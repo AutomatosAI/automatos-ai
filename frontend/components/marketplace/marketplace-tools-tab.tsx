@@ -37,6 +37,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import { useToast } from '@/hooks/use-toast'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import {
     useAvailableApps,
@@ -73,6 +75,7 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
     const { toast } = useToast()
     const { isAdmin } = useSystemRole()
     const syncCacheMutation = useSyncToolsCache()
+    const [viewMode, setViewMode] = useViewMode('mp-tools')
     const [selectedCategory, setSelectedCategory] = useState('all')
     const [connectingApp, setConnectingApp] = useState<string | null>(null)
     const [detailsModalOpen, setDetailsModalOpen] = useState(false)
@@ -329,24 +332,32 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
     if (appsLoading) {
         return (
             <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    {[...Array(8)].map((_, i) => (
-                        <Card key={i} className="glass-card animate-pulse">
-                            <CardHeader className="pb-2">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-secondary/50 rounded-lg" />
-                                    <div className="space-y-2">
-                                        <div className="h-4 w-24 bg-secondary/50 rounded" />
-                                        <div className="h-3 w-32 bg-secondary/50 rounded" />
+                {viewMode === 'list' ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {[...Array(6)].map((_, i) => (
+                            <div key={i} className="h-16 glass-card animate-pulse rounded-xl" />
+                        ))}
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        {[...Array(8)].map((_, i) => (
+                            <Card key={i} className="glass-card animate-pulse">
+                                <CardHeader className="pb-2">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-secondary/50 rounded-lg" />
+                                        <div className="space-y-2">
+                                            <div className="h-4 w-24 bg-secondary/50 rounded" />
+                                            <div className="h-3 w-32 bg-secondary/50 rounded" />
+                                        </div>
                                     </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="h-8 w-20 bg-secondary/50 rounded mt-2" />
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="h-8 w-20 bg-secondary/50 rounded mt-2" />
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                )}
             </div>
         )
     }
@@ -383,6 +394,7 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                     <Badge variant="outline" className="text-[hsl(var(--info))] border-[hsl(var(--info))]/30">
                         {apps.length} Available
                     </Badge>
+                    <ViewToggle value={viewMode} onChange={setViewMode} />
                     {isAdmin && (
                         <Button
                             variant="outline"
@@ -425,29 +437,88 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
             </div>
 
             {/* Apps Grid - Using ToolCard component */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <AnimatePresence>
-                    {paginatedApps.map((app, index) => {
+            {viewMode === 'list' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {paginatedApps.map((app) => {
                         const isConnected = connectedApps.has(app.name.toUpperCase())
                         const isInWorkspace = workspaceApps.has(app.name.toUpperCase())
                         const isConnecting = connectingApp === app.name
 
                         return (
-                            <ToolCard
+                            <Card
                                 key={app.name}
-                                app={app}
-                                index={index}
-                                isConnected={isConnected}
-                                isInWorkspace={isInWorkspace}
-                                isConnecting={isConnecting}
-                                onConnect={() => handleAddToWorkspace(app)}
-                                onDisconnect={() => handleDisconnect(app.name)}
-                                onDetails={() => handleOpenDetails(app)}
-                            />
+                                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+                                onClick={() => handleOpenDetails(app)}
+                            >
+                                <CardContent className="p-3">
+                                    <div className="flex items-center gap-3">
+                                        <ToolLogo
+                                            logo={app.logo_url}
+                                            name={app.display_name}
+                                            size={36}
+                                            fallbackIcon={undefined}
+                                            showBackground={true}
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-semibold text-sm truncate">{app.display_name}</span>
+                                                {app.categories?.slice(0, 1).map((tag) => (
+                                                    <Badge key={tag} variant="outline" className="text-[10px] h-5 shrink-0">{tag}</Badge>
+                                                ))}
+                                            </div>
+                                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                                                <span>{app.action_count ?? 0} Tools</span>
+                                                <span>&middot;</span>
+                                                <span>{app.trigger_count ?? 0} Triggers</span>
+                                            </div>
+                                        </div>
+                                        {isInWorkspace ? (
+                                            <Badge variant="secondary" className="text-xs shrink-0">
+                                                <CheckCircle className="w-3 h-3 mr-1" />
+                                                Added
+                                            </Badge>
+                                        ) : (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-8 w-8 p-0 shrink-0"
+                                                onClick={(e) => { e.stopPropagation(); handleAddToWorkspace(app) }}
+                                                disabled={isConnecting}
+                                            >
+                                                {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                            </Button>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
                         )
                     })}
-                </AnimatePresence>
-            </div>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <AnimatePresence>
+                        {paginatedApps.map((app, index) => {
+                            const isConnected = connectedApps.has(app.name.toUpperCase())
+                            const isInWorkspace = workspaceApps.has(app.name.toUpperCase())
+                            const isConnecting = connectingApp === app.name
+
+                            return (
+                                <ToolCard
+                                    key={app.name}
+                                    app={app}
+                                    index={index}
+                                    isConnected={isConnected}
+                                    isInWorkspace={isInWorkspace}
+                                    isConnecting={isConnecting}
+                                    onConnect={() => handleAddToWorkspace(app)}
+                                    onDisconnect={() => handleDisconnect(app.name)}
+                                    onDetails={() => handleOpenDetails(app)}
+                                />
+                            )
+                        })}
+                    </AnimatePresence>
+                </div>
+            )}
 
             {/* Pagination Controls */}
             {filteredApps.length > pageSize && (

@@ -29,6 +29,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import {
@@ -54,6 +56,7 @@ interface RecipeExecutionInfo {
 
 interface RecipesTabProps {
   searchTerm?: string
+  viewMode?: 'grid' | 'list'
   externalCreateOpen?: boolean
   onCreateModalClosed?: () => void
   onUseRecipe: (recipe: any) => void
@@ -77,11 +80,14 @@ function agentColor(id: number): string {
 
 export function RecipesTab({
   searchTerm: externalSearchTerm,
+  viewMode: viewModeProp,
   externalCreateOpen,
   onCreateModalClosed,
   onUseRecipe,
   onExecuteRecipe,
 }: RecipesTabProps) {
+  const [viewModeLocal] = useViewMode('wf-recipes')
+  const viewMode = viewModeProp || viewModeLocal
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -290,6 +296,57 @@ export function RecipesTab({
           <p className="text-muted-foreground">No recipes found</p>
           <p className="text-xs text-muted-foreground mt-1">Create your first recipe to get started</p>
         </div>
+      ) : viewMode === 'list' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {recipes.map((recipe: any) => {
+            const steps = recipe.steps || []
+            const stepCount = steps.length
+            const agentIds = [...new Set(steps.map((s: any) => s.agent_id).filter(Boolean))] as number[]
+            const isCooking = cookingRecipeId === (recipe.template_id || recipe.id?.toString())
+
+            return (
+              <Card
+                key={recipe.id}
+                data-testid="workflow-card"
+                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+                onClick={() => handleViewClick(recipe)}
+              >
+                <CardContent className="p-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-lg">
+                      {recipe.icon || '🍳'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm truncate">{recipe.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                        <span>{stepCount} Steps</span>
+                        <span>&middot;</span>
+                        <span>{agentIds.length} Agents</span>
+                        <span>&middot;</span>
+                        <span>{recipe.use_count || 0} Runs</span>
+                      </div>
+                    </div>
+                    <Button
+                      className="h-8 text-xs shrink-0"
+                      size="sm"
+                      onClick={(e) => { e.stopPropagation(); handleCookRecipe(recipe) }}
+                      disabled={isCooking}
+                    >
+                      {isCooking ? (
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                      ) : (
+                        <Play className="w-3 h-3 mr-1" />
+                      )}
+                      Cook
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {recipes.map((recipe: any, index: number) => {
@@ -309,7 +366,7 @@ export function RecipesTab({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: index * 0.05 }}
               >
-                <Card className="glass-card hover:border-primary/30 transition-all duration-300 h-full flex flex-col group">
+                <Card data-testid="workflow-card" className="glass-card hover:border-primary/30 transition-all duration-300 h-full flex flex-col group">
                   {/* Card Header — icon, name, badges */}
                   <CardHeader className="pb-3">
                     <div className="flex items-start gap-3">
@@ -481,6 +538,7 @@ export function RecipesTab({
       )}
 
       {/* Create/Edit Recipe Modal (4-step wizard) */}
+
       <CreateRecipeModal
         open={showCreateModal}
         onClose={closeCreateModal}

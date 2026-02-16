@@ -5,6 +5,8 @@ import { FileText, Download, Loader2, Bot, Zap, CheckCircle, ArrowRight, ChefHat
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +26,7 @@ interface MarketplaceRecipesTabProps {
 }
 
 export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProps) {
+  const [viewMode, setViewMode] = useViewMode('mp-recipes')
   const [selectedType, setSelectedType] = useState('all')
   const [installingRecipeId, setInstallingRecipeId] = useState<number | null>(null)
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
@@ -130,55 +133,108 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={selectedType === 'all' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setSelectedType('all')}
-          className={
-            selectedType === 'all'
-              ? 'bg-secondary border-primary/50 text-foreground font-semibold'
-              : 'border-secondary text-muted-foreground hover:bg-secondary'
-          }
-        >
-          All Recipes
-        </Button>
-        <Button
-          variant={selectedType === 'simple' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setSelectedType('simple')}
-          className={
-            selectedType === 'simple'
-              ? 'bg-secondary border-primary/50 text-foreground font-semibold'
-              : 'border-secondary text-muted-foreground hover:bg-secondary'
-          }
-        >
-          Simple
-        </Button>
-        <Button
-          variant={selectedType === 'complex' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setSelectedType('complex')}
-          className={
-            selectedType === 'complex'
-              ? 'bg-secondary border-primary/50 text-foreground font-semibold'
-              : 'border-secondary text-muted-foreground hover:bg-secondary'
-          }
-        >
-          Complex
-        </Button>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent flex-1">
+          <Button
+            variant={selectedType === 'all' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedType('all')}
+            className={`whitespace-nowrap flex-shrink-0 ${
+              selectedType === 'all'
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
+                : 'border-secondary text-muted-foreground hover:bg-secondary'
+            }`}
+          >
+            All Recipes
+          </Button>
+          <Button
+            variant={selectedType === 'simple' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedType('simple')}
+            className={`whitespace-nowrap flex-shrink-0 ${
+              selectedType === 'simple'
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
+                : 'border-secondary text-muted-foreground hover:bg-secondary'
+            }`}
+          >
+            Simple
+          </Button>
+          <Button
+            variant={selectedType === 'complex' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedType('complex')}
+            className={`whitespace-nowrap flex-shrink-0 ${
+              selectedType === 'complex'
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
+                : 'border-secondary text-muted-foreground hover:bg-secondary'
+            }`}
+          >
+            Complex
+          </Button>
+        </div>
+        <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className="h-48 glass-card animate-pulse" />
-          ))}
-        </div>
+        viewMode === 'list' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-16 glass-card animate-pulse rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="h-48 glass-card animate-pulse" />
+            ))}
+          </div>
+        )
       ) : recipes.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>No recipes found. Recipes will be available soon!</p>
+        </div>
+      ) : viewMode === 'list' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {recipes.map((recipe: any) => (
+            <Card
+              key={recipe.id}
+              className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+              onClick={() => handleViewRecipe(recipe)}
+            >
+              <CardContent className="p-3">
+                <div className="flex items-center gap-3">
+                  <ChefHat className="w-9 h-9 text-primary shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm truncate">{recipe.name}</span>
+                      {isAdmin && !recipe.is_approved && (
+                        <Badge variant="outline" className="text-[10px] border-yellow-500/30 text-yellow-400 shrink-0">
+                          Pending
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                      <span>{recipe.steps?.length || 0} Steps</span>
+                      <span>&middot;</span>
+                      <span>{recipe.steps ? new Set(recipe.steps.map((s: any) => s.agent_id)).size : 0} Agents</span>
+                      <span>&middot;</span>
+                      <span>{recipe.install_count || 0} installs</span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 shrink-0"
+                    onClick={(e) => { e.stopPropagation(); handleInstall(e, recipe.id) }}
+                    disabled={installingRecipeId === recipe.id}
+                  >
+                    {installingRecipeId === recipe.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

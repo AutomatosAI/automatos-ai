@@ -21,6 +21,8 @@ import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
 import { SearchInput } from '@/components/shared/search-input'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 
 // Import all tab components
 import { AgentRoster } from './agent-roster'
@@ -37,6 +39,7 @@ import { apiClient } from '@/lib/api-client'
 
 export function AgentManagement() {
   const [activeTab, setActiveTab] = useState('roster')
+  const [viewMode, setViewMode] = useViewMode('agents')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [viewDetailsAgentId, setViewDetailsAgentId] = useState<string | null>(null)
@@ -221,7 +224,7 @@ export function AgentManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.6, delay: 0.3 }}
       >
-        <FilterTabs tabs={tabDefs} value={activeTab} onValueChange={setActiveTab}>
+        <FilterTabs tabs={tabDefs} value={activeTab} onValueChange={setActiveTab} trailing={<ViewToggle value={viewMode} onChange={setViewMode} className="ml-auto" />}>
           <TabsContent value="roster" className="space-y-6">
             <div data-tour="agent-roster">
               <AgentRoster
@@ -234,6 +237,7 @@ export function AgentManagement() {
                 selectedAgentId={selectedAgentId}
                 onRefresh={() => refetchAgents()}
                 setSearchTerm={setSearchTerm}
+                viewMode={viewMode}
               />
             </div>
           </TabsContent>

@@ -233,8 +233,8 @@ export function PilotHelperWidget({
   }
 
   const positionClasses = {
-    'bottom-right': 'bottom-4 right-4',
-    'bottom-left': 'bottom-4 left-4',
+    'bottom-right': 'bottom-3 right-3 md:bottom-4 md:right-4',
+    'bottom-left': 'bottom-3 left-3 md:bottom-4 md:left-4',
   }
 
   const helpItems = PAGE_HELP_CONTENT[context.currentPage] || PAGE_HELP_CONTENT.dashboard
@@ -249,7 +249,7 @@ export function PilotHelperWidget({
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.9, opacity: 0, y: 20 }}
             transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-            className="mb-4 w-96 max-h-[600px] overflow-y-auto glass-card card-glow rounded-2xl shadow-2xl"
+            className="mb-4 w-[calc(100vw-2rem)] sm:w-96 max-h-[70vh] md:max-h-[600px] overflow-y-auto glass-card card-glow rounded-2xl shadow-2xl"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 pt-4 pb-2">
@@ -459,11 +459,11 @@ export function PilotHelperWidget({
       >
         <Button
           onClick={() => setIsOpen((v) => !v)}
-          className="w-14 h-14 rounded-full bg-white hover:bg-gray-50 shadow-lg hover:shadow-xl transition-all duration-300 group p-0 overflow-hidden"
+          className="w-11 h-11 md:w-14 md:h-14 rounded-full bg-white hover:bg-gray-50 shadow-lg hover:shadow-xl transition-all duration-300 group p-0 overflow-hidden"
           size="lg"
           title="Report an issue"
         >
-          <img src="/brand/jira-logo.svg" alt="Jira" className="w-14 h-14 group-hover:scale-110 transition-transform" draggable={false} />
+          <img src="/brand/jira-logo.svg" alt="Jira" className="w-11 h-11 md:w-14 md:h-14 group-hover:scale-110 transition-transform" draggable={false} />
         </Button>
       </motion.div>
     </div>

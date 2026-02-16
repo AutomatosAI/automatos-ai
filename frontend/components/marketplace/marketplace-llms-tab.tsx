@@ -19,6 +19,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 import {
   Select,
   SelectContent,
@@ -158,6 +160,7 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
   const queryClient = useQueryClient()
   const { isAdmin } = useSystemRole()
   const syncMutation = useSyncOpenRouterCache()
+  const [viewMode, setViewMode] = useViewMode('mp-llms')
 
   // Filter state
   const [selectedProvider, setSelectedProvider] = useState('all')
@@ -388,35 +391,38 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
             </span>
           )}
         </div>
-        {isAdmin && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending}
-            className="gap-2 text-muted-foreground hover:text-foreground"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-            {syncMutation.isPending ? 'Syncing...' : 'Sync OpenRouter'}
-          </Button>
-        )}
+        <div className="flex items-center gap-3">
+          <ViewToggle value={viewMode} onChange={setViewMode} />
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              className="gap-2 text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+              {syncMutation.isPending ? 'Syncing...' : 'Sync OpenRouter'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Filter bar */}
       <div className="space-y-4">
         {/* Provider buttons (dynamic from cache) */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent">
           {providerFilters.map((provider) => (
             <Button
               key={provider.id}
               variant={selectedProvider === provider.id ? 'default' : 'outline'}
               size="sm"
               onClick={() => setSelectedProvider(provider.id)}
-              className={
+              className={`whitespace-nowrap flex-shrink-0 ${
                 selectedProvider === provider.id
                   ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                   : 'border-secondary text-muted-foreground hover:bg-secondary'
-              }
+              }`}
             >
               {provider.name}
               <span className="ml-1.5 text-[10px] opacity-60">{provider.count}</span>
@@ -563,11 +569,19 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
 
       {/* Results */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className="h-72 glass-card animate-pulse rounded-xl" />
-          ))}
-        </div>
+        viewMode === 'list' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-16 glass-card animate-pulse rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="h-72 glass-card animate-pulse rounded-xl" />
+            ))}
+          </div>
+        )
       ) : models.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground">
           <Zap className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -596,18 +610,34 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
             Showing {models.length} of {totalCount} model{totalCount !== 1 ? 's' : ''}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {models.map((model) => (
-              <LLMModelCard
-                key={model.id}
-                model={model}
-                onInstall={handleInstall}
-                onCompareToggle={handleCompareToggle}
-                isComparing={comparing.has(model.model_id)}
-                onClick={() => handleModelClick(model)}
-              />
-            ))}
-          </div>
+          {viewMode === 'list' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {models.map((model) => (
+                <LLMModelCard
+                  key={model.id}
+                  model={model}
+                  onInstall={handleInstall}
+                  onCompareToggle={handleCompareToggle}
+                  isComparing={comparing.has(model.model_id)}
+                  onClick={() => handleModelClick(model)}
+                  viewMode="list"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {models.map((model) => (
+                <LLMModelCard
+                  key={model.id}
+                  model={model}
+                  onInstall={handleInstall}
+                  onCompareToggle={handleCompareToggle}
+                  isComparing={comparing.has(model.model_id)}
+                  onClick={() => handleModelClick(model)}
+                />
+              ))}
+            </div>
+          )}
         </>
       )}
 

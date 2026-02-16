@@ -740,7 +740,7 @@ export function ToolsDashboard() {
                       <ToolCard
                         key={tool?.id}
                         tool={tool}
-                        viewMode="grid"
+                        viewMode={viewMode}
                         index={index}
                         onInstall={() => {
                           if (tool.provider === 'Composio') {

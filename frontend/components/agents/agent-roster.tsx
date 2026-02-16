@@ -34,6 +34,8 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/shared'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -184,6 +186,7 @@ interface AgentRosterProps {
   selectedAgentId: string | null
   onRefresh: () => void
   setSearchTerm?: ((term: string) => void) | undefined
+  viewMode?: 'grid' | 'list'
 }
 
 export function AgentRoster({
@@ -195,8 +198,12 @@ export function AgentRoster({
   onViewDetails,
   selectedAgentId,
   onRefresh,
-  setSearchTerm
+  setSearchTerm,
+  viewMode: viewModeProp
 }: AgentRosterProps) {
+  const [viewModeLocal, setViewModeLocal] = useViewMode('agents')
+  const viewMode = viewModeProp || viewModeLocal
+
   // Modal states
   const [configModalAgentId, setConfigModalAgentId] = useState<number | null>(null)
   const [statusModalAgentId, setStatusModalAgentId] = useState<number | null>(null)
@@ -253,18 +260,100 @@ export function AgentRoster({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading agents...</p>
-        </div>
+      <div className="space-y-6">
+        {viewMode === 'list' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-16 glass-card animate-pulse rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-muted-foreground">Loading agents...</p>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      {/* Agent Grid */}
+      {/* Agent Grid / List */}
+      {viewMode === 'list' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filteredAgents.map((agent) => {
+            const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
+            const AgentIcon = getAgentIcon(agent.agent_type || 'custom', (agent as any).marketplace_category)
+            const iconColor = getAgentIconColor(agent.agent_type || 'custom', (agent as any).marketplace_category)
+
+            return (
+              <div
+                key={agent.id}
+                data-testid="agent-card"
+                className="glass-card p-3 hover:border-primary/20 transition-all cursor-pointer"
+                onClick={() => onViewDetails(agent.id.toString())}
+              >
+                <div className="flex items-center gap-3">
+                  <AgentIcon className={`w-9 h-9 ${iconColor} shrink-0`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm truncate">{agent.name || 'Unknown Agent'}</span>
+                      <StatusBadge size="sm" status={
+                        agent.status === 'idle' ? 'warning' :
+                        agent.status === 'maintenance' ? 'error' : 'success'
+                      }>
+                        <StatusIcon className="w-2.5 h-2.5 mr-0.5" />
+                        {agent.status || 'active'}
+                      </StatusBadge>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                      <span>{agent.agent_type ? agent.agent_type.replace('_', ' ') : 'Unknown'}</span>
+                      <span>&middot;</span>
+                      <span>{getModelDisplayName(agent.agent_model_config?.model_id)}</span>
+                      <span>&middot;</span>
+                      <span>{agent.performance_metrics?.tasks_completed || 0} tasks</span>
+                    </div>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleViewDetails(agent.id.toString()) }}>
+                        <Eye className="w-4 h-4 mr-2" />
+                        View Details
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleConfigure(agent.id) }}>
+                        <Settings className="w-4 h-4 mr-2" />
+                        Configure
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleToggleStatus(agent.id, agent.status) }}>
+                        {agent.status === 'active' ? (
+                          <><Pause className="w-4 h-4 mr-2" />Pause Agent</>
+                        ) : (
+                          <><Play className="w-4 h-4 mr-2" />Start Agent</>
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => { e.stopPropagation(); handleDelete(agent.id) }}
+                        className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {filteredAgents.map((agent, index) => {
           const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
@@ -274,6 +363,7 @@ export function AgentRoster({
           return (
             <motion.div
               key={agent.id}
+              data-testid="agent-card"
               className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 flex flex-col h-full"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -459,6 +549,7 @@ export function AgentRoster({
           )
         })}
       </div>
+      )}
 
       {filteredAgents.length === 0 && (
         <motion.div

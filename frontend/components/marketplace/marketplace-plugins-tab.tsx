@@ -36,6 +36,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 import { apiClient } from '@/lib/api-client'
 import { useUser } from '@clerk/nextjs'
 import { MarketplacePluginDetailModal } from './marketplace-plugin-detail-modal'
@@ -89,6 +91,7 @@ interface MarketplacePluginsTabProps {
 export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProps) {
   const { toast } = useToast()
   const { user } = useUser()
+  const [viewMode, setViewMode] = useViewMode('mp-plugins')
 
   // Admin check (same pattern as agents tab)
   const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
@@ -388,25 +391,33 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {[...Array(8)].map((_, i) => (
-            <Card key={i} className="glass-card animate-pulse">
-              <CardHeader className="pb-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-secondary/50 rounded-lg" />
-                  <div className="space-y-2">
-                    <div className="h-4 w-24 bg-secondary/50 rounded" />
-                    <div className="h-3 w-32 bg-secondary/50 rounded" />
+        {viewMode === 'list' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-16 glass-card animate-pulse rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {[...Array(8)].map((_, i) => (
+              <Card key={i} className="glass-card animate-pulse">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-secondary/50 rounded-lg" />
+                    <div className="space-y-2">
+                      <div className="h-4 w-24 bg-secondary/50 rounded" />
+                      <div className="h-3 w-32 bg-secondary/50 rounded" />
+                    </div>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="h-8 w-full bg-secondary/50 rounded mt-2" />
-                <div className="h-6 w-20 bg-secondary/50 rounded mt-3" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-8 w-full bg-secondary/50 rounded mt-2" />
+                  <div className="h-6 w-20 bg-secondary/50 rounded mt-3" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -498,17 +509,20 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
           ))}
         </div>
 
-        <Select value={sortBy} onValueChange={setSortBy}>
-          <SelectTrigger className="w-[140px] bg-secondary/50 border-secondary flex-shrink-0">
-            <ArrowUpDown className="w-3 h-3 mr-1" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="popular">Popular</SelectItem>
-            <SelectItem value="newest">Newest</SelectItem>
-            <SelectItem value="name">Name</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger className="w-[140px] bg-secondary/50 border-secondary">
+              <ArrowUpDown className="w-3 h-3 mr-1" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="popular">Popular</SelectItem>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="name">Name</SelectItem>
+            </SelectContent>
+          </Select>
+          <ViewToggle value={viewMode} onChange={setViewMode} />
+        </div>
       </div>
 
       {/* Plugins Grid */}
@@ -531,6 +545,54 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
           >
             Clear Filters
           </Button>
+        </div>
+      ) : viewMode === 'list' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filteredPlugins.map((plugin) => {
+            const isEnabled = enabledPluginIds.has(plugin.id)
+            return (
+              <Card
+                key={plugin.id}
+                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+                onClick={() => setSelectedPluginId(plugin.id)}
+              >
+                <CardContent className="p-3">
+                  <div className="flex items-center gap-3">
+                    <Sparkles className="w-9 h-9 text-primary shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm truncate">{plugin.name}</span>
+                        {plugin.category_name && (
+                          <Badge variant="outline" className="text-[10px] shrink-0">{plugin.category_name}</Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                        {plugin.skills_count > 0 && <span>{plugin.skills_count} skills</span>}
+                        {plugin.skills_count > 0 && plugin.enable_count > 0 && <span>&middot;</span>}
+                        <span>{plugin.enable_count} enabled</span>
+                      </div>
+                    </div>
+                    {isEnabled ? (
+                      <Badge variant="secondary" className="text-xs shrink-0">
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        On
+                      </Badge>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 shrink-0"
+                        onClick={(e) => { e.stopPropagation(); handleEnable(plugin.id, plugin.name) }}
+                        disabled={enablingId === plugin.id}
+                      >
+                        {enablingId === plugin.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

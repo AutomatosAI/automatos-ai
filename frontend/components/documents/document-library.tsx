@@ -46,6 +46,8 @@ import { toast } from 'react-hot-toast'
 
 // API hooks
 import { useDeleteDocument, useTagDocument, useStartProcessing } from '@/hooks/use-document-api'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 
 // Document type configurations
 const documentTypes = {
@@ -117,7 +119,7 @@ export function DocumentLibrary({
   onDocumentSelect,
   onRefresh
 }: DocumentLibraryProps) {
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [viewMode, setViewMode] = useViewMode('documents')
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([])
@@ -307,24 +309,7 @@ export function DocumentLibrary({
           </DropdownMenu>
 
           {/* View mode toggle */}
-          <div className="flex items-center border rounded-lg">
-            <Button
-              variant={viewMode === 'grid' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('grid')}
-              className="rounded-r-none"
-            >
-              <Grid3X3 className="w-4 h-4" />
-            </Button>
-            <Button
-              variant={viewMode === 'list' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('list')}
-              className="rounded-l-none"
-            >
-              <List className="w-4 h-4" />
-            </Button>
-          </div>
+          <ViewToggle value={viewMode} onChange={setViewMode} />
         </div>
       </div>
 
@@ -342,7 +327,8 @@ export function DocumentLibrary({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, delay: index * 0.05 }}
               >
-                <Card 
+                <Card
+                  data-testid="doc-card"
                   className={`glass-card cursor-pointer transition-all duration-200 hover:shadow-lg hover:border-brand-primary/30 ${
                     selectedDocumentId === document.id ? 'border-brand-primary shadow-lg' : ''
                   }`}
@@ -502,7 +488,8 @@ export function DocumentLibrary({
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.3, delay: index * 0.02 }}
               >
-                <Card 
+                <Card
+                  data-testid="doc-card"
                   className={`glass-card cursor-pointer transition-all duration-200 hover:shadow-lg hover:border-brand-primary/30 ${
                     selectedDocumentId === document.id ? 'border-brand-primary shadow-lg' : ''
                   }`}

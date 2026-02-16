@@ -51,6 +51,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { workflowService, type WorkflowWithMetrics, type WorkflowStats } from '@/lib/workflow-service'
 import { apiClient } from '@/lib/api-client'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 import { ActiveWorkflowsPanel } from './active-workflows-panel'
 import { toast } from '@/components/ui/use-toast'
 import { HistoryTab } from './history-tab'
@@ -191,6 +193,9 @@ export function WorkflowManagement() {
   const [showExecutionKitchen, setShowExecutionKitchen] = useState(false)
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [autoStartExecution, setAutoStartExecution] = useState(false)
+
+  // View mode
+  const [viewMode, setViewMode] = useViewMode('wf-recipes')
 
   // Recipe creation modal (triggered from top "Create Recipe" button)
   const [recipeCreateOpen, setRecipeCreateOpen] = useState(false)
@@ -588,6 +593,7 @@ export function WorkflowManagement() {
                 className="pl-10 bg-secondary/50 border-secondary"
               />
             </div>
+            <ViewToggle value={viewMode} onChange={setViewMode} />
           </div>
 
           <SharedTabsContent value="active" className="space-y-6">
@@ -640,6 +646,7 @@ export function WorkflowManagement() {
           <SharedTabsContent value="templates" className="space-y-6">
             <RecipesTab
               searchTerm={recipeSearchTerm}
+              viewMode={viewMode}
               externalCreateOpen={recipeCreateOpen}
               onCreateModalClosed={() => setRecipeCreateOpen(false)}
               onUseRecipe={(recipeId) => {
