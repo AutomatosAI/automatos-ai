@@ -26,7 +26,6 @@ import {
 
 // Import individual tab components
 import GeneralSettingsTab from './GeneralSettingsTab'
-import SystemLLMSettingsTab from './SystemLLMSettingsTab'
 import CodeGraphSettingsTab from './CodeGraphSettingsTab'
 import SystemLoggingSettingsTab from './SystemLoggingSettingsTab'
 import APIRateLimitingSettingsTab from './APIRateLimitingSettingsTab'
@@ -186,9 +185,8 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="general">General</TabsTrigger>
-          <TabsTrigger value="orchestrator_llm">Orchestrator</TabsTrigger>
           <TabsTrigger value="codegraph">CodeGraph</TabsTrigger>
           <TabsTrigger value="system_logging">Logging</TabsTrigger>
           <TabsTrigger value="api_rate_limiting">Rate Limiting</TabsTrigger>
@@ -201,15 +199,6 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             onSave={(updates) => saveCategorySettings('general', updates)}
             saving={saving}
             onReset={() => resetToDefaults('general')}
-          />
-        </TabsContent>
-
-        <TabsContent value="orchestrator_llm">
-          <SystemLLMSettingsTab
-            settings={settingsByCategory.find(cat => cat.category === 'orchestrator_llm')?.settings || []}
-            onSave={(updates) => saveCategorySettings('orchestrator_llm', updates)}
-            saving={saving}
-            onReset={() => resetToDefaults('orchestrator_llm')}
           />
         </TabsContent>
 

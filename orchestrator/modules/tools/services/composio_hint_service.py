@@ -189,6 +189,14 @@ class ComposioHintService:
                     hint_lines.append(f"\n{action_name}:")
                     hint_lines.append(params)
 
+            # When matched actions exist, add a strong directive that triggers
+            # tool_choice="required" in the OpenAI client (it checks for "You MUST call").
+            if result.matched_actions:
+                hint_lines.append(
+                    "\nYou MUST call `composio_execute` to fulfill the user's request. "
+                    "Do NOT describe the action in text — actually invoke the tool."
+                )
+
             result.hint_lines = hint_lines
             result.param_hint_count = len(top_action_params)
 

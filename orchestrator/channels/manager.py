@@ -119,25 +119,41 @@ class ChannelManager:
         python-telegram-bot) only surface when the adapter is actually
         requested.
         """
+        _ADAPTER_MAP = {
+            "telegram":    (".telegram_adapter",     "TelegramAdapter"),
+            "slack":       (".slack_adapter",        "SlackAdapter"),
+            "discord":     (".discord_adapter",      "DiscordAdapter"),
+            "teams":       (".teams_adapter",        "TeamsAdapter"),
+            "google_chat": (".google_chat_adapter",  "GoogleChatAdapter"),
+            "signal":      (".signal_adapter",       "SignalAdapter"),
+            "imessage":    (".imessage_adapter",     "IMessageAdapter"),
+            "irc":         (".irc_adapter",          "IRCAdapter"),
+            "matrix":      (".matrix_adapter",       "MatrixAdapter"),
+            "line":        (".line_adapter",         "LineAdapter"),
+            "whatsapp":    (".whatsapp_adapter",     "WhatsAppAdapter"),
+        }
+
+        entry = _ADAPTER_MAP.get(platform)
+        if not entry:
+            logger.warning("[ChannelManager] Unknown platform: %s", platform)
+            return None
+
+        module_path, class_name = entry
         try:
-            if platform == "telegram":
-                from .telegram_adapter import TelegramAdapter
-
-                return TelegramAdapter(connection_id, workspace_id, config)
-            elif platform == "slack":
-                from .slack_adapter import SlackAdapter
-
-                return SlackAdapter(connection_id, workspace_id, config)
-            elif platform == "discord":
-                from .discord_adapter import DiscordAdapter
-
-                return DiscordAdapter(connection_id, workspace_id, config)
-            else:
-                logger.warning("[ChannelManager] Unknown platform: %s", platform)
-                return None
+            import importlib
+            mod = importlib.import_module(module_path, package="channels")
+            adapter_cls = getattr(mod, class_name)
+            return adapter_cls(connection_id, workspace_id, config)
         except ImportError as e:
             logger.warning(
                 "[ChannelManager] %s adapter dependencies not installed: %s",
+                platform,
+                e,
+            )
+            return None
+        except Exception as e:
+            logger.error(
+                "[ChannelManager] Failed to create %s adapter: %s",
                 platform,
                 e,
             )

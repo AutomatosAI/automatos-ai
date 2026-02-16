@@ -26,15 +26,20 @@ import {
   Database, Eye
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { SystemSetting } from '@/lib/api/system-settings'
+import {
+  SystemSetting,
+  getSettingsForCategory,
+  bulkUpdateSettings,
+  resetSettingsToDefaults,
+} from '@/lib/api/system-settings'
 import { useModels } from '@/hooks/use-model-api'
 import { apiClient } from '@/lib/api-client'
 
 interface SystemLLMSettingsTabProps {
-  settings: SystemSetting[]
-  onSave: (updates: Record<string, string>) => void
-  saving: boolean
-  onReset: () => void
+  settings?: SystemSetting[]
+  onSave?: (updates: Record<string, string>) => void
+  saving?: boolean
+  onReset?: () => void
 }
 
 interface MemoryStats {
@@ -98,11 +103,20 @@ const THINKING_LEVELS: Record<string, string> = {
 }
 
 export default function SystemLLMSettingsTab({
-  settings,
-  onSave,
-  saving,
-  onReset
+  settings: externalSettings,
+  onSave: externalOnSave,
+  saving: externalSaving,
+  onReset: externalOnReset
 }: SystemLLMSettingsTabProps) {
+  // Self-loading state (used when no props passed — top-level mode)
+  const isStandalone = !externalSettings
+  const [selfSettings, setSelfSettings] = useState<SystemSetting[]>([])
+  const [selfLoading, setSelfLoading] = useState(isStandalone)
+  const [selfSaving, setSelfSaving] = useState(false)
+
+  const settings = externalSettings ?? selfSettings
+  const saving = externalSaving ?? selfSaving
+
   // Existing LLM form data (from system_settings table)
   const [formData, setFormData] = useState<Record<string, string>>({})
 
@@ -131,6 +145,24 @@ export default function SystemLLMSettingsTab({
     if (!selectedProvider) return allModels
     return allModels.filter((model: { provider: string }) => model.provider === selectedProvider)
   }, [allModels, selectedProvider])
+
+  // Self-load settings when in standalone mode
+  useEffect(() => {
+    if (!isStandalone) return
+    const loadSelfSettings = async () => {
+      try {
+        setSelfLoading(true)
+        const data = await getSettingsForCategory('orchestrator_llm')
+        setSelfSettings(data)
+      } catch (err) {
+        console.error('Failed to self-load orchestrator_llm settings:', err)
+        toast.error('Failed to load LLM settings')
+      } finally {
+        setSelfLoading(false)
+      }
+    }
+    loadSelfSettings()
+  }, [isStandalone])
 
   // Initialize LLM form data from system settings
   useEffect(() => {
@@ -210,8 +242,32 @@ export default function SystemLLMSettingsTab({
     })
   }
 
-  const handleSaveLLM = () => {
-    onSave(formData)
+  const handleSaveLLM = async () => {
+    if (externalOnSave) {
+      externalOnSave(formData)
+      return
+    }
+    // Self-save mode
+    try {
+      setSelfSaving(true)
+      const bulkUpdates = settings
+        .map(setting => ({
+          id: setting.id,
+          value: formData[setting.key] !== undefined ? formData[setting.key] : (setting.value || setting.default_value || '')
+        }))
+      if (bulkUpdates.length > 0) {
+        await bulkUpdateSettings(bulkUpdates)
+        toast.success('LLM settings saved')
+        // Reload
+        const data = await getSettingsForCategory('orchestrator_llm')
+        setSelfSettings(data)
+      }
+    } catch (err) {
+      console.error('Failed to save LLM settings:', err)
+      toast.error('Failed to save LLM settings')
+    } finally {
+      setSelfSaving(false)
+    }
   }
 
   const handleSaveOrchestrator = async () => {
@@ -231,13 +287,29 @@ export default function SystemLLMSettingsTab({
     }
   }
 
-  const handleReset = () => {
+  const handleReset = async () => {
     const defaultData: Record<string, string> = {}
     settings.forEach(setting => {
       defaultData[setting.key] = setting.default_value || ''
     })
     setFormData(defaultData)
-    onReset()
+    if (externalOnReset) {
+      externalOnReset()
+      return
+    }
+    // Self-reset mode
+    try {
+      setSelfSaving(true)
+      await resetSettingsToDefaults('orchestrator_llm')
+      toast.success('LLM settings reset to defaults')
+      const data = await getSettingsForCategory('orchestrator_llm')
+      setSelfSettings(data)
+    } catch (err) {
+      console.error('Failed to reset LLM settings:', err)
+      toast.error('Failed to reset LLM settings')
+    } finally {
+      setSelfSaving(false)
+    }
   }
 
   const getSetting = (key: string) => settings.find(s => s.key === key)
@@ -245,6 +317,15 @@ export default function SystemLLMSettingsTab({
   const soulTokenEstimate = orchConfig?.custom_soul
     ? Math.ceil(orchConfig.custom_soul.length / 4)
     : 0
+
+  if (selfLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-2">Loading orchestrator settings...</span>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -284,6 +365,11 @@ export default function SystemLLMSettingsTab({
                       <SelectItem value="openai">OpenAI</SelectItem>
                       <SelectItem value="anthropic">Anthropic</SelectItem>
                       <SelectItem value="google">Google</SelectItem>
+                      <SelectItem value="openrouter">OpenRouter</SelectItem>
+                      <SelectItem value="deepseek">DeepSeek</SelectItem>
+                      <SelectItem value="azure">Azure OpenAI</SelectItem>
+                      <SelectItem value="bedrock">AWS Bedrock</SelectItem>
+                      <SelectItem value="grok">Grok / xAI</SelectItem>
                       <SelectItem value="cohere">Cohere</SelectItem>
                       <SelectItem value="huggingface">HuggingFace (Free/Testing)</SelectItem>
                       <SelectItem value="local">Local Model</SelectItem>

@@ -254,11 +254,7 @@ export function PilotHelperWidget({
             {/* Header */}
             <div className="flex items-center justify-between px-4 pt-4 pb-2">
               <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 rounded-full bg-[#0052CC] flex items-center justify-center">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-                    <path d="M11.53 2c0 4.97 3.5 8.97 8.47 8.97V13c-5.13 0-8.47 3.63-8.47 9h-2.06c0-5.13-3.63-9-9.47-9v-2.03C5.13 10.97 9.47 6.97 9.47 2h2.06z" fill="white" />
-                  </svg>
-                </div>
+                <img src="/brand/jira-logo.svg" alt="Jira" className="w-8 h-8" draggable={false} />
                 <h3 className="font-semibold text-foreground">Pilot Helper</h3>
               </div>
               <Button
@@ -463,13 +459,11 @@ export function PilotHelperWidget({
       >
         <Button
           onClick={() => setIsOpen((v) => !v)}
-          className="w-14 h-14 rounded-full bg-[#0052CC] hover:bg-[#0065FF] shadow-lg hover:shadow-xl transition-all duration-300 group p-0"
+          className="w-14 h-14 rounded-full bg-white hover:bg-gray-50 shadow-lg hover:shadow-xl transition-all duration-300 group p-0 overflow-hidden"
           size="lg"
           title="Report an issue"
         >
-          <svg className="w-7 h-7 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none">
-            <path d="M11.53 2c0 4.97 3.5 8.97 8.47 8.97V13c-5.13 0-8.47 3.63-8.47 9h-2.06c0-5.13-3.63-9-9.47-9v-2.03C5.13 10.97 9.47 6.97 9.47 2h2.06z" fill="white" />
-          </svg>
+          <img src="/brand/jira-logo.svg" alt="Jira" className="w-14 h-14 group-hover:scale-110 transition-transform" draggable={false} />
         </Button>
       </motion.div>
     </div>

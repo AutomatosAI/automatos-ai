@@ -432,14 +432,19 @@ class LLMManager:
         else:
             provider_str, _ = get_provider_and_model_from_settings(service_name)
         
-        # Validate provider (NO fallback - must be valid)
+        # Validate provider - route unknown providers with slash-format models
+        # through OpenRouter (e.g. provider="qwen" + model="qwen/qwen3-coder-next")
         try:
             provider = LLMProvider(provider_str)
         except ValueError:
-            raise ValueError(
-                f"Unknown LLM provider: '{provider_str}'. "
-                f"Supported providers: {[p.value for p in LLMProvider]}"
-            )
+            if model_override and "/" in model_override:
+                logger.info(f"Unknown provider '{provider_str}', routing '{model_override}' through OpenRouter")
+                provider = LLMProvider.OPENROUTER
+            else:
+                raise ValueError(
+                    f"Unknown LLM provider: '{provider_str}'. "
+                    f"Supported providers: {[p.value for p in LLMProvider]}"
+                )
         
         # Get model from settings or use override
         if model_override:

@@ -1,11 +1,11 @@
 'use client'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings, Key, FileText, Shield, Webhook, KeyRound, Radio } from 'lucide-react'
+import { Settings, Key, Shield, Webhook, KeyRound, Radio, Brain } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
-import { CredentialTypesTab } from './CredentialTypesTab'
 import { CredentialAuditTab } from './CredentialAuditTab'
 import SystemSettingsTab from './SystemSettingsTab'
+import SystemLLMSettingsTab from './SystemLLMSettingsTab'
 import WebhooksSettingsTab from './WebhooksSettingsTab'
 import { ApiKeysSettingsTab } from './ApiKeysSettingsTab'
 import { ChannelsSettingsTab } from './ChannelsSettingsTab'
@@ -27,6 +27,10 @@ export function SettingsPanel() {
             <Settings className="w-4 h-4 mr-2" />
             System Settings
           </TabsTrigger>
+          <TabsTrigger value="orchestrator">
+            <Brain className="w-4 h-4 mr-2" />
+            Orchestrator
+          </TabsTrigger>
           <TabsTrigger value="webhooks">
             <Webhook className="w-4 h-4 mr-2" />
             Webhooks
@@ -38,10 +42,6 @@ export function SettingsPanel() {
           <TabsTrigger value="credentials">
             <Key className="w-4 h-4 mr-2" />
             Credentials
-          </TabsTrigger>
-          <TabsTrigger value="credential-types">
-            <FileText className="w-4 h-4 mr-2" />
-            Credential Types
           </TabsTrigger>
           <TabsTrigger value="audit">
             <Shield className="w-4 h-4 mr-2" />
@@ -58,6 +58,11 @@ export function SettingsPanel() {
           <SystemSettingsTab />
         </TabsContent>
 
+        {/* PRD-54/55: Orchestrator Tab (self-loading) */}
+        <TabsContent value="orchestrator">
+          <SystemLLMSettingsTab />
+        </TabsContent>
+
         {/* Webhooks Tab */}
         <TabsContent value="webhooks">
           <WebhooksSettingsTab />
@@ -71,11 +76,6 @@ export function SettingsPanel() {
         {/* PRD-18: Credentials Management Tab */}
         <TabsContent value="credentials">
           <CredentialsTab />
-        </TabsContent>
-
-        {/* PRD-18: Credential Types Browser Tab */}
-        <TabsContent value="credential-types">
-          <CredentialTypesTab />
         </TabsContent>
 
         {/* PRD-18: Audit Logs Tab */}

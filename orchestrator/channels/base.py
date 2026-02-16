@@ -69,6 +69,12 @@ class BaseChannelAdapter(ABC):
     async def handle_message(self, platform_message: Dict[str, Any]):
         """Process an incoming platform message through the
         ingest -> route -> execute -> respond pipeline.
+
+        1. Convert platform message to RequestEnvelope
+        2. Route via UniversalRouter -> RoutingDecision (agent_id)
+        3. Execute via AgentFactory.execute_with_prompt()
+        4. Send result back via send_message()
+        5. Update activity stats on the channel connection
         """
         try:
             envelope = self._to_envelope(platform_message)
@@ -78,22 +84,59 @@ class BaseChannelAdapter(ABC):
             # Lazy imports to avoid circular dependency at module load
             from core.routing.engine import UniversalRouter
             from core.database.database import SessionLocal
+            from modules.agents.factory.agent_factory import AgentFactory
 
             db = SessionLocal()
             try:
+                # ── Route ──
                 router = UniversalRouter(db=db)
                 decision = await router.route(envelope)
-            finally:
-                db.close()
 
-            # Send the response back to the originating channel
-            if decision and getattr(decision, "response", None):
+                if not decision or not decision.agent_id:
+                    logger.warning(
+                        "[Channel:%s] No route found for message, sending fallback",
+                        self.connection_id,
+                    )
+                    reply_channel = (
+                        platform_message.get("reply_channel_id")
+                        or platform_message.get("channel_id")
+                    )
+                    if reply_channel:
+                        await self.send_message(
+                            reply_channel,
+                            "I'm not sure how to handle that request. Please try rephrasing.",
+                        )
+                    return
+
+                # ── Execute ──
+                factory = AgentFactory(db_session=db)
+                result = await factory.execute_with_prompt(
+                    agent=decision.agent_id,
+                    prompt=envelope.content,
+                    context={
+                        "source": envelope.source.value if hasattr(envelope.source, "value") else str(envelope.source),
+                        "workspace_id": str(envelope.workspace_id),
+                        "connection_id": self.connection_id,
+                    },
+                )
+
+                response_text = (result or {}).get("response", "")
+                if not response_text:
+                    response_text = (result or {}).get("content", "I processed your request but have no text to return.")
+
+                # ── Respond ──
                 reply_channel = (
                     platform_message.get("reply_channel_id")
                     or platform_message.get("channel_id")
                 )
-                if reply_channel:
-                    await self.send_message(reply_channel, decision.response)
+                if reply_channel and response_text:
+                    await self.send_message(reply_channel, response_text)
+
+                # ── Update activity stats ──
+                await self._update_activity_stats(db)
+
+            finally:
+                db.close()
 
         except Exception as e:
             logger.error(
@@ -101,6 +144,26 @@ class BaseChannelAdapter(ABC):
                 self.connection_id,
                 e,
             )
+
+    async def _update_activity_stats(self, db) -> None:
+        """Increment message_count and set last_activity_at on the connection row."""
+        try:
+            from sqlalchemy import text
+            from datetime import datetime
+
+            db.execute(
+                text(
+                    "UPDATE channel_connections "
+                    "SET message_count = COALESCE(message_count, 0) + 1, "
+                    "    last_activity_at = :now, "
+                    "    updated_at = :now "
+                    "WHERE id = :conn_id"
+                ),
+                {"conn_id": self.connection_id, "now": datetime.utcnow()},
+            )
+            db.commit()
+        except Exception as e:
+            logger.warning("[Channel:%s] Failed to update activity stats: %s", self.connection_id, e)
 
     @abstractmethod
     def _to_envelope(self, platform_message: Dict[str, Any]) -> Optional["RequestEnvelope"]:

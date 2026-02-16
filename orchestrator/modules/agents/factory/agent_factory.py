@@ -834,16 +834,19 @@ Available Shell Tools:
             "bedrock": LLMProviderEnum.AWS_BEDROCK,
         }
 
-        if model_config.provider not in provider_map:
+        # Auto-detect and correct provider-model mismatches
+        effective_provider = self._resolve_provider_for_model(model_config.provider, model_config.model_id)
+
+        if effective_provider not in provider_map:
             raise ValueError(f"Unsupported provider: {model_config.provider}")
 
-        provider = provider_map[model_config.provider]
+        provider = provider_map[effective_provider]
 
         # Resolve API key: BYOK (if enabled) → platform credential → env vars
-        resolved = await self._resolve_api_key(model_config.provider, agent_name, workspace_id=workspace_id)
+        resolved = await self._resolve_api_key(effective_provider, agent_name, workspace_id=workspace_id)
 
         if not resolved:
-            raise ValueError(f"API key not found for provider: {model_config.provider}")
+            raise ValueError(f"API key not found for provider: {effective_provider}")
 
         # Create LLM config
         llm_config = LLMConfig(
@@ -981,6 +984,48 @@ Available Shell Tools:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
+    def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> str:
+        """
+        Auto-detect and correct provider-model mismatches.
+
+        Handles:
+        - Unknown providers with slash-format model IDs → OpenRouter
+        - gemini models sent to openai → google
+        - claude models sent to wrong provider → anthropic
+        - gpt/o1/o3/o4 models sent to wrong provider → openai
+        - grok models sent to wrong provider → grok
+        """
+        DIRECT_PROVIDERS = {
+            "openai", "anthropic", "google", "grok", "azure", "azure_openai",
+            "aws_bedrock", "bedrock", "huggingface", "openrouter",
+        }
+        model_lower = model_id.lower()
+
+        # Unknown provider + slash format = OpenRouter marketplace model
+        if provider_str not in DIRECT_PROVIDERS and "/" in model_id:
+            self.logger.info(f"Provider '{provider_str}' not recognized, routing '{model_id}' through OpenRouter")
+            return "openrouter"
+
+        # Fix provider-model mismatches (e.g. gemini model on openai provider)
+        inferred = None
+        if model_lower.startswith("gemini"):
+            inferred = "google"
+        elif model_lower.startswith("claude"):
+            inferred = "anthropic"
+        elif model_lower.startswith(("gpt-", "o1", "o3", "o4")):
+            inferred = "openai"
+        elif model_lower.startswith("grok"):
+            inferred = "grok"
+
+        if inferred and inferred != provider_str and provider_str in DIRECT_PROVIDERS:
+            self.logger.warning(
+                f"Provider-model mismatch: provider='{provider_str}' but model='{model_id}' "
+                f"suggests '{inferred}'. Auto-correcting provider to '{inferred}'."
+            )
+            return inferred
+
+        return provider_str
+
     async def activate_agent(self, agent_id: int, workspace_dir: str = "/tmp/automatos_workspace") -> Optional[AgentRuntime]:
         """
         Load an agent from database and activate it in runtime.
@@ -1038,6 +1083,11 @@ Available Shell Tools:
             
             # Create LLM manager with API key resolution (PRD-54)
             provider_str = llm_config_dict.get("provider", "openai")
+            model_id_str = llm_config_dict.get("model", "gpt-4")
+
+            # Auto-detect provider from model name to fix misconfigurations
+            provider_str = self._resolve_provider_for_model(provider_str, model_id_str)
+
             provider = LLMProvider(provider_str)
 
             # Resolve API key: BYOK (if enabled) → platform credential → env vars
