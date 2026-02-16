@@ -340,19 +340,19 @@ export function DocumentManagement() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8 }}
-        className="flex items-center justify-between"
+        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
       >
         <div>
-          <h1 data-testid="page-title" className="text-3xl font-bold mb-2">
+          <h1 data-testid="page-title" className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">
             Knowledge <span className="gradient-text">Bases</span>
           </h1>
-          <p className="text-muted-foreground text-lg">
+          <p className="text-muted-foreground text-sm md:text-lg">
             Manage documents, code repositories, and knowledge sources
           </p>
         </div>
-        
+
         <Button
-          className="gradient-accent hover:opacity-90 transition-opacity"
+          className="gradient-accent hover:opacity-90 transition-opacity shrink-0"
           onClick={() => setShowUploadModal(true)}
           disabled={uploadDocumentMutation.isLoading}
         >
