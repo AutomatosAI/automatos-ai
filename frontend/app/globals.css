@@ -377,3 +377,63 @@ html {
   .stage-active, .progress-shimmer, .flow-particle, .agent-avatar-active { animation: none; }
 }
 
+/* ── Mobile Performance Optimizations ── */
+@media (max-width: 767px) {
+  /* Reduce heavy backdrop-blur on mobile for smoother scrolling */
+  .glass-card {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  .glass-panel {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  .glass-panel-light {
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  /* Reduce box-shadow complexity on mobile */
+  .card-glow {
+    box-shadow:
+      0 8px 24px hsla(0 0% 0% / var(--card-shadow-alpha)),
+      0 0 0 1px hsla(var(--primary) / var(--card-accent-alpha));
+  }
+
+  .card-glow:hover {
+    box-shadow:
+      0 8px 24px hsla(0 0% 0% / var(--card-shadow-alpha)),
+      0 0 0 1px hsla(var(--primary) / var(--card-accent-alpha-hover));
+  }
+
+  /* Faster transitions on mobile */
+  .glass-card {
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  /* Disable parallax on mobile */
+  .parallax-bg {
+    background-attachment: scroll;
+  }
+}
+
+/* ── Scrollbar hide utility for horizontal scroll containers ── */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Safe area insets for notched phones ── */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+

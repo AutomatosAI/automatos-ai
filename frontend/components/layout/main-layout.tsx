@@ -5,8 +5,11 @@ import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
+import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
 import { ChatWidget } from '../chatbot/chat-widget'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -14,6 +17,8 @@ interface MainLayoutProps {
 
 export function MainLayout({ children }: MainLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const isMobileLayout = useIsTabletOrBelow()
   const pathname = usePathname()
 
   // Get current page context for the chat
@@ -39,37 +44,64 @@ export function MainLayout({ children }: MainLayoutProps) {
     recentActions: [] // This could track recent user actions
   }
 
+  const handleMenuClick = () => {
+    if (isMobileLayout) {
+      setMobileMenuOpen(true)
+    } else {
+      setSidebarCollapsed(!sidebarCollapsed)
+    }
+  }
+
   return (
     <div className="min-h-screen gradient-bg">
-      {/* Sidebar */}
-      <Sidebar collapsed={sidebarCollapsed} onToggle={setSidebarCollapsed} />
+      {/* Desktop Sidebar — hidden below lg */}
+      {!isMobileLayout && (
+        <>
+          <Sidebar collapsed={sidebarCollapsed} onToggle={setSidebarCollapsed} />
 
-      {/* Overlay scrim when sidebar expanded */}
-      {!sidebarCollapsed && (
-        <div
-          className="fixed inset-0 z-30 bg-black/30 backdrop-blur-[1px]"
-          onClick={() => setSidebarCollapsed(true)}
-          aria-hidden="true"
-        />
+          {/* Overlay scrim when sidebar expanded on desktop */}
+          {!sidebarCollapsed && (
+            <div
+              className="fixed inset-0 z-30 bg-black/30 backdrop-blur-[1px]"
+              onClick={() => setSidebarCollapsed(true)}
+              aria-hidden="true"
+            />
+          )}
+        </>
       )}
-      
+
+      {/* Mobile Navigation Sheet */}
+      {isMobileLayout && (
+        <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+          <SheetContent
+            side="left"
+            className="w-[280px] p-0 glass-card border-r border-primary/15 bg-background/95 backdrop-blur-lg"
+          >
+            <MobileSidebar onNavigate={() => setMobileMenuOpen(false)} />
+          </SheetContent>
+        </Sheet>
+      )}
+
       {/* Main Content */}
-      {/* Always keep content offset for collapsed sidebar; expanded sidebar overlays */}
-      <div className="transition-all duration-300 ml-16">
-        <Header onMenuClick={() => setSidebarCollapsed(!sidebarCollapsed)} />
-        
-        <main className="p-6">
+      <div className={
+        isMobileLayout
+          ? 'transition-all duration-300'
+          : 'transition-all duration-300 ml-16'
+      }>
+        <Header onMenuClick={handleMenuClick} />
+
+        <main className="p-3 md:p-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: isMobileLayout ? 0.2 : 0.5 }}
             className="max-w-7xl mx-auto"
           >
             {children}
           </motion.div>
         </main>
       </div>
-      
+
       {/* Pilot Helper Widget — shown on ALL pages (overlay, no navigation) */}
       <ChatWidget
         position="bottom-right"
