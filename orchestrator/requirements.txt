@@ -33,6 +33,9 @@ pytesseract==0.3.10
 # System monitoring (essential for our dashboard)
 psutil==5.9.6
 
+# Scheduling (heartbeat service)
+apscheduler>=3.10
+
 # Network & async
 asyncio-mqtt==0.16.1
 aiofiles==23.2.1

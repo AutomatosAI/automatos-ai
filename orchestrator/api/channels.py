@@ -24,6 +24,7 @@ router = APIRouter(prefix="/api/channels", tags=["channels"])
 _SUPPORTED_PLATFORMS = {
     "telegram", "slack", "discord", "teams", "google_chat",
     "signal", "imessage", "irc", "matrix", "line", "whatsapp",
+    "webhook",
 }
 
 _REQUIRED_CONFIG = {
