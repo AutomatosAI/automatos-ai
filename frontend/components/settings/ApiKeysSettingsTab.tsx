@@ -64,8 +64,12 @@ const PROVIDERS = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'google', label: 'Google' },
   { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'azure', label: 'Azure' },
-  { value: 'grok', label: 'Grok' },
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'azure', label: 'Azure OpenAI' },
+  { value: 'bedrock', label: 'AWS Bedrock' },
+  { value: 'grok', label: 'Grok / xAI' },
+  { value: 'cohere', label: 'Cohere' },
+  { value: 'huggingface', label: 'HuggingFace' },
 ] as const
 
 // ---------------------------------------------------------------------------
