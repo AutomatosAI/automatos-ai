@@ -112,7 +112,7 @@ interface OpenRouterMarketplaceResponse {
 }
 
 // Adapt OpenRouter model to the existing LLMModel card interface
-function adaptToLLMModel(m: OpenRouterModel): LLMModel {
+function adaptToLLMModel(m: OpenRouterModel, installedIds?: Set<string>): LLMModel {
   return {
     id: m.id,
     provider: m.provider,
@@ -138,7 +138,7 @@ function adaptToLLMModel(m: OpenRouterModel): LLMModel {
     is_default: false,
     requires_plan: null,
     install_count: 0,
-    is_installed: false,
+    is_installed: installedIds ? installedIds.has(m.model_id) : false,
   }
 }
 
@@ -182,8 +182,20 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
   const combinedSearch = searchQuery || localSearch
 
   // -----------------------------------------------------------------------
-  // Data fetching (from OpenRouter cache)
+  // Data fetching
   // -----------------------------------------------------------------------
+
+  // Fetch installed model IDs for this workspace (lightweight)
+  const { data: installedData } = useQuery<{ model_ids: string[] }>({
+    queryKey: ['installed-model-ids'],
+    queryFn: () => apiClient.get('/api/marketplace/llm/installed-ids'),
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+  const installedIds = useMemo(
+    () => new Set(installedData?.model_ids ?? []),
+    [installedData]
+  )
 
   const { data: response, isLoading } = useQuery<OpenRouterMarketplaceResponse>({
     queryKey: [
@@ -284,8 +296,11 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
     return [{ id: 'all', name: 'All', count: totalCount }, ...providers]
   }, [providerCounts, totalCount])
 
-  // Adapt to existing card format
-  const models = useMemo(() => rawModels.map(adaptToLLMModel), [rawModels])
+  // Adapt to existing card format (with installed status)
+  const models = useMemo(
+    () => rawModels.map((m) => adaptToLLMModel(m, installedIds)),
+    [rawModels, installedIds]
+  )
 
   // Active filter count (for indicator)
   const activeFilterCount = [
@@ -325,6 +340,8 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
   const handleInstall = () => {
     queryClient.invalidateQueries({ queryKey: ['openrouterModels'] })
     queryClient.invalidateQueries({ queryKey: ['marketplaceLlmModels'] })
+    queryClient.invalidateQueries({ queryKey: ['installed-model-ids'] })
+    queryClient.invalidateQueries({ queryKey: ['workspace-models'] })
   }
 
   const clearAllFilters = () => {

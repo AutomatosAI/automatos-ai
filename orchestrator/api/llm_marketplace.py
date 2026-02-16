@@ -19,6 +19,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import LLMModel, WorkspaceModel
+from core.models.openrouter_cache import OpenRouterModelCache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/marketplace/llm", tags=["LLM Marketplace"])
@@ -95,6 +96,51 @@ def _model_to_out(m: LLMModel, installed_model_ids: set = None) -> LLMModelOut:
         install_count=m.install_count or 0,
         is_installed=m.id in (installed_model_ids or set()),
     )
+
+
+def _get_or_create_from_cache(db: Session, model_id: str) -> Optional[LLMModel]:
+    """
+    Find model in llm_models, or auto-create from openrouter_models_cache.
+    This bridges the two-table architecture: marketplace browses from OpenRouter
+    cache, but install/workspace tracking uses the llm_models table.
+    """
+    m = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
+    if m:
+        return m
+
+    # Try OpenRouter cache
+    cached = db.query(OpenRouterModelCache).filter(
+        OpenRouterModelCache.model_id == model_id
+    ).first()
+    if not cached:
+        return None
+
+    # Auto-create LLMModel from cache data
+    m = LLMModel(
+        provider=cached.provider,
+        model_id=cached.model_id,
+        display_name=cached.display_name,
+        description=cached.description,
+        model_family=cached.provider,
+        context_window=cached.context_length or 0,
+        max_output_tokens=cached.max_completion_tokens or 0,
+        input_cost_per_1k_tokens=(cached.prompt_cost or 0) * 1000,
+        output_cost_per_1k_tokens=(cached.completion_cost or 0) * 1000,
+        supports_functions=cached.supports_tools or False,
+        supports_vision=cached.supports_vision or False,
+        supports_streaming=cached.supports_streaming if cached.supports_streaming is not None else True,
+        status="active",
+        tier="aggregator",
+        category=cached.category,
+        tags=cached.tags or [],
+        capabilities={},
+        recommended_for=[],
+        external_id=cached.model_id,
+    )
+    db.add(m)
+    db.flush()
+    logger.info(f"Auto-created LLMModel from OpenRouter cache: {model_id}")
+    return m
 
 
 def _get_installed_ids(db: Session, workspace_id) -> set:
@@ -206,6 +252,25 @@ async def get_installed_models(
     return [_model_to_out(m, installed_ids) for m in models]
 
 
+@router.get("/installed-ids")
+async def get_installed_model_ids(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return just the model_id strings installed in this workspace (lightweight)."""
+    if not ctx.workspace_id:
+        return {"model_ids": []}
+    installed_llm_ids = _get_installed_ids(db, ctx.workspace_id)
+    if not installed_llm_ids:
+        return {"model_ids": []}
+    rows = (
+        db.query(LLMModel.model_id)
+        .filter(LLMModel.id.in_(installed_llm_ids))
+        .all()
+    )
+    return {"model_ids": [r[0] for r in rows]}
+
+
 @router.get("/models/{model_id:path}", response_model=LLMModelOut)
 async def get_model_detail(
     model_id: str,
@@ -213,7 +278,7 @@ async def get_model_detail(
     db: Session = Depends(get_db),
 ):
     """Get full detail for a single model."""
-    m = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
+    m = _get_or_create_from_cache(db, model_id)
     if not m:
         raise HTTPException(404, f"Model not found: {model_id}")
     installed = _get_installed_ids(db, ctx.workspace_id)
@@ -230,7 +295,7 @@ async def install_model(
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
-    m = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
+    m = _get_or_create_from_cache(db, model_id)
     if not m:
         raise HTTPException(404, f"Model not found: {model_id}")
 
@@ -259,7 +324,7 @@ async def install_model(
     return InstallResult(success=True, message="Model installed", model_id=model_id)
 
 
-@router.delete("/models/{model_id:path}/uninstall", response_model=InstallResult)
+@router.post("/models/{model_id:path}/uninstall", response_model=InstallResult)
 async def uninstall_model(
     model_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -269,7 +334,7 @@ async def uninstall_model(
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
-    m = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
+    m = _get_or_create_from_cache(db, model_id)
     if not m:
         raise HTTPException(404, f"Model not found: {model_id}")
 

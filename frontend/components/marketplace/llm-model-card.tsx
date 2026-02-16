@@ -133,6 +133,7 @@ export function LLMModelCard({
       }
       queryClient.invalidateQueries({ queryKey: ['marketplaceLlmModels'] })
       queryClient.invalidateQueries({ queryKey: ['workspace-models'] })
+      queryClient.invalidateQueries({ queryKey: ['installed-model-ids'] })
       onInstall?.(model.model_id)
     } catch (error: any) {
       toast.error(model.is_installed ? 'Failed to uninstall' : 'Failed to install', {
