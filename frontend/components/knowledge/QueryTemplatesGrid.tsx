@@ -187,7 +187,7 @@ export function QueryTemplatesGrid({ templates: initialTemplates, selectedSource
 
           {/* Category Tabs */}
           <Tabs value={selectedCategory} onValueChange={setSelectedCategory}>
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="w-full justify-start gap-1">
               {categories.map(cat => (
                 <TabsTrigger key={cat} value={cat} className="capitalize">
                   {cat === 'all' ? 'All Templates' : cat}

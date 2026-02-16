@@ -102,18 +102,18 @@ export function TeamManagement() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
-                className="flex justify-between items-start"
+                className="flex flex-col sm:flex-row justify-between items-start gap-3"
             >
                 <div>
-                    <h1 className="text-3xl font-bold mb-2">
+                    <h1 className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">
                         Team <span className="gradient-text">Management</span>
                     </h1>
-                    <p className="text-muted-foreground mt-1">
+                    <p className="text-sm md:text-base text-muted-foreground mt-1">
                         Manage your workspace members, roles, and invitations.
                     </p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
                     <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
                         <Users className="w-3 h-3 mr-1" />
                         {members.length} Members
@@ -164,7 +164,7 @@ export function TeamManagement() {
                 transition={{ duration: 0.6, delay: 0.2 }}
                 className="glass-card rounded-xl border border-white/5 overflow-hidden"
             >
-                <div className="p-4 border-b border-white/5 bg-white/5 grid grid-cols-12 gap-4 font-medium text-sm text-muted-foreground">
+                <div className="p-4 border-b border-white/5 bg-white/5 hidden md:grid grid-cols-12 gap-4 font-medium text-sm text-muted-foreground">
                     <div className="col-span-5">User</div>
                     <div className="col-span-3">Role</div>
                     <div className="col-span-3">Joined</div>
@@ -185,9 +185,9 @@ export function TeamManagement() {
                                 key={member.id}
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
-                                className="grid grid-cols-12 gap-4 p-4 items-center hover:bg-white/5 transition-colors group"
+                                className="flex flex-col md:grid md:grid-cols-12 gap-2 md:gap-4 p-4 items-start md:items-center hover:bg-white/5 transition-colors group"
                             >
-                                <div className="col-span-5 flex items-center gap-3">
+                                <div className="md:col-span-5 flex items-center gap-3 w-full md:w-auto">
                                     <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-orange-500/20 to-purple-500/20 flex items-center justify-center border border-white/10 shrink-0">
                                         <span className="font-semibold text-foreground">
                                             {member.name ? member.name[0].toUpperCase() : member.email[0].toUpperCase()}
@@ -202,7 +202,7 @@ export function TeamManagement() {
                                     </div>
                                 </div>
 
-                                <div className="col-span-3">
+                                <div className="md:col-span-3 flex items-center gap-2 pl-13 md:pl-0">
                                     <div className="relative inline-block">
                                         <select
                                             value={member.role}
@@ -221,7 +221,7 @@ export function TeamManagement() {
                                     </div>
                                 </div>
 
-                                <div className="col-span-3 text-sm text-muted-foreground">
+                                <div className="md:col-span-3 text-sm text-muted-foreground pl-13 md:pl-0">
                                     {new Date(member.joined_at).toLocaleDateString()}
                                 </div>
 

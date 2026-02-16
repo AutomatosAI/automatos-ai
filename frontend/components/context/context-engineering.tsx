@@ -271,7 +271,7 @@ export function ContextEngineering() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="performance" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
             <TabsTrigger value="performance" className="flex items-center space-x-2">
               <BarChart className="w-4 h-4" />
               <span className="hidden sm:inline">Performance</span>

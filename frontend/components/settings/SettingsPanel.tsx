@@ -15,40 +15,40 @@ export function SettingsPanel() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Settings</h1>
+        <h1 className="text-2xl md:text-3xl font-bold">Settings</h1>
         <p className="text-muted-foreground mt-1">
           Manage system configuration, credentials, and security
         </p>
       </div>
 
       <Tabs defaultValue="system-settings" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="w-full justify-start gap-1">
           <TabsTrigger value="system-settings">
-            <Settings className="w-4 h-4 mr-2" />
-            System Settings
+            <Settings className="w-4 h-4 mr-1 shrink-0" />
+            <span className="hidden sm:inline">System</span> Settings
           </TabsTrigger>
           <TabsTrigger value="orchestrator">
-            <Brain className="w-4 h-4 mr-2" />
+            <Brain className="w-4 h-4 mr-1 shrink-0" />
             Orchestrator
           </TabsTrigger>
           <TabsTrigger value="webhooks">
-            <Webhook className="w-4 h-4 mr-2" />
+            <Webhook className="w-4 h-4 mr-1 shrink-0" />
             Webhooks
           </TabsTrigger>
           <TabsTrigger value="api-keys">
-            <KeyRound className="w-4 h-4 mr-2" />
+            <KeyRound className="w-4 h-4 mr-1 shrink-0" />
             API Keys
           </TabsTrigger>
           <TabsTrigger value="credentials">
-            <Key className="w-4 h-4 mr-2" />
+            <Key className="w-4 h-4 mr-1 shrink-0" />
             Credentials
           </TabsTrigger>
           <TabsTrigger value="audit">
-            <Shield className="w-4 h-4 mr-2" />
-            Audit Logs
+            <Shield className="w-4 h-4 mr-1 shrink-0" />
+            Audit <span className="hidden sm:inline">Logs</span>
           </TabsTrigger>
           <TabsTrigger value="channels">
-            <Radio className="w-4 h-4 mr-2" />
+            <Radio className="w-4 h-4 mr-1 shrink-0" />
             Channels
           </TabsTrigger>
         </TabsList>

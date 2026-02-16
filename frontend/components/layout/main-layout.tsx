@@ -53,7 +53,7 @@ export function MainLayout({ children }: MainLayoutProps) {
   }
 
   return (
-    <div className="min-h-screen gradient-bg">
+    <div className="min-h-screen gradient-bg overflow-x-hidden">
       {/* Desktop Sidebar — hidden below lg */}
       {!isMobileLayout && (
         <>
@@ -90,7 +90,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       }>
         <Header onMenuClick={handleMenuClick} />
 
-        <main className="p-3 md:p-6">
+        <main className="p-4 md:p-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
