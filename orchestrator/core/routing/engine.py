@@ -471,6 +471,18 @@ class UniversalRouter:
             )
         agents_block = "\n".join(agent_lines)
 
+        # PRD-58: Try PromptRegistry (admin-editable), fallback to hardcoded
+        try:
+            from core.services.prompt_registry import prompt_registry
+            custom = prompt_registry.get_raw("routing-classifier")
+            if custom:
+                return custom.format_map({
+                    "message": content,
+                    "available_routes": agents_block,
+                })
+        except Exception:
+            pass
+
         return (
             "You are a request router. Given the user's request, select the best agent "
             "to handle it from the list below.\n\n"

@@ -102,6 +102,13 @@ _PERSONALITY_MAP = {
     "technical": _TECHNICAL_PERSONALITY,
 }
 
+# PRD-58: Map personality modes to PromptRegistry slugs
+_PERSONALITY_SLUGS = {
+    "friendly": "chatbot-friendly",
+    "professional": "chatbot-professional",
+    "technical": "chatbot-technical",
+}
+
 _COMMUNICATION_SUFFIX = {
     "concise": "\n\n**Communication style:** Keep responses short and direct. Skip preambles.",
     "balanced": "",  # default — no extra instruction needed
@@ -147,7 +154,19 @@ class AutomatosPersonality:
         if personality_mode == "custom" and custom_soul.strip():
             personality_block = custom_soul.strip()
         else:
-            personality_block = _PERSONALITY_MAP.get(personality_mode, _FRIENDLY_PERSONALITY)
+            # PRD-58: Try PromptRegistry first (admin-editable), fallback to hardcoded
+            personality_block = None
+            slug = _PERSONALITY_SLUGS.get(personality_mode)
+            if slug:
+                try:
+                    from core.services.prompt_registry import prompt_registry
+                    raw = prompt_registry.get_raw(slug)
+                    if raw:
+                        personality_block = raw
+                except Exception:
+                    pass
+            if not personality_block:
+                personality_block = _PERSONALITY_MAP.get(personality_mode, _FRIENDLY_PERSONALITY)
 
         comm_suffix = _COMMUNICATION_SUFFIX.get(communication_style, "")
 
