@@ -3,15 +3,18 @@ PRD-58 Phase 1B: FutureAGI Integration Service
 ================================================
 
 Wrapper around the FutureAGI SDK (pip install futureagi) for:
-- Prompt quality scoring (instruction_adherence, task_completion, etc.)
-- Prompt optimization (Bayesian, ProTeGi, GEPA, etc.)
-- Safety scanning (toxicity, bias, jailbreak detection)
+- Prompt quality scoring (groundedness, toxicity, coherence, etc.)
+- Safety scanning (toxicity, bias, prompt injection detection)
+
+futureagi 0.6.0 API:
+  - fi.client.Client(fi_api_key, fi_secret_key)
+  - fi.evals.Evaluator(fi_api_key, fi_secret_key)
+  - fi.evals.templates.* (Groundedness, Toxicity, PromptAdherence, etc.)
+  - fi.testcases.TestCase(input=..., output=..., prompt=...)
 
 Requires:
   FUTUREAGI_API_KEY   - API key from FutureAGI dashboard
   FUTUREAGI_SECRET_KEY - Secret key from FutureAGI dashboard
-
-pip install futureagi
 """
 
 from __future__ import annotations
@@ -34,8 +37,10 @@ class FutureAGIService:
     _instance: Optional["FutureAGIService"] = None
 
     def __init__(self) -> None:
-        self._client = None
+        self._evaluator = None
         self._available = False
+        self._api_key: Optional[str] = None
+        self._secret_key: Optional[str] = None
         self._init_client()
 
     @classmethod
@@ -45,27 +50,30 @@ class FutureAGIService:
         return cls._instance
 
     def _init_client(self) -> None:
-        """Initialize the FutureAGI SDK client."""
-        api_key = os.getenv("FUTUREAGI_API_KEY")
-        secret_key = os.getenv("FUTUREAGI_SECRET_KEY")
+        """Initialize the FutureAGI SDK evaluator."""
+        self._api_key = os.getenv("FUTUREAGI_API_KEY")
+        self._secret_key = os.getenv("FUTUREAGI_SECRET_KEY")
 
-        if not api_key or not secret_key:
+        if not self._api_key or not self._secret_key:
             logger.info("FutureAGI keys not configured, service disabled")
             return
 
         try:
-            from fi.client import FIClient
-            self._client = FIClient(api_key=api_key, secret_key=secret_key)
+            from fi.evals import Evaluator
+            self._evaluator = Evaluator(
+                fi_api_key=self._api_key,
+                fi_secret_key=self._secret_key,
+            )
             self._available = True
-            logger.info("FutureAGI client initialized successfully")
+            logger.info("FutureAGI evaluator initialized successfully")
         except ImportError as ie:
             logger.warning(f"futureagi import failed: {ie}")
         except Exception as e:
-            logger.warning(f"FutureAGI client init failed: {e}")
+            logger.warning(f"FutureAGI init failed: {e}")
 
     @property
     def is_available(self) -> bool:
-        return self._available and self._client is not None
+        return self._available and self._evaluator is not None
 
     # ------------------------------------------------------------------
     # Assessment
@@ -78,130 +86,99 @@ class FutureAGIService:
         metrics: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
-        Score a system prompt using FutureAGI metrics.
+        Score a system prompt using FutureAGI eval templates.
 
-        Args:
-            prompt_content: The system prompt text to assess
-            test_cases: Optional list of {"input": ..., "expected_output": ...}
-            metrics: Which metrics to run (defaults to all)
-
-        Returns:
-            Dict with metric scores (0.0-1.0) and details
+        Available templates: groundedness, prompt_adherence, completeness,
+        context_adherence, factual_accuracy, summary_quality, coherence
         """
         if not self.is_available:
             return {"error": "FutureAGI not configured", "scores": {}}
 
         default_metrics = [
-            "instruction_adherence",
-            "task_completion",
-            "factual_accuracy",
-            "conciseness",
+            "prompt_adherence",
+            "completeness",
             "groundedness",
         ]
         selected_metrics = metrics or default_metrics
 
         try:
-            from fi.evals import (
-                InstructionAdherence,
+            from fi.evals.templates import (
+                PromptAdherence,
+                Completeness,
                 Groundedness,
-                Conciseness,
+                FactualAccuracy,
+                SummaryQuality,
+                ContextAdherence,
+                ConversationCoherence,
             )
+            from fi.testcases import TestCase
 
-            # Build metric instances
-            metric_map = {
-                "instruction_adherence": InstructionAdherence,
+            template_map = {
+                "prompt_adherence": PromptAdherence,
+                "completeness": Completeness,
                 "groundedness": Groundedness,
-                "conciseness": Conciseness,
+                "factual_accuracy": FactualAccuracy,
+                "summary_quality": SummaryQuality,
+                "context_adherence": ContextAdherence,
+                "coherence": ConversationCoherence,
             }
 
             results = {}
             for metric_name in selected_metrics:
-                metric_cls = metric_map.get(metric_name)
-                if not metric_cls:
-                    # For metrics not directly available, use a general scoring approach
-                    results[metric_name] = {"score": None, "note": "Metric not yet mapped"}
+                template_cls = template_map.get(metric_name)
+                if not template_cls:
+                    results[metric_name] = {"score": None, "note": "Template not mapped"}
                     continue
 
                 try:
-                    metric_instance = metric_cls()
-                    # Use the client to run scoring
-                    score = self._client.run_metric(
-                        metric=metric_instance,
-                        prompt=prompt_content,
-                        test_cases=test_cases or [],
+                    template = template_cls()
+                    # Build test case — use provided test cases or a default
+                    if test_cases:
+                        tc = TestCase(
+                            input=test_cases[0].get("input", ""),
+                            output=test_cases[0].get("output", test_cases[0].get("expected_output", "")),
+                            prompt=prompt_content,
+                            context=[prompt_content],
+                        )
+                    else:
+                        tc = TestCase(
+                            input="Evaluate this system prompt for quality.",
+                            output="System prompt evaluated.",
+                            prompt=prompt_content,
+                            context=[prompt_content],
+                        )
+
+                    batch_result = self._evaluator.evaluate(
+                        eval_templates=[template],
+                        inputs=[tc],
                     )
-                    results[metric_name] = {
-                        "score": float(score) if score is not None else None,
-                    }
+
+                    # Extract score from BatchRunResult
+                    if batch_result and batch_result.eval_results:
+                        first = batch_result.eval_results[0]
+                        score_val = None
+                        if first.metrics:
+                            score_val = first.metrics[0].value
+                        results[metric_name] = {
+                            "score": float(score_val) if score_val is not None else None,
+                            "passed": not first.failure,
+                            "reason": first.reason or None,
+                        }
+                    else:
+                        results[metric_name] = {"score": None, "note": "No result returned"}
+
                 except Exception as metric_err:
                     logger.warning(f"Metric {metric_name} failed: {metric_err}")
                     results[metric_name] = {"score": None, "error": str(metric_err)}
 
             return {"scores": results, "metrics_run": len(results)}
 
+        except ImportError as ie:
+            logger.error(f"FutureAGI eval import failed: {ie}")
+            return {"error": str(ie), "scores": {}}
         except Exception as e:
             logger.error(f"FutureAGI assessment failed: {e}")
             return {"error": str(e), "scores": {}}
-
-    # ------------------------------------------------------------------
-    # Optimization
-    # ------------------------------------------------------------------
-
-    async def optimize_prompt(
-        self,
-        prompt_content: str,
-        algorithm: str = "bayesian",
-        target_metric: str = "instruction_adherence",
-        num_iterations: int = 10,
-    ) -> Dict[str, Any]:
-        """
-        Run prompt optimization using FutureAGI's optimization algorithms.
-
-        Algorithms: bayesian, protegi, meta_prompt, gepa, random, prompt_wizard
-        """
-        if not self.is_available:
-            return {"error": "FutureAGI not configured"}
-
-        try:
-            # Map algorithm names to SDK classes
-            from fi.optim import BayesianSearch, ProTeGi, MetaPrompt, GEPA, RandomSearch
-
-            algo_map = {
-                "bayesian": BayesianSearch,
-                "protegi": ProTeGi,
-                "meta_prompt": MetaPrompt,
-                "gepa": GEPA,
-                "random": RandomSearch,
-            }
-
-            algo_cls = algo_map.get(algorithm)
-            if not algo_cls:
-                return {"error": f"Unknown algorithm: {algorithm}"}
-
-            optimizer = algo_cls(
-                target_metric=target_metric,
-                num_iterations=num_iterations,
-            )
-
-            result = self._client.optimize(
-                optimizer=optimizer,
-                initial_prompt=prompt_content,
-            )
-
-            return {
-                "optimized_prompt": result.best_prompt if hasattr(result, "best_prompt") else str(result),
-                "best_score": float(result.best_score) if hasattr(result, "best_score") else None,
-                "algorithm": algorithm,
-                "iterations": num_iterations,
-                "history": result.history if hasattr(result, "history") else [],
-            }
-
-        except ImportError as ie:
-            logger.warning(f"FutureAGI optimization import failed: {ie}")
-            return {"error": f"Optimization module not available: {ie}"}
-        except Exception as e:
-            logger.error(f"FutureAGI optimization failed: {e}")
-            return {"error": str(e)}
 
     # ------------------------------------------------------------------
     # Safety Check
@@ -209,47 +186,59 @@ class FutureAGIService:
 
     async def safety_check(self, prompt_content: str) -> Dict[str, Any]:
         """
-        Run safety scanning on a prompt (toxicity, bias, jailbreak vectors).
+        Run safety scanning on a prompt (toxicity, bias, prompt injection).
         """
         if not self.is_available:
             return {"error": "FutureAGI not configured", "safe": None}
 
         try:
-            from fi.evals import Toxicity, Bias
+            from fi.evals.templates import (
+                Toxicity,
+                BiasDetection,
+                PromptInjection,
+                ContentModeration,
+            )
+            from fi.testcases import TestCase
+
+            safety_templates = {
+                "toxicity": Toxicity,
+                "bias": BiasDetection,
+                "prompt_injection": PromptInjection,
+                "content_moderation": ContentModeration,
+            }
 
             checks = {}
+            for check_name, template_cls in safety_templates.items():
+                try:
+                    template = template_cls()
+                    tc = TestCase(
+                        input=prompt_content,
+                        output=prompt_content,
+                        prompt=prompt_content,
+                    )
+                    batch_result = self._evaluator.evaluate(
+                        eval_templates=[template],
+                        inputs=[tc],
+                    )
 
-            # Toxicity check
-            try:
-                toxicity = Toxicity()
-                tox_score = self._client.run_metric(
-                    metric=toxicity,
-                    prompt=prompt_content,
-                    test_cases=[],
-                )
-                checks["toxicity"] = {
-                    "score": float(tox_score) if tox_score is not None else None,
-                    "safe": float(tox_score) < 0.3 if tox_score is not None else None,
-                }
-            except Exception as e:
-                checks["toxicity"] = {"error": str(e)}
+                    if batch_result and batch_result.eval_results:
+                        first = batch_result.eval_results[0]
+                        score_val = None
+                        if first.metrics:
+                            score_val = first.metrics[0].value
+                        checks[check_name] = {
+                            "score": float(score_val) if score_val is not None else None,
+                            "safe": not first.failure,
+                            "reason": first.reason or None,
+                        }
+                    else:
+                        checks[check_name] = {"score": None, "safe": None}
 
-            # Bias check
-            try:
-                bias = Bias()
-                bias_score = self._client.run_metric(
-                    metric=bias,
-                    prompt=prompt_content,
-                    test_cases=[],
-                )
-                checks["bias"] = {
-                    "score": float(bias_score) if bias_score is not None else None,
-                    "safe": float(bias_score) < 0.3 if bias_score is not None else None,
-                }
-            except Exception as e:
-                checks["bias"] = {"error": str(e)}
+                except Exception as e:
+                    logger.warning(f"Safety check {check_name} failed: {e}")
+                    checks[check_name] = {"error": str(e)}
 
-            # Overall safety
+            # Overall safety: all checks must pass
             all_safe = all(
                 c.get("safe", True)
                 for c in checks.values()
@@ -261,11 +250,53 @@ class FutureAGIService:
                 "checks": checks,
             }
 
-        except ImportError:
-            return {"error": "Safety modules not available", "safe": None}
+        except ImportError as ie:
+            logger.warning(f"Safety module import failed: {ie}")
+            return {"error": str(ie), "safe": None}
         except Exception as e:
             logger.error(f"FutureAGI safety check failed: {e}")
             return {"error": str(e), "safe": None}
+
+    # ------------------------------------------------------------------
+    # Optimization (placeholder — fi.optim may not exist in 0.6.0)
+    # ------------------------------------------------------------------
+
+    async def optimize_prompt(
+        self,
+        prompt_content: str,
+        algorithm: str = "bayesian",
+        target_metric: str = "prompt_adherence",
+        num_iterations: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Prompt optimization. Returns error if fi.optim is not available.
+        """
+        if not self.is_available:
+            return {"error": "FutureAGI not configured"}
+
+        try:
+            from fi.prompt import PromptOptimizer
+            optimizer = PromptOptimizer(
+                fi_api_key=self._api_key,
+                fi_secret_key=self._secret_key,
+            )
+            result = optimizer.optimize(
+                prompt=prompt_content,
+                algorithm=algorithm,
+                target_metric=target_metric,
+                num_iterations=num_iterations,
+            )
+            return {
+                "optimized_prompt": getattr(result, "best_prompt", str(result)),
+                "best_score": float(getattr(result, "best_score", 0)),
+                "algorithm": algorithm,
+                "iterations": num_iterations,
+            }
+        except ImportError:
+            return {"error": "Prompt optimization not available in this SDK version"}
+        except Exception as e:
+            logger.error(f"FutureAGI optimization failed: {e}")
+            return {"error": str(e)}
 
     # ------------------------------------------------------------------
     # Run orchestrator (called by admin_prompts.py)
@@ -318,13 +349,12 @@ class FutureAGIService:
                 result = await self.optimize_prompt(
                     prompt_content,
                     algorithm=config.get("algorithm", "bayesian"),
-                    target_metric=config.get("target_metric", "instruction_adherence"),
+                    target_metric=config.get("target_metric", "prompt_adherence"),
                     num_iterations=config.get("num_iterations", 10),
                 )
             elif run.run_type == "safety":
                 result = await self.safety_check(prompt_content)
             else:
-                # Default to assessment
                 result = await self.assess_prompt(prompt_content)
 
             # Save results
@@ -335,7 +365,7 @@ class FutureAGIService:
                 run.status = "completed"
                 run.scores = result
 
-                # Also snapshot scores on the version if this is a quality assessment
+                # Snapshot scores on the version for quality assessments
                 if run.run_type in ("assess", "evaluate") and result.get("scores"):
                     version.eval_scores = result["scores"]
 
