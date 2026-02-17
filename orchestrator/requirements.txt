@@ -114,3 +114,7 @@ boto3>=1.39.5
 # futureagi pins exact versions of common packages (requests==2.32.3,
 # pandas==2.2.2, charset-normalizer==3.3.2) that conflict with our stack.
 # Installed separately with --no-deps in Dockerfile.
+# These are transitive deps futureagi needs but --no-deps skips:
+requests-futures>=1.0.0
+python-Levenshtein>=0.21.0
+rouge-score>=0.1.2
