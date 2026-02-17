@@ -20,7 +20,6 @@ from .routing import *  # PRD-50: Universal Orchestrator Router
 from .channels import *  # PRD-55: Channel Connections (US-019)
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
 from .personas import *  # PRD-42: Agent Personas
-from .system_prompts import *  # PRD-58: System Prompt Management
 
 try:
     from .channels import *  # PRD-55: Channel Connections
