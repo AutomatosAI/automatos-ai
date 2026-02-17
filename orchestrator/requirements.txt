@@ -82,9 +82,10 @@ langchain-community==0.4.1
 langchain-openai==1.0.1
 langchain-core==1.0.2
 
-# PandasAI (optional): charts + NL analysis for database results
-pandasai==2.2.12
-pandasai-litellm==0.0.1
+# PandasAI — removed: pandasai hard-pins pandas==1.5.3 which conflicts
+# with futureagi (requires pandas>=2.2). Re-add once pandasai 3.x stabilises.
+# pandasai==2.2.12
+# pandasai-litellm==0.0.1
 
 # CodeGraph dependencies (PRD-11)
 tree-sitter>=0.20.4
