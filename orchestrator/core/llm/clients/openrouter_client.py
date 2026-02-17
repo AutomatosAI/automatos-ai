@@ -94,8 +94,57 @@ class OpenRouterProvider(BaseLLMProvider):
             response = await loop.run_in_executor(None, _call)
 
             tool_calls = None
-            content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason
+
+            # Handle multipart/image content from models like Gemini via OpenRouter.
+            # OpenRouter returns images in a separate `images` field on the message
+            # (not inside `content`), with structure:
+            #   images: [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}]
+            content = ""
+            additional_blocks = []
+            msg = response.choices[0].message
+
+            try:
+                raw_msg = msg.model_dump()
+            except Exception:
+                raw_msg = {}
+
+            # 1. Extract text content (may be string, list of parts, or empty)
+            raw_content = raw_msg.get("content")
+            if isinstance(raw_content, list):
+                text_parts = []
+                for part in raw_content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                content = "\n".join(text_parts)
+            else:
+                content = msg.content or ""
+
+            # 2. Extract images from the `images` field (OpenRouter/Gemini image models)
+            raw_images = raw_msg.get("images") or []
+            for img in raw_images:
+                if not isinstance(img, dict):
+                    continue
+                url = ""
+                if img.get("type") == "image_url":
+                    url = (img.get("image_url") or {}).get("url", "")
+                elif "url" in img:
+                    url = img["url"]
+                if url:
+                    content += f"\n\n![Generated Image]({url})\n\n"
+                    additional_blocks.append({"type": "image", "url": url})
+
+            # 3. Also check content list for inline image_url parts
+            if isinstance(raw_content, list):
+                for part in raw_content:
+                    if isinstance(part, dict) and part.get("type") == "image_url":
+                        url = (part.get("image_url") or {}).get("url", "")
+                        if url:
+                            content += f"\n\n![Generated Image]({url})\n\n"
+                            additional_blocks.append({"type": "image", "url": url})
+
+            if additional_blocks:
+                logger.info(f"Extracted {len(additional_blocks)} image(s) from OpenRouter response")
 
             if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
                 tool_calls = []
@@ -120,6 +169,7 @@ class OpenRouterProvider(BaseLLMProvider):
                 provider="openrouter",
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
+                additional_blocks=additional_blocks or None,
             )
         except Exception as e:
             logger.error(f"OpenRouter API error: {e}")

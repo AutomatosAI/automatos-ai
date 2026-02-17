@@ -125,6 +125,14 @@ export function Message({
     td: ({ children }: any) => (
       <td className="px-4 py-3 align-top text-foreground dark:text-gray-200">{children}</td>
     ),
+    img: ({ src, alt }: any) => (
+      <img
+        src={src}
+        alt={alt || 'Generated image'}
+        className="rounded-xl border border-border/60 max-w-full max-h-[512px] object-contain my-4 shadow-lg"
+        loading="lazy"
+      />
+    ),
   }), [])
 
   const renderMessageContent = () => {
@@ -301,6 +309,7 @@ export function Message({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
+      data-testid={message.role === 'user' ? 'msg-user' : 'msg-assistant'}
       className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
     >
       <div className={`flex items-start space-x-3 max-w-[85%] ${message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''

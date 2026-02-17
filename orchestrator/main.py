@@ -82,6 +82,7 @@ from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
 from api.agent_plugins import router as agent_plugins_router  # PRD-42: Agent Plugin Assignment
 from api.personas import router as personas_router  # PRD-42: Persona API
+from api.admin_prompts import router as admin_prompts_router  # PRD-58: System Prompt Management
 # Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
 try:
     from api.bug_reports import router as bug_reports_router
@@ -543,6 +544,7 @@ app.include_router(user_api_keys_router)  # PRD-54: BYOK API Key Management
 app.include_router(workspace_plugins_router)  # PRD-42: Workspace Plugin Enablement
 app.include_router(agent_plugins_router)  # PRD-42: Agent Plugin Assignment
 app.include_router(personas_router)  # PRD-42: Persona API
+app.include_router(admin_prompts_router)  # PRD-58: System Prompt Management
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
 

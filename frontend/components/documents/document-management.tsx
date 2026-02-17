@@ -337,6 +337,7 @@ export function DocumentManagement() {
       />
       {/* Header */}
       <motion.div
+        ref={ref}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8 }}
@@ -363,7 +364,6 @@ export function DocumentManagement() {
 
       {/* Stats Overview */}
       <motion.div
-        ref={ref}
         className="hidden md:grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6"
         initial={{ opacity: 0, y: 20 }}
         animate={inView ? { opacity: 1, y: 0 } : {}}

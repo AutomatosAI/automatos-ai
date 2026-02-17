@@ -1006,6 +1006,21 @@ Available Shell Tools:
             self.logger.info(f"Provider '{provider_str}' not recognized, routing '{model_id}' through OpenRouter")
             return "openrouter"
 
+        # Slash-format model IDs (e.g. google/gemini-3-pro, meta-llama/llama-4)
+        # are OpenRouter marketplace models — route through OpenRouter even if
+        # the stored provider matches a direct provider name.
+        if "/" in model_id and provider_str != "openrouter":
+            prefix = model_id.split("/")[0].lower()
+            # If the provider name matches the model prefix, it's an OpenRouter
+            # model that was auto-assigned a misleading provider (e.g. provider=google
+            # for model_id=google/gemini-3-pro-image-preview).
+            if prefix == provider_str.lower() or prefix not in DIRECT_PROVIDERS:
+                self.logger.info(
+                    f"Slash-format model '{model_id}' with provider='{provider_str}' "
+                    f"detected as OpenRouter marketplace model. Routing through OpenRouter."
+                )
+                return "openrouter"
+
         # Fix provider-model mismatches (e.g. gemini model on openai provider)
         inferred = None
         if model_lower.startswith("gemini"):

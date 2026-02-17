@@ -177,6 +177,14 @@ def init_database():
                 db.add(default_rag)
             
             db.commit()
+
+            # PRD-58: Seed system prompts
+            try:
+                from core.seeds.seed_system_prompts import seed_system_prompts
+                seed_system_prompts(db)
+            except Exception as seed_err:
+                logger.warning(f"System prompt seeding skipped: {seed_err}")
+
             logger.info("Database initialized with default data")
             
     except Exception as e:
