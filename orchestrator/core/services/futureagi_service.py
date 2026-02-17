@@ -154,7 +154,10 @@ class FutureAGIService:
                     )
 
                     # Extract score from BatchRunResult
-                    if batch_result and batch_result.eval_results:
+                    logger.info(f"FutureAGI {metric_name} raw result type: {type(batch_result).__name__}")
+                    logger.info(f"FutureAGI {metric_name} raw result: {batch_result}")
+
+                    if batch_result and hasattr(batch_result, "eval_results") and batch_result.eval_results:
                         first = batch_result.eval_results[0]
                         score_val = None
                         if first.metrics:
@@ -165,7 +168,16 @@ class FutureAGIService:
                             "reason": first.reason or None,
                         }
                     else:
-                        results[metric_name] = {"score": None, "note": "No result returned"}
+                        # Try to extract from dict-like response
+                        if isinstance(batch_result, dict):
+                            results[metric_name] = {"raw": batch_result}
+                        elif batch_result is not None:
+                            # Inspect all attributes
+                            attrs = {k: str(getattr(batch_result, k, None))[:200]
+                                     for k in dir(batch_result) if not k.startswith("_")}
+                            results[metric_name] = {"score": None, "note": "Unexpected structure", "attrs": attrs}
+                        else:
+                            results[metric_name] = {"score": None, "note": "No result returned"}
 
                 except Exception as metric_err:
                     logger.warning(f"Metric {metric_name} failed: {metric_err}")
