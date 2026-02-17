@@ -94,8 +94,36 @@ class OpenRouterProvider(BaseLLMProvider):
             response = await loop.run_in_executor(None, _call)
 
             tool_calls = None
-            content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason
+
+            # Handle multipart content (e.g., Gemini image models return text + images)
+            content = ""
+            additional_blocks = []
+            msg = response.choices[0].message
+            try:
+                raw_content = msg.model_dump().get("content")
+            except Exception:
+                raw_content = msg.content
+
+            if isinstance(raw_content, list):
+                # Multipart response — extract text and inline images
+                text_parts = []
+                for part in raw_content:
+                    if not isinstance(part, dict):
+                        continue
+                    ptype = part.get("type", "")
+                    if ptype == "text":
+                        text_parts.append(part.get("text", ""))
+                    elif ptype == "image_url":
+                        url = (part.get("image_url") or {}).get("url", "")
+                        if url:
+                            text_parts.append(f"\n\n![Generated Image]({url})\n\n")
+                            additional_blocks.append({"type": "image", "url": url})
+                content = "\n".join(text_parts)
+                if additional_blocks:
+                    logger.info(f"Extracted {len(additional_blocks)} image(s) from multipart response")
+            else:
+                content = msg.content or ""
 
             if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
                 tool_calls = []
@@ -120,6 +148,7 @@ class OpenRouterProvider(BaseLLMProvider):
                 provider="openrouter",
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
+                additional_blocks=additional_blocks or None,
             )
         except Exception as e:
             logger.error(f"OpenRouter API error: {e}")
