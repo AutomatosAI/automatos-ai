@@ -181,36 +181,18 @@ class StreamingHandler:
     ) -> AsyncGenerator[str, None]:
         """
         Stream text in AI SDK format with smooth chunking.
-        Handles embedded base64 images efficiently (single chunk).
+
+        Images are now stored in S3 and referenced by small URLs,
+        so no special base64 handling is needed.
 
         Args:
             text: Full text to stream
             chunk_size: Characters per chunk
         """
-        import re
-
-        # If text contains base64 image data, split and stream efficiently
-        if "data:image/" in text and "![" in text:
-            # Split around markdown images: ![alt](data:image/...)
-            pattern = r'(!\[[^\]]*\]\(data:image/[^)]+\))'
-            segments = re.split(pattern, text)
-
-            for segment in segments:
-                if segment.startswith("![") and "data:image/" in segment:
-                    # Image — send as single chunk (avoid 50K+ tiny SSE events)
-                    yield self.format_aisdk_text(segment)
-                    await asyncio.sleep(0.01)
-                else:
-                    # Text — stream smoothly in small chunks
-                    for i in range(0, len(segment), chunk_size):
-                        chunk = segment[i:i + chunk_size]
-                        yield self.format_aisdk_text(chunk)
-                        await asyncio.sleep(0.01)
-        else:
-            for i in range(0, len(text), chunk_size):
-                chunk = text[i:i + chunk_size]
-                yield self.format_aisdk_text(chunk)
-                await asyncio.sleep(0.01)  # Small delay for smooth streaming
+        for i in range(0, len(text), chunk_size):
+            chunk = text[i:i + chunk_size]
+            yield self.format_aisdk_text(chunk)
+            await asyncio.sleep(0.01)
 
 
 # Module-level instance
