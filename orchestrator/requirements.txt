@@ -110,4 +110,5 @@ composio-openai>=0.6.0
 boto3>=1.39.5
 
 # PRD-58: FutureAGI Integration (prompt scoring, optimization, safety)
-futureagi
+# Optional: `pip install futureagi` — not bundled due to heavy deps (pandas>=2.2, crewai, dspy, etc.)
+# The FutureAGIService gracefully disables itself when the SDK is not installed.
