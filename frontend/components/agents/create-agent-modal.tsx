@@ -278,35 +278,20 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       // Submit to marketplace if enabled - uses same fields as main agent
       if (agentData.shareToMarketplace && newAgent?.id) {
         try {
-          const marketplacePayload = {
-            type: 'agent',
+          await apiClient.submitToMarketplace({
+            item_type: 'agent',
             name: agentData.name,
             description: agentData.description,
-            creator_name: 'You', // Backend will set actual username
             category: agentData.category,
-            tags: tags,  // Use same tags as main agent
+            tags: tags,
             metadata: {
               agent_id: newAgent.id,
               agent_type: agentData.category,
               plugins: agentData.plugins,
               tools: agentData.tools
             }
-          }
-
-          console.log('Submitting agent to marketplace:', marketplacePayload)
-          const response = await fetch('/api/marketplace/submit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(marketplacePayload)
           })
-
-          if (response.ok) {
-            toast.success('Agent submitted to marketplace for approval!')
-          } else {
-            const error = await response.json()
-            console.error('Marketplace submission failed:', error)
-            toast.error('Agent created but marketplace submission failed')
-          }
+          toast.success('Agent submitted to marketplace for approval!')
         } catch (error) {
           console.error('Marketplace submission error:', error)
           toast.error('Agent created but marketplace submission failed')
