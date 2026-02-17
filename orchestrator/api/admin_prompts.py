@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
@@ -368,6 +368,7 @@ def list_assessment_runs(
 def trigger_assessment(
     prompt_id: UUID,
     body: EvalRunCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -404,23 +405,19 @@ def trigger_assessment(
     db.commit()
     db.refresh(run)
 
-    # Dispatch async assessment (non-blocking)
+    # Dispatch assessment via FastAPI BackgroundTasks (works in sync endpoints)
     try:
         from core.services.futureagi_service import futureagi_service
+
         import asyncio
 
-        async def _run_assessment():
+        def _run_assessment_sync(run_id: str):
             try:
-                await futureagi_service.run_assessment(str(run.id))
+                asyncio.run(futureagi_service.run_assessment(run_id))
             except Exception as e:
-                logger.error(f"FutureAGI assessment run {run.id} failed: {e}")
+                logger.error(f"FutureAGI assessment run {run_id} failed: {e}")
 
-        # Fire and forget
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(_run_assessment())
-        else:
-            asyncio.run(_run_assessment())
+        background_tasks.add_task(_run_assessment_sync, str(run.id))
     except ImportError:
         logger.warning("FutureAGI service not available, assessment run will stay pending")
     except Exception as e:
