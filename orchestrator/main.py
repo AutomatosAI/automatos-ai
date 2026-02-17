@@ -78,7 +78,10 @@ from api.context_summarization import router as context_summarization_router  # 
 from api.team import router as team_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
 from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
-from api.admin_prompts import router as admin_prompts_router  # PRD-58: System Prompt Management
+try:
+    from api.admin_prompts import router as admin_prompts_router  # PRD-58: System Prompt Management
+except ImportError:
+    admin_prompts_router = None
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
 from api.agent_plugins import router as agent_plugins_router  # PRD-42: Agent Plugin Assignment
@@ -534,7 +537,8 @@ app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
-app.include_router(admin_prompts_router)  # PRD-58: System Prompt Management
+if admin_prompts_router is not None:
+    app.include_router(admin_prompts_router)  # PRD-58: System Prompt Management
 app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
 app.include_router(llm_marketplace_router)  # PRD-54: LLM Provider Marketplace
 app.include_router(openrouter_marketplace_router)  # OpenRouter Model Cache (separate sync)
