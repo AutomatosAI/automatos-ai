@@ -58,8 +58,8 @@ class FutureAGIService:
             self._client = FIClient(api_key=api_key, secret_key=secret_key)
             self._available = True
             logger.info("FutureAGI client initialized successfully")
-        except ImportError:
-            logger.warning("futureagi package not installed, FutureAGI disabled")
+        except ImportError as ie:
+            logger.warning(f"futureagi import failed: {ie}")
         except Exception as e:
             logger.warning(f"FutureAGI client init failed: {e}")
 
