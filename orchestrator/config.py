@@ -170,6 +170,13 @@ class Config:
     S3_VECTORS_METRIC: str = os.getenv("S3_VECTORS_METRIC", "cosine")
     
     # =============================================================================
+    # PRD-58: FutureAGI Integration (Prompt Scoring & Optimization)
+    # =============================================================================
+    FUTUREAGI_API_KEY: str = os.getenv("FUTUREAGI_API_KEY")
+    FUTUREAGI_SECRET_KEY: str = os.getenv("FUTUREAGI_SECRET_KEY")
+    FUTUREAGI_ENABLED: bool = os.getenv("FUTUREAGI_ENABLED", "false").lower() == "true"
+
+    # =============================================================================
     # JIRA BUG REPORTS (Pilot Helper Widget)
     # =============================================================================
     JIRA_PROJECT_KEY: str = os.getenv("JIRA_PROJECT_KEY", "PILOT")
