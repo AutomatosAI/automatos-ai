@@ -110,4 +110,4 @@ composio-openai>=0.6.0
 boto3>=1.39.5
 
 # PRD-58: FutureAGI Integration (prompt scoring, optimization, safety)
-fi-client>=1.0.0
+futureagi
