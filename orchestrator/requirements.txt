@@ -69,7 +69,7 @@ sentence-transformers>=2.2.2
 transformers>=4.21.0
 huggingface-hub>=0.10.0
 numpy>=1.26.2  # Required by langchain-community 0.4.1
-pandas==2.2.2  # Pinned: futureagi==0.6.0 requires exactly 2.2.2
+pandas>=2.2.0,<3.0
 scikit-learn==1.3.2
 faiss-cpu==1.7.4
 nltk==3.8.1
@@ -111,4 +111,6 @@ composio-openai==0.11.1
 boto3>=1.39.5
 
 # PRD-58: FutureAGI Integration (prompt scoring, optimization, safety)
-futureagi==0.6.0
+# futureagi pins exact versions of common packages (requests==2.32.3,
+# pandas==2.2.2, charset-normalizer==3.3.2) that conflict with our stack.
+# Installed separately with --no-deps in Dockerfile.
