@@ -100,9 +100,25 @@ class OpenRouterProvider(BaseLLMProvider):
             content = ""
             additional_blocks = []
             msg = response.choices[0].message
+
+            # Debug: log raw message structure to understand multipart responses
             try:
-                raw_content = msg.model_dump().get("content")
-            except Exception:
+                raw_msg = msg.model_dump()
+                raw_content = raw_msg.get("content")
+                logger.info(
+                    f"[multipart-debug] content type={type(raw_content).__name__}, "
+                    f"content_is_none={raw_content is None}, "
+                    f"msg_keys={list(raw_msg.keys())}"
+                )
+                # Log truncated content preview for debugging
+                if raw_content and isinstance(raw_content, str) and len(raw_content) > 0:
+                    logger.info(f"[multipart-debug] content preview: {raw_content[:200]}")
+                elif isinstance(raw_content, list):
+                    logger.info(f"[multipart-debug] content is list with {len(raw_content)} parts")
+                    for i, part in enumerate(raw_content[:3]):
+                        logger.info(f"[multipart-debug] part[{i}]: {str(part)[:200]}")
+            except Exception as e:
+                logger.warning(f"[multipart-debug] model_dump failed: {e}")
                 raw_content = msg.content
 
             if isinstance(raw_content, list):
@@ -124,6 +140,21 @@ class OpenRouterProvider(BaseLLMProvider):
                     logger.info(f"Extracted {len(additional_blocks)} image(s) from multipart response")
             else:
                 content = msg.content or ""
+                # Check if content is empty but raw response might have data elsewhere
+                if not content:
+                    try:
+                        # Some models return image data in non-standard fields
+                        raw_choices = response.model_dump().get("choices", [{}])
+                        if raw_choices:
+                            raw_message = raw_choices[0].get("message", {})
+                            logger.info(f"[multipart-debug] empty content, full message keys: {list(raw_message.keys())}")
+                            # Log any non-standard fields
+                            for k, v in raw_message.items():
+                                if k not in ("role", "content", "tool_calls", "refusal"):
+                                    val_preview = str(v)[:200] if v else "None"
+                                    logger.info(f"[multipart-debug] extra field '{k}': {val_preview}")
+                    except Exception as e:
+                        logger.warning(f"[multipart-debug] response dump failed: {e}")
 
             if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
                 tool_calls = []
