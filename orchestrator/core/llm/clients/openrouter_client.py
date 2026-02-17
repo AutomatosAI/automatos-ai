@@ -96,65 +96,55 @@ class OpenRouterProvider(BaseLLMProvider):
             tool_calls = None
             finish_reason = response.choices[0].finish_reason
 
-            # Handle multipart content (e.g., Gemini image models return text + images)
+            # Handle multipart/image content from models like Gemini via OpenRouter.
+            # OpenRouter returns images in a separate `images` field on the message
+            # (not inside `content`), with structure:
+            #   images: [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}]
             content = ""
             additional_blocks = []
             msg = response.choices[0].message
 
-            # Debug: log raw message structure to understand multipart responses
             try:
                 raw_msg = msg.model_dump()
-                raw_content = raw_msg.get("content")
-                logger.info(
-                    f"[multipart-debug] content type={type(raw_content).__name__}, "
-                    f"content_is_none={raw_content is None}, "
-                    f"msg_keys={list(raw_msg.keys())}"
-                )
-                # Log truncated content preview for debugging
-                if raw_content and isinstance(raw_content, str) and len(raw_content) > 0:
-                    logger.info(f"[multipart-debug] content preview: {raw_content[:200]}")
-                elif isinstance(raw_content, list):
-                    logger.info(f"[multipart-debug] content is list with {len(raw_content)} parts")
-                    for i, part in enumerate(raw_content[:3]):
-                        logger.info(f"[multipart-debug] part[{i}]: {str(part)[:200]}")
-            except Exception as e:
-                logger.warning(f"[multipart-debug] model_dump failed: {e}")
-                raw_content = msg.content
+            except Exception:
+                raw_msg = {}
 
+            # 1. Extract text content (may be string, list of parts, or empty)
+            raw_content = raw_msg.get("content")
             if isinstance(raw_content, list):
-                # Multipart response — extract text and inline images
                 text_parts = []
                 for part in raw_content:
-                    if not isinstance(part, dict):
-                        continue
-                    ptype = part.get("type", "")
-                    if ptype == "text":
+                    if isinstance(part, dict) and part.get("type") == "text":
                         text_parts.append(part.get("text", ""))
-                    elif ptype == "image_url":
-                        url = (part.get("image_url") or {}).get("url", "")
-                        if url:
-                            text_parts.append(f"\n\n![Generated Image]({url})\n\n")
-                            additional_blocks.append({"type": "image", "url": url})
                 content = "\n".join(text_parts)
-                if additional_blocks:
-                    logger.info(f"Extracted {len(additional_blocks)} image(s) from multipart response")
             else:
                 content = msg.content or ""
-                # Check if content is empty but raw response might have data elsewhere
-                if not content:
-                    try:
-                        # Some models return image data in non-standard fields
-                        raw_choices = response.model_dump().get("choices", [{}])
-                        if raw_choices:
-                            raw_message = raw_choices[0].get("message", {})
-                            logger.info(f"[multipart-debug] empty content, full message keys: {list(raw_message.keys())}")
-                            # Log any non-standard fields
-                            for k, v in raw_message.items():
-                                if k not in ("role", "content", "tool_calls", "refusal"):
-                                    val_preview = str(v)[:200] if v else "None"
-                                    logger.info(f"[multipart-debug] extra field '{k}': {val_preview}")
-                    except Exception as e:
-                        logger.warning(f"[multipart-debug] response dump failed: {e}")
+
+            # 2. Extract images from the `images` field (OpenRouter/Gemini image models)
+            raw_images = raw_msg.get("images") or []
+            for img in raw_images:
+                if not isinstance(img, dict):
+                    continue
+                url = ""
+                if img.get("type") == "image_url":
+                    url = (img.get("image_url") or {}).get("url", "")
+                elif "url" in img:
+                    url = img["url"]
+                if url:
+                    content += f"\n\n![Generated Image]({url})\n\n"
+                    additional_blocks.append({"type": "image", "url": url})
+
+            # 3. Also check content list for inline image_url parts
+            if isinstance(raw_content, list):
+                for part in raw_content:
+                    if isinstance(part, dict) and part.get("type") == "image_url":
+                        url = (part.get("image_url") or {}).get("url", "")
+                        if url:
+                            content += f"\n\n![Generated Image]({url})\n\n"
+                            additional_blocks.append({"type": "image", "url": url})
+
+            if additional_blocks:
+                logger.info(f"Extracted {len(additional_blocks)} image(s) from OpenRouter response")
 
             if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
                 tool_calls = []
