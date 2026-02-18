@@ -2,15 +2,11 @@
 PRD-58 Phase 1B: FutureAGI Integration Service
 ================================================
 
-Wrapper around the FutureAGI SDK (pip install futureagi) for:
-- Prompt quality scoring (groundedness, toxicity, coherence, etc.)
-- Safety scanning (toxicity, bias, prompt injection detection)
+Direct HTTP integration with FutureAGI API (no SDK dependency).
 
-futureagi 0.6.0 API:
-  - fi.client.Client(fi_api_key, fi_secret_key)
-  - fi.evals.Evaluator(fi_api_key, fi_secret_key)
-  - fi.evals.templates.* (Groundedness, Toxicity, PromptAdherence, etc.)
-  - fi.testcases.TestCase(input=..., output=..., prompt=...)
+API: POST https://api.futureagi.com/sdk/api/v1/new-eval/
+Auth: X-Api-Key + X-Secret-Key headers
+Payload: {"eval_name": "<template>", "inputs": {"input": [...], "output": [...]}, "model": "gpt-4"}
 
 Requires:
   FUTUREAGI_API_KEY   - API key from FutureAGI dashboard
@@ -19,29 +15,34 @@ Requires:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+FUTUREAGI_BASE_URL = "https://api.futureagi.com"
+ASSESSMENT_ENDPOINT = f"{FUTUREAGI_BASE_URL}/sdk/api/v1/new-eval/"
+TIMEOUT = 60  # seconds per request
 
 
 class FutureAGIService:
     """
-    Singleton service wrapping the FutureAGI SDK.
-
-    All methods are async-safe and handle SDK unavailability gracefully.
+    Singleton service calling FutureAGI REST API directly via httpx.
+    No SDK dependency — just HTTP POST with JSON payloads.
     """
 
     _instance: Optional["FutureAGIService"] = None
 
     def __init__(self) -> None:
-        self._evaluator = None
-        self._available = False
         self._api_key: Optional[str] = None
         self._secret_key: Optional[str] = None
-        self._init_client()
+        self._available = False
+        self._init()
 
     @classmethod
     def get_instance(cls) -> "FutureAGIService":
@@ -49,31 +50,80 @@ class FutureAGIService:
             cls._instance = cls()
         return cls._instance
 
-    def _init_client(self) -> None:
-        """Initialize the FutureAGI SDK evaluator."""
+    def _init(self) -> None:
         self._api_key = os.getenv("FUTUREAGI_API_KEY")
         self._secret_key = os.getenv("FUTUREAGI_SECRET_KEY")
-
-        if not self._api_key or not self._secret_key:
-            logger.info("FutureAGI keys not configured, service disabled")
-            return
-
-        try:
-            from fi.evals import Evaluator
-            self._evaluator = Evaluator(
-                fi_api_key=self._api_key,
-                fi_secret_key=self._secret_key,
-            )
+        if self._api_key and self._secret_key:
             self._available = True
-            logger.info("FutureAGI evaluator initialized successfully")
-        except ImportError as ie:
-            logger.warning(f"futureagi import failed: {ie}")
-        except Exception as e:
-            logger.warning(f"FutureAGI init failed: {e}")
+            logger.info("FutureAGI service ready (direct HTTP)")
+        else:
+            logger.info("FutureAGI keys not configured, service disabled")
 
     @property
     def is_available(self) -> bool:
-        return self._available and self._evaluator is not None
+        return self._available
+
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "X-Api-Key": self._api_key or "",
+            "X-Secret-Key": self._secret_key or "",
+            "Content-Type": "application/json",
+        }
+
+    async def _run_single_assessment(
+        self, assessment_name: str, input_text: str, output_text: str, model: str = "gpt-4"
+    ) -> Dict[str, Any]:
+        """
+        Single assessment call to FutureAGI API.
+        Returns parsed result dict with score, failure, reason, metrics.
+        """
+        payload = {
+            "eval_name": assessment_name,
+            "inputs": {
+                "input": [input_text],
+                "output": [output_text],
+            },
+            "model": model,
+        }
+
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.post(ASSESSMENT_ENDPOINT, json=payload, headers=self._headers())
+
+        logger.info(f"[{assessment_name}] status={resp.status_code}")
+
+        if resp.status_code != 200:
+            logger.warning(f"[{assessment_name}] error: {resp.status_code} {resp.text[:500]}")
+            return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+
+        data = resp.json()
+        logger.info(f"[{assessment_name}] raw response keys={list(data.keys())}")
+
+        # Parse: {"result": [{"evaluations": [{"failure": bool, "reason": str, "metrics": [{"id": str, "value": float}]}]}]}
+        try:
+            results = data.get("result", [])
+            if not results:
+                return {"error": "Empty result from API", "raw": data}
+
+            assessments = results[0].get("evaluations", [])
+            if not assessments:
+                return {"error": "No evaluations in result", "raw": data}
+
+            item = assessments[0]
+            metrics = item.get("metrics", [])
+            score_val = metrics[0]["value"] if metrics else None
+            metadata = item.get("metadata", {})
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+
+            return {
+                "score": float(score_val) if score_val is not None else None,
+                "passed": not item.get("failure", True),
+                "reason": item.get("reason", ""),
+                "explanation": metadata.get("explanation", {}) if isinstance(metadata, dict) else {},
+            }
+        except Exception as e:
+            logger.warning(f"[{assessment_name}] parse error: {e}, raw={data}")
+            return {"error": f"Parse error: {e}", "raw": data}
 
     # ------------------------------------------------------------------
     # Assessment
@@ -85,253 +135,67 @@ class FutureAGIService:
         test_cases: Optional[List[Dict[str, Any]]] = None,
         metrics: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """
-        Score a system prompt using FutureAGI eval templates.
-
-        Available templates: groundedness, prompt_adherence, completeness,
-        context_adherence, factual_accuracy, summary_quality, coherence
-        """
+        """Score a system prompt using FutureAGI assessment templates."""
         if not self.is_available:
             return {"error": "FutureAGI not configured", "scores": {}}
 
-        default_metrics = [
-            "prompt_adherence",
-            "completeness",
-            "groundedness",
-        ]
+        default_metrics = ["prompt_adherence", "completeness", "groundedness"]
         selected_metrics = metrics or default_metrics
 
-        try:
-            from fi.evals.templates import (
-                PromptAdherence,
-                Completeness,
-                Groundedness,
-                FactualAccuracy,
-                SummaryQuality,
-                ContextAdherence,
-                ConversationCoherence,
-            )
+        if test_cases:
+            input_text = test_cases[0].get("input", prompt_content)
+            output_text = test_cases[0].get("output", test_cases[0].get("expected_output", ""))
+        else:
+            input_text = prompt_content
+            output_text = "System prompt assessed successfully."
 
-            template_map = {
-                "prompt_adherence": PromptAdherence,
-                "completeness": Completeness,
-                "groundedness": Groundedness,
-                "factual_accuracy": FactualAccuracy,
-                "summary_quality": SummaryQuality,
-                "context_adherence": ContextAdherence,
-                "coherence": ConversationCoherence,
-            }
+        results = {}
+        for metric_name in selected_metrics:
+            result = await self._run_single_assessment(metric_name, input_text, output_text)
+            if "error" in result:
+                results[metric_name] = {"score": None, "error": result["error"]}
+            else:
+                results[metric_name] = {
+                    "score": result["score"],
+                    "passed": result["passed"],
+                    "reason": result["reason"],
+                }
 
-            # FutureAGI API requires: only input/output keys (no prompt/context),
-            # and model_name for system evals
-            eval_model = "gpt-4"
-
-            results = {}
-            for metric_name in selected_metrics:
-                template_cls = template_map.get(metric_name)
-                if not template_cls:
-                    results[metric_name] = {"score": None, "note": "Template not mapped"}
-                    continue
-
-                try:
-                    template = template_cls()
-
-                    # Build input as dict with only accepted keys (input, output)
-                    if test_cases:
-                        tc = {
-                            "input": test_cases[0].get("input", prompt_content),
-                            "output": test_cases[0].get("output", test_cases[0].get("expected_output", "")),
-                        }
-                    else:
-                        tc = {
-                            "input": prompt_content,
-                            "output": "System prompt evaluated successfully.",
-                        }
-
-                    batch_result = self._evaluator.evaluate(
-                        eval_templates=[template],
-                        inputs=[tc],
-                        model_name=eval_model,
-                    )
-
-                    # Debug: log the raw result structure
-                    logger.info(f"[{metric_name}] batch_result type={type(batch_result).__name__}")
-                    logger.info(f"[{metric_name}] batch_result attrs={[a for a in dir(batch_result) if not a.startswith('_')]}")
-                    if hasattr(batch_result, "eval_results"):
-                        logger.info(f"[{metric_name}] eval_results={batch_result.eval_results}")
-                    if hasattr(batch_result, "results"):
-                        logger.info(f"[{metric_name}] results={batch_result.results}")
-                    # Try to log as dict
-                    try:
-                        logger.info(f"[{metric_name}] as dict={batch_result.__dict__}")
-                    except Exception:
-                        logger.info(f"[{metric_name}] str={batch_result}")
-
-                    # Extract score — try multiple SDK response shapes
-                    score_extracted = False
-
-                    # Shape 1: batch_result.eval_results[0].metrics[0].value
-                    if hasattr(batch_result, "eval_results") and batch_result.eval_results:
-                        first = batch_result.eval_results[0]
-                        score_val = None
-                        if hasattr(first, "metrics") and first.metrics:
-                            score_val = first.metrics[0].value if hasattr(first.metrics[0], "value") else None
-                        results[metric_name] = {
-                            "score": float(score_val) if score_val is not None else None,
-                            "passed": not getattr(first, "failure", True),
-                            "reason": getattr(first, "reason", None),
-                        }
-                        score_extracted = True
-
-                    # Shape 2: batch_result.results (list of dicts)
-                    if not score_extracted and hasattr(batch_result, "results") and batch_result.results:
-                        first = batch_result.results[0]
-                        if isinstance(first, dict):
-                            score_val = first.get("score") or first.get("value")
-                            results[metric_name] = {
-                                "score": float(score_val) if score_val is not None else None,
-                                "passed": first.get("passed", first.get("pass")),
-                                "reason": first.get("reason"),
-                            }
-                            score_extracted = True
-
-                    # Shape 3: batch_result is iterable
-                    if not score_extracted:
-                        try:
-                            items = list(batch_result)
-                            if items:
-                                first = items[0]
-                                logger.info(f"[{metric_name}] iterable first item type={type(first).__name__} val={first}")
-                                if isinstance(first, dict):
-                                    score_val = first.get("score") or first.get("value")
-                                    results[metric_name] = {
-                                        "score": float(score_val) if score_val is not None else None,
-                                    }
-                                    score_extracted = True
-                                elif hasattr(first, "score"):
-                                    results[metric_name] = {"score": float(first.score)}
-                                    score_extracted = True
-                        except (TypeError, StopIteration):
-                            pass
-
-                    if not score_extracted:
-                        results[metric_name] = {"score": None, "note": "No result returned"}
-
-                except Exception as metric_err:
-                    logger.warning(f"Metric {metric_name} failed: {metric_err}")
-                    results[metric_name] = {"score": None, "error": str(metric_err)}
-
-            return {"scores": results, "metrics_run": len(results)}
-
-        except ImportError as ie:
-            logger.error(f"FutureAGI eval import failed: {ie}")
-            return {"error": str(ie), "scores": {}}
-        except Exception as e:
-            logger.error(f"FutureAGI assessment failed: {e}")
-            return {"error": str(e), "scores": {}}
+        return {"scores": results, "metrics_run": len(results)}
 
     # ------------------------------------------------------------------
     # Safety Check
     # ------------------------------------------------------------------
 
     async def safety_check(self, prompt_content: str) -> Dict[str, Any]:
-        """
-        Run safety scanning on a prompt (toxicity, bias, prompt injection).
-        """
+        """Run safety scanning on a prompt."""
         if not self.is_available:
             return {"error": "FutureAGI not configured", "safe": None}
 
-        try:
-            from fi.evals.templates import (
-                Toxicity,
-                BiasDetection,
-                PromptInjection,
-                ContentModeration,
-            )
+        safety_checks = ["toxicity", "bias_detection", "prompt_injection", "content_moderation"]
 
-            safety_templates = {
-                "toxicity": Toxicity,
-                "bias": BiasDetection,
-                "prompt_injection": PromptInjection,
-                "content_moderation": ContentModeration,
-            }
+        checks = {}
+        for check_name in safety_checks:
+            result = await self._run_single_assessment(check_name, prompt_content, prompt_content)
+            if "error" in result:
+                checks[check_name] = {"score": None, "safe": None, "error": result["error"]}
+            else:
+                checks[check_name] = {
+                    "score": result["score"],
+                    "safe": result["passed"],
+                    "reason": result["reason"],
+                }
 
-            checks = {}
-            for check_name, template_cls in safety_templates.items():
-                try:
-                    template = template_cls()
-                    tc = {
-                        "input": prompt_content,
-                        "output": prompt_content,
-                    }
-                    batch_result = self._evaluator.evaluate(
-                        eval_templates=[template],
-                        inputs=[tc],
-                        model_name="gpt-4",
-                    )
+        all_safe = all(
+            c.get("safe", True)
+            for c in checks.values()
+            if "safe" in c and c["safe"] is not None
+        )
 
-                    # Debug logging
-                    logger.info(f"[safety:{check_name}] type={type(batch_result).__name__}")
-                    try:
-                        logger.info(f"[safety:{check_name}] dict={batch_result.__dict__}")
-                    except Exception:
-                        logger.info(f"[safety:{check_name}] str={batch_result}")
-
-                    safe_extracted = False
-
-                    # Shape 1: eval_results
-                    if hasattr(batch_result, "eval_results") and batch_result.eval_results:
-                        first = batch_result.eval_results[0]
-                        score_val = None
-                        if hasattr(first, "metrics") and first.metrics:
-                            score_val = first.metrics[0].value if hasattr(first.metrics[0], "value") else None
-                        checks[check_name] = {
-                            "score": float(score_val) if score_val is not None else None,
-                            "safe": not getattr(first, "failure", True),
-                            "reason": getattr(first, "reason", None),
-                        }
-                        safe_extracted = True
-
-                    # Shape 2: results list
-                    if not safe_extracted and hasattr(batch_result, "results") and batch_result.results:
-                        first = batch_result.results[0]
-                        if isinstance(first, dict):
-                            score_val = first.get("score") or first.get("value")
-                            checks[check_name] = {
-                                "score": float(score_val) if score_val is not None else None,
-                                "safe": first.get("safe", first.get("passed", first.get("pass"))),
-                                "reason": first.get("reason"),
-                            }
-                            safe_extracted = True
-
-                    if not safe_extracted:
-                        checks[check_name] = {"score": None, "safe": None}
-
-                except Exception as e:
-                    logger.warning(f"Safety check {check_name} failed: {e}")
-                    checks[check_name] = {"error": str(e)}
-
-            # Overall safety: all checks must pass
-            all_safe = all(
-                c.get("safe", True)
-                for c in checks.values()
-                if "safe" in c and c["safe"] is not None
-            )
-
-            return {
-                "safe": all_safe,
-                "checks": checks,
-            }
-
-        except ImportError as ie:
-            logger.warning(f"Safety module import failed: {ie}")
-            return {"error": str(ie), "safe": None}
-        except Exception as e:
-            logger.error(f"FutureAGI safety check failed: {e}")
-            return {"error": str(e), "safe": None}
+        return {"safe": all_safe, "checks": checks}
 
     # ------------------------------------------------------------------
-    # Optimization (placeholder — fi.optim may not exist in 0.6.0)
+    # Optimization (via FutureAGI improve-prompt endpoint)
     # ------------------------------------------------------------------
 
     async def optimize_prompt(
@@ -341,32 +205,36 @@ class FutureAGIService:
         target_metric: str = "prompt_adherence",
         num_iterations: int = 10,
     ) -> Dict[str, Any]:
-        """
-        Prompt optimization. Returns error if fi.optim is not available.
-        """
+        """Prompt optimization via FutureAGI improve-prompt API."""
         if not self.is_available:
             return {"error": "FutureAGI not configured"}
 
+        url = f"{FUTUREAGI_BASE_URL}/model-hub/prompt-templates/improve-prompt/"
+        payload = {
+            "prompt": prompt_content,
+            "algorithm": algorithm,
+            "target_metric": target_metric,
+            "num_iterations": num_iterations,
+        }
+
         try:
-            from fi.prompt import PromptOptimizer
-            optimizer = PromptOptimizer(
-                fi_api_key=self._api_key,
-                fi_secret_key=self._secret_key,
-            )
-            result = optimizer.optimize(
-                prompt=prompt_content,
-                algorithm=algorithm,
-                target_metric=target_metric,
-                num_iterations=num_iterations,
-            )
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(url, json=payload, headers=self._headers())
+
+            logger.info(f"[optimize] status={resp.status_code}")
+
+            if resp.status_code != 200:
+                return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+
+            data = resp.json()
+            result = data.get("result", data)
+
             return {
-                "optimized_prompt": getattr(result, "best_prompt", str(result)),
-                "best_score": float(getattr(result, "best_score", 0)),
+                "optimized_prompt": result.get("improved_prompt", result.get("prompt", str(result))),
+                "best_score": result.get("score"),
                 "algorithm": algorithm,
                 "iterations": num_iterations,
             }
-        except ImportError:
-            return {"error": "Prompt optimization not available in this SDK version"}
         except Exception as e:
             logger.error(f"FutureAGI optimization failed: {e}")
             return {"error": str(e)}
@@ -392,12 +260,10 @@ class FutureAGIService:
                 logger.error(f"Assessment run {run_id} not found")
                 return
 
-            # Mark as running
             run.status = "running"
             run.started_at = datetime.utcnow()
             db.commit()
 
-            # Load the version content
             version = db.query(SystemPromptVersion).filter(
                 SystemPromptVersion.id == run.version_id
             ).first()
@@ -411,7 +277,6 @@ class FutureAGIService:
             prompt_content = version.content
             config = run.metadata_ or {}
 
-            # Dispatch based on run_type
             if run.run_type == "assess":
                 result = await self.assess_prompt(
                     prompt_content,
@@ -430,7 +295,6 @@ class FutureAGIService:
             else:
                 result = await self.assess_prompt(prompt_content)
 
-            # Save results
             if "error" in result and not result.get("scores"):
                 run.status = "failed"
                 run.error_message = result["error"]
@@ -438,8 +302,7 @@ class FutureAGIService:
                 run.status = "completed"
                 run.scores = result
 
-                # Snapshot scores on the version for quality assessments
-                if run.run_type in ("assess", "evaluate") and result.get("scores"):
+                if run.run_type in ("assess",) and result.get("scores"):
                     version.eval_scores = result["scores"]
 
             run.completed_at = datetime.utcnow()
