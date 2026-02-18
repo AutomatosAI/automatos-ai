@@ -121,7 +121,7 @@ export function SystemPromptsTab() {
       const params = new URLSearchParams()
       if (selectedCategory) params.set('category', selectedCategory)
       if (searchQuery) params.set('search', searchQuery)
-      const data = await apiClient(`/api/admin/prompts?${params}`)
+      const data = await apiClient.request(`/api/admin/prompts?${params}`)
       setPrompts(data)
     } catch (err) {
       console.error('Failed to fetch prompts:', err)
@@ -132,7 +132,7 @@ export function SystemPromptsTab() {
 
   const fetchCategories = useCallback(async () => {
     try {
-      const data = await apiClient('/api/admin/prompts/categories')
+      const data = await apiClient.request('/api/admin/prompts/categories')
       setCategories(data)
     } catch (err) {
       console.error('Failed to fetch categories:', err)
@@ -141,7 +141,7 @@ export function SystemPromptsTab() {
 
   const fetchVersions = useCallback(async (promptId: string) => {
     try {
-      const data = await apiClient(`/api/admin/prompts/${promptId}/versions`)
+      const data = await apiClient.request(`/api/admin/prompts/${promptId}/versions`)
       setVersions(data)
     } catch (err) {
       console.error('Failed to fetch versions:', err)
@@ -150,7 +150,7 @@ export function SystemPromptsTab() {
 
   const fetchAssessmentRuns = useCallback(async (promptId: string) => {
     try {
-      const data = await apiClient(`/api/admin/prompts/${promptId}/assessment-runs`)
+      const data = await apiClient.request(`/api/admin/prompts/${promptId}/assessment-runs`)
       setAssessmentRuns(data)
     } catch (err) {
       console.error('Failed to fetch assessment runs:', err)
@@ -182,7 +182,7 @@ export function SystemPromptsTab() {
     if (!selectedPrompt) return
     await fetchPrompts()
     await fetchVersions(selectedPrompt.id)
-    const updated = await apiClient(`/api/admin/prompts/${selectedPrompt.id}`)
+    const updated = await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}`)
     setSelectedPrompt(updated)
     setEditContent(updated.active_content || '')
   }
@@ -191,7 +191,7 @@ export function SystemPromptsTab() {
     if (!selectedPrompt || !editContent.trim()) return
     setSaving(true)
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/versions?activate=${activate}`, {
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/versions?activate=${activate}`, {
         method: 'POST',
         body: JSON.stringify({ content: editContent, change_note: editNote || null }),
       })
@@ -207,7 +207,7 @@ export function SystemPromptsTab() {
   const activateVersion = async (versionId: string) => {
     if (!selectedPrompt) return
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/versions/${versionId}/activate`, { method: 'POST' })
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/versions/${versionId}/activate`, { method: 'POST' })
       await refreshSelected()
     } catch (err) {
       console.error('Failed to activate version:', err)
@@ -217,7 +217,7 @@ export function SystemPromptsTab() {
   const rollback = async () => {
     if (!selectedPrompt) return
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/rollback`, { method: 'POST' })
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/rollback`, { method: 'POST' })
       await refreshSelected()
     } catch (err) {
       console.error('Failed to rollback:', err)
@@ -227,7 +227,7 @@ export function SystemPromptsTab() {
   const deleteVersion = async (versionId: string) => {
     if (!selectedPrompt) return
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/versions/${versionId}`, { method: 'DELETE' })
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/versions/${versionId}`, { method: 'DELETE' })
       await fetchVersions(selectedPrompt.id)
     } catch (err) {
       console.error('Failed to delete version:', err)
@@ -237,7 +237,7 @@ export function SystemPromptsTab() {
   const triggerAssessment = async (runType: string) => {
     if (!selectedPrompt) return
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/assess`, {
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/assess`, {
         method: 'POST',
         body: JSON.stringify({ run_type: runType }),
       })
