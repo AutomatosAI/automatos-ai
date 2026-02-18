@@ -61,7 +61,7 @@ def _run_single_template(template: str, inputs: Dict[str, str], model: str = "tu
             eval_templates=template,
             inputs=inputs,
             model_name=model,
-            timeout=60,
+            timeout=30,
         )
     except Exception as e:
         logger.warning(f"[{template}] scoring failed: {e}")
@@ -242,7 +242,8 @@ def assess(req: AssessRequest):
 @app.post("/safety")
 def safety(req: SafetyRequest):
     start = time.time()
-    safety_templates = ["toxicity", "bias_detection", "prompt_injection", "content_moderation"]
+    # bias_detection consistently times out / returns empty on FutureAGI's protect_flash model
+    safety_templates = ["toxicity", "prompt_injection", "content_moderation"]
 
     # Run all safety templates concurrently
     raw_results = {}
