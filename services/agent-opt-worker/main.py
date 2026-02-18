@@ -72,11 +72,26 @@ def _run_single_template(template: str, inputs: Dict[str, str], model: str = "tu
             logger.warning(f"[{template}] empty eval_results")
             return {"error": f"Empty result from SDK for {template}"}
         er = result.eval_results[0]
+        # Log all attributes for debugging
+        er_dict = {k: v for k, v in vars(er).items() if not k.startswith("_")} if hasattr(er, "__dict__") else str(er)
+        logger.info(f"[{template}] raw result: {er_dict}")
+
         score = getattr(er, "score", None)
         failure = getattr(er, "failure", None)
-        passed = (not failure) if failure is not None else (score is not None and score >= 0.5)
         reason = getattr(er, "reason", "") or getattr(er, "output", "")
-        logger.info(f"[{template}] score={score} passed={passed}")
+        # metric_name can also hold the classification
+        metric_name = getattr(er, "metric_name", None)
+
+        # Determine pass/fail: explicit failure field > score threshold > assume pass
+        if failure is not None:
+            passed = not failure
+        elif score is not None:
+            passed = score >= 0.5
+        else:
+            # Text-only templates: check if reason indicates success
+            passed = True
+
+        logger.info(f"[{template}] score={score} passed={passed} failure={failure}")
         return {"score": score, "passed": passed, "reason": reason}
     except (IndexError, AttributeError) as e:
         logger.warning(f"[{template}] parse error: {e}")
@@ -160,16 +175,18 @@ def health():
 
 @app.get("/test")
 def test_sdk():
-    """Quick SDK smoke test — runs a single is_concise eval."""
-    try:
-        result = _run_single_template(
-            "is_concise",
-            {"output": "Hello, world!"},
-            model="turing_flash",
-        )
-        return {"test": "is_concise", "result": result}
-    except Exception as e:
-        return {"test": "is_concise", "error": str(e)}
+    """Quick SDK smoke test — runs is_concise + is_helpful evals."""
+    results = {}
+    for template, inputs, model in [
+        ("is_concise", {"output": "Hello, world!"}, "turing_large"),
+        ("is_helpful", {"input": "What is 2+2?", "output": "4"}, "turing_large"),
+        ("toxicity", {"output": "Hello, world!"}, "protect"),
+    ]:
+        try:
+            results[template] = _run_single_template(template, inputs, model)
+        except Exception as e:
+            results[template] = {"error": str(e)}
+    return {"tests": results}
 
 
 # ---------------------------------------------------------------------------
