@@ -54,12 +54,13 @@ def _run_single_template(template: str, inputs: Dict[str, str], model: str = "tu
 
     evaluator = Evaluator(fi_api_key=api_key, fi_secret_key=secret_key)
 
+    logger.info(f"[{template}] calling SDK with model={model}, keys={len(inputs)} input keys")
     try:
         result = evaluator.evaluate(
             eval_templates=template,
             inputs=inputs,
             model_name=model,
-            timeout=90,
+            timeout=60,
         )
     except Exception as e:
         logger.warning(f"[{template}] scoring failed: {e}")
@@ -67,12 +68,16 @@ def _run_single_template(template: str, inputs: Dict[str, str], model: str = "tu
 
     # Parse SDK result
     try:
+        if not result or not hasattr(result, "eval_results") or not result.eval_results:
+            logger.warning(f"[{template}] empty eval_results")
+            return {"error": f"Empty result from SDK for {template}"}
         er = result.eval_results[0]
-        return {
-            "score": getattr(er, "score", None),
-            "passed": not getattr(er, "failure", False),
-            "reason": getattr(er, "reason", "") or getattr(er, "output", ""),
-        }
+        score = getattr(er, "score", None)
+        failure = getattr(er, "failure", None)
+        passed = (not failure) if failure is not None else (score is not None and score >= 0.5)
+        reason = getattr(er, "reason", "") or getattr(er, "output", "")
+        logger.info(f"[{template}] score={score} passed={passed}")
+        return {"score": score, "passed": passed, "reason": reason}
     except (IndexError, AttributeError) as e:
         logger.warning(f"[{template}] parse error: {e}")
         return {"error": f"Parse error: {e}"}
@@ -150,7 +155,21 @@ class OptimizeRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "futureagi-worker", "version": "2.0.0"}
+    return {"status": "ok", "service": "futureagi-worker", "version": "2.1.0"}
+
+
+@app.get("/test")
+def test_sdk():
+    """Quick SDK smoke test — runs a single is_concise eval."""
+    try:
+        result = _run_single_template(
+            "is_concise",
+            {"output": "Hello, world!"},
+            model="turing_flash",
+        )
+        return {"test": "is_concise", "result": result}
+    except Exception as e:
+        return {"test": "is_concise", "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +287,7 @@ def optimize(req: OptimizeRequest):
     )
 
     try:
-        optimizer = _create_optimizer(req.algorithm, teacher, req.num_rounds)
+        optimizer = _create_optimizer(req.algorithm, teacher)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -284,6 +303,7 @@ def optimize(req: OptimizeRequest):
             dataset=req.dataset,
             initial_prompts=[req.prompt_content],
             task_description=task_desc,
+            num_rounds=req.num_rounds,
             eval_subset_size=min(len(req.dataset), 10),
         )
     except Exception as e:
@@ -316,24 +336,23 @@ def optimize(req: OptimizeRequest):
     }
 
 
-def _create_optimizer(algorithm: str, teacher, num_rounds: int):
+def _create_optimizer(algorithm: str, teacher):
     if algorithm == "meta_prompt":
         from fi.opt.optimizers import MetaPromptOptimizer
-        return MetaPromptOptimizer(teacher_generator=teacher, num_rounds=num_rounds)
+        return MetaPromptOptimizer(teacher_generator=teacher)
     elif algorithm == "bayesian":
         from fi.opt.optimizers import BayesianSearchOptimizer
         return BayesianSearchOptimizer(
-            inference_model_name=teacher.model, n_trials=num_rounds * 4,
+            inference_model_name=teacher.model,
             min_examples=2, max_examples=5,
         )
     elif algorithm == "protegi":
         from fi.opt.optimizers import ProTeGi
         return ProTeGi(
-            teacher_generator=teacher, num_gradients=4,
-            beam_size=4, num_rounds=num_rounds,
+            teacher_generator=teacher, num_gradients=4, beam_size=4,
         )
     elif algorithm == "random":
         from fi.opt.optimizers import RandomSearchOptimizer
-        return RandomSearchOptimizer(teacher_generator=teacher, num_candidates=num_rounds * 3)
+        return RandomSearchOptimizer(generator=teacher)
     else:
         raise ValueError(f"Unknown algorithm '{algorithm}'. Options: meta_prompt, bayesian, protegi, random")
