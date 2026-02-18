@@ -937,6 +937,7 @@ async def run_benchmark(
 @router.get("/{source_id}/benchmark/history")
 async def get_benchmark_history(
     source_id: int,
+    limit: int = 50,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -946,7 +947,7 @@ async def get_benchmark_history(
     runs = db.query(NL2SQLBenchmarkRun).filter(
         NL2SQLBenchmarkRun.workspace_id == ctx.workspace_id,
         NL2SQLBenchmarkRun.database_source_id == source_id
-    ).order_by(NL2SQLBenchmarkRun.created_at.desc()).limit(50).all()
+    ).order_by(NL2SQLBenchmarkRun.created_at.desc()).limit(min(limit, 100)).all()
 
     return [
         {
