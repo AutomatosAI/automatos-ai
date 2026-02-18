@@ -6,7 +6,9 @@ Direct HTTP integration with FutureAGI API (no SDK dependency).
 
 API: POST https://api.futureagi.com/sdk/api/v1/new-eval/
 Auth: X-Api-Key + X-Secret-Key headers
-Payload: {"eval_name": "<template>", "inputs": {"input": [...], "output": [...]}, "model": "gpt-4"}
+
+Each template has different required input keys and valid models.
+See TEMPLATE_CONFIG below for the full mapping.
 
 Requires:
   FUTUREAGI_API_KEY   - API key from FutureAGI dashboard
@@ -15,6 +17,7 @@ Requires:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -27,11 +30,25 @@ logger = logging.getLogger(__name__)
 
 FUTUREAGI_BASE_URL = "https://api.futureagi.com"
 ASSESSMENT_ENDPOINT = f"{FUTUREAGI_BASE_URL}/sdk/api/v1/new-eval/"
-TIMEOUT = 60  # seconds per request
+TIMEOUT = 90  # seconds per request (some templates are slow)
 
-# FutureAGI model names (not OpenAI models)
-ASSESS_MODEL = "turing_large"
-SAFETY_MODEL = "protect"
+# Template config: required input keys + best model per template
+# Sourced from GET /sdk/api/v1/get-evals/ on 2026-02-18
+TEMPLATE_CONFIG = {
+    # --- Quality assessment ---
+    "completeness":      {"keys": ["input", "output"], "model": "turing_large"},
+    "prompt_adherence":  {"keys": ["input", "output"], "model": "turing_large"},
+    "groundedness":      {"keys": ["input", "output", "context"], "model": "turing_large"},
+    "factual_accuracy":  {"keys": ["input", "output"], "model": "turing_large"},
+    "summary_quality":   {"keys": ["input", "output"], "model": "turing_large"},
+    "is_concise":        {"keys": ["output"], "model": "turing_large"},
+    "is_helpful":        {"keys": ["input", "output"], "model": "turing_large"},
+    # --- Safety ---
+    "toxicity":          {"keys": ["output"], "model": "protect"},
+    "bias_detection":    {"keys": ["output"], "model": "protect_flash"},
+    "prompt_injection":  {"keys": ["input"], "model": "protect"},
+    "content_moderation": {"keys": ["output"], "model": "protect"},
+}
 
 
 class FutureAGIService:
@@ -74,47 +91,67 @@ class FutureAGIService:
             "Content-Type": "application/json",
         }
 
-    async def _run_single_assessment(
-        self, assessment_name: str, input_text: str, output_text: str, model: str = ASSESS_MODEL
+    def _build_inputs(
+        self, template_name: str, input_text: str, output_text: str, context_text: Optional[str] = None
+    ) -> Dict[str, List[str]]:
+        """Build the inputs dict with only the keys this template accepts."""
+        config = TEMPLATE_CONFIG.get(template_name, {"keys": ["input", "output"]})
+        required = config["keys"]
+        inputs: Dict[str, List[str]] = {}
+        if "input" in required:
+            inputs["input"] = [input_text]
+        if "output" in required:
+            inputs["output"] = [output_text]
+        if "context" in required:
+            inputs["context"] = [context_text or input_text]
+        return inputs
+
+    def _get_model(self, template_name: str) -> str:
+        config = TEMPLATE_CONFIG.get(template_name, {"model": "turing_large"})
+        return config["model"]
+
+    async def _call_template(
+        self, template_name: str, input_text: str, output_text: str, context_text: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Single assessment call to FutureAGI API.
-        Returns parsed result dict with score, failure, reason, metrics.
-        """
+        """Single assessment call to FutureAGI API. Returns parsed result."""
         payload = {
-            "eval_name": assessment_name,
-            "inputs": {
-                "input": [input_text],
-                "output": [output_text],
-            },
-            "model": model,
+            "eval_name": template_name,
+            "inputs": self._build_inputs(template_name, input_text, output_text, context_text),
+            "model": self._get_model(template_name),
         }
 
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.post(ASSESSMENT_ENDPOINT, json=payload, headers=self._headers())
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+                resp = await client.post(ASSESSMENT_ENDPOINT, json=payload, headers=self._headers())
+        except httpx.TimeoutException:
+            logger.warning(f"[{template_name}] timed out after {TIMEOUT}s")
+            return {"error": f"Timed out after {TIMEOUT}s"}
 
-        logger.info(f"[{assessment_name}] status={resp.status_code}")
+        logger.info(f"[{template_name}] status={resp.status_code}")
 
         if resp.status_code != 200:
-            logger.warning(f"[{assessment_name}] error: {resp.status_code} {resp.text[:500]}")
-            return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+            error_text = resp.text[:300]
+            logger.warning(f"[{template_name}] error: {resp.status_code} {error_text}")
+            return {"error": f"HTTP {resp.status_code}: {error_text}"}
 
         data = resp.json()
-        logger.info(f"[{assessment_name}] raw response keys={list(data.keys())}")
 
-        # Parse: {"result": [{"evaluations": [{"failure": bool, "reason": str, "metrics": [{"id": str, "value": float}]}]}]}
+        # Parse response: {"result": [{"evaluations": [{"failure": bool, "reason": str, "metrics": [{"id": str, "value": float}]}]}]}
         try:
             results = data.get("result", [])
             if not results:
-                return {"error": "Empty result from API", "raw": data}
+                logger.warning(f"[{template_name}] empty result: {data}")
+                return {"error": "Empty result from API"}
 
-            assessments = results[0].get("evaluations", [])
-            if not assessments:
-                return {"error": "No evaluations in result", "raw": data}
+            evals_list = results[0].get("evaluations", [])
+            if not evals_list:
+                logger.warning(f"[{template_name}] no evaluations: {results[0]}")
+                return {"error": "No evaluations in result"}
 
-            item = assessments[0]
+            item = evals_list[0]
             metrics = item.get("metrics", [])
             score_val = metrics[0]["value"] if metrics else None
+
             metadata = item.get("metadata", {})
             if isinstance(metadata, str):
                 metadata = json.loads(metadata)
@@ -126,11 +163,11 @@ class FutureAGIService:
                 "explanation": metadata.get("explanation", {}) if isinstance(metadata, dict) else {},
             }
         except Exception as e:
-            logger.warning(f"[{assessment_name}] parse error: {e}, raw={data}")
-            return {"error": f"Parse error: {e}", "raw": data}
+            logger.warning(f"[{template_name}] parse error: {e}")
+            return {"error": f"Parse error: {e}"}
 
     # ------------------------------------------------------------------
-    # Assessment
+    # Assessment (runs templates concurrently)
     # ------------------------------------------------------------------
 
     async def assess_prompt(
@@ -143,7 +180,7 @@ class FutureAGIService:
         if not self.is_available:
             return {"error": "FutureAGI not configured", "scores": {}}
 
-        default_metrics = ["prompt_adherence", "completeness", "groundedness"]
+        default_metrics = ["completeness", "prompt_adherence", "is_concise"]
         selected_metrics = metrics or default_metrics
 
         if test_cases:
@@ -153,22 +190,30 @@ class FutureAGIService:
             input_text = prompt_content
             output_text = "System prompt assessed successfully."
 
+        # Run all metrics concurrently
+        tasks = {
+            name: self._call_template(name, input_text, output_text, context_text=prompt_content)
+            for name in selected_metrics
+        }
+        raw_results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
         results = {}
-        for metric_name in selected_metrics:
-            result = await self._run_single_assessment(metric_name, input_text, output_text)
-            if "error" in result:
-                results[metric_name] = {"score": None, "error": result["error"]}
+        for name, raw in zip(tasks.keys(), raw_results):
+            if isinstance(raw, Exception):
+                results[name] = {"score": None, "error": str(raw)}
+            elif "error" in raw:
+                results[name] = {"score": None, "error": raw["error"]}
             else:
-                results[metric_name] = {
-                    "score": result["score"],
-                    "passed": result["passed"],
-                    "reason": result["reason"],
+                results[name] = {
+                    "score": raw["score"],
+                    "passed": raw["passed"],
+                    "reason": raw["reason"],
                 }
 
         return {"scores": results, "metrics_run": len(results)}
 
     # ------------------------------------------------------------------
-    # Safety Check
+    # Safety Check (runs templates concurrently)
     # ------------------------------------------------------------------
 
     async def safety_check(self, prompt_content: str) -> Dict[str, Any]:
@@ -176,18 +221,26 @@ class FutureAGIService:
         if not self.is_available:
             return {"error": "FutureAGI not configured", "safe": None}
 
-        safety_checks = ["toxicity", "bias_detection", "prompt_injection", "content_moderation"]
+        safety_templates = ["toxicity", "bias_detection", "prompt_injection", "content_moderation"]
+
+        # Run all safety checks concurrently
+        tasks = {
+            name: self._call_template(name, prompt_content, prompt_content)
+            for name in safety_templates
+        }
+        raw_results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
         checks = {}
-        for check_name in safety_checks:
-            result = await self._run_single_assessment(check_name, prompt_content, prompt_content, model=SAFETY_MODEL)
-            if "error" in result:
-                checks[check_name] = {"score": None, "safe": None, "error": result["error"]}
+        for name, raw in zip(tasks.keys(), raw_results):
+            if isinstance(raw, Exception):
+                checks[name] = {"score": None, "safe": None, "error": str(raw)}
+            elif "error" in raw:
+                checks[name] = {"score": None, "safe": None, "error": raw["error"]}
             else:
-                checks[check_name] = {
-                    "score": result["score"],
-                    "safe": result["passed"],
-                    "reason": result["reason"],
+                checks[name] = {
+                    "score": raw["score"],
+                    "safe": raw["passed"],
+                    "reason": raw["reason"],
                 }
 
         all_safe = all(
@@ -222,7 +275,7 @@ class FutureAGIService:
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(url, json=payload, headers=self._headers())
 
-            logger.info(f"[optimize] status={resp.status_code}")
+            logger.info(f"[optimize] status={resp.status_code} body={resp.text[:300]}")
 
             if resp.status_code != 200:
                 return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
@@ -303,7 +356,7 @@ class FutureAGIService:
                 run.status = "completed"
                 run.scores = result
 
-                if run.run_type in ("assess",) and result.get("scores"):
+                if run.run_type == "assess" and result.get("scores"):
                     version.eval_scores = result["scores"]
 
             run.completed_at = datetime.utcnow()
