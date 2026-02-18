@@ -156,9 +156,19 @@ class FutureAGIService:
             if isinstance(metadata, str):
                 metadata = json.loads(metadata)
 
+            # Determine passed/failed: use explicit 'failure' field, fallback to score
+            if "failure" in item:
+                passed = not item["failure"]
+            elif score_val is not None:
+                passed = float(score_val) >= 0.5
+            else:
+                passed = True  # No signal → assume pass
+
+            logger.debug(f"[{template_name}] raw eval: failure={item.get('failure')}, score={score_val}, passed={passed}")
+
             return {
                 "score": float(score_val) if score_val is not None else None,
-                "passed": not item.get("failure", True),
+                "passed": passed,
                 "reason": item.get("reason", ""),
                 "explanation": metadata.get("explanation", {}) if isinstance(metadata, dict) else {},
             }
