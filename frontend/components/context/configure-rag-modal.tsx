@@ -39,6 +39,12 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
     retrieval_strategy: 'similarity',
     top_k: 5,
     similarity_threshold: 0.7,
+    hybrid_vector_weight: 0.7,
+    hybrid_keyword_weight: 0.3,
+    parent_child_expansion: true,
+    expansion_window: 1,
+    enable_graph_retrieval: false,
+    graph_max_hops: 2,
     configuration: '{}'
   })
   
@@ -83,6 +89,17 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
         }
       }
 
+      // Merge RAG v3 settings into configuration
+      const mergedConfig = {
+        ...configurationObj,
+        hybrid_vector_weight: formData.hybrid_vector_weight,
+        hybrid_keyword_weight: formData.hybrid_keyword_weight,
+        parent_child_expansion: formData.parent_child_expansion,
+        expansion_window: formData.expansion_window,
+        enable_graph_retrieval: formData.enable_graph_retrieval,
+        graph_max_hops: formData.graph_max_hops,
+      }
+
       // Create RAG configuration
       const newConfig = await apiClient.createRAGConfig({
         name: formData.name,
@@ -92,7 +109,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
         retrieval_strategy: formData.retrieval_strategy,
         top_k: formData.top_k,
         similarity_threshold: formData.similarity_threshold,
-        configuration: configurationObj
+        configuration: mergedConfig
       })
 
       setCreatedConfig(newConfig)
@@ -130,6 +147,12 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
       retrieval_strategy: 'similarity',
       top_k: 5,
       similarity_threshold: 0.7,
+      hybrid_vector_weight: 0.7,
+      hybrid_keyword_weight: 0.3,
+      parent_child_expansion: true,
+      expansion_window: 1,
+      enable_graph_retrieval: false,
+      graph_max_hops: 2,
       configuration: '{}'
     })
     setTestQuery('')
@@ -231,8 +254,11 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
                       <SelectItem value="sentence-transformers/all-mpnet-base-v2">
                         all-mpnet-base-v2 (High Quality)
                       </SelectItem>
+                      <SelectItem value="text-embedding-3-small">
+                        OpenAI text-embedding-3-small (Best Value)
+                      </SelectItem>
                       <SelectItem value="text-embedding-ada-002">
-                        OpenAI Ada-002 (Premium)
+                        OpenAI Ada-002 (Legacy)
                       </SelectItem>
                     </SelectContent>
                   </Select>
@@ -277,8 +303,8 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
                 {/* Retrieval Strategy */}
                 <div>
                   <Label htmlFor="retrieval_strategy">Retrieval Strategy</Label>
-                  <Select 
-                    value={formData.retrieval_strategy} 
+                  <Select
+                    value={formData.retrieval_strategy}
                     onValueChange={(value) => handleInputChange('retrieval_strategy', value)}
                     disabled={!!createdConfig}
                   >
@@ -287,11 +313,102 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="similarity">Similarity Search</SelectItem>
-                      <SelectItem value="hybrid">Hybrid Search</SelectItem>
+                      <SelectItem value="hybrid">Hybrid Search (BM25 + Vector)</SelectItem>
                       <SelectItem value="semantic">Semantic Search</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Hybrid Search Weights (shown when hybrid selected) */}
+                {formData.retrieval_strategy === 'hybrid' && (
+                  <div className="space-y-3 p-3 bg-secondary/20 rounded-lg border border-border/40">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Hybrid Weights</p>
+                    <div>
+                      <Label>Vector Weight: {formData.hybrid_vector_weight.toFixed(1)}</Label>
+                      <Slider
+                        value={[formData.hybrid_vector_weight]}
+                        onValueChange={(values) => {
+                          handleSliderChange('hybrid_vector_weight', values)
+                          handleInputChange('hybrid_keyword_weight', parseFloat((1 - values[0]).toFixed(1)))
+                        }}
+                        min={0.0}
+                        max={1.0}
+                        step={0.1}
+                        className="mt-2"
+                        disabled={!!createdConfig}
+                      />
+                      <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                        <span>Keyword Only</span>
+                        <span>Vector: {(formData.hybrid_vector_weight * 100).toFixed(0)}% / Keyword: {(formData.hybrid_keyword_weight * 100).toFixed(0)}%</span>
+                        <span>Vector Only</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Parent-Child Expansion */}
+                <div className="flex items-center justify-between p-3 bg-secondary/20 rounded-lg border border-border/40">
+                  <div>
+                    <Label>Parent-Child Expansion</Label>
+                    <p className="text-xs text-muted-foreground">Include surrounding chunks for context</p>
+                  </div>
+                  <Switch
+                    checked={formData.parent_child_expansion}
+                    onCheckedChange={(checked) => handleInputChange('parent_child_expansion', checked)}
+                    disabled={!!createdConfig}
+                  />
+                </div>
+
+                {formData.parent_child_expansion && (
+                  <div>
+                    <Label>Expansion Window: {formData.expansion_window} chunk{formData.expansion_window !== 1 ? 's' : ''}</Label>
+                    <Slider
+                      value={[formData.expansion_window]}
+                      onValueChange={(values) => handleSliderChange('expansion_window', values)}
+                      min={1}
+                      max={5}
+                      step={1}
+                      className="mt-2"
+                      disabled={!!createdConfig}
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                      <span>1 (narrow)</span>
+                      <span>5 (wide)</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Graph Retrieval */}
+                <div className="flex items-center justify-between p-3 bg-secondary/20 rounded-lg border border-border/40">
+                  <div>
+                    <Label>Knowledge Graph Retrieval</Label>
+                    <p className="text-xs text-muted-foreground">Use entity relationships for multi-hop search</p>
+                  </div>
+                  <Switch
+                    checked={formData.enable_graph_retrieval}
+                    onCheckedChange={(checked) => handleInputChange('enable_graph_retrieval', checked)}
+                    disabled={!!createdConfig}
+                  />
+                </div>
+
+                {formData.enable_graph_retrieval && (
+                  <div>
+                    <Label>Max Graph Hops: {formData.graph_max_hops}</Label>
+                    <Slider
+                      value={[formData.graph_max_hops]}
+                      onValueChange={(values) => handleSliderChange('graph_max_hops', values)}
+                      min={1}
+                      max={4}
+                      step={1}
+                      className="mt-2"
+                      disabled={!!createdConfig}
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                      <span>1 (direct)</span>
+                      <span>4 (deep)</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Top K */}
                 <div>

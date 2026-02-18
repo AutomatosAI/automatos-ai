@@ -444,7 +444,7 @@ class ImageProcessor:
             
             # Call GPT-4V
             response = self.openai_client.chat.completions.create(
-                model="gpt-4-vision-preview",
+                model="gpt-4o",
                 messages=[
                     {
                         "role": "user",
@@ -714,14 +714,18 @@ class MultimodalDocumentProcessor:
 
 
 # Convenience function for easy importing
-def create_multimodal_processor():
+def create_multimodal_processor(openai_key=None):
     """
     Factory function to create multimodal processor
-    
+
+    Args:
+        openai_key: Optional OpenAI API key for image description features
+
     Returns:
-        Multi modal processor instance
+        Multimodal processor instance
     """
-    # Uses centralized LLM manager - no API key needed
-    from core.llm import create_llm_manager
-    
-    return MultimodalDocumentProcessor()
+    openai_client = None
+    if openai_key:
+        from openai import OpenAI
+        openai_client = OpenAI(api_key=openai_key)
+    return MultimodalDocumentProcessor(openai_client=openai_client)

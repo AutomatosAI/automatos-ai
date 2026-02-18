@@ -32,6 +32,7 @@ interface SemanticSearchProps {
   showActions?: boolean
   maxResults?: number
   documentIds?: number[]
+  standalone?: boolean
 }
 
 export function SemanticSearch({
@@ -40,7 +41,8 @@ export function SemanticSearch({
   onResultsChange,
   showActions = true,
   maxResults = 10,
-  documentIds
+  documentIds,
+  standalone = false,
 }: SemanticSearchProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -201,30 +203,31 @@ export function SemanticSearch({
         <div className="space-y-4">
           {data.results.map((result, index) => (
             <motion.div
-              key={result.chunk_id}
+              key={result.document_id || index}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
             >
-              <Card 
+              <Card
                 className={`glass-card ${onResultSelect ? 'cursor-pointer hover:shadow-lg transition-shadow' : ''}`}
                 onClick={() => onResultSelect && onResultSelect(result)}
               >
                 <CardContent className="p-6">
-                  {/* Result Header */}
+                  {/* Document Header */}
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center space-x-3">
                       <FileText className="w-5 h-5 text-blue-400" />
                       <div>
                         <h3 className="font-medium text-foreground">
-                          {result.source.filename}
+                          {result.source?.filename || 'Document'}
                         </h3>
                         <p className="text-sm text-muted-foreground">
-                          Chunk {result.chunk_index + 1}
+                          {result.chunk_count ? `${result.chunk_count} chunks` : `Chunk ${(result.chunk_index ?? 0) + 1}`}
+                          {result.preview_truncated && ' (preview)'}
                         </p>
                       </div>
                     </div>
-                    
+
                     {/* Similarity Badge */}
                     <Badge className={getSimilarityColor(result.similarity)}>
                       {(result.similarity * 100).toFixed(0)}% Match
@@ -233,25 +236,33 @@ export function SemanticSearch({
 
                   {/* Content Preview */}
                   <div className="bg-muted/30 rounded-lg p-4 mb-3">
-                    <p className="text-sm text-foreground line-clamp-3">
-                      {result.content}
+                    <p className="text-sm text-foreground line-clamp-4 whitespace-pre-wrap">
+                      {result.preview || result.excerpt || result.content || ''}
                     </p>
                   </div>
 
                   {/* Result Footer */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-4 text-xs text-muted-foreground">
-                      <span>{result.source.file_type.toUpperCase()}</span>
-                      <span>•</span>
-                      <span>
-                        {(result.source.file_size / 1024).toFixed(1)} KB
-                      </span>
-                      {result.source.upload_date && (
+                      {result.source?.file_type && (
+                        <span>{result.source.file_type.toUpperCase()}</span>
+                      )}
+                      {result.source?.file_size != null && (
                         <>
                           <span>•</span>
-                          <span>
-                            {new Date(result.source.upload_date).toLocaleDateString()}
-                          </span>
+                          <span>{(result.source.file_size / 1024).toFixed(1)} KB</span>
+                        </>
+                      )}
+                      {result.source?.upload_date && (
+                        <>
+                          <span>•</span>
+                          <span>{new Date(result.source.upload_date).toLocaleDateString()}</span>
+                        </>
+                      )}
+                      {result.full_content_available && (
+                        <>
+                          <span>•</span>
+                          <span className="text-blue-400">Full content available</span>
                         </>
                       )}
                     </div>
