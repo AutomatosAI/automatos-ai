@@ -110,6 +110,7 @@ export function SystemPromptsTab() {
   const [editNote, setEditNote] = useState('')
   const [showEditor, setShowEditor] = useState(false)
   const [activeTab, setActiveTab] = useState<'content' | 'versions' | 'assessments'>('content')
+  const [assessLoading, setAssessLoading] = useState<string | null>(null)
 
   // ---------------------------------------------------------------
   // Data fetching
@@ -159,6 +160,16 @@ export function SystemPromptsTab() {
 
   useEffect(() => { fetchCategories() }, [fetchCategories])
   useEffect(() => { fetchPrompts() }, [fetchPrompts])
+
+  // Auto-poll assessment runs when any are pending/running
+  useEffect(() => {
+    const hasPending = assessmentRuns.some(r => r.status === 'pending' || r.status === 'running')
+    if (!hasPending || !selectedPrompt) return
+    const interval = setInterval(() => {
+      fetchAssessmentRuns(selectedPrompt.id)
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [assessmentRuns, selectedPrompt, fetchAssessmentRuns])
 
   // ---------------------------------------------------------------
   // Select prompt
@@ -236,14 +247,18 @@ export function SystemPromptsTab() {
 
   const triggerAssessment = async (runType: string) => {
     if (!selectedPrompt) return
+    setAssessLoading(runType)
     try {
       await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/assess`, {
         method: 'POST',
         body: JSON.stringify({ run_type: runType }),
       })
+      setActiveTab('assessments')
       await fetchAssessmentRuns(selectedPrompt.id)
     } catch (err) {
       console.error('Failed to trigger assessment:', err)
+    } finally {
+      setAssessLoading(null)
     }
   }
 
@@ -504,14 +519,17 @@ export function SystemPromptsTab() {
       {activeTab === 'assessments' && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={() => triggerAssessment('assess')}>
-              <BarChart3 className="w-3.5 h-3.5 mr-1.5" />Score Quality
+            <Button size="sm" onClick={() => triggerAssessment('assess')} disabled={!!assessLoading}>
+              {assessLoading === 'assess' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <BarChart3 className="w-3.5 h-3.5 mr-1.5" />}
+              Score Quality
             </Button>
-            <Button size="sm" variant="outline" onClick={() => triggerAssessment('optimize')}>
-              <Zap className="w-3.5 h-3.5 mr-1.5" />Optimize
+            <Button size="sm" variant="outline" onClick={() => triggerAssessment('optimize')} disabled={!!assessLoading}>
+              {assessLoading === 'optimize' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 mr-1.5" />}
+              Optimize
             </Button>
-            <Button size="sm" variant="outline" onClick={() => triggerAssessment('safety')}>
-              <Shield className="w-3.5 h-3.5 mr-1.5" />Safety Scan
+            <Button size="sm" variant="outline" onClick={() => triggerAssessment('safety')} disabled={!!assessLoading}>
+              {assessLoading === 'safety' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Shield className="w-3.5 h-3.5 mr-1.5" />}
+              Safety Scan
             </Button>
           </div>
 
