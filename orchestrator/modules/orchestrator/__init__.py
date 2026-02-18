@@ -1,37 +1,45 @@
 """
-Orchestrator Module - 9-Stage Workflow Pipeline
-================================================
+Orchestrator Module — Dynamic Phase Workflow Engine
+=====================================================
 
-The brain of Automatos AI - coordinates all workflow execution.
+PRD-59: Evolved from fixed 9-stage pipeline to dynamic phase architecture.
 
-Stages:
-1. Task Decomposition - Break complex tasks into subtasks
-2. Agent Selection - Choose best agents for each subtask
-3. Context Engineering - Build optimal context for each agent
-4. Agent Execution - Execute agents (uses modules.agents)
-5. Result Aggregation - Combine agent outputs
-6. Learning Update - Update learning systems
-7. Quality Assessment - Assess output quality
-8. Memory Storage - Store results in memory
-9. Response Generation - Synthesize final response
-
-Usage:
-    from modules.orchestrator import EnhancedOrchestratorService
-    
-    orchestrator = EnhancedOrchestratorService(db_session)
-    result = await orchestrator.execute_workflow(workflow_id, prompt)
+Phases (expand into stages as needed):
+  PLAN     → 1. Task Decomposition, 2. Agent Selection, 2b. Negotiation
+  PREPARE  → 3. Context Engineering, 3b. Prompt Optimization
+  EXECUTE  → 4. Agent Execution, 4b. Inter-Agent Coordination
+  EVALUATE → 5. Result Aggregation, 6. Quality Assessment
+  LEARN    → 7. Learning Update, 8. Memory Storage, 9. Response Generation
 
 Components:
-- stages/      - Individual pipeline stages
-- llm/         - LLM-based orchestration (PRD-16)
-- service.py   - Main orchestrator service
-- tracker.py   - Execution tracking
+  stages/         — Individual pipeline stages (original + PRD-59 additions)
+  llm/            — LLM-based orchestration (PRD-16)
+  phase_selector  — Dynamic phase selection (PRD-59)
+  pipeline        — Composable stage executor (PRD-59)
+  service.py      — Main orchestrator service
+  tracker.py      — Execution tracking
 
 Sellable as: automatos-orchestrator
 """
 
 from modules.orchestrator.service import EnhancedOrchestratorService
 from modules.orchestrator.tracker import orchestration_tracker
+
+# PRD-59: Phase architecture
+from modules.orchestrator.phase_selector import (
+    PhaseSelector,
+    ExecutionMode,
+    ComplexityLevel,
+    Phase,
+    PhaseSpec,
+)
+from modules.orchestrator.pipeline import (
+    WorkflowPipeline,
+    WorkflowContext,
+    StageResult,
+    StageStatus,
+    ErrorStrategy,
+)
 
 # Stage components
 from modules.orchestrator.stages import (
@@ -44,16 +52,33 @@ from modules.orchestrator.stages import (
     WorkflowMemoryIntegrator,
     ComplexityAnalyzer,
     TokenBudgetManager,
+    # PRD-59 new stages
+    InterAgentNegotiation,
+    NegotiationResult,
+    PromptOptimizationStage,
+    PromptOptimizationResult,
 )
 
 __all__ = [
     # Main service
     'EnhancedOrchestratorService',
     'orchestration_tracker',
-    
+
+    # PRD-59: Phase architecture
+    'PhaseSelector',
+    'ExecutionMode',
+    'ComplexityLevel',
+    'Phase',
+    'PhaseSpec',
+    'WorkflowPipeline',
+    'WorkflowContext',
+    'StageResult',
+    'StageStatus',
+    'ErrorStrategy',
+
     # Stages
     'RealTaskDecomposer',
-    'IntelligentAgentSelector', 
+    'IntelligentAgentSelector',
     'ContextEngineeringIntegrator',
     'ResultAggregator',
     'AggregatedResults',
@@ -61,5 +86,11 @@ __all__ = [
     'WorkflowMemoryIntegrator',
     'ComplexityAnalyzer',
     'TokenBudgetManager',
+
+    # PRD-59 new stages
+    'InterAgentNegotiation',
+    'NegotiationResult',
+    'PromptOptimizationStage',
+    'PromptOptimizationResult',
 ]
 

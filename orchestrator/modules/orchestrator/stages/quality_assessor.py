@@ -257,8 +257,14 @@ class OutputQualityAssessor:
             output, requirements, output_type, quality_threshold, context
         )
         
-        # Get LLM assessment
-        if hasattr(self.llm_client, 'generate'):
+        # Get LLM assessment - support multiple LLM client interfaces
+        if hasattr(self.llm_client, 'generate_response'):
+            # LLMManager interface: generate_response(messages)
+            messages = [{"role": "user", "content": prompt}]
+            llm_response = await self.llm_client.generate_response(messages)
+            # Extract text from LLMResponse object
+            response = getattr(llm_response, 'content', None) or getattr(llm_response, 'text', None) or str(llm_response)
+        elif hasattr(self.llm_client, 'generate'):
             response = await self.llm_client.generate(prompt)
         else:
             # Synchronous fallback

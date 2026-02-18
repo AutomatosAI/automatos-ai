@@ -167,7 +167,26 @@ class ContextEngineeringIntegrator:
                 logger.warning(f"Failed to initialize embedding generator: {e}")
                 self.use_vector_store = False
         
-        self.logger.info("ℹ️ Mathematical optimization DISABLED - using basic RAG only")
+        # PRD-59 Fix 3: Feature flag for context optimization
+        # Override via env var: ENABLE_CONTEXT_OPTIMIZATION=true/false
+        env_optimization = os.getenv("ENABLE_CONTEXT_OPTIMIZATION", "").lower()
+        if env_optimization == "true" and not self.use_optimization:
+            # Force enable if env says so and optimizer import succeeded
+            if CONTEXT_OPTIMIZER_AVAILABLE:
+                try:
+                    self.context_optimizer = ContextOptimizer()
+                    self.use_optimization = True
+                    logger.info("✅ Context Optimizer force-enabled via ENABLE_CONTEXT_OPTIMIZATION env var")
+                except Exception as e:
+                    logger.warning(f"Failed to force-enable ContextOptimizer: {e}")
+        elif env_optimization == "false":
+            self.use_optimization = False
+            self.context_optimizer = None
+
+        if self.use_optimization and self.context_optimizer:
+            self.logger.info("✅ Mathematical optimization ENABLED (Shannon Entropy + MMR + Knapsack)")
+        else:
+            self.logger.info("ℹ️ Mathematical optimization DISABLED - using basic RAG only")
     
     async def enhance_subtasks_with_context(
         self,

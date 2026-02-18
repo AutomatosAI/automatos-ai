@@ -1567,6 +1567,22 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
 
                     logger.info(f"✅ Decomposed into {len(steps)} real subtasks")
 
+                    # PRD-59 Fix 5: Propagate graph metadata to individual subtasks
+                    graph_analysis = decomposition_result.get("graph_analysis", {})
+                    parallel_groups = graph_analysis.get("parallel_groups", [])
+                    execution_order = graph_analysis.get("execution_order", [])
+                    for step in steps:
+                        step_id = step.get("subtask_id", "")
+                        step["graph_metadata"] = {
+                            "parallel_group": next(
+                                (i for i, group in enumerate(parallel_groups)
+                                 if step_id in group),
+                                0
+                            ),
+                            "dependencies": step.get("dependencies", []),
+                            "execution_order": execution_order,
+                        }
+
                 except Exception as e:
                     logger.error(f"❌ Task decomposition failed: {e}, falling back to default steps", exc_info=True)
                     logger.error(f"❌ DECOMPOSITION ERROR TRACEBACK:")
@@ -1893,9 +1909,18 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             # ========== STAGE 3: CONTEXT ENGINEERING ==========
             await stage_tracker.start_stage(3)
             
-            # CONTEXT ENGINEERING INTEGRATION (FORCED FOR ALL SUBTASKS)
-            # FIX: Force all subtasks to get context engineering (was being skipped by LLM)
-            subtasks_needing_context = steps  # All subtasks get context
+            # PRD-59 Fix 4: Respect requires_context from decomposer
+            # Only run context engineering for subtasks that need it
+            subtasks_needing_context = [
+                step for step in steps
+                if step.get("requires_context", True)  # Default to True for safety
+            ]
+            subtasks_skipping_context = [
+                step for step in steps
+                if not step.get("requires_context", True)
+            ]
+            if subtasks_skipping_context:
+                logger.info(f"⚡ Skipping context engineering for {len(subtasks_skipping_context)} subtasks (requires_context=False)")
             
             try:
                 if subtasks_needing_context:
@@ -2230,23 +2255,50 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             logger.info(f"🎯 Assessing workflow output quality...")
             try:
                 from modules.orchestrator.stages import OutputQualityAssessor, OutputType
-                
-                quality_assessor = OutputQualityAssessor(
-                    llm_client=None,  # Will use heuristic assessment
-                    use_llm=False
-                )
-                
-                # Build output summary for assessment
-                output_summary = f"""Workflow Execution Summary:
-- Subtasks: {len(steps)}
-- Success Rate: {execution_summary.get('success_rate', 0):.0%} if 'execution_summary' in locals() else 'N/A'
-- Overall Quality: {aggregated_results.quality_scores.overall:.0%} if 'aggregated_results' in locals() else 'N/A'
-- Total Tokens: {aggregated_results.total_tokens_used if 'aggregated_results' in locals() else 0}
+                import os
 
-Subtask Results:
-{chr(10).join([f"- {step.get('description', 'Unknown')}: {step.get('execution_result', {}).get('status', 'unknown')}" for step in steps[:10]])}
-"""
-                
+                # PRD-59 Fix 1: Use LLM-based quality assessment on real outputs
+                # For complex tasks (3+ subtasks), use LLM assessment
+                # For simple tasks, use heuristic to save cost
+                use_llm_quality = len(steps) >= 3 and os.environ.get("ENABLE_LLM_QUALITY_ASSESSMENT", "true").lower() == "true"
+
+                llm_client_for_quality = None
+                if use_llm_quality:
+                    try:
+                        from core.llm import create_llm_manager
+                        llm_client_for_quality = create_llm_manager(service_name="orchestrator")
+                    except Exception as llm_err:
+                        logger.warning(f"Could not create LLM for quality assessment: {llm_err}")
+
+                quality_assessor = OutputQualityAssessor(
+                    llm_client=llm_client_for_quality,
+                    use_llm=use_llm_quality and llm_client_for_quality is not None
+                )
+
+                # PRD-59: Build quality input from ACTUAL agent outputs, not metadata
+                actual_outputs = []
+                for step in steps:
+                    exec_result = step.get("execution_result", {})
+                    result_content = exec_result.get("result", "") or exec_result.get("output", "") or ""
+                    if result_content:
+                        actual_outputs.append({
+                            "subtask": step.get("description", "Unknown"),
+                            "agent": step.get("agent_name", "Unknown"),
+                            "output": str(result_content)[:2000],  # Truncate for token budget
+                            "tokens_used": exec_result.get("tokens_used", 0),
+                            "status": exec_result.get("status", "unknown"),
+                        })
+
+                completed_count = sum(1 for s in steps if s.get("execution_result", {}).get("status") == "completed")
+                total_count = len(steps) or 1
+
+                output_summary = json.dumps({
+                    "task": task_description[:500],
+                    "subtask_outputs": actual_outputs,
+                    "overall_success_rate": completed_count / total_count,
+                    "total_subtasks": len(steps),
+                }, indent=2)
+
                 # Assess quality
                 quality_assessment = await quality_assessor.assess_quality(
                     output=output_summary,
@@ -2257,7 +2309,7 @@ Subtask Results:
                 
                 # Store quality assessment
                 execution.input_data["quality_assessment"] = {
-                    "is_real": True,
+                    "is_real": quality_assessment.assessment_method in ("llm", "hybrid"),
                     "overall_score": quality_assessment.overall_score,
                     "passes_threshold": quality_assessment.passes_threshold,
                     "dimensions": {
