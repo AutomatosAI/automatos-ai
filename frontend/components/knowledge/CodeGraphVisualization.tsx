@@ -100,6 +100,12 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
   const [selectedNode, setSelectedNode] = useState<SelectedNodeData | null>(null)
   const [codePanelOpen, setCodePanelOpen] = useState(false)
 
+  // PRD-62: File tree sidebar state (US-018)
+  const [fileTreeOpen, setFileTreeOpen] = useState(false)
+  const [fileTreeData, setFileTreeData] = useState<Array<{ file_path: string; language: string; lines_of_code: number; symbol_count?: number }>>([])
+  const [fileFilter, setFileFilter] = useState('')
+  const [highlightedFile, setHighlightedFile] = useState<string | null>(null)
+
   // PRD-62: Fetch architecture data
   const fetchArchitecture = useCallback(async () => {
     if (!projectId) return
@@ -117,9 +123,43 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
     }
   }, [projectId])
 
+  // PRD-62: Fetch file tree data
+  const fetchFileTree = useCallback(async () => {
+    if (!projectId) return
+    try {
+      const res = await fetch(`/api/code-graph/projects/${projectId}/architecture`)
+      if (res.ok) {
+        const data = await res.json()
+        // Extract file info from communities
+        const fileMap = new Map<string, { language: string; symbol_count: number; lines_of_code: number }>()
+        if (data.communities) {
+          data.communities.forEach((c: any) => {
+            c.members?.forEach((m: any) => {
+              if (m.file && !fileMap.has(m.file)) {
+                fileMap.set(m.file, { language: '', symbol_count: 0, lines_of_code: 0 })
+              }
+              if (m.file) {
+                const entry = fileMap.get(m.file)!
+                entry.symbol_count = (entry.symbol_count || 0) + 1
+              }
+            })
+          })
+        }
+        setFileTreeData(Array.from(fileMap.entries()).map(([fp, data]) => ({
+          file_path: fp, ...data
+        })).sort((a, b) => a.file_path.localeCompare(b.file_path)))
+      }
+    } catch (err) {
+      // Non-critical, silently fail
+    }
+  }, [projectId])
+
   useEffect(() => {
-    if (projectId) fetchArchitecture()
-  }, [projectId, fetchArchitecture])
+    if (projectId) {
+      fetchArchitecture()
+      fetchFileTree()
+    }
+  }, [projectId, fetchArchitecture, fetchFileTree])
 
   const fetchCallGraph = useCallback(async (symbol: string) => {
     if (!symbol || !project) return
@@ -369,8 +409,73 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
         </div>
       </div>
 
-      {/* Graph + Code Panel */}
+      {/* Graph + Code Panel + File Tree */}
       <div className="flex-1 flex relative">
+        {/* PRD-62: File Tree Sidebar (US-018) */}
+        {fileTreeOpen && (
+          <div className="w-56 border-r border-slate-700 bg-slate-900/80 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-2 border-b border-slate-700">
+              <span className="text-xs font-medium text-slate-300">Files</span>
+              <button onClick={() => setFileTreeOpen(false)} className="text-slate-400 hover:text-white text-xs">
+                Close
+              </button>
+            </div>
+            <div className="p-2">
+              <input
+                type="text"
+                placeholder="Filter files..."
+                value={fileFilter}
+                onChange={(e) => setFileFilter(e.target.value)}
+                className="w-full px-2 py-1 bg-slate-800 border border-slate-600 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {fileTreeData
+                .filter(f => !fileFilter || f.file_path.toLowerCase().includes(fileFilter.toLowerCase()))
+                .map((file, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    setHighlightedFile(file.file_path === highlightedFile ? null : file.file_path)
+                    // Highlight nodes from this file
+                    setNodes((nds) => nds.map(n => ({
+                      ...n,
+                      style: {
+                        ...n.style,
+                        boxShadow: file.file_path === highlightedFile ? 'none' :
+                          (n.data?.file === file.file_path ? '0 0 12px rgba(59, 130, 246, 0.8)' : 'none'),
+                      }
+                    })))
+                  }}
+                  className={`w-full text-left px-2 py-1.5 text-xs hover:bg-slate-800 transition-colors ${
+                    highlightedFile === file.file_path ? 'bg-blue-900/30 border-l-2 border-blue-500' : ''
+                  }`}
+                >
+                  <div className="text-slate-300 truncate font-mono">{file.file_path.split('/').pop()}</div>
+                  <div className="text-slate-500 text-[10px] truncate">{file.file_path}</div>
+                  <div className="flex gap-2 text-[10px] text-slate-600 mt-0.5">
+                    {file.symbol_count ? <span>{file.symbol_count} symbols</span> : null}
+                    {file.lines_of_code ? <span>{file.lines_of_code} LOC</span> : null}
+                  </div>
+                </button>
+              ))}
+              {fileTreeData.length === 0 && (
+                <div className="text-slate-500 text-xs p-2 text-center">No files indexed</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* File tree toggle button */}
+        {!fileTreeOpen && nodes.length > 0 && fileTreeData.length > 0 && (
+          <button
+            onClick={() => setFileTreeOpen(true)}
+            className="absolute left-2 top-2 bg-slate-800 border border-slate-700 p-1.5 rounded hover:bg-slate-700 transition-colors z-10"
+            title="Show file tree"
+          >
+            <ChevronRight className="w-4 h-4 text-slate-400" />
+          </button>
+        )}
         {/* Graph Area */}
         <div className={`flex-1 relative ${codePanelOpen ? 'w-2/3' : 'w-full'}`}>
           {nodes.length === 0 ? (
