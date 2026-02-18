@@ -34,10 +34,15 @@ app = FastAPI(title="FutureAGI Worker", version="2.0.0")
 # ---------------------------------------------------------------------------
 
 def _get_keys():
-    api_key = os.getenv("FUTUREAGI_API_KEY")
-    secret_key = os.getenv("FUTUREAGI_SECRET_KEY")
+    api_key = os.getenv("FUTUREAGI_API_KEY") or os.getenv("FI_API_KEY")
+    secret_key = os.getenv("FUTUREAGI_SECRET_KEY") or os.getenv("FI_SECRET_KEY")
     if not api_key or not secret_key:
         raise HTTPException(status_code=500, detail="FutureAGI keys not configured")
+    # Ensure FI_* env vars are set — the agent-opt Evaluator only forwards
+    # fi_api_key to the inner fi.evals.Evaluator, dropping fi_secret_key.
+    # Setting env vars lets the SDK auto-detect both keys.
+    os.environ.setdefault("FI_API_KEY", api_key)
+    os.environ.setdefault("FI_SECRET_KEY", secret_key)
     return api_key, secret_key
 
 
