@@ -49,6 +49,7 @@ interface SystemPrompt {
   description: string | null
   variables: Record<string, string> | null
   is_active: boolean
+  futureagi_eval_enabled: boolean
   active_version_number: number | null
   active_content: string | null
   active_eval_scores: Record<string, any> | null
@@ -242,6 +243,18 @@ export function SystemPromptsTab() {
       await fetchVersions(selectedPrompt.id)
     } catch (err) {
       console.error('Failed to delete version:', err)
+    }
+  }
+
+  const toggleFutureAGI = async () => {
+    if (!selectedPrompt) return
+    try {
+      const updated = await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/futureagi-toggle`, {
+        method: 'PATCH',
+      })
+      setSelectedPrompt(updated as SystemPrompt)
+    } catch (err) {
+      console.error('Failed to toggle FutureAGI:', err)
     }
   }
 
@@ -518,6 +531,26 @@ export function SystemPromptsTab() {
       {/* ASSESSMENTS */}
       {activeTab === 'assessments' && (
         <div className="space-y-4">
+          {/* Live eval toggle */}
+          <div className="flex items-center justify-between p-3 rounded-xl border border-border/50 bg-secondary/10">
+            <div>
+              <div className="text-sm font-medium">FutureAGI Live Scoring</div>
+              <div className="text-xs text-muted-foreground">Score every real chat message using this prompt</div>
+            </div>
+            <button
+              onClick={toggleFutureAGI}
+              className={cn(
+                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                selectedPrompt?.futureagi_eval_enabled ? 'bg-emerald-500' : 'bg-zinc-600'
+              )}
+            >
+              <span className={cn(
+                'inline-block h-4 w-4 rounded-full bg-white transition-transform',
+                selectedPrompt?.futureagi_eval_enabled ? 'translate-x-6' : 'translate-x-1'
+              )} />
+            </button>
+          </div>
+
           <div className="flex items-center gap-2">
             <Button size="sm" onClick={() => triggerAssessment('assess')} disabled={!!assessLoading}>
               {assessLoading === 'assess' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <BarChart3 className="w-3.5 h-3.5 mr-1.5" />}
@@ -560,8 +593,8 @@ export function SystemPromptsTab() {
                   </div>
                   {run.error_message && <p className="text-xs text-destructive mt-1">{run.error_message}</p>}
 
-                  {/* Assess results */}
-                  {run.scores && run.run_type === 'assess' && run.scores.scores && (
+                  {/* Assess / Live results */}
+                  {run.scores && (run.run_type === 'assess' || run.run_type === 'live') && run.scores.scores && (
                     <div className="mt-2 space-y-2">
                       {Object.entries(run.scores.scores as Record<string, any>).map(([key, val]) => {
                         const v = val as any

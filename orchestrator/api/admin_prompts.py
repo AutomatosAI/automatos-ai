@@ -69,6 +69,7 @@ def _prompt_to_response(prompt: SystemPrompt) -> PromptResponse:
         description=prompt.description,
         variables=prompt.variables,
         is_active=prompt.is_active,
+        futureagi_eval_enabled=prompt.futureagi_eval_enabled,
         active_version_number=active_version.version_number if active_version else None,
         active_content=active_version.content if active_version else None,
         active_eval_scores=active_version.eval_scores if active_version else None,
@@ -331,6 +332,29 @@ def delete_draft(
 
     db.delete(version)
     db.commit()
+
+
+# ===================================================================
+# FutureAGI toggle
+# ===================================================================
+
+@router.patch("/{prompt_id}/futureagi-toggle", response_model=PromptResponse)
+def toggle_futureagi(
+    prompt_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Toggle FutureAGI live traffic scoring on/off for a prompt."""
+    _assert_admin(ctx)
+    prompt = db.query(SystemPrompt).filter(SystemPrompt.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    prompt.futureagi_eval_enabled = not prompt.futureagi_eval_enabled
+    db.commit()
+    db.refresh(prompt)
+    state = "enabled" if prompt.futureagi_eval_enabled else "disabled"
+    logger.info(f"FutureAGI scoring {state} for {prompt.slug}")
+    return _prompt_to_response(prompt)
 
 
 # ===================================================================

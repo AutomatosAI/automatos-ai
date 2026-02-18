@@ -167,6 +167,82 @@ class FutureAGIService:
             return {"error": f"Parse error: {e}"}
 
     # ------------------------------------------------------------------
+    # Live traffic evaluation (fire-and-forget from chat pipeline)
+    # ------------------------------------------------------------------
+
+    LIVE_METRICS = ["completeness", "is_helpful", "is_concise"]
+
+    async def eval_live_traffic(
+        self,
+        prompt_slug: str,
+        input_text: str,
+        output_text: str,
+        context_text: Optional[str] = None,
+    ) -> None:
+        """
+        Called fire-and-forget after each chat response.
+        Checks if eval is enabled for this prompt, runs metrics, stores results.
+        """
+        if not self.is_available:
+            return
+
+        from core.database.database import SessionLocal
+        from core.models.system_prompts import SystemPrompt, SystemPromptEvalRun, SystemPromptVersion
+
+        db = SessionLocal()
+        try:
+            prompt = db.query(SystemPrompt).filter(SystemPrompt.slug == prompt_slug).first()
+            if not prompt or not prompt.futureagi_eval_enabled:
+                return
+
+            # Find active version
+            version = db.query(SystemPromptVersion).filter(
+                SystemPromptVersion.prompt_id == prompt.id,
+                SystemPromptVersion.status == "active",
+            ).first()
+            if not version:
+                return
+
+            # Run quality metrics concurrently
+            tasks = {
+                name: self._call_template(name, input_text, output_text, context_text=context_text)
+                for name in self.LIVE_METRICS
+            }
+            raw_results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+            scores = {}
+            for name, raw in zip(tasks.keys(), raw_results):
+                if isinstance(raw, Exception):
+                    scores[name] = {"score": None, "error": str(raw)}
+                elif "error" in raw:
+                    scores[name] = {"score": None, "error": raw["error"]}
+                else:
+                    scores[name] = {
+                        "score": raw["score"],
+                        "passed": raw["passed"],
+                        "reason": raw.get("reason", ""),
+                    }
+
+            # Store as eval run
+            run = SystemPromptEvalRun(
+                prompt_id=prompt.id,
+                version_id=version.id,
+                run_type="live",
+                status="completed",
+                scores={"scores": scores, "metrics_run": len(scores), "source": "live_traffic"},
+                started_at=datetime.utcnow(),
+                completed_at=datetime.utcnow(),
+            )
+            db.add(run)
+            db.commit()
+            logger.info(f"[live] Scored {prompt_slug}: {', '.join(f'{k}={v.get(\"score\")}' for k, v in scores.items())}")
+
+        except Exception as e:
+            logger.warning(f"[live] Failed for {prompt_slug}: {e}")
+        finally:
+            db.close()
+
+    # ------------------------------------------------------------------
     # Assessment (runs templates concurrently)
     # ------------------------------------------------------------------
 

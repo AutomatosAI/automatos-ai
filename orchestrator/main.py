@@ -186,6 +186,18 @@ async def lifespan(app: FastAPI):
             import core.models.system_prompts  # register models with Base.metadata
             from core.database.database import create_tables, get_db_session
             create_tables()
+            # PRD-58 Phase 1B: Add futureagi_eval_enabled column if missing
+            try:
+                from sqlalchemy import text
+                from core.database.database import engine
+                with engine.connect() as conn:
+                    conn.execute(text(
+                        "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
+                        "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                    conn.commit()
+            except Exception as col_err:
+                logger.debug(f"Column migration check: {col_err}")
             from core.seeds.seed_system_prompts import seed_system_prompts
             with get_db_session() as db:
                 seed_system_prompts(db)

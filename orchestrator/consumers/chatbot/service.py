@@ -1415,6 +1415,22 @@ class StreamingChatService:
                 except Exception as mem_err:
                     logger.warning(f"Failed to store memory exchange: {mem_err}")
 
+            # FutureAGI live traffic eval (fire-and-forget)
+            if latest_text and full_response:
+                try:
+                    from core.services.futureagi_service import futureagi_service
+                    if futureagi_service.is_available:
+                        asyncio.create_task(
+                            futureagi_service.eval_live_traffic(
+                                prompt_slug="chatbot-friendly",
+                                input_text=latest_text,
+                                output_text=full_response,
+                                context_text=orchestrated.system_prompt,
+                            )
+                        )
+                except Exception:
+                    pass  # Never block chat for eval
+
             # Update agent metrics
             if hasattr(agent_runtime, 'update_metrics'):
                 tokens_used = response.usage.get('total_tokens', 0) if response.usage else 0
