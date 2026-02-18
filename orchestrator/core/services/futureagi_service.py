@@ -29,6 +29,10 @@ FUTUREAGI_BASE_URL = "https://api.futureagi.com"
 ASSESSMENT_ENDPOINT = f"{FUTUREAGI_BASE_URL}/sdk/api/v1/new-eval/"
 TIMEOUT = 60  # seconds per request
 
+# FutureAGI model names (not OpenAI models)
+ASSESS_MODEL = "turing_large"
+SAFETY_MODEL = "protect"
+
 
 class FutureAGIService:
     """
@@ -71,7 +75,7 @@ class FutureAGIService:
         }
 
     async def _run_single_assessment(
-        self, assessment_name: str, input_text: str, output_text: str, model: str = "gpt-4"
+        self, assessment_name: str, input_text: str, output_text: str, model: str = ASSESS_MODEL
     ) -> Dict[str, Any]:
         """
         Single assessment call to FutureAGI API.
@@ -176,7 +180,7 @@ class FutureAGIService:
 
         checks = {}
         for check_name in safety_checks:
-            result = await self._run_single_assessment(check_name, prompt_content, prompt_content)
+            result = await self._run_single_assessment(check_name, prompt_content, prompt_content, model=SAFETY_MODEL)
             if "error" in result:
                 checks[check_name] = {"score": None, "safe": None, "error": result["error"]}
             else:
@@ -211,10 +215,7 @@ class FutureAGIService:
 
         url = f"{FUTUREAGI_BASE_URL}/model-hub/prompt-templates/improve-prompt/"
         payload = {
-            "prompt": prompt_content,
-            "algorithm": algorithm,
-            "target_metric": target_metric,
-            "num_iterations": num_iterations,
+            "existing_prompt": prompt_content,
         }
 
         try:
