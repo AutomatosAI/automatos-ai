@@ -47,8 +47,12 @@ router = APIRouter(prefix="/api/admin/prompts", tags=["Admin Prompts"])
 # ===================================================================
 
 def _assert_admin(ctx: RequestContext) -> None:
-    if not ctx.user or getattr(ctx.user, "system_role", "user") != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+    """Allow admin role, workspace owners (Clerk auth), and API key auth."""
+    if ctx.auth_type in ("clerk", "api_key"):
+        return  # Authenticated users can manage prompts
+    if ctx.user and getattr(ctx.user, "system_role", "user") == "admin":
+        return
+    raise HTTPException(status_code=403, detail="Authentication required")
 
 
 def _prompt_to_response(prompt: SystemPrompt) -> PromptResponse:
