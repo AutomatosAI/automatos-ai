@@ -1,14 +1,17 @@
 """
-PRD-58 Phase 1B: Agent-Opt Worker Service
-==========================================
+PRD-58: FutureAGI Worker Service
+=================================
 
-Isolated microservice for FutureAGI prompt optimization.
-Runs agent-opt library in its own container to avoid dependency
-conflicts with the main orchestrator.
+Single gateway for ALL FutureAGI operations. Runs in its own container
+with the full SDK (agent-opt + ai-evaluation) isolated from the main
+orchestrator.
 
 Endpoints:
-  POST /optimize  — Run prompt optimization (synchronous, returns improved prompt)
-  GET  /health    — Health check
+  POST /assess    - Score a prompt using quality metric templates
+  POST /safety    - Run safety checks on a prompt
+  POST /optimize  - Run prompt optimization (synchronous)
+  POST /score     - Score a live chat input/output pair
+  GET  /health    - Health check
 """
 
 from __future__ import annotations
@@ -22,49 +25,118 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("agent-opt-worker")
+logger = logging.getLogger("futureagi-worker")
 
-app = FastAPI(title="Agent-Opt Worker", version="1.0.0")
+app = FastAPI(title="FutureAGI Worker", version="2.0.0")
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _get_keys():
+    api_key = os.getenv("FUTUREAGI_API_KEY")
+    secret_key = os.getenv("FUTUREAGI_SECRET_KEY")
+    if not api_key or not secret_key:
+        raise HTTPException(status_code=500, detail="FutureAGI keys not configured")
+    return api_key, secret_key
+
+
+def _run_single_template(template: str, inputs: Dict[str, str], model: str = "turing_flash") -> Dict[str, Any]:
+    """Run a single scoring template via the SDK and return parsed result."""
+    api_key, secret_key = _get_keys()
+
+    from fi.evals import Evaluator
+
+    evaluator = Evaluator(fi_api_key=api_key, fi_secret_key=secret_key)
+
+    try:
+        result = evaluator.evaluate(
+            eval_templates=template,
+            inputs=inputs,
+            model_name=model,
+            timeout=90,
+        )
+    except Exception as e:
+        logger.warning(f"[{template}] scoring failed: {e}")
+        return {"error": str(e)}
+
+    # Parse SDK result
+    try:
+        er = result.eval_results[0]
+        return {
+            "score": getattr(er, "score", None),
+            "passed": not getattr(er, "failure", False),
+            "reason": getattr(er, "reason", "") or getattr(er, "output", ""),
+        }
+    except (IndexError, AttributeError) as e:
+        logger.warning(f"[{template}] parse error: {e}")
+        return {"error": f"Parse error: {e}"}
+
+
+# Template config: required input keys + best model per template
+TEMPLATE_CONFIG = {
+    "completeness":       {"keys": ["input", "output"], "model": "turing_large"},
+    "prompt_adherence":   {"keys": ["input", "output"], "model": "turing_large"},
+    "groundedness":       {"keys": ["input", "output", "context"], "model": "turing_large"},
+    "factual_accuracy":   {"keys": ["input", "output"], "model": "turing_large"},
+    "summary_quality":    {"keys": ["input", "output"], "model": "turing_large"},
+    "is_concise":         {"keys": ["output"], "model": "turing_large"},
+    "is_helpful":         {"keys": ["input", "output"], "model": "turing_large"},
+    "toxicity":           {"keys": ["output"], "model": "protect"},
+    "bias_detection":     {"keys": ["output"], "model": "protect_flash"},
+    "prompt_injection":   {"keys": ["input"], "model": "protect"},
+    "content_moderation": {"keys": ["output"], "model": "protect"},
+}
+
+
+def _build_inputs(template: str, input_text: str, output_text: str, context_text: Optional[str] = None) -> Dict[str, str]:
+    """Build inputs dict with only the keys this template accepts."""
+    config = TEMPLATE_CONFIG.get(template, {"keys": ["input", "output"]})
+    required = config["keys"]
+    inputs = {}
+    if "input" in required:
+        inputs["input"] = input_text
+    if "output" in required:
+        inputs["output"] = output_text
+    if "context" in required:
+        inputs["context"] = context_text or input_text
+    return inputs
+
+
+def _get_model(template: str) -> str:
+    return TEMPLATE_CONFIG.get(template, {}).get("model", "turing_flash")
 
 
 # ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
+class AssessRequest(BaseModel):
+    prompt_content: str
+    test_input: Optional[str] = None
+    test_output: Optional[str] = None
+    metrics: Optional[List[str]] = None
+
+
+class SafetyRequest(BaseModel):
+    prompt_content: str
+
+
+class ScoreRequest(BaseModel):
+    input_text: str
+    output_text: str
+    context_text: Optional[str] = None
+    metrics: Optional[List[str]] = None
+
+
 class OptimizeRequest(BaseModel):
-    prompt_content: str = Field(..., description="The current system prompt to optimize")
-    dataset: List[Dict[str, str]] = Field(
-        ...,
-        description="List of {input, output} pairs from live traffic",
-        min_length=1,
-    )
-    eval_template: str = Field(
-        default="is_helpful",
-        description="FutureAGI eval template name for scoring",
-    )
-    algorithm: str = Field(
-        default="meta_prompt",
-        description="Optimization algorithm: meta_prompt, bayesian, protegi, random",
-    )
+    prompt_content: str
+    dataset: List[Dict[str, str]] = Field(..., min_length=1)
+    scoring_template: str = "is_helpful"
+    algorithm: str = "meta_prompt"
     num_rounds: int = Field(default=3, ge=1, le=20)
-    teacher_model: str = Field(
-        default="gpt-4o-mini",
-        description="LLM model for generating improved prompts",
-    )
-    task_description: Optional[str] = Field(
-        default=None,
-        description="Description of what the prompt should accomplish",
-    )
-
-
-class OptimizeResponse(BaseModel):
-    optimized_prompt: str
-    final_score: float
-    initial_score: Optional[float] = None
-    rounds_completed: int
-    algorithm: str
-    history: List[Dict[str, Any]] = []
-    duration_seconds: float
+    teacher_model: str = "gpt-4o-mini"
+    task_description: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -73,28 +145,99 @@ class OptimizeResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "agent-opt-worker"}
+    return {"status": "ok", "service": "futureagi-worker", "version": "2.0.0"}
 
 
 # ---------------------------------------------------------------------------
-# Optimize endpoint
+# Assess - score a prompt using quality metrics
 # ---------------------------------------------------------------------------
 
-@app.post("/optimize", response_model=OptimizeResponse)
-def optimize(req: OptimizeRequest):
-    """
-    Run synchronous prompt optimization using agent-opt library.
-    This can take 1-5 minutes depending on rounds and dataset size.
-    """
+@app.post("/assess")
+def assess(req: AssessRequest):
     start = time.time()
+    metrics = req.metrics or ["completeness", "is_helpful", "is_concise"]
+    input_text = req.test_input or req.prompt_content
+    output_text = req.test_output or "System prompt assessed successfully."
 
-    fi_api_key = os.getenv("FUTUREAGI_API_KEY")
-    fi_secret_key = os.getenv("FUTUREAGI_SECRET_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
+    results = {}
+    for template in metrics:
+        inputs = _build_inputs(template, input_text, output_text, context_text=req.prompt_content)
+        model = _get_model(template)
+        results[template] = _run_single_template(template, inputs, model)
 
-    if not fi_api_key or not fi_secret_key:
-        raise HTTPException(status_code=500, detail="FutureAGI keys not configured")
-    if not openai_key:
+    return {"scores": results, "metrics_run": len(results), "duration": round(time.time() - start, 1)}
+
+
+# ---------------------------------------------------------------------------
+# Safety - run safety templates
+# ---------------------------------------------------------------------------
+
+@app.post("/safety")
+def safety(req: SafetyRequest):
+    start = time.time()
+    safety_templates = ["toxicity", "bias_detection", "prompt_injection", "content_moderation"]
+
+    checks = {}
+    for template in safety_templates:
+        inputs = _build_inputs(template, req.prompt_content, req.prompt_content)
+        model = _get_model(template)
+        result = _run_single_template(template, inputs, model)
+
+        if "error" in result:
+            checks[template] = {"score": None, "safe": None, "error": result["error"]}
+        else:
+            checks[template] = {
+                "score": result.get("score"),
+                "safe": result.get("passed"),
+                "reason": result.get("reason", ""),
+            }
+
+    all_safe = all(
+        c.get("safe", True)
+        for c in checks.values()
+        if "safe" in c and c["safe"] is not None
+    )
+
+    return {"safe": all_safe, "checks": checks, "duration": round(time.time() - start, 1)}
+
+
+# ---------------------------------------------------------------------------
+# Score - score a real chat exchange (live traffic)
+# ---------------------------------------------------------------------------
+
+@app.post("/score")
+def score_live(req: ScoreRequest):
+    start = time.time()
+    metrics = req.metrics or ["completeness", "is_helpful", "is_concise"]
+
+    scores = {}
+    for template in metrics:
+        inputs = _build_inputs(template, req.input_text, req.output_text, context_text=req.context_text)
+        model = _get_model(template)
+        result = _run_single_template(template, inputs, model)
+
+        if "error" in result:
+            scores[template] = {"score": None, "error": result["error"]}
+        else:
+            scores[template] = {
+                "score": result.get("score"),
+                "passed": result.get("passed"),
+                "reason": result.get("reason", ""),
+            }
+
+    return {"scores": scores, "metrics_run": len(scores), "source": "live_traffic", "duration": round(time.time() - start, 1)}
+
+
+# ---------------------------------------------------------------------------
+# Optimize - full prompt optimization via agent-opt
+# ---------------------------------------------------------------------------
+
+@app.post("/optimize")
+def optimize(req: OptimizeRequest):
+    start = time.time()
+    api_key, secret_key = _get_keys()
+
+    if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="OpenAI API key not configured")
 
     try:
@@ -102,47 +245,31 @@ def optimize(req: OptimizeRequest):
         from fi.opt.datamappers import BasicDataMapper
         from fi.opt.generators import LiteLLMGenerator
     except ImportError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"agent-opt not installed correctly: {e}",
-        )
+        raise HTTPException(status_code=500, detail=f"agent-opt not installed: {e}")
 
-    # --- Set up evaluator (FutureAGI scoring) ---
     evaluator = Evaluator(
-        eval_template=req.eval_template,
+        eval_template=req.scoring_template,
         eval_model_name="turing_flash",
-        fi_api_key=fi_api_key,
-        fi_secret_key=fi_secret_key,
+        fi_api_key=api_key,
+        fi_secret_key=secret_key,
     )
 
-    # --- Data mapper: our dataset keys → eval input keys ---
-    data_mapper = BasicDataMapper(
-        key_map={"input": "input", "output": "output"}
-    )
+    data_mapper = BasicDataMapper(key_map={"input": "input", "output": "output"})
+    teacher = LiteLLMGenerator(model=req.teacher_model, prompt_template="{prompt}")
 
-    # --- Teacher model (generates improved prompts) ---
-    teacher = LiteLLMGenerator(
-        model=req.teacher_model,
-        prompt_template="{prompt}",
-    )
-
-    # --- Task description ---
     task_desc = req.task_description or (
         "This is a system prompt for an AI assistant. "
         "Optimize it to produce more helpful, concise, and complete responses."
     )
 
-    # --- Select optimizer ---
     try:
         optimizer = _create_optimizer(req.algorithm, teacher, req.num_rounds)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # --- Run optimization ---
     logger.info(
-        f"Starting {req.algorithm} optimization: "
-        f"{req.num_rounds} rounds, {len(req.dataset)} examples, "
-        f"eval={req.eval_template}, teacher={req.teacher_model}"
+        f"Starting {req.algorithm}: {req.num_rounds} rounds, "
+        f"{len(req.dataset)} examples, template={req.scoring_template}"
     )
 
     try:
@@ -159,10 +286,7 @@ def optimize(req: OptimizeRequest):
         raise HTTPException(status_code=500, detail=f"Optimization failed: {e}")
 
     duration = time.time() - start
-
-    # --- Extract results ---
     best_prompt = result.best_generator.get_prompt_template()
-    final_score = result.final_score
 
     history = []
     if hasattr(result, "history") and result.history:
@@ -173,56 +297,38 @@ def optimize(req: OptimizeRequest):
                 "prompt_preview": getattr(iteration, "prompt", "")[:200],
             })
 
-    initial_score = history[0]["score"] if history else None
+    logger.info(f"Optimization complete: {result.final_score:.4f} in {duration:.1f}s")
 
-    logger.info(
-        f"Optimization complete: {final_score:.4f} "
-        f"({req.num_rounds} rounds, {duration:.1f}s)"
-    )
-
-    return OptimizeResponse(
-        optimized_prompt=best_prompt,
-        final_score=final_score,
-        initial_score=initial_score,
-        rounds_completed=req.num_rounds,
-        algorithm=req.algorithm,
-        history=history,
-        duration_seconds=round(duration, 1),
-    )
+    return {
+        "optimized_prompt": best_prompt,
+        "final_score": result.final_score,
+        "initial_score": history[0]["score"] if history else None,
+        "rounds_completed": req.num_rounds,
+        "algorithm": req.algorithm,
+        "history": history,
+        "duration_seconds": round(duration, 1),
+        "status": "completed",
+    }
 
 
 def _create_optimizer(algorithm: str, teacher, num_rounds: int):
-    """Factory for optimizer instances."""
     if algorithm == "meta_prompt":
         from fi.opt.optimizers import MetaPromptOptimizer
-        return MetaPromptOptimizer(
-            teacher_generator=teacher,
-            num_rounds=num_rounds,
-        )
+        return MetaPromptOptimizer(teacher_generator=teacher, num_rounds=num_rounds)
     elif algorithm == "bayesian":
         from fi.opt.optimizers import BayesianSearchOptimizer
         return BayesianSearchOptimizer(
-            inference_model_name=teacher.model,
-            n_trials=num_rounds * 4,
-            min_examples=2,
-            max_examples=5,
+            inference_model_name=teacher.model, n_trials=num_rounds * 4,
+            min_examples=2, max_examples=5,
         )
     elif algorithm == "protegi":
         from fi.opt.optimizers import ProTeGi
         return ProTeGi(
-            teacher_generator=teacher,
-            num_gradients=4,
-            beam_size=4,
-            num_rounds=num_rounds,
+            teacher_generator=teacher, num_gradients=4,
+            beam_size=4, num_rounds=num_rounds,
         )
     elif algorithm == "random":
         from fi.opt.optimizers import RandomSearchOptimizer
-        return RandomSearchOptimizer(
-            teacher_generator=teacher,
-            num_candidates=num_rounds * 3,
-        )
+        return RandomSearchOptimizer(teacher_generator=teacher, num_candidates=num_rounds * 3)
     else:
-        raise ValueError(
-            f"Unknown algorithm '{algorithm}'. "
-            f"Options: meta_prompt, bayesian, protegi, random"
-        )
+        raise ValueError(f"Unknown algorithm '{algorithm}'. Options: meta_prompt, bayesian, protegi, random")
