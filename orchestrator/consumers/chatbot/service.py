@@ -25,6 +25,7 @@ from sqlalchemy import and_, desc, or_
 from difflib import SequenceMatcher
 
 from core.models import Chat, Message, Vote, Workspace
+from core.services.image_store import get_image_store
 from config import config
 
 # Import from consumer's own modules
@@ -413,6 +414,39 @@ class ChatService:
         self.db.commit()
         logger.info(f"Voted on message {message_id}: upvoted={is_upvoted}")
         return True
+
+
+# =============================================================================
+# =============================================================================
+# IMAGE UPLOAD HELPER — Replace inline base64 images with S3 URLs
+# =============================================================================
+
+_BASE64_IMG_RE = re.compile(
+    r'!\[([^\]]*)\]\((data:image/(jpeg|jpg|png|gif|webp);base64,([A-Za-z0-9+/=\s]+))\)'
+)
+
+
+async def _upload_inline_images(text: str, workspace_id: str = None) -> str:
+    """Find base64 image markdown in text, upload to S3, replace with URLs."""
+    matches = list(_BASE64_IMG_RE.finditer(text))
+    if not matches:
+        return text
+
+    store = get_image_store()
+    result = text
+    for match in reversed(matches):  # reverse to preserve offsets
+        alt = match.group(1)
+        mime_type = f"image/{match.group(3)}"
+        b64_data = match.group(4).replace("\n", "").replace(" ", "")
+        try:
+            image_id = await store.save_image(b64_data, mime_type, workspace_id)
+            url = f"/api/generated-images/{image_id}"
+            replacement = f"![{alt}]({url})"
+            result = result[:match.start()] + replacement + result[match.end():]
+            logger.info(f"Replaced inline base64 image with {url}")
+        except Exception as e:
+            logger.warning(f"Failed to upload inline image to S3: {e}")
+    return result
 
 
 # =============================================================================
@@ -1112,11 +1146,17 @@ class StreamingChatService:
             if tool_data.get("documents") and is_direct_doc_request:
                 topic = _infer_doc_topic(latest_text)
                 full_response = _enforce_documents_shape(full_response, topic)
-            
+
+            # Upload inline base64 images to S3 and replace with URLs
+            full_response = await _upload_inline_images(
+                full_response,
+                workspace_id=str(self.workspace_id) if self.workspace_id else None,
+            )
+
             # Stream text response
             async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
                 yield chunk
-            
+
             # Send usage data + track usage
             if hasattr(response, 'usage') and response.usage:
                 yield self.streaming_handler.format_aisdk_usage(
@@ -1364,11 +1404,18 @@ class StreamingChatService:
                 # No tool calls, use response content directly
                 if response.content:
                     full_response = response.content
-            
+
+            # Upload inline base64 images to S3 and replace with URLs
+            _ws_id_img = getattr(agent_runtime, 'workspace_id', None) or self.workspace_id
+            full_response = await _upload_inline_images(
+                full_response,
+                workspace_id=str(_ws_id_img) if _ws_id_img else None,
+            )
+
             # Stream text response
             async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
                 yield chunk
-            
+
             # Send usage data + track usage with BYOK metadata
             if hasattr(response, 'usage') and response.usage:
                 yield self.streaming_handler.format_aisdk_usage(

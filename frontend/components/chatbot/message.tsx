@@ -1,16 +1,15 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { User, ThumbsUp, ThumbsDown, Copy, RotateCw, Code, FileText, Database, ChevronRight, Wrench, CheckCircle2, XCircle, Loader2, Zap } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { User, Code, FileText, Database, ChevronRight, CheckCircle2, XCircle, Loader2, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { voteMessage } from '@/lib/chat/api'
-import { copyToClipboard, formatTimestamp } from '@/lib/utils'
 import type { ChatMessage, Artifact, CodeSnippet, DocumentReference, DatabaseResult, ToolCall, UseChatHelpers } from '@/types'
-import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { CodeBlock } from './code-block'
+import { ImageGallery, type ChatImage } from './image-gallery'
+import { MessageActions } from './message-actions'
 
 export interface MessageProps {
   chatId: string
@@ -25,6 +24,18 @@ export interface MessageProps {
   onDatabaseSelect?: (db: DatabaseResult) => void
 }
 
+// Extract images from markdown content
+const IMAGE_RE = /!\[([^\]]*)\]\(([^)]+)\)/g
+
+function extractImages(content: string): { text: string; images: ChatImage[] } {
+  const images: ChatImage[] = []
+  const text = content.replace(IMAGE_RE, (_, alt, src) => {
+    images.push({ src, alt: alt || 'Generated image' })
+    return ''
+  })
+  return { text: text.trim(), images }
+}
+
 export function Message({
   chatId,
   message,
@@ -37,27 +48,13 @@ export function Message({
   onDocumentSelect,
   onDatabaseSelect,
 }: MessageProps) {
-  const [mode, setMode] = useState<'view' | 'edit'>('view')
-  const [isUpvoted, setIsUpvoted] = useState<boolean | undefined>()
+  const isUser = message.role === 'user'
 
-  const handleCopy = async () => {
+  // Get plain text content for actions
+  const plainContent = useMemo(() => {
     const textParts = message.parts?.filter(p => p.type === 'text').map(p => 'text' in p ? p.text : '')
-    const content = textParts?.join('\n') || message.content || ''
-
-    if (await copyToClipboard(content)) {
-      toast.success('Copied to clipboard')
-    }
-  }
-
-  const handleVote = async (upvote: boolean) => {
-    try {
-      await voteMessage(chatId, message.id, upvote)
-      setIsUpvoted(upvote)
-      toast.success(upvote ? 'Upvoted' : 'Downvoted')
-    } catch (error) {
-      toast.error('Failed to vote')
-    }
-  }
+    return textParts?.join('\n') || message.content || ''
+  }, [message.parts, message.content])
 
   const markdownComponents = useMemo(() => ({
     p: ({ children }: any) => (
@@ -78,26 +75,45 @@ export function Message({
       </a>
     ),
     ul: ({ children }: any) => (
-      <ul className="list-disc pl-6 space-y-3 text-foreground dark:text-gray-100">{children}</ul>
+      <ul className="list-disc pl-5 space-y-1.5 text-foreground dark:text-gray-100">{children}</ul>
     ),
     ol: ({ children }: any) => (
-      <ol className="list-decimal pl-6 space-y-3 text-foreground dark:text-gray-100">{children}</ol>
+      <ol className="list-decimal pl-5 space-y-1.5 text-foreground dark:text-gray-100">{children}</ol>
     ),
     li: ({ children }: any) => (
-      <li className="bg-card/60 border border-border/60 rounded-lg px-4 py-3 shadow-sm dark:bg-gray-900/40 dark:border-gray-800/60">
-        <div className="space-y-1 text-foreground dark:text-gray-100">{children}</div>
-      </li>
+      <li className="text-foreground dark:text-gray-100 pl-1">{children}</li>
     ),
-    code: ({ inline, children }: any) => (
-      inline ? (
-        <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs text-foreground dark:bg-gray-900/60 dark:text-orange-200">
-          {children}
-        </code>
-      ) : (
-        <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 text-foreground dark:bg-gray-900/70 dark:border-gray-800/60 dark:text-gray-100">
-          <code className="text-inherit">{children}</code>
-        </pre>
-      )
+    code: ({ inline, className, children }: any) => {
+      if (inline) {
+        return (
+          <code className="rounded bg-orange-500/10 px-1.5 py-0.5 text-[13px] font-mono text-orange-200 border border-orange-500/10">
+            {children}
+          </code>
+        )
+      }
+      // Block code: extract language and delegate to CodeBlock
+      const match = /language-(\w+)/.exec(className || '')
+      const lang = match ? match[1] : ''
+      const code = String(children).replace(/\n$/, '')
+      return <CodeBlock code={code} language={lang} />
+    },
+    pre: ({ children }: any) => <>{children}</>,
+    blockquote: ({ children }: any) => (
+      <blockquote className="border-l-2 border-orange-500/40 pl-4 py-1 bg-orange-500/5 rounded-r-lg text-foreground/80 dark:text-gray-300 italic">
+        {children}
+      </blockquote>
+    ),
+    h1: ({ children }: any) => (
+      <h1 className="text-lg font-semibold text-foreground dark:text-gray-100 pb-1 border-b border-border/30 mb-2">{children}</h1>
+    ),
+    h2: ({ children }: any) => (
+      <h2 className="text-base font-semibold text-foreground dark:text-gray-100 pb-1 border-b border-border/20 mb-2">{children}</h2>
+    ),
+    h3: ({ children }: any) => (
+      <h3 className="text-sm font-semibold text-foreground dark:text-gray-100 mb-1">{children}</h3>
+    ),
+    hr: () => (
+      <hr className="border-0 h-px bg-gradient-to-r from-transparent via-orange-500/30 to-transparent my-4" />
     ),
     table: ({ children }: any) => (
       <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-gray-900/40">
@@ -125,28 +141,35 @@ export function Message({
     td: ({ children }: any) => (
       <td className="px-4 py-3 align-top text-foreground dark:text-gray-200">{children}</td>
     ),
-    img: ({ src, alt }: any) => (
-      <img
-        src={src}
-        alt={alt || 'Generated image'}
-        className="rounded-xl border border-border/60 max-w-full max-h-[512px] object-contain my-4 shadow-lg"
-        loading="lazy"
-      />
-    ),
+    // Images handled by ImageGallery — strip from markdown
+    img: () => null,
   }), [])
+
+  const proseClass = "prose prose-sm md:prose-base max-w-none space-y-3 dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-orange-500 dark:prose-a:text-orange-300"
+
+  const renderMarkdownWithImages = (text: string, keyPrefix = '') => {
+    const { text: cleanText, images } = extractImages(text)
+    return (
+      <>
+        {cleanText && (
+          <ReactMarkdown
+            key={`${keyPrefix}md`}
+            remarkPlugins={[remarkGfm]}
+            className={proseClass}
+            components={markdownComponents}
+          >
+            {cleanText}
+          </ReactMarkdown>
+        )}
+        {images.length > 0 && <ImageGallery images={images} />}
+      </>
+    )
+  }
 
   const renderMessageContent = () => {
     // Handle AI SDK format (content field)
     if ('content' in message && message.content && (!message.parts || message.parts.length === 0)) {
-      return (
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          className="prose prose-sm md:prose-base max-w-none space-y-4 dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-orange-500 dark:prose-a:text-orange-300"
-          components={markdownComponents}
-        >
-          {message.content}
-        </ReactMarkdown>
-      )
+      return renderMarkdownWithImages(message.content)
     }
 
     // Handle custom format (parts array)
@@ -158,16 +181,7 @@ export function Message({
       <div className="space-y-3">
         {message.parts.map((part, index) => {
           if (part.type === 'text' && 'text' in part) {
-            return (
-              <ReactMarkdown
-                key={index}
-                remarkPlugins={[remarkGfm]}
-                className="prose prose-sm md:prose-base max-w-none space-y-4 dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-orange-500 dark:prose-a:text-orange-300"
-                components={markdownComponents}
-              >
-                {part.text}
-              </ReactMarkdown>
-            )
+            return <div key={index}>{renderMarkdownWithImages(part.text, `p${index}`)}</div>
           }
 
           if (part.type === 'file' && 'filename' in part) {
@@ -206,33 +220,26 @@ export function Message({
   const renderAssistantState = () => {
     if (message.role !== 'assistant') return null
 
-    // Only show state for the actively streaming assistant message (the one passed isLoading)
     if (isLoading) {
       return (
-        <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/25 bg-orange-500/10 px-3 py-1 text-xs text-orange-200">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span className="font-medium">Thinking</span>
-          <span className="opacity-70">…</span>
+        <div className="inline-flex items-center gap-2">
+          <div className="flex space-x-1">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="w-2 h-2 rounded-full bg-orange-400/60 animate-pulse"
+                style={{ animationDelay: `${i * 0.15}s` }}
+              />
+            ))}
+          </div>
+          <span className="text-xs text-orange-300/80 font-medium">Thinking</span>
         </div>
       )
     }
 
-    // When finished, keep it subtle (only show if this message has any content)
-    const hasText =
-      (typeof message.content === 'string' && message.content.trim().length > 0) ||
-      (Array.isArray(message.parts) && message.parts.some((p: any) => p?.type === 'text' && p?.text))
-
-    if (!hasText) return null
-
-    return (
-      <div className="inline-flex items-center gap-2 rounded-full border border-gray-800/60 bg-gray-900/30 px-3 py-1 text-xs text-gray-300">
-        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-        <span className="font-medium text-muted-foreground dark:text-gray-300">Completed</span>
-      </div>
-    )
+    return null
   }
 
-  // Format tool name for display (e.g., "composio_execute" -> "Composio", "search_knowledge" -> "Searching docs")
   const formatToolName = (toolName: string): string => {
     const toolLabels: Record<string, string> = {
       'composio_execute': 'Composio',
@@ -252,19 +259,14 @@ export function Message({
     const toolCalls = message.toolCalls || []
     if (toolCalls.length === 0) return null
 
-    // Filter out composio_execute - users don't need to see internal Composio execution
     const filteredToolCalls = toolCalls.filter(tc => tc.toolName !== 'composio_execute')
-
-    // Only show running tools - hide completed ones for cleaner UX
     const runningTools = filteredToolCalls.filter(tc => tc.state === 'running')
     const errorTools = filteredToolCalls.filter(tc => tc.state === 'error')
 
-    // If nothing is running and no errors, don't show anything
     if (runningTools.length === 0 && errorTools.length === 0) return null
 
     return (
       <div className="flex flex-wrap items-center gap-2">
-        {/* Show running tools with spinner */}
         {runningTools.map((tc) => (
           <div
             key={tc.toolCallId}
@@ -274,8 +276,6 @@ export function Message({
             <span>{formatToolName(tc.toolName)}</span>
           </div>
         ))}
-
-        {/* Only show errors (users need to know if something failed) */}
         {errorTools.map((tc) => (
           <div
             key={tc.toolCallId}
@@ -309,17 +309,17 @@ export function Message({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      data-testid={message.role === 'user' ? 'msg-user' : 'msg-assistant'}
-      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+      data-testid={isUser ? 'msg-user' : 'msg-assistant'}
+      className={`group/msg flex ${isUser ? 'justify-end' : 'justify-start'}`}
     >
-      <div className={`flex items-start space-x-3 max-w-[85%] ${message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
-        }`}>
+      <div className={`flex items-start space-x-3 max-w-[85%] ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}>
         {/* Avatar */}
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${message.role === 'user'
-          ? 'bg-blue-600'
-          : 'bg-gradient-to-br from-orange-500/40 to-red-500/30 ring-1 ring-orange-500/25'
-          }`}>
-          {message.role === 'user' ? (
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+          isUser
+            ? 'bg-blue-600'
+            : 'bg-gradient-to-br from-orange-500/40 to-red-500/30 ring-1 ring-orange-500/25 shadow-[0_0_12px_rgba(249,115,22,0.15)]'
+        }`}>
+          {isUser ? (
             <User className="w-5 h-5 text-white" />
           ) : (
             <img
@@ -333,10 +333,15 @@ export function Message({
 
         {/* Message Content */}
         <div className="flex-1 space-y-3">
-          <div className="space-y-2">
+          {/* Message bubble */}
+          <div className={`rounded-2xl px-4 py-3 space-y-2 ${
+            isUser
+              ? 'bg-gradient-to-br from-orange-500/15 to-orange-600/5 border border-orange-500/10 rounded-tr-sm'
+              : 'bg-card/40 backdrop-blur-sm border border-border/30 rounded-tl-sm'
+          }`}>
             {renderMessageContent()}
 
-            {/* Assistant state (Thinking / Completed) */}
+            {/* Assistant state (Thinking animation) */}
             {renderAssistantState()}
 
             {/* Tool calls (lifecycle transparency) */}
@@ -347,16 +352,16 @@ export function Message({
 
             {/* Metadata */}
             {message.metadata && message.role === 'assistant' && (
-              <div className="mt-3 pt-3 border-t border-border/50 flex items-center justify-between text-xs dark:border-gray-700/50">
+              <div className="mt-2 pt-2 border-t border-border/30 flex items-center justify-between text-xs dark:border-gray-700/30">
                 <div className="flex items-center space-x-3 text-muted-foreground">
                   {message.metadata.source && (
-                    <Badge variant="outline" className={`
-                      ${message.metadata.source === 'codegraph' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' : ''}
-                      ${message.metadata.source === 'rag' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : ''}
-                      ${message.metadata.source === 'semantic' ? 'bg-green-500/10 border-green-500/20 text-green-400' : ''}
-                      ${message.metadata.source === 'database' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : ''}
-                      ${message.metadata.source === 'llm' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' : ''}
-                    `}>
+                    <Badge variant="outline" className={`text-[10px] ${
+                      message.metadata.source === 'codegraph' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' :
+                      message.metadata.source === 'rag' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                      message.metadata.source === 'semantic' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
+                      message.metadata.source === 'database' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                      message.metadata.source === 'llm' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' : ''
+                    }`}>
                       {message.metadata.source.toUpperCase()}
                     </Badge>
                   )}
@@ -394,7 +399,6 @@ export function Message({
           {message.documents && message.documents.length > 0 && (
             <div className="space-y-2">
               {message.documents.map((doc, idx) => {
-                // Support both old and new format
                 const title = doc.title || doc.filename || 'Unknown Document'
                 const relevance = doc.relevance !== undefined ? doc.relevance : (doc.similarity ? doc.similarity * 100 : 0)
                 const preview = doc.preview || doc.excerpt || ''
@@ -407,7 +411,6 @@ export function Message({
                   <button
                     key={idx}
                     onClick={() => {
-                      // PRD-38.1: Use onDocumentSelect to create a DocumentWidget
                       if (onDocumentSelect) {
                         onDocumentSelect({
                           ...doc,
@@ -446,7 +449,6 @@ export function Message({
                     )}
 
                     <div className="mt-3 text-xs text-blue-400 flex items-center gap-1">
-                      <span>📖</span>
                       <span>Click to view full document</span>
                     </div>
                   </button>
@@ -469,7 +471,7 @@ export function Message({
                       <Database className="w-4 h-4 text-green-400" />
                       <span className="text-sm font-medium text-emerald-700 dark:text-green-300">{dbResult.database}</span>
                       <Badge variant="outline" className="bg-green-500/10 border-green-500/20 text-green-400 text-xs">
-                        {dbResult.row_count} rows • {dbResult.execution_time_ms?.toFixed(0)}ms
+                        {dbResult.row_count} rows {dbResult.execution_time_ms && `• ${dbResult.execution_time_ms.toFixed(0)}ms`}
                       </Badge>
                     </div>
                     <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-emerald-700 dark:group-hover:text-green-300" />
@@ -530,55 +532,18 @@ export function Message({
             </div>
           )}
 
-          {/* Actions */}
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleCopy}
-              className="text-gray-500 hover:text-gray-300 p-1 h-auto"
-            >
-              <Copy className="w-3 h-3" />
-            </Button>
-
-            {message.role === 'assistant' && !isReadonly && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleVote(true)}
-                  className={`p-1 h-auto ${isUpvoted === true ? 'text-green-400' : 'text-gray-500 hover:text-green-400'
-                    }`}
-                >
-                  <ThumbsUp className="w-3 h-3" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleVote(false)}
-                  className={`p-1 h-auto ${isUpvoted === false ? 'text-red-400' : 'text-gray-500 hover:text-red-400'
-                    }`}
-                >
-                  <ThumbsDown className="w-3 h-3" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={regenerate}
-                  className="text-gray-500 hover:text-gray-300 p-1 h-auto"
-                >
-                  <RotateCw className="w-3 h-3" />
-                </Button>
-              </>
-            )}
-
-            <span className="text-xs text-gray-500">
-              {formatTimestamp(message.createdAt || new Date().toISOString())}
-            </span>
-          </div>
+          {/* Actions (show on hover) */}
+          <MessageActions
+            chatId={chatId}
+            messageId={message.id}
+            role={message.role as 'user' | 'assistant'}
+            content={plainContent}
+            isReadonly={isReadonly}
+            regenerate={regenerate}
+            createdAt={message.createdAt}
+          />
         </div>
       </div>
     </motion.div>
   )
 }
-
