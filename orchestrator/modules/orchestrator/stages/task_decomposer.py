@@ -161,8 +161,20 @@ REMEMBER:
             logger.info(f"  ⚙️  Complexity: {complexity} → Target: {5 if complexity == 'low' else 7 if complexity == 'medium' else 10} subtasks")
             logger.info(f"  🎯 Design: Granular, single-skill, inter-agent collaboration")
             
+            # PRD-59/US-006: Fetch system prompt from Prompt Registry if available
+            system_prompt = "You are an expert task decomposition system. Always return valid JSON."
+            try:
+                from modules.prompts.registry import PromptRegistry
+                registry = PromptRegistry()
+                registry_prompt = await registry.get_prompt("task-decomposer")
+                if registry_prompt and registry_prompt.get("content"):
+                    system_prompt = registry_prompt["content"]
+                    logger.info("📋 Stage 1: Using Prompt Registry system prompt (task-decomposer)")
+            except (ImportError, Exception) as e:
+                logger.debug(f"Prompt Registry not available for Stage 1: {e}")
+
             messages = [
-                {"role": "system", "content": "You are an expert task decomposition system. Always return valid JSON."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ]
             

@@ -410,9 +410,21 @@ class SharedContextManager:
         else:
             from core.database.database import SessionLocal
             self.db_session = SessionLocal()
-        
+
         self.contexts: Dict[str, SharedContext] = {}
         self.logger = logging.getLogger(__name__)
+
+        # PRD-59/US-018: Optional Redis backing for cross-process sharing
+        self._redis = None
+        try:
+            from core.redis import get_redis_client
+            self._redis = get_redis_client()
+            if self._redis:
+                self._redis.ping()
+                self.logger.info("✅ SharedContextManager: Redis backing enabled")
+        except Exception as e:
+            self._redis = None
+            self.logger.debug(f"SharedContextManager: Redis not available, using in-memory: {e}")
     
     async def create_shared_context(
         self,
@@ -443,8 +455,17 @@ class SharedContextManager:
             context_data=initial_context or {}
         )
         
-        # Store in memory (in production, store in database)
+        # Store in memory + Redis if available
         self.contexts[context.id] = context
+        if self._redis:
+            try:
+                import json as _json
+                redis_key = f"swarm:{context.id}:shared_context"
+                self._redis.hset(redis_key, "context_data", _json.dumps(context.context_data))
+                self._redis.hset(redis_key, "team_agents", _json.dumps(context.team_agents))
+                self._redis.expire(redis_key, 7200)  # 2 hour TTL
+            except Exception as e:
+                self.logger.debug(f"Redis context store failed: {e}")
         
         # Log creation
         context.access_log.append({

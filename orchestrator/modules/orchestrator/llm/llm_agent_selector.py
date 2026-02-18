@@ -135,6 +135,18 @@ class LLMAgentSelector:
         self.llm = llm or OrchestratorLLM(temperature=0.7)
         self.use_caching = use_caching
         self.cache_ttl = cache_ttl_seconds
+
+        # PRD-59/US-006: Try to load optimized system prompt from Prompt Registry
+        self._registry_prompt = None
+        try:
+            from modules.prompts.registry import PromptRegistry
+            import asyncio
+            registry = PromptRegistry()
+            # Store for lazy async loading
+            self._prompt_registry = registry
+            logger.info("📋 Agent Selector: Prompt Registry available for agent-selector slug")
+        except (ImportError, Exception):
+            self._prompt_registry = None
         
         # Initialize semantic skill matcher for intelligent matching
         # Initialize semantic skill matcher for intelligent matching
