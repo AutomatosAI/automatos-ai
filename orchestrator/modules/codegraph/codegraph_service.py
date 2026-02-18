@@ -88,12 +88,34 @@ class CodeGraphService:
         except Exception as e:
             logger.warning(f"EnhancedVectorStore not available, using fallback: {e}")
         
-        # Supported file extensions
-        self.language_extensions = {
-            'python': ['.py'],
-            'typescript': ['.ts', '.tsx'],
-            'javascript': ['.js', '.jsx']
-        }
+        # Initialize tree-sitter parser (PRD-62: 14+ language support)
+        self._treesitter_parser = None
+        try:
+            from .parsers.treesitter_parser import TreeSitterParser
+            self._treesitter_parser = TreeSitterParser()
+            if self._treesitter_parser.available:
+                logger.info("CodeGraphService using tree-sitter for multi-language parsing (14+ languages)")
+            else:
+                logger.warning("TreeSitterParser created but tree-sitter not available, using fallback parsers")
+                self._treesitter_parser = None
+        except Exception as e:
+            logger.warning(f"TreeSitterParser not available, using legacy parsers: {e}")
+
+        # Supported file extensions (expanded with tree-sitter support)
+        if self._treesitter_parser and self._treesitter_parser.available:
+            # Build from tree-sitter's supported languages
+            self.language_extensions = {}
+            for ext, lang in self._treesitter_parser.SUPPORTED_LANGUAGES.items():
+                if lang not in self.language_extensions:
+                    self.language_extensions[lang] = []
+                self.language_extensions[lang].append(ext)
+        else:
+            # Fallback: original 3-language support
+            self.language_extensions = {
+                'python': ['.py'],
+                'typescript': ['.ts', '.tsx'],
+                'javascript': ['.js', '.jsx']
+            }
         
         # Default exclude patterns
         self.default_excludes = [
@@ -147,47 +169,26 @@ class CodeGraphService:
         # Create or update project record
         if existing:
             project_id = existing.id
-            # Delete old symbols and relationships before re-indexing (to handle dimension changes)
-            logger.info(f"Deleting old symbols and embeddings for project {project_name} before re-indexing...")
-            
-            # Count records before deletion
-            rel_count = self.db.execute(
-                text("SELECT COUNT(*) FROM codegraph_relationships WHERE project_id = :id"),
-                {"id": project_id}
-            ).scalar()
-            sym_count = self.db.execute(
-                text("SELECT COUNT(*) FROM codegraph_symbols WHERE project_id = :id"),
-                {"id": project_id}
-            ).scalar()
-            file_count = self.db.execute(
-                text("SELECT COUNT(*) FROM codegraph_files WHERE project_id = :id"),
-                {"id": project_id}
-            ).scalar()
-            
-            logger.info(f"Found {rel_count} relationships, {sym_count} symbols, {file_count} files to delete")
-            
-            # Delete old data
-            self.db.execute(
-                text("DELETE FROM codegraph_relationships WHERE project_id = :id"),
-                {"id": project_id}
-            )
-            self.db.execute(
-                text("DELETE FROM codegraph_symbols WHERE project_id = :id"),
-                {"id": project_id}
-            )
-            self.db.execute(
-                text("DELETE FROM codegraph_files WHERE project_id = :id"),
-                {"id": project_id}
-            )
+            # PRD-62: Incremental indexing — load existing file hashes for comparison
+            self._existing_file_hashes = {}
+            try:
+                rows = self.db.execute(
+                    text("SELECT file_path, file_hash FROM codegraph_files WHERE project_id = :id"),
+                    {"id": project_id}
+                ).fetchall()
+                self._existing_file_hashes = {r.file_path: r.file_hash for r in rows}
+                logger.info(f"Loaded {len(self._existing_file_hashes)} existing file hashes for incremental indexing")
+            except Exception as e:
+                logger.warning(f"Could not load file hashes, will do full re-index: {e}")
+
+            # Only delete symbols for files that have changed (determined during parse loop)
+            # Don't do a full wipe anymore — incremental indexing handles per-file updates
             self.db.execute(
                 text("UPDATE codegraph_projects SET status = 'indexing', updated_at = NOW() WHERE id = :id"),
                 {"id": project_id}
             )
-            
-            # Commit deletion immediately
             self.db.commit()
-            logger.info(f"✅ Deleted {rel_count} relationships, {sym_count} symbols, {file_count} files")
-            
+
             # Ensure embedding column dimension matches current embedding model
             self._ensure_embedding_dimension()
         else:
@@ -225,13 +226,42 @@ class CodeGraphService:
             files_data = []
             total_files = 0
             
+            skipped_files = 0
+            discovered_paths = set()
+
             for file_path in self._discover_files(repo_path, all_excludes):
                 try:
+                    rel_path = os.path.relpath(file_path, repo_path)
+                    discovered_paths.add(rel_path)
+
+                    # PRD-62: Incremental indexing — skip unchanged files
+                    existing_hashes = getattr(self, '_existing_file_hashes', {})
+                    if existing_hashes:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content_check = f.read()
+                        new_hash = hashlib.sha256(content_check.encode()).hexdigest()
+                        if existing_hashes.get(rel_path) == new_hash:
+                            skipped_files += 1
+                            total_files += 1
+                            continue
+                        # File changed — delete old symbols/relationships for this file
+                        self.db.execute(
+                            text("""
+                                DELETE FROM codegraph_relationships WHERE project_id = :pid
+                                AND (from_symbol_id IN (SELECT id FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp)
+                                  OR to_symbol_id IN (SELECT id FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp))
+                            """),
+                            {"pid": project_id, "fp": rel_path}
+                        )
+                        self.db.execute(
+                            text("DELETE FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp"),
+                            {"pid": project_id, "fp": rel_path}
+                        )
+
                     parse_result = await self._parse_file(file_path, repo_path)
-                    
+
                     if parse_result:
                         # Store file metadata
-                        rel_path = os.path.relpath(file_path, repo_path)
                         files_data.append({
                             "project_id": project_id,
                             "file_path": rel_path,
@@ -276,6 +306,32 @@ class CodeGraphService:
                     logger.warning(f"Failed to parse {file_path}: {e}")
                     continue
             
+            # PRD-62: Remove symbols for files that were deleted from repo
+            if existing_hashes:
+                deleted_paths = set(existing_hashes.keys()) - discovered_paths
+                for del_path in deleted_paths:
+                    self.db.execute(
+                        text("""
+                            DELETE FROM codegraph_relationships WHERE project_id = :pid
+                            AND (from_symbol_id IN (SELECT id FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp)
+                              OR to_symbol_id IN (SELECT id FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp))
+                        """),
+                        {"pid": project_id, "fp": del_path}
+                    )
+                    self.db.execute(
+                        text("DELETE FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp"),
+                        {"pid": project_id, "fp": del_path}
+                    )
+                    self.db.execute(
+                        text("DELETE FROM codegraph_files WHERE project_id = :pid AND file_path = :fp"),
+                        {"pid": project_id, "fp": del_path}
+                    )
+                if deleted_paths:
+                    logger.info(f"Removed {len(deleted_paths)} deleted files from index")
+
+            if skipped_files:
+                logger.info(f"Incremental indexing: skipped {skipped_files} unchanged files, re-parsed {total_files - skipped_files} changed files")
+
             # Batch insert files
             if files_data:
                 for file_data in files_data:
@@ -417,26 +473,71 @@ class CodeGraphService:
             return pattern in path
     
     async def _parse_file(self, file_path: str, repo_root: str) -> Optional[ParseResult]:
-        """Parse a single file and extract symbols"""
+        """Parse a single file and extract symbols.
+
+        Uses tree-sitter parser (14+ languages) when available,
+        falls back to legacy Python AST / regex parsers.
+        """
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-            
+
             # Calculate file hash
             file_hash = hashlib.sha256(content.encode()).hexdigest()
             lines_of_code = len([line for line in content.split('\n') if line.strip()])
-            
-            # Detect language
+
             extension = Path(file_path).suffix
+
+            # Try tree-sitter first (PRD-62: 14+ language support)
+            if self._treesitter_parser:
+                lang_name = self._treesitter_parser.get_language_for_extension(extension)
+                if lang_name:
+                    ts_result = self._treesitter_parser.parse_file(file_path, content, repo_root)
+                    if not ts_result.errors:
+                        # Convert tree-sitter results to CodeSymbol/CodeRelationship
+                        symbols = [
+                            CodeSymbol(
+                                symbol_type=s.symbol_type,
+                                name=s.name,
+                                qualified_name=f"{s.file_path}::{s.name}",
+                                file_path=s.file_path,
+                                line_number=s.line_number,
+                                signature=s.signature,
+                                docstring=s.docstring,
+                                code_snippet=s.code_snippet,
+                                metadata=s.metadata,
+                            )
+                            for s in ts_result.symbols
+                        ]
+                        relationships = [
+                            CodeRelationship(
+                                from_symbol=r.from_symbol,
+                                to_symbol=r.to_symbol_name,
+                                relationship_type=r.relationship_type,
+                                metadata=r.metadata,
+                            )
+                            for r in ts_result.relationships
+                        ]
+                        return ParseResult(
+                            symbols=symbols,
+                            relationships=relationships,
+                            file_hash=file_hash,
+                            lines_of_code=lines_of_code,
+                            language=ts_result.language,
+                        )
+                    else:
+                        logger.debug(f"tree-sitter parse errors for {file_path}, falling back: {ts_result.errors}")
+
+            # Fallback: legacy parsers (Python AST + regex TS/JS)
             language = self._detect_language(extension)
-            
+
             if language == 'python':
                 symbols, relationships = self._parse_python(content, file_path, repo_root)
             elif language in ['typescript', 'javascript']:
                 symbols, relationships = self._parse_typescript_javascript(content, file_path, repo_root, language)
             else:
                 return None
-            
+
             return ParseResult(
                 symbols=symbols,
                 relationships=relationships,
@@ -444,7 +545,7 @@ class CodeGraphService:
                 lines_of_code=lines_of_code,
                 language=language
             )
-            
+
         except Exception as e:
             logger.warning(f"Failed to parse {file_path}: {e}")
             return None
@@ -970,11 +1071,40 @@ class CodeGraphService:
                     except Exception as e:
                         logger.warning(f"Failed to insert relationship: {e}")
                         continue
-                else:
+                elif from_symbol_id and not to_symbol_id:
+                    # PRD-62 Bug #4: Store as external_reference instead of silently skipping
+                    to_name = rel['to_symbol'].split('::')[-1] if '::' in rel['to_symbol'] else rel['to_symbol']
+                    try:
+                        self.db.execute(
+                            text("""
+                                INSERT INTO codegraph_relationships
+                                (project_id, from_symbol_id, to_symbol_id, relationship_type, metadata, workspace_id)
+                                VALUES (:project_id, :from_symbol_id, NULL, 'external_reference', CAST(:metadata AS jsonb), :workspace_id)
+                            """),
+                            {
+                                "project_id": project_id,
+                                "from_symbol_id": from_symbol_id,
+                                "relationship_type": 'external_reference',
+                                "metadata": json.dumps({
+                                    **rel.get('metadata', {}),
+                                    'status': 'unresolved',
+                                    'reason': 'not_in_project',
+                                    'target_name': to_name,
+                                    'original_type': rel['relationship_type'],
+                                }),
+                                "workspace_id": rel.get('workspace_id')
+                            }
+                        )
+                        relationships_inserted += 1
+                    except Exception:
+                        pass
+                    logger.debug(f"Unresolved reference: {to_name} (from {rel['from_symbol']})")
                     skipped_external += 1
-            
+                else:
+                    skipped_notfound += 1
+
             self.db.commit()
-            logger.info(f"✅ Stored {relationships_inserted} relationships (from {len(relationships_data)} extracted, {matched_fuzzy} fuzzy-matched, {skipped_external} skipped)")
+            logger.info(f"Stored {relationships_inserted} relationships (from {len(relationships_data)} extracted, {matched_fuzzy} fuzzy-matched, {skipped_external} external refs, {skipped_notfound} unresolved)")
             
         except Exception as e:
             logger.error(f"Failed to store relationships: {e}")
