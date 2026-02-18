@@ -180,7 +180,7 @@ class FutureAGIService:
         if not self.is_available:
             return {"error": "FutureAGI not configured", "scores": {}}
 
-        default_metrics = ["completeness", "prompt_adherence", "is_concise"]
+        default_metrics = ["completeness", "is_helpful", "is_concise"]
         selected_metrics = metrics or default_metrics
 
         if test_cases:
@@ -262,13 +262,22 @@ class FutureAGIService:
         target_metric: str = "prompt_adherence",
         num_iterations: int = 10,
     ) -> Dict[str, Any]:
-        """Prompt optimization via FutureAGI improve-prompt API."""
+        """Prompt optimization via FutureAGI improve-prompt API.
+
+        The API is async — it returns an improveId immediately.
+        We submit the job and return the job ID. The improved prompt
+        can be retrieved later via the FutureAGI dashboard.
+        """
         if not self.is_available:
             return {"error": "FutureAGI not configured"}
 
         url = f"{FUTUREAGI_BASE_URL}/model-hub/prompt-templates/improve-prompt/"
         payload = {
             "existing_prompt": prompt_content,
+            "improvement_requirements": (
+                f"Improve this system prompt for better {target_metric.replace('_', ' ')}. "
+                f"Make it clearer, more specific, and more effective."
+            ),
         }
 
         try:
@@ -281,7 +290,20 @@ class FutureAGIService:
                 return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
 
             data = resp.json()
-            result = data.get("result", data)
+            if not data.get("status"):
+                return {"error": data.get("result", "Unknown error")}
+
+            result = data.get("result", {})
+            improve_id = result.get("improveId") if isinstance(result, dict) else None
+
+            if improve_id:
+                return {
+                    "optimized_prompt": None,
+                    "improve_id": improve_id,
+                    "status": "submitted",
+                    "message": "Optimization job submitted to FutureAGI. Results available in the FutureAGI dashboard.",
+                    "algorithm": algorithm,
+                }
 
             return {
                 "optimized_prompt": result.get("improved_prompt", result.get("prompt", str(result))),
@@ -349,7 +371,7 @@ class FutureAGIService:
             else:
                 result = await self.assess_prompt(prompt_content)
 
-            if "error" in result and not result.get("scores"):
+            if "error" in result and not result.get("scores") and not result.get("status"):
                 run.status = "failed"
                 run.error_message = result["error"]
             else:
@@ -360,7 +382,9 @@ class FutureAGIService:
                     version.eval_scores = result["scores"]
 
             run.completed_at = datetime.utcnow()
+            logger.info(f"Assessment run {run_id} -> {run.status}")
             db.commit()
+            logger.info(f"Assessment run {run_id} saved to DB")
 
         except Exception as e:
             logger.error(f"Assessment run {run_id} failed: {e}")
