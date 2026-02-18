@@ -643,18 +643,40 @@ export function SystemPromptsTab() {
 
                   {/* Optimize results */}
                   {run.scores && run.run_type === 'optimize' && (
-                    <div className="mt-2 text-xs space-y-1">
-                      {run.scores.status === 'submitted' && (
-                        <p className="text-blue-400">{run.scores.message || 'Optimization submitted to FutureAGI'}</p>
+                    <div className="mt-2 text-xs space-y-2">
+                      {run.scores.error && (
+                        <p className="text-red-400">{run.scores.error}</p>
                       )}
-                      {run.scores.optimized_prompt && (
+                      {run.scores.status === 'completed' && run.scores.optimized_prompt && (
                         <div>
-                          <span className="text-muted-foreground">Optimized prompt:</span>
-                          <p className="mt-1 p-2 rounded-lg bg-secondary/30 whitespace-pre-wrap">{run.scores.optimized_prompt}</p>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-emerald-400">Optimized prompt ready</span>
+                            {run.scores.best_score != null && (
+                              <span className="text-muted-foreground">
+                                Score: {(run.scores.best_score * 100).toFixed(0)}%
+                                {run.scores.initial_score != null && (
+                                  <> (was {(run.scores.initial_score * 100).toFixed(0)}%)</>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                          <p className="p-2.5 rounded-lg bg-secondary/30 whitespace-pre-wrap max-h-48 overflow-y-auto border border-border/30">
+                            {run.scores.optimized_prompt}
+                          </p>
+                          {run.scores.duration && (
+                            <p className="text-muted-foreground mt-1">
+                              {run.scores.algorithm} / {run.scores.rounds} rounds / {run.scores.duration}s
+                            </p>
+                          )}
                         </div>
                       )}
-                      {run.scores.improve_id && (
-                        <p className="text-muted-foreground">Job ID: {run.scores.improve_id}</p>
+                      {run.scores.status === 'submitted' && (
+                        <div>
+                          <p className="text-blue-400">{run.scores.message || 'Optimization submitted to FutureAGI'}</p>
+                          {run.scores.improve_id && (
+                            <p className="text-muted-foreground">Job ID: {run.scores.improve_id}</p>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}

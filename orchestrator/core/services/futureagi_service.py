@@ -51,6 +51,21 @@ TEMPLATE_CONFIG = {
 }
 
 
+def _extract_text(parts) -> str:
+    """Extract plain text from chat message parts (JSON list of {type, text})."""
+    if isinstance(parts, str):
+        return parts
+    if isinstance(parts, list):
+        texts = []
+        for p in parts:
+            if isinstance(p, dict) and p.get("type") == "text":
+                texts.append(p.get("text", ""))
+            elif isinstance(p, str):
+                texts.append(p)
+        return " ".join(texts).strip()
+    return ""
+
+
 class FutureAGIService:
     """
     Singleton service calling FutureAGI REST API directly via httpx.
@@ -340,68 +355,113 @@ class FutureAGIService:
         return {"safe": all_safe, "checks": checks}
 
     # ------------------------------------------------------------------
-    # Optimization (via FutureAGI improve-prompt endpoint)
+    # Optimization (via agent-opt worker service)
     # ------------------------------------------------------------------
+
+    AGENT_OPT_URL = os.getenv("AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080")
 
     async def optimize_prompt(
         self,
         prompt_content: str,
-        algorithm: str = "bayesian",
-        target_metric: str = "prompt_adherence",
-        num_iterations: int = 10,
+        algorithm: str = "meta_prompt",
+        target_metric: str = "is_helpful",
+        num_iterations: int = 3,
     ) -> Dict[str, Any]:
-        """Prompt optimization via FutureAGI improve-prompt API.
+        """Prompt optimization via agent-opt worker service.
 
-        The API is async — it returns an improveId immediately.
-        We submit the job and return the job ID. The improved prompt
-        can be retrieved later via the FutureAGI dashboard.
+        Collects live traffic input/output pairs as the dataset,
+        sends to the isolated agent-opt worker for synchronous optimization.
+        Returns the improved prompt directly.
         """
-        if not self.is_available:
-            return {"error": "FutureAGI not configured"}
+        # Gather dataset from recent live eval traffic
+        dataset = await self._collect_optimization_dataset(prompt_content)
+        if not dataset:
+            return {"error": "No live traffic data yet. Enable FutureAGI scoring and chat first to build a dataset."}
 
-        url = f"{FUTUREAGI_BASE_URL}/model-hub/prompt-templates/improve-prompt/"
         payload = {
-            "existing_prompt": prompt_content,
-            "improvement_requirements": (
-                f"Improve this system prompt for better {target_metric.replace('_', ' ')}. "
-                f"Make it clearer, more specific, and more effective."
-            ),
+            "prompt_content": prompt_content,
+            "dataset": dataset,
+            "eval_template": target_metric,
+            "algorithm": algorithm,
+            "num_rounds": num_iterations,
+            "teacher_model": "gpt-4o-mini",
+            "task_description": f"Optimize this AI system prompt for better {target_metric.replace('_', ' ')}.",
         }
 
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(url, json=payload, headers=self._headers())
+            url = f"{self.AGENT_OPT_URL}/optimize"
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(url, json=payload)
 
-            logger.info(f"[optimize] status={resp.status_code} body={resp.text[:300]}")
+            logger.info(f"[optimize] worker status={resp.status_code}")
 
             if resp.status_code != 200:
-                return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+                error_text = resp.text[:300]
+                logger.warning(f"[optimize] worker error: {error_text}")
+                return {"error": f"Worker error: {error_text}"}
 
             data = resp.json()
-            if not data.get("status"):
-                return {"error": data.get("result", "Unknown error")}
-
-            result = data.get("result", {})
-            improve_id = result.get("improveId") if isinstance(result, dict) else None
-
-            if improve_id:
-                return {
-                    "optimized_prompt": None,
-                    "improve_id": improve_id,
-                    "status": "submitted",
-                    "message": "Optimization job submitted to FutureAGI. Results available in the FutureAGI dashboard.",
-                    "algorithm": algorithm,
-                }
-
             return {
-                "optimized_prompt": result.get("improved_prompt", result.get("prompt", str(result))),
-                "best_score": result.get("score"),
-                "algorithm": algorithm,
-                "iterations": num_iterations,
+                "optimized_prompt": data.get("optimized_prompt"),
+                "best_score": data.get("final_score"),
+                "initial_score": data.get("initial_score"),
+                "algorithm": data.get("algorithm"),
+                "rounds": data.get("rounds_completed"),
+                "duration": data.get("duration_seconds"),
+                "history": data.get("history", []),
+                "status": "completed",
             }
+        except httpx.ConnectError:
+            logger.warning("[optimize] agent-opt worker not reachable")
+            return {"error": "Optimization worker not available. Is the agent-opt-worker service running?"}
+        except httpx.TimeoutException:
+            logger.warning("[optimize] worker timed out after 300s")
+            return {"error": "Optimization timed out (>5min). Try fewer rounds or smaller dataset."}
         except Exception as e:
-            logger.error(f"FutureAGI optimization failed: {e}")
+            logger.error(f"[optimize] failed: {e}")
             return {"error": str(e)}
+
+    async def _collect_optimization_dataset(
+        self, prompt_content: str, limit: int = 20
+    ) -> List[Dict[str, str]]:
+        """Collect recent chat input/output pairs from the database for optimization."""
+        from core.database.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            # Pull recent chat messages (input/output pairs)
+            from sqlalchemy import text
+            rows = db.execute(text("""
+                SELECT m1.parts, m2.parts
+                FROM chat_messages m1
+                JOIN chat_messages m2
+                  ON m1.chat_id = m2.chat_id
+                  AND m2.role = 'assistant'
+                  AND m2.created_at = (
+                      SELECT MIN(created_at) FROM chat_messages
+                      WHERE chat_id = m1.chat_id AND role = 'assistant'
+                      AND created_at > m1.created_at
+                  )
+                WHERE m1.role = 'user'
+                ORDER BY m1.created_at DESC
+                LIMIT :limit
+            """), {"limit": limit}).fetchall()
+
+            dataset = []
+            for user_parts, assistant_parts in rows:
+                # Extract text from parts JSON
+                user_text = _extract_text(user_parts)
+                assistant_text = _extract_text(assistant_parts)
+                if user_text and assistant_text:
+                    dataset.append({"input": user_text, "output": assistant_text})
+
+            logger.info(f"[optimize] collected {len(dataset)} I/O pairs for dataset")
+            return dataset
+        except Exception as e:
+            logger.warning(f"[optimize] dataset collection failed: {e}")
+            return []
+        finally:
+            db.close()
 
     # ------------------------------------------------------------------
     # Run orchestrator (called by admin_prompts.py)
