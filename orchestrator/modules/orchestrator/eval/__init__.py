@@ -16,6 +16,7 @@ from .datasets import (
     get_eval_dataset,
 )
 from .runner import PromptEvalRunner
+from .optimizer import StagePromptOptimizer, OptimizationResult
 
 __all__ = [
     "EvalCase",
@@ -23,4 +24,6 @@ __all__ = [
     "AGENT_SELECTOR_EVAL_DATASET",
     "get_eval_dataset",
     "PromptEvalRunner",
+    "StagePromptOptimizer",
+    "OptimizationResult",
 ]
