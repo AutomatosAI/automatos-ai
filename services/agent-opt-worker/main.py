@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -82,18 +83,27 @@ def _run_single_template(template: str, inputs: Dict[str, str], model: str = "tu
         score = getattr(er, "score", None)
         runtime_ms = getattr(er, "runtime", None)
 
-        # Parse pass/fail from output field
-        output_lower = (output or "").lower().strip()
-        if output_lower == "passed":
-            passed = True
-            if score is None:
-                score = 1.0
-        elif output_lower == "failed":
-            passed = False
-            if score is None:
-                score = 0.0
-        elif score is not None:
+        # output can be: "Passed"/"Failed" (Pass/Fail type) or a float (score type)
+        if isinstance(output, (int, float)):
+            # Numeric score (e.g. completeness returns 0.0-1.0)
+            score = float(output)
             passed = score >= 0.5
+        elif isinstance(output, str):
+            output_lower = output.lower().strip()
+            if output_lower == "passed":
+                passed = True
+                score = 1.0
+            elif output_lower == "failed":
+                passed = False
+                score = 0.0
+            else:
+                # Try to parse as number
+                try:
+                    score = float(output)
+                    passed = score >= 0.5
+                except (ValueError, TypeError):
+                    passed = True
+                    score = 1.0
         else:
             passed = True
             score = 1.0
@@ -207,11 +217,20 @@ def assess(req: AssessRequest):
     input_text = req.test_input or req.prompt_content
     output_text = req.test_output or "System prompt assessed successfully."
 
+    # Run all templates concurrently
     results = {}
-    for template in metrics:
-        inputs = _build_inputs(template, input_text, output_text, context_text=req.prompt_content)
-        model = _get_model(template)
-        results[template] = _run_single_template(template, inputs, model)
+    with ThreadPoolExecutor(max_workers=len(metrics)) as pool:
+        futures = {}
+        for template in metrics:
+            inputs = _build_inputs(template, input_text, output_text, context_text=req.prompt_content)
+            model = _get_model(template)
+            futures[pool.submit(_run_single_template, template, inputs, model)] = template
+        for future in as_completed(futures):
+            template = futures[future]
+            try:
+                results[template] = future.result()
+            except Exception as e:
+                results[template] = {"error": str(e)}
 
     return {"scores": results, "metrics_run": len(results), "duration": round(time.time() - start, 1)}
 
@@ -225,12 +244,23 @@ def safety(req: SafetyRequest):
     start = time.time()
     safety_templates = ["toxicity", "bias_detection", "prompt_injection", "content_moderation"]
 
-    checks = {}
-    for template in safety_templates:
-        inputs = _build_inputs(template, req.prompt_content, req.prompt_content)
-        model = _get_model(template)
-        result = _run_single_template(template, inputs, model)
+    # Run all safety templates concurrently
+    raw_results = {}
+    with ThreadPoolExecutor(max_workers=len(safety_templates)) as pool:
+        futures = {}
+        for template in safety_templates:
+            inputs = _build_inputs(template, req.prompt_content, req.prompt_content)
+            model = _get_model(template)
+            futures[pool.submit(_run_single_template, template, inputs, model)] = template
+        for future in as_completed(futures):
+            template = futures[future]
+            try:
+                raw_results[template] = future.result()
+            except Exception as e:
+                raw_results[template] = {"error": str(e)}
 
+    checks = {}
+    for template, result in raw_results.items():
         if "error" in result:
             checks[template] = {"score": None, "safe": None, "error": result["error"]}
         else:
@@ -258,20 +288,28 @@ def score_live(req: ScoreRequest):
     start = time.time()
     metrics = req.metrics or ["completeness", "is_helpful", "is_concise"]
 
+    # Run all scoring templates concurrently
     scores = {}
-    for template in metrics:
-        inputs = _build_inputs(template, req.input_text, req.output_text, context_text=req.context_text)
-        model = _get_model(template)
-        result = _run_single_template(template, inputs, model)
-
-        if "error" in result:
-            scores[template] = {"score": None, "error": result["error"]}
-        else:
-            scores[template] = {
-                "score": result.get("score"),
-                "passed": result.get("passed"),
-                "reason": result.get("reason", ""),
-            }
+    with ThreadPoolExecutor(max_workers=len(metrics)) as pool:
+        futures = {}
+        for template in metrics:
+            inputs = _build_inputs(template, req.input_text, req.output_text, context_text=req.context_text)
+            model = _get_model(template)
+            futures[pool.submit(_run_single_template, template, inputs, model)] = template
+        for future in as_completed(futures):
+            template = futures[future]
+            try:
+                result = future.result()
+                if "error" in result:
+                    scores[template] = {"score": None, "error": result["error"]}
+                else:
+                    scores[template] = {
+                        "score": result.get("score"),
+                        "passed": result.get("passed"),
+                        "reason": result.get("reason", ""),
+                    }
+            except Exception as e:
+                scores[template] = {"score": None, "error": str(e)}
 
     return {"scores": scores, "metrics_run": len(scores), "source": "live_traffic", "duration": round(time.time() - start, 1)}
 
