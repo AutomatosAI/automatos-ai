@@ -23,6 +23,13 @@ Quick start:
 from .base import TaskRunner
 from .factory import get_task_runner, reset_task_runner
 from .local import LocalTaskRunner
+
+# Phase 2: QueuedTaskRunner (requires redis)
+try:
+    from .queued import QueuedTaskRunner
+except ImportError:
+    QueuedTaskRunner = None  # type: ignore[assignment,misc]
+
 from .models import (
     AgentTask,
     TaskEvent,
@@ -39,6 +46,7 @@ __all__ = [
     # Core interface
     "TaskRunner",
     "LocalTaskRunner",
+    "QueuedTaskRunner",
     "get_task_runner",
     "reset_task_runner",
     # Models

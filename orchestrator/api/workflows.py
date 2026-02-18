@@ -35,7 +35,9 @@ router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
 
 
 class WorkflowStageTracker:
-    """Track 9-stage workflow execution with SSE events"""
+    """Track workflow execution with SSE events — supports both legacy 9-stage and PRD-59 dynamic phases"""
+
+    # Legacy 9-stage names (backward compat)
     STAGES = {
         1: "Task Decomposition",
         2: "Agent Selection",
@@ -45,94 +47,138 @@ class WorkflowStageTracker:
         6: "Learning Update",
         7: "Quality Assessment",
         8: "Memory Storage",
-        9: "Response Generation"
+        9: "Response Generation",
     }
-    
+
+    # PRD-59: Dynamic stage names including sub-stages
+    DYNAMIC_STAGES = {
+        **STAGES,
+        "2b": "Agent Negotiation",
+        "3b": "Prompt Optimization",
+        "4b": "Inter-Agent Coordination",
+    }
+
+    # PRD-59: Phase → stage mapping
+    PHASES = {
+        "PLAN":     {"stages": [1, 2, "2b"], "label": "Planning"},
+        "PREPARE":  {"stages": [3, "3b"],     "label": "Preparation"},
+        "EXECUTE":  {"stages": [4, "4b"],     "label": "Execution"},
+        "EVALUATE": {"stages": [5, 6],        "label": "Evaluation"},
+        "LEARN":    {"stages": [7, 8, 9],     "label": "Learning"},
+    }
+
     def __init__(self, execution_id: int, redis_client=None, stream_manager=None):
         self.execution_id = execution_id
         self.redis = redis_client
         self.stream_manager = stream_manager
         self.current_stage = 0
+        self.current_phase = None
         self.stage_start_times = {}
-    
-    async def start_stage(self, stage_num: int):
-        """Mark stage as started, emit SSE event"""
+        self.phase_start_times = {}
+        self.active_phases = []  # PRD-59: Ordered list of phases selected for this execution
+
+    def set_active_phases(self, phases: list):
+        """PRD-59: Set which phases are active for this execution (from PhaseSelector)"""
+        self.active_phases = phases
+
+    def _get_stage_name(self, stage_id) -> str:
+        """Get stage name supporting both int (legacy) and str (dynamic) IDs"""
+        return self.DYNAMIC_STAGES.get(stage_id, self.DYNAMIC_STAGES.get(str(stage_id), f"Stage {stage_id}"))
+
+    async def start_phase(self, phase_name: str):
+        """PRD-59: Mark a phase as started, emit SSE event"""
+        self.current_phase = phase_name
+        self.phase_start_times[phase_name] = datetime.now()
+        phase_info = self.PHASES.get(phase_name, {"label": phase_name, "stages": []})
+        phase_index = self.active_phases.index(phase_name) if phase_name in self.active_phases else 0
+        total_phases = len(self.active_phases) or 5
+
+        logger.info(f"🔷 PHASE {phase_name} START: {phase_info['label']} ({phase_index+1}/{total_phases})")
+
+        event_data = {
+            "phase": phase_name,
+            "phase_label": phase_info["label"],
+            "phase_index": phase_index,
+            "total_phases": total_phases,
+            "stages": [{"id": s, "name": self._get_stage_name(s)} for s in phase_info.get("stages", [])],
+            "timestamp": datetime.now().isoformat(),
+        }
+        await self._emit("phase_start", event_data)
+
+    async def complete_phase(self, phase_name: str, result: dict = None):
+        """PRD-59: Mark a phase as complete, emit SSE event"""
+        duration_ms = 0
+        if phase_name in self.phase_start_times:
+            duration_ms = int((datetime.now() - self.phase_start_times[phase_name]).total_seconds() * 1000)
+
+        phase_info = self.PHASES.get(phase_name, {"label": phase_name})
+        logger.info(f"🔷 PHASE {phase_name} COMPLETE: {phase_info['label']} ({duration_ms}ms)")
+
+        event_data = {
+            "phase": phase_name,
+            "phase_label": phase_info["label"],
+            "result": result or {},
+            "duration_ms": duration_ms,
+            "timestamp": datetime.now().isoformat(),
+        }
+        await self._emit("phase_complete", event_data)
+
+    async def start_stage(self, stage_num):
+        """Mark stage as started, emit SSE event. Accepts int or str (e.g. '2b')."""
         self.current_stage = stage_num
         self.stage_start_times[stage_num] = datetime.now()
-        
-        logger.info(f"🎯 STAGE {stage_num} START: {self.STAGES[stage_num]}")
-        
-        # Emit SSE event DIRECTLY to stream manager for instant UI updates
-        if self.stream_manager:
-            try:
-                await self.stream_manager.broadcast_event(
-                    execution_id=self.execution_id,
-                    event_type="stage_start",
-                    data={
-                        "stage": stage_num,
-                        "stage_name": self.STAGES[stage_num],
-                        "timestamp": datetime.now().isoformat()
-                    }
-                )
-            except Exception as e:
-                logger.warning(f"Failed to broadcast stage_start event: {e}")
-        
-        # Also publish to Redis for logging/monitoring (optional)
-        if self.redis:
-            try:
-                self.redis.publish_workflow_event(
-                    execution_id=self.execution_id,
-                    event_type="stage_start",
-                    data={
-                        "stage": stage_num,
-                        "stage_name": self.STAGES[stage_num],
-                        "timestamp": datetime.now().isoformat()
-                    }
-                )
-            except Exception as e:
-                logger.warning(f"Failed to publish stage_start to Redis: {e}")
-    
-    async def complete_stage(self, stage_num: int, result: dict = None):
-        """Mark stage as complete, emit SSE event"""
+        stage_name = self._get_stage_name(stage_num)
+
+        logger.info(f"🎯 STAGE {stage_num} START: {stage_name}")
+
+        event_data = {
+            "stage": stage_num,
+            "stage_name": stage_name,
+            "phase": self.current_phase,
+            "timestamp": datetime.now().isoformat(),
+        }
+        await self._emit("stage_start", event_data)
+
+    async def complete_stage(self, stage_num, result: dict = None):
+        """Mark stage as complete, emit SSE event. Accepts int or str (e.g. '2b')."""
         duration_ms = 0
         if stage_num in self.stage_start_times:
             duration_ms = int((datetime.now() - self.stage_start_times[stage_num]).total_seconds() * 1000)
-        
-        logger.info(f"✅ STAGE {stage_num} COMPLETE: {self.STAGES[stage_num]} ({duration_ms}ms)")
-        
-        # Emit SSE event DIRECTLY to stream manager for instant UI updates
+        stage_name = self._get_stage_name(stage_num)
+
+        logger.info(f"✅ STAGE {stage_num} COMPLETE: {stage_name} ({duration_ms}ms)")
+
+        event_data = {
+            "stage": stage_num,
+            "stage_name": stage_name,
+            "phase": self.current_phase,
+            "result": result or {},
+            "duration_ms": duration_ms,
+            "timestamp": datetime.now().isoformat(),
+        }
+        await self._emit("stage_complete", event_data)
+
+    async def _emit(self, event_type: str, data: dict):
+        """Emit event to both SSE stream manager and Redis"""
         if self.stream_manager:
             try:
                 await self.stream_manager.broadcast_event(
                     execution_id=self.execution_id,
-                    event_type="stage_complete",
-                    data={
-                        "stage": stage_num,
-                        "stage_name": self.STAGES[stage_num],
-                        "result": result or {},
-                        "duration_ms": duration_ms,
-                        "timestamp": datetime.now().isoformat()
-                    }
+                    event_type=event_type,
+                    data=data,
                 )
             except Exception as e:
-                logger.warning(f"Failed to broadcast stage_complete event: {e}")
-        
-        # Also publish to Redis for logging/monitoring (optional)
+                logger.warning(f"Failed to broadcast {event_type} event: {e}")
+
         if self.redis:
             try:
                 self.redis.publish_workflow_event(
                     execution_id=self.execution_id,
-                    event_type="stage_complete",
-                    data={
-                        "stage": stage_num,
-                        "stage_name": self.STAGES[stage_num],
-                        "result": result or {},
-                        "duration_ms": duration_ms,
-                        "timestamp": datetime.now().isoformat()
-                    }
+                    event_type=event_type,
+                    data=data,
                 )
             except Exception as e:
-                logger.warning(f"Failed to publish stage_complete to Redis: {e}")
+                logger.warning(f"Failed to publish {event_type} to Redis: {e}")
 
 
 
@@ -1507,6 +1553,87 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             attributes.flag_modified(execution, "input_data")
             db.commit()
 
+            # PRD-59: Use PhaseSelector to determine dynamic phase plan
+            try:
+                from modules.orchestrator.phase_selector import (
+                    PhaseSelector, ExecutionMode as PSExecutionMode,
+                    ComplexityLevel,
+                )
+                _ps_mode_map = {
+                    "AUTONOMOUS": PSExecutionMode.AUTONOMOUS,
+                    "RECIPE": PSExecutionMode.RECIPE,
+                    "HYBRID": PSExecutionMode.HYBRID,
+                }
+                phase_selector = PhaseSelector()
+
+                # Quick complexity estimate from step count / description length
+                step_count = len(predefined_steps) or len(predefined_tasks) or 1
+                desc_len = len(task_description)
+                if step_count <= 1 and desc_len < 100:
+                    _complexity = ComplexityLevel.ATOM
+                elif step_count <= 3:
+                    _complexity = ComplexityLevel.MOLECULE
+                elif step_count <= 6:
+                    _complexity = ComplexityLevel.CELL
+                elif step_count <= 10:
+                    _complexity = ComplexityLevel.ORGAN
+                else:
+                    _complexity = ComplexityLevel.ORGANISM
+
+                # Check prompt registry availability
+                _has_prompt_registry = False
+                try:
+                    from modules.prompts.registry import PromptRegistry
+                    _has_prompt_registry = True
+                except ImportError:
+                    pass
+
+                phase_specs = phase_selector.select_phases(
+                    mode=_ps_mode_map.get(execution_mode, PSExecutionMode.AUTONOMOUS),
+                    complexity=_complexity,
+                    agent_count=step_count,  # Rough proxy: steps ≈ agents
+                    has_context_sources=True,
+                    has_prompt_registry=_has_prompt_registry,
+                )
+
+                # Extract phase names for the tracker (map Phase enum → top-level name)
+                _phase_name_map = {
+                    "plan_full": "PLAN", "plan_partial": "PLAN",
+                    "prepare": "PREPARE",
+                    "execute_single": "EXECUTE", "execute_multi": "EXECUTE",
+                    "evaluate_full": "EVALUATE", "evaluate_light": "EVALUATE",
+                    "learn": "LEARN",
+                }
+                active_phases = []
+                for ps in phase_specs:
+                    mapped = _phase_name_map.get(ps.phase.value, ps.phase.value.upper())
+                    if mapped not in active_phases:
+                        active_phases.append(mapped)
+
+                # Store phase plan in execution metadata
+                execution.input_data["phase_plan"] = {
+                    "complexity": _complexity.value,
+                    "phases": [
+                        {"phase": ps.phase.value, "stages": [s.stage_name for s in ps.stages], "budget": ps.token_budget}
+                        for ps in phase_specs
+                    ],
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+
+                logger.info(f"📋 PRD-59 PhaseSelector: complexity={_complexity.value}, phases={active_phases}")
+            except Exception as ps_err:
+                logger.warning(f"PhaseSelector unavailable, using default phases: {ps_err}")
+                active_phases = ["PLAN", "PREPARE", "EXECUTE", "EVALUATE", "LEARN"]
+                if execution_mode == "RECIPE":
+                    active_phases = ["PREPARE", "EXECUTE", "EVALUATE", "LEARN"]
+
+            stage_tracker.set_active_phases(active_phases)
+
+            # ========== PHASE: PLAN (Stages 1, 2) ==========
+            if "PLAN" in active_phases:
+                await stage_tracker.start_phase("PLAN")
+
             # ========== STAGE 1: TASK DECOMPOSITION ==========
             # RECIPE mode: Skip - steps are pre-defined
             # HYBRID mode: Skip - partial steps are pre-defined
@@ -1906,6 +2033,12 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 # Ensure mem0_client is None so we know it's not available
                 mem0_client = None
             
+            # Complete PLAN phase, start PREPARE phase
+            if "PLAN" in active_phases:
+                await stage_tracker.complete_phase("PLAN", {"stages_completed": [1, 2]})
+            if "PREPARE" in active_phases:
+                await stage_tracker.start_phase("PREPARE")
+
             # ========== STAGE 3: CONTEXT ENGINEERING ==========
             await stage_tracker.start_stage(3)
             
@@ -1998,7 +2131,13 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 "enhanced_subtasks": len(context_enhancements),
                 "avg_context_quality": execution.input_data.get("context_engineering", {}).get("summary", {}).get("avg_context_quality", 0)
             })
-            
+
+            # Complete PREPARE phase, start EXECUTE phase
+            if "PREPARE" in active_phases:
+                await stage_tracker.complete_phase("PREPARE", {"stages_completed": [3]})
+            if "EXECUTE" in active_phases:
+                await stage_tracker.start_phase("EXECUTE")
+
             # ========== STAGE 4: AGENT EXECUTION ==========
             await stage_tracker.start_stage(4)
             
@@ -2145,7 +2284,13 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 "success_rate": execution_summary.get("success_rate", 0) if 'execution_summary' in locals() else 0,
                 "total_tokens": execution_summary.get("total_tokens_used", 0) if 'execution_summary' in locals() else 0
             })
-            
+
+            # Complete EXECUTE phase, start EVALUATE phase
+            if "EXECUTE" in active_phases:
+                await stage_tracker.complete_phase("EXECUTE", {"stages_completed": [4]})
+            if "EVALUATE" in active_phases:
+                await stage_tracker.start_phase("EVALUATE")
+
             # ========== STAGE 5: RESULT AGGREGATION ==========
             await stage_tracker.start_stage(5)
             
@@ -2247,103 +2392,122 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             await stage_tracker.complete_stage(6, {
                 "total_updates": learning_updates.get("total_updates", 0) if 'learning_updates' in locals() else 0
             })
-            
+
+            # Complete EVALUATE phase, start LEARN phase
+            if "EVALUATE" in active_phases:
+                await stage_tracker.complete_phase("EVALUATE", {"stages_completed": [5, 6]})
+            if "LEARN" in active_phases:
+                await stage_tracker.start_phase("LEARN")
+
             # ========== STAGE 7: QUALITY ASSESSMENT ==========
-            await stage_tracker.start_stage(7)
-            
-            # QUALITY ASSESSMENT
-            logger.info(f"🎯 Assessing workflow output quality...")
-            try:
-                from modules.orchestrator.stages import OutputQualityAssessor, OutputType
-                import os
+            # PRD-59: PhaseSelector may skip quality for EVALUATE_LIGHT (simple tasks)
+            _phase_plan = execution.input_data.get("phase_plan", {})
+            _skip_quality = not any(
+                "Quality Assessment" in p.get("stages", [])
+                for p in _phase_plan.get("phases", [])
+            ) if _phase_plan else False
 
-                # PRD-59 Fix 1: Use LLM-based quality assessment on real outputs
-                # For complex tasks (3+ subtasks), use LLM assessment
-                # For simple tasks, use heuristic to save cost
-                use_llm_quality = len(steps) >= 3 and os.environ.get("ENABLE_LLM_QUALITY_ASSESSMENT", "true").lower() == "true"
-
-                llm_client_for_quality = None
-                if use_llm_quality:
-                    try:
-                        from core.llm import create_llm_manager
-                        llm_client_for_quality = create_llm_manager(service_name="orchestrator")
-                    except Exception as llm_err:
-                        logger.warning(f"Could not create LLM for quality assessment: {llm_err}")
-
-                quality_assessor = OutputQualityAssessor(
-                    llm_client=llm_client_for_quality,
-                    use_llm=use_llm_quality and llm_client_for_quality is not None
-                )
-
-                # PRD-59: Build quality input from ACTUAL agent outputs, not metadata
-                actual_outputs = []
-                for step in steps:
-                    exec_result = step.get("execution_result", {})
-                    result_content = exec_result.get("result", "") or exec_result.get("output", "") or ""
-                    if result_content:
-                        actual_outputs.append({
-                            "subtask": step.get("description", "Unknown"),
-                            "agent": step.get("agent_name", "Unknown"),
-                            "output": str(result_content)[:2000],  # Truncate for token budget
-                            "tokens_used": exec_result.get("tokens_used", 0),
-                            "status": exec_result.get("status", "unknown"),
-                        })
-
-                completed_count = sum(1 for s in steps if s.get("execution_result", {}).get("status") == "completed")
-                total_count = len(steps) or 1
-
-                output_summary = json.dumps({
-                    "task": task_description[:500],
-                    "subtask_outputs": actual_outputs,
-                    "overall_success_rate": completed_count / total_count,
-                    "total_subtasks": len(steps),
-                }, indent=2)
-
-                # Assess quality
-                quality_assessment = await quality_assessor.assess_quality(
-                    output=output_summary,
-                    requirements=task_description,
-                    output_type=OutputType.GENERAL,
-                    quality_threshold=0.7
-                )
-                
-                # Store quality assessment
-                execution.input_data["quality_assessment"] = {
-                    "is_real": quality_assessment.assessment_method in ("llm", "hybrid"),
-                    "overall_score": quality_assessment.overall_score,
-                    "passes_threshold": quality_assessment.passes_threshold,
-                    "dimensions": {
-                        name: {
-                            "score": dim.score,
-                            "feedback": dim.feedback
-                        }
-                        for name, dim in quality_assessment.dimensions.items()
-                    },
-                    "strengths": quality_assessment.strengths,
-                    "weaknesses": quality_assessment.weaknesses,
-                    "improvement_suggestions": quality_assessment.improvement_suggestions
-                }
-                attributes.flag_modified(execution, "input_data")
-                db.commit()
-                
-                logger.info(
-                    f"✅ Quality assessment complete: {quality_assessment.overall_score:.0%} overall score "
-                    f"({'PASS' if quality_assessment.passes_threshold else 'FAIL'})"
-                )
-                
-            except Exception as e:
-                logger.error(f"❌ Quality assessment failed: {e}")
+            if _skip_quality:
+                logger.info(f"⏭️ SKIPPED Stage 7: EVALUATE_LIGHT mode — no LLM quality assessment")
                 execution.input_data["quality_assessment"] = {
                     "is_real": False,
-                    "error": str(e)
+                    "skip_reason": "EVALUATE_LIGHT — simple task",
+                    "overall_score": 0.7,
                 }
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
-            
-            await stage_tracker.complete_stage(7, {
-                "quality_score": quality_assessment.overall_score if 'quality_assessment' in locals() else 0,
-                "passes_threshold": quality_assessment.passes_threshold if 'quality_assessment' in locals() else False
-            })
+            else:
+                await stage_tracker.start_stage(7)
+
+                # QUALITY ASSESSMENT
+                logger.info(f"🎯 Assessing workflow output quality...")
+                try:
+                    from modules.orchestrator.stages import OutputQualityAssessor, OutputType
+                    import os
+
+                    # PRD-59 Fix 1: Use LLM-based quality assessment on real outputs
+                    use_llm_quality = len(steps) >= 3 and os.environ.get("ENABLE_LLM_QUALITY_ASSESSMENT", "true").lower() == "true"
+
+                    llm_client_for_quality = None
+                    if use_llm_quality:
+                        try:
+                            from core.llm import create_llm_manager
+                            llm_client_for_quality = create_llm_manager(service_name="orchestrator")
+                        except Exception as llm_err:
+                            logger.warning(f"Could not create LLM for quality assessment: {llm_err}")
+
+                    quality_assessor = OutputQualityAssessor(
+                        llm_client=llm_client_for_quality,
+                        use_llm=use_llm_quality and llm_client_for_quality is not None
+                    )
+
+                    # PRD-59: Build quality input from ACTUAL agent outputs, not metadata
+                    actual_outputs = []
+                    for step in steps:
+                        exec_result = step.get("execution_result", {})
+                        result_content = exec_result.get("result", "") or exec_result.get("output", "") or ""
+                        if result_content:
+                            actual_outputs.append({
+                                "subtask": step.get("description", "Unknown"),
+                                "agent": step.get("agent_name", "Unknown"),
+                                "output": str(result_content)[:2000],
+                                "tokens_used": exec_result.get("tokens_used", 0),
+                                "status": exec_result.get("status", "unknown"),
+                            })
+
+                    completed_count = sum(1 for s in steps if s.get("execution_result", {}).get("status") == "completed")
+                    total_count = len(steps) or 1
+
+                    output_summary = json.dumps({
+                        "task": task_description[:500],
+                        "subtask_outputs": actual_outputs,
+                        "overall_success_rate": completed_count / total_count,
+                        "total_subtasks": len(steps),
+                    }, indent=2)
+
+                    quality_assessment = await quality_assessor.assess_quality(
+                        output=output_summary,
+                        requirements=task_description,
+                        output_type=OutputType.GENERAL,
+                        quality_threshold=0.7
+                    )
+
+                    execution.input_data["quality_assessment"] = {
+                        "is_real": quality_assessment.assessment_method in ("llm", "hybrid"),
+                        "overall_score": quality_assessment.overall_score,
+                        "passes_threshold": quality_assessment.passes_threshold,
+                        "dimensions": {
+                            name: {
+                                "score": dim.score,
+                                "feedback": dim.feedback
+                            }
+                            for name, dim in quality_assessment.dimensions.items()
+                        },
+                        "strengths": quality_assessment.strengths,
+                        "weaknesses": quality_assessment.weaknesses,
+                        "improvement_suggestions": quality_assessment.improvement_suggestions
+                    }
+                    attributes.flag_modified(execution, "input_data")
+                    db.commit()
+
+                    logger.info(
+                        f"✅ Quality assessment complete: {quality_assessment.overall_score:.0%} overall score "
+                        f"({'PASS' if quality_assessment.passes_threshold else 'FAIL'})"
+                    )
+
+                except Exception as e:
+                    logger.error(f"❌ Quality assessment failed: {e}")
+                    execution.input_data["quality_assessment"] = {
+                        "is_real": False,
+                        "error": str(e)
+                    }
+                    attributes.flag_modified(execution, "input_data")
+                    db.commit()
+
+                await stage_tracker.complete_stage(7, {
+                    "quality_score": quality_assessment.overall_score if 'quality_assessment' in locals() else 0,
+                    "passes_threshold": quality_assessment.passes_threshold if 'quality_assessment' in locals() else False
+                })
             
             # ========== STAGE 8: MEMORY STORAGE ==========
             await stage_tracker.start_stage(8)
@@ -2455,7 +2619,11 @@ Key Learnings:
                 "status": "completed",
                 "total_cost": usage_summary.get("total_cost", 0)
             })
-            
+
+            # Complete LEARN phase — all phases done
+            if "LEARN" in active_phases:
+                await stage_tracker.complete_phase("LEARN", {"stages_completed": [7, 8, 9]})
+
             # Update workflow status and last_execution
             workflow.status = "completed"
             
