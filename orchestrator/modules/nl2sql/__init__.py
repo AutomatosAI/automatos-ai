@@ -4,30 +4,38 @@ NL2SQL Module
 
 Natural language to SQL query generation with intelligent features.
 
+PRD-61: Enhanced with RAG-based few-shot examples, error self-correction,
+schema linking, confidence scoring, Golden SQL training, and benchmarking.
+
 Usage:
     # Basic SQL generation
     from modules.nl2sql import NLToSQLService
     service = NLToSQLService(llm_provider)
     sql, explanation, metadata = service.generate_sql(question, schema)
-    
+
     # Full database knowledge service
     from modules.nl2sql import DatabaseKnowledgeService
     db_service = DatabaseKnowledgeService(...)
     result = await db_service.query_database(source_id, query, user_id)
-    
+
     # Smart Agent (PandasAI-inspired)
     from modules.nl2sql import SmartNL2SQLAgent
     agent = SmartNL2SQLAgent(llm_provider, schema_metadata)
-    
-    # Check if clarification needed
-    if agent.needs_clarification("show me sales"):
-        questions = agent.get_clarifications("show me sales")
-    
-    # Rephrase vague queries
-    better_query, reason = agent.rephrase_query("show me stuff")
-    
-    # Full smart query with all features
-    result = await agent.query("show me sales trends")
+
+    # Training examples (Vanna-inspired)
+    from modules.nl2sql import SQLExampleStore
+    store = SQLExampleStore()
+    await store.add_example("top 10 customers", "SELECT ...", source_id, ...)
+
+    # Schema linking
+    from modules.nl2sql import SchemaLinker
+    linker = SchemaLinker()
+    linked = await linker.link(question, schema)
+
+    # Confidence scoring
+    from modules.nl2sql import QueryConfidenceScorer
+    scorer = QueryConfidenceScorer()
+    confidence = scorer.score(context)
 
 Sellable as: automatos-nl2sql
 """
@@ -58,6 +66,19 @@ from .intelligence import (
 )
 from .intelligence.agent import create_smart_agent
 
+# PRD-61: Training (Vanna-inspired RAG for SQL)
+from .training.example_store import SQLExampleStore
+
+# PRD-61: Schema Linking
+from .query.schema_linker import SchemaLinker, LinkedSchema
+
+# PRD-61: Confidence Scoring
+from .query.confidence import QueryConfidenceScorer, ConfidenceScore, ScoringContext
+
+# PRD-61: Benchmarking
+from .benchmarks.runner import NL2SQLBenchmarkRunner
+from .benchmarks.comparator import SQLComparator
+
 # Aliases for convenience
 NLToSQLService = NaturalLanguageToSQLService
 
@@ -84,4 +105,16 @@ __all__ = [
     "QueryRephraser",
     "ResultExplainer",
     "VisualizationSuggester",
+    # PRD-61: Training
+    "SQLExampleStore",
+    # PRD-61: Schema Linking
+    "SchemaLinker",
+    "LinkedSchema",
+    # PRD-61: Confidence
+    "QueryConfidenceScorer",
+    "ConfidenceScore",
+    "ScoringContext",
+    # PRD-61: Benchmarking
+    "NL2SQLBenchmarkRunner",
+    "SQLComparator",
 ]

@@ -7,9 +7,22 @@ Inspired by PandasAI's agent.clarification_questions() feature.
 """
 
 import logging
+import re
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _word_boundary_match(keyword: str, text: str) -> bool:
+    """
+    Check if keyword appears as a whole word in text, not as part of another word.
+
+    PRD-61 Bug Fix: Prevents 'last' matching inside 'last_name',
+    'by' matching inside 'baby', etc.
+    """
+    # Use word boundary regex, but also exclude underscore-joined words
+    pattern = rf'(?<![a-zA-Z_]){re.escape(keyword)}(?![a-zA-Z_])'
+    return bool(re.search(pattern, text, re.IGNORECASE))
 
 
 class QueryClarifier:
@@ -19,6 +32,8 @@ class QueryClarifier:
     """
     
     # Common ambiguity patterns
+    # PRD-61 Bug Fix (US-008): Use word boundary patterns to prevent false positives.
+    # 'last_name' no longer triggers time_range, 'baby' no longer triggers grouping.
     AMBIGUOUS_PATTERNS = {
         'time_range': {
             'keywords': ['sales', 'orders', 'revenue', 'count', 'total', 'sum', 'average', 'trend'],
@@ -29,7 +44,7 @@ class QueryClarifier:
             ]
         },
         'grouping': {
-            'keywords': ['by', 'per', 'breakdown', 'split'],
+            'keywords': ['per', 'breakdown', 'split'],
             'missing': ['product', 'region', 'category', 'customer', 'user', 'country'],
             'questions': [
                 "How would you like to group the data? (e.g., by product, region, date)",
@@ -85,28 +100,28 @@ class QueryClarifier:
         if word_count <= 3:
             return True
         
-        # Check for ambiguity patterns
+        # Check for ambiguity patterns using word boundary matching (PRD-61 fix)
         for pattern_name, pattern in self.AMBIGUOUS_PATTERNS.items():
             keywords = pattern.get('keywords', [])
             missing = pattern.get('missing', [])
-            
-            # Check if query matches pattern keywords
-            has_keyword = any(kw in query_lower for kw in keywords)
-            
+
+            # Check if query matches pattern keywords using word boundaries
+            has_keyword = any(_word_boundary_match(kw, query_lower) for kw in keywords)
+
             if has_keyword:
                 # For time-based queries, check if time is specified
                 if pattern_name == 'time_range':
-                    has_time = any(t in query_lower for t in missing)
+                    has_time = any(_word_boundary_match(t, query_lower) for t in missing)
                     if not has_time:
                         return True
-                
+
                 # For entity queries, check if a table is referenced
                 if pattern.get('requires_entity'):
                     table_names = [t.get('name', '').lower() for t in schema_metadata.get('tables', [])]
                     has_entity = any(tbl in query_lower for tbl in table_names)
                     if not has_entity:
                         return True
-        
+
         return False
     
     def get_clarifications(
@@ -129,10 +144,10 @@ class QueryClarifier:
         query_lower = query.lower()
         questions = []
         
-        # Analyze what's missing
+        # Analyze what's missing (using word boundary matching — PRD-61 fix)
         for pattern_name, pattern in self.AMBIGUOUS_PATTERNS.items():
             keywords = pattern.get('keywords', [])
-            has_keyword = any(kw in query_lower for kw in keywords)
+            has_keyword = any(_word_boundary_match(kw, query_lower) for kw in keywords)
             
             if has_keyword:
                 # Add relevant questions

@@ -234,6 +234,77 @@ class SemanticDimension(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
+class NL2SQLTrainingExample(Base):
+    """
+    Training examples (question/SQL pairs) for few-shot retrieval.
+    PRD-61: Golden SQL system inspired by Vanna and Dataherald.
+    """
+    __tablename__ = 'nl2sql_training_examples'
+    __table_args__ = (
+        Index('idx_nl2sql_examples_workspace', 'workspace_id'),
+        Index('idx_nl2sql_examples_source', 'database_source_id'),
+        Index('idx_nl2sql_examples_verified', 'is_verified', postgresql_where='is_verified = TRUE'),
+        {'extend_existing': True}
+    )
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(ForeignKey("workspaces.id"), nullable=False)
+    database_source_id = Column(Integer, ForeignKey('database_knowledge_sources.id'), nullable=False)
+
+    question = Column(Text, nullable=False)
+    sql = Column(Text, nullable=False)
+    tables_used = Column(JSON, default=[])  # TEXT[] equivalent as JSON array
+
+    is_verified = Column(Boolean, default=False)
+    verification_source = Column(String(50))  # 'user', 'auto', 'import', 'ddl', 'documentation'
+
+    usage_count = Column(Integer, default=0)
+    last_used_at = Column(DateTime)
+
+    embedding_id = Column(String(255))  # reference to vector store
+
+    metadata = Column(JSON, default={})
+
+    created_by = Column(String(255))
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class NL2SQLBenchmarkRun(Base):
+    """Benchmark run tracking for NL2SQL accuracy measurement."""
+    __tablename__ = 'nl2sql_benchmark_runs'
+    __table_args__ = {'extend_existing': True}
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(ForeignKey("workspaces.id"), nullable=False)
+    database_source_id = Column(Integer, ForeignKey('database_knowledge_sources.id'), nullable=False)
+
+    total_examples = Column(Integer, default=0)
+    exact_match_rate = Column(Float, default=0.0)
+    execution_match_rate = Column(Float, default=0.0)
+
+    created_at = Column(DateTime, default=func.now())
+
+    results = relationship("NL2SQLBenchmarkResult", back_populates="run")
+
+
+class NL2SQLBenchmarkResult(Base):
+    """Individual benchmark test result."""
+    __tablename__ = 'nl2sql_benchmark_results'
+    __table_args__ = {'extend_existing': True}
+
+    id = Column(Integer, primary_key=True)
+    benchmark_run_id = Column(Integer, ForeignKey('nl2sql_benchmark_runs.id'), nullable=False)
+
+    question = Column(Text)
+    expected_sql = Column(Text)
+    generated_sql = Column(Text)
+    exact_match = Column(Boolean, default=False)
+    execution_match = Column(Boolean, default=False)
+
+    run = relationship("NL2SQLBenchmarkRun", back_populates="results")
+
+
 class DatabaseQueryTemplate(Base):
     """
     Pre-built query templates (20+ per database type as requested!)
@@ -317,6 +388,24 @@ class SemanticDimensionCreate(BaseModel):
     description: Optional[str] = None
     hierarchy_levels: Optional[List[str]] = None
     is_featured: bool = False
+
+
+class TrainingExampleCreate(BaseModel):
+    """Create a training example (question/SQL pair)"""
+    question: str
+    sql: str
+    tables_used: List[str] = []
+    is_verified: bool = False
+    metadata: Dict[str, Any] = {}
+
+
+class TrainingExampleUpdate(BaseModel):
+    """Update a training example"""
+    question: Optional[str] = None
+    sql: Optional[str] = None
+    tables_used: Optional[List[str]] = None
+    is_verified: Optional[bool] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class DatabaseQueryRequest(BaseModel):
