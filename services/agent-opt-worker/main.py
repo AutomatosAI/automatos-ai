@@ -61,7 +61,7 @@ def _run_single_template(template: str, inputs: Dict[str, str], model: str = "tu
             eval_templates=template,
             inputs=inputs,
             model_name=model,
-            timeout=30,
+            timeout=55,
         )
     except Exception as e:
         logger.warning(f"[{template}] scoring failed: {e}")
