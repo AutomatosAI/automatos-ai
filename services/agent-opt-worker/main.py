@@ -72,26 +72,33 @@ def _run_single_template(template: str, inputs: Dict[str, str], model: str = "tu
             logger.warning(f"[{template}] empty eval_results")
             return {"error": f"Empty result from SDK for {template}"}
         er = result.eval_results[0]
-        # Log all attributes for debugging
         er_dict = {k: v for k, v in vars(er).items() if not k.startswith("_")} if hasattr(er, "__dict__") else str(er)
         logger.info(f"[{template}] raw result: {er_dict}")
 
+        # SDK returns: output="Passed"/"Failed", output_type="Pass/Fail",
+        # reason=explanation, runtime=ms, eval_id=uuid
+        output = getattr(er, "output", "")
+        reason = getattr(er, "reason", "") or ""
         score = getattr(er, "score", None)
-        failure = getattr(er, "failure", None)
-        reason = getattr(er, "reason", "") or getattr(er, "output", "")
-        # metric_name can also hold the classification
-        metric_name = getattr(er, "metric_name", None)
+        runtime_ms = getattr(er, "runtime", None)
 
-        # Determine pass/fail: explicit failure field > score threshold > assume pass
-        if failure is not None:
-            passed = not failure
+        # Parse pass/fail from output field
+        output_lower = (output or "").lower().strip()
+        if output_lower == "passed":
+            passed = True
+            if score is None:
+                score = 1.0
+        elif output_lower == "failed":
+            passed = False
+            if score is None:
+                score = 0.0
         elif score is not None:
             passed = score >= 0.5
         else:
-            # Text-only templates: check if reason indicates success
             passed = True
+            score = 1.0
 
-        logger.info(f"[{template}] score={score} passed={passed} failure={failure}")
+        logger.info(f"[{template}] output={output} score={score} passed={passed}")
         return {"score": score, "passed": passed, "reason": reason}
     except (IndexError, AttributeError) as e:
         logger.warning(f"[{template}] parse error: {e}")
