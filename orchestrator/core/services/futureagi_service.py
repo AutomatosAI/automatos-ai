@@ -154,18 +154,67 @@ class FutureAGIService:
                         model_name=eval_model,
                     )
 
-                    # Extract score from BatchRunResult
-                    if batch_result and hasattr(batch_result, "eval_results") and batch_result.eval_results:
+                    # Debug: log the raw result structure
+                    logger.info(f"[{metric_name}] batch_result type={type(batch_result).__name__}")
+                    logger.info(f"[{metric_name}] batch_result attrs={[a for a in dir(batch_result) if not a.startswith('_')]}")
+                    if hasattr(batch_result, "eval_results"):
+                        logger.info(f"[{metric_name}] eval_results={batch_result.eval_results}")
+                    if hasattr(batch_result, "results"):
+                        logger.info(f"[{metric_name}] results={batch_result.results}")
+                    # Try to log as dict
+                    try:
+                        logger.info(f"[{metric_name}] as dict={batch_result.__dict__}")
+                    except Exception:
+                        logger.info(f"[{metric_name}] str={batch_result}")
+
+                    # Extract score — try multiple SDK response shapes
+                    score_extracted = False
+
+                    # Shape 1: batch_result.eval_results[0].metrics[0].value
+                    if hasattr(batch_result, "eval_results") and batch_result.eval_results:
                         first = batch_result.eval_results[0]
                         score_val = None
-                        if first.metrics:
-                            score_val = first.metrics[0].value
+                        if hasattr(first, "metrics") and first.metrics:
+                            score_val = first.metrics[0].value if hasattr(first.metrics[0], "value") else None
                         results[metric_name] = {
                             "score": float(score_val) if score_val is not None else None,
-                            "passed": not first.failure,
-                            "reason": first.reason or None,
+                            "passed": not getattr(first, "failure", True),
+                            "reason": getattr(first, "reason", None),
                         }
-                    else:
+                        score_extracted = True
+
+                    # Shape 2: batch_result.results (list of dicts)
+                    if not score_extracted and hasattr(batch_result, "results") and batch_result.results:
+                        first = batch_result.results[0]
+                        if isinstance(first, dict):
+                            score_val = first.get("score") or first.get("value")
+                            results[metric_name] = {
+                                "score": float(score_val) if score_val is not None else None,
+                                "passed": first.get("passed", first.get("pass")),
+                                "reason": first.get("reason"),
+                            }
+                            score_extracted = True
+
+                    # Shape 3: batch_result is iterable
+                    if not score_extracted:
+                        try:
+                            items = list(batch_result)
+                            if items:
+                                first = items[0]
+                                logger.info(f"[{metric_name}] iterable first item type={type(first).__name__} val={first}")
+                                if isinstance(first, dict):
+                                    score_val = first.get("score") or first.get("value")
+                                    results[metric_name] = {
+                                        "score": float(score_val) if score_val is not None else None,
+                                    }
+                                    score_extracted = True
+                                elif hasattr(first, "score"):
+                                    results[metric_name] = {"score": float(first.score)}
+                                    score_extracted = True
+                        except (TypeError, StopIteration):
+                            pass
+
+                    if not score_extracted:
                         results[metric_name] = {"score": None, "note": "No result returned"}
 
                 except Exception as metric_err:
@@ -221,17 +270,41 @@ class FutureAGIService:
                         model_name="gpt-4",
                     )
 
-                    if batch_result and batch_result.eval_results:
+                    # Debug logging
+                    logger.info(f"[safety:{check_name}] type={type(batch_result).__name__}")
+                    try:
+                        logger.info(f"[safety:{check_name}] dict={batch_result.__dict__}")
+                    except Exception:
+                        logger.info(f"[safety:{check_name}] str={batch_result}")
+
+                    safe_extracted = False
+
+                    # Shape 1: eval_results
+                    if hasattr(batch_result, "eval_results") and batch_result.eval_results:
                         first = batch_result.eval_results[0]
                         score_val = None
-                        if first.metrics:
-                            score_val = first.metrics[0].value
+                        if hasattr(first, "metrics") and first.metrics:
+                            score_val = first.metrics[0].value if hasattr(first.metrics[0], "value") else None
                         checks[check_name] = {
                             "score": float(score_val) if score_val is not None else None,
-                            "safe": not first.failure,
-                            "reason": first.reason or None,
+                            "safe": not getattr(first, "failure", True),
+                            "reason": getattr(first, "reason", None),
                         }
-                    else:
+                        safe_extracted = True
+
+                    # Shape 2: results list
+                    if not safe_extracted and hasattr(batch_result, "results") and batch_result.results:
+                        first = batch_result.results[0]
+                        if isinstance(first, dict):
+                            score_val = first.get("score") or first.get("value")
+                            checks[check_name] = {
+                                "score": float(score_val) if score_val is not None else None,
+                                "safe": first.get("safe", first.get("passed", first.get("pass"))),
+                                "reason": first.get("reason"),
+                            }
+                            safe_extracted = True
+
+                    if not safe_extracted:
                         checks[check_name] = {"score": None, "safe": None}
 
                 except Exception as e:
