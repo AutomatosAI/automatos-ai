@@ -434,3 +434,75 @@ async def get_call_graph_api(
         raise HTTPException(status_code=500, detail=f"Failed to retrieve call graph: {e}")
 
 
+# ── PRD-62: Architecture Analysis (US-012) ─────────────────────────
+
+@router.get("/projects/{project_id}/architecture")
+async def get_architecture_analysis(
+    project_id: int,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """
+    Get architecture analysis: Louvain module clusters, coupling metrics,
+    hotspots, and circular dependencies.
+    """
+    try:
+        from modules.codegraph.analysis import ArchitectureAnalyzer
+        analyzer = ArchitectureAnalyzer(db)
+        report = await analyzer.analyze(
+            project_id=project_id,
+            workspace_id=ctx.workspace_id,
+        )
+        return {
+            "project_id": report.project_id,
+            "project_name": report.project_name,
+            "communities": report.communities,
+            "metrics": report.metrics,
+            "hotspots": report.hotspots,
+            "cycles": report.cycles,
+            "total_nodes": report.total_nodes,
+            "total_edges": report.total_edges,
+            "modularity_score": report.modularity_score,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Architecture analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Architecture analysis failed: {e}")
+
+
+# ── PRD-62: Natural Language Code Queries (US-015) ──────────────────
+
+class CodeQuestionRequest(BaseModel):
+    """Request to ask a natural language question about code."""
+    question: str = Field(..., min_length=1, description="Natural language question about the codebase")
+
+
+@router.post("/projects/{project_id}/ask")
+async def ask_code_question(
+    project_id: int,
+    body: CodeQuestionRequest,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """
+    Ask a natural language question about the codebase.
+    Examples: "What functions call authenticate?", "Show me all API endpoints"
+    """
+    if not body.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    try:
+        from modules.codegraph.search import NLCodeSearch
+        nl_search = NLCodeSearch(db)
+        result = await nl_search.query(
+            question=body.question,
+            project_id=project_id,
+            workspace_id=ctx.workspace_id,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"NL code query error: {e}")
+        raise HTTPException(status_code=500, detail=f"Code question failed: {e}")
