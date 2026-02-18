@@ -44,11 +44,23 @@ class SQLExampleStore:
             return None
 
     def _get_db_session(self):
-        """Get or create DB session."""
+        """Get or create DB session. If creating a new one, caller must close it."""
         if self.db_session:
             return self.db_session
         from core.database.database import SessionLocal
         return SessionLocal()
+
+    def _should_close_session(self) -> bool:
+        """True if we created the session ourselves (not injected)."""
+        return self.db_session is None
+
+    def _close_if_owned(self, db):
+        """Close session if we created it (not injected)."""
+        if self._should_close_session() and db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
     async def add_example(
         self,
@@ -110,6 +122,8 @@ class SQLExampleStore:
             db.rollback()
             logger.error(f"Failed to add training example: {e}")
             raise
+        finally:
+            self._close_if_owned(db)
 
     async def get_similar_examples(
         self,
@@ -142,42 +156,10 @@ class SQLExampleStore:
             if not all_examples:
                 return []
 
-            # Try embedding-based similarity
-            em = self._get_embedding_manager()
-            if em:
-                try:
-                    query_embedding = em.embed_text(question)
-                    if query_embedding is not None:
-                        scored = []
-                        for ex in all_examples:
-                            # Generate embedding for stored question
-                            ex_embedding = em.embed_text(ex.question)
-                            if ex_embedding is not None:
-                                similarity = self._cosine_similarity(query_embedding, ex_embedding)
-                                if similarity >= min_similarity:
-                                    scored.append((similarity, ex))
-
-                        scored.sort(key=lambda x: x[0], reverse=True)
-                        results = []
-                        for sim, ex in scored[:limit]:
-                            results.append({
-                                "id": ex.id,
-                                "question": ex.question,
-                                "sql": ex.sql,
-                                "tables_used": ex.tables_used,
-                                "similarity": round(sim, 3),
-                                "is_verified": ex.is_verified,
-                                "usage_count": ex.usage_count or 0,
-                            })
-                            # Update usage count
-                            ex.usage_count = (ex.usage_count or 0) + 1
-                            ex.last_used_at = datetime.utcnow()
-
-                        if results:
-                            db.commit()
-                            return results
-                except Exception as e:
-                    logger.warning(f"Embedding similarity failed, falling back to keyword: {e}")
+            # Note: Embedding-based similarity requires a vector store to avoid
+            # O(N) re-embedding. Until embeddings are persisted in a vector store,
+            # we use the keyword fallback which is fast and effective for moderate
+            # example counts. The embedding_id field is reserved for future use.
 
             # Fallback: keyword-based similarity
             return self._keyword_similarity(question, all_examples, limit, db)
@@ -185,6 +167,8 @@ class SQLExampleStore:
         except Exception as e:
             logger.error(f"Failed to get similar examples: {e}")
             return []
+        finally:
+            self._close_if_owned(db)
 
     def _keyword_similarity(
         self,
@@ -242,18 +226,21 @@ class SQLExampleStore:
         from core.models.database_knowledge import NL2SQLTrainingExample
 
         db = self._get_db_session()
-        example = db.query(NL2SQLTrainingExample).filter(
-            NL2SQLTrainingExample.id == example_id,
-            NL2SQLTrainingExample.workspace_id == workspace_id
-        ).first()
-        if not example:
-            raise ValueError(f"Example {example_id} not found")
+        try:
+            example = db.query(NL2SQLTrainingExample).filter(
+                NL2SQLTrainingExample.id == example_id,
+                NL2SQLTrainingExample.workspace_id == workspace_id
+            ).first()
+            if not example:
+                raise ValueError(f"Example {example_id} not found")
 
-        example.is_verified = True
-        example.verification_source = "user"
-        example.updated_at = datetime.utcnow()
-        db.commit()
-        logger.info(f"Marked example {example_id} as verified (Golden SQL)")
+            example.is_verified = True
+            example.verification_source = "user"
+            example.updated_at = datetime.utcnow()
+            db.commit()
+            logger.info(f"Marked example {example_id} as verified (Golden SQL)")
+        finally:
+            self._close_if_owned(db)
 
     async def add_ddl(
         self,
@@ -294,16 +281,19 @@ class SQLExampleStore:
         from core.models.database_knowledge import NL2SQLTrainingExample
 
         db = self._get_db_session()
-        example = db.query(NL2SQLTrainingExample).filter(
-            NL2SQLTrainingExample.id == example_id,
-            NL2SQLTrainingExample.workspace_id == workspace_id
-        ).first()
-        if not example:
-            raise ValueError(f"Example {example_id} not found")
+        try:
+            example = db.query(NL2SQLTrainingExample).filter(
+                NL2SQLTrainingExample.id == example_id,
+                NL2SQLTrainingExample.workspace_id == workspace_id
+            ).first()
+            if not example:
+                raise ValueError(f"Example {example_id} not found")
 
-        db.delete(example)
-        db.commit()
-        logger.info(f"Deleted training example {example_id}")
+            db.delete(example)
+            db.commit()
+            logger.info(f"Deleted training example {example_id}")
+        finally:
+            self._close_if_owned(db)
 
     async def get_stats(
         self,
@@ -312,38 +302,40 @@ class SQLExampleStore:
     ) -> Dict[str, Any]:
         """Get training example statistics."""
         from core.models.database_knowledge import NL2SQLTrainingExample
-        from sqlalchemy import func
 
         db = self._get_db_session()
-        base_query = db.query(NL2SQLTrainingExample).filter(
-            NL2SQLTrainingExample.workspace_id == workspace_id,
-            NL2SQLTrainingExample.database_source_id == int(database_source_id),
-        )
+        try:
+            base_query = db.query(NL2SQLTrainingExample).filter(
+                NL2SQLTrainingExample.workspace_id == workspace_id,
+                NL2SQLTrainingExample.database_source_id == int(database_source_id),
+            )
 
-        total = base_query.count()
-        verified = base_query.filter(NL2SQLTrainingExample.is_verified == True).count()
-        auto_generated = base_query.filter(
-            NL2SQLTrainingExample.verification_source == "auto"
-        ).count()
+            total = base_query.count()
+            verified = base_query.filter(NL2SQLTrainingExample.is_verified.is_(True)).count()
+            auto_generated = base_query.filter(
+                NL2SQLTrainingExample.verification_source == "auto"
+            ).count()
 
-        # Most used examples
-        most_used = base_query.order_by(
-            NL2SQLTrainingExample.usage_count.desc()
-        ).limit(5).all()
+            # Most used examples
+            most_used = base_query.order_by(
+                NL2SQLTrainingExample.usage_count.desc()
+            ).limit(5).all()
 
-        return {
-            "total_examples": total,
-            "verified_count": verified,
-            "unverified_count": total - verified,
-            "auto_generated_count": auto_generated,
-            "most_used_examples": [
-                {
-                    "id": ex.id,
-                    "question": ex.question,
-                    "sql": ex.sql[:200],
-                    "usage_count": ex.usage_count or 0,
-                    "is_verified": ex.is_verified,
-                }
-                for ex in most_used
-            ],
-        }
+            return {
+                "total_examples": total,
+                "verified_count": verified,
+                "unverified_count": total - verified,
+                "auto_generated_count": auto_generated,
+                "most_used_examples": [
+                    {
+                        "id": ex.id,
+                        "question": ex.question,
+                        "sql": ex.sql[:200],
+                        "usage_count": ex.usage_count or 0,
+                        "is_verified": ex.is_verified,
+                    }
+                    for ex in most_used
+                ],
+            }
+        finally:
+            self._close_if_owned(db)

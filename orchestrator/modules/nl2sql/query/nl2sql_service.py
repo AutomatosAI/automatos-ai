@@ -122,10 +122,7 @@ class NaturalLanguageToSQLService:
         # Use schema linker if available, otherwise fall back to improved scoring
         if self.schema_linker:
             try:
-                import asyncio
-                linked = asyncio.get_event_loop().run_until_complete(
-                    self.schema_linker.link(question, schema_metadata, semantic_layer)
-                )
+                linked = self.schema_linker.link(question, schema_metadata, semantic_layer)
                 relevant_tables = linked.tables
             except Exception:
                 relevant_tables = self._get_relevant_tables(question, schema_metadata)

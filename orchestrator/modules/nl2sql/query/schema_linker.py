@@ -44,7 +44,7 @@ class SchemaLinker:
     def __init__(self, embedding_manager=None):
         self.embedding_manager = embedding_manager
 
-    async def link(
+    def link(
         self,
         question: str,
         schema_metadata: Dict[str, Any],

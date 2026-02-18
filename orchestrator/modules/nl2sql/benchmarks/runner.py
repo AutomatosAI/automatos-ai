@@ -79,15 +79,15 @@ class NL2SQLBenchmarkRunner:
                     dialect=dialect
                 )
 
-                # Compare: exact match (normalized)
+                # Compare: exact match (normalized SQL comparison)
                 exact = self.comparator.exact_match(generated_sql, expected_sql)
+                # Note: execution_match requires a live DB connection to execute both
+                # SQLs and compare results. For now it mirrors exact_match.
+                # TODO: Add optional db_engine param to enable actual execution matching
+                exec_match = exact
                 if exact:
                     exact_matches += 1
-                    exec_matches += 1  # Exact match implies execution match
-                    exec_match = True
-                else:
-                    # We don't execute in benchmarks by default (would need DB connection)
-                    exec_match = False
+                    exec_matches += 1
 
                 results.append({
                     'question': question,
