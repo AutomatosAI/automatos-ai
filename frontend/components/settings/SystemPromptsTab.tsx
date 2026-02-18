@@ -559,19 +559,70 @@ export function SystemPromptsTab() {
                     <span className="text-xs text-muted-foreground">{new Date(run.created_at).toLocaleString()}</span>
                   </div>
                   {run.error_message && <p className="text-xs text-destructive mt-1">{run.error_message}</p>}
-                  {run.scores && (
-                    <div className="mt-2 grid grid-cols-3 gap-2">
-                      {Object.entries(run.scores.scores || run.scores).map(([key, val]) => {
-                        if (key === 'metrics_run' || key === 'error') return null
-                        const score = typeof val === 'object' ? (val as any)?.score : val
+
+                  {/* Assess results */}
+                  {run.scores && run.run_type === 'assess' && run.scores.scores && (
+                    <div className="mt-2 space-y-2">
+                      {Object.entries(run.scores.scores as Record<string, any>).map(([key, val]) => {
+                        const v = val as any
+                        const passed = v?.passed
+                        const score = v?.score
                         const pct = score != null ? Math.round(Number(score) * 100) : null
                         return (
                           <div key={key} className="text-xs">
-                            <span className="text-muted-foreground">{key.replace(/_/g, ' ')}: </span>
-                            <span className="font-medium">{pct != null ? `${pct}%` : 'N/A'}</span>
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className={cn('inline-block w-1.5 h-1.5 rounded-full', passed ? 'bg-emerald-400' : passed === false ? 'bg-amber-400' : 'bg-zinc-400')} />
+                              <span className="font-medium">{key.replace(/_/g, ' ')}</span>
+                              {pct != null && <span className="text-muted-foreground">({pct}%)</span>}
+                            </div>
+                            {v?.reason && <p className="text-muted-foreground ml-3 line-clamp-2">{v.reason}</p>}
                           </div>
                         )
                       })}
+                    </div>
+                  )}
+
+                  {/* Safety results */}
+                  {run.scores && run.run_type === 'safety' && (
+                    <div className="mt-2 space-y-1.5">
+                      {run.scores.safe != null && (
+                        <div className="flex items-center gap-1.5 text-xs font-medium">
+                          <span className={cn('inline-block w-2 h-2 rounded-full', run.scores.safe ? 'bg-emerald-400' : 'bg-red-400')} />
+                          {run.scores.safe ? 'All checks passed' : 'Issues detected'}
+                        </div>
+                      )}
+                      {run.scores.checks && Object.entries(run.scores.checks as Record<string, any>).map(([key, val]) => {
+                        const v = val as any
+                        return (
+                          <div key={key} className="text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <span className={cn('inline-block w-1.5 h-1.5 rounded-full', v?.safe ? 'bg-emerald-400' : v?.safe === false ? 'bg-red-400' : 'bg-zinc-400')} />
+                              <span className="font-medium">{key.replace(/_/g, ' ')}</span>
+                              {v?.safe != null && <span className="text-muted-foreground">({v.safe ? 'safe' : 'flagged'})</span>}
+                            </div>
+                            {v?.reason && <p className="text-muted-foreground ml-3 line-clamp-2">{v.reason}</p>}
+                            {v?.error && <p className="text-amber-400 ml-3">{v.error}</p>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Optimize results */}
+                  {run.scores && run.run_type === 'optimize' && (
+                    <div className="mt-2 text-xs space-y-1">
+                      {run.scores.status === 'submitted' && (
+                        <p className="text-blue-400">{run.scores.message || 'Optimization submitted to FutureAGI'}</p>
+                      )}
+                      {run.scores.optimized_prompt && (
+                        <div>
+                          <span className="text-muted-foreground">Optimized prompt:</span>
+                          <p className="mt-1 p-2 rounded-lg bg-secondary/30 whitespace-pre-wrap">{run.scores.optimized_prompt}</p>
+                        </div>
+                      )}
+                      {run.scores.improve_id && (
+                        <p className="text-muted-foreground">Job ID: {run.scores.improve_id}</p>
+                      )}
                     </div>
                   )}
                 </div>
