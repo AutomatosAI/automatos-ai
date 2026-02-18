@@ -1631,4 +1631,188 @@ class CodeGraphService:
             "edges": edges
         }
 
+    # ── PRD-62: Architecture Analysis (US-007) ────────────────────────
 
+    async def analyze_architecture(
+        self,
+        project_id: int,
+        workspace_id: Optional[str] = None,
+        focus_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get high-level architecture overview: modules, key symbols, dependency patterns.
+
+        Args:
+            project_id: Project to analyze
+            workspace_id: Workspace for isolation
+            focus_path: Optional directory prefix to focus on
+        """
+        # Verify project exists
+        project = self.db.execute(
+            text("SELECT id, name FROM codegraph_projects WHERE id = :id AND workspace_id = :wid"),
+            {"id": project_id, "wid": workspace_id}
+        ).fetchone()
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+
+        # Fetch symbols (optionally filtered by path)
+        if focus_path:
+            symbols = self.db.execute(
+                text("""
+                    SELECT id, name, qualified_name, symbol_type, file_path, line_number
+                    FROM codegraph_symbols
+                    WHERE project_id = :pid AND workspace_id = :wid AND file_path LIKE :fp
+                """),
+                {"pid": project_id, "wid": workspace_id, "fp": f"{focus_path}%"}
+            ).fetchall()
+        else:
+            symbols = self.db.execute(
+                text("""
+                    SELECT id, name, qualified_name, symbol_type, file_path, line_number
+                    FROM codegraph_symbols
+                    WHERE project_id = :pid AND workspace_id = :wid
+                """),
+                {"pid": project_id, "wid": workspace_id}
+            ).fetchall()
+
+        # Fetch relationships
+        relationships = self.db.execute(
+            text("""
+                SELECT r.from_symbol_id, r.to_symbol_id, r.relationship_type
+                FROM codegraph_relationships r
+                WHERE r.project_id = :pid AND r.workspace_id = :wid
+                AND r.relationship_type != 'external_reference'
+            """),
+            {"pid": project_id, "wid": workspace_id}
+        ).fetchall()
+
+        # Group symbols by file
+        files_map: Dict[str, List[Dict]] = {}
+        symbol_type_counts: Dict[str, int] = {}
+        for s in symbols:
+            fp = s.file_path
+            if fp not in files_map:
+                files_map[fp] = []
+            files_map[fp].append({
+                "id": s.id, "name": s.name, "type": s.symbol_type, "line": s.line_number
+            })
+            symbol_type_counts[s.symbol_type] = symbol_type_counts.get(s.symbol_type, 0) + 1
+
+        # Relationship type counts
+        rel_type_counts: Dict[str, int] = {}
+        incoming_counts: Dict[int, int] = {}
+        for r in relationships:
+            rel_type_counts[r.relationship_type] = rel_type_counts.get(r.relationship_type, 0) + 1
+            if r.to_symbol_id:
+                incoming_counts[r.to_symbol_id] = incoming_counts.get(r.to_symbol_id, 0) + 1
+
+        # Top referenced symbols (by incoming relationship count)
+        symbol_id_map = {s.id: s for s in symbols}
+        top_referenced = sorted(incoming_counts.items(), key=lambda x: x[1], reverse=True)[:20]
+        top_symbols = []
+        for sym_id, count in top_referenced:
+            s = symbol_id_map.get(sym_id)
+            if s:
+                top_symbols.append({
+                    "name": s.name, "qualified_name": s.qualified_name,
+                    "type": s.symbol_type, "file": s.file_path,
+                    "incoming_references": count,
+                })
+
+        return {
+            "project_id": project_id,
+            "project_name": project.name,
+            "total_symbols": len(symbols),
+            "total_relationships": len(relationships),
+            "total_files": len(files_map),
+            "symbol_type_counts": symbol_type_counts,
+            "relationship_type_counts": rel_type_counts,
+            "top_referenced_symbols": top_symbols,
+            "files": {fp: syms for fp, syms in sorted(files_map.items())},
+        }
+
+    async def find_dependencies(
+        self,
+        project_id: int,
+        symbol_name: str,
+        direction: str = 'both',
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Find all symbols that depend on a given symbol, or that it depends on.
+
+        Args:
+            project_id: Project to search
+            symbol_name: Symbol name (simple or qualified)
+            direction: 'dependents', 'dependencies', or 'both'
+            workspace_id: Workspace for isolation
+        """
+        # Find the target symbol(s)
+        target_symbols = self.db.execute(
+            text("""
+                SELECT id, name, qualified_name, file_path, symbol_type
+                FROM codegraph_symbols
+                WHERE project_id = :pid AND workspace_id = :wid
+                AND (name = :name OR qualified_name = :name)
+            """),
+            {"pid": project_id, "wid": workspace_id, "name": symbol_name}
+        ).fetchall()
+
+        if not target_symbols:
+            return {
+                "symbol": symbol_name, "direction": direction,
+                "dependents": [], "dependencies": [], "error": "Symbol not found"
+            }
+
+        target_ids = [s.id for s in target_symbols]
+        dependents = []
+        dependencies = []
+
+        if direction in ('dependents', 'both'):
+            # Symbols that reference target (incoming edges)
+            for tid in target_ids:
+                rows = self.db.execute(
+                    text("""
+                        SELECT DISTINCT s.name, s.qualified_name, s.file_path, s.symbol_type, r.relationship_type
+                        FROM codegraph_relationships r
+                        JOIN codegraph_symbols s ON s.id = r.from_symbol_id
+                        WHERE r.to_symbol_id = :tid AND r.project_id = :pid
+                        AND r.relationship_type != 'external_reference'
+                    """),
+                    {"tid": tid, "pid": project_id}
+                ).fetchall()
+                for row in rows:
+                    dependents.append({
+                        "name": row.name, "qualified_name": row.qualified_name,
+                        "file": row.file_path, "type": row.symbol_type,
+                        "relationship": row.relationship_type,
+                    })
+
+        if direction in ('dependencies', 'both'):
+            # Symbols that target depends on (outgoing edges)
+            for tid in target_ids:
+                rows = self.db.execute(
+                    text("""
+                        SELECT DISTINCT s.name, s.qualified_name, s.file_path, s.symbol_type, r.relationship_type
+                        FROM codegraph_relationships r
+                        JOIN codegraph_symbols s ON s.id = r.to_symbol_id
+                        WHERE r.from_symbol_id = :tid AND r.project_id = :pid
+                        AND r.relationship_type != 'external_reference'
+                    """),
+                    {"tid": tid, "pid": project_id}
+                ).fetchall()
+                for row in rows:
+                    dependencies.append({
+                        "name": row.name, "qualified_name": row.qualified_name,
+                        "file": row.file_path, "type": row.symbol_type,
+                        "relationship": row.relationship_type,
+                    })
+
+        return {
+            "symbol": symbol_name,
+            "direction": direction,
+            "dependents": dependents,
+            "dependencies": dependencies,
+            "dependents_count": len(dependents),
+            "dependencies_count": len(dependencies),
+        }
