@@ -109,7 +109,7 @@ export function useAgentAnalytics(days: number = 30) {
           avgRunTime: agent.performance_metrics?.avg_execution_time || 0,
           tokensUsed: agent.model_usage_stats?.total_tokens || 0,
           cost: agent.model_usage_stats?.total_cost || 0,
-          llmModel: agent.model_config?.model_id || 'unknown',
+          llmModel: agent.agent_model_config?.model_id || 'unknown',
           totalRequests: agent.model_usage_stats?.total_requests || 0,
           lastUsed: agent.model_usage_stats?.last_used_at || agent.updated_at,
         })),
@@ -273,7 +273,7 @@ export function useCostAnalyticsUnified(days: number = 30) {
         // Derive from agent model_usage_stats
         const modelMap: Record<string, { requests: number; inputTokens: number; outputTokens: number; cost: number; agents: Set<string> }> = {}
         agentList.forEach((agent: any) => {
-          const model = agent.model_config?.model_id || 'unknown'
+          const model = agent.agent_model_config?.model_id || 'unknown'
           if (!modelMap[model]) modelMap[model] = { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0, agents: new Set() }
           modelMap[model].requests += agent.model_usage_stats?.total_requests || 0
           modelMap[model].inputTokens += agent.model_usage_stats?.input_tokens || 0
@@ -307,14 +307,14 @@ export function useCostAnalyticsUnified(days: number = 30) {
           mostExpensiveAgent: mostExpensive?.model_usage_stats?.total_cost > 0 ? {
             name: mostExpensive.name,
             cost: mostExpensive.model_usage_stats.total_cost,
-            model: mostExpensive.model_config?.model_id || 'unknown',
+            model: mostExpensive.agent_model_config?.model_id || 'unknown',
           } : null,
         },
         byModel,
         byAgent: agentList.map((agent: any) => ({
           id: agent.id,
           name: agent.name,
-          model: agent.model_config?.model_id || 'unknown',
+          model: agent.agent_model_config?.model_id || 'unknown',
           tokens: agent.model_usage_stats?.total_tokens || 0,
           cost: agent.model_usage_stats?.total_cost || 0,
           requests: agent.model_usage_stats?.total_requests || 0,
@@ -386,7 +386,7 @@ export function useRecommendations() {
 
       // Analyze agent LLM usage
       agentList.forEach((agent: any) => {
-        const model = agent.model_config?.model_id || ''
+        const model = agent.agent_model_config?.model_id || ''
         const cost = agent.model_usage_stats?.total_cost || 0
         const tokens = agent.model_usage_stats?.total_tokens || 0
         const avgTokens = agent.model_usage_stats?.total_requests > 0
@@ -756,7 +756,7 @@ export function useAdminCostAnalytics(period: string = '30d') {
       // Build provider breakdown from agent model configs
       const providerMap: Record<string, { cost: number; requests: number }> = {}
       agentList.forEach((a: any) => {
-        const provider = a.model_config?.provider || 'unknown'
+        const provider = a.agent_model_config?.provider || 'unknown'
         if (!providerMap[provider]) providerMap[provider] = { cost: 0, requests: 0 }
         providerMap[provider].cost += a.model_usage_stats?.total_cost || 0
         providerMap[provider].requests += a.model_usage_stats?.total_requests || 0

@@ -236,6 +236,7 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         performance_metrics=agent.performance_metrics or {},
         created_by=agent.created_by,
         agent_model_config=getattr(agent, 'model_config', None),  # PRD-15: Include model config (field renamed to agent_model_config)
+        model_usage_stats=getattr(agent, 'model_usage_stats', None),  # PRD-54: LLM usage stats
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
