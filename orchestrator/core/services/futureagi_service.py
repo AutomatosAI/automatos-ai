@@ -188,8 +188,8 @@ class FutureAGIService:
 
         logger.info(f"[optimize] job started: {job_id}, {len(dataset)} examples, {num_iterations} rounds")
 
-        # Poll for completion (up to 20 minutes)
-        max_wait = 1200
+        # Poll for completion (up to 25 minutes)
+        max_wait = 1500
         poll_interval = 10
         elapsed = 0
         consecutive_errors = 0
@@ -391,7 +391,7 @@ class FutureAGIService:
                     prompt_content,
                     algorithm=config.get("algorithm", "meta_prompt"),
                     target_metric=config.get("target_metric", "is_helpful"),
-                    num_iterations=config.get("num_iterations", 3),
+                    num_iterations=config.get("num_iterations", 2),
                 )
             elif run.run_type == "safety":
                 result = await self.safety_check(prompt_content)
