@@ -470,10 +470,11 @@ async def get_architecture_analysis(
             "modularity_score": report.modularity_score,
         }
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Architecture analysis resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project not found for architecture analysis")
     except Exception as e:
         logger.error(f"Architecture analysis error: {e}")
-        raise HTTPException(status_code=500, detail=f"Architecture analysis failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ── PRD-62: Natural Language Code Queries (US-015) ──────────────────
@@ -507,7 +508,8 @@ async def ask_code_question(
         )
         return result
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"NL code query resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project not found for code question")
     except Exception as e:
         logger.error(f"NL code query error: {e}")
-        raise HTTPException(status_code=500, detail=f"Code question failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")

@@ -84,12 +84,23 @@ const formatTimestamp = (ts?: string) => {
   }
 }
 
+// SECURITY: Escape HTML entities to prevent XSS when Prism highlighting fails (OWASP A03:2021 - Injection)
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function highlightJson(value: unknown): string {
   try {
     const json = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
     return Prism.highlight(json, Prism.languages.json, 'json')
   } catch {
-    return String(value)
+    // Fallback: escape HTML to prevent XSS when used with dangerouslySetInnerHTML
+    return escapeHtml(String(value))
   }
 }
 

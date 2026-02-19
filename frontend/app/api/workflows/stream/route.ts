@@ -9,6 +9,13 @@ import { NextRequest } from 'next/server'
 
 export const runtime = 'edge' // Edge runtime for true streaming
 
+// SECURITY: UUID v4 validation to prevent SSRF via path injection (OWASP A10:2021 - SSRF)
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isValidUUID(value: string): boolean {
+  return UUID_REGEX.test(value)
+}
+
 function getAuthHeaders(request: NextRequest): Record<string, string> {
   const headers: Record<string, string> = {
     'Accept': 'text/plain',
@@ -34,6 +41,14 @@ export async function POST(request: NextRequest) {
 
     if (!executionId) {
       return new Response(JSON.stringify({ error: 'executionId required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+
+    // SECURITY: Validate executionId is a UUID to prevent SSRF path injection
+    if (!isValidUUID(executionId)) {
+      return new Response(JSON.stringify({ error: 'Invalid executionId format' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       })
@@ -83,6 +98,14 @@ export async function GET(request: NextRequest) {
 
   if (!executionId) {
     return new Response(JSON.stringify({ error: 'executionId required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  }
+
+  // SECURITY: Validate executionId is a UUID to prevent SSRF path injection
+  if (!isValidUUID(executionId)) {
+    return new Response(JSON.stringify({ error: 'Invalid executionId format' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }
     })

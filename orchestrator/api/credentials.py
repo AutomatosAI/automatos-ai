@@ -184,7 +184,8 @@ async def handle_request(
         created_cred = store.create_credential(
             credential_data=credential,
             user_id=user_id,
-            ip_address=ip_address
+            ip_address=ip_address,
+            workspace_id=ctx.workspace_id,
         )
         
         # Build response (without decrypted values)
@@ -558,7 +559,7 @@ async def resolve_credential(
             credential = store.get_credential(resolve_request.credential_id)
             if not credential:
                 raise HTTPException(status_code=404, detail="Credential not found")
-        
+
         elif resolve_request.credential_name:
             credential = store.get_credential_by_name(
                 resolve_request.credential_name,
@@ -571,6 +572,10 @@ async def resolve_credential(
                 )
         else:
             raise HTTPException(status_code=400, detail="Must provide credential_id or credential_name")
+
+        # SECURITY: verify resolved credential belongs to the caller's workspace
+        # (OWASP A01:2021 Broken Access Control / BOLA protection)
+        _check_credential_workspace(credential, ctx)
         
         # Decrypt credential data
         decrypted_data = store.get_decrypted_credential(

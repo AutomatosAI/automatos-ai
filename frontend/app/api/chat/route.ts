@@ -4,6 +4,17 @@ export const runtime = 'edge'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+// SECURITY: Allowlist of safe path patterns for PATCH proxy (OWASP A10:2021 - SSRF)
+// Only allows paths like /history/{uuid}, /vote/{uuid}, /{uuid}
+// Blocks path traversal (..), encoded sequences (%2e), and arbitrary destinations
+const SAFE_CHAT_PATH_REGEX = /^\/[a-z][\w-]{0,30}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isValidChatPath(path: string): boolean {
+  if (!path || path === '') return true // Empty path is fine (PATCH to /api/chat itself)
+  if (path.includes('..') || path.includes('%') || path.includes('\\')) return false
+  return SAFE_CHAT_PATH_REGEX.test(path)
+}
+
 // Get API key helper — uses server-side API_KEY (not NEXT_PUBLIC_ since this is an edge route)
 function getApiKey(request: NextRequest): string | null {
   return process.env.API_KEY ||
@@ -101,6 +112,14 @@ export async function PATCH(request: NextRequest) {
     // Get the path from the request URL to forward to correct backend endpoint
     const url = new URL(request.url)
     const path = url.pathname.replace('/api/chat', '') // Remove /api/chat prefix
+
+    // SECURITY: Validate path to prevent SSRF / path traversal (OWASP A10:2021 - SSRF)
+    if (!isValidChatPath(path)) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid request path' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
 
     // Build auth headers — send both JWT and API key (backend checks both independently)
     const headers: Record<string, string> = {

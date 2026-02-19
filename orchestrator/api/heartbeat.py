@@ -35,7 +35,7 @@ async def run_orchestrator_heartbeat(
         return result
     except Exception as e:
         logger.error("Failed to run orchestrator heartbeat: %s", e)
-        raise HTTPException(500, f"Heartbeat failed: {str(e)}")
+        raise HTTPException(500, "Internal server error")
 
 
 @router.get("/orchestrator/history")
@@ -100,7 +100,7 @@ async def run_agent_heartbeat(
         return result
     except Exception as e:
         logger.error("Failed to run agent heartbeat for %s: %s", agent_id, e)
-        raise HTTPException(500, f"Heartbeat failed: {str(e)}")
+        raise HTTPException(500, "Internal server error")
 
 
 @router.get("/agents/{agent_id}/history")
@@ -148,7 +148,8 @@ async def get_heartbeat_status(
         service = get_heartbeat_service()
         return service.get_status()
     except Exception as e:
-        return {"active": False, "jobs": [], "error": str(e)}
+        logger.error("Failed to get heartbeat status: %s", e)
+        return {"active": False, "jobs": [], "error": "Failed to retrieve heartbeat status"}
 
 
 # ── Analytics ──────────────────────────────────────────────────────

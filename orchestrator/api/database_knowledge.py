@@ -867,14 +867,16 @@ async def refresh_schema(
             service_name="schema_refresh"
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Credential error: {e}")
+        logger.error("Failed to resolve credentials for schema refresh on source %s: %s", source_id, e)
+        raise HTTPException(status_code=400, detail="Failed to resolve database credentials")
 
     dialect = _map_dialect_to_introspector(source.dialect)
     try:
         inspector = DatabaseIntrospectionService(credential=creds, dialect=dialect)
         metadata = inspector.introspect(include_samples=True, sample_limit=5)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Introspection failed: {e}")
+        logger.error("Schema introspection failed for source %s: %s", source_id, e)
+        raise HTTPException(status_code=400, detail="Schema introspection failed")
 
     # Update source
     source.schema_metadata = metadata

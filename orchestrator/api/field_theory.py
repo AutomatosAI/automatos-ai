@@ -461,7 +461,7 @@ async def field_theory_health_check():
         logger.error(f"Health check failed: {e}")
         return {
             "status": "unhealthy",
-            "error": str(e),
+            "error": "Health check failed",
             "timestamp": datetime.utcnow().isoformat()
         }
 
@@ -489,7 +489,8 @@ async def batch_update_fields(
                 )
                 results[update_id] = {"status": "success", "data": result}
             except Exception as e:
-                results[update_id] = {"status": "error", "error": str(e)}
+                logger.error(f"Batch field update failed for {update_id}: {e}")
+                results[update_id] = {"status": "error", "error": "Field update failed"}
         
         successful_updates = sum(1 for r in results.values() if r["status"] == "success")
         
@@ -530,7 +531,8 @@ async def batch_propagate_fields(
                 )
                 results[prop_id] = {"status": "success", "data": result}
             except Exception as e:
-                results[prop_id] = {"status": "error", "error": str(e)}
+                logger.error(f"Batch field propagation failed for {prop_id}: {e}")
+                results[prop_id] = {"status": "error", "error": "Field propagation failed"}
         
         successful_propagations = sum(1 for r in results.values() if r["status"] == "success")
         

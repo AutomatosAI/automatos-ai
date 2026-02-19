@@ -493,7 +493,7 @@ async def multi_agent_health_check():
         logger.error(f"Health check failed: {e}")
         return {
             "status": "unhealthy",
-            "error": str(e),
+            "error": "Health check failed",
             "timestamp": datetime.utcnow().isoformat()
         }
 
@@ -546,8 +546,9 @@ async def realtime_behavior_monitoring(websocket: WebSocket):
                 }))
                 
             except Exception as e:
+                logger.error(f"WebSocket behavior monitoring error: {e}")
                 await websocket.send_text(json.dumps({
-                    "error": str(e),
+                    "error": "Behavior monitoring failed",
                     "timestamp": datetime.utcnow().isoformat()
                 }))
             
@@ -560,7 +561,7 @@ async def realtime_behavior_monitoring(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         try:
             await websocket.send_text(json.dumps({
-                "error": f"WebSocket error: {str(e)}"
+                "error": "WebSocket error"
             }))
         except:
             pass

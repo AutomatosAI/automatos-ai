@@ -410,9 +410,10 @@ async def create_agent_batch(
                 created_agents.append(agent_status)
                 
             except Exception as e:
+                logger.error(f"Failed to create agent '{config.get('name')}': {e}")
                 errors.append({
                     "name": config.get("name"),
-                    "error": str(e)
+                    "error": "Agent creation failed"
                 })
         
         return {
@@ -549,9 +550,10 @@ async def agent_system_health():
         return health
         
     except Exception as e:
+        logger.error(f"Agent health check failed: {e}")
         return {
             "status": "unhealthy",
-            "error": str(e),
+            "error": "Health check failed",
             "timestamp": datetime.now().isoformat()
         }
 
