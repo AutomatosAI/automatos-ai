@@ -353,12 +353,25 @@ Common Relationships:
                 'relationships': [],
             }
 
-    def invalidate_cache(self):
-        """Invalidate all caches (useful after schema changes)"""
-        self._schema_cache.clear()
-        self._context_cache.clear()
-        self.get_database_schema_overview.cache_clear()
-        self.get_domain_context.cache_clear()
+    def invalidate_cache(self, database_source_id: str = None):
+        """
+        Invalidate schema caches, optionally for a specific source.
+
+        PRD-61 Bug Fix (US-010): Added per-source invalidation support.
+        Previously only supported full cache clear with no DDL change hooks.
+        """
+        if database_source_id:
+            # Remove only entries related to this source
+            keys_to_remove = [k for k in self._schema_cache if str(database_source_id) in str(k)]
+            for k in keys_to_remove:
+                del self._schema_cache[k]
+            logger.info(f"Schema cache invalidated for source {database_source_id}")
+        else:
+            self._schema_cache.clear()
+            self._context_cache.clear()
+            self.get_database_schema_overview.cache_clear()
+            self.get_domain_context.cache_clear()
+            logger.info("All schema caches invalidated")
 
 
 # Global instance

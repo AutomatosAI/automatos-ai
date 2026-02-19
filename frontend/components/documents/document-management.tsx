@@ -39,6 +39,7 @@ import { DatabaseQueryExplorer } from '@/components/knowledge/DatabaseQueryExplo
 import { QueryTemplatesGrid } from '@/components/knowledge/QueryTemplatesGrid'
 import { SemanticLayerBuilder } from '@/components/knowledge/SemanticLayerBuilder'
 import { AddDatabaseModal } from '@/components/knowledge/AddDatabaseModal'
+import { TrainingExamplesManager } from '@/components/knowledge/TrainingExamplesManager'
 // Document modals
 import { DocumentDetailsModal } from './document-details-modal'
 import { DeleteConfirmationModal } from './delete-confirmation-modal'
@@ -728,6 +729,7 @@ export function DocumentManagement() {
                 <TabsTrigger value="explorer">SQL Explorer</TabsTrigger>
                 <TabsTrigger value="semantic">Semantic Layer</TabsTrigger>
                 <TabsTrigger value="templates">Query Templates</TabsTrigger>
+                <TabsTrigger value="training">Training</TabsTrigger>
                 <TabsTrigger value="schema">Schema Browser</TabsTrigger>
                 <TabsTrigger value="audit">Audit History</TabsTrigger>
               </TabsList>
@@ -752,6 +754,19 @@ export function DocumentManagement() {
                   templates={templates || []}
                   selectedSource={databaseSources?.[0]}
                 />
+              </TabsContent>
+
+              <TabsContent value="training" className="space-y-6">
+                {databaseSources && databaseSources.length > 0 ? (
+                  <TrainingExamplesManager sourceId={databaseSources[0].id} />
+                ) : (
+                  <Card className="glass-card">
+                    <CardContent className="p-8 text-center text-muted-foreground">
+                      <Database className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                      <p>Connect a database first to manage training examples.</p>
+                    </CardContent>
+                  </Card>
+                )}
               </TabsContent>
 
               <TabsContent value="schema" className="space-y-6">

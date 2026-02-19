@@ -361,6 +361,110 @@ class DatabaseToolIntegration:
         
         logger.info(f"Updated task mappings for {len(database_task_types)} task types")
     
+    def get_mcp_tool_definitions(self, source: DatabaseKnowledgeSource) -> List[Dict[str, Any]]:
+        """
+        PRD-61 Phase 7 (US-016): Get MCP-format tool definitions for NL2SQL.
+        Exposes query, schema exploration, and training as MCP tools for
+        external agents (Claude Desktop, Cursor, etc.).
+        """
+        source_name = source.name
+        source_id = source.id
+
+        return [
+            {
+                "name": "query_database",
+                "description": (
+                    f"Ask a natural language question about data in the "
+                    f"'{source_name}' database. Returns SQL, results, and "
+                    f"optional visualization."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "Natural language question about the data"
+                        },
+                        "database_source": {
+                            "type": "string",
+                            "description": f"Name or ID of the database source (default: {source_name})",
+                            "default": str(source_id)
+                        },
+                        "auto_execute": {
+                            "type": "boolean",
+                            "description": "Execute the query automatically",
+                            "default": True
+                        },
+                        "include_chart": {
+                            "type": "boolean",
+                            "description": "Include visualization suggestion",
+                            "default": False
+                        }
+                    },
+                    "required": ["question"]
+                },
+                "metadata": {
+                    "source_id": source_id,
+                    "workspace_id": str(source.workspace_id),
+                    "read_only": True,
+                    "max_rows": source.max_rows_limit or 1000,
+                }
+            },
+            {
+                "name": "explore_database_schema",
+                "description": (
+                    f"Explore the schema of '{source_name}' database. "
+                    f"Returns tables, columns, relationships, and sample data."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "database_source": {
+                            "type": "string",
+                            "default": str(source_id)
+                        },
+                        "table_name": {
+                            "type": "string",
+                            "description": "Optional: specific table to explore"
+                        }
+                    }
+                },
+                "metadata": {
+                    "source_id": source_id,
+                    "workspace_id": str(source.workspace_id),
+                }
+            },
+            {
+                "name": "add_sql_training_example",
+                "description": (
+                    "Add a verified question/SQL pair to improve future "
+                    "query generation accuracy."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The natural language question"
+                        },
+                        "sql": {
+                            "type": "string",
+                            "description": "The correct SQL query"
+                        },
+                        "database_source": {
+                            "type": "string",
+                            "default": str(source_id)
+                        }
+                    },
+                    "required": ["question", "sql"]
+                },
+                "metadata": {
+                    "source_id": source_id,
+                    "workspace_id": str(source.workspace_id),
+                }
+            }
+        ]
+
     def remove_database_tools(self, source_id: int, source_name: str) -> int:
         """
         Remove tools when a database source is deleted.

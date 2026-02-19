@@ -1,0 +1,308 @@
+{
+  "project": "Automatos AI Platform — NL2SQL",
+  "branchName": "ralph/nl2sql-v2-competitive-upgrade",
+  "description": "PRD-61: NL2SQL v2 Competitive Upgrade — Close critical gaps vs top open-source NL2SQL projects (Vanna, Dataherald, DB-GPT). 8 phases: (1) RAG-based few-shot example retrieval, (2) SQL error self-correction loop, (3) Explicit schema linking stage, (4) 5 bug fixes from code audit, (5) Golden SQL training system with UI, (6) Query confidence scoring, (7) MCP server exposure, (8) Benchmarking & monitoring. Adopt techniques (not codebases) from competitors. Takes Automatos from 'good internal tool' to 'competitive with Vanna/Dataherald' level.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "RAG-based SQL example store for few-shot retrieval",
+      "description": "As the system, I need a vector-backed store for verified question/SQL pairs that can be retrieved at generation time for few-shot prompting (Vanna pattern). This is the single highest-impact improvement (+15-25% accuracy).",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/nl2sql/training/__init__.py package",
+        "Create orchestrator/modules/nl2sql/training/example_store.py with SQLExampleStore class",
+        "SQLExampleStore.add_example(question, sql, database_source_id, tables_used, is_verified, metadata) stores pair with embedding in vector store",
+        "SQLExampleStore.get_similar_examples(question, database_source_id, limit=5, min_similarity=0.7) retrieves most similar verified examples",
+        "SQLExampleStore.mark_verified(example_id) marks an example as Golden SQL",
+        "SQLExampleStore.add_ddl(ddl, database_source_id) stores DDL for schema context retrieval",
+        "SQLExampleStore.add_documentation(doc, database_source_id) stores business context documentation",
+        "Collection name: nl2sql_examples, workspace-isolated",
+        "Uses existing EmbeddingManager infrastructure for vector operations",
+        "Typecheck passes"
+      ],
+      "priority": 1
+    },
+    {
+      "id": "US-002",
+      "title": "Database migration for nl2sql_training_examples table",
+      "description": "As the system, I need a database table to persist training examples with metadata for the Golden SQL system.",
+      "acceptanceCriteria": [
+        "Create Alembic migration for nl2sql_training_examples table",
+        "Schema: id (UUID PK), workspace_id (FK workspaces), database_source_id (FK database_knowledge_sources), question (TEXT), sql (TEXT), tables_used (TEXT[]), is_verified (BOOLEAN default FALSE), verification_source (VARCHAR(50)), usage_count (INTEGER default 0), last_used_at (TIMESTAMP), embedding_id (VARCHAR(255)), metadata (JSONB default '{}'), created_by (UUID), created_at (TIMESTAMP), updated_at (TIMESTAMP)",
+        "Create index idx_nl2sql_examples_workspace on workspace_id",
+        "Create index idx_nl2sql_examples_source on database_source_id",
+        "Create partial index idx_nl2sql_examples_verified on is_verified WHERE is_verified = TRUE",
+        "Add NL2SQLTrainingExample SQLAlchemy model to orchestrator/core/models/database_knowledge.py",
+        "Migration runs cleanly up and down",
+        "Typecheck passes"
+      ],
+      "priority": 2
+    },
+    {
+      "id": "US-003",
+      "title": "Inject few-shot examples into SQL generation prompt",
+      "description": "As the system, when generating SQL from natural language, I need to retrieve similar verified examples and include them in the LLM prompt for few-shot learning.",
+      "acceptanceCriteria": [
+        "Modify orchestrator/modules/nl2sql/query/nl2sql_service.py to accept and use SQLExampleStore",
+        "In _build_sql_prompt() or equivalent, after schema context, call example_store.get_similar_examples(question, source_id, limit=5)",
+        "If similar examples found, append '--- SIMILAR VERIFIED QUERIES (use as reference) ---' section with Question/SQL pairs",
+        "Few-shot examples are injected before the final generation instruction",
+        "If no examples found, prompt remains unchanged (graceful degradation)",
+        "Update orchestrator/modules/nl2sql/__init__.py to export new classes",
+        "Typecheck passes"
+      ],
+      "priority": 3
+    },
+    {
+      "id": "US-004",
+      "title": "Training examples API endpoints",
+      "description": "As a user, I need REST API endpoints to manage training examples (CRUD + bulk import) for each database source.",
+      "acceptanceCriteria": [
+        "POST /api/knowledge/sources/database/{id}/examples — Add training example (question, sql, tables_used)",
+        "GET /api/knowledge/sources/database/{id}/examples — List examples with optional verified_only filter",
+        "PUT /api/knowledge/sources/database/{id}/examples/{eid} — Update example (edit SQL, verify)",
+        "DELETE /api/knowledge/sources/database/{id}/examples/{eid} — Delete example",
+        "POST /api/knowledge/sources/database/{id}/examples/import — Bulk import from CSV/JSON file upload",
+        "PUT /api/knowledge/sources/database/{id}/examples/{eid}/verify — One-click verify (mark as Golden SQL)",
+        "All endpoints in orchestrator/api/database_knowledge.py",
+        "All endpoints require workspace context auth and multi-tenant isolation",
+        "Typecheck passes"
+      ],
+      "priority": 4
+    },
+    {
+      "id": "US-005",
+      "title": "SQL error self-correction loop",
+      "description": "As the system, when generated SQL fails execution, I need to automatically retry with error context (like Vanna auto_train and DB-GPT feedback). Reduces failure rate by 30-50%.",
+      "acceptanceCriteria": [
+        "Add query_database_with_correction(question, source_id, max_retries=2, auto_train=True) method to orchestrator/modules/nl2sql/service.py",
+        "On each retry, pass previous SQL attempts and their error messages as error_context to generate_sql()",
+        "Modify orchestrator/modules/nl2sql/query/nl2sql_service.py _build_sql_prompt() to accept error_context and previous_attempts parameters",
+        "When error_context provided, append '--- PREVIOUS ATTEMPTS (fix these errors) ---' section with attempted SQL and errors",
+        "On first-try success with auto_train=True, auto-save question/SQL pair as unverified training example",
+        "Return response with: success, sql, results, attempts count, corrections array",
+        "On all retries exhausted, return success=False with last error and all attempted SQLs",
+        "Add auto_correct parameter to query endpoint in orchestrator/api/database_knowledge.py",
+        "Typecheck passes"
+      ],
+      "priority": 5
+    },
+    {
+      "id": "US-006",
+      "title": "Explicit schema linking stage",
+      "description": "As the system, I need a dedicated schema linking step before SQL generation that identifies the most relevant tables/columns using embeddings + semantic layer matching, replacing the brittle keyword-only _get_relevant_tables().",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/nl2sql/query/schema_linker.py with SchemaLinker class",
+        "SchemaLinker.link(question, schema_metadata, semantic_layer, top_k_tables=5, top_k_columns=20) returns LinkedSchema",
+        "LinkedSchema dataclass with: tables (ranked), columns (ranked), relationships, metrics matched, overall confidence score",
+        "Step 1: Semantic layer matching — map business terms to metrics/dimensions (highest priority)",
+        "Step 2: Embedding-based table ranking — score tables by similarity to question",
+        "Step 3: Column-level matching — score columns within top tables",
+        "Step 4: Relationship expansion — include JOIN bridge tables for selected tables",
+        "Replace _get_relevant_tables() call in nl2sql_service.py with schema_linker.link()",
+        "Only linked tables/columns sent to LLM prompt (40%+ token reduction)",
+        "Update orchestrator/modules/nl2sql/__init__.py to export SchemaLinker",
+        "Typecheck passes"
+      ],
+      "priority": 6
+    },
+    {
+      "id": "US-007",
+      "title": "Bug fix: Table relevance scoring sends ALL tables",
+      "description": "As a developer, the _get_relevant_tables() in nl2sql_service.py uses keyword matching only and falls back to sending ALL tables to the LLM. Fix with proper scoring.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/nl2sql/query/nl2sql_service.py, replace _get_relevant_tables() with scored approach",
+        "Score factors: direct table name mention (+10), column name mention (+5), description keyword overlap (+2 per word, excluding stopwords)",
+        "Sort by score descending, take top 10",
+        "If no matches, fall back to top 5 tables by row_count (most important tables), NOT all tables",
+        "Note: This is the immediate fix; Phase 3 SchemaLinker provides the full embedding-based replacement",
+        "Typecheck passes"
+      ],
+      "priority": 7
+    },
+    {
+      "id": "US-008",
+      "title": "Bug fix: Clarifier false positives on word boundaries",
+      "description": "As a developer, the clarifier.py regex patterns match inside words — 'last_name' triggers time_range, 'baby' triggers grouping. Fix with word boundary assertions.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/nl2sql/intelligence/clarifier.py, update all ambiguity_patterns to use word boundaries",
+        "time_range patterns: use \\b and negative lookahead (?!_) so 'last_name' doesn't match",
+        "grouping patterns: 'by' must be followed by whitespace + word, not be part of 'baby', 'nearby', etc.",
+        "Add test cases: 'Show last_name column' should NOT trigger time_range clarification",
+        "Add test cases: 'Count babies by hospital' should NOT trigger grouping on 'baby' but SHOULD trigger on 'by hospital'",
+        "Typecheck passes"
+      ],
+      "priority": 8
+    },
+    {
+      "id": "US-009",
+      "title": "Bug fix: Validator allows subqueries with mutations",
+      "description": "As a developer, the validator.py only checks top-level for INSERT/UPDATE/DELETE. Nested 'INSERT INTO ... SELECT' bypasses the single-statement check. Fix with recursive parsing.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/nl2sql/query/validator.py, update mutation checking to scan entire SQL string",
+        "Strip string literals first (replace 'content' with '' to avoid false positives on quoted keywords)",
+        "Use regex pattern matching for mutation keywords: INSERT INTO, UPDATE SET, DELETE FROM, DROP, CREATE, ALTER, TRUNCATE, GRANT, REVOKE",
+        "Match across the full SQL including subqueries",
+        "Test: 'SELECT * FROM (INSERT INTO foo SELECT * FROM bar)' should be caught",
+        "Test: 'SELECT * FROM foo WHERE name = ''DELETE FROM bar''' should NOT be caught (it's a string literal)",
+        "Typecheck passes"
+      ],
+      "priority": 9
+    },
+    {
+      "id": "US-010",
+      "title": "Bug fix: Schema cache never invalidates on DDL changes",
+      "description": "As a developer, the schema cache in provider.py uses TTL but has no hook for ALTER TABLE / new columns. Add explicit invalidation.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/nl2sql/schema/provider.py, add invalidate_cache(database_source_id=None) method",
+        "If database_source_id provided, remove only cache entries for that source",
+        "If None, clear entire cache",
+        "Log cache invalidation events at INFO level",
+        "Call invalidate_cache() when schema introspection is manually triggered via API",
+        "Add /api/knowledge/sources/database/{id}/schema/refresh endpoint that triggers re-introspection + cache invalidation",
+        "Typecheck passes"
+      ],
+      "priority": 10
+    },
+    {
+      "id": "US-011",
+      "title": "Bug fix: Visualizer chart config missing axis labels",
+      "description": "As a developer, the _build_chart_config() in visualizer.py returns x/y fields but no labels/titles for charts. Add human-readable labels.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/nl2sql/intelligence/visualizer.py, update _build_chart_config()",
+        "Add xLabel: x_col with underscores replaced by spaces, title-cased",
+        "Add yLabel: y_col with underscores replaced by spaces, title-cased",
+        "Add title: auto-generated from chart_type + x_col + y_col (e.g., 'Revenue by Month')",
+        "Existing chart config fields remain unchanged (backward compatible)",
+        "Typecheck passes"
+      ],
+      "priority": 11
+    },
+    {
+      "id": "US-012",
+      "title": "Golden SQL training system — frontend TrainingExamplesManager",
+      "description": "As a user, I want a UI to manage verified question/SQL training pairs (Golden SQL) for each database source, integrated as a tab in the existing database management structure.",
+      "acceptanceCriteria": [
+        "Create frontend/components/knowledge/TrainingExamplesManager.tsx",
+        "Integrate as new tab/panel in existing document-management.tsx structure (alongside DatabaseQueryExplorer, SemanticLayerBuilder, etc.)",
+        "List all training examples for selected database source with columns: question, SQL preview, verified badge, usage count, created date",
+        "Filter controls: All / Verified Only / Unverified / Auto-generated",
+        "Inline SQL editing with syntax highlighting (use existing CodeEditor component if available)",
+        "One-click verify button (golden star icon) calls PUT .../examples/{id}/verify",
+        "Import button: upload CSV/JSON file, calls POST .../examples/import",
+        "Delete button with confirmation dialog",
+        "Usage statistics: total examples, verified count, most-used examples",
+        "Pagination for large example sets",
+        "Typecheck passes"
+      ],
+      "priority": 12
+    },
+    {
+      "id": "US-013",
+      "title": "Training examples stats API endpoint",
+      "description": "As the system, I need an API endpoint returning training example statistics for the Golden SQL dashboard.",
+      "acceptanceCriteria": [
+        "GET /api/knowledge/sources/database/{id}/examples/stats returns: total_examples, verified_count, unverified_count, auto_generated_count, most_used_examples (top 5 by usage_count), avg_similarity_score",
+        "Add to orchestrator/api/database_knowledge.py",
+        "Workspace-isolated query",
+        "Typecheck passes"
+      ],
+      "priority": 13
+    },
+    {
+      "id": "US-014",
+      "title": "Query confidence scoring system",
+      "description": "As a user, I want to see a confidence score for each generated SQL query so I know when to trust it vs review manually.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/nl2sql/query/confidence.py with QueryConfidenceScorer class",
+        "ScoringContext dataclass with: similar_examples, linked_schema, sql, metrics_matched, validation_clean",
+        "ConfidenceScore dataclass with: score (0-100), level (high/medium/low), factors dict, recommendation (auto_execute/review_sql/manual_review)",
+        "Factor 1 — example_match (0-30 pts): similar_count * 5 + best_similarity * 20",
+        "Factor 2 — schema_link (0-25 pts): linked_schema.confidence * 25",
+        "Factor 3 — complexity (0-20 pts): 20 minus penalties for JOINs (3 each) and subqueries (5 each)",
+        "Factor 4 — semantic (0-15 pts): metrics_used * 5",
+        "Factor 5 — validation (0-10 pts): 10 if clean, 5 if rewritten",
+        "Levels: high >= 70, medium >= 40, low < 40",
+        "Integrate scorer into orchestrator/modules/nl2sql/service.py query flow",
+        "Return confidence in query API response in orchestrator/api/database_knowledge.py",
+        "Typecheck passes"
+      ],
+      "priority": 14
+    },
+    {
+      "id": "US-015",
+      "title": "Confidence badge in DatabaseQueryExplorer UI",
+      "description": "As a user, I want to see the confidence score displayed as a badge in the query results area of DatabaseQueryExplorer.",
+      "acceptanceCriteria": [
+        "In frontend/components/knowledge/DatabaseQueryExplorer.tsx, add confidence badge near generated SQL display",
+        "Badge colors: green for high, yellow for medium, red for low",
+        "Tooltip on hover showing factor breakdown (example_match, schema_link, complexity, semantic, validation)",
+        "Show recommendation text: 'Auto-executed', 'Review SQL recommended', 'Manual review required'",
+        "Small addition to existing component — do not restructure",
+        "Typecheck passes"
+      ],
+      "priority": 15
+    },
+    {
+      "id": "US-016",
+      "title": "MCP server tool definitions for NL2SQL",
+      "description": "As an external MCP client (Claude Desktop, Cursor, etc.), I want to query databases through Automatos via MCP tools.",
+      "acceptanceCriteria": [
+        "Add 3 MCP tool definitions to orchestrator/modules/tools/services/database_tool_integration.py",
+        "Tool 1: query_database — inputSchema: question (string, required), database_source (string), auto_execute (boolean, default true), include_chart (boolean, default false). Returns SQL + results + optional visualization",
+        "Tool 2: explore_database_schema — inputSchema: database_source (string), table_name (string, optional). Returns tables, columns, relationships, sample data",
+        "Tool 3: add_sql_training_example — inputSchema: question (string, required), sql (string, required), database_source (string). Adds verified pair to training store",
+        "Tools integrate with existing MCP gateway infrastructure (PRD-33)",
+        "Tools respect workspace isolation and read-only mode with row limits",
+        "Typecheck passes"
+      ],
+      "priority": 16
+    },
+    {
+      "id": "US-017",
+      "title": "NL2SQL benchmark runner",
+      "description": "As the system, I need an automated benchmark runner that tests SQL generation accuracy against verified Golden SQL examples and tracks results over time.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/nl2sql/benchmarks/__init__.py package",
+        "Create orchestrator/modules/nl2sql/benchmarks/runner.py with NL2SQLBenchmarkRunner class",
+        "run_benchmark(database_source_id, test_examples=None) runs test suite",
+        "If test_examples is None, use 20% of verified examples as test set (random split, seeded for reproducibility)",
+        "For each example: generate SQL from question, compare to verified SQL",
+        "Scoring: exact_match (normalized SQL comparison), execution_match (both SQLs return same results)",
+        "Create orchestrator/modules/nl2sql/benchmarks/comparator.py with SQL normalization and result comparison logic",
+        "SQL normalization: lowercase, collapse whitespace, remove trailing semicolons, normalize aliases",
+        "Return BenchmarkResult: total, exact_match_rate, execution_match_rate, details list, timestamp",
+        "Typecheck passes"
+      ],
+      "priority": 17
+    },
+    {
+      "id": "US-018",
+      "title": "Benchmark API endpoints and history storage",
+      "description": "As a user, I need API endpoints to run benchmarks and view historical accuracy trends.",
+      "acceptanceCriteria": [
+        "Create Alembic migration for nl2sql_benchmark_runs and nl2sql_benchmark_results tables",
+        "nl2sql_benchmark_runs: id, workspace_id, database_source_id, total_examples, exact_match_rate, execution_match_rate, created_at",
+        "nl2sql_benchmark_results: id, benchmark_run_id, question, expected_sql, generated_sql, exact_match, execution_match",
+        "POST /api/knowledge/sources/database/{id}/benchmark/run — triggers benchmark, stores and returns results",
+        "GET /api/knowledge/sources/database/{id}/benchmark/history — list historical benchmark runs with accuracy trends",
+        "Add endpoints to orchestrator/api/database_knowledge.py",
+        "Typecheck passes"
+      ],
+      "priority": 18
+    },
+    {
+      "id": "US-019",
+      "title": "Benchmark charts in DatabaseQueryAnalytics UI",
+      "description": "As a user, I want to see benchmark accuracy trends and error breakdowns in the analytics dashboard.",
+      "acceptanceCriteria": [
+        "In frontend/components/context/DatabaseQueryAnalytics.tsx (or equivalent analytics component), add benchmark section",
+        "Accuracy trend line chart: exact_match_rate and execution_match_rate over time",
+        "Error category breakdown pie/bar chart (syntax errors, wrong table, wrong aggregation, etc.)",
+        "Latest benchmark summary card: score, date, example count",
+        "Small addition to existing analytics component — do not restructure",
+        "Typecheck passes"
+      ],
+      "priority": 19
+    }
+  ]
+}
