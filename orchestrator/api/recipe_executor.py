@@ -198,8 +198,10 @@ async def _execute_step(
     if scratchpad:
         tools = list(tools) + [SCRATCHPAD_WRITE_TOOL_DEF]
 
-    # 6. LLM — agent's own LLM manager
+    # 6. LLM — agent's own LLM manager (with tracking context for recipe)
     llm = agent_runtime.llm_manager
+    if hasattr(llm, '_tracking_ctx'):
+        llm._tracking_ctx["request_type"] = "recipe"
 
     # 7. Generate + tool loop
     tool_router = get_tool_router()

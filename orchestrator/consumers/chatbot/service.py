@@ -1249,29 +1249,13 @@ class StreamingChatService:
             async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
                 yield chunk
 
-            # Send usage data + track usage
+            # Send usage data (tracking now handled by LLMManager)
             if hasattr(response, 'usage') and response.usage:
                 yield self.streaming_handler.format_aisdk_usage(
                     response.usage.get('prompt_tokens', 0),
                     response.usage.get('completion_tokens', 0),
                     response.usage.get('total_tokens', 0)
                 )
-                # Track LLM usage for analytics (default path — platform key)
-                if self.workspace_id:
-                    try:
-                        from core.llm.usage_tracker import UsageTracker
-                        UsageTracker.track(
-                            workspace_id=self.workspace_id,
-                            model_id=model or "unknown",
-                            provider=provider or "openai",
-                            input_tokens=response.usage.get('prompt_tokens', 0),
-                            output_tokens=response.usage.get('completion_tokens', 0),
-                            agent_id=agent_id,
-                            request_type="chat",
-                            is_byok=False,
-                        )
-                    except Exception as e:
-                        logger.warning(f"Usage tracking failed: {e}")
 
             # Send finish event
             yield self.streaming_handler.format_aisdk_finish()
@@ -1552,32 +1536,13 @@ class StreamingChatService:
             async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
                 yield chunk
 
-            # Send usage data + track usage with BYOK metadata
+            # Send usage data (tracking now handled by LLMManager)
             if hasattr(response, 'usage') and response.usage:
                 yield self.streaming_handler.format_aisdk_usage(
                     response.usage.get('prompt_tokens', 0),
                     response.usage.get('completion_tokens', 0),
                     response.usage.get('total_tokens', 0)
                 )
-                # Track LLM usage for analytics (agent path — BYOK-aware)
-                _ws_id = getattr(agent_runtime, 'workspace_id', None) or self.workspace_id
-                if _ws_id:
-                    try:
-                        from core.llm.usage_tracker import UsageTracker
-                        _model_id = agent_runtime.llm_manager.config.model if agent_runtime.llm_manager else "unknown"
-                        _provider = agent_runtime.resolved_provider or (agent_runtime.llm_manager.config.provider.value if agent_runtime.llm_manager else "unknown")
-                        UsageTracker.track(
-                            workspace_id=_ws_id,
-                            model_id=_model_id,
-                            provider=_provider,
-                            input_tokens=response.usage.get('prompt_tokens', 0),
-                            output_tokens=response.usage.get('completion_tokens', 0),
-                            agent_id=agent_id,
-                            request_type="agent_chat",
-                            is_byok=getattr(agent_runtime, 'is_byok', False),
-                        )
-                    except Exception as e:
-                        logger.warning(f"Usage tracking failed: {e}")
 
             # Send finish event
             yield self.streaming_handler.format_aisdk_finish()

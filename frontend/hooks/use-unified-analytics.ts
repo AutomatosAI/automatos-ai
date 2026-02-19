@@ -37,7 +37,10 @@ export function useAnalyticsOverview(days: number = 30) {
 
       // Each call wrapped in try/catch to prevent synchronous TypeError from breaking Promise.all
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       const [agents, llmSummary, workflowStats, docStats] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
@@ -84,7 +87,10 @@ export function useAgentAnalytics(days: number = 30) {
     queryKey: unifiedAnalyticsKeys.agents(days),
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       const [agents, stats] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
@@ -127,7 +133,10 @@ export function useWorkflowAnalytics(days: number = 30) {
     queryKey: unifiedAnalyticsKeys.workflows(days),
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       const [workflows, stats] = await Promise.all([
         safeRequest(() => apiClient.getWorkflows(), []),
@@ -169,7 +178,10 @@ export function useDocumentAnalyticsUnified(days: number = 30) {
       const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
 
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       const [documents, usage] = await Promise.all([
         safeRequest(() => apiClient.getDocuments(), []),
@@ -214,7 +226,10 @@ export function useCostAnalyticsUnified(days: number = 30) {
       const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
 
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       // Fetch from backend LLM analytics + agent data as fallback
       const [summary, usageByModel, agents] = await Promise.all([
@@ -714,7 +729,10 @@ export function useAdminCostAnalytics(period: string = '30d') {
     queryKey: ['unified-analytics', 'admin', 'costs', period],
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       // Fetch from backend + agent data as fallback
       const [backendData, agents] = await Promise.all([
@@ -771,7 +789,10 @@ export function useAdminWorkspaceAnalytics(days: number = 30) {
     queryKey: unifiedAnalyticsKeys.adminWorkspaces(days),
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       const [agents] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
