@@ -770,6 +770,20 @@ class StreamingChatService:
                             agent_id=agent_id
                         )
 
+                    # FutureAGI live traffic eval (fire-and-forget)
+                    if latest_text and full_response:
+                        try:
+                            from core.services.futureagi_service import futureagi_service
+                            if futureagi_service.is_available:
+                                asyncio.create_task(
+                                    futureagi_service.eval_live_traffic(
+                                        input_text=latest_text,
+                                        output_text=full_response,
+                                    )
+                                )
+                        except Exception:
+                            pass  # Never block chat for eval
+
                     return
             
             # Pre-trigger tools for models without native tool calling
@@ -1280,13 +1294,27 @@ class StreamingChatService:
                     workspace_id=str(self.workspace_id) if self.workspace_id else None,
                     agent_id=agent_id
                 )
-            
+
+            # FutureAGI live traffic eval (fire-and-forget)
+            if latest_text and full_response:
+                try:
+                    from core.services.futureagi_service import futureagi_service
+                    if futureagi_service.is_available:
+                        asyncio.create_task(
+                            futureagi_service.eval_live_traffic(
+                                input_text=latest_text,
+                                output_text=full_response,
+                            )
+                        )
+                except Exception:
+                    pass  # Never block chat for eval
+
         except Exception as e:
             logger.error(f"Error streaming response: {e}")
             import traceback
             traceback.print_exc()
             yield self.streaming_handler.format_aisdk_error(str(e))
-    
+
     async def stream_response_with_agent(
         self,
         chat_id: str,
@@ -1569,6 +1597,21 @@ class StreamingChatService:
                     await smart_chat.store(latest_text, full_response, chat_id)
                 except Exception as mem_err:
                     logger.warning(f"Failed to store memory exchange: {mem_err}")
+
+            # FutureAGI live traffic eval (fire-and-forget, scores ALL enabled prompts)
+            if latest_text and full_response:
+                try:
+                    from core.services.futureagi_service import futureagi_service
+                    if futureagi_service.is_available:
+                        asyncio.create_task(
+                            futureagi_service.eval_live_traffic(
+                                input_text=latest_text,
+                                output_text=full_response,
+                                context_text=orchestrated.system_prompt,
+                            )
+                        )
+                except Exception:
+                    pass  # Never block chat for eval
 
             # Update agent metrics
             if hasattr(agent_runtime, 'update_metrics'):

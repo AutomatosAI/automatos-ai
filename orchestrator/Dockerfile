@@ -30,7 +30,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 # Install Python dependencies (clean cache after)
+# futureagi is installed separately with --no-deps because it pins exact
+# versions of common packages (requests==2.32.3, pandas==2.2.2, etc.)
+# that conflict with our stack. Its code works fine with our versions.
 RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir --no-deps futureagi==0.6.0 && \
     pip cache purge && \
     rm -rf /root/.cache/pip
 

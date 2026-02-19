@@ -69,7 +69,7 @@ sentence-transformers>=2.2.2
 transformers>=4.21.0
 huggingface-hub>=0.10.0
 numpy>=1.26.2  # Required by langchain-community 0.4.1
-pandas==2.0.3
+pandas>=2.2.0,<3.0
 scikit-learn==1.3.2
 faiss-cpu==1.7.4
 nltk==3.8.1
@@ -82,9 +82,10 @@ langchain-community==0.4.1
 langchain-openai==1.0.1
 langchain-core==1.0.2
 
-# PandasAI (optional): charts + NL analysis for database results
-pandasai
-pandasai-litellm
+# PandasAI — removed: pandasai hard-pins pandas==1.5.3 which conflicts
+# with futureagi (requires pandas>=2.2). Re-add once pandasai 3.x stabilises.
+# pandasai==2.2.12
+# pandasai-litellm==0.0.1
 
 # CodeGraph dependencies (PRD-11 + PRD-62)
 tree-sitter>=0.23.0
@@ -96,7 +97,7 @@ GitPython==3.1.40
 
 # RAG v2.0 - Hybrid Search & Reranking
 rank-bm25>=0.2.2
-flashrank>=0.2.0
+flashrank==0.2.0
 
 # PRD-37: SaaS Foundation
 PyJWT>=2.8.0
@@ -104,17 +105,17 @@ cryptography>=41.0.0
 slowapi>=0.1.9
 
 # PRD-36: Composio Integration (500+ tools, Tool Router, Triggers)
-composio-core>=0.6.0
-composio-openai>=0.6.0
+composio-core==0.7.0
+composio-openai==0.11.1
 
 # PRD-42: Cloud Document Sync with S3 Vectors
 boto3>=1.39.5
 
 # PRD-58: FutureAGI Integration (prompt scoring, optimization, safety)
-fi-client>=1.0.0
-
-# PRD-63: Document Generation Module
-weasyprint>=62.0
-docxtpl>=0.18.0
-xlsxwriter>=3.2.0
-gotenberg-client>=1.0.0
+# futureagi pins exact versions of common packages (requests==2.32.3,
+# pandas==2.2.2, charset-normalizer==3.3.2) that conflict with our stack.
+# Installed separately with --no-deps in Dockerfile.
+# These are transitive deps futureagi needs but --no-deps skips:
+requests-futures>=1.0.0
+python-Levenshtein>=0.21.0
+rouge-score>=0.1.2

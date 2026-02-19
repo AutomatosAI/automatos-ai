@@ -49,6 +49,7 @@ class SystemPrompt(Base):
     description = Column(Text, nullable=True)
     variables = Column(JSONB, nullable=True)  # e.g. {"agent_name": "str", "tools_list": "str[]"}
     is_active = Column(Boolean, default=True, nullable=False)
+    futureagi_eval_enabled = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -170,6 +171,7 @@ class PromptResponse(BaseModel):
     description: Optional[str] = None
     variables: Optional[Dict[str, Any]] = None
     is_active: bool
+    futureagi_eval_enabled: bool = False
     active_version_number: Optional[int] = None
     active_content: Optional[str] = None
     active_eval_scores: Optional[Dict[str, Any]] = None

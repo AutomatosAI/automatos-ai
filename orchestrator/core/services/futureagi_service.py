@@ -1,42 +1,57 @@
 """
-PRD-58 Phase 1B: FutureAGI Integration Service
-================================================
+PRD-58: FutureAGI Service (Orchestrator Side)
+==============================================
 
-Wrapper around the FutureAGI SDK (pip install futureagi) for:
-- Prompt quality scoring (instruction_adherence, task_completion, etc.)
-- Prompt optimization (Bayesian, ProTeGi, GEPA, etc.)
-- Safety scanning (toxicity, bias, jailbreak detection)
+Thin HTTP client that routes ALL FutureAGI operations to the isolated
+futureagi-worker service. No SDK dependency in the orchestrator.
 
-Requires:
-  FUTUREAGI_API_KEY   - API key from FutureAGI dashboard
-  FUTUREAGI_SECRET_KEY - Secret key from FutureAGI dashboard
-
-pip install futureagi
+The worker handles: assess, safety, optimize, live scoring.
+This module handles: DB reads/writes, fire-and-forget dispatch, dataset collection.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
+
+WORKER_URL = os.getenv("AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080")
+WORKER_TIMEOUT = 120  # seconds for assess/safety
+OPTIMIZE_TIMEOUT = 300  # seconds for optimization
+
+
+def _extract_text(parts) -> str:
+    """Extract plain text from chat message parts (JSON list of {type, text})."""
+    if isinstance(parts, str):
+        return parts
+    if isinstance(parts, list):
+        texts = []
+        for p in parts:
+            if isinstance(p, dict) and p.get("type") == "text":
+                texts.append(p.get("text", ""))
+            elif isinstance(p, str):
+                texts.append(p)
+        return " ".join(texts).strip()
+    return ""
 
 
 class FutureAGIService:
     """
-    Singleton service wrapping the FutureAGI SDK.
-
-    All methods are async-safe and handle SDK unavailability gracefully.
+    Routes all FutureAGI calls to the isolated worker service.
+    Keeps DB operations (eval run storage, dataset collection) in the orchestrator.
     """
 
     _instance: Optional["FutureAGIService"] = None
 
     def __init__(self) -> None:
-        self._client = None
         self._available = False
-        self._init_client()
+        self._init()
 
     @classmethod
     def get_instance(cls) -> "FutureAGIService":
@@ -44,31 +59,59 @@ class FutureAGIService:
             cls._instance = cls()
         return cls._instance
 
-    def _init_client(self) -> None:
-        """Initialize the FutureAGI SDK client."""
-        api_key = os.getenv("FUTUREAGI_API_KEY")
-        secret_key = os.getenv("FUTUREAGI_SECRET_KEY")
-
-        if not api_key or not secret_key:
-            logger.info("FutureAGI keys not configured, service disabled")
-            return
-
-        try:
-            from fi.client import FIClient
-            self._client = FIClient(api_key=api_key, secret_key=secret_key)
-            self._available = True
-            logger.info("FutureAGI client initialized successfully")
-        except ImportError:
-            logger.warning("futureagi package not installed, FutureAGI disabled")
-        except Exception as e:
-            logger.warning(f"FutureAGI client init failed: {e}")
+    def _init(self) -> None:
+        # Check if worker URL is configured (keys live on the worker now)
+        self._available = bool(os.getenv("AGENT_OPT_WORKER_URL") or os.getenv("FUTUREAGI_API_KEY"))
+        if self._available:
+            logger.info(f"FutureAGI service ready (worker at {WORKER_URL})")
+        else:
+            logger.info("FutureAGI service disabled (no worker URL or API keys)")
 
     @property
     def is_available(self) -> bool:
-        return self._available and self._client is not None
+        return self._available
 
     # ------------------------------------------------------------------
-    # Assessment
+    # Worker HTTP calls
+    # ------------------------------------------------------------------
+
+    async def _call_worker(self, path: str, payload: Dict[str, Any], timeout: int = WORKER_TIMEOUT) -> Dict[str, Any]:
+        """POST to the worker service and return JSON response."""
+        url = f"{WORKER_URL}{path}"
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                error_text = resp.text[:300]
+                logger.warning(f"[worker] {path} error: {resp.status_code} {error_text}")
+                return {"error": f"Worker error ({resp.status_code}): {error_text}"}
+            return resp.json()
+        except httpx.ConnectError:
+            logger.warning(f"[worker] {path} not reachable at {WORKER_URL}")
+            return {"error": "FutureAGI worker not available"}
+        except httpx.TimeoutException:
+            logger.warning(f"[worker] {path} timed out after {timeout}s")
+            return {"error": f"Worker timed out after {timeout}s"}
+        except Exception as e:
+            logger.error(f"[worker] {path} failed: {e}")
+            return {"error": str(e)}
+
+    async def _call_worker_get(self, path: str, timeout: int = 15) -> Dict[str, Any]:
+        """GET from the worker service and return JSON response."""
+        url = f"{WORKER_URL}{path}"
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(url)
+            if resp.status_code != 200:
+                error_text = resp.text[:300]
+                return {"error": f"Worker error ({resp.status_code}): {error_text}"}
+            return resp.json()
+        except Exception as e:
+            logger.warning(f"[worker] GET {path} failed: {e}")
+            return {"error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Assess
     # ------------------------------------------------------------------
 
     async def assess_prompt(
@@ -77,195 +120,227 @@ class FutureAGIService:
         test_cases: Optional[List[Dict[str, Any]]] = None,
         metrics: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """
-        Score a system prompt using FutureAGI metrics.
-
-        Args:
-            prompt_content: The system prompt text to assess
-            test_cases: Optional list of {"input": ..., "expected_output": ...}
-            metrics: Which metrics to run (defaults to all)
-
-        Returns:
-            Dict with metric scores (0.0-1.0) and details
-        """
         if not self.is_available:
             return {"error": "FutureAGI not configured", "scores": {}}
 
-        default_metrics = [
-            "instruction_adherence",
-            "task_completion",
-            "factual_accuracy",
-            "conciseness",
-            "groundedness",
-        ]
-        selected_metrics = metrics or default_metrics
+        payload: Dict[str, Any] = {"prompt_content": prompt_content}
+        if metrics:
+            payload["metrics"] = metrics
 
-        try:
-            from fi.evals import (
-                InstructionAdherence,
-                Groundedness,
-                Conciseness,
-            )
+        # Use provided test cases, or pull real I/O from live traffic
+        if test_cases:
+            payload["test_input"] = test_cases[0].get("input")
+            payload["test_output"] = test_cases[0].get("output", test_cases[0].get("expected_output"))
+        else:
+            # Pull a real chat exchange so scoring is meaningful
+            dataset = await self._collect_optimization_dataset(limit=1)
+            if dataset:
+                payload["test_input"] = dataset[0]["input"]
+                payload["test_output"] = dataset[0]["output"]
+                logger.info(f"[assess] using real I/O: input={dataset[0]['input'][:80]}...")
+            else:
+                logger.warning("[assess] no live traffic data, scores will be based on synthetic output")
 
-            # Build metric instances
-            metric_map = {
-                "instruction_adherence": InstructionAdherence,
-                "groundedness": Groundedness,
-                "conciseness": Conciseness,
-            }
-
-            results = {}
-            for metric_name in selected_metrics:
-                metric_cls = metric_map.get(metric_name)
-                if not metric_cls:
-                    # For metrics not directly available, use a general scoring approach
-                    results[metric_name] = {"score": None, "note": "Metric not yet mapped"}
-                    continue
-
-                try:
-                    metric_instance = metric_cls()
-                    # Use the client to run scoring
-                    score = self._client.run_metric(
-                        metric=metric_instance,
-                        prompt=prompt_content,
-                        test_cases=test_cases or [],
-                    )
-                    results[metric_name] = {
-                        "score": float(score) if score is not None else None,
-                    }
-                except Exception as metric_err:
-                    logger.warning(f"Metric {metric_name} failed: {metric_err}")
-                    results[metric_name] = {"score": None, "error": str(metric_err)}
-
-            return {"scores": results, "metrics_run": len(results)}
-
-        except Exception as e:
-            logger.error(f"FutureAGI assessment failed: {e}")
-            return {"error": str(e), "scores": {}}
+        return await self._call_worker("/assess", payload)
 
     # ------------------------------------------------------------------
-    # Optimization
+    # Safety
+    # ------------------------------------------------------------------
+
+    async def safety_check(self, prompt_content: str) -> Dict[str, Any]:
+        if not self.is_available:
+            return {"error": "FutureAGI not configured", "safe": None}
+
+        return await self._call_worker("/safety", {"prompt_content": prompt_content})
+
+    # ------------------------------------------------------------------
+    # Optimize
     # ------------------------------------------------------------------
 
     async def optimize_prompt(
         self,
         prompt_content: str,
-        algorithm: str = "bayesian",
-        target_metric: str = "instruction_adherence",
-        num_iterations: int = 10,
+        algorithm: str = "meta_prompt",
+        target_metric: str = "is_helpful",
+        num_iterations: int = 2,
     ) -> Dict[str, Any]:
-        """
-        Run prompt optimization using FutureAGI's optimization algorithms.
-
-        Algorithms: bayesian, protegi, meta_prompt, gepa, random, prompt_wizard
-        """
         if not self.is_available:
             return {"error": "FutureAGI not configured"}
 
-        try:
-            # Map algorithm names to SDK classes
-            from fi.optim import BayesianSearch, ProTeGi, MetaPrompt, GEPA, RandomSearch
+        dataset = await self._collect_optimization_dataset(limit=10)
+        if not dataset:
+            return {"error": "No live traffic data yet. Enable FutureAGI scoring and chat first to build a dataset."}
 
-            algo_map = {
-                "bayesian": BayesianSearch,
-                "protegi": ProTeGi,
-                "meta_prompt": MetaPrompt,
-                "gepa": GEPA,
-                "random": RandomSearch,
-            }
+        payload = {
+            "prompt_content": prompt_content,
+            "dataset": dataset,
+            "scoring_template": target_metric,
+            "algorithm": algorithm,
+            "num_rounds": num_iterations,
+            "teacher_model": "gpt-4o-mini",
+        }
 
-            algo_cls = algo_map.get(algorithm)
-            if not algo_cls:
-                return {"error": f"Unknown algorithm: {algorithm}"}
+        # Start async optimization job on worker
+        start_result = await self._call_worker("/optimize", payload, timeout=30)
+        job_id = start_result.get("job_id")
+        if not job_id:
+            return start_result  # error or unexpected response
 
-            optimizer = algo_cls(
-                target_metric=target_metric,
-                num_iterations=num_iterations,
-            )
+        logger.info(f"[optimize] job started: {job_id}, {len(dataset)} examples, {num_iterations} rounds")
 
-            result = self._client.optimize(
-                optimizer=optimizer,
-                initial_prompt=prompt_content,
-            )
+        # Poll for completion (up to 25 minutes)
+        max_wait = 1500
+        poll_interval = 10
+        elapsed = 0
+        consecutive_errors = 0
+        while elapsed < max_wait:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
 
-            return {
-                "optimized_prompt": result.best_prompt if hasattr(result, "best_prompt") else str(result),
-                "best_score": float(result.best_score) if hasattr(result, "best_score") else None,
-                "algorithm": algorithm,
-                "iterations": num_iterations,
-                "history": result.history if hasattr(result, "history") else [],
-            }
+            status_result = await self._call_worker_get(f"/optimize/{job_id}", timeout=15)
+            status = status_result.get("status", "unknown")
 
-        except ImportError as ie:
-            logger.warning(f"FutureAGI optimization import failed: {ie}")
-            return {"error": f"Optimization module not available: {ie}"}
-        except Exception as e:
-            logger.error(f"FutureAGI optimization failed: {e}")
-            return {"error": str(e)}
+            if status == "completed":
+                logger.info(f"[optimize] job {job_id} completed in {elapsed}s")
+                result = status_result
+                # Normalize response keys for frontend
+                if "optimized_prompt" in result:
+                    result["best_score"] = result.pop("final_score", None)
+                    result["rounds"] = result.pop("rounds_completed", None)
+                    result["duration"] = result.pop("duration_seconds", None)
+                return result
+            elif status == "failed":
+                logger.warning(f"[optimize] job {job_id} failed: {status_result.get('error')}")
+                return {"error": status_result.get("error", "Optimization failed"), "status": "failed"}
+            elif "error" in status_result:
+                consecutive_errors += 1
+                logger.warning(f"[optimize] poll error #{consecutive_errors}: {status_result.get('error')}")
+                # If worker lost the job (404 / restart), fail fast
+                if consecutive_errors >= 5:
+                    return {"error": "Lost connection to optimization job (worker may have restarted)", "status": "failed"}
+            else:
+                consecutive_errors = 0
+                if elapsed % 60 == 0:
+                    logger.info(f"[optimize] job {job_id} still {status} ({elapsed}s elapsed)")
+
+        return {"error": f"Optimization timed out after {max_wait}s", "status": "failed"}
 
     # ------------------------------------------------------------------
-    # Safety Check
+    # Live traffic scoring (fire-and-forget from chat pipeline)
     # ------------------------------------------------------------------
 
-    async def safety_check(self, prompt_content: str) -> Dict[str, Any]:
+    LIVE_METRICS = ["completeness", "is_helpful", "is_concise"]
+
+    async def eval_live_traffic(
+        self,
+        input_text: str,
+        output_text: str,
+        context_text: Optional[str] = None,
+    ) -> None:
         """
-        Run safety scanning on a prompt (toxicity, bias, jailbreak vectors).
+        Fire-and-forget after each chat response.
+        Finds all prompts with eval enabled, scores via worker, stores results.
         """
         if not self.is_available:
-            return {"error": "FutureAGI not configured", "safe": None}
+            return
 
+        from core.database.database import SessionLocal
+        from core.models.system_prompts import SystemPrompt, SystemPromptEvalRun, SystemPromptVersion
+
+        db = SessionLocal()
         try:
-            from fi.evals import Toxicity, Bias
+            enabled_prompts = db.query(SystemPrompt).filter(
+                SystemPrompt.futureagi_eval_enabled == True  # noqa: E712
+            ).all()
+            if not enabled_prompts:
+                return
 
-            checks = {}
-
-            # Toxicity check
-            try:
-                toxicity = Toxicity()
-                tox_score = self._client.run_metric(
-                    metric=toxicity,
-                    prompt=prompt_content,
-                    test_cases=[],
-                )
-                checks["toxicity"] = {
-                    "score": float(tox_score) if tox_score is not None else None,
-                    "safe": float(tox_score) < 0.3 if tox_score is not None else None,
-                }
-            except Exception as e:
-                checks["toxicity"] = {"error": str(e)}
-
-            # Bias check
-            try:
-                bias = Bias()
-                bias_score = self._client.run_metric(
-                    metric=bias,
-                    prompt=prompt_content,
-                    test_cases=[],
-                )
-                checks["bias"] = {
-                    "score": float(bias_score) if bias_score is not None else None,
-                    "safe": float(bias_score) < 0.3 if bias_score is not None else None,
-                }
-            except Exception as e:
-                checks["bias"] = {"error": str(e)}
-
-            # Overall safety
-            all_safe = all(
-                c.get("safe", True)
-                for c in checks.values()
-                if "safe" in c and c["safe"] is not None
-            )
-
-            return {
-                "safe": all_safe,
-                "checks": checks,
+            # Call worker to score the exchange
+            payload: Dict[str, Any] = {
+                "input_text": input_text,
+                "output_text": output_text,
+                "metrics": self.LIVE_METRICS,
             }
+            if context_text:
+                payload["context_text"] = context_text
 
-        except ImportError:
-            return {"error": "Safety modules not available", "safe": None}
+            result = await self._call_worker("/score", payload)
+
+            if "error" in result:
+                logger.warning(f"[live] worker scoring failed: {result['error']}")
+                return
+
+            scores = result.get("scores", {})
+
+            # Store a run for each enabled prompt
+            for prompt in enabled_prompts:
+                version = db.query(SystemPromptVersion).filter(
+                    SystemPromptVersion.prompt_id == prompt.id,
+                    SystemPromptVersion.status == "active",
+                ).first()
+                if not version:
+                    continue
+
+                run = SystemPromptEvalRun(
+                    prompt_id=prompt.id,
+                    version_id=version.id,
+                    run_type="live",
+                    status="completed",
+                    scores={"scores": scores, "metrics_run": len(scores), "source": "live_traffic"},
+                    started_at=datetime.utcnow(),
+                    completed_at=datetime.utcnow(),
+                )
+                db.add(run)
+                db.commit()
+                score_summary = ", ".join(f"{k}={v.get('score')}" for k, v in scores.items())
+                logger.info(f"[live] Scored {prompt.slug}: {score_summary}")
+
         except Exception as e:
-            logger.error(f"FutureAGI safety check failed: {e}")
-            return {"error": str(e), "safe": None}
+            logger.warning(f"[live] eval_live_traffic failed: {e}")
+        finally:
+            db.close()
+
+    # ------------------------------------------------------------------
+    # Dataset collection for optimization
+    # ------------------------------------------------------------------
+
+    async def _collect_optimization_dataset(self, limit: int = 20) -> List[Dict[str, str]]:
+        """Collect recent chat input/output pairs from the messages table."""
+        from core.database.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            from sqlalchemy import text
+            rows = db.execute(text("""
+                SELECT m1.parts, m2.parts
+                FROM messages m1
+                JOIN messages m2
+                  ON m1.chat_id = m2.chat_id
+                  AND m2.role = 'assistant'
+                  AND m2.created_at = (
+                      SELECT MIN(created_at) FROM messages
+                      WHERE chat_id = m1.chat_id AND role = 'assistant'
+                      AND created_at > m1.created_at
+                  )
+                WHERE m1.role = 'user'
+                ORDER BY m1.created_at DESC
+                LIMIT :limit
+            """), {"limit": limit}).fetchall()
+
+            dataset = []
+            for user_parts, assistant_parts in rows:
+                user_text = _extract_text(user_parts)
+                assistant_text = _extract_text(assistant_parts)
+                if user_text and assistant_text:
+                    dataset.append({"input": user_text, "output": assistant_text})
+
+            logger.info(f"[optimize] collected {len(dataset)} I/O pairs for dataset")
+            return dataset
+        except Exception as e:
+            logger.warning(f"[optimize] dataset collection failed: {e}")
+            return []
+        finally:
+            db.close()
 
     # ------------------------------------------------------------------
     # Run orchestrator (called by admin_prompts.py)
@@ -274,7 +349,7 @@ class FutureAGIService:
     async def run_assessment(self, run_id: str) -> None:
         """
         Process a SystemPromptEvalRun by its ID.
-        Loads the run from DB, performs the requested operation, saves results.
+        Loads the run from DB, calls the worker, saves results.
         """
         from core.database.database import SessionLocal
         from core.models.system_prompts import SystemPromptEvalRun, SystemPromptVersion
@@ -288,12 +363,10 @@ class FutureAGIService:
                 logger.error(f"Assessment run {run_id} not found")
                 return
 
-            # Mark as running
             run.status = "running"
             run.started_at = datetime.utcnow()
             db.commit()
 
-            # Load the version content
             version = db.query(SystemPromptVersion).filter(
                 SystemPromptVersion.id == run.version_id
             ).first()
@@ -307,7 +380,6 @@ class FutureAGIService:
             prompt_content = version.content
             config = run.metadata_ or {}
 
-            # Dispatch based on run_type
             if run.run_type == "assess":
                 result = await self.assess_prompt(
                     prompt_content,
@@ -317,29 +389,29 @@ class FutureAGIService:
             elif run.run_type == "optimize":
                 result = await self.optimize_prompt(
                     prompt_content,
-                    algorithm=config.get("algorithm", "bayesian"),
-                    target_metric=config.get("target_metric", "instruction_adherence"),
-                    num_iterations=config.get("num_iterations", 10),
+                    algorithm=config.get("algorithm", "meta_prompt"),
+                    target_metric=config.get("target_metric", "is_helpful"),
+                    num_iterations=config.get("num_iterations", 2),
                 )
             elif run.run_type == "safety":
                 result = await self.safety_check(prompt_content)
             else:
-                # Default to assessment
                 result = await self.assess_prompt(prompt_content)
 
-            # Save results
-            if "error" in result and not result.get("scores"):
+            if result.get("status") == "failed" or (
+                "error" in result and not result.get("scores")
+            ):
                 run.status = "failed"
-                run.error_message = result["error"]
+                run.error_message = result.get("error", "Unknown worker error")
             else:
                 run.status = "completed"
                 run.scores = result
 
-                # Also snapshot scores on the version if this is a quality assessment
-                if run.run_type in ("assess", "evaluate") and result.get("scores"):
+                if run.run_type == "assess" and result.get("scores"):
                     version.eval_scores = result["scores"]
 
             run.completed_at = datetime.utcnow()
+            logger.info(f"Assessment run {run_id} -> {run.status}")
             db.commit()
 
         except Exception as e:

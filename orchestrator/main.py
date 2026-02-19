@@ -185,10 +185,30 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Automotas AI API Server...")
     try:
-        # NOTE: Database initialization is handled by docker-compose on first install
-        # Only run init_database() manually if you need to recreate tables/seed data
-        # init_database()
-        logger.info("Database ready (tables already exist from docker-compose init)")
+        # NOTE: Most tables are created by docker-compose on first install.
+        # PRD-58: Ensure system_prompts tables exist + seed on every startup (idempotent).
+        try:
+            import core.models.system_prompts  # register models with Base.metadata
+            from core.database.database import create_tables, get_db_session
+            create_tables()
+            # PRD-58 Phase 1B: Add futureagi_eval_enabled column if missing
+            try:
+                from sqlalchemy import text
+                from core.database.database import engine
+                with engine.connect() as conn:
+                    conn.execute(text(
+                        "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
+                        "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                    conn.commit()
+            except Exception as col_err:
+                logger.debug(f"Column migration check: {col_err}")
+            from core.seeds.seed_system_prompts import seed_system_prompts
+            with get_db_session() as db:
+                seed_system_prompts(db)
+        except Exception as e:
+            logger.warning(f"PRD-58 table/seed init: {e}")
+        logger.info("Database ready")
         
         # NOTE: Redis client uses lazy initialization via get_redis_client()
         # Services will auto-initialize on first use from environment variables
