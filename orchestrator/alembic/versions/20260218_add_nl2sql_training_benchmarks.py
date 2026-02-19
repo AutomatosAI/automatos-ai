@@ -1,7 +1,7 @@
 """Add NL2SQL training examples and benchmark tables (PRD-61)
 
 Revision ID: 20260218_nl2sql_training
-Revises: 20260215_heartbeat_channels
+Revises: 20260218_document_templates
 Create Date: 2026-02-18 12:00:00.000000
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '20260218_nl2sql_training'
-down_revision = '20260215_heartbeat_channels'
+down_revision = '20260218_document_templates'
 branch_labels = None
 depends_on = None
 

@@ -110,7 +110,7 @@ class SQLExampleStore:
                 is_verified=is_verified,
                 verification_source=verification_source,
                 embedding_id=embedding_id,
-                metadata=metadata or {},
+                extra_metadata=metadata or {},
                 created_by=created_by,
             )
             db.add(example)

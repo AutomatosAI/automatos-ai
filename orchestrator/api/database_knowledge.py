@@ -648,7 +648,7 @@ async def list_training_examples(
             "usage_count": ex.usage_count or 0,
             "last_used_at": ex.last_used_at.isoformat() if ex.last_used_at else None,
             "created_at": ex.created_at.isoformat() if ex.created_at else None,
-            "metadata": ex.metadata or {},
+            "metadata": ex.extra_metadata or {},
         }
         for ex in examples
     ]
@@ -709,7 +709,7 @@ async def update_training_example(
     if "is_verified" in body:
         example.is_verified = body["is_verified"]
     if "metadata" in body:
-        example.metadata = body["metadata"]
+        example.extra_metadata = body["metadata"]
 
     from datetime import datetime
     example.updated_at = datetime.utcnow()

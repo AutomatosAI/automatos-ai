@@ -263,7 +263,7 @@ class NL2SQLTrainingExample(Base):
 
     embedding_id = Column(String(255))  # reference to vector store
 
-    metadata = Column(JSON, default={})
+    extra_metadata = Column('metadata', JSON, default={})
 
     created_by = Column(String(255))
     created_at = Column(DateTime, default=func.now())
