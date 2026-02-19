@@ -42,7 +42,7 @@ def _get_keys():
     api_key = os.getenv("FUTUREAGI_API_KEY") or os.getenv("FI_API_KEY")
     secret_key = os.getenv("FUTUREAGI_SECRET_KEY") or os.getenv("FI_SECRET_KEY")
     if not api_key or not secret_key:
-        raise HTTPException(status_code=500, detail="FutureAGI keys not configured")
+        raise ValueError("FutureAGI keys not configured")
     # Ensure FI_* env vars are set — the agent-opt Evaluator only forwards
     # fi_api_key to the inner fi.evals.Evaluator, dropping fi_secret_key.
     # Setting env vars lets the SDK auto-detect both keys.
@@ -85,7 +85,6 @@ def _run_single_template(template: str, inputs: Dict[str, str], model: str = "tu
         output = getattr(er, "output", "")
         reason = getattr(er, "reason", "") or ""
         score = getattr(er, "score", None)
-        runtime_ms = getattr(er, "runtime", None)
 
         # output can be: "Passed"/"Failed" (Pass/Fail type) or a float (score type)
         if isinstance(output, (int, float)):
@@ -106,11 +105,13 @@ def _run_single_template(template: str, inputs: Dict[str, str], model: str = "tu
                     score = float(output)
                     passed = score >= 0.5
                 except (ValueError, TypeError):
-                    passed = True
-                    score = 1.0
+                    logger.warning(f"[{template}] unparseable output: {output!r}, defaulting to score=0")
+                    passed = False
+                    score = 0.0
         else:
-            passed = True
-            score = 1.0
+            logger.warning(f"[{template}] unexpected output type {type(output)}: {output!r}, defaulting to score=0")
+            passed = False
+            score = 0.0
 
         logger.info(f"[{template}] output={output} score={score} passed={passed}")
         return {"score": score, "passed": passed, "reason": reason}
@@ -284,11 +285,8 @@ def safety(req: SafetyRequest):
                 "reason": result.get("reason", ""),
             }
 
-    all_safe = all(
-        c.get("safe", True)
-        for c in checks.values()
-        if "safe" in c and c["safe"] is not None
-    )
+    resolved = [c for c in checks.values() if c.get("safe") is not None]
+    all_safe = all(c["safe"] for c in resolved) if resolved else None
 
     return {"safe": all_safe, "checks": checks, "duration": round(time.time() - start, 1)}
 
@@ -334,6 +332,20 @@ def score_live(req: ScoreRequest):
 
 # In-memory job store for async optimization
 _optimize_jobs: Dict[str, Dict[str, Any]] = {}
+_JOB_TTL = 3600  # clean up jobs older than 1 hour
+
+
+def _cleanup_old_jobs():
+    """Remove completed/failed jobs older than TTL to prevent memory leak."""
+    now = time.time()
+    stale = [
+        jid for jid, job in _optimize_jobs.items()
+        if job["status"] in ("completed", "failed") and now - job["created_at"] > _JOB_TTL
+    ]
+    for jid in stale:
+        del _optimize_jobs[jid]
+    if stale:
+        logger.info(f"[cleanup] removed {len(stale)} stale optimization jobs")
 
 
 def _escape_template_vars(text: str) -> tuple[str, list[tuple[str, str]]]:
@@ -447,7 +459,7 @@ def _run_optimize_job(job_id: str, req: OptimizeRequest):
 
     except Exception as e:
         duration = time.time() - start
-        logger.error(f"[job {job_id[:8]}] Failed after {duration:.1f}s: {e}")
+        logger.exception(f"[job {job_id[:8]}] Failed after {duration:.1f}s: {e}")
         job["status"] = "failed"
         job["error"] = str(e)
         job["duration_seconds"] = round(duration, 1)
@@ -457,9 +469,14 @@ def _run_optimize_job(job_id: str, req: OptimizeRequest):
 def optimize(req: OptimizeRequest):
     """Start async optimization — returns job_id immediately. Poll GET /optimize/{job_id} for result."""
     # Validate upfront
-    _get_keys()
+    try:
+        _get_keys()
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="OpenAI API key not configured")
+
+    _cleanup_old_jobs()
 
     job_id = str(uuid.uuid4())
     _optimize_jobs[job_id] = {

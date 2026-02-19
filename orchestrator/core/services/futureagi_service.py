@@ -398,9 +398,11 @@ class FutureAGIService:
             else:
                 result = await self.assess_prompt(prompt_content)
 
-            if "error" in result and not result.get("scores") and not result.get("status"):
+            if result.get("status") == "failed" or (
+                "error" in result and not result.get("scores")
+            ):
                 run.status = "failed"
-                run.error_message = result["error"]
+                run.error_message = result.get("error", "Unknown worker error")
             else:
                 run.status = "completed"
                 run.scores = result
