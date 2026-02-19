@@ -70,6 +70,11 @@ export function CodeGraphPanel() {
   const [searching, setSearching] = useState(false)
   const [searchTime, setSearchTime] = useState<number>(0)
 
+  // PRD-62: Natural language code question state
+  const [nlQuestion, setNlQuestion] = useState('')
+  const [nlAnswer, setNlAnswer] = useState<{ answer: string; query_type: string; results: any[] } | null>(null)
+  const [nlLoading, setNlLoading] = useState(false)
+
   // Load projects on mount
   useEffect(() => {
     loadProjects()
@@ -171,6 +176,33 @@ export function CodeGraphPanel() {
       console.error('Error searching:', e)
     } finally {
       setSearching(false)
+    }
+  }
+
+  // PRD-62: Ask about code (natural language query)
+  const handleAskCode = async () => {
+    if (!nlQuestion.trim() || !selectedProject) return
+    const proj = projects.find(p => p.name === selectedProject)
+    if (!proj) return
+
+    setNlLoading(true)
+    setNlAnswer(null)
+    try {
+      const res = await fetch(`/api/code-graph/projects/${proj.id}/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: nlQuestion }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setNlAnswer(data)
+      } else {
+        setError('Failed to process code question')
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Code question failed')
+    } finally {
+      setNlLoading(false)
     }
   }
 
@@ -504,6 +536,47 @@ export function CodeGraphPanel() {
                   Found {searchResults.length} results in {searchTime.toFixed(0)}ms
                 </div>
               )}
+
+              {/* PRD-62: Ask about code (US-016) */}
+              <div className="border-t pt-4 mt-4">
+                <div className="text-sm font-medium mb-2 text-muted-foreground">Ask about your code</div>
+                <div className="flex space-x-2">
+                  <Input
+                    className="flex-1"
+                    placeholder="e.g., What functions call authenticate? What depends on UserService?"
+                    value={nlQuestion}
+                    onChange={(e) => setNlQuestion(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleAskCode()}
+                  />
+                  <Button onClick={handleAskCode} disabled={nlLoading || !selectedProject || !nlQuestion.trim()} variant="secondary">
+                    {nlLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      'Ask'
+                    )}
+                  </Button>
+                </div>
+
+                {nlAnswer && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{nlAnswer.query_type}</Badge>
+                    </div>
+                    <div className="p-3 rounded-lg bg-muted/50 text-sm">
+                      {nlAnswer.answer}
+                    </div>
+                    {nlAnswer.results && nlAnswer.results.length > 0 && (
+                      <div className="space-y-1">
+                        {nlAnswer.results.slice(0, 5).map((r: any, i: number) => (
+                          <div key={i} className="text-xs text-muted-foreground font-mono p-1 bg-muted/30 rounded">
+                            {r.symbol || r.name} {r.file && `— ${r.file}`}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 

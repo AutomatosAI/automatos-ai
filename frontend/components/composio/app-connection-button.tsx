@@ -36,7 +36,7 @@ export function AppConnectionButton({
         try {
             const result = await initiateConnection.mutateAsync({
                 appName,
-                callbackUrl: `${window.location.origin}/settings/tools?connected=${appName}`,
+                callbackUrl: `${window.location.origin}/tools/callback?connected=${appName}`,
             })
 
             // Open OAuth popup

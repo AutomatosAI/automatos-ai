@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { X, Copy, Download, Maximize2, Eye, EyeOff } from 'lucide-react'
+import { X, Copy, Download, Maximize2, Eye, EyeOff, FileText } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -124,6 +124,43 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           )}
           {artifact.kind === 'image' && (
             <img src={artifact.content} alt={artifact.title} className="max-w-full h-auto" />
+          )}
+          {artifact.kind === 'document' && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <FileText className="h-8 w-8 text-orange-500" />
+                <div>
+                  <h3 className="font-semibold">{artifact.title}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {artifact.metadata?.format?.toUpperCase()} {artifact.metadata?.size_kb ? `• ${artifact.metadata.size_kb}KB` : ''}
+                  </p>
+                </div>
+              </div>
+              {artifact.metadata?.format === 'pdf' && artifact.metadata?.preview_url && (
+                <iframe
+                  src={artifact.metadata.preview_url}
+                  className="w-full h-[600px] rounded-lg border"
+                  title={artifact.title}
+                />
+              )}
+              <div className="flex gap-2">
+                {artifact.metadata?.download_url && (
+                  <Button
+                    onClick={() => window.open(artifact.metadata!.download_url, '_blank')}
+                    className="bg-orange-500 hover:bg-orange-600 text-white"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download {artifact.metadata?.format?.toUpperCase()}
+                  </Button>
+                )}
+                {artifact.metadata?.format && artifact.metadata.format !== 'pdf' && (
+                  <Button variant="outline" disabled>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Convert to PDF
+                  </Button>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>

@@ -2,7 +2,7 @@
 PRD-58 Phase 1B: FutureAGI Integration Service
 ================================================
 
-Wrapper around the FutureAGI fi-client SDK for:
+Wrapper around the FutureAGI SDK (pip install futureagi) for:
 - Prompt quality scoring (instruction_adherence, task_completion, etc.)
 - Prompt optimization (Bayesian, ProTeGi, GEPA, etc.)
 - Safety scanning (toxicity, bias, jailbreak detection)
@@ -11,7 +11,7 @@ Requires:
   FUTUREAGI_API_KEY   - API key from FutureAGI dashboard
   FUTUREAGI_SECRET_KEY - Secret key from FutureAGI dashboard
 
-pip install fi-client
+pip install futureagi
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 class FutureAGIService:
     """
-    Singleton service wrapping the FutureAGI fi-client SDK.
+    Singleton service wrapping the FutureAGI SDK.
 
     All methods are async-safe and handle SDK unavailability gracefully.
     """
@@ -59,7 +59,7 @@ class FutureAGIService:
             self._available = True
             logger.info("FutureAGI client initialized successfully")
         except ImportError:
-            logger.warning("fi-client package not installed, FutureAGI disabled")
+            logger.warning("futureagi package not installed, FutureAGI disabled")
         except Exception as e:
             logger.warning(f"FutureAGI client init failed: {e}")
 
