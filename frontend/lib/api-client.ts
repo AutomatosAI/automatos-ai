@@ -108,12 +108,13 @@ class ApiClient {
       'Content-Type': 'application/json',
     }
 
-    // Initialize mock config
-    this.mockConfig = this.loadMockConfig()
-    this.mockData = this.initializeMockData()
+    // Initialize mock config (dev only)
+    const isDev = process.env.NODE_ENV !== 'production'
+    this.mockConfig = isDev ? this.loadMockConfig() : { enabled: false, endpoints: {}, logMockUsage: false }
+    this.mockData = isDev ? this.initializeMockData() : {}
 
-    // Expose mock control to window for easy debugging
-    if (typeof window !== 'undefined') {
+    // Expose mock control to window for easy debugging (dev only)
+    if (isDev && typeof window !== 'undefined') {
       (window as any).automatos = {
         ...(window as any).automatos,
         mocks: {
@@ -126,14 +127,16 @@ class ApiClient {
       }
     }
 
-    console.log('🚀 API Client initialized')
-    console.log(`📍 Base URL: ${this.baseUrl || 'relative URLs (Next.js)'}`)
-    console.log(`📍 NEXT_PUBLIC_API_URL env: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
-    console.log('🔐 Auth: Clerk JWT (workspace-aware)')
-    if (this.mockConfig.enabled) {
-      console.warn('⚠️  Mock mode is ENABLED - Disable for production!')
-    } else {
-      console.log('✅ Real API mode enabled')
+    if (isDev) {
+      console.log('🚀 API Client initialized')
+      console.log(`📍 Base URL: ${this.baseUrl || 'relative URLs (Next.js)'}`)
+      console.log(`📍 NEXT_PUBLIC_API_URL env: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
+      console.log('🔐 Auth: Clerk JWT (workspace-aware)')
+      if (this.mockConfig.enabled) {
+        console.warn('⚠️  Mock mode is ENABLED - Disable for production!')
+      } else {
+        console.log('✅ Real API mode enabled')
+      }
     }
   }
 
@@ -143,7 +146,7 @@ class ApiClient {
    */
   public setClerkTokenGetter(getter: () => Promise<string | null>) {
     this.getClerkToken = getter
-    console.log('✅ Clerk token getter configured')
+    if (process.env.NODE_ENV !== 'production') console.log('✅ Clerk token getter configured')
   }
 
   // Load mock config from localStorage or use defaults
@@ -221,6 +224,9 @@ class ApiClient {
 
   // Check if mock should be used for endpoint
   private shouldUseMock(endpoint: string): boolean {
+    // Never use mocks in production
+    if (process.env.NODE_ENV === 'production') return false
+
     // 1. CHECK PAGE-LEVEL CONFIG FIRST (highest priority)
     if (this.currentPage && this.currentPage in PAGE_MOCK_CONFIG) {
       // Page config overrides everything - return it directly
@@ -257,8 +263,10 @@ class ApiClient {
    */
   public setCurrentPage(pageName: string) {
     this.currentPage = pageName.toLowerCase()
-    const mockStatus = PAGE_MOCK_CONFIG[this.currentPage] ? 'MOCKS ON' : 'REAL APIs'
-    console.log(`📄 Page: ${pageName} → ${mockStatus}`)
+    if (process.env.NODE_ENV !== 'production') {
+      const mockStatus = PAGE_MOCK_CONFIG[this.currentPage] ? 'MOCKS ON' : 'REAL APIs'
+      console.log(`📄 Page: ${pageName} → ${mockStatus}`)
+    }
   }
 
   /**
@@ -274,7 +282,7 @@ class ApiClient {
    */
   public setPageMockOverride(pageName: string, useMocks: boolean) {
     PAGE_MOCK_CONFIG[pageName.toLowerCase()] = useMocks
-    console.log(`🔧 Mock override for ${pageName}: ${useMocks ? 'ENABLED' : 'DISABLED'}`)
+    if (process.env.NODE_ENV !== 'production') console.log(`🔧 Mock override for ${pageName}: ${useMocks ? 'ENABLED' : 'DISABLED'}`)
   }
 
 
@@ -881,7 +889,7 @@ class ApiClient {
       }
 
       const data = await response.json()
-      console.log('✅ API Success:', endpoint, 'Data type:', Array.isArray(data) ? `array[${data.length}]` : typeof data)
+      if (process.env.NODE_ENV !== 'production') console.log('✅ API Success:', endpoint, 'Data type:', Array.isArray(data) ? `array[${data.length}]` : typeof data)
 
       return data
     } catch (error: any) {
@@ -911,7 +919,7 @@ class ApiClient {
       }
 
       // If mocks are disabled, throw the original error
-      console.error('🚨 API Failed:', endpoint, error.message)
+      if (process.env.NODE_ENV !== 'production') console.error('🚨 API Failed:', endpoint, error.message)
       throw error
     }
   }

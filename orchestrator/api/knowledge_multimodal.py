@@ -176,7 +176,7 @@ async def get_knowledge_types(
         
     except Exception as e:
         logger.error(f"Error fetching knowledge types: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/items", response_model=KnowledgeItemResponse)
@@ -247,7 +247,7 @@ async def create_knowledge_item(
     except Exception as e:
         logger.error(f"Error creating knowledge item: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
@@ -280,12 +280,25 @@ async def upload_document_multimodal(
             raise HTTPException(status_code=400, detail="No file provided")
         
         file_extension = Path(file.filename).suffix.lower()
-        allowed_extensions = {'.pdf', '.docx', '.doc', '.txt', '.md'}
-        
-        if file_extension not in allowed_extensions:
+        allowed_types = {
+            '.pdf': {'application/pdf'},
+            '.docx': {'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/octet-stream'},
+            '.doc': {'application/msword', 'application/octet-stream'},
+            '.txt': {'text/plain', 'application/octet-stream'},
+            '.md': {'text/markdown', 'text/plain', 'application/octet-stream'},
+        }
+
+        if file_extension not in allowed_types:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type: {file_extension}. Allowed: {', '.join(allowed_extensions)}"
+                detail=f"Unsupported file type: {file_extension}. Allowed: {', '.join(allowed_types.keys())}"
+            )
+
+        # Validate MIME type matches extension
+        if file.content_type and file.content_type not in allowed_types[file_extension]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"MIME type mismatch: {file.content_type} not valid for {file_extension}"
             )
         
         # Save file temporarily
@@ -642,7 +655,7 @@ async def upload_document_multimodal(
     except Exception as e:
         logger.error(f"Error uploading document: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/search", response_model=List[KnowledgeSearchResult])
@@ -759,7 +772,7 @@ async def search_knowledge(
         
     except Exception as e:
         logger.error(f"Error searching knowledge: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/items/{item_id}")
@@ -883,7 +896,7 @@ async def get_knowledge_item(
         raise
     except Exception as e:
         logger.error(f"Error fetching knowledge item {item_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats")
@@ -943,5 +956,5 @@ async def get_knowledge_stats(
         
     except Exception as e:
         logger.error(f"Error getting knowledge stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 

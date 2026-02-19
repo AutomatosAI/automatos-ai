@@ -1,0 +1,274 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/universal-orchestrator-router",
+  "description": "PRD-50: Universal Orchestrator Router — Transform the orchestrator from a workflow-only executor into a universal request router that handles all incoming requests (Chatbot, Jira triggers, APIs) and intelligently routes them to the right pre-configured agent or recipe/workflow.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create RequestEnvelope and RoutingDecision models",
+      "description": "As a developer, I need standard data models for the universal request envelope and routing decision so that all channels produce consistent input and the router produces consistent output.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/models/routing.py with all models",
+        "RequestEnvelope Pydantic model with fields: id (UUID), source (ChannelSource), content (str), raw_payload (Dict), user (RequestUser), workspace_id (UUID), metadata (Dict), override_agent_id (Optional[int]), override_workflow_id (Optional[int]), conversation_id (Optional[UUID]), timestamp (datetime)",
+        "RoutingDecision Pydantic model with fields: route_type (str: agent|workflow|orchestrate), agent_id (Optional[int]), workflow_id (Optional[int]), confidence (float), reasoning (str), cached (bool), intent_category (str)",
+        "ChannelSource enum with values: chatbot, jira_trigger, slack, whatsapp, api, workflow",
+        "RequestUser model with fields: id (Optional[str]), email (Optional[str]), name (Optional[str]), auth_type (str), clerk_user_id (Optional[str])",
+        "RoutingDecisionRecord SQLAlchemy ORM model for routing_decisions table with fields: id, request_id, envelope_hash, source, route_type, agent_id, workflow_id, confidence, cached, was_corrected, corrected_agent_id, created_at",
+        "RoutingRule SQLAlchemy ORM model for routing_rules table with fields: id, workspace_id, source_pattern, intent_keywords, target_agent_id, target_workflow_id, priority, is_active, created_at",
+        "UnroutedEvent SQLAlchemy ORM model for unrouted_events table with fields: id, workspace_id, source, content, raw_payload, reason, created_at",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Build routing cache with TTL and workspace scoping",
+      "description": "As the system, I need to cache routing decisions per workspace so repeated patterns resolve instantly without LLM calls.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/routing/__init__.py (empty)",
+        "Create orchestrator/core/routing/cache.py with RoutingCache class",
+        "In-memory cache using dict keyed by (workspace_id, hash(normalized_content + source))",
+        "Cache TTL: 24 hours default, configurable via ROUTING_CACHE_TTL_HOURS env var",
+        "get(workspace_id, content, source) method — returns cached RoutingDecision or None",
+        "put(workspace_id, content, source, decision) method — stores decision with timestamp",
+        "record_correction(workspace_id, content, source, correct_agent_id) method — updates cached entry if same correction made 2+ times",
+        "clear(workspace_id) method — clear all cache for a workspace",
+        "stats() method — returns cache size, hit rate, top cached routes",
+        "Expired entries cleaned up on access (lazy eviction)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Build routing engine — Tier 0 and Tier 2 (override and rules)",
+      "description": "As the orchestrator, I need the core routing engine that handles user overrides (Tier 0) and rule-based matching (Tier 2) without LLM calls.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/routing/engine.py with UniversalRouter class",
+        "Constructor takes db session and optional RoutingCache instance",
+        "async route(envelope: RequestEnvelope) -> RoutingDecision method",
+        "Tier 0: If envelope.override_agent_id set, return RoutingDecision with route_type='agent', confidence=1.0, reasoning='User override'",
+        "Tier 0: If envelope.override_workflow_id set, return RoutingDecision with route_type='workflow', confidence=1.0, reasoning='User override'",
+        "Tier 1: Check RoutingCache — if hit, return cached decision with cached=True",
+        "Tier 2: Query routing_rules table for matching workspace_id + source_pattern. If match, return decision.",
+        "Tier 2b: Query TriggerSubscription table if source is jira_trigger — if matching trigger has agent_id/workflow_id, use it",
+        "Tier 2c: Use existing IntentClassifier from core/services/intent_classifier.py for keyword-based matching",
+        "If no match at any tier, return None (caller handles LLM fallback)",
+        "Log every routing decision to routing_decisions table",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Tier 3 (LLM classification) added in next story"
+    },
+    {
+      "id": "US-004",
+      "title": "Add Tier 3 LLM classification to routing engine",
+      "description": "As the orchestrator, I need LLM-based intent classification as a fallback when cache and rules don't match.",
+      "acceptanceCriteria": [
+        "Add _classify_with_llm(envelope: RequestEnvelope) async method to UniversalRouter",
+        "Query database for all active agents in the workspace with their names, descriptions, and assigned app names",
+        "Build a lightweight prompt: 'Given this request: {content}. Route to the best agent from: {agent_list}. Return agent_id and confidence.'",
+        "Use workspace's configured LLM provider/model via existing LLM manager",
+        "Parse LLM response to extract agent_id and confidence score",
+        "If confidence < 0.5, return route_type='orchestrate' (full decomposition needed)",
+        "Cache the LLM result via RoutingCache.put() for future Tier 1 hits",
+        "Update route() method: after Tier 2 returns None, call _classify_with_llm()",
+        "If LLM also fails or returns low confidence, store in unrouted_events table",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Create base ingestor and chatbot ingestor",
+      "description": "As the chatbot, I need to normalize ChatRequest into a RequestEnvelope so it flows through the universal router.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/routing/ingestors/__init__.py (empty)",
+        "Create orchestrator/core/routing/ingestors/base.py with abstract BaseIngestor class",
+        "BaseIngestor has abstract method: ingest(**kwargs) -> RequestEnvelope",
+        "Create orchestrator/core/routing/ingestors/chatbot.py with ChatbotIngestor",
+        "ChatbotIngestor.ingest(message, agent_id, session_id, request_context) -> RequestEnvelope",
+        "Sets source='chatbot', content=message text",
+        "Populates RequestUser from RequestContext (clerk_user_id, email, role)",
+        "If agent_id provided, sets override_agent_id (manual override preserved)",
+        "If agent_id NOT provided, override_agent_id=None (router decides)",
+        "Sets workspace_id from RequestContext",
+        "Sets conversation_id from session_id",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Create Jira trigger ingestor",
+      "description": "As the system, when a Jira trigger webhook fires, I need to normalize the event into a RequestEnvelope.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/routing/ingestors/jira_trigger.py with JiraTriggerIngestor",
+        "JiraTriggerIngestor.ingest(trigger_name, entity_id, event_data, db) -> RequestEnvelope",
+        "Sets source='jira_trigger'",
+        "Extracts from event_data: issue key, summary, description, issue type, priority, reporter, project",
+        "Sets content to: '[{issue_key}] {summary}\\n\\n{description}'",
+        "Populates metadata dict with all Jira fields",
+        "Sets user from Jira reporter field (email/name) or system user if unavailable",
+        "Resolves workspace_id from entity_id via composio_entities table lookup",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Integrate router into chat endpoint",
+      "description": "As a chatbot user, when I send a message without selecting an agent, the router should auto-select the best agent.",
+      "acceptanceCriteria": [
+        "Modify orchestrator/api/chat.py stream_chat endpoint (around line 253)",
+        "Before agent selection, create RequestEnvelope via ChatbotIngestor",
+        "Call UniversalRouter.route(envelope) to get RoutingDecision",
+        "If decision.route_type == 'agent', use decision.agent_id as effective_agent_id",
+        "If request.agentId is set (user override), skip routing and use it directly",
+        "Replace get_default_agent_id() fallback with router decision",
+        "If router returns None (no route), fall back to get_default_agent_id() as safety net",
+        "Conversation history maintained regardless of which agent responds",
+        "Add routing_decision info to response metadata if available",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Complete webhook → router dispatch",
+      "description": "As a developer, I need to replace the TODO at api/composio.py:509 with actual routing logic that dispatches webhook events.",
+      "acceptanceCriteria": [
+        "Modify orchestrator/api/composio.py handle_webhook endpoint (around line 509)",
+        "Remove TODO comment",
+        "After parsing webhook payload, determine ingestor by trigger_name prefix (JIRA_ → JiraTriggerIngestor)",
+        "Create RequestEnvelope via appropriate ingestor",
+        "Call UniversalRouter.route(envelope) to get RoutingDecision",
+        "If route_type == 'agent': create asyncio.create_task() to execute agent with envelope content",
+        "If route_type == 'workflow': create asyncio.create_task() to call execute_workflow() with envelope as context",
+        "If no route found: store in unrouted_events table",
+        "Return 200 immediately with routing decision summary (async dispatch in background)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Add routing config and env vars",
+      "description": "As a developer, I need configuration variables for the routing system.",
+      "acceptanceCriteria": [
+        "Add to orchestrator/config.py: COMPOSIO_WEBHOOK_SECRET (str, from env), ROUTING_CACHE_TTL_HOURS (int, default 24), ROUTING_LLM_CONFIDENCE_THRESHOLD (float, default 0.5)",
+        "Add to orchestrator/.env.example: COMPOSIO_WEBHOOK_SECRET, ROUTING_CACHE_TTL_HOURS, ROUTING_LLM_CONFIDENCE_THRESHOLD",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Register routing API endpoints",
+      "description": "As an admin, I need API endpoints to manage routing rules, view decisions, and record corrections.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/routing.py with FastAPI router (prefix=/api/routing, tags=['Routing'])",
+        "GET /api/routing/decisions — list recent routing decisions with optional filters: source, agent_id, was_corrected. Paginated. Auth required via get_request_context_hybrid.",
+        "POST /api/routing/rules — create a routing rule: source_pattern (str), intent_keywords (List[str]), target_agent_id or target_workflow_id, priority (int). Auth required.",
+        "GET /api/routing/rules — list all active routing rules for the workspace. Auth required.",
+        "DELETE /api/routing/rules/{rule_id} — soft delete a routing rule. Auth required.",
+        "POST /api/routing/corrections — record user correction: request_id (UUID), correct_agent_id (int). Updates RoutingCache. Auth required.",
+        "GET /api/routing/cache/stats — return cache size, hit count, miss count, top 10 cached routes. Auth required.",
+        "Register router in orchestrator/main.py",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Set up Jira trigger subscription",
+      "description": "As an admin, I need to register JIRA_NEW_ISSUE_TRIGGER for the PILOT project so new tickets fire webhooks.",
+      "acceptanceCriteria": [
+        "Create orchestrator/scripts/setup_jira_trigger.py management script",
+        "Script reads COMPOSIO_KEY from env or .env file",
+        "Script calls Composio SDK to create JIRA_NEW_ISSUE_TRIGGER with trigger_config: {project_key: 'PILOT'}",
+        "Script creates TriggerSubscription record in database linking trigger to a configurable agent_id or workflow_id",
+        "Script prints trigger ID and confirms subscription created",
+        "Add POST /api/routing/triggers/setup endpoint as alternative to script (auth required)",
+        "Document webhook URL configuration step (Composio dashboard → Project Settings)",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Build Jira Bug Triage workflow — Read and Analyze steps",
+      "description": "As the system, I need the first half of the autonomous Bug Triage workflow: read the Jira ticket and analyze the codebase.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/workflows/recipes/jira_bug_triage.py",
+        "Define JiraBugTriageRecipe class with async execute(envelope: RequestEnvelope, db, workspace_id) method",
+        "Step 1 — Read Ticket: Use ComposioToolExecutor to call JIRA_GET_ISSUE with issue key from envelope.metadata",
+        "Step 2 — Analyze: Parse issue description, extract keywords, use CodeGraph search to find relevant files in the indexed codebase",
+        "Step 3 — Plan: Use LLM to generate a fix plan based on ticket description + relevant code snippets",
+        "Post the fix plan as a Jira comment via JIRA_ADD_COMMENT",
+        "Log progress at each step for observability",
+        "If any step fails, post failure summary as Jira comment and return error result",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Build Jira Bug Triage workflow — Fix, PR, and Update steps",
+      "description": "As the system, I need the second half of the Bug Triage workflow: clone repo, apply fix, open PR, update Jira.",
+      "acceptanceCriteria": [
+        "Extend JiraBugTriageRecipe with Steps 4-6",
+        "Step 4 — Clone & Fix: Use GITHUB_CREATE_BRANCH to create fix/{issue_key} branch, use GITHUB_CREATE_OR_UPDATE_FILE to apply code changes based on the plan",
+        "Step 5 — Open PR: Use GITHUB_CREATE_PULL_REQUEST with title referencing Jira ticket, description containing the fix plan",
+        "Step 6 — Update Jira: Use JIRA_UPDATE_ISSUE to transition ticket status. Add PR link as Jira comment via JIRA_ADD_COMMENT.",
+        "If any step fails, post failure summary as Jira comment and stop (no partial PRs)",
+        "Full workflow linked to TriggerSubscription so it can be dispatched by the router",
+        "Register recipe in a recipe registry so UniversalRouter can reference it by workflow_id",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Update chatbot UI for auto-routing indicator",
+      "description": "As a chatbot user, I want to see which agent was auto-selected and have the option to override.",
+      "acceptanceCriteria": [
+        "Add 'Auto' option to agent dropdown in frontend chatbot as first/default option",
+        "When 'Auto' selected, send request without agentId (let router decide)",
+        "After message sent, show subtle indicator below the message: 'Routed to: {Agent Name}'",
+        "If user selects a different agent from dropdown after auto-route, trigger correction via POST /api/routing/corrections",
+        "Agent dropdown still works as before for manual pinning",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Browser verification needed — no dev-browser tool available"
+    }
+  ]
+}

@@ -10,6 +10,8 @@ import os
 import hashlib
 import tempfile
 import json
+import uuid
+import magic
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
@@ -83,6 +85,18 @@ def get_document_manager(workspace_id: str) -> DocumentManager:
         s3_bucket=s3_bucket
     )
 
+# Allowlist of accepted MIME types mapped to valid extensions
+ALLOWED_MIME_TYPES = {
+    "application/pdf": [".pdf"],
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+    "text/plain": [".txt", ".md", ".csv"],
+    "text/markdown": [".md"],
+    "text/csv": [".csv"],
+    "application/json": [".json"],
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+    "application/octet-stream": [".pdf", ".docx", ".xlsx"],  # fallback for binary
+}
+
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def handle_request(
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -105,15 +119,34 @@ async def handle_request(
         
         if file_size > 50 * 1024 * 1024:  # 50MB limit
             raise HTTPException(status_code=400, detail="File too large (max 50MB)")
-        
+
+        # MIME type validation using python-magic (detect actual content type)
+        detected_mime = magic.from_buffer(content, mime=True)
+        file_extension = Path(file.filename).suffix.lower()
+
+        if detected_mime not in ALLOWED_MIME_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File type not allowed. Detected MIME type: {detected_mime}"
+            )
+
+        # Verify extension matches detected MIME type
+        allowed_extensions = ALLOWED_MIME_TYPES[detected_mime]
+        if file_extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File extension '{file_extension}' does not match detected content type '{detected_mime}'. "
+                       f"Allowed extensions for this type: {', '.join(allowed_extensions)}"
+            )
+
         # Reset file pointer
         await file.seek(0)
-        
+
         # Generate file hash
         content_hash = hashlib.sha256(content).hexdigest()
-        
+
         # Check for duplicate
-        existing = db.query(Document).filter(Document.content_hash == content_hash).first()
+        existing = db.query(Document).filter(Document.content_hash == content_hash, Document.workspace_id == ctx.workspace_id).first()
         if existing:
             return DocumentUploadResponse(
                 document_id=existing.id,
@@ -121,23 +154,23 @@ async def handle_request(
                 status="duplicate",
                 message="Document already exists"
             )
-        
-        # Save file temporarily
+
+        # Save file temporarily with random filename (never use original filename)
         upload_dir = Path("/tmp/automotas_uploads")
         upload_dir.mkdir(exist_ok=True)
-        
-        file_path = upload_dir / f"{content_hash}_{file.filename}"
+
+        safe_filename = f"{uuid.uuid4().hex}{file_extension}"
+        file_path = upload_dir / safe_filename
         
         with open(file_path, "wb") as f:
             f.write(content)
-        
-        # Determine file type
-        file_extension = Path(file.filename).suffix.lower()
+
+        # Determine file type category from extension
         file_type = "unknown"
         if file_extension in ['.pdf']:
             file_type = "pdf"
         elif file_extension in ['.md', '.markdown']:
-            file_type = "markdown"  # FIXED: Use markdown type for SmartChunker
+            file_type = "markdown"
         elif file_extension in ['.txt']:
             file_type = "text"
         elif file_extension in ['.doc', '.docx']:
@@ -217,7 +250,7 @@ async def handle_request(
         raise
     except Exception as e:
         logger.error(f"Error uploading document: {e}")
-        raise HTTPException(status_code=500, detail=f"Error uploading document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/download")
 async def download_document(path: str = Query(..., description="Full path to document")):
@@ -270,7 +303,7 @@ async def download_document(path: str = Query(..., description="Full path to doc
         raise
     except Exception as e:
         logger.error(f"Error downloading document: {e}")
-        raise HTTPException(status_code=500, detail=f"Error downloading document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/content")
 async def get_document_content_by_path(path: str = Query(..., description="Full path to document")):
@@ -314,7 +347,7 @@ async def get_document_content_by_path(path: str = Query(..., description="Full 
         raise
     except Exception as e:
         logger.error(f"Error reading document: {e}")
-        raise HTTPException(status_code=500, detail=f"Error reading document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 
@@ -396,7 +429,7 @@ async def get_document_analytics(
         
     except Exception as e:
         logger.error(f"Error getting document analytics: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/", response_model=List[DocumentResponse])
 async def list_documents(
@@ -447,7 +480,7 @@ async def list_documents(
         
     except Exception as e:
         logger.error(f"Error listing documents: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing documents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
@@ -480,7 +513,7 @@ async def get_document(
         raise
     except Exception as e:
         logger.error(f"Error getting document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{document_id}/delete-impact")
 async def get_delete_impact(
@@ -546,7 +579,7 @@ async def get_delete_impact(
         raise
     except Exception as e:
         logger.error(f"Error getting delete impact for document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error analyzing delete impact: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{document_id}")
 async def delete_document(
@@ -578,7 +611,7 @@ async def delete_document(
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{document_id}/reprocess")
 async def reprocess_document(
@@ -647,13 +680,13 @@ async def reprocess_document(
             logger.error(f"Error reprocessing document {document_id}: {e}")
             document.status = "failed"
             db.commit()
-            raise HTTPException(status_code=500, detail=f"Error reprocessing document: {str(e)}")
+            raise HTTPException(status_code=500, detail="Internal server error")
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error reprocessing document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error reprocessing document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{document_id}/content")
 async def get_document_content_by_id(
@@ -724,7 +757,7 @@ async def get_document_content_by_id(
         raise
     except Exception as e:
         logger.error(f"Error getting document content {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting document content: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 PREVIEW_CHUNK_LIMIT = 6  # Max number of chunks included in preview window
@@ -773,10 +806,11 @@ async def semantic_search(
             doc_filter = "AND d.id = ANY(:document_ids)"
         
         # Format embedding as PostgreSQL array string for pgvector
-        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
-        
-        similarity_query = text(f"""
-            SELECT 
+        # Pass as parameterized value to avoid SQL injection
+        embedding_str = '[' + ','.join(str(float(v)) for v in query_embedding) + ']'
+
+        similarity_query = text("""
+            SELECT
                 dc.id as chunk_id,
                 dc.document_id,
                 dc.chunk_index,
@@ -786,18 +820,19 @@ async def semantic_search(
                 d.file_type,
                 d.file_size,
                 d.upload_date,
-                1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
+                1 - (dc.embedding <=> cast(:embedding as vector)) as similarity
             FROM document_chunks dc
             JOIN documents d ON dc.document_id = d.id
             WHERE dc.embedding IS NOT NULL
                 AND d.workspace_id = :workspace_id
                 {doc_filter}
-                AND (1 - (dc.embedding <=> '{embedding_str}'::vector)) >= :min_similarity
-            ORDER BY dc.embedding <=> '{embedding_str}'::vector
+                AND (1 - (dc.embedding <=> cast(:embedding as vector))) >= :min_similarity
+            ORDER BY dc.embedding <=> cast(:embedding as vector)
             LIMIT :limit
-        """)
-        
+        """.format(doc_filter=doc_filter))
+
         params = {
+            "embedding": embedding_str,
             "min_similarity": min_similarity,
             "limit": limit,
             "workspace_id": ctx.workspace_id
@@ -977,7 +1012,7 @@ async def semantic_search(
         raise
     except Exception as e:
         logger.error(f"Error performing semantic search: {e}")
-        raise HTTPException(status_code=500, detail=f"Error performing semantic search: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/queue/status")
@@ -1002,7 +1037,7 @@ async def get_queue_status(
             Document.workspace_id == ctx.workspace_id,
             Document.status == 'pending'
         ).order_by(Document.upload_date.desc()).all()
-        
+
         processing_docs = db.query(Document).filter(
             Document.workspace_id == ctx.workspace_id,
             Document.status == 'processing'
@@ -1131,7 +1166,7 @@ async def get_queue_status(
         
     except Exception as e:
         logger.error(f"Error getting queue status: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting queue status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/rag/retrieve")
@@ -1141,6 +1176,7 @@ async def rag_retrieve(
     max_tokens: Optional[int] = Query(None, ge=100, le=8000, description="Maximum tokens (uses system_settings if not provided)"),
     diversity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Diversity parameter (uses system_settings if not provided)"),
     min_similarity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum similarity (uses system_settings if not provided)"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -1271,7 +1307,7 @@ async def rag_retrieve(
         
     except Exception as e:
         logger.error(f"Error performing RAG retrieval: {e}")
-        raise HTTPException(status_code=500, detail=f"Error performing RAG retrieval: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # Usage Analytics Endpoints
@@ -1282,6 +1318,7 @@ async def track_usage_event(
     document_id: Optional[int] = Query(None, description="Document ID (if applicable)"),
     query: Optional[str] = Query(None, description="Search query (if applicable)"),
     metadata: Optional[str] = Query(None, description="Additional metadata as JSON string"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -1350,12 +1387,13 @@ async def track_usage_event(
         
     except Exception as e:
         logger.error(f"Error tracking usage event: {e}")
-        raise HTTPException(status_code=500, detail=f"Error tracking usage event: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/analytics/usage")
 async def get_usage_analytics(
     period: str = Query("7d", description="Time period (24h, 7d, 30d)"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -1386,23 +1424,24 @@ async def get_usage_analytics(
         
         # Most accessed documents (by view count or recent activity)
         popular_docs_query = text("""
-            SELECT 
+            SELECT
                 id,
                 filename,
                 file_type,
                 upload_date,
                 processed_date,
-                CASE 
+                CASE
                     WHEN processed_date IS NOT NULL THEN 1
                     ELSE 0
                 END as access_count
             FROM documents
             WHERE status = 'completed'
+                AND workspace_id = :workspace_id
             ORDER BY processed_date DESC NULLS LAST
             LIMIT 10
         """)
         
-        popular_docs_result = db.execute(popular_docs_query)
+        popular_docs_result = db.execute(popular_docs_query, {"workspace_id": str(ctx.workspace_id)})
         popular_documents = [
             {
                 "document_id": row.id,
@@ -1415,14 +1454,15 @@ async def get_usage_analytics(
         
         # Get document statistics
         stats_query = text("""
-            SELECT 
+            SELECT
                 COUNT(*) as total_documents,
                 COUNT(CASE WHEN status = 'completed' THEN 1 END) as processed_documents,
                 COUNT(CASE WHEN upload_date >= :start_time THEN 1 END) as documents_this_period
             FROM documents
+            WHERE workspace_id = :workspace_id
         """)
-        
-        stats_result = db.execute(stats_query, {"start_time": start_time}).fetchone()
+
+        stats_result = db.execute(stats_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchone()
         
         # Get REAL popular search terms from document_usage table (if it exists)
         popular_search_terms = []
@@ -1452,16 +1492,17 @@ async def get_usage_analytics(
         
         # Time series data (documents uploaded per day)
         time_series_query = text("""
-            SELECT 
+            SELECT
                 DATE(upload_date) as date,
                 COUNT(*) as count
             FROM documents
             WHERE upload_date >= :start_time
+                AND workspace_id = :workspace_id
             GROUP BY DATE(upload_date)
             ORDER BY date
         """)
-        
-        time_series_result = db.execute(time_series_query, {"start_time": start_time})
+
+        time_series_result = db.execute(time_series_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)})
         time_series = [
             {
                 "date": row.date.isoformat() if row.date else None,
@@ -1493,7 +1534,7 @@ async def get_usage_analytics(
         
     except Exception as e:
         logger.error(f"Error getting usage analytics: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting usage analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -1505,6 +1546,7 @@ async def get_usage_analytics(
 @router.post("/reprocess-all")
 async def reprocess_all_documents(
     background_tasks: BackgroundTasks,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -1537,11 +1579,14 @@ async def reprocess_all_documents(
         
     except Exception as e:
         logger.error(f"Error starting batch re-processing: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/reprocess-status")
-async def get_reprocess_status(db: Session = Depends(get_db)):
+async def get_reprocess_status(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """
     Get status of document re-processing.
     
@@ -1551,14 +1596,15 @@ async def get_reprocess_status(db: Session = Depends(get_db)):
         from sqlalchemy import text
         
         status_query = text("""
-            SELECT 
+            SELECT
                 status,
                 COUNT(*) as count
             FROM documents
+            WHERE workspace_id = :workspace_id
             GROUP BY status
         """)
         
-        result = db.execute(status_query)
+        result = db.execute(status_query, {"workspace_id": str(ctx.workspace_id)})
         status_counts = {row.status: row.count for row in result}
         
         total = sum(status_counts.values())
@@ -1579,4 +1625,4 @@ async def get_reprocess_status(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting re-process status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

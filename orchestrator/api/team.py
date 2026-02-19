@@ -149,7 +149,7 @@ async def invite_member(
                 invitation_service.revoke_invitation(invitation)
             except Exception as revoke_err:
                 logger.error("Failed to revoke invitation after Clerk error: %s", revoke_err)
-            raise HTTPException(status_code=502, detail=f"Clerk invite failed: {e}") from e
+            raise HTTPException(status_code=502, detail="Clerk invite failed") from e
 
     audit = AuditService(db)
     audit.log(

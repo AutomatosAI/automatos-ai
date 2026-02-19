@@ -81,7 +81,7 @@ export default function BackendAPIKeysSettingsTab({
                 type="password"
                 value={formData.api_key || ''}
                 onChange={(e) => handleInputChange('api_key', e.target.value)}
-                placeholder="test_api_key_for_backend_validation_2025"
+                placeholder="Enter your API key"
               />
               {getSetting('api_key')?.is_sensitive && (
                 <Badge variant="destructive" className="text-xs">Sensitive</Badge>

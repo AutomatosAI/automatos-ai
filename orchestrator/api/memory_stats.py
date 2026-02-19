@@ -13,52 +13,55 @@ from datetime import datetime, timedelta
 
 from core.database.database import get_db
 from modules.memory.storage.knowledge_system import MemoryItem
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/memory", tags=["Real Memory Stats"])
 
 @router.get("/stats/real")
-async def get_real_memory_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Get REAL memory statistics from database
     """
     try:
-        # Total memories
-        total_memories = db.query(func.count(MemoryItem.id)).scalar() or 0
-        
+        # Total memories - scoped to workspace
+        ws_filter = MemoryItem.workspace_id == ctx.workspace_id
+        total_memories = db.query(func.count(MemoryItem.id)).filter(ws_filter).scalar() or 0
+
         # Memories by type
         memory_by_type = db.query(
             MemoryItem.memory_type,
             func.count(MemoryItem.id).label('count')
-        ).group_by(MemoryItem.memory_type).all()
-        
+        ).filter(ws_filter).group_by(MemoryItem.memory_type).all()
+
         # Memories by level
         memory_by_level = db.query(
             MemoryItem.memory_level,
             func.count(MemoryItem.id).label('count')
-        ).group_by(MemoryItem.memory_level).all()
-        
+        ).filter(ws_filter).group_by(MemoryItem.memory_level).all()
+
         # Agents with memories
         agents_with_memories = db.query(
             func.count(func.distinct(MemoryItem.agent_id))
-        ).scalar() or 0
-        
+        ).filter(ws_filter).scalar() or 0
+
         # Average importance
         avg_importance = db.query(
             func.avg(MemoryItem.importance)
-        ).scalar() or 0.0
-        
+        ).filter(ws_filter).scalar() or 0.0
+
         # Recent memories (last 24h)
         yesterday = datetime.utcnow() - timedelta(hours=24)
         recent_memories = db.query(
             func.count(MemoryItem.id)
-        ).filter(MemoryItem.created_at >= yesterday).scalar() or 0
-        
+        ).filter(ws_filter, MemoryItem.created_at >= yesterday).scalar() or 0
+
         # Access count stats
         total_accesses = db.query(
             func.sum(MemoryItem.access_count)
-        ).scalar() or 0
+        ).filter(ws_filter).scalar() or 0
         
         return {
             "system_stats": {
@@ -85,10 +88,10 @@ async def get_real_memory_stats(db: Session = Depends(get_db)) -> Dict[str, Any]
         
     except Exception as e:
         logger.error(f"Failed to get real memory stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get memory stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats/agents")
-async def get_agent_memory_stats(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+async def get_agent_memory_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     """
     Get memory stats per agent
     """
@@ -98,7 +101,7 @@ async def get_agent_memory_stats(db: Session = Depends(get_db)) -> List[Dict[str
             func.count(MemoryItem.id).label('memory_count'),
             func.avg(MemoryItem.importance).label('avg_importance'),
             func.sum(MemoryItem.access_count).label('total_accesses')
-        ).group_by(MemoryItem.agent_id).all()
+        ).filter(MemoryItem.workspace_id == ctx.workspace_id).group_by(MemoryItem.agent_id).all()
         
         return [
             {
@@ -112,18 +115,21 @@ async def get_agent_memory_stats(db: Session = Depends(get_db)) -> List[Dict[str
         
     except Exception as e:
         logger.error(f"Failed to get agent memory stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get agent stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats/recent")
 async def get_recent_memories(
     limit: int = 10,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ) -> List[Dict[str, Any]]:
     """
     Get most recent memories
     """
     try:
-        recent = db.query(MemoryItem).order_by(
+        recent = db.query(MemoryItem).filter(
+            MemoryItem.workspace_id == ctx.workspace_id
+        ).order_by(
             desc(MemoryItem.created_at)
         ).limit(limit).all()
         
@@ -142,5 +148,5 @@ async def get_recent_memories(
         
     except Exception as e:
         logger.error(f"Failed to get recent memories: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get recent memories: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 

@@ -3,13 +3,12 @@ Chat API
 ========
 PRD-27: Chat endpoints for streaming conversations, history, and voting.
 
-Follows standard API pattern with require_api_key dependency.
+Secured with hybrid auth (Clerk JWT + API key).
 """
 
-import os
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
@@ -25,17 +24,6 @@ from core.routing.ingestors.chatbot import ChatbotIngestor
 
 logger = logging.getLogger(__name__)
 
-# Standard API key auth (matches all other APIs)
-# For chat endpoint, API key is optional if not set in env (user-facing feature)
-def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    # If API_KEY is not set in env, allow requests (for user-facing chat)
-    if not required:
-        return True
-    # If API_KEY is set, require it
-    if x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
 
 router = APIRouter(prefix="/api/chat", tags=["💬 Chat"])
 
@@ -153,7 +141,6 @@ def get_default_agent_id(db: Session, workspace_id) -> int:
 @router.post("")
 async def stream_chat(
     request: ChatRequest,
-    _x_api_key: bool = Depends(require_api_key),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -327,6 +314,7 @@ async def stream_chat(
 @router.get("/history")
 async def get_chat_history(
     limit: int = 20,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get chat history for the current user"""
@@ -352,6 +340,7 @@ async def get_chat_history(
 @router.get("/{chat_id}")
 async def get_chat(
     chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get a specific chat"""
@@ -379,6 +368,7 @@ async def get_chat(
 @router.get("/{chat_id}/messages")
 async def get_chat_messages(
     chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get all messages for a chat"""
@@ -410,6 +400,7 @@ async def get_chat_messages(
 @router.delete("/{chat_id}")
 async def delete_chat(
     chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Delete a chat"""
@@ -432,6 +423,7 @@ async def delete_chat(
 async def update_chat(
     chat_id: str,
     request: UpdateTitleRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Update chat title"""
@@ -453,6 +445,7 @@ async def update_chat(
 @router.patch("/vote")
 async def vote_message(
     request: VoteRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Vote on a message"""
@@ -480,12 +473,13 @@ async def vote_message(
 @router.get("/agents")
 async def get_available_agents(
     status: str = "active",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get list of available agents for chat selection."""
     from core.models import Agent
     
-    query = db.query(Agent).filter(Agent.status == status)
+    query = db.query(Agent).filter(Agent.status == status, Agent.workspace_id == ctx.workspace_id)
     agents = query.all()
     
     return {
@@ -515,6 +509,7 @@ class SwitchAgentRequest(BaseModel):
 async def switch_agent(
     chat_id: str,
     request: SwitchAgentRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Switch to a different agent mid-conversation."""
@@ -532,7 +527,7 @@ async def switch_agent(
     if chat.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    new_agent = db.query(Agent).filter(Agent.id == request.newAgentId).first()
+    new_agent = db.query(Agent).filter(Agent.id == request.newAgentId, Agent.workspace_id == ctx.workspace_id).first()
     if not new_agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     

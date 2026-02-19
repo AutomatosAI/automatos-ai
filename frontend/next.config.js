@@ -4,6 +4,8 @@ const path = require('path')
 const nextConfig = {
   reactStrictMode: false,
   typescript: {
+    // TODO: Set to false once ~400 TS errors are resolved (separate PR)
+    // Security audit 2026-02-04: 798 lines of TS errors found across dozens of components
     ignoreBuildErrors: true
   },
   typedRoutes: true,

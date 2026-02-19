@@ -17,6 +17,8 @@ import uuid
 import json
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from core.models.system_settings import (
     SystemSetting, SystemSettingResponse, SystemSettingUpdate, 
     SystemSettingCreate, SystemSettingsByCategory, SystemSettingsStats,
@@ -36,7 +38,8 @@ router = APIRouter(prefix="/api/system-settings", tags=["system-settings"])
 @router.get("/", response_model=List[SystemSettingResponse])
 async def list_system_settings(
     category: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """List all system settings, optionally filtered by category"""
     try:
@@ -48,11 +51,11 @@ async def list_system_settings(
         return settings
     except Exception as e:
         logger.error(f"Failed to list system settings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/categories", response_model=List[str])
-async def list_setting_categories(db: Session = Depends(get_db)):
+async def list_setting_categories(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """List all available setting categories"""
     
     try:
@@ -60,11 +63,11 @@ async def list_setting_categories(db: Session = Depends(get_db)):
         return [cat[0] for cat in categories]
     except Exception as e:
         logger.error(f"Failed to list categories: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/by-category", response_model=List[SystemSettingsByCategory])
-async def get_settings_by_category(db: Session = Depends(get_db)):
+async def get_settings_by_category(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get all settings grouped by category"""
     
     try:
@@ -88,11 +91,11 @@ async def get_settings_by_category(db: Session = Depends(get_db)):
         return result
     except Exception as e:
         logger.error(f"Failed to get settings by category: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats", response_model=SystemSettingsStats)
-async def get_settings_stats(db: Session = Depends(get_db)):
+async def get_settings_stats(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get system settings statistics"""
     
     try:
@@ -119,13 +122,14 @@ async def get_settings_stats(db: Session = Depends(get_db)):
         )
     except Exception as e:
         logger.error(f"Failed to get settings stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{setting_id}", response_model=SystemSettingResponse)
 async def get_system_setting(
     setting_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Get a specific system setting"""
     
@@ -139,14 +143,15 @@ async def get_system_setting(
         raise
     except Exception as e:
         logger.error(f"Failed to get system setting {setting_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/{setting_id}", response_model=SystemSettingResponse)
 async def update_system_setting(
     setting_id: int,
     update_data: SystemSettingUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Update a system setting"""
     
@@ -168,13 +173,14 @@ async def update_system_setting(
         raise
     except Exception as e:
         logger.error(f"Failed to update system setting {setting_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/", response_model=SystemSettingResponse)
 async def create_system_setting(
     setting_data: SystemSettingCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Create a new system setting"""
     
@@ -202,13 +208,14 @@ async def create_system_setting(
         raise
     except Exception as e:
         logger.error(f"Failed to create system setting: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/{setting_id}")
 async def delete_system_setting(
     setting_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Delete a system setting"""
     
@@ -233,14 +240,15 @@ async def delete_system_setting(
         raise
     except Exception as e:
         logger.error(f"Failed to delete system setting {setting_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/bulk-update")
 async def bulk_update_settings(
     request: Request,
     updates: List[BulkUpdateItem] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Bulk update multiple settings"""
     
@@ -294,13 +302,14 @@ async def bulk_update_settings(
         raise
     except Exception as e:
         logger.error(f"Failed to bulk update settings: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/reset-to-defaults")
 async def reset_settings_to_defaults(
     category: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Reset settings to their default values"""
     
@@ -322,4 +331,4 @@ async def reset_settings_to_defaults(
         return {"message": f"Reset {reset_count} settings to default values"}
     except Exception as e:
         logger.error(f"Failed to reset settings to defaults: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

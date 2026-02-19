@@ -3,13 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
 const PREFIX = (process.env.NEXT_PUBLIC_API_PREFIX || '/api').replace(/\/$/, '')
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || ''
-const AUTH = process.env.NEXT_PUBLIC_AUTH_TOKEN || ''
-
 function headers(extra?: Record<string,string>) {
   const h: Record<string,string> = { 'Content-Type':'application/json', ...(extra||{}) }
-  if (API_KEY && !h['X-API-Key']) h['X-API-Key'] = API_KEY
-  if (AUTH && !h['Authorization']) h['Authorization'] = `Bearer ${AUTH}`
   return h
 }
 

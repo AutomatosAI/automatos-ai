@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac as _hmac
 import os
 import logging
 import secrets
@@ -68,20 +69,34 @@ def _get_workspace_id_from_request(request: Request) -> Optional[UUID]:
     return None
 
 
-def _workspace_exists(workspace_id: UUID) -> bool:
+def _workspace_exists(db, workspace_id: UUID) -> bool:
     """Return True if workspace exists (and is active)."""
-    db = SessionLocal()
-    try:
-        row = db.execute(
-            text("SELECT 1 FROM workspaces WHERE id = :id AND is_active = true LIMIT 1"),
-            {"id": str(workspace_id)},
-        ).fetchone()
-        return bool(row)
-    finally:
-        db.close()
+    row = db.execute(
+        text("SELECT 1 FROM workspaces WHERE id = :id AND is_active = true LIMIT 1"),
+        {"id": str(workspace_id)},
+    ).fetchone()
+    return bool(row)
 
 
-def _user_has_workspace_access(clerk_user_id: Optional[str], workspace_id: UUID) -> bool:
+def _user_is_workspace_member(db, workspace_id: UUID, clerk_user_id: Optional[str]) -> bool:
+    """Return True if the Clerk user is an active member of the workspace."""
+    if not clerk_user_id:
+        return False
+    row = db.execute(
+        text(
+            "SELECT 1 FROM workspace_members wm "
+            "JOIN users u ON wm.user_id = u.id "
+            "WHERE wm.workspace_id = :workspace_id "
+            "AND u.clerk_user_id = :clerk_user_id "
+            "AND wm.is_active = true "
+            "LIMIT 1"
+        ),
+        {"workspace_id": str(workspace_id), "clerk_user_id": clerk_user_id},
+    ).fetchone()
+    return bool(row)
+
+
+def _user_has_workspace_access(db, clerk_user_id: Optional[str], workspace_id: UUID) -> bool:
     """
     Verify that a Clerk user actually has access to the requested workspace.
 
@@ -90,21 +105,17 @@ def _user_has_workspace_access(clerk_user_id: Optional[str], workspace_id: UUID)
     """
     if not clerk_user_id:
         return False
-    db = SessionLocal()
-    try:
-        row = db.execute(
-            text(
-                "SELECT 1 FROM users u "
-                "LEFT JOIN workspaces w ON w.owner_id = u.id AND w.id = :ws_id "
-                "LEFT JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = :ws_id AND wm.is_active = true "
-                "WHERE u.clerk_user_id = :cid AND (w.id IS NOT NULL OR wm.id IS NOT NULL) "
-                "LIMIT 1"
-            ),
-            {"cid": clerk_user_id, "ws_id": str(workspace_id)},
-        ).fetchone()
-        return bool(row)
-    finally:
-        db.close()
+    row = db.execute(
+        text(
+            "SELECT 1 FROM users u "
+            "LEFT JOIN workspaces w ON w.owner_id = u.id AND w.id = :ws_id "
+            "LEFT JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = :ws_id AND wm.is_active = true "
+            "WHERE u.clerk_user_id = :cid AND (w.id IS NOT NULL OR wm.id IS NOT NULL) "
+            "LIMIT 1"
+        ),
+        {"cid": clerk_user_id, "ws_id": str(workspace_id)},
+    ).fetchone()
+    return bool(row)
 
 
 def _provision_new_user_workspace(
@@ -114,13 +125,13 @@ def _provision_new_user_workspace(
     Auto-provision a personal workspace for a new Clerk user.
 
     Creates:
-    1. A `users` row (if missing) linked via clerk_user_id
-    2. A personal `workspaces` row owned by that user
-    3. A `workspace_members` row with role='owner'
+    1. A ``users`` row (if missing) linked via clerk_user_id
+    2. A personal ``workspaces`` row owned by that user
+    3. A ``workspace_members`` row with role='owner'
 
     Returns the new workspace UUID.
     """
-    # 1) Atomic upsert user — INSERT ON CONFLICT to avoid race conditions
+    # 1) Atomic upsert user -- INSERT ON CONFLICT to avoid race conditions
     username = email or clerk_user_id
     try:
         db.execute(
@@ -191,6 +202,7 @@ def _provision_new_user_workspace(
 
 
 def _resolve_workspace_for_clerk_user(
+    db,
     clerk_user_id: Optional[str],
     org_id: Optional[str],
     email: Optional[str] = None,
@@ -204,57 +216,49 @@ def _resolve_workspace_for_clerk_user(
     2. Personal workspace owned by mapped user
     3. Auto-provision a new personal workspace (new user signup)
     """
-    db = SessionLocal()
-    try:
-        # 1) Org workspace
-        if org_id:
-            row = db.execute(
+    # 1) Org workspace
+    if org_id:
+        row = db.execute(
+            text(
+                "SELECT id FROM workspaces "
+                "WHERE clerk_org_id = :org_id AND is_active = true "
+                "ORDER BY updated_at DESC NULLS LAST "
+                "LIMIT 1"
+            ),
+            {"org_id": org_id},
+        ).fetchone()
+        if row and row[0]:
+            return row[0]
+
+    # 2) Personal workspace via existing user record
+    if clerk_user_id:
+        user_row = db.execute(
+            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+            {"cid": clerk_user_id},
+        ).fetchone()
+        if user_row and user_row[0]:
+            uid = user_row[0]
+            ws_row = db.execute(
                 text(
                     "SELECT id FROM workspaces "
-                    "WHERE clerk_org_id = :org_id AND is_active = true "
-                    "ORDER BY updated_at DESC NULLS LAST "
+                    "WHERE owner_id = :uid AND is_active = true "
+                    "ORDER BY is_personal DESC, updated_at DESC NULLS LAST "
                     "LIMIT 1"
                 ),
-                {"org_id": org_id},
+                {"uid": uid},
             ).fetchone()
-            if row and row[0]:
-                return row[0]
+            if ws_row and ws_row[0]:
+                return ws_row[0]
 
-        # 2) Personal workspace via existing user record
-        if clerk_user_id:
-            user_row = db.execute(
-                text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-                {"cid": clerk_user_id},
-            ).fetchone()
-            if user_row and user_row[0]:
-                uid = user_row[0]
-                ws_row = db.execute(
-                    text(
-                        "SELECT id FROM workspaces "
-                        "WHERE owner_id = :uid AND is_active = true "
-                        "ORDER BY is_personal DESC, updated_at DESC NULLS LAST "
-                        "LIMIT 1"
-                    ),
-                    {"uid": uid},
-                ).fetchone()
-                if ws_row and ws_row[0]:
-                    return ws_row[0]
+    # 3) No workspace found -- auto-provision for authenticated Clerk users
+    if clerk_user_id:
+        logger.info(
+            "No workspace found for clerk_user_id=%s -- provisioning new personal workspace",
+            clerk_user_id,
+        )
+        return _provision_new_user_workspace(db, clerk_user_id, email=email, name=name)
 
-        # 3) No workspace found — auto-provision for authenticated Clerk users
-        if clerk_user_id:
-            logger.info(
-                "No workspace found for clerk_user_id=%s — provisioning new personal workspace",
-                clerk_user_id,
-            )
-            return _provision_new_user_workspace(db, clerk_user_id, email=email, name=name)
-
-        return None
-    except Exception:
-        db.rollback()
-        logger.exception("Failed to resolve/provision workspace for clerk_user_id=%s", clerk_user_id)
-        return None
-    finally:
-        db.close()
+    return None
 
 
 def _get_api_key(request: Request) -> Optional[str]:
@@ -303,101 +307,109 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
 
     workspace_id = _get_workspace_id_from_request(request)
 
-    require_auth = os.getenv("REQUIRE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
+    # Secure-by-default: auth is required unless explicitly disabled
+    _require_auth_raw = os.getenv("REQUIRE_AUTH", "true").strip().lower()
+    require_auth = _require_auth_raw not in {"0", "false", "no", "off"}
 
-    # 1) Clerk JWT
-    bearer = _get_bearer_token(request)
-    if bearer:
-        clerk = get_clerk_auth()
-        claims = clerk.verify_token(bearer)
-        if claims:
-            # ... (successful resolution logic)
-            info = clerk.extract_user_info(claims)
-            clerk_uid = info.get("clerk_user_id")
+    # Single DB session for all workspace resolution queries in this request
+    db = SessionLocal()
+    try:
+        # 1) Clerk JWT
+        bearer = _get_bearer_token(request)
+        if bearer:
+            clerk = get_clerk_auth()
+            claims = clerk.verify_token(bearer)
+            if claims:
+                info = clerk.extract_user_info(claims)
+                clerk_uid = info.get("clerk_user_id")
 
-            # If client sent a workspace ID via header, verify the user has access
-            if workspace_id:
-                if not _workspace_exists(workspace_id):
+                # If client sent a workspace ID via header, verify the user has access
+                if workspace_id:
+                    if not _workspace_exists(db, workspace_id):
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+                    if not _user_has_workspace_access(db, clerk_uid, workspace_id):
+                        logger.warning("Access denied: user %s tried to access workspace %s", clerk_uid, workspace_id)
+                        # Fall through to resolver instead of blocking -- user may have a stale
+                        # localStorage value from the old shared-workspace bug
+                        workspace_id = None
+
+                resolved = workspace_id or _resolve_workspace_for_clerk_user(
+                    db,
+                    clerk_user_id=clerk_uid,
+                    org_id=info.get("org_id"),
+                    email=info.get("email"),
+                    name=info.get("name"),
+                )
+                if not resolved:
+                    logger.warning("Auth failed: Workspace not resolved for user %s", info.get("email"))
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Workspace not resolved. Ensure client sends X-Workspace-ID or user has a workspace.",
+                    )
+                if not _workspace_exists(db, resolved):
+                    logger.warning("Auth failed: Workspace %s does not exist", resolved)
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-                if not _user_has_workspace_access(clerk_uid, workspace_id):
-                    logger.warning("Access denied: user %s tried to access workspace %s", clerk_uid, workspace_id)
-                    # Fall through to resolver instead of blocking — user may have a stale
-                    # localStorage value from the old shared-workspace bug
-                    workspace_id = None
 
-            resolved = workspace_id or _resolve_workspace_for_clerk_user(
-                clerk_user_id=clerk_uid,
-                org_id=info.get("org_id"),
-                email=info.get("email"),
-                name=info.get("name"),
-            )
-            if not resolved:
-                 logger.warning(f"Auth failed: Workspace not resolved for user {info.get('email')}")
-                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Workspace not resolved. Ensure client sends X-Workspace-ID or user has a workspace.",
+                user = UserContext(
+                    id=info.get("clerk_user_id") or info.get("email"),
+                    email=info.get("email"),
+                    role=info.get("role") or "user",
+                    system_role=info.get("system_role") or info.get("role") or "user",
+                    clerk_user_id=info.get("clerk_user_id"),
+                    org_id=info.get("org_id"),
+                    raw_claims=claims,
                 )
-            if not _workspace_exists(resolved):
-                logger.warning(f"Auth failed: Workspace {resolved} does not exist")
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-            
-            user = UserContext(
-                id=info.get("clerk_user_id") or info.get("email"),
-                email=info.get("email"),
-                role=info.get("role") or "user",
-                system_role=info.get("system_role") or info.get("role") or "user",
-                clerk_user_id=info.get("clerk_user_id"),
-                org_id=info.get("org_id"),
-                raw_claims=claims,
+                return RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
+
+            # If a bearer token is present but invalid, treat as unauthorized.
+            logger.warning("Auth failed: Invalid or expired Clerk token")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+        # 2) API key
+        provided_key = _get_api_key(request)
+        if provided_key:
+            expected = (
+                os.getenv("ORCHESTRATOR_API_KEY")
+                or os.getenv("AUTOMATOS_API_KEY")
+                or os.getenv("API_KEY")
             )
-            return RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
-
-        # If a bearer token is present but invalid, treat as unauthorized.
-        logger.warning("Auth failed: Invalid or expired Clerk token")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-
-    # 2) API key
-    provided_key = _get_api_key(request)
-    if provided_key:
-        expected = (
-            os.getenv("ORCHESTRATOR_API_KEY")
-            or os.getenv("AUTOMATOS_API_KEY")
-            or os.getenv("API_KEY")
-        )
-        if expected and provided_key == expected:
-            # ... (success logic)
-            user = UserContext(id="api_key", email=None, role="admin", system_role="admin")
-            resolved = workspace_id
-            if not resolved:
-                # Prefer env default if provided; otherwise use unambiguous DB workspace.
-                resolved = _parse_uuid(os.getenv("DEFAULT_WORKSPACE_ID")) or _resolve_workspace_for_clerk_user(
-                    clerk_user_id=None, org_id=None
+            if expected and _hmac.compare_digest(provided_key, expected):
+                user = UserContext(id="api_key", email=None, role="admin", system_role="admin")
+                resolved = workspace_id
+                if not resolved:
+                    # Prefer env default if provided; otherwise resolve from DB.
+                    resolved = _parse_uuid(os.getenv("DEFAULT_WORKSPACE_ID")) or _resolve_workspace_for_clerk_user(
+                        db, clerk_user_id=None, org_id=None
+                    )
+                if not resolved:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace not resolved")
+                if not _workspace_exists(db, resolved):
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+                return RequestContext(
+                    workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
                 )
-            if not resolved:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace not resolved")
-            if not _workspace_exists(resolved):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-            return RequestContext(
-                workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
+
+            logger.warning("Auth failed: Invalid API key provided")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+        # 3) Dev fallback
+        if require_auth:
+            logger.warning("Auth failed: Authentication required but no credentials provided (REQUIRE_AUTH=true)")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+        # Keep noisy warnings down unless explicitly enabled
+        if os.getenv("AUTH_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}:
+            logger.info(
+                "Auth note: No credentials, using anonymous context (REQUIRE_AUTH=false)."
             )
-        
-        logger.warning("Auth failed: Invalid API key provided")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
-    # 3) Dev fallback
-    if require_auth:
-        logger.warning("Auth failed: Authentication required but no credentials provided (REQUIRE_AUTH=true)")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
-
-    # Keep noisy warnings down unless explicitly enabled
-    if os.getenv("AUTH_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}:
-        logger.info(
-            "Auth note: No credentials, using anonymous context (REQUIRE_AUTH=false)."
-        )
-
-    # Anonymous requests
-    resolved = workspace_id or _resolve_workspace_for_clerk_user(clerk_user_id=None, org_id=None)
-    if not resolved:
-        resolved = UUID("00000000-0000-0000-0000-000000000001")
-    return RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
-
+        # Anonymous requests (only reachable when REQUIRE_AUTH is explicitly disabled)
+        resolved = workspace_id or _resolve_workspace_for_clerk_user(db, clerk_user_id=None, org_id=None)
+        if not resolved:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
+            )
+        return RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
+    finally:
+        db.close()

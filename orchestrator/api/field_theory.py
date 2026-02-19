@@ -19,6 +19,8 @@ from datetime import datetime
 
 # Import database and dependencies
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from modules.orchestrator import EnhancedOrchestratorService
 
 logger = logging.getLogger(__name__)
@@ -70,16 +72,14 @@ class FieldPropagationRequest(BaseModel):
 class FieldInteractionRequest(BaseModel):
     """Request model for modeling field interactions between contexts"""
     task_id: int = Field(..., ge=1, description="Task identifier for interaction modeling")
-    user_id: int = Field(..., ge=1, description="User identifier requesting interaction analysis")
     similarity_threshold: Optional[float] = Field(0.5, ge=0.0, le=1.0, description="Minimum similarity threshold for interactions")
     interaction_types: Optional[List[str]] = Field(["semantic", "temporal", "causal"], description="Types of interactions to model")
     max_interactions: Optional[int] = Field(50, ge=1, le=500, description="Maximum number of interactions to return")
-    
+
     class Config:
         schema_extra = {
             "example": {
                 "task_id": 123,
-                "user_id": 456,
                 "similarity_threshold": 0.7,
                 "interaction_types": ["semantic", "temporal", "causal"],
                 "max_interactions": 20
@@ -108,19 +108,17 @@ class DynamicFieldRequest(BaseModel):
 class FieldOptimizationRequest(BaseModel):
     """Request model for multi-objective field optimization"""
     task_id: int = Field(..., ge=1, description="Task identifier for optimization")
-    user_id: int = Field(..., ge=1, description="User identifier requesting optimization")
     objectives: Optional[Dict[str, float]] = Field(
-        {"performance": 0.4, "stability": 0.3, "adaptability": 0.3}, 
+        {"performance": 0.4, "stability": 0.3, "adaptability": 0.3},
         description="Optimization objectives with weights (must sum to 1.0)"
     )
     optimization_algorithm: Optional[str] = Field("multi_objective", description="Algorithm: multi_objective, genetic, simulated_annealing")
     max_iterations: Optional[int] = Field(100, ge=10, le=1000, description="Maximum optimization iterations")
-    
+
     class Config:
         schema_extra = {
             "example": {
                 "task_id": 123,
-                "user_id": 456,
                 "objectives": {"performance": 0.5, "stability": 0.3, "adaptability": 0.2},
                 "optimization_algorithm": "multi_objective",
                 "max_iterations": 150
@@ -143,7 +141,8 @@ orchestrator_service = EnhancedOrchestratorService()
 
 @router.post("/fields/update", response_model=Dict[str, Any])
 async def update_field_context(
-    request: FieldUpdateRequest
+    request: FieldUpdateRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Update field representation for context data
@@ -165,14 +164,16 @@ async def update_field_context(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Field context update validation error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid field context update parameters")
     except Exception as e:
-        logger.error(f"Field context update failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Field update failed: {str(e)}")
+        logger.error(f"Field context update failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fields/propagate", response_model=Dict[str, Any])
 async def propagate_field_influence(
-    request: FieldPropagationRequest
+    request: FieldPropagationRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Propagate field influence using gradient calculations
@@ -193,14 +194,16 @@ async def propagate_field_influence(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Field propagation validation error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid field propagation parameters")
     except Exception as e:
-        logger.error(f"Field propagation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Field propagation failed: {str(e)}")
+        logger.error(f"Field propagation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fields/interactions", response_model=Dict[str, Any])
 async def model_field_interactions(
-    request: FieldInteractionRequest
+    request: FieldInteractionRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Model interactions between task contexts using field theory
@@ -221,14 +224,16 @@ async def model_field_interactions(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Field interaction modeling not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Requested field interaction resource not found")
     except Exception as e:
-        logger.error(f"Field interaction modeling failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Field interaction modeling failed: {str(e)}")
+        logger.error(f"Field interaction modeling failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fields/dynamic", response_model=Dict[str, Any])
 async def manage_dynamic_fields(
-    request: DynamicFieldRequest
+    request: DynamicFieldRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Dynamic field management with real-time updates
@@ -250,15 +255,17 @@ async def manage_dynamic_fields(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Dynamic field management validation error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid dynamic field management parameters")
     except Exception as e:
-        logger.error(f"Dynamic field management failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Dynamic field management failed: {str(e)}")
+        logger.error(f"Dynamic field management failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fields/optimize", response_model=Dict[str, Any])
 async def optimize_field_configuration(
     request: FieldOptimizationRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Multi-objective field optimization
@@ -270,7 +277,7 @@ async def optimize_field_configuration(
         result = await orchestrator_service.optimize_field_configuration(
             db=db,
             task_id=request.task_id,
-            user_id=request.user_id,
+            user_id=ctx.user.id,
             objectives=request.objectives
         )
         
@@ -281,14 +288,16 @@ async def optimize_field_configuration(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Field optimization resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Requested field optimization resource not found")
     except Exception as e:
-        logger.error(f"Field optimization failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Field optimization failed: {str(e)}")
+        logger.error(f"Field optimization failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/fields/context/{session_id}", response_model=Dict[str, Any])
 async def get_field_context(
-    session_id: str
+    session_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Get field context for a specific session"""
     try:
@@ -307,10 +316,10 @@ async def get_field_context(
         raise
     except Exception as e:
         logger.error(f"Failed to get field context: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/fields/statistics", response_model=Dict[str, Any])
-async def get_field_statistics():
+async def get_field_statistics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get comprehensive field theory statistics and performance metrics"""
     try:
         stats = orchestrator_service.field_manager.get_field_statistics()
@@ -323,10 +332,10 @@ async def get_field_statistics():
         
     except Exception as e:
         logger.error(f"Failed to get field statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/fields/states", response_model=Dict[str, Any])
-async def get_field_states():
+async def get_field_states(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get current field states across all sessions"""
     try:
         field_states = {}
@@ -350,10 +359,10 @@ async def get_field_states():
         
     except Exception as e:
         logger.error(f"Failed to get field states: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/fields/interactions", response_model=Dict[str, Any])
-async def get_field_interactions():
+async def get_field_interactions(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get current field interactions across all contexts"""
     try:
         interactions = []
@@ -378,11 +387,12 @@ async def get_field_interactions():
         
     except Exception as e:
         logger.error(f"Failed to get field interactions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/fields/context/{session_id}", response_model=Dict[str, Any])
 async def clear_field_context(
-    session_id: str
+    session_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Clear field context for a specific session"""
     try:
@@ -413,7 +423,7 @@ async def clear_field_context(
         raise
     except Exception as e:
         logger.error(f"Failed to clear field context: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/health", response_model=Dict[str, Any])
 async def field_theory_health_check():
@@ -458,7 +468,8 @@ async def field_theory_health_check():
 # Batch operations
 @router.post("/fields/batch/update", response_model=Dict[str, Any])
 async def batch_update_fields(
-    updates: Dict[str, FieldUpdateRequest]
+    updates: Dict[str, FieldUpdateRequest],
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Batch update multiple field contexts
@@ -495,11 +506,12 @@ async def batch_update_fields(
         
     except Exception as e:
         logger.error(f"Batch field update failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Batch field update failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fields/batch/propagate", response_model=Dict[str, Any])
 async def batch_propagate_fields(
-    propagations: Dict[str, FieldPropagationRequest]
+    propagations: Dict[str, FieldPropagationRequest],
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Batch propagate multiple field influences
@@ -535,4 +547,4 @@ async def batch_propagate_fields(
         
     except Exception as e:
         logger.error(f"Batch field propagation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Batch field propagation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

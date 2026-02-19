@@ -4,6 +4,7 @@ Database Knowledge API Routes
 PRD-21: API endpoints for database knowledge source management
 """
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
@@ -33,6 +34,8 @@ from modules.nl2sql import DatabaseIntrospectionService
 from core.models.database_knowledge import DatabaseQueryAudit
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/knowledge/sources/database", tags=["Database Knowledge"])
 
@@ -85,7 +88,7 @@ async def get_item(
     """
     try:
         query = db.query(DatabaseKnowledgeSource).filter(DatabaseKnowledgeSource.workspace_id == ctx.workspace_id).filter(
-            DatabaseKnowledgeSource.tenant_id == 1  # TODO: Get from auth context
+            DatabaseKnowledgeSource.tenant_id == str(ctx.workspace_id)
         )
         
         if active_only:
@@ -111,12 +114,13 @@ async def get_item(
             for s in sources
         ]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list database sources: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/", response_model=Dict[str, Any])
 async def create_database_source(
     source: DatabaseKnowledgeSourceCreate,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -135,7 +139,7 @@ async def create_database_source(
         result = await service.add_database_source(
             name=source.name,
             credential_id=source.credential_id,
-            tenant_id=1,  # TODO: Get from auth context
+            tenant_id=str(ctx.workspace_id),
             description=source.description
         )
         
@@ -151,16 +155,15 @@ async def create_database_source(
         }
     
     except Exception as e:
-        import traceback
-        logger.error(f"Failed to create database source: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Failed to create database source: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to create database source")
 
 
 @router.post("/{source_id}/query", response_model=Dict[str, Any])
 async def query_database(
     source_id: int,
     request: DatabaseQueryRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -183,12 +186,13 @@ async def query_database(
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"API query_database failed: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Query execution failed")
 
 
 @router.post("/{source_id}/introspect")
 async def introspect_schema(
     source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -209,15 +213,17 @@ async def introspect_schema(
             service_name="database_introspection"
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to resolve credentials: {e}")
-    
+        logging.getLogger(__name__).error(f"Failed to resolve credentials for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to resolve database credentials")
+
     # Introspect
     dialect = _map_dialect_to_introspector(source.dialect)
     try:
         inspector = DatabaseIntrospectionService(credential=creds, dialect=dialect)
         metadata = inspector.introspect(include_samples=True, sample_limit=5)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Introspection failed: {e}")
+        logging.getLogger(__name__).error(f"Introspection failed for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Schema introspection failed")
     
     # Persist
     source.schema_metadata = metadata
@@ -240,6 +246,7 @@ async def introspect_schema(
 async def get_schema(
     source_id: int,
     use_cache: bool = True,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -250,7 +257,7 @@ async def get_schema(
     # Try cache first
     if use_cache:
         try:
-            cached = cache.get_cached_schema(source_id, tenant_id=1)
+            cached = cache.get_cached_schema(source_id, tenant_id=str(ctx.workspace_id))
             if cached:
                 return cached
         except Exception:
@@ -275,6 +282,7 @@ async def update_semantic_layer(
     source_id: int,
     metrics: List[SemanticMetricCreate] = Body(default=[]),
     dimensions: List[SemanticDimensionCreate] = Body(default=[]),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -306,12 +314,14 @@ async def update_semantic_layer(
         }
     
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logging.getLogger(__name__).error(f"Failed to update semantic layer for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to update semantic layer")
 
 
 @router.get("/{source_id}")
 async def get_database_source(
     source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -342,6 +352,7 @@ async def get_database_source(
 @router.delete("/{source_id}")
 async def delete_database_source(
     source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -369,13 +380,14 @@ async def delete_database_source(
         }
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete source: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/templates/list")
 async def list_query_templates(
     dialect: Optional[str] = None,
     category: Optional[str] = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -412,6 +424,7 @@ async def list_query_templates(
 async def execute_template(
     source_id: int,
     request: QueryTemplateExecute,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -430,13 +443,15 @@ async def execute_template(
         }
     
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logging.getLogger(__name__).error(f"Failed to execute template for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Template execution failed")
 
 
 @router.post("/{source_id}/query/sql")
 async def execute_validated_sql(
     source_id: int,
     payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -462,7 +477,7 @@ async def execute_validated_sql(
     except SQLValidationError as e:
         # audit failure
         db.add(DatabaseQueryAudit(
-            tenant_id=1,  # TODO from auth
+            tenant_id=str(ctx.workspace_id),
             source_id=source.id,
             user_id=None,
             agent_id=None,
@@ -482,7 +497,8 @@ async def execute_validated_sql(
             confidence_score=None
         ))
         db.commit()
-        raise HTTPException(status_code=400, detail=str(e))
+        logging.getLogger(__name__).error(f"SQL validation failed for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="SQL validation failed")
 
     # Resolve creds and execute
     from sqlalchemy import create_engine, text
@@ -496,7 +512,7 @@ async def execute_validated_sql(
     except Exception as e:
         # audit failure
         db.add(DatabaseQueryAudit(
-            tenant_id=1,
+            tenant_id=str(ctx.workspace_id),
             source_id=source.id,
             user_id=None,
             agent_id=None,
@@ -516,14 +532,31 @@ async def execute_validated_sql(
             confidence_score=None
         ))
         db.commit()
-        raise HTTPException(status_code=400, detail=f"Failed to resolve credentials: {e}")
+        logging.getLogger(__name__).error(f"Failed to resolve credentials for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to resolve database credentials")
 
-    # Build URL
+    # Build URL using SQLAlchemy URL.create() to safely escape credential values
+    from sqlalchemy.engine import URL as SAURL
+    from urllib.parse import quote_plus
     dialect = source.dialect.lower()
     if dialect.startswith("postgres"):
-        url = f"postgresql+psycopg2://{creds.get('user')}:{creds.get('password')}@{creds.get('host')}:{creds.get('port')}/{creds.get('database')}"
+        url = SAURL.create(
+            drivername="postgresql+psycopg2",
+            username=creds.get('user'),
+            password=creds.get('password'),
+            host=creds.get('host'),
+            port=int(creds.get('port', 5432)),
+            database=creds.get('database'),
+        )
     elif dialect.startswith("mysql"):
-        url = f"mysql+pymysql://{creds.get('user')}:{creds.get('password')}@{creds.get('host')}:{creds.get('port')}/{creds.get('database')}"
+        url = SAURL.create(
+            drivername="mysql+pymysql",
+            username=creds.get('user'),
+            password=creds.get('password'),
+            host=creds.get('host'),
+            port=int(creds.get('port', 3306)),
+            database=creds.get('database'),
+        )
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported dialect: {source.dialect}")
 
@@ -537,7 +570,8 @@ async def execute_validated_sql(
         with engine.connect() as conn:
             # Set timeout for Postgres
             if dialect.startswith("postgres") and (source.query_timeout_seconds or 0) > 0:
-                conn.execute(text(f"SET LOCAL statement_timeout = {(source.query_timeout_seconds or 30) * 1000}"))
+                timeout_ms = int((source.query_timeout_seconds or 30) * 1000)
+                conn.execute(text(f"SET LOCAL statement_timeout = {timeout_ms}"))
             import time
             start = time.time()
             result = conn.execute(text(validated_sql))
@@ -546,7 +580,7 @@ async def execute_validated_sql(
             duration_ms = int((time.time() - start) * 1000)
             # audit success
             db.add(DatabaseQueryAudit(
-                tenant_id=1,
+                tenant_id=str(ctx.workspace_id),
                 source_id=source.id,
                 user_id=None,
                 agent_id=None,
@@ -569,7 +603,7 @@ async def execute_validated_sql(
     except Exception as e:
         # audit failure
         db.add(DatabaseQueryAudit(
-            tenant_id=1,
+            tenant_id=str(ctx.workspace_id),
             source_id=source.id,
             user_id=None,
             agent_id=None,
@@ -589,7 +623,8 @@ async def execute_validated_sql(
             confidence_score=None
         ))
         db.commit()
-        raise HTTPException(status_code=400, detail=f"Query failed: {e}")
+        logging.getLogger(__name__).error(f"SQL query execution failed for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Query execution failed")
 
     return {
         "sql": validated_sql,
@@ -602,6 +637,7 @@ async def execute_validated_sql(
 
 @router.get("/cache/stats")
 async def get_cache_statistics(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     tenant_id: int = 1
 ):
     """

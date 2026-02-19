@@ -23,6 +23,10 @@ export async function POST(request: NextRequest) {
       request.headers.get('X-Workspace-ID') ||
       request.headers.get('X-Workspace')
 
+    if (!process.env.API_KEY && !authHeader) {
+      console.warn('[Chat Proxy] No API_KEY env var and no Authorization header')
+    }
+
     // Build auth headers — send both JWT and API key (backend checks both independently)
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -49,7 +53,7 @@ export async function POST(request: NextRequest) {
       const errorText = await backendResponse.text()
       console.error('Backend error:', backendResponse.status, errorText)
       return new Response(
-        JSON.stringify({ error: `Backend error: ${backendResponse.status}` }),
+        JSON.stringify({ error: 'Chat proxy failed' }),
         { status: backendResponse.status, headers: { 'Content-Type': 'application/json' } }
       )
     }
@@ -76,7 +80,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Chat proxy error:', error)
     return new Response(
-      JSON.stringify({ error: error.message || 'Chat proxy failed' }),
+      JSON.stringify({ error: 'Chat proxy failed' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }
@@ -93,11 +97,11 @@ export async function PATCH(request: NextRequest) {
       request.headers.get('x-workspace') ||
       request.headers.get('X-Workspace-ID') ||
       request.headers.get('X-Workspace')
-    
+
     // Get the path from the request URL to forward to correct backend endpoint
     const url = new URL(request.url)
     const path = url.pathname.replace('/api/chat', '') // Remove /api/chat prefix
-    
+
     // Build auth headers — send both JWT and API key (backend checks both independently)
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -123,7 +127,7 @@ export async function PATCH(request: NextRequest) {
       const errorText = await backendResponse.text()
       console.error('Backend PATCH error:', backendResponse.status, errorText)
       return new Response(
-        JSON.stringify({ error: `Backend error: ${backendResponse.status}` }),
+        JSON.stringify({ error: 'Chat proxy failed' }),
         { status: backendResponse.status, headers: { 'Content-Type': 'application/json' } }
       )
     }
@@ -137,7 +141,7 @@ export async function PATCH(request: NextRequest) {
   } catch (error: any) {
     console.error('Chat PATCH proxy error:', error)
     return new Response(
-      JSON.stringify({ error: error.message || 'Chat PATCH proxy failed' }),
+      JSON.stringify({ error: 'Chat proxy failed' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

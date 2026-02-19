@@ -191,13 +191,8 @@ class ClerkAuth:
                 # Cache the placeholder to avoid repeated warnings
                 self._email_cache[clerk_user_id] = email
         
-        # Auto-admin for @automatos.app domain
-        # Anyone with an @automatos.app email is automatically an admin
-        # This overrides any publicMetadata settings
-        if email and email.endswith("@automatos.app"):
-            system_role = "admin"
-            role = "admin"
-            logger.info(f"Auto-assigned admin role to {email} based on domain")
+        # Admin role is determined exclusively from Clerk publicMetadata / session token.
+        # Domain-based auto-admin was removed for security (see PRD-43 US-025).
         
         return {
             "clerk_user_id": claims.get("sub"),

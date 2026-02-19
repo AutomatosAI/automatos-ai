@@ -842,19 +842,26 @@ class UnifiedToolExecutor:
         source_file = parameters.get('source_file')
         output_file = parameters.get('output_file')
         title = parameters.get('title', 'Document')
-        
+
         if not source_file or not output_file:
             return {
                 "success": False,
                 "error": "Missing required parameters: source_file and output_file",
                 "tool": tool_name
             }
-        
-        # Ensure absolute paths
-        if not os.path.isabs(source_file):
-            source_file = os.path.join(self.workspace_dir, source_file)
-        if not os.path.isabs(output_file):
-            output_file = os.path.join(self.workspace_dir, output_file)
+
+        # Resolve paths within workspace (prevent path traversal)
+        from pathlib import Path as _Path
+        workspace = _Path(self.workspace_dir).resolve()
+        source_file = str((workspace / source_file).resolve())
+        output_file = str((workspace / output_file).resolve())
+
+        if not source_file.startswith(str(workspace)) or not output_file.startswith(str(workspace)):
+            return {
+                "success": False,
+                "error": "File paths must be within the workspace directory",
+                "tool": tool_name
+            }
         
         try:
             if tool_name == 'create_pdf':
@@ -1316,10 +1323,15 @@ class UnifiedToolExecutor:
                 "tool": tool_name
             }
         
-        # Ensure absolute path
+        # Ensure absolute path within workspace
         if not os.path.isabs(output_file):
             output_file = os.path.join(self.workspace_dir, output_file)
-        
+        # Validate path stays within workspace
+        workspace = _Path(self.workspace_dir).resolve()
+        resolved_output = _Path(output_file).resolve()
+        if not str(resolved_output).startswith(str(workspace)):
+            return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
         try:
             # Generate implementation plan content
             plan_content = f"""# Implementation Plan
@@ -1395,10 +1407,13 @@ class UnifiedToolExecutor:
             if not topic:
                 return {"success": False, "error": "Missing required parameter: topic", "tool": tool_name}
             
-            # Ensure absolute path
+            # Ensure absolute path within workspace
             if not os.path.isabs(output_file):
                 output_file = os.path.join(self.workspace_dir, output_file)
-            
+            workspace = _Path(self.workspace_dir).resolve()
+            if not str(_Path(output_file).resolve()).startswith(str(workspace)):
+                return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
             # Generate content based on type
             content = f"""# {topic}
 
@@ -1444,12 +1459,15 @@ This {content_type} covers the topic of {topic}.
             if not input_file or not output_file:
                 return {"success": False, "error": "Missing required parameters: input_file and output_file", "tool": tool_name}
             
-            # Ensure absolute paths
+            # Ensure absolute paths within workspace
             if not os.path.isabs(input_file):
                 input_file = os.path.join(self.workspace_dir, input_file)
             if not os.path.isabs(output_file):
                 output_file = os.path.join(self.workspace_dir, output_file)
-            
+            workspace = _Path(self.workspace_dir).resolve()
+            if not str(_Path(input_file).resolve()).startswith(str(workspace)) or not str(_Path(output_file).resolve()).startswith(str(workspace)):
+                return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
             try:
                 with open(input_file, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -1485,10 +1503,13 @@ This {content_type} covers the topic of {topic}.
             if not title:
                 return {"success": False, "error": "Missing required parameter: title", "tool": tool_name}
             
-            # Ensure absolute path
+            # Ensure absolute path within workspace
             if not os.path.isabs(output_file):
                 output_file = os.path.join(self.workspace_dir, output_file)
-            
+            workspace = _Path(self.workspace_dir).resolve()
+            if not str(_Path(output_file).resolve()).startswith(str(workspace)):
+                return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
             content = f"""# {title}
 
 **Document Type**: {document_type.capitalize()}  
@@ -1534,11 +1555,14 @@ Summary and recommendations.
         Creates analysis reports in the workspace.
         """
         output_file = parameters.get('output_file', f'{tool_name}_report.md')
-        
-        # Ensure absolute path
+
+        # Ensure absolute path within workspace
         if not os.path.isabs(output_file):
             output_file = os.path.join(self.workspace_dir, output_file)
-        
+        workspace = _Path(self.workspace_dir).resolve()
+        if not str(_Path(output_file).resolve()).startswith(str(workspace)):
+            return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
         try:
             if tool_name == 'review_code':
                 target_path = parameters.get('target_path', '')
