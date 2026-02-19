@@ -429,10 +429,26 @@ export function useWorkspaceMemory() {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.memory,
     queryFn: async () => {
-      const memoryData = await apiClient.request('/api/v1/memory/stats/real').catch(() => null)
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
+
+      const [memoryData, recentMemories] = await Promise.all([
+        safeRequest(() => apiClient.request('/api/v1/memory/stats/real'), null),
+        safeRequest(() => apiClient.request<any[]>('/api/v1/memory/stats/recent?limit=8'), []),
+      ])
+
+      const items = Array.isArray(recentMemories) ? recentMemories.map((mem: any) => ({
+        key: mem.memory_type || 'memory',
+        value: mem.content || `${mem.memory_level || 'memory'} (importance: ${mem.importance ?? 'N/A'})`,
+        source: mem.agent_id ? 'learned' : 'system',
+        updated_at: mem.created_at,
+      })) : []
 
       return {
-        items: (memoryData as any)?.user_preferences || [],
+        items,
         totalMemories: (memoryData as any)?.system_stats?.total_memories || 0,
         hitRate: (memoryData as any)?.access_metrics?.hit_rate || 0,
       }

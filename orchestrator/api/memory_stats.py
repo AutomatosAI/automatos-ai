@@ -135,13 +135,14 @@ async def get_recent_memories(
         
         return [
             {
-                "id": mem.id,
+                "id": str(mem.id),
                 "agent_id": mem.agent_id,
                 "memory_type": mem.memory_type,
                 "memory_level": mem.memory_level,
+                "content": (mem.content[:120] + "...") if mem.content and len(mem.content) > 120 else mem.content,
                 "importance": mem.importance,
                 "access_count": mem.access_count,
-                "created_at": mem.created_at.isoformat() if mem.created_at else None
+                "created_at": mem.created_at.isoformat() if mem.created_at else None,
             }
             for mem in recent
         ]
