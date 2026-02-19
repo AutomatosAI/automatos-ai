@@ -1,6 +1,6 @@
 # PRD 62: CodeGraph v2 — Top-10 Competitive Upgrade
 
-**Status:** Draft
+**Status:** Complete
 **Priority:** High
 **Effort:** 40-50 hours (phased)
 **Dependencies:** PRD-11 (CodeGraph v1, completed), PRD-30 (Modular Architecture)
@@ -11,7 +11,7 @@
 
 ## Executive Summary
 
-Deep research across the top code graph/code intelligence open-source projects (Aider 30K+ stars, Tree-sitter 23.8K, Sourcetrail 16.4K, Semgrep 9.2K, CodeQL 8K, Joern 2.9K, Code-Graph-RAG 1.9K, Emerge 1K, CodeFuse-CGM 521, CodePrism/CodeGraph-Rust) reveals that **Automatos already has a surprisingly strong CodeGraph implementation** — ~4,500+ lines of working code across backend + frontend with full API, graph visualization (ReactFlow + D3), agent integration, and workflow hooks.
+Deep research across the top code graph/code intelligence open-source projects (Aider 30K+ stars, Tree-sitter 23.8K, Sourcetrail 16.4K, Semgrep 9.2K, CodeQL 8K, Joern 2.9K, Code-Graph-RAG 1.9K, Emerge 1K, CodeFuse-CGM 521, CodePrism/CodeGraph-Rust) reveals that **Automatos already has a surprisingly strong CodeGraph implementation** — ~6,500+ lines of working code across backend + frontend with full API, graph visualization (ReactFlow + D3), agent integration, and workflow hooks.
 
 However, critical gaps remain: **no tree-sitter** (limits language coverage to 3), regex-based TypeScript parsing, no MCP exposure, no incremental indexing, and a database schema mismatch. This PRD closes those gaps across 8 phases.
 
@@ -122,13 +122,17 @@ Automatos has a **substantial, production-ready CodeGraph system** across backen
 
 | Component | File | Lines | Status | Quality |
 |-----------|------|-------|--------|---------|
-| Core Service | `modules/codegraph/codegraph_service.py` | 1,504 | Working | Production |
+| Core Service | `modules/codegraph/codegraph_service.py` | 1,818 | Working | Production |
 | Project Context | `modules/codegraph/project_context.py` | 355 | Working | Good |
-| REST API | `api/codegraph.py` | 436 | Working | Complete |
-| Unit Tests | `modules/codegraph/tests/test_codegraph_service.py` | 191 | Working | Good |
-| Integration Tests | `modules/codegraph/tests/test_codegraph_integration.py` | 147 | Working | Good |
-| Test Fixtures | `modules/codegraph/tests/conftest.py` | 255 | Working | Comprehensive |
-| DB Models (legacy) | `core/models/code_graph.py` | 55 | Outdated | Needs fix |
+| REST API | `api/codegraph.py` | 508 | Working | Complete |
+| Tree-sitter Parser | `modules/codegraph/parsers/treesitter_parser.py` | 627 | Working | Production |
+| PageRank Ranker | `modules/codegraph/ranking/pagerank_ranker.py` | 116 | Working | Good |
+| Architecture Analyzer | `modules/codegraph/analysis/architecture_analyzer.py` | 259 | Working | Good |
+| NL Code Search | `modules/codegraph/search/nl_code_search.py` | 417 | Working | Good |
+| Unit Tests | `modules/codegraph/tests/test_codegraph_service.py` | 190 | Working | Good |
+| Integration Tests | `modules/codegraph/tests/test_codegraph_integration.py` | 146 | Working | Good |
+| Test Fixtures | `modules/codegraph/tests/conftest.py` | 254 | Working | Comprehensive |
+| DB Models (legacy) | `core/models/code_graph.py` | 55 | Outdated | Superseded by migration |
 
 **Features implemented:**
 - GitHub repository indexing (clone, parse, store) with auth token support
@@ -148,8 +152,8 @@ Automatos has a **substantial, production-ready CodeGraph system** across backen
 
 | Component | File | Lines | Status | Quality |
 |-----------|------|-------|--------|---------|
-| CodeGraph Panel | `components/knowledge/CodeGraphPanel.tsx` | 663 | Working | Production |
-| Call Graph Viz | `components/knowledge/CodeGraphVisualization.tsx` | 265 | Working | Good |
+| CodeGraph Panel | `components/knowledge/CodeGraphPanel.tsx` | 736 | Working | Production |
+| Call Graph Viz | `components/knowledge/CodeGraphVisualization.tsx` | 633 | Working | Production |
 | Knowledge Graph | `components/knowledge/KnowledgeGraphVisualizer.tsx` | 496 | Working | Good |
 | Settings | `components/settings/CodeGraphSettingsTab.tsx` | 391 | Working | Complete |
 
@@ -170,7 +174,7 @@ Automatos has a **substantial, production-ready CodeGraph system** across backen
 - Workflow context (codegraph_project in workflow JSON)
 - API client with 8 codegraph methods
 
-**Total: ~4,500+ lines of working CodeGraph code**
+**Total: ~6,500+ lines of working CodeGraph code**
 
 ### What's Missing (Gaps vs Top Projects)
 
@@ -191,7 +195,7 @@ Automatos has a **substantial, production-ready CodeGraph system** across backen
 |---|-----|----------|----------|-----|
 | 1 | **Schema mismatch** — migration creates `code_symbols`/`code_edges` but service uses `codegraph_projects`/`codegraph_symbols`/etc. | Critical | `alembic/.../add_code_graph.py` vs `codegraph_service.py` | Create proper migration for actual tables |
 | 2 | **TypeScript/JavaScript parsing is regex-based** — misses nested functions, arrow functions, destructured imports | High | `codegraph_service.py` (TS/JS parser methods) | Replace with tree-sitter |
-| 3 | **Empty placeholder directories** — `analysis/`, `graph/`, `search/` exist with only `__init__.py` | Low | `modules/codegraph/` | Delete or implement planned features |
+| 3 | ~~**Empty placeholder directories**~~ — **FIXED**: `analysis/` and `search/` now contain real implementations; `graph/` removed | Low | `modules/codegraph/` | Resolved in Phase 1-6 implementation |
 | 4 | **Relationship matching uses fuzzy fallback** — external dependencies silently skipped | Medium | `codegraph_service.py` | Log warnings, store as "external" relationship type |
 | 5 | **No cache invalidation** — re-index deletes everything and re-creates | Medium | `codegraph_service.py` | Add file hash checking for incremental updates |
 
@@ -227,7 +231,7 @@ Automatos has a **substantial, production-ready CodeGraph system** across backen
 | Natural language graph queries | Code-Graph-RAG | 4h | "What functions call the auth module?" |
 | Incremental indexing (file hashing) | Code-Graph-RAG | 4h | Faster re-indexing |
 
-**Bottom line:** Your existing implementation is ~4,500 lines of working, multi-tenant, production-ready code with a full React frontend. Adopting an open-source project would cost more than enhancing. Adopt the **techniques** (tree-sitter, PageRank, MCP, Louvain) not codebases.
+**Bottom line:** Your existing implementation is ~6,500 lines of working, multi-tenant, production-ready code with a full React frontend. Adopting an open-source project would cost more than enhancing. Adopt the **techniques** (tree-sitter, PageRank, MCP, Louvain) not codebases.
 
 ---
 
@@ -808,8 +812,8 @@ Addressed in Phase 2.
 #### Bug 2: TS/JS Regex Parsing (High)
 Addressed in Phase 1 (tree-sitter replaces regex).
 
-#### Bug 3: Empty Placeholder Directories (Low)
-Delete `analysis/`, `graph/`, `search/` empty directories (or use them in Phases 5-6).
+#### Bug 3: Empty Placeholder Directories (Low) — RESOLVED
+`analysis/` and `search/` now contain real implementations (`architecture_analyzer.py`, `nl_code_search.py`). `graph/` directory removed.
 
 #### Bug 4: Relationship Fuzzy Fallback (Medium)
 **File:** `codegraph_service.py`
@@ -872,16 +876,16 @@ Addressed in Phase 2 (file hash-based incremental indexing).
 
 ## Files Summary
 
-### New Files
-| File | Phase | Purpose |
-|------|-------|---------|
-| `orchestrator/modules/codegraph/parsers/__init__.py` | 1 | Package init |
-| `orchestrator/modules/codegraph/parsers/treesitter_parser.py` | 1 | tree-sitter multi-language parser |
-| `orchestrator/modules/codegraph/ranking/__init__.py` | 4 | Package init |
-| `orchestrator/modules/codegraph/ranking/pagerank_ranker.py` | 4 | PageRank importance ranking |
-| `orchestrator/modules/codegraph/analysis/architecture_analyzer.py` | 5 | Louvain clustering + metrics |
-| `orchestrator/modules/codegraph/search/nl_code_search.py` | 6 | Natural language code queries |
-| Alembic migration (schema fix) | 2 | Proper codegraph tables |
+### New Files (Implemented)
+| File | Phase | Purpose | Lines |
+|------|-------|---------|-------|
+| `orchestrator/modules/codegraph/parsers/__init__.py` | 1 | Package init | — |
+| `orchestrator/modules/codegraph/parsers/treesitter_parser.py` | 1 | tree-sitter multi-language parser | 627 |
+| `orchestrator/modules/codegraph/ranking/__init__.py` | 4 | Package init | — |
+| `orchestrator/modules/codegraph/ranking/pagerank_ranker.py` | 4 | PageRank importance ranking | 116 |
+| `orchestrator/modules/codegraph/analysis/architecture_analyzer.py` | 5 | Louvain clustering + metrics | 259 |
+| `orchestrator/modules/codegraph/search/nl_code_search.py` | 6 | Natural language code queries | 417 |
+| `20260218_fix_codegraph_schema_v2.py` | 2 | Proper codegraph tables | — |
 
 ### Modified Files
 | File | Phases | Changes |
