@@ -320,10 +320,11 @@ async def generate_document(
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except ImportError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Document generation import error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         logger.exception("Document generation failed")
-        raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     return GenerateDocumentResponse(
         status="success",

@@ -305,7 +305,7 @@ async def list_items(
 
     except Exception as e:
         logger.error(f"Error listing marketplace items: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to list marketplace items: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -349,7 +349,7 @@ async def get_item(
         raise
     except Exception as e:
         logger.error(f"Error fetching marketplace item {item_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch marketplace item: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 def _build_agent_detail(agent: Agent, db: Session) -> MarketplaceItemDetail:
@@ -577,7 +577,7 @@ async def install_item(
     except Exception as e:
         logger.error(f"Error installing marketplace item {item_id}: {str(e)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to install marketplace item: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -635,7 +635,7 @@ async def get_featured(
 
     except Exception as e:
         logger.error(f"Error fetching featured items: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch featured items: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -693,7 +693,7 @@ async def check_updates(
 
     except Exception as e:
         logger.error(f"Error checking for updates: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to check for updates: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -825,7 +825,7 @@ async def submit_item(
         import traceback
         logger.error(traceback.format_exc())
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to submit marketplace item: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -869,7 +869,7 @@ async def approve_marketplace_item(
     except Exception as e:
         logger.error(f"Error approving marketplace item: {str(e)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to approve item: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -912,7 +912,7 @@ async def delete_marketplace_item(
     except Exception as e:
         logger.error(f"Error deleting marketplace item: {str(e)}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete item: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -967,4 +967,4 @@ async def get_pending_items(
         raise
     except Exception as e:
         logger.error(f"Error fetching pending items: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch pending items: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

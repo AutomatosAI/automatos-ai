@@ -208,7 +208,7 @@ async def list_personas(
         raise
     except Exception as e:
         logger.error("Error listing personas: %s", e)
-        raise HTTPException(status_code=500, detail=f"Failed to list personas: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/personas/{persona_id}", response_model=PersonaOut)
@@ -239,7 +239,7 @@ async def get_persona(
         raise
     except Exception as e:
         logger.error("Error fetching persona %s: %s", persona_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch persona: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/workspaces/{workspace_id}/personas", status_code=201, response_model=PersonaOut)
@@ -286,7 +286,7 @@ async def create_workspace_persona(
     except Exception as e:
         logger.error("Error creating workspace persona: %s", e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create persona: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/workspaces/{workspace_id}/personas/{persona_id}", response_model=PersonaOut)
@@ -340,7 +340,7 @@ async def update_workspace_persona(
     except Exception as e:
         logger.error("Error updating persona %s: %s", persona_id, e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update persona: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/workspaces/{workspace_id}/personas/{persona_id}")
@@ -394,7 +394,7 @@ async def delete_workspace_persona(
     except Exception as e:
         logger.error("Error deleting persona %s: %s", persona_id, e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete persona: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/agents/{agent_id}/persona", response_model=AgentPersonaOut)
@@ -469,7 +469,7 @@ async def set_agent_persona(
     except Exception as e:
         logger.error("Error setting persona for agent %s: %s", agent_id, e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to set agent persona: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/agents/{agent_id}/persona", response_model=AgentPersonaOut)
@@ -518,4 +518,4 @@ async def get_agent_persona(
         raise
     except Exception as e:
         logger.error("Error fetching persona for agent %s: %s", agent_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch agent persona: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")

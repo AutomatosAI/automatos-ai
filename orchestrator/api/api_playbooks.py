@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Optional
 import os
 from fastapi import APIRouter, Depends, Header, HTTPException
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -21,7 +23,7 @@ class MineRequest(BaseModel):
 
 
 @router.post("/mine")
-def mine(body: MineRequest, db: Session = Depends(get_db), x_tenant_id: str | None = Header(default=None)):
+def mine(body: MineRequest, db: Session = Depends(get_db), x_tenant_id: str | None = Header(default=None), ctx: RequestContext = Depends(get_request_context_hybrid)):
     required = bool(int(os.getenv("PLAYBOOKS_REQUIRE_TENANT", "0")))
     tenant_id = body.tenant_id or x_tenant_id
     if required and not tenant_id:
@@ -32,7 +34,7 @@ def mine(body: MineRequest, db: Session = Depends(get_db), x_tenant_id: str | No
 
 
 @router.get("")
-def list_playbooks(tenant_id: Optional[str] = None, db: Session = Depends(get_db), x_tenant_id: str | None = Header(default=None)):
+def list_playbooks(tenant_id: Optional[str] = None, db: Session = Depends(get_db), x_tenant_id: str | None = Header(default=None), ctx: RequestContext = Depends(get_request_context_hybrid)):
     required = bool(int(os.getenv("PLAYBOOKS_REQUIRE_TENANT", "0")))
     tenant = tenant_id or x_tenant_id
     if required and not tenant:

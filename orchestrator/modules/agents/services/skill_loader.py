@@ -100,8 +100,14 @@ def validate_git_url(git_url: str) -> Tuple[bool, Optional[str]]:
     Returns:
         (is_valid, error_message)
     """
+    from urllib.parse import urlparse as _urlparse
+    try:
+        parsed = _urlparse(git_url)
+        hostname = (parsed.hostname or "").lower()
+    except Exception:
+        return False, "Invalid Git URL format"
     for domain in SkillLoaderConfig.ALLOWED_GIT_DOMAINS:
-        if domain in git_url:
+        if hostname == domain or hostname.endswith("." + domain):
             return True, None
     
     return False, f"Git URL domain not in whitelist. Allowed: {SkillLoaderConfig.ALLOWED_GIT_DOMAINS}"

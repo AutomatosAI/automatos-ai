@@ -70,7 +70,8 @@ def get_memory_manager() -> AdvancedMemoryManager:
 async def store_memory(
     memory_data: MemoryItemCreate,
     auto_augment: bool = Query(True, description="Automatically augment with external knowledge"),
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Store new memory item in the hierarchical memory system
@@ -97,7 +98,7 @@ async def store_memory(
         
     except Exception as e:
         logger.error(f"Failed to store memory: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to store memory: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/retrieve/{session_id}", response_model=List[Dict[str, Any]])
 async def retrieve_memories(
@@ -107,7 +108,8 @@ async def retrieve_memories(
     max_items: int = Query(10, ge=1, le=100, description="Maximum number of items to retrieve"),
     min_importance: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance threshold"),
     access_pattern: str = Query("locality", description="Access optimization pattern"),
-    include_augmented: bool = Query(True, description="Include augmented memories")
+    include_augmented: bool = Query(True, description="Include augmented memories"),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> List[Dict[str, Any]]:
     """
     Retrieve memories for a session with optimized access patterns
@@ -163,13 +165,14 @@ async def retrieve_memories(
         
     except Exception as e:
         logger.error(f"Failed to retrieve memories: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve memories: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Memory Augmentation Endpoints
 
 @router.post("/external-knowledge", response_model=Dict[str, Any])
 async def add_external_knowledge(
-    knowledge_data: ExternalKnowledgeCreate
+    knowledge_data: ExternalKnowledgeCreate,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Add external knowledge for memory augmentation
@@ -192,13 +195,14 @@ async def add_external_knowledge(
         
     except Exception as e:
         logger.error(f"Failed to add external knowledge: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to add external knowledge: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/augment/{memory_id}", response_model=List[Dict[str, Any]])
 async def augment_memory(
     memory_id: str,
     strategy: str = Query("hybrid", description="Augmentation strategy"),
-    max_augmentations: int = Query(5, ge=1, le=20, description="Maximum augmentations to generate")
+    max_augmentations: int = Query(5, ge=1, le=20, description="Maximum augmentations to generate"),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> List[Dict[str, Any]]:
     """
     Explicitly augment a specific memory item with external knowledge
@@ -231,7 +235,7 @@ async def augment_memory(
         
     except Exception as e:
         logger.error(f"Failed to augment memory {memory_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to augment memory: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Memory Consolidation Endpoints
 
@@ -241,7 +245,8 @@ async def consolidate_memories(
     memory_level: Optional[str] = Query(None, description="Memory level to consolidate"),
     strategy: str = Query("hybrid", description="Consolidation strategy"),
     force: bool = Query(False, description="Force consolidation even if not needed"),
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Consolidate memories to optimize storage and improve efficiency
@@ -286,12 +291,14 @@ async def consolidate_memories(
         
     except Exception as e:
         logger.error(f"Failed to consolidate memories: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to consolidate memories: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # System Monitoring and Statistics
 
 @router.get("/stats", response_model=Dict[str, Any])
-async def get_memory_stats() -> Dict[str, Any]:
+async def get_memory_stats(
+    ctx: RequestContext = Depends(get_request_context_hybrid)
+) -> Dict[str, Any]:
     """
     Get comprehensive memory system statistics
     """
@@ -325,11 +332,12 @@ async def get_memory_stats() -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Failed to get memory stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get memory stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats/timeseries/access-patterns", response_model=List[Dict[str, Any]])
 async def get_access_patterns_timeseries(
-    hours: int = Query(default=24, ge=1, le=168, description="Hours of history (1-168)")
+    hours: int = Query(default=24, ge=1, le=168, description="Hours of history (1-168)"),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> List[Dict[str, Any]]:
     """
     Get memory access patterns time-series data for charts
@@ -371,11 +379,12 @@ async def get_access_patterns_timeseries(
         
     except Exception as e:
         logger.error(f"Failed to get access patterns timeseries: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get access patterns: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats/timeseries/consolidation", response_model=List[Dict[str, Any]])
 async def get_consolidation_timeseries(
-    hours: int = Query(default=24, ge=1, le=168, description="Hours of history (1-168)")
+    hours: int = Query(default=24, ge=1, le=168, description="Hours of history (1-168)"),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> List[Dict[str, Any]]:
     """
     Get memory consolidation time-series data for charts
@@ -430,11 +439,12 @@ async def get_consolidation_timeseries(
         
     except Exception as e:
         logger.error(f"Failed to get consolidation timeseries: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get consolidation: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/optimize", response_model=Dict[str, Any])
 async def optimize_system_performance(
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Optimize overall memory system performance
@@ -461,14 +471,15 @@ async def optimize_system_performance(
         
     except Exception as e:
         logger.error(f"Failed to optimize system performance: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to optimize system: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # System Management Endpoints
 
 @router.post("/backup", response_model=Dict[str, Any])
 async def backup_system_state(
     directory: str = Query("memory_backups", description="Backup directory"),
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Backup complete memory system state
@@ -495,12 +506,13 @@ async def backup_system_state(
         
     except Exception as e:
         logger.error(f"Failed to backup system state: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to backup system: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/restore", response_model=Dict[str, Any])
 async def restore_system_state(
     directory: str = Query("memory_backups", description="Restore directory"),
-    timestamp: Optional[str] = Query(None, description="Specific backup timestamp to restore")
+    timestamp: Optional[str] = Query(None, description="Specific backup timestamp to restore"),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Restore memory system state from backup
@@ -519,7 +531,7 @@ async def restore_system_state(
         
     except Exception as e:
         logger.error(f"Failed to restore system state: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to restore system: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/health", response_model=Dict[str, Any])
 async def memory_system_health() -> Dict[str, Any]:
@@ -568,11 +580,11 @@ async def memory_system_health() -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Failed to get memory system health: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get system health: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Additional CRUD endpoints for user journey tests
 @router.get("/{memory_id}", response_model=Dict[str, Any])
-async def get_memory_by_id(memory_id: str):
+async def get_memory_by_id(memory_id: str, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get a specific memory entry by ID"""
     try:
         # For now, return a placeholder - in production would query actual database
@@ -592,7 +604,7 @@ async def get_memory_by_id(memory_id: str):
         raise HTTPException(status_code=404, detail=f"Memory {memory_id} not found")
 
 @router.put("/{memory_id}", response_model=Dict[str, Any])
-async def update_memory(memory_id: str, update_data: Dict[str, Any]):
+async def update_memory(memory_id: str, update_data: Dict[str, Any], ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Update a memory entry by ID"""
     try:
         return {
@@ -603,10 +615,10 @@ async def update_memory(memory_id: str, update_data: Dict[str, Any]):
         }
     except Exception as e:
         logger.error(f"Error updating memory {memory_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error updating memory: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{memory_id}", response_model=Dict[str, Any])
-async def delete_memory(memory_id: str):
+async def delete_memory(memory_id: str, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Delete a memory entry by ID"""
     try:
         return {
@@ -620,7 +632,7 @@ async def delete_memory(memory_id: str):
         raise HTTPException(status_code=404, detail=f"Memory {memory_id} not found")
 
 @router.post("/search", response_model=List[Dict[str, Any]])
-async def search_memories(search_data: Dict[str, Any]):
+async def search_memories(search_data: Dict[str, Any], ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Search memory entries by query, context, and tags"""
     try:
         query = search_data.get("query", "")
@@ -642,10 +654,10 @@ async def search_memories(search_data: Dict[str, Any]):
         }]
     except Exception as e:
         logger.error(f"Error searching memories: {e}")
-        raise HTTPException(status_code=500, detail=f"Error searching memories: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/retrieve", response_model=List[Dict[str, Any]])
-async def retrieve_memories_by_context(query_data: Dict[str, Any]):
+async def retrieve_memories_by_context(query_data: Dict[str, Any], ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Retrieve memories by context/query"""
     try:
         context = query_data.get("context", "")
@@ -662,12 +674,13 @@ async def retrieve_memories_by_context(query_data: Dict[str, Any]):
         }]
     except Exception as e:
         logger.error(f"Error retrieving memories by context: {e}")
-        raise HTTPException(status_code=500, detail=f"Error retrieving memories: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Cleanup endpoint for development/testing
 @router.post("/clear", response_model=Dict[str, Any])
 async def clear_memory_system(
-    confirm: bool = Query(False, description="Confirm clear operation")
+    confirm: bool = Query(False, description="Confirm clear operation"),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Clear all memory system data (development/testing only)
@@ -695,4 +708,4 @@ async def clear_memory_system(
         
     except Exception as e:
         logger.error(f"Failed to clear memory system: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to clear system: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

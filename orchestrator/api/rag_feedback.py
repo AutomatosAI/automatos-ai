@@ -88,7 +88,7 @@ async def submit_feedback(
     except Exception as e:
         db.rollback()
         logger.error(f"Error submitting feedback: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats")
@@ -135,7 +135,7 @@ async def get_feedback_stats(
 
     except Exception as e:
         logger.error(f"Error getting feedback stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/recent")
@@ -175,4 +175,4 @@ async def get_recent_feedback(
 
     except Exception as e:
         logger.error(f"Error getting recent feedback: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

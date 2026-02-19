@@ -293,7 +293,7 @@ async def initiate_connection(
         )
     except Exception as e:
         logger.error(f"Failed to initiate connection for {app_name}: {e}")
-        raise HTTPException(status_code=503, detail=f"Failed to initiate OAuth: {str(e)}")
+        raise HTTPException(status_code=503, detail="Failed to initiate OAuth connection")
     
     # Store pending connection
     entity_manager.add_connection(
@@ -876,7 +876,7 @@ async def subscribe_to_trigger(
         )
     except Exception as e:
         logger.error(f"Failed to subscribe to trigger: {e}")
-        raise HTTPException(status_code=503, detail=f"Failed to subscribe: {str(e)}")
+        raise HTTPException(status_code=503, detail="Failed to subscribe to trigger")
     
     # Store subscription
     subscription = TriggerSubscription(

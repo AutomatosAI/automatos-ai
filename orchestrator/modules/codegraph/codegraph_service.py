@@ -824,17 +824,22 @@ class CodeGraphService:
                     logger.warning(f"Could not drop index: {e}")
                 
                 # Alter the column
+                # Validate current_dim is a safe integer before interpolating into DDL
+                # (DDL statements cannot use bind parameters for type definitions)
+                current_dim = int(current_dim)
+                if not (1 <= current_dim <= 10000):
+                    raise ValueError(f"Invalid embedding dimension: {current_dim}")
                 self.db.execute(
-                    text(f"ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector({current_dim})")
+                    text("ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector(" + str(current_dim) + ")")
                 )
-                
+
                 # Recreate the index
                 try:
                     self.db.execute(
-                        text(f"""
-                            CREATE INDEX idx_codegraph_symbols_embedding 
-                            ON codegraph_symbols 
-                            USING ivfflat (embedding vector_cosine_ops) 
+                        text("""
+                            CREATE INDEX idx_codegraph_symbols_embedding
+                            ON codegraph_symbols
+                            USING ivfflat (embedding vector_cosine_ops)
                             WITH (lists = 100)
                         """)
                     )
@@ -1135,36 +1140,64 @@ class CodeGraphService:
         project_id = project.id
         
         # Build search query
-        type_filter = "AND symbol_type = :symbol_type" if symbol_type else ""
-        
-        search_query = text(f"""
-            SELECT
-                id,
-                symbol_type,
-                name,
-                qualified_name,
-                file_path,
-                line_number,
-                signature,
-                docstring,
-                code_snippet
-            FROM codegraph_symbols
-            WHERE project_id = :project_id
-                {type_filter}
-                AND (
-                    name ILIKE :query
-                    OR qualified_name ILIKE :query
-                    OR signature ILIKE :query
-                )
-            ORDER BY
-                CASE
-                    WHEN name = :exact_query THEN 1
-                    WHEN name ILIKE :starts_with THEN 2
-                    ELSE 3
-                END,
-                name
-            LIMIT :limit
-        """)
+        # Use two separate fully-parameterized queries to avoid f-string SQL interpolation
+        if symbol_type:
+            search_query = text("""
+                SELECT
+                    id,
+                    symbol_type,
+                    name,
+                    qualified_name,
+                    file_path,
+                    line_number,
+                    signature,
+                    docstring,
+                    code_snippet
+                FROM codegraph_symbols
+                WHERE project_id = :project_id
+                    AND symbol_type = :symbol_type
+                    AND (
+                        name ILIKE :query
+                        OR qualified_name ILIKE :query
+                        OR signature ILIKE :query
+                    )
+                ORDER BY
+                    CASE
+                        WHEN name = :exact_query THEN 1
+                        WHEN name ILIKE :starts_with THEN 2
+                        ELSE 3
+                    END,
+                    name
+                LIMIT :limit
+            """)
+        else:
+            search_query = text("""
+                SELECT
+                    id,
+                    symbol_type,
+                    name,
+                    qualified_name,
+                    file_path,
+                    line_number,
+                    signature,
+                    docstring,
+                    code_snippet
+                FROM codegraph_symbols
+                WHERE project_id = :project_id
+                    AND (
+                        name ILIKE :query
+                        OR qualified_name ILIKE :query
+                        OR signature ILIKE :query
+                    )
+                ORDER BY
+                    CASE
+                        WHEN name = :exact_query THEN 1
+                        WHEN name ILIKE :starts_with THEN 2
+                        ELSE 3
+                    END,
+                    name
+                LIMIT :limit
+            """)
         
         params = {
             "project_id": project_id,
@@ -1328,10 +1361,11 @@ class CodeGraphService:
         
         # FALLBACK: Original SQL-based implementation (kept for rollback)
         logger.info("Using fallback SQL-based semantic search")
-        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
-        
-        # Semantic search
-        search_query = text(f"""
+        # Validate embedding values are numeric and build safe string for parameterized query
+        embedding_str = '[' + ','.join(str(float(v)) for v in query_embedding) + ']'
+
+        # Semantic search using parameterized query with CAST for the embedding vector
+        search_query = text("""
             SELECT
                 id,
                 symbol_type,
@@ -1342,17 +1376,17 @@ class CodeGraphService:
                 signature,
                 docstring,
                 code_snippet,
-                1 - (embedding <=> '{embedding_str}'::vector) as similarity
+                1 - (embedding <=> CAST(:embedding AS vector)) as similarity
             FROM codegraph_symbols
             WHERE project_id = :project_id
                 AND embedding IS NOT NULL
-            ORDER BY embedding <=> '{embedding_str}'::vector
+            ORDER BY embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
         """)
         
         results = self.db.execute(
             search_query,
-            {"project_id": project_id, "limit": limit}
+            {"project_id": project_id, "limit": limit, "embedding": embedding_str}
         ).fetchall()
         
         # Format results

@@ -292,10 +292,15 @@ async def set_platform_key(
     cred_name = f"{provider}_api"
     encrypted_data = encryption.encrypt_dict({"api_key": body.api_key})
 
-    # Look for existing credential with this name (any workspace — platform scope)
+    # SECURITY: scope lookup to the caller's workspace (OWASP A01:2021 BOLA protection).
+    # Without workspace filtering, a user in workspace A could overwrite workspace B's key.
     existing = (
         db.query(Credential)
-        .filter(and_(Credential.name == cred_name, Credential.is_active == True))
+        .filter(and_(
+            Credential.name == cred_name,
+            Credential.is_active == True,
+            Credential.workspace_id == ctx.workspace_id,
+        ))
         .first()
     )
 
@@ -363,9 +368,17 @@ async def remove_platform_key(
     provider = provider.lower()
     cred_name = f"{provider}_api"
 
+    # SECURITY: scope to caller's workspace to prevent cross-tenant deletion (OWASP A01:2021)
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
     cred = (
         db.query(Credential)
-        .filter(and_(Credential.name == cred_name, Credential.is_active == True))
+        .filter(and_(
+            Credential.name == cred_name,
+            Credential.is_active == True,
+            Credential.workspace_id == ctx.workspace_id,
+        ))
         .first()
     )
     if not cred:

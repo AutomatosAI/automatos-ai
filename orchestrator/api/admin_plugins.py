@@ -514,9 +514,10 @@ async def import_github(
             create_plugin_zip,
         )
     except ImportError as e:
+        logger.error("Harvest helpers not available: %s", e)
         raise HTTPException(
             status_code=500,
-            detail=f"Harvest helpers not available: {e}",
+            detail="Internal server error",
         )
 
     from core.services.marketplace_s3 import MarketplaceS3Service
@@ -608,7 +609,7 @@ async def import_github(
                 results.append(GitHubImportResult(
                     slug=slug,
                     status="error",
-                    error=str(e),
+                    error="Plugin import failed",
                 ))
 
         return {
@@ -620,7 +621,7 @@ async def import_github(
         raise
     except Exception as e:
         logger.exception("GitHub import error: %s", e)
-        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

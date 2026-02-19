@@ -75,7 +75,7 @@ class Config:
     # Set CORS_ALLOW_ORIGINS in Railway to include your frontend domain
     # For Railway: https://automotas-ai-frontend-production.up.railway.app
     # For custom domain: https://ui.automatos.app
-    _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,https://automotas-ai-frontend-production.up.railway.app")
+    _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
     CORS_ALLOW_ORIGINS: str = ",".join([origin.strip() for origin in _cors_origins.split(",") if origin.strip()])
     
     # =============================================================================

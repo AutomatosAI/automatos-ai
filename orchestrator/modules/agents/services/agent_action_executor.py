@@ -40,19 +40,20 @@ class ActionExecutor:
     """
     
     # Define safe commands that agents can execute
+    # NOTE: Intentionally restrictive — no interpreters (python, curl, wget, docker)
+    # that could be used for arbitrary code execution or data exfiltration.
     SAFE_COMMANDS = {
-        # File operations
-        'ls', 'cat', 'head', 'tail', 'grep', 'find', 'wc', 'file', 'stat',
-        # System info
-        'pwd', 'whoami', 'date', 'echo', 'env', 'which',
-        # Text processing
-        'sed', 'awk', 'cut', 'sort', 'uniq', 'tr',
-        # Development tools
-        'python', 'python3', 'pip', 'npm', 'node', 'git', 'curl', 'wget',
-        # Docker operations
-        'docker', 'docker-compose',
+        # File operations (read-only)
+        'ls', 'cat', 'head', 'tail', 'grep', 'wc', 'file', 'stat',
+        # System info (read-only)
+        'pwd', 'whoami', 'date', 'echo', 'which',
+        # Text processing (read-only)
+        'cut', 'sort', 'uniq', 'tr',
     }
-    
+
+    # Shell metacharacters that enable command chaining/injection
+    SHELL_METACHARACTERS = set(';|&$`><(){}')
+
     # Dangerous patterns to block
     DANGEROUS_PATTERNS = [
         r'rm\s+-rf\s+/',  # Prevent rm -rf /
@@ -277,65 +278,75 @@ class ActionExecutor:
     def _validate_command(self, command: str) -> bool:
         """
         Validate a shell command for safety
-        
+
         Args:
             command: Command to validate
-            
+
         Returns:
             True if command is safe
-            
+
         Raises:
             SecurityError: If command is dangerous
         """
+        # Block shell metacharacters that enable injection
+        if any(ch in command for ch in self.SHELL_METACHARACTERS):
+            raise SecurityError("Shell metacharacters are not allowed in commands")
+
         # Check for dangerous patterns
         for pattern in self.DANGEROUS_PATTERNS:
             if re.search(pattern, command):
-                raise SecurityError(f"Dangerous command pattern detected: {pattern}")
-        
+                raise SecurityError(f"Dangerous command pattern detected")
+
         # Extract the base command
         parts = command.split()
         if not parts:
             raise ValueError("Empty command")
-        
+
         base_command = parts[0]
-        
+
         # Check if command is in whitelist
+        if '/' in base_command:
+            base_command = os.path.basename(base_command)
+
         if base_command not in self.SAFE_COMMANDS:
-            # Check if it's a path to an allowed command
-            if '/' in base_command:
-                base_command = os.path.basename(base_command)
-                if base_command not in self.SAFE_COMMANDS:
-                    raise SecurityError(f"Command not whitelisted: {base_command}")
-        
+            raise SecurityError(f"Command not whitelisted: {base_command}")
+
         return True
     
     def execute_command(
-        self, 
-        command: str, 
+        self,
+        command: str,
         timeout: int = 30,
         capture_output: bool = True,
-        shell: bool = True
+        shell: bool = False
     ) -> Tuple[bool, Dict[str, Any]]:
         """
-        Execute a shell command in the workspace
-        
+        Execute a command in the workspace (no shell — prevents injection)
+
         Args:
-            command: Command to execute
+            command: Command string (will be split into args list)
             timeout: Command timeout in seconds
             capture_output: Whether to capture output
-            shell: Whether to use shell
-            
+            shell: Must be False (shell=True is blocked for security)
+
         Returns:
             Success status and result dictionary
         """
         try:
+            if shell:
+                raise SecurityError("shell=True is not allowed for security reasons")
+
             # Validate command safety
             self._validate_command(command)
-            
-            # Execute in workspace directory
+
+            # Split into args list — safe because metacharacters are already blocked
+            import shlex
+            cmd_args = shlex.split(command)
+
+            # Execute in workspace directory (no shell)
             result = subprocess.run(
-                command,
-                shell=shell,
+                cmd_args,
+                shell=False,
                 cwd=str(self.workspace_root),
                 capture_output=capture_output,
                 text=True,

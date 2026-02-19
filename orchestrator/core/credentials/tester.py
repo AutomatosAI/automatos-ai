@@ -12,18 +12,49 @@ Based on n8n's approach to credential testing:
 import asyncio
 import aiohttp
 import asyncpg
+import io
+import ipaddress
 import redis
 import paramiko
 import json
 import logging
 from typing import Dict, Any, Optional, Union
 from datetime import datetime
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+def _is_private_ip(hostname: str) -> bool:
+    """Check if a hostname resolves to a private/reserved IP address (SSRF protection)."""
+    try:
+        addr = ipaddress.ip_address(hostname)
+        return addr.is_private or addr.is_reserved or addr.is_loopback or addr.is_link_local
+    except ValueError:
+        # Not a raw IP — resolve via DNS is deferred to runtime;
+        # we block known private hostnames as best-effort.
+        lower = hostname.lower()
+        return lower in ('localhost', '127.0.0.1', '::1', '0.0.0.0') or lower.endswith('.local')
+
+
+def _validate_url_not_ssrf(url: str) -> Optional[str]:
+    """Validate that a URL does not point to a private/internal network. Returns error string or None."""
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme or parsed.scheme not in ('http', 'https'):
+            return "Only http/https URLs are allowed"
+        hostname = parsed.hostname
+        if not hostname:
+            return "URL has no hostname"
+        if _is_private_ip(hostname):
+            return "URLs targeting private/internal networks are not allowed"
+        return None
+    except Exception:
+        return "Invalid URL"
+
+
 class CredentialTester:
     """Test credentials using n8n-style validation"""
-    
+
     def __init__(self):
         self.session = None
     
@@ -90,18 +121,22 @@ class CredentialTester:
             logger.error(f"Credential test failed for {credential_type}: {e}")
             return {
                 'success': False,
-                'message': f'Test failed: {str(e)}',
-                'details': {'error': str(e), 'type': type(e).__name__}
+                'message': 'Credential test failed',
+                'details': {'error_type': type(e).__name__}
             }
     
     async def _test_openai(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Test OpenAI API credentials"""
         api_key = data.get('api_key')
         base_url = data.get('base_url', 'https://api.openai.com/v1')
-        
+
         if not api_key:
             return {'success': False, 'message': 'API key is required'}
-        
+
+        ssrf_err = _validate_url_not_ssrf(base_url)
+        if ssrf_err:
+            return {'success': False, 'message': f'Invalid base_url: {ssrf_err}'}
+
         url = f"{base_url}/models"
         headers = {'Authorization': f'Bearer {api_key}'}
         
@@ -128,10 +163,14 @@ class CredentialTester:
         """Test Anthropic API credentials"""
         api_key = data.get('api_key')
         base_url = data.get('base_url', 'https://api.anthropic.com')
-        
+
         if not api_key:
             return {'success': False, 'message': 'API key is required'}
-        
+
+        ssrf_err = _validate_url_not_ssrf(base_url)
+        if ssrf_err:
+            return {'success': False, 'message': f'Invalid base URL: {ssrf_err}'}
+
         url = f"{base_url}/v1/messages"
         headers = {
             'x-api-key': api_key,
@@ -299,18 +338,23 @@ class CredentialTester:
         password = data.get('password')
         private_key = data.get('private_key')
         auth_method = data.get('auth_method', 'password')
-        
+
         if not all([host, username]):
             return {'success': False, 'message': 'Host and username are required'}
+
+        if _is_private_ip(host):
+            return {'success': False, 'message': 'SSH connections to private/internal networks are not allowed'}
         
         try:
             ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
             
             if auth_method == 'password' and password:
                 ssh.connect(host, port=int(port), username=username, password=password)
             elif auth_method == 'key' and private_key:
-                key = paramiko.RSAKey.from_private_key_file(private_key) if private_key.startswith('/') else paramiko.RSAKey.from_private_key(io.StringIO(private_key))
+                # Never read key files from user-provided paths (arbitrary file read risk)
+                # Always treat private_key as inline PEM content
+                key = paramiko.RSAKey.from_private_key(io.StringIO(private_key))
                 ssh.connect(host, port=int(port), username=username, pkey=key)
             else:
                 return {'success': False, 'message': 'Invalid authentication method or missing credentials'}
@@ -343,12 +387,16 @@ class CredentialTester:
         base_url = data.get('base_url')
         auth_method = data.get('auth_method', 'header')
         header_name = data.get('header_name', 'X-API-Key')
-        
+
         if not api_key:
             return {'success': False, 'message': 'API key is required'}
-        
+
         if not base_url:
             return {'success': False, 'message': 'Base URL is required for testing'}
+
+        ssrf_err = _validate_url_not_ssrf(base_url)
+        if ssrf_err:
+            return {'success': False, 'message': f'Invalid base_url: {ssrf_err}'}
         
         headers = {}
         params = {}
@@ -432,9 +480,13 @@ class CredentialTester:
     async def _test_discord_webhook(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Test Discord webhook"""
         webhook_url = data.get('webhook_url')
-        
+
         if not webhook_url:
             return {'success': False, 'message': 'Webhook URL is required'}
+
+        ssrf_err = _validate_url_not_ssrf(webhook_url)
+        if ssrf_err:
+            return {'success': False, 'message': f'Invalid webhook_url: {ssrf_err}'}
         
         payload = {
             'content': '🔧 Credential test from Automatos AI Platform',
