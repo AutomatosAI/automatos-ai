@@ -162,12 +162,12 @@ class FutureAGIService:
         prompt_content: str,
         algorithm: str = "meta_prompt",
         target_metric: str = "is_helpful",
-        num_iterations: int = 3,
+        num_iterations: int = 2,
     ) -> Dict[str, Any]:
         if not self.is_available:
             return {"error": "FutureAGI not configured"}
 
-        dataset = await self._collect_optimization_dataset()
+        dataset = await self._collect_optimization_dataset(limit=10)
         if not dataset:
             return {"error": "No live traffic data yet. Enable FutureAGI scoring and chat first to build a dataset."}
 
@@ -186,12 +186,13 @@ class FutureAGIService:
         if not job_id:
             return start_result  # error or unexpected response
 
-        logger.info(f"[optimize] job started: {job_id}")
+        logger.info(f"[optimize] job started: {job_id}, {len(dataset)} examples, {num_iterations} rounds")
 
-        # Poll for completion (up to 10 minutes)
-        max_wait = 600
-        poll_interval = 5
+        # Poll for completion (up to 20 minutes)
+        max_wait = 1200
+        poll_interval = 10
         elapsed = 0
+        consecutive_errors = 0
         while elapsed < max_wait:
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
@@ -211,8 +212,15 @@ class FutureAGIService:
             elif status == "failed":
                 logger.warning(f"[optimize] job {job_id} failed: {status_result.get('error')}")
                 return {"error": status_result.get("error", "Optimization failed"), "status": "failed"}
+            elif "error" in status_result:
+                consecutive_errors += 1
+                logger.warning(f"[optimize] poll error #{consecutive_errors}: {status_result.get('error')}")
+                # If worker lost the job (404 / restart), fail fast
+                if consecutive_errors >= 5:
+                    return {"error": "Lost connection to optimization job (worker may have restarted)", "status": "failed"}
             else:
-                if elapsed % 30 == 0:
+                consecutive_errors = 0
+                if elapsed % 60 == 0:
                     logger.info(f"[optimize] job {job_id} still {status} ({elapsed}s elapsed)")
 
         return {"error": f"Optimization timed out after {max_wait}s", "status": "failed"}
