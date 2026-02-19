@@ -96,6 +96,20 @@ class FutureAGIService:
             logger.error(f"[worker] {path} failed: {e}")
             return {"error": str(e)}
 
+    async def _call_worker_get(self, path: str, timeout: int = 15) -> Dict[str, Any]:
+        """GET from the worker service and return JSON response."""
+        url = f"{WORKER_URL}{path}"
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(url)
+            if resp.status_code != 200:
+                error_text = resp.text[:300]
+                return {"error": f"Worker error ({resp.status_code}): {error_text}"}
+            return resp.json()
+        except Exception as e:
+            logger.warning(f"[worker] GET {path} failed: {e}")
+            return {"error": str(e)}
+
     # ------------------------------------------------------------------
     # Assess
     # ------------------------------------------------------------------
@@ -166,15 +180,42 @@ class FutureAGIService:
             "teacher_model": "gpt-4o-mini",
         }
 
-        result = await self._call_worker("/optimize", payload, timeout=OPTIMIZE_TIMEOUT)
+        # Start async optimization job on worker
+        start_result = await self._call_worker("/optimize", payload, timeout=30)
+        job_id = start_result.get("job_id")
+        if not job_id:
+            return start_result  # error or unexpected response
 
-        # Normalize response keys for frontend
-        if "optimized_prompt" in result:
-            result["best_score"] = result.pop("final_score", None)
-            result["rounds"] = result.pop("rounds_completed", None)
-            result["duration"] = result.pop("duration_seconds", None)
+        logger.info(f"[optimize] job started: {job_id}")
 
-        return result
+        # Poll for completion (up to 10 minutes)
+        max_wait = 600
+        poll_interval = 5
+        elapsed = 0
+        while elapsed < max_wait:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+            status_result = await self._call_worker_get(f"/optimize/{job_id}", timeout=15)
+            status = status_result.get("status", "unknown")
+
+            if status == "completed":
+                logger.info(f"[optimize] job {job_id} completed in {elapsed}s")
+                result = status_result
+                # Normalize response keys for frontend
+                if "optimized_prompt" in result:
+                    result["best_score"] = result.pop("final_score", None)
+                    result["rounds"] = result.pop("rounds_completed", None)
+                    result["duration"] = result.pop("duration_seconds", None)
+                return result
+            elif status == "failed":
+                logger.warning(f"[optimize] job {job_id} failed: {status_result.get('error')}")
+                return {"error": status_result.get("error", "Optimization failed"), "status": "failed"}
+            else:
+                if elapsed % 30 == 0:
+                    logger.info(f"[optimize] job {job_id} still {status} ({elapsed}s elapsed)")
+
+        return {"error": f"Optimization timed out after {max_wait}s", "status": "failed"}
 
     # ------------------------------------------------------------------
     # Live traffic scoring (fire-and-forget from chat pipeline)

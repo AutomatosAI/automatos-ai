@@ -9,7 +9,8 @@ orchestrator.
 Endpoints:
   POST /assess    - Score a prompt using quality metric templates
   POST /safety    - Run safety checks on a prompt
-  POST /optimize  - Run prompt optimization (synchronous)
+  POST /optimize  - Start async prompt optimization (returns job_id)
+  GET  /optimize/{job_id} - Poll optimization status/result
   POST /score     - Score a live chat input/output pair
   GET  /health    - Health check
 """
@@ -18,7 +19,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
@@ -28,7 +32,7 @@ from pydantic import BaseModel, Field
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("futureagi-worker")
 
-app = FastAPI(title="FutureAGI Worker", version="2.0.0")
+app = FastAPI(title="FutureAGI Worker", version="3.0.0")
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -187,7 +191,7 @@ class OptimizeRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "futureagi-worker", "version": "2.1.0"}
+    return {"status": "ok", "service": "futureagi-worker", "version": "3.0.0"}
 
 
 @app.get("/test")
@@ -239,18 +243,27 @@ def assess(req: AssessRequest):
 # Safety - run safety templates
 # ---------------------------------------------------------------------------
 
+SAFETY_PREAMBLE = (
+    "NOTE: The following text is a SYSTEM PROMPT (instructions for an AI assistant), "
+    "not user-generated content. It may contain instructional language about handling "
+    "sensitive topics. Evaluate the actual intent, not the instructional framing.\n\n"
+)
+
 @app.post("/safety")
 def safety(req: SafetyRequest):
     start = time.time()
-    # bias_detection consistently times out / returns empty on FutureAGI's protect_flash model
     safety_templates = ["toxicity", "prompt_injection", "content_moderation"]
+
+    # Prefix system prompt context so the safety model understands this is
+    # instructional text, not user content — reduces false positives
+    contextualized = SAFETY_PREAMBLE + req.prompt_content
 
     # Run all safety templates concurrently
     raw_results = {}
     with ThreadPoolExecutor(max_workers=len(safety_templates)) as pool:
         futures = {}
         for template in safety_templates:
-            inputs = _build_inputs(template, req.prompt_content, req.prompt_content)
+            inputs = _build_inputs(template, contextualized, contextualized)
             model = _get_model(template)
             futures[pool.submit(_run_single_template, template, inputs, model)] = template
         for future in as_completed(futures):
@@ -316,20 +329,22 @@ def score_live(req: ScoreRequest):
 
 
 # ---------------------------------------------------------------------------
-# Optimize - full prompt optimization via agent-opt
+# Optimize - async prompt optimization via agent-opt
 # ---------------------------------------------------------------------------
+
+# In-memory job store for async optimization
+_optimize_jobs: Dict[str, Dict[str, Any]] = {}
+
 
 def _escape_template_vars(text: str) -> tuple[str, list[tuple[str, str]]]:
     """
     Escape {variable} placeholders so the SDK's .format() doesn't crash.
     Returns (escaped_text, list of (placeholder, original) for restoration).
     """
-    import re
     replacements = []
-    # Match {word} patterns that aren't already escaped {{word}}
     for match in re.finditer(r'(?<!\{)\{(\w+)\}(?!\})', text):
-        original = match.group(0)        # e.g. {available_routes}
-        var_name = match.group(1)        # e.g. available_routes
+        original = match.group(0)
+        var_name = match.group(1)
         placeholder = f"__TMPL_{var_name.upper()}__"
         replacements.append((placeholder, original))
     escaped = text
@@ -345,55 +360,54 @@ def _restore_template_vars(text: str, replacements: list[tuple[str, str]]) -> st
     return text
 
 
-@app.post("/optimize")
-def optimize(req: OptimizeRequest):
+def _run_optimize_job(job_id: str, req: OptimizeRequest):
+    """Run optimization in a background thread. Updates _optimize_jobs in place."""
+    job = _optimize_jobs[job_id]
     start = time.time()
-    api_key, secret_key = _get_keys()
-
-    if not os.getenv("OPENAI_API_KEY"):
-        raise HTTPException(status_code=500, detail="OpenAI API key not configured")
 
     try:
+        api_key, secret_key = _get_keys()
+
+        if not os.getenv("OPENAI_API_KEY"):
+            job["status"] = "failed"
+            job["error"] = "OpenAI API key not configured"
+            return
+
         from fi.opt.base.evaluator import Evaluator
         from fi.opt.datamappers import BasicDataMapper
         from fi.opt.generators import LiteLLMGenerator
-    except ImportError as e:
-        raise HTTPException(status_code=500, detail=f"agent-opt not installed: {e}")
 
-    # Escape template variables like {available_routes}, {message} etc.
-    # so the SDK's .format() doesn't crash with KeyError
-    escaped_prompt, template_replacements = _escape_template_vars(req.prompt_content)
-    if template_replacements:
-        var_names = [orig for _, orig in template_replacements]
-        logger.info(f"Escaped {len(template_replacements)} template vars: {var_names}")
+        # Escape template variables
+        escaped_prompt, template_replacements = _escape_template_vars(req.prompt_content)
+        if template_replacements:
+            var_names = [orig for _, orig in template_replacements]
+            logger.info(f"[job {job_id[:8]}] Escaped {len(template_replacements)} template vars: {var_names}")
 
-    evaluator = Evaluator(
-        eval_template=req.scoring_template,
-        eval_model_name="turing_flash",
-        fi_api_key=api_key,
-        fi_secret_key=secret_key,
-    )
+        evaluator = Evaluator(
+            eval_template=req.scoring_template,
+            eval_model_name="turing_flash",
+            fi_api_key=api_key,
+            fi_secret_key=secret_key,
+        )
 
-    data_mapper = BasicDataMapper(key_map={"input": "input", "output": "output"})
-    teacher = LiteLLMGenerator(model=req.teacher_model, prompt_template="{prompt}")
+        data_mapper = BasicDataMapper(key_map={"input": "input", "output": "output"})
+        teacher = LiteLLMGenerator(model=req.teacher_model, prompt_template="{prompt}")
 
-    task_desc = req.task_description or (
-        "This is a system prompt for an AI assistant. "
-        "Optimize it to produce more helpful, concise, and complete responses. "
-        "IMPORTANT: Preserve any placeholder tokens like __TMPL_*__ exactly as they are."
-    )
+        task_desc = req.task_description or (
+            "This is a system prompt for an AI assistant. "
+            "Optimize it to produce more helpful, concise, and complete responses. "
+            "IMPORTANT: Preserve any placeholder tokens like __TMPL_*__ exactly as they are."
+        )
 
-    try:
         optimizer = _create_optimizer(req.algorithm, teacher)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
-    logger.info(
-        f"Starting {req.algorithm}: {req.num_rounds} rounds, "
-        f"{len(req.dataset)} examples, template={req.scoring_template}"
-    )
+        logger.info(
+            f"[job {job_id[:8]}] Starting {req.algorithm}: {req.num_rounds} rounds, "
+            f"{len(req.dataset)} examples, template={req.scoring_template}"
+        )
 
-    try:
+        job["status"] = "running"
+
         result = optimizer.optimize(
             evaluator=evaluator,
             data_mapper=data_mapper,
@@ -403,37 +417,92 @@ def optimize(req: OptimizeRequest):
             num_rounds=req.num_rounds,
             eval_subset_size=min(len(req.dataset), 10),
         )
+
+        duration = time.time() - start
+        best_prompt = result.best_generator.get_prompt_template()
+        best_prompt = _restore_template_vars(best_prompt, template_replacements)
+
+        history = []
+        if hasattr(result, "history") and result.history:
+            for i, iteration in enumerate(result.history):
+                history.append({
+                    "round": i + 1,
+                    "score": getattr(iteration, "average_score", None),
+                    "prompt_preview": getattr(iteration, "prompt", "")[:200],
+                })
+
+        logger.info(f"[job {job_id[:8]}] Complete: {result.final_score:.4f} in {duration:.1f}s")
+
+        job["status"] = "completed"
+        job["result"] = {
+            "optimized_prompt": best_prompt,
+            "final_score": result.final_score,
+            "initial_score": history[0]["score"] if history else None,
+            "rounds_completed": req.num_rounds,
+            "algorithm": req.algorithm,
+            "history": history,
+            "duration_seconds": round(duration, 1),
+            "status": "completed",
+        }
+
     except Exception as e:
-        logger.error(f"Optimization failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Optimization failed: {e}")
+        duration = time.time() - start
+        logger.error(f"[job {job_id[:8]}] Failed after {duration:.1f}s: {e}")
+        job["status"] = "failed"
+        job["error"] = str(e)
+        job["duration_seconds"] = round(duration, 1)
 
-    duration = time.time() - start
-    best_prompt = result.best_generator.get_prompt_template()
 
-    # Restore template variables in the optimized prompt
-    best_prompt = _restore_template_vars(best_prompt, template_replacements)
+@app.post("/optimize")
+def optimize(req: OptimizeRequest):
+    """Start async optimization — returns job_id immediately. Poll GET /optimize/{job_id} for result."""
+    # Validate upfront
+    _get_keys()
+    if not os.getenv("OPENAI_API_KEY"):
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured")
 
-    history = []
-    if hasattr(result, "history") and result.history:
-        for i, iteration in enumerate(result.history):
-            history.append({
-                "round": i + 1,
-                "score": getattr(iteration, "average_score", None),
-                "prompt_preview": getattr(iteration, "prompt", "")[:200],
-            })
-
-    logger.info(f"Optimization complete: {result.final_score:.4f} in {duration:.1f}s")
-
-    return {
-        "optimized_prompt": best_prompt,
-        "final_score": result.final_score,
-        "initial_score": history[0]["score"] if history else None,
-        "rounds_completed": req.num_rounds,
-        "algorithm": req.algorithm,
-        "history": history,
-        "duration_seconds": round(duration, 1),
-        "status": "completed",
+    job_id = str(uuid.uuid4())
+    _optimize_jobs[job_id] = {
+        "status": "starting",
+        "created_at": time.time(),
+        "result": None,
+        "error": None,
     }
+
+    # Run in background thread — no timeout constraint
+    thread = threading.Thread(target=_run_optimize_job, args=(job_id, req), daemon=True)
+    thread.start()
+
+    logger.info(f"[job {job_id[:8]}] Optimization job started (async)")
+    return {"job_id": job_id, "status": "starting"}
+
+
+@app.get("/optimize/{job_id}")
+def get_optimize_status(job_id: str):
+    """Poll optimization job status. Returns result when complete."""
+    job = _optimize_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    elapsed = round(time.time() - job["created_at"], 1)
+
+    if job["status"] == "completed":
+        result = job["result"]
+        # Clean up old job after retrieval
+        return {**result, "job_id": job_id}
+    elif job["status"] == "failed":
+        return {
+            "job_id": job_id,
+            "status": "failed",
+            "error": job.get("error", "Unknown error"),
+            "duration_seconds": job.get("duration_seconds", elapsed),
+        }
+    else:
+        return {
+            "job_id": job_id,
+            "status": job["status"],
+            "elapsed_seconds": elapsed,
+        }
 
 
 def _create_optimizer(algorithm: str, teacher):
