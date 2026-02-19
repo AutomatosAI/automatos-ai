@@ -8,7 +8,7 @@ API endpoints for system statistics, agent metrics, and dashboard data.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, text
 from typing import Dict, Any
 from datetime import datetime, timedelta
 from core.database.database import get_db
@@ -135,7 +135,6 @@ async def get_skill_statistics(ctx: RequestContext = Depends(get_request_context
         total_skills = db.query(Skill).filter(Skill.is_active == True, Skill.workspace_id == ctx.workspace_id).count()
 
         # Most used skills (based on agent associations)
-        from sqlalchemy import text
         most_used_skills = db.execute(text("""
             SELECT s.name, s.category, COUNT(ags.agent_id) as usage_count
             FROM skills s

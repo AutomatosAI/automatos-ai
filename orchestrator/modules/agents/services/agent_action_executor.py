@@ -44,7 +44,7 @@ class ActionExecutor:
     # that could be used for arbitrary code execution or data exfiltration.
     SAFE_COMMANDS = {
         # File operations (read-only)
-        'ls', 'cat', 'head', 'tail', 'grep', 'find', 'wc', 'file', 'stat',
+        'ls', 'cat', 'head', 'tail', 'grep', 'wc', 'file', 'stat',
         # System info (read-only)
         'pwd', 'whoami', 'date', 'echo', 'which',
         # Text processing (read-only)

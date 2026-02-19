@@ -13,6 +13,7 @@ Enforces capability checks at EXECUTION time (defense in depth).
 
 import logging
 import os
+from pathlib import Path as _Path
 from typing import Dict, Any, Optional, Tuple
 from uuid import UUID
 from sqlalchemy.orm import Session
@@ -851,12 +852,13 @@ class UnifiedToolExecutor:
             }
 
         # Resolve paths within workspace (prevent path traversal)
-        from pathlib import Path as _Path
         workspace = _Path(self.workspace_dir).resolve()
-        source_file = str((workspace / source_file).resolve())
-        output_file = str((workspace / output_file).resolve())
+        resolved_source = (workspace / source_file).resolve()
+        resolved_output = (workspace / output_file).resolve()
+        source_file = str(resolved_source)
+        output_file = str(resolved_output)
 
-        if not source_file.startswith(str(workspace)) or not output_file.startswith(str(workspace)):
+        if not resolved_source.is_relative_to(workspace) or not resolved_output.is_relative_to(workspace):
             return {
                 "success": False,
                 "error": "File paths must be within the workspace directory",
@@ -1329,7 +1331,7 @@ class UnifiedToolExecutor:
         # Validate path stays within workspace
         workspace = _Path(self.workspace_dir).resolve()
         resolved_output = _Path(output_file).resolve()
-        if not str(resolved_output).startswith(str(workspace)):
+        if not resolved_output.is_relative_to(workspace):
             return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
 
         try:
@@ -1411,7 +1413,7 @@ class UnifiedToolExecutor:
             if not os.path.isabs(output_file):
                 output_file = os.path.join(self.workspace_dir, output_file)
             workspace = _Path(self.workspace_dir).resolve()
-            if not str(_Path(output_file).resolve()).startswith(str(workspace)):
+            if not _Path(output_file).resolve().is_relative_to(workspace):
                 return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
 
             # Generate content based on type
@@ -1465,7 +1467,7 @@ This {content_type} covers the topic of {topic}.
             if not os.path.isabs(output_file):
                 output_file = os.path.join(self.workspace_dir, output_file)
             workspace = _Path(self.workspace_dir).resolve()
-            if not str(_Path(input_file).resolve()).startswith(str(workspace)) or not str(_Path(output_file).resolve()).startswith(str(workspace)):
+            if not _Path(input_file).resolve().is_relative_to(workspace) or not _Path(output_file).resolve().is_relative_to(workspace):
                 return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
 
             try:
@@ -1507,7 +1509,7 @@ This {content_type} covers the topic of {topic}.
             if not os.path.isabs(output_file):
                 output_file = os.path.join(self.workspace_dir, output_file)
             workspace = _Path(self.workspace_dir).resolve()
-            if not str(_Path(output_file).resolve()).startswith(str(workspace)):
+            if not _Path(output_file).resolve().is_relative_to(workspace):
                 return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
 
             content = f"""# {title}
@@ -1560,7 +1562,7 @@ Summary and recommendations.
         if not os.path.isabs(output_file):
             output_file = os.path.join(self.workspace_dir, output_file)
         workspace = _Path(self.workspace_dir).resolve()
-        if not str(_Path(output_file).resolve()).startswith(str(workspace)):
+        if not _Path(output_file).resolve().is_relative_to(workspace):
             return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
 
         try:
