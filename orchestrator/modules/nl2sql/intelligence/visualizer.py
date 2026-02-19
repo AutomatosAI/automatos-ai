@@ -236,6 +236,13 @@ class VisualizationSuggester:
         # Default to table for raw data
         return ChartType.TABLE
     
+    @staticmethod
+    def _humanize_column(col_name: str) -> str:
+        """Convert column_name to 'Column Name' for chart labels."""
+        if not col_name:
+            return ""
+        return col_name.replace('_', ' ').title()
+
     def _build_chart_config(
         self,
         chart_type: ChartType,
@@ -244,48 +251,58 @@ class VisualizationSuggester:
     ) -> Dict[str, Any]:
         """
         Build chart configuration.
+
+        PRD-61 Bug Fix (US-011): Added xLabel, yLabel, and auto-generated title
+        to chart config. Previously only returned x/y field names without
+        human-readable labels.
         """
         config = {
             'type': chart_type.value,
             'reason': '',
             'x_axis': None,
             'y_axis': None,
+            'xLabel': None,
+            'yLabel': None,
             'series': None,
             'title': '',
         }
-        
+
         time_cols = analysis.get('time_columns', [])
         numeric_cols = analysis.get('numeric_columns', [])
         category_cols = analysis.get('category_columns', [])
-        
+
         if chart_type == ChartType.LINE:
             config['x_axis'] = time_cols[0] if time_cols else category_cols[0] if category_cols else None
             config['y_axis'] = numeric_cols[0] if numeric_cols else None
             config['reason'] = "Time series data best shown as line chart"
-            config['title'] = f"{config['y_axis']} over {config['x_axis']}"
-        
+            config['title'] = f"{self._humanize_column(config['y_axis'])} over {self._humanize_column(config['x_axis'])}"
+
         elif chart_type == ChartType.BAR:
             config['x_axis'] = category_cols[0] if category_cols else time_cols[0] if time_cols else None
             config['y_axis'] = numeric_cols[0] if numeric_cols else None
             config['reason'] = "Categorical comparison best shown as bar chart"
-            config['title'] = f"{config['y_axis']} by {config['x_axis']}"
-        
+            config['title'] = f"{self._humanize_column(config['y_axis'])} by {self._humanize_column(config['x_axis'])}"
+
         elif chart_type == ChartType.PIE:
             config['series'] = category_cols[0] if category_cols else None
             config['y_axis'] = numeric_cols[0] if numeric_cols else None
             config['reason'] = "Proportion/share data best shown as pie chart"
-            config['title'] = f"Distribution of {config['series']}"
-        
+            config['title'] = f"Distribution of {self._humanize_column(config['series'])}"
+
         elif chart_type == ChartType.SCATTER:
             config['x_axis'] = numeric_cols[0] if len(numeric_cols) > 0 else None
             config['y_axis'] = numeric_cols[1] if len(numeric_cols) > 1 else None
             config['reason'] = "Correlation between numeric values best shown as scatter plot"
-            config['title'] = f"{config['y_axis']} vs {config['x_axis']}"
-        
+            config['title'] = f"{self._humanize_column(config['y_axis'])} vs {self._humanize_column(config['x_axis'])}"
+
         elif chart_type == ChartType.TABLE:
             config['reason'] = "Raw data or large dataset best shown as table"
             config['title'] = "Data Table"
-        
+
+        # PRD-61: Add human-readable axis labels
+        config['xLabel'] = self._humanize_column(config.get('x_axis'))
+        config['yLabel'] = self._humanize_column(config.get('y_axis'))
+
         return config
     
     def get_chart_prompt(

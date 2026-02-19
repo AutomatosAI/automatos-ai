@@ -1,19 +1,19 @@
 /**
  * Semantic Search API Hook
- * 
+ *
  * Provides semantic search capabilities across document chunks
  * using vector similarity search powered by pgvector and OpenAI embeddings.
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 
 export interface SearchResult {
-  chunk_id: number
   document_id: number
-  chunk_index: number
-  content: string
+  excerpt: string
   similarity: number
+  chunk_index: number
+  chunk_count: number
   metadata: Record<string, any>
   source: {
     filename: string
@@ -21,6 +21,9 @@ export interface SearchResult {
     file_size: number
     upload_date: string | null
   }
+  preview?: string
+  preview_truncated?: boolean
+  full_content_available?: boolean
 }
 
 export interface SemanticSearchResponse {
@@ -38,7 +41,8 @@ export interface SemanticSearchParams {
 }
 
 /**
- * Hook for performing semantic search across documents
+ * Hook for performing semantic search across documents.
+ * Uses apiClient for proper auth (Clerk JWT + workspace ID).
  */
 export function useSemanticSearch(
   params: SemanticSearchParams | null,
@@ -66,29 +70,38 @@ export function useSemanticSearch(
         })
       }
 
-      // CRITICAL: Call backend directly to bypass Next.js proxy mock data
-      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
-      const url = `${BACKEND_URL}/api/documents/search?${searchParams.toString()}`
-      console.log('[Semantic Search] Calling backend directly:', url)
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-      
-      console.log('[Semantic Search] Response status:', response.status)
-
-      if (!response.ok) {
-        throw new Error(`Search failed: ${response.statusText}`)
-      }
-
-      return response.json() as Promise<SemanticSearchResponse>
+      // Use apiClient for proper auth headers (Clerk JWT + workspace ID)
+      return apiClient.post<SemanticSearchResponse>(
+        `/api/documents/search?${searchParams.toString()}`
+      )
     },
     enabled: options?.enabled !== false && !!params?.query,
-    staleTime: options?.staleTime || 5 * 60 * 1000, // 5 minutes
+    staleTime: options?.staleTime || 5 * 60 * 1000,
     retry: 2,
+  })
+}
+
+/**
+ * Hook for fetching document content with optional chunk highlighting.
+ */
+export function useDocumentContent(
+  documentId: number | null,
+  highlightChunkIds?: number[],
+  options?: { enabled?: boolean }
+) {
+  return useQuery({
+    queryKey: ['documents', documentId, 'content', highlightChunkIds],
+    queryFn: async () => {
+      if (!documentId) throw new Error('Document ID required')
+      const params = new URLSearchParams()
+      if (highlightChunkIds?.length) {
+        highlightChunkIds.forEach(id => params.append('highlight_chunk_ids', String(id)))
+      }
+      const qs = params.toString()
+      return apiClient.get(`/api/documents/${documentId}/content${qs ? `?${qs}` : ''}`)
+    },
+    enabled: options?.enabled !== false && !!documentId,
+    staleTime: 5 * 60 * 1000,
   })
 }
 
@@ -98,10 +111,11 @@ export function useSemanticSearch(
 export function useTrackSearchQuery() {
   return useMutation({
     mutationFn: async (data: { query: string; results_count: number }) => {
-      // Track search event for analytics
-      // TODO: Implement when analytics endpoint is ready
-      console.log('Search tracked:', data)
-      return data
+      return apiClient.post('/api/documents/analytics/track', {
+        event_type: 'document_searched',
+        query: data.query,
+        results_count: data.results_count,
+      })
     },
   })
 }

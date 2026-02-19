@@ -273,7 +273,7 @@ async def download_document(path: str = Query(..., description="Full path to doc
         raise HTTPException(status_code=500, detail=f"Error downloading document: {str(e)}")
 
 @router.get("/content")
-async def get_document_content(path: str = Query(..., description="Full path to document")):
+async def get_document_content_by_path(path: str = Query(..., description="Full path to document")):
     """
     Get document content as text for artifact viewer.
     
@@ -656,46 +656,70 @@ async def reprocess_document(
         raise HTTPException(status_code=500, detail=f"Error reprocessing document: {str(e)}")
 
 @router.get("/{document_id}/content")
-async def get_document_content(
+async def get_document_content_by_id(
     document_id: int,
+    highlight_chunk_ids: Optional[List[int]] = Query(None, description="Chunk IDs to highlight in content"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get document content/chunks"""
+    """
+    Get document content reconstructed from chunks, with optional highlighting.
+
+    If highlight_chunk_ids provided, wraps matching chunk text in <mark> tags
+    so the frontend can scroll to and highlight the relevant section.
+    """
     try:
         document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
-        
+
         # Query chunks using raw SQL (SQLAlchemy model doesn't exist yet)
-        from sqlalchemy import text
         query = text("""
-            SELECT id, chunk_index, content, metadata, 
+            SELECT id, chunk_index, content, metadata,
                    CASE WHEN embedding IS NOT NULL THEN true ELSE false END as has_embedding
             FROM document_chunks
             WHERE document_id = :document_id
             ORDER BY chunk_index
         """)
-        
+
         result = db.execute(query, {"document_id": document_id})
         chunks = result.fetchall()
-        
+
+        # Reconstruct full content from chunks
+        full_content = "\n\n".join(c.content for c in chunks)
+
+        # Apply highlighting if requested
+        highlighted_content = full_content
+        if highlight_chunk_ids:
+            highlight_set = set(highlight_chunk_ids)
+            for chunk in chunks:
+                if chunk.id in highlight_set:
+                    highlighted_content = highlighted_content.replace(
+                        chunk.content,
+                        f'<mark data-chunk-id="{chunk.id}">{chunk.content}</mark>',
+                        1
+                    )
+
+        chunks_response = [
+            {
+                "chunk_id": row.id,
+                "chunk_index": row.chunk_index,
+                "content": row.content,
+                "has_embedding": row.has_embedding,
+                "metadata": row.metadata if row.metadata else {}
+            }
+            for row in chunks
+        ]
+
         return {
             "document_id": document_id,
             "filename": document.filename,
+            "file_type": document.file_type,
+            "content": highlighted_content,
             "chunk_count": len(chunks),
-            "chunks": [
-                {
-                    "chunk_id": row.id,
-                    "chunk_index": row.chunk_index,
-                    "content": row.content,
-                    "has_embedding": row.has_embedding,
-                    "metadata": row.metadata if row.metadata else {}
-                }
-                for row in chunks
-            ]
+            "chunks": chunks_response if highlight_chunk_ids else None
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:

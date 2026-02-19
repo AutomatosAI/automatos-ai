@@ -128,6 +128,7 @@ from api.user_api_keys import router as user_api_keys_router  # PRD-54: BYOK API
 from api.execution_history import router as execution_history_router  # Enhanced execution history
 from api.database_knowledge import router as database_knowledge_router  # PRD-21: Database Knowledge
 from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
+from api.document_generation import router as document_generation_router  # PRD-63: Document Generation
 
 # PRD-55: Autonomous Assistant Platform (optional modules)
 try:
@@ -501,6 +502,7 @@ app.include_router(recipe_webhook_router)  # Recipe webhook triggers (no auth)
 app.include_router(general_webhooks_router)  # General workspace webhooks (no auth)
 app.include_router(marketplace_router)  # Community Marketplace
 app.include_router(documents_router)
+app.include_router(document_generation_router)  # PRD-63: Document Generation
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(context_engineering_router)

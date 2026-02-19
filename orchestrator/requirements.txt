@@ -87,9 +87,10 @@ langchain-core==1.0.2
 # pandasai==2.2.12
 # pandasai-litellm==0.0.1
 
-# CodeGraph dependencies (PRD-11)
-tree-sitter>=0.20.4
-tree-sitter-python>=0.23.0
+# CodeGraph dependencies (PRD-11 + PRD-62)
+tree-sitter>=0.23.0
+tree-sitter-language-pack>=0.2.0  # 14+ languages in one package
+tree-sitter-python>=0.23.0    # Fallback if language-pack unavailable
 tree-sitter-javascript>=0.20.3
 tree-sitter-typescript>=0.20.5
 GitPython==3.1.40

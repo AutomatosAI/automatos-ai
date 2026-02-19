@@ -17,10 +17,13 @@ from core.models.database_knowledge import (
     DatabaseQueryRequest,
     QueryTemplateExecute
 )
-from modules.nl2sql import DatabaseKnowledgeService
+from modules.nl2sql import DatabaseKnowledgeService, NaturalLanguageToSQLService
 from core.database.database_cache_service import get_database_cache_service
 from modules.tools.services.database_tool_integration import get_database_tool_integration
 from core.credentials.resolver import get_credential_resolver
+
+import logging
+logger = logging.getLogger(__name__)
 
 # NEW imports for introspection wiring
 from core.models.database_knowledge import DatabaseKnowledgeSource
@@ -605,7 +608,354 @@ async def get_cache_statistics(
     Get cache statistics for monitoring.
     """
     _, cache, _ = get_services()
-    
+
     stats = cache.get_cache_stats(tenant_id)
-    
+
     return stats
+
+
+# =============================================================================
+# PRD-61: Training Examples API (US-004, US-013)
+# =============================================================================
+
+@router.get("/{source_id}/examples")
+async def list_training_examples(
+    source_id: int,
+    verified_only: bool = False,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """List training examples for a database source."""
+    from core.models.database_knowledge import NL2SQLTrainingExample
+
+    query = db.query(NL2SQLTrainingExample).filter(
+        NL2SQLTrainingExample.workspace_id == ctx.workspace_id,
+        NL2SQLTrainingExample.database_source_id == source_id
+    )
+    if verified_only:
+        query = query.filter(NL2SQLTrainingExample.is_verified == True)
+
+    examples = query.order_by(NL2SQLTrainingExample.created_at.desc()).all()
+
+    return [
+        {
+            "id": ex.id,
+            "question": ex.question,
+            "sql": ex.sql,
+            "tables_used": ex.tables_used,
+            "is_verified": ex.is_verified,
+            "verification_source": ex.verification_source,
+            "usage_count": ex.usage_count or 0,
+            "last_used_at": ex.last_used_at.isoformat() if ex.last_used_at else None,
+            "created_at": ex.created_at.isoformat() if ex.created_at else None,
+            "metadata": ex.extra_metadata or {},
+        }
+        for ex in examples
+    ]
+
+
+@router.post("/{source_id}/examples")
+async def add_training_example(
+    source_id: int,
+    body: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Add a new training example (question/SQL pair)."""
+    from modules.nl2sql.training.example_store import SQLExampleStore
+
+    store = SQLExampleStore(db_session=db)
+    example_id = await store.add_example(
+        question=body.get("question", ""),
+        sql=body.get("sql", ""),
+        database_source_id=str(source_id),
+        workspace_id=str(ctx.workspace_id),
+        tables_used=body.get("tables_used", []),
+        is_verified=body.get("is_verified", False),
+        verification_source="manual",
+        created_by=str(ctx.user_id) if ctx.user_id else None,
+        metadata=body.get("metadata", {})
+    )
+
+    return {"success": True, "example_id": example_id}
+
+
+@router.put("/{source_id}/examples/{example_id}")
+async def update_training_example(
+    source_id: int,
+    example_id: int,
+    body: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Update a training example."""
+    from core.models.database_knowledge import NL2SQLTrainingExample
+
+    example = db.query(NL2SQLTrainingExample).filter(
+        NL2SQLTrainingExample.id == example_id,
+        NL2SQLTrainingExample.workspace_id == ctx.workspace_id,
+        NL2SQLTrainingExample.database_source_id == source_id
+    ).first()
+
+    if not example:
+        raise HTTPException(status_code=404, detail="Training example not found")
+
+    if "question" in body:
+        example.question = body["question"]
+    if "sql" in body:
+        example.sql = body["sql"]
+    if "tables_used" in body:
+        example.tables_used = body["tables_used"]
+    if "is_verified" in body:
+        example.is_verified = body["is_verified"]
+    if "metadata" in body:
+        example.extra_metadata = body["metadata"]
+
+    from datetime import datetime
+    example.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"success": True, "example_id": example_id}
+
+
+@router.put("/{source_id}/examples/{example_id}/verify")
+async def verify_training_example(
+    source_id: int,
+    example_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Mark an example as verified (Golden SQL)."""
+    from modules.nl2sql.training.example_store import SQLExampleStore
+
+    store = SQLExampleStore(db_session=db)
+    await store.mark_verified(example_id, str(ctx.workspace_id))
+
+    return {"success": True, "example_id": example_id, "verified": True}
+
+
+@router.delete("/{source_id}/examples/{example_id}")
+async def delete_training_example(
+    source_id: int,
+    example_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Delete a training example."""
+    from modules.nl2sql.training.example_store import SQLExampleStore
+
+    store = SQLExampleStore(db_session=db)
+    await store.delete_example(example_id, str(ctx.workspace_id))
+
+    return {"success": True, "deleted_id": example_id}
+
+
+@router.post("/{source_id}/examples/import")
+async def import_training_examples(
+    source_id: int,
+    body: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Bulk import examples from JSON array."""
+    from modules.nl2sql.training.example_store import SQLExampleStore
+
+    examples = body.get("examples", [])
+    if not examples:
+        raise HTTPException(status_code=400, detail="No examples provided")
+
+    store = SQLExampleStore(db_session=db)
+    imported = 0
+
+    for ex in examples:
+        try:
+            await store.add_example(
+                question=ex.get("question", ""),
+                sql=ex.get("sql", ""),
+                database_source_id=str(source_id),
+                workspace_id=str(ctx.workspace_id),
+                tables_used=ex.get("tables_used", []),
+                is_verified=ex.get("is_verified", False),
+                verification_source="import",
+                created_by=str(ctx.user_id) if ctx.user_id else None,
+            )
+            imported += 1
+        except Exception as e:
+            logger.warning(f"Failed to import example: {e}")
+
+    return {"success": True, "imported": imported, "total": len(examples)}
+
+
+@router.get("/{source_id}/examples/stats")
+async def get_training_example_stats(
+    source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Get training example statistics."""
+    from modules.nl2sql.training.example_store import SQLExampleStore
+
+    store = SQLExampleStore(db_session=db)
+    stats = await store.get_stats(str(source_id), str(ctx.workspace_id))
+
+    return stats
+
+
+# =============================================================================
+# PRD-61: Schema Refresh API (US-010)
+# =============================================================================
+
+@router.post("/{source_id}/schema/refresh")
+async def refresh_schema(
+    source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Re-introspect schema and invalidate cache.
+    PRD-61 Bug Fix: Explicit cache invalidation on schema changes.
+    """
+    source = db.query(DatabaseKnowledgeSource).filter(
+        DatabaseKnowledgeSource.id == source_id,
+        DatabaseKnowledgeSource.workspace_id == ctx.workspace_id
+    ).first()
+
+    if not source:
+        raise HTTPException(status_code=404, detail="Database source not found")
+
+    # Resolve credentials and introspect
+    cred_store = CredentialStore(db)
+    try:
+        creds = cred_store.get_decrypted_credential(
+            credential_id=source.credential_id,
+            service_name="schema_refresh"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Credential error: {e}")
+
+    dialect = _map_dialect_to_introspector(source.dialect)
+    try:
+        inspector = DatabaseIntrospectionService(credential=creds, dialect=dialect)
+        metadata = inspector.introspect(include_samples=True, sample_limit=5)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Introspection failed: {e}")
+
+    # Update source
+    source.schema_metadata = metadata
+    source.last_introspected = datetime.utcnow()
+    db.commit()
+
+    # Invalidate schema cache
+    from modules.nl2sql.schema.provider import get_schema_provider
+    try:
+        provider = get_schema_provider(db)
+        provider.invalidate_cache(str(source_id))
+    except Exception:
+        pass
+
+    tables = metadata.get("tables", []) or []
+    return {
+        "success": True,
+        "tables": len(tables),
+        "message": "Schema refreshed and cache invalidated"
+    }
+
+
+# =============================================================================
+# PRD-61: Benchmark API (US-018)
+# =============================================================================
+
+@router.post("/{source_id}/benchmark/run")
+async def run_benchmark(
+    source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Run NL2SQL benchmark against verified training examples."""
+    from modules.nl2sql.benchmarks.runner import NL2SQLBenchmarkRunner
+    from modules.nl2sql.training.example_store import SQLExampleStore
+    from core.models.database_knowledge import NL2SQLBenchmarkRun, NL2SQLBenchmarkResult
+
+    # Get source
+    source = db.query(DatabaseKnowledgeSource).filter(
+        DatabaseKnowledgeSource.id == source_id,
+        DatabaseKnowledgeSource.workspace_id == ctx.workspace_id
+    ).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Database source not found")
+
+    if not source.schema_metadata:
+        raise HTTPException(status_code=400, detail="No schema metadata. Run introspection first.")
+
+    service, _, _ = get_services()
+
+    runner = NL2SQLBenchmarkRunner(
+        nl2sql_service=NaturalLanguageToSQLService(llm_provider=service.llm_provider),
+        example_store=SQLExampleStore(db_session=db)
+    )
+
+    result = await runner.run_benchmark(
+        database_source_id=str(source_id),
+        workspace_id=str(ctx.workspace_id),
+        schema_metadata=source.schema_metadata,
+        dialect=source.dialect or "postgresql"
+    )
+
+    # Persist benchmark run
+    run = NL2SQLBenchmarkRun(
+        workspace_id=ctx.workspace_id,
+        database_source_id=source_id,
+        total_examples=result.total,
+        exact_match_rate=result.exact_match_rate,
+        execution_match_rate=result.execution_match_rate,
+    )
+    db.add(run)
+    db.flush()
+
+    for detail in result.details:
+        db.add(NL2SQLBenchmarkResult(
+            benchmark_run_id=run.id,
+            question=detail.get('question'),
+            expected_sql=detail.get('expected_sql'),
+            generated_sql=detail.get('generated_sql'),
+            exact_match=detail.get('exact_match', False),
+            execution_match=detail.get('execution_match', False),
+        ))
+
+    db.commit()
+
+    return {
+        "success": True,
+        "benchmark_id": run.id,
+        "total": result.total,
+        "exact_match_rate": round(result.exact_match_rate, 3),
+        "execution_match_rate": round(result.execution_match_rate, 3),
+        "details": result.details[:20],  # Limit response size
+    }
+
+
+@router.get("/{source_id}/benchmark/history")
+async def get_benchmark_history(
+    source_id: int,
+    limit: int = 50,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Get historical benchmark results for accuracy trends."""
+    from core.models.database_knowledge import NL2SQLBenchmarkRun
+
+    runs = db.query(NL2SQLBenchmarkRun).filter(
+        NL2SQLBenchmarkRun.workspace_id == ctx.workspace_id,
+        NL2SQLBenchmarkRun.database_source_id == source_id
+    ).order_by(NL2SQLBenchmarkRun.created_at.desc()).limit(min(limit, 100)).all()
+
+    return [
+        {
+            "id": r.id,
+            "total_examples": r.total_examples,
+            "exact_match_rate": r.exact_match_rate,
+            "execution_match_rate": r.execution_match_rate,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in runs
+    ]

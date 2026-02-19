@@ -168,23 +168,37 @@ class EnhancedVectorStore:
     
     async def _create_indexes(self, conn: asyncpg.Connection) -> None:
         """Create optimized indexes for vector operations"""
-        
+
         index_type = self.index_strategies.get(self.similarity_function, "vector_cosine_ops")
-        
+
         # Vector index for similarity search
         await conn.execute(f"""
-            CREATE INDEX IF NOT EXISTS {self.table_name}_embedding_idx 
-            ON {self.table_name} 
+            CREATE INDEX IF NOT EXISTS {self.table_name}_embedding_idx
+            ON {self.table_name}
             USING ivfflat (embedding {index_type})
             WITH (lists = 100);
         """)
-        
+
         # Metadata indexes
         await conn.execute(f"""
-            CREATE INDEX IF NOT EXISTS {self.table_name}_metadata_idx 
+            CREATE INDEX IF NOT EXISTS {self.table_name}_metadata_idx
             ON {self.table_name} USING GIN (metadata);
         """)
-        
+
+        # Add search_vector stored generated column for full-text search
+        try:
+            await conn.execute(f"""
+                ALTER TABLE {self.table_name}
+                ADD COLUMN IF NOT EXISTS search_vector tsvector
+                GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED;
+            """)
+            await conn.execute(f"""
+                CREATE INDEX IF NOT EXISTS {self.table_name}_search_vector_idx
+                ON {self.table_name} USING GIN (search_vector);
+            """)
+        except Exception as e:
+            logger.debug(f"search_vector column may already exist or is not supported: {e}")
+
         # Standard indexes
         indexes = [
             f"CREATE INDEX IF NOT EXISTS {self.table_name}_timestamp_idx ON {self.table_name} (timestamp DESC);",
@@ -192,7 +206,7 @@ class EnhancedVectorStore:
             f"CREATE INDEX IF NOT EXISTS {self.table_name}_document_type_idx ON {self.table_name} (document_type);",
             f"CREATE INDEX IF NOT EXISTS {self.table_name}_importance_idx ON {self.table_name} (importance_score DESC);",
         ]
-        
+
         for index_query in indexes:
             await conn.execute(index_query)
     
@@ -380,36 +394,59 @@ class EnhancedVectorStore:
         query_embedding: List[float],
         query_text: str,
         limit: int,
-        search_filter: Optional[SearchFilter]
+        search_filter: Optional[SearchFilter],
+        vector_weight: float = 0.7,
+        keyword_weight: float = 0.3
     ) -> List[VectorDocument]:
-        """Hybrid search combining vector similarity and text search"""
-        
+        """Hybrid search combining vector similarity and full-text search.
+
+        Uses the indexed ``search_vector`` column (GIN) instead of computing
+        ``to_tsvector`` on the fly, and falls back to the expression form when
+        the stored column is not present.
+        """
+
         embedding_str = f"[{','.join(map(str, query_embedding))}]"
-        
+
         # Build filter conditions
         where_conditions, params = self._build_filter_conditions(search_filter)
-        where_clause = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
-        
+
         similarity_op = self._get_similarity_operator()
-        
-        # Combine vector similarity with text search
+
+        # Check whether the table has a stored search_vector column
+        has_search_vector = await conn.fetchval(f"""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = $1 AND column_name = 'search_vector'
+            )
+        """, self.table_name)
+
+        if has_search_vector:
+            ts_expr = "search_vector"
+            # Add a WHERE filter to leverage the GIN index
+            where_conditions.append("search_vector @@ plainto_tsquery('english', $2)")
+        else:
+            ts_expr = "to_tsvector('english', content)"
+
+        where_clause = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
+
+        # Combine vector similarity with text search using configurable weights
         query = f"""
-            SELECT id, content, embedding, metadata, timestamp, source, 
+            SELECT id, content, embedding, metadata, timestamp, source,
                    document_type, importance_score,
                    (embedding {similarity_op} $1) as vector_similarity,
-                   ts_rank(to_tsvector('english', content), plainto_tsquery('english', $2)) as text_rank
+                   ts_rank({ts_expr}, plainto_tsquery('english', $2)) as text_rank
             FROM {self.table_name}
             {where_clause}
-            ORDER BY 
-                (embedding {similarity_op} $1) * 0.7 + 
-                ts_rank(to_tsvector('english', content), plainto_tsquery('english', $2)) * 0.3 DESC
+            ORDER BY
+                (embedding {similarity_op} $1) * {vector_weight} +
+                ts_rank({ts_expr}, plainto_tsquery('english', $2)) * {keyword_weight} DESC
             LIMIT {limit}
         """
-        
-        # Add parameters
+
+        # Add parameters (embedding first, then query_text)
         params.insert(0, embedding_str)
         params.insert(1, query_text or "")
-        
+
         rows = await conn.fetch(query, *params)
         return [self._row_to_document(row) for row in rows]
     

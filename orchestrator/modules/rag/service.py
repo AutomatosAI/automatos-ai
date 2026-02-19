@@ -93,6 +93,13 @@ class RAGConfig:
     enable_rrf_fusion: bool = True
     enable_reranking: bool = False
     rrf_k: int = 60
+
+    # Hybrid search settings
+    hybrid_search_enabled: bool = True
+    hybrid_vector_weight: float = 0.7
+    hybrid_keyword_weight: float = 0.3
+    parent_child_expansion: bool = True
+    expansion_window: int = 1
     
     def __post_init__(self):
         """Load from system_settings if not provided"""
@@ -198,13 +205,6 @@ class RAGService:
             logger.warning(f"SemanticChunker not available: {e}")
             self._semantic_chunker = None
             
-        # Use centralized embedding manager
-        try:
-            from core.llm import create_embedding_manager
-            self._embedding_manager = create_embedding_manager()
-        except Exception as e:
-            logger.warning(f"Embedding manager not available: {e}")
-        
         # Query enhancer for HyDE and decomposition
         try:
             from modules.rag.query_enhancer import create_query_enhancer
@@ -286,7 +286,10 @@ class RAGService:
         # Optional: Cross-encoder re-ranking for higher precision
         if self.config.enable_reranking:
             candidates = await self._rerank_with_cross_encoder(query, candidates)
-        
+
+        # Parent-child context expansion
+        candidates = await self._expand_to_parent_context(candidates, self.config.expansion_window)
+
         # Use existing ContextOptimizer if available
         if self._context_optimizer:
             return await self._optimize_with_context_optimizer(
@@ -513,38 +516,37 @@ class RAGService:
     
     def _calculate_content_quality(self, text: str) -> float:
         """
-        Calculate content quality score (0.0 - 1.0)
-        Penalizes ASCII art and prefers actual prose
+        Calculate content quality score (0.0 - 1.0).
+        Penalizes ASCII art but treats short valid content (code, definitions,
+        config values) fairly.
         """
-        if not text or len(text) < 20:
-            return 0.3  # Too short
-        
+        if not text or len(text.strip()) == 0:
+            return 0.1
+
         # Detect ASCII art characters
         ascii_art_chars = '│─┌└┐┘├┤┬┴┼▼▲►◄║═╔╗╚╝╠╣╦╩╬'
         special_char_count = sum(1 for c in text if c in ascii_art_chars)
         ascii_art_ratio = special_char_count / len(text)
-        
+
         # Heavy penalty for ASCII art
-        if ascii_art_ratio > 0.15:  # More than 15% special chars
-            logger.debug(f"  ⚠️ High ASCII art ratio: {ascii_art_ratio:.2%}")
-            return 0.2  # Very low quality
-        elif ascii_art_ratio > 0.05:  # More than 5%
-            return 0.5  # Medium quality
-        
-        # Check for actual prose content
+        if ascii_art_ratio > 0.15:
+            logger.debug(f"  High ASCII art ratio: {ascii_art_ratio:.2%}")
+            return 0.2
+        elif ascii_art_ratio > 0.05:
+            return 0.5
+
         words = text.split()
         word_count = len(words)
-        
-        if word_count < 10:
-            return 0.4  # Too few words
-        
-        # Prefer longer, more substantive content
-        if word_count > 50:
-            return 1.0  # Good quality prose
-        elif word_count > 20:
-            return 0.8  # Decent quality
+
+        # Short content is still valid (code snippets, definitions, config)
+        if word_count < 5:
+            return 0.5
+        elif word_count < 20:
+            return 0.7
+        elif word_count < 50:
+            return 0.85
         else:
-            return 0.6  # Minimal quality
+            return 1.0
     
     
     def _knapsack_dp(
@@ -650,12 +652,16 @@ class RAGService:
             query=query
         )
     
-    async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5) -> List[Dict]:
+    async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
         Get candidate chunks from database using centralized EnhancedVectorStore.
-        
+
         MIGRATED: Now uses modules.search.EnhancedVectorStore for consistent vector search.
         Old SQL-based implementation kept below for rollback if needed.
+
+        Args:
+            workspace_id: Optional workspace ID for multi-tenant isolation.
+                          Falls back to self._workspace_id if not provided.
         """
         if not self._embedding_manager:
             return []
@@ -673,12 +679,13 @@ class RAGService:
                     if not self._vector_store.pool:
                         await self._vector_store.initialize()
                     
-                    logger.info(f"🔎 Using EnhancedVectorStore: min_similarity={min_similarity}, limit={limit}")
-                    
+                    search_mode = SearchMode.HYBRID if self.config.hybrid_search_enabled else SearchMode.VECTOR_ONLY
+                    logger.info(f"🔎 Using EnhancedVectorStore: mode={search_mode.value}, min_similarity={min_similarity}, limit={limit}")
+
                     # Perform search using centralized vector store
                     search_results = await self._vector_store.search(
                         query_embedding=query_embedding,
-                        mode=SearchMode.VECTOR_ONLY,  # Pure vector search for RAG
+                        mode=search_mode,
                         ranking_strategy=RankingStrategy.SIMILARITY,
                         limit=limit,
                         query_text=query
@@ -730,33 +737,55 @@ class RAGService:
             # FALLBACK: Original SQL-based implementation (kept for rollback)
             logger.info("Using fallback SQL-based vector search")
             embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
-            
+
             import asyncpg
             import os
-            
+
             db_url = os.getenv("DATABASE_URL", "")
             if not db_url:
                 db_url = "postgresql://postgres:postgres@localhost:5432/automatos"
-            
+
             conn = await asyncpg.connect(db_url)
-            
+
+            # Resolve workspace_id for multi-tenant isolation
+            effective_workspace_id = workspace_id or self._workspace_id
+
             try:
-                logger.info(f"🔎 Executing SQL vector similarity search: min_similarity={min_similarity}, limit={limit}")
-                results = await conn.fetch("""
-                    SELECT 
-                        dc.id,
-                        dc.content,
-                        d.filename as source_file,
-                        d.id as document_id,
-                        d.file_type,
-                        1 - (dc.embedding <=> $1::vector) as similarity,
-                        dc.metadata
-                    FROM document_chunks dc
-                    JOIN documents d ON dc.document_id = d.id
-                    WHERE 1 - (dc.embedding <=> $1::vector) >= $2
-                    ORDER BY dc.embedding <=> $1::vector
-                    LIMIT $3
-                """, embedding_str, min_similarity, limit)
+                logger.info(f"🔎 Executing SQL vector similarity search: min_similarity={min_similarity}, limit={limit}, workspace={effective_workspace_id}")
+
+                if effective_workspace_id:
+                    results = await conn.fetch("""
+                        SELECT
+                            dc.id,
+                            dc.content,
+                            d.filename as source_file,
+                            d.id as document_id,
+                            d.file_type,
+                            1 - (dc.embedding <=> $1::vector) as similarity,
+                            dc.metadata
+                        FROM document_chunks dc
+                        JOIN documents d ON dc.document_id = d.id
+                        WHERE 1 - (dc.embedding <=> $1::vector) >= $2
+                            AND d.workspace_id = $4
+                        ORDER BY dc.embedding <=> $1::vector
+                        LIMIT $3
+                    """, embedding_str, min_similarity, limit, effective_workspace_id)
+                else:
+                    results = await conn.fetch("""
+                        SELECT
+                            dc.id,
+                            dc.content,
+                            d.filename as source_file,
+                            d.id as document_id,
+                            d.file_type,
+                            1 - (dc.embedding <=> $1::vector) as similarity,
+                            dc.metadata
+                        FROM document_chunks dc
+                        JOIN documents d ON dc.document_id = d.id
+                        WHERE 1 - (dc.embedding <=> $1::vector) >= $2
+                        ORDER BY dc.embedding <=> $1::vector
+                        LIMIT $3
+                    """, embedding_str, min_similarity, limit)
                 
                 logger.info(f"📊 Database returned {len(results)} results")
                 
@@ -799,6 +828,55 @@ class RAGService:
             traceback.print_exc()
             return []
     
+    async def _expand_to_parent_context(
+        self,
+        candidates: List[Dict],
+        expand_window: int = 1
+    ) -> List[Dict]:
+        """
+        For each retrieved chunk, fetch surrounding chunks from the same document.
+        Uses chunk_index from metadata to find neighbors.
+        """
+        if not candidates or not self.config.parent_child_expansion:
+            return candidates
+
+        try:
+            import asyncpg
+            db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
+            conn = await asyncpg.connect(db_url)
+
+            try:
+                for candidate in candidates:
+                    doc_id = candidate.get("document_id")
+                    chunk_metadata = candidate.get("metadata", {})
+                    chunk_index = chunk_metadata.get("chunk_index") if isinstance(chunk_metadata, dict) else None
+
+                    if doc_id is None or chunk_index is None:
+                        candidate["expanded_content"] = candidate.get("content", "")
+                        continue
+
+                    window = expand_window or self.config.expansion_window
+                    surrounding = await conn.fetch("""
+                        SELECT content, metadata
+                        FROM document_chunks
+                        WHERE document_id = $1
+                          AND chunk_index BETWEEN $2 AND $3
+                        ORDER BY chunk_index
+                    """, doc_id, max(0, chunk_index - window), chunk_index + window)
+
+                    if surrounding:
+                        candidate["expanded_content"] = "\n\n".join(r["content"] for r in surrounding)
+                    else:
+                        candidate["expanded_content"] = candidate.get("content", "")
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.warning(f"Parent-child expansion failed, using original content: {e}")
+            for candidate in candidates:
+                candidate["expanded_content"] = candidate.get("content", "")
+
+        return candidates
+
     def _format_context(self, chunks: List[Dict], query: str) -> str:
         """Format chunks into context string"""
         
@@ -902,27 +980,44 @@ class RAGService:
             
             # Count total RAG queries from documents table
             result = db.execute(text("""
-                SELECT 
+                SELECT
                     COUNT(*) as total_docs,
                     SUM(chunk_count) as total_chunks,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs
                 FROM documents
             """)).fetchone()
-            
+
             total_docs = result.total_docs or 0
             total_chunks = result.total_chunks or 0
             completed_docs = result.completed_docs or 0
-            
+
             # Calculate success rate
             success_rate = (completed_docs / total_docs * 100) if total_docs > 0 else 0
-            
+
+            # Get actual avg response time from document_usage tracking
+            avg_response_time = 0
+            last_query_time = None
+            try:
+                usage_result = db.execute(text("""
+                    SELECT
+                        COALESCE(AVG(execution_time_ms), 0) as avg_time,
+                        MAX(timestamp) as last_query
+                    FROM document_usage
+                    WHERE event_type IN ('document_searched', 'rag_query')
+                """)).fetchone()
+                if usage_result:
+                    avg_response_time = round(usage_result.avg_time or 0, 1)
+                    last_query_time = usage_result.last_query.isoformat() if usage_result.last_query else None
+            except Exception:
+                pass  # Table may not exist yet
+
             return {
                 'total_queries': total_docs,
                 'success_rate': round(success_rate, 1),
-                'avg_response_time': 150,  # TODO: Track actual response times
+                'avg_response_time': avg_response_time,
                 'vector_embeddings': total_chunks,
                 'system_status': 'operational' if total_chunks > 0 else 'no_data',
-                'last_query_time': None
+                'last_query_time': last_query_time
             }
             
         except Exception as e:
