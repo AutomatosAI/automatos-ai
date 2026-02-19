@@ -637,24 +637,57 @@ class StreamingChatService:
                             }
                         )
 
-            # Provide Composio app/action hints based on agent assignments (DB-backed).
-            # Delegates to unified ComposioHintService (3-tier resolution).
+            # Composio per-action tools (primary) or hint fallback
+            _composio_result = None
             try:
-                if latest_text and agent_id:
-                    from modules.tools.services.composio_hint_service import ComposioHintService
+                if latest_text and agent_id and self.workspace_id:
+                    from modules.tools.services.composio_tool_service import ComposioToolService
 
-                    hint_service = ComposioHintService(self.db)
-                    hint_result = hint_service.build_hints(
+                    _composio_svc = ComposioToolService(self.db)
+                    _composio_result = _composio_svc.get_tools_for_step(
                         agent_id=agent_id,
-                        prompt=latest_text,
                         workspace_id=self.workspace_id,
+                        task_prompt=latest_text,
                     )
-                    if hint_result.hint_lines:
-                        insert_at = 2 if memory_context else 1
-                        llm_messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
-                        logger.info(f"[Composio Hints] strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)} param_hints={hint_result.param_hint_count}")
+                    insert_at = 2 if memory_context else 1
+                    if _composio_result and _composio_result.tools:
+                        # Strip composio_execute, add per-action tools
+                        if use_tools:
+                            use_tools = [
+                                t for t in use_tools
+                                if t.get("function", {}).get("name") != "composio_execute"
+                            ] + _composio_result.tools
+                        elif context_tools:
+                            use_tools = [
+                                t for t in context_tools
+                                if t.get("function", {}).get("name") != "composio_execute"
+                            ] + _composio_result.tools
+                        else:
+                            use_tools = _composio_result.tools
+                        from api.recipe_executor import _composio_scope_message
+                        llm_messages.insert(insert_at, {
+                            "role": "system",
+                            "content": _composio_scope_message(_composio_result.app_names),
+                        })
+                        logger.info(
+                            f"[ComposioToolService] strategy={_composio_result.strategy} "
+                            f"actions={len(_composio_result.action_set)} search_ms={_composio_result.search_ms}"
+                        )
+                    else:
+                        # Fallback: ComposioHintService (composio_execute mega-tool)
+                        from modules.tools.services.composio_hint_service import ComposioHintService
+
+                        hint_service = ComposioHintService(self.db)
+                        hint_result = hint_service.build_hints(
+                            agent_id=agent_id,
+                            prompt=latest_text,
+                            workspace_id=self.workspace_id,
+                        )
+                        if hint_result.hint_lines:
+                            llm_messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
+                            logger.info(f"[Composio Hints fallback] strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}")
             except Exception as exc:
-                logger.warning(f"Composio hint injection failed: {exc}", exc_info=True)
+                logger.warning(f"Composio tool injection failed: {exc}", exc_info=True)
 
             # Explicit tool call bypass (e.g., "Use tool X with params {...}")
             explicit_call = self.prompt_analyzer.parse_explicit_tool_call(latest_text)
@@ -873,6 +906,51 @@ class StreamingChatService:
                                         "error": "Refused destructive action for messaging intent",
                                         "silent": False
                                     }
+
+                        # Direct Composio action execution (per-action tools)
+                        _is_composio = (
+                            _composio_result and _composio_result.entity_id and (
+                                tool_name in _composio_result.action_set
+                                or any(tool_name.startswith(f"{app}_") for app in (_composio_result.app_names or []))
+                            )
+                        )
+                        if _is_composio:
+                            try:
+                                from modules.tools.services.composio_tool_service import ComposioToolService
+                                _exec_svc = ComposioToolService(self.db)
+                                exec_result = _exec_svc.execute_action(
+                                    action_name=tool_name,
+                                    params=tool_args,
+                                    entity_id=_composio_result.entity_id,
+                                )
+                                success = exec_result.get("success", False)
+                                data = exec_result.get("data")
+                                error = exec_result.get("error")
+                                if success:
+                                    content = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
+                                else:
+                                    content = f"Error executing {tool_name}: {error or 'unknown error'}"
+                                logger.info(f"[Composio direct] {tool_name}: success={success}")
+                            except Exception as exc:
+                                content = f"Error executing {tool_name}: {exc}"
+                                success = False
+                                error = str(exc)
+                                logger.error(f"[Composio direct] {tool_name} exception: {exc}", exc_info=True)
+
+                            if len(content) > 4000:
+                                content = content[:4000] + "\n... (truncated)"
+
+                            return {
+                                "tool_call_id": tool_id,
+                                "tool_name": tool_name,
+                                "tool_args": tool_args,
+                                "role": "tool",
+                                "content": content,
+                                "frontend_data": {},
+                                "success": success,
+                                "error": error if not success else None,
+                                "silent": False,
+                            }
 
                         logger.info(f"Executing tool: {tool_name}")
                         result = await self.tool_router.execute_and_format(
@@ -1328,23 +1406,53 @@ class StreamingChatService:
                 },
             )
 
-            # Provide Composio app/action hints based on agent assignments.
+            # Composio per-action tools (primary) or hint fallback
+            _composio_result = None
             try:
-                if latest_text and agent_id:
-                    from modules.tools.services.composio_hint_service import ComposioHintService
+                if latest_text and agent_id and self.workspace_id:
+                    from modules.tools.services.composio_tool_service import ComposioToolService
 
-                    hint_service = ComposioHintService(self.db)
-                    hint_result = hint_service.build_hints(
+                    _composio_svc = ComposioToolService(self.db)
+                    _composio_result = _composio_svc.get_tools_for_step(
                         agent_id=agent_id,
-                        prompt=latest_text,
                         workspace_id=self.workspace_id,
+                        task_prompt=latest_text,
                     )
-                    if hint_result.hint_lines:
-                        llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
-                        logger.info(f"[Composio Hints] Agent {agent_id}: strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)} param_hints={hint_result.param_hint_count}")
+                    if _composio_result and _composio_result.tools:
+                        # Strip composio_execute mega-tool, add per-action tools
+                        if use_tools:
+                            use_tools = [
+                                t for t in use_tools
+                                if t.get("function", {}).get("name") != "composio_execute"
+                            ] + _composio_result.tools
+                        else:
+                            use_tools = _composio_result.tools
+                        # Inject scope message so LLM knows to call actions directly
+                        from api.recipe_executor import _composio_scope_message
+                        llm_messages.insert(2, {
+                            "role": "system",
+                            "content": _composio_scope_message(_composio_result.app_names),
+                        })
+                        logger.info(
+                            f"[ComposioToolService] Agent {agent_id}: strategy={_composio_result.strategy} "
+                            f"actions={len(_composio_result.action_set)} search_ms={_composio_result.search_ms}"
+                        )
+                    else:
+                        # Fallback: ComposioHintService (composio_execute mega-tool)
+                        from modules.tools.services.composio_hint_service import ComposioHintService
+
+                        hint_service = ComposioHintService(self.db)
+                        hint_result = hint_service.build_hints(
+                            agent_id=agent_id,
+                            prompt=latest_text,
+                            workspace_id=self.workspace_id,
+                        )
+                        if hint_result.hint_lines:
+                            llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
+                            logger.info(f"[Composio Hints fallback] Agent {agent_id}: strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}")
             except Exception as exc:
-                logger.warning(f"Composio hint injection failed for agent {agent_id}: {exc}")
-            
+                logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
+
             # Generate response using agent's LLM manager
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
             logger.info(f"🔍 Agent tools - count: {len(use_tools) if use_tools else 0}, is_simple: {is_simple}")
@@ -1373,7 +1481,7 @@ class StreamingChatService:
             if response.tool_calls:
                 logger.info(f"Agent requested {len(response.tool_calls)} tool calls")
                 final_response = None
-                async for chunk in self._handle_tool_calls_aisdk(response, llm_messages, agent_runtime, tool_data, use_tools):
+                async for chunk in self._handle_tool_calls_aisdk(response, llm_messages, agent_runtime, tool_data, use_tools, _composio_result=_composio_result):
                     # Check if this is the final response
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']
@@ -1634,21 +1742,16 @@ CRITICAL INSTRUCTIONS:
 - DO NOT explain how to do something - ACTUALLY DO IT using function calls
 - If you have a write_file or create_document tool, USE IT to create files
 - If you have database query tools, USE THEM to get real data
-- If you need external apps (Gmail/Slack/etc.), use `composio_execute` with an exact mapped action name from `composio_actions_cache`
+- If you need external apps (Gmail/Slack/etc.), call the tool by its exact action name (e.g. TAVILY_SEARCH, GMAIL_SEND_EMAIL). Do NOT use composio_execute — call the action tool directly.
 - EXECUTE first, explain later (if needed)
 
 Examples:
 - "Create a report" → Call write_file tool with the report content
 - "Query the database" → Call smart_query_database tool
 - "Search for code" → Call search_codebase tool
-- "Post a message to Slack" → Call composio_execute with a mapped Slack send-message action from the cache and params {channel, text}
-- "Summarize my emails" → Call composio_execute with a mapped Gmail fetch/list action from the cache and params (query/date filters), then summarize
-- If an action is not mapped, retry using one of the suggested safe mapped actions returned by the tool
-
-COMMUNICATION TOOLS:
-- composio_execute: Use this to call external app actions (Gmail, Slack, GitHub, etc.)
-  - The `action` MUST be an exact mapped action name from `composio_actions_cache` (we will provide examples in-system).
-  - Use `params` (or `parameters`) for the action inputs.
+- "Post a message to Slack" → Call SLACK_SEND_A_MESSAGE_TO_A_SLACK_CHANNEL directly with the required params
+- "Summarize my emails" → Call GMAIL_FETCH_EMAILS directly, then summarize
+- "Search the web" → Call TAVILY_SEARCH directly with the query
 
 Always be clear, concise, and ACTION-ORIENTED in your responses. When tools are available, USE THEM instead of explaining what you would do."""
         
@@ -1754,17 +1857,19 @@ YOUR SPECIALIZED SKILLS:
         llm_messages: List[Dict],
         agent_runtime,
         tool_data: Dict,
-        use_tools: List = None
+        use_tools: List = None,
+        _composio_result=None,
     ) -> AsyncGenerator[str, None]:
         """
         Handle tool calls from agent's LLM response.
-        
+
         Args:
             response: LLM response with tool_calls
             llm_messages: Current message history
             agent_runtime: Agent runtime with tools
             tool_data: Dict to store tool results
             use_tools: Tools to pass to LLM for next iteration
+            _composio_result: ComposioToolResult for per-action tool execution
             
         Yields:
             AI SDK formatted tool execution chunks
@@ -1864,6 +1969,59 @@ YOUR SPECIALIZED SKILLS:
                         if m.get("role") == "user":
                             user_text = m.get("content") or ""
                             break
+
+                    # Direct Composio action execution (per-action tools from ComposioToolService).
+                    # If the tool name is in the resolved action set (or matches a connected app prefix),
+                    # execute via ComposioToolService.execute_action() instead of tool_router.
+                    _is_composio_action = (
+                        _composio_result and _composio_result.entity_id and (
+                            tool_name in _composio_result.action_set
+                            or any(tool_name.startswith(f"{app}_") for app in _composio_result.app_names)
+                        )
+                    )
+                    if _is_composio_action:
+                        try:
+                            from modules.tools.services.composio_tool_service import ComposioToolService
+                            _exec_svc = ComposioToolService(self.db)
+                            exec_result = _exec_svc.execute_action(
+                                action_name=tool_name,
+                                params=tool_args,
+                                entity_id=_composio_result.entity_id,
+                            )
+                            success = exec_result.get("success", False)
+                            data = exec_result.get("data")
+                            error = exec_result.get("error")
+                            if success:
+                                llm_context = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
+                            else:
+                                llm_context = f"Error executing {tool_name}: {error or 'unknown error'}"
+                            logger.info(f"[Composio direct] {tool_name}: success={success}")
+                        except Exception as exc:
+                            llm_context = f"Error executing {tool_name}: {exc}"
+                            logger.error(f"[Composio direct] {tool_name} exception: {exc}", exc_info=True)
+
+                        if len(llm_context) > 4000:
+                            llm_context = llm_context[:4000] + f"\n... (truncated)"
+
+                        tool_results.append({
+                            'tool_call_id': tool_id,
+                            'role': 'tool',
+                            'name': tool_name,
+                            'content': llm_context,
+                        })
+
+                        yield self.streaming_handler.format_aisdk_tool_end(
+                            tool_call_id=tool_id,
+                            tool_name=tool_name,
+                            success=True,
+                            duration_ms=int((time.time() - start_times.get(tool_id, time.time())) * 1000),
+                        )
+                        yield self.streaming_handler.format_aisdk_data(
+                            "tool-result",
+                            {"toolCallId": tool_id, "toolName": tool_name, "result": llm_context[:500]},
+                        )
+                        await asyncio.sleep(0)
+                        continue
 
                     result = await self.tool_router.execute_and_format(
                         tool_name=tool_name,

@@ -95,6 +95,9 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       
+      # Document Generation (PRD-63)
+      GOTENBERG_URL: http://gotenberg:3000
+
       # Environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -170,6 +173,23 @@ services:
       ADMINER_DESIGN: nette
     ports:
       - "${ADMINER_PORT:-8080}:8080"
+    networks:
+      - automatos
+
+  # ===========================================================================
+  # Gotenberg - Document Conversion Sidecar (PRD-63)
+  # DOCX/XLSX → PDF via Chromium + LibreOffice
+  # ===========================================================================
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: automatos_gotenberg
+    restart: unless-stopped
+    profiles: ["all"]
+    environment:
+      GOTENBERG_API_TIMEOUT: "120s"
+      GOTENBERG_LOG_LEVEL: "info"
+    ports:
+      - "${GOTENBERG_PORT:-3001}:3000"
     networks:
       - automatos
 
