@@ -1127,7 +1127,7 @@ class Artifact(Base):
     user = relationship("User", backref="artifacts")
     
     __table_args__ = (
-        CheckConstraint("kind IN ('code', 'text', 'image', 'sheet')", name='check_artifact_kind'),
+        CheckConstraint("kind IN ('code', 'text', 'image', 'sheet', 'document')", name='check_artifact_kind'),
         {'extend_existing': True}
     )
 
@@ -1340,6 +1340,51 @@ class WorkflowTemplate(Base):
             'created_by': self.created_by,
             'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None
         }
+
+
+# ===================================================================
+# PRD-63: Document Generation Module
+# ===================================================================
+
+class DocumentTemplate(Base):
+    """Document templates for PDF, DOCX, XLSX generation (PRD-63)"""
+    __tablename__ = 'document_templates'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    format = Column(String(20), nullable=False)
+
+    # Template content
+    template_content = Column(Text, nullable=True)  # HTML/CSS for PDF templates
+    template_file_path = Column(String(500), nullable=True)  # Path to .docx template file
+
+    # Schema definition: what variables the template expects
+    data_schema = Column(JSONB, nullable=False, default=dict, server_default='{}')
+
+    # Sample data for preview
+    sample_data = Column(JSONB, default=dict, server_default='{}')
+
+    # Metadata
+    category = Column(String(100), default='general', server_default='general')
+    tags = Column(PG_ARRAY(String), default=list)
+    thumbnail_url = Column(String(500), nullable=True)
+
+    # Versioning
+    version = Column(Integer, default=1, server_default='1')
+    is_active = Column(Boolean, default=True, server_default='true')
+
+    # Audit
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=func.now(), server_default=func.now())
+    updated_at = Column(DateTime, default=func.now(), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        CheckConstraint("format IN ('pdf', 'docx', 'xlsx')", name='check_document_template_format'),
+        UniqueConstraint('workspace_id', 'name', 'version', name='uq_template_workspace_name_version'),
+        {'extend_existing': True}
+    )
 
 
 class RecipeExecution(Base):

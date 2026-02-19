@@ -5,7 +5,7 @@ import type { UIMessage } from '@ai-sdk/react'
 /**
  * Artifact types supported by the system
  */
-export type ArtifactKind = 'code' | 'text' | 'image' | 'sheet'
+export type ArtifactKind = 'code' | 'text' | 'image' | 'sheet' | 'document'
 
 /**
  * Artifact data structure

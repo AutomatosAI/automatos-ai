@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: #1a1a2e; line-height: 1.5; }
+  .invoice-header { display: flex; justify-content: space-between; margin-bottom: 2rem; }
+  .invoice-header .company { font-size: 20pt; font-weight: 700; color: #1a1a2e; }
+  .invoice-header .invoice-badge {
+    background: #ff6b35; color: white; font-size: 14pt; font-weight: 700;
+    padding: 0.5rem 1.5rem; border-radius: 4px;
+  }
+  .info-grid { display: flex; justify-content: space-between; margin-bottom: 2rem; }
+  .info-block h3 { margin: 0 0 0.5rem 0; font-size: 9pt; text-transform: uppercase; color: #999; letter-spacing: 0.5px; }
+  .info-block p { margin: 0.2rem 0; }
+  table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; }
+  th { background: #1a1a2e; color: white; padding: 0.75rem; text-align: left; font-size: 9pt; text-transform: uppercase; }
+  th:last-child, td:last-child { text-align: right; }
+  td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #eee; }
+  .totals { margin-left: auto; width: 300px; margin-top: 1rem; }
+  .totals .row { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #eee; }
+  .totals .row.total { font-weight: 700; font-size: 14pt; border-top: 2px solid #1a1a2e; border-bottom: none; padding-top: 0.75rem; }
+  .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #eee; font-size: 9pt; color: #999; }
+</style>
+</head>
+<body>
+  <div class="invoice-header">
+    <div>
+      <div class="company">{{ company.name | default('Company Name') }}</div>
+      <div>{{ company.address | default('') }}</div>
+      <div>{{ company.email | default('') }}</div>
+    </div>
+    <div class="invoice-badge">INVOICE</div>
+  </div>
+
+  <div class="info-grid">
+    <div class="info-block">
+      <h3>Bill To</h3>
+      <p><strong>{{ client.name | default('Client Name') }}</strong></p>
+      <p>{{ client.address | default('') }}</p>
+      <p>{{ client.email | default('') }}</p>
+    </div>
+    <div class="info-block" style="text-align: right;">
+      <h3>Invoice Details</h3>
+      <p>Invoice #: {{ invoice_number | default('INV-001') }}</p>
+      <p>Date: {{ date | default('') }}</p>
+      <p>Due: {{ due_date | default('') }}</p>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr>
+    </thead>
+    <tbody>
+      {% for item in line_items %}
+      <tr>
+        <td>{{ item.description }}</td>
+        <td>{{ item.quantity }}</td>
+        <td>${{ "%.2f" | format(item.unit_price) }}</td>
+        <td>${{ "%.2f" | format(item.total) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="row"><span>Subtotal</span><span>${{ "%.2f" | format(subtotal) }}</span></div>
+    {% if tax %}<div class="row"><span>Tax</span><span>${{ "%.2f" | format(tax) }}</span></div>{% endif %}
+    <div class="row total"><span>Total</span><span>${{ "%.2f" | format(total) }}</span></div>
+  </div>
+
+  {% if payment_terms %}
+  <div class="footer">
+    <strong>Payment Terms:</strong> {{ payment_terms }}
+  </div>
+  {% endif %}
+</body>
+</html>
