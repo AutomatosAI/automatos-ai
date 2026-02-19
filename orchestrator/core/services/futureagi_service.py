@@ -112,9 +112,20 @@ class FutureAGIService:
         payload: Dict[str, Any] = {"prompt_content": prompt_content}
         if metrics:
             payload["metrics"] = metrics
+
+        # Use provided test cases, or pull real I/O from live traffic
         if test_cases:
             payload["test_input"] = test_cases[0].get("input")
             payload["test_output"] = test_cases[0].get("output", test_cases[0].get("expected_output"))
+        else:
+            # Pull a real chat exchange so scoring is meaningful
+            dataset = await self._collect_optimization_dataset(limit=1)
+            if dataset:
+                payload["test_input"] = dataset[0]["input"]
+                payload["test_output"] = dataset[0]["output"]
+                logger.info(f"[assess] using real I/O: input={dataset[0]['input'][:80]}...")
+            else:
+                logger.warning("[assess] no live traffic data, scores will be based on synthetic output")
 
         return await self._call_worker("/assess", payload)
 

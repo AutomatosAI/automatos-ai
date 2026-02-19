@@ -319,6 +319,32 @@ def score_live(req: ScoreRequest):
 # Optimize - full prompt optimization via agent-opt
 # ---------------------------------------------------------------------------
 
+def _escape_template_vars(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """
+    Escape {variable} placeholders so the SDK's .format() doesn't crash.
+    Returns (escaped_text, list of (placeholder, original) for restoration).
+    """
+    import re
+    replacements = []
+    # Match {word} patterns that aren't already escaped {{word}}
+    for match in re.finditer(r'(?<!\{)\{(\w+)\}(?!\})', text):
+        original = match.group(0)        # e.g. {available_routes}
+        var_name = match.group(1)        # e.g. available_routes
+        placeholder = f"__TMPL_{var_name.upper()}__"
+        replacements.append((placeholder, original))
+    escaped = text
+    for placeholder, original in replacements:
+        escaped = escaped.replace(original, placeholder)
+    return escaped, replacements
+
+
+def _restore_template_vars(text: str, replacements: list[tuple[str, str]]) -> str:
+    """Restore escaped template variables back to {variable} form."""
+    for placeholder, original in replacements:
+        text = text.replace(placeholder, original)
+    return text
+
+
 @app.post("/optimize")
 def optimize(req: OptimizeRequest):
     start = time.time()
@@ -334,6 +360,13 @@ def optimize(req: OptimizeRequest):
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"agent-opt not installed: {e}")
 
+    # Escape template variables like {available_routes}, {message} etc.
+    # so the SDK's .format() doesn't crash with KeyError
+    escaped_prompt, template_replacements = _escape_template_vars(req.prompt_content)
+    if template_replacements:
+        var_names = [orig for _, orig in template_replacements]
+        logger.info(f"Escaped {len(template_replacements)} template vars: {var_names}")
+
     evaluator = Evaluator(
         eval_template=req.scoring_template,
         eval_model_name="turing_flash",
@@ -346,7 +379,8 @@ def optimize(req: OptimizeRequest):
 
     task_desc = req.task_description or (
         "This is a system prompt for an AI assistant. "
-        "Optimize it to produce more helpful, concise, and complete responses."
+        "Optimize it to produce more helpful, concise, and complete responses. "
+        "IMPORTANT: Preserve any placeholder tokens like __TMPL_*__ exactly as they are."
     )
 
     try:
@@ -364,7 +398,7 @@ def optimize(req: OptimizeRequest):
             evaluator=evaluator,
             data_mapper=data_mapper,
             dataset=req.dataset,
-            initial_prompts=[req.prompt_content],
+            initial_prompts=[escaped_prompt],
             task_description=task_desc,
             num_rounds=req.num_rounds,
             eval_subset_size=min(len(req.dataset), 10),
@@ -375,6 +409,9 @@ def optimize(req: OptimizeRequest):
 
     duration = time.time() - start
     best_prompt = result.best_generator.get_prompt_template()
+
+    # Restore template variables in the optimized prompt
+    best_prompt = _restore_template_vars(best_prompt, template_replacements)
 
     history = []
     if hasattr(result, "history") and result.history:
