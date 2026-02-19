@@ -87,19 +87,23 @@ def build_tool_context_message(
             similarity = doc.get('similarity', doc.get('score', 0.0))
             content = doc.get('excerpt', doc.get('content', ''))
 
-            # Extract file_path from metadata
+            # Extract document_id and metadata for API-based access
             metadata = doc.get('metadata', {})
-            file_path = metadata.get('file_path', f"/var/automatos/documents/{source}")
+            document_id = doc.get('document_id', metadata.get('document_id'))
+            chunk_id = doc.get('chunk_id', doc.get('id'))
 
             if source not in docs_by_source:
                 docs_by_source[source] = {
                     'source': source,
-                    'file_path': file_path,
+                    'document_id': document_id,
                     'chunks': [],
+                    'chunk_ids': [],
                     'max_similarity': 0.0
                 }
 
             docs_by_source[source]['chunks'].append(content)
+            if chunk_id:
+                docs_by_source[source]['chunk_ids'].append(chunk_id)
             docs_by_source[source]['max_similarity'] = max(
                 docs_by_source[source]['max_similarity'],
                 similarity
@@ -117,7 +121,7 @@ def build_tool_context_message(
 
         for i, doc_info in enumerate(sorted_docs, 1):
             source = doc_info['source']
-            file_path = doc_info['file_path']
+            document_id = doc_info.get('document_id')
             relevance = int(doc_info['max_similarity'] * 100)
             chunk_count = len(doc_info['chunks'])
 
@@ -128,12 +132,13 @@ def build_tool_context_message(
             # Remove numbering prefix (e.g., "02-" or "30-")
             title = re.sub(r'^\d+\s*', '', title)
 
-            doc_parts.append(f"\U0001f4c4 **{title}** ({source})")
+            doc_parts.append(f"\U0001f4c4 **[{i}] {title}** ({source})")
             doc_parts.append(f"   \u2022 {chunk_count} relevant section(s) found")
             doc_parts.append(f"   \u2022 Relevance: {relevance}%")
 
-            # Add download link
-            doc_parts.append(f"   \u2022 [Download Full Document](/api/documents/download?path={file_path})")
+            # Add document link using API endpoint (not hardcoded local path)
+            if document_id:
+                doc_parts.append(f"   \u2022 [View Document](/api/documents/{document_id}/content)")
             doc_parts.append("")
 
         # Add full content from all chunks for LLM to use

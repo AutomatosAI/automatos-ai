@@ -66,6 +66,8 @@ class DocumentType(Enum):
     TEXT = "txt"
     PYTHON = "py"
     JSON = "json"
+    XLSX = "xlsx"
+    CSV = "csv"
 
 @dataclass
 class DocumentMetadata:
@@ -142,6 +144,10 @@ class DocumentProcessor:
                 return DocumentType.PYTHON
             elif extension == '.json':
                 return DocumentType.JSON
+            elif mime_type in ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'] or extension == '.xlsx':
+                return DocumentType.XLSX
+            elif mime_type in ['text/csv'] or extension == '.csv':
+                return DocumentType.CSV
             else:
                 return DocumentType.TEXT
         except Exception as e:
@@ -198,15 +204,72 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"Error extracting text from DOCX {file_path}: {e}")
             raise
-    
+
+    def _extract_spreadsheet_xlsx(self, file_path: str) -> str:
+        """Extract XLSX spreadsheet data as Markdown tables for LLM consumption."""
+        try:
+            import openpyxl
+        except ImportError:
+            logger.warning("openpyxl not installed, cannot extract spreadsheet")
+            return ""
+
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        parts = []
+
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                continue
+
+            parts.append(f"## Sheet: {sheet_name}\n")
+
+            headers = rows[0]
+            md = "| " + " | ".join(str(h or "") for h in headers) + " |\n"
+            md += "| " + " | ".join("---" for _ in headers) + " |\n"
+            for row in rows[1:]:
+                md += "| " + " | ".join(str(cell or "") for cell in row) + " |\n"
+
+            parts.append(md)
+
+        return "\n\n".join(parts)
+
+    def _extract_spreadsheet_csv(self, file_path: str) -> str:
+        """Extract CSV data as a Markdown table for LLM consumption."""
+        import csv
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+        except UnicodeDecodeError:
+            with open(file_path, 'r', encoding='latin-1') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+
+        if not rows:
+            return ""
+
+        headers = rows[0]
+        md = "| " + " | ".join(str(h or "") for h in headers) + " |\n"
+        md += "| " + " | ".join("---" for _ in headers) + " |\n"
+        for row in rows[1:]:
+            md += "| " + " | ".join(str(cell or "") for cell in row) + " |\n"
+
+        return md
+
     def extract_text_from_file(self, file_path: str) -> str:
         """Extract text from any supported file type"""
         file_type = self.detect_file_type(file_path)
-        
+
         if file_type == DocumentType.PDF:
             text = self.extract_text_from_pdf(file_path)
         elif file_type == DocumentType.DOCX:
             text = self.extract_text_from_docx(file_path)
+        elif file_type == DocumentType.XLSX:
+            text = self._extract_spreadsheet_xlsx(file_path)
+        elif file_type == DocumentType.CSV:
+            text = self._extract_spreadsheet_csv(file_path)
         else:
             # For text-based files (MD, TXT, PY, JSON)
             try:
@@ -410,6 +473,71 @@ class DocumentManager:
             else:
                 logger.error(f"❌ S3 bucket check failed: {e}")
                 raise
+
+    def _extract_pdf_with_tables(self, file_path: str) -> tuple:
+        """
+        Extract text AND tables from PDF.
+        Tables are converted to Markdown format for better LLM comprehension.
+        Returns: (full_text, tables_list)
+        """
+        import pdfplumber
+
+        text_parts = []
+        tables = []
+
+        with pdfplumber.open(file_path) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                # Extract regular text
+                page_text = page.extract_text() or ""
+                text_parts.append(f"[Page {page_num}]\n{page_text}")
+
+                # Extract tables
+                page_tables = page.extract_tables()
+                for table_idx, table in enumerate(page_tables):
+                    if table and len(table) > 1:
+                        headers = table[0]
+                        md_table = "| " + " | ".join(str(h or "") for h in headers) + " |\n"
+                        md_table += "| " + " | ".join("---" for _ in headers) + " |\n"
+                        for row in table[1:]:
+                            md_table += "| " + " | ".join(str(cell or "") for cell in row) + " |\n"
+
+                        text_parts.append(f"\n[Table {table_idx + 1}, Page {page_num}]\n{md_table}")
+                        tables.append({
+                            "page": page_num,
+                            "index": table_idx,
+                            "markdown": md_table,
+                        })
+
+        return "\n\n".join(text_parts), tables
+
+    def _extract_spreadsheet(self, file_path: str) -> str:
+        """Extract spreadsheet data as Markdown tables for LLM consumption."""
+        try:
+            import openpyxl
+        except ImportError:
+            logger.warning("openpyxl not installed, cannot extract spreadsheet")
+            return ""
+
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        parts = []
+
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                continue
+
+            parts.append(f"## Sheet: {sheet_name}\n")
+
+            headers = rows[0]
+            md = "| " + " | ".join(str(h or "") for h in headers) + " |\n"
+            md += "| " + " | ".join("---" for _ in headers) + " |\n"
+            for row in rows[1:]:
+                md += "| " + " | ".join(str(cell or "") for cell in row) + " |\n"
+
+            parts.append(md)
+
+        return "\n\n".join(parts)
 
     def _ensure_database_initialized(self, max_retries: int = 5, retry_delay: float = 2.0):
         """Ensure database is initialized with retry logic"""
@@ -670,8 +798,24 @@ class DocumentManager:
             workspace_id = doc_row[0] if doc_row else None
             logger.info(f"Processing document {document_id} for workspace {workspace_id}")
 
-            # Extract text
-            text = self.processor.extract_text_from_file(file_path)
+            # Extract text (with enhanced extraction for PDFs and spreadsheets)
+            pdf_tables = []
+            if file_type == DocumentType.PDF:
+                try:
+                    text, pdf_tables = self._extract_pdf_with_tables(file_path)
+                    logger.info(f"Extracted {len(text)} characters and {len(pdf_tables)} tables from PDF document {document_id}")
+                except Exception as e:
+                    logger.warning(f"Enhanced PDF extraction failed, falling back to basic: {e}")
+                    text = self.processor.extract_text_from_file(file_path)
+            elif file_type == DocumentType.XLSX:
+                try:
+                    text = self._extract_spreadsheet(file_path)
+                    logger.info(f"Extracted {len(text)} characters from XLSX document {document_id}")
+                except Exception as e:
+                    logger.warning(f"XLSX extraction failed: {e}")
+                    text = self.processor.extract_text_from_file(file_path)
+            else:
+                text = self.processor.extract_text_from_file(file_path)
             logger.info(f"Extracted {len(text)} characters from document {document_id}")
             
             # Multimodal processing (tables, formulas, images)
@@ -871,13 +1015,55 @@ class DocumentManager:
                 logger.warning(f"Multimodal processing encountered errors for document {document_id}: {e}")
                 # Continue processing even if multimodal extraction fails
             
+            # Optional multimodal processing for PDFs: extract tables/images as additional chunks
+            additional_chunks = []
+            if file_type == DocumentType.PDF and getattr(self, 'enable_multimodal', False):
+                try:
+                    from modules.rag.ingestion.multimodal.processors import create_multimodal_processor
+                    mm_processor = create_multimodal_processor(openai_key=getattr(self, 'openai_key', None))
+                    multimodal_results = mm_processor.process_pdf_multimodal(file_path)
+
+                    for table in multimodal_results.get('tables', []):
+                        markdown = table.markdown if hasattr(table, 'markdown') else table.get('markdown', '')
+                        page = table.page_number if hasattr(table, 'page_number') else table.get('page')
+                        if markdown:
+                            additional_chunks.append({
+                                "content": markdown,
+                                "metadata": {"type": "table", "page": page, "source": "multimodal"}
+                            })
+
+                    for image in multimodal_results.get('images', []):
+                        description = image.description if hasattr(image, 'description') else image.get('description')
+                        page = image.page_number if hasattr(image, 'page_number') else image.get('page')
+                        if description:
+                            additional_chunks.append({
+                                "content": f"[Image: {description}]",
+                                "metadata": {"type": "image", "page": page, "source": "multimodal"}
+                            })
+                except Exception as e:
+                    logger.warning(f"Multimodal processing failed (non-fatal): {e}")
+
             # Create chunks with file_path metadata
             chunks = self.processor.chunk_document(text, file_type, {
                 'document_id': document_id,
                 'source_file': os.path.basename(file_path),
                 'file_path': file_path  # NEW: Add full path for downloads
             })
-            
+
+            # Append multimodal chunks to the regular chunks
+            for mc in additional_chunks:
+                chunks.append(DocumentChunk(
+                    document_id=document_id,
+                    chunk_index=len(chunks),
+                    content=mc["content"],
+                    metadata={
+                        'document_id': document_id,
+                        'source_file': os.path.basename(file_path),
+                        'file_path': file_path,
+                        **mc["metadata"]
+                    }
+                ))
+
             # Generate embeddings and save chunks
             valid_chunks = []
             embeddings_for_s3 = []
@@ -895,6 +1081,28 @@ class DocumentManager:
                 stripped = content.replace('-', '').replace('=', '').replace('_', '').replace('#', '').replace('`', '').strip()
                 if len(stripped) < 10:
                     continue
+
+                # Enrich chunk metadata with page numbers from [Page N] markers (PDF)
+                if file_type == DocumentType.PDF:
+                    import re
+                    page_markers = re.findall(r'\[Page (\d+)\]', chunk.content)
+                    if page_markers:
+                        page_numbers = sorted(set(int(p) for p in page_markers))
+                        if chunk.metadata is None:
+                            chunk.metadata = {}
+                        chunk.metadata['page_numbers'] = page_numbers
+                        chunk.metadata['page_start'] = page_numbers[0]
+                        chunk.metadata['page_end'] = page_numbers[-1]
+
+                    # Check for table markers too
+                    table_markers = re.findall(r'\[Table (\d+), Page (\d+)\]', chunk.content)
+                    if table_markers:
+                        if chunk.metadata is None:
+                            chunk.metadata = {}
+                        chunk.metadata['contains_tables'] = True
+                        chunk.metadata['table_refs'] = [
+                            {"table": int(t), "page": int(p)} for t, p in table_markers
+                        ]
 
                 # Generate embedding
                 embedding = await self._generate_embedding(chunk.content)

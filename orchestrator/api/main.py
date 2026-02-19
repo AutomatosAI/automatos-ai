@@ -88,6 +88,9 @@ from api.auth import router as auth_router
 from api.workspaces import router as workspaces_router
 from api.api_keys import router as api_keys_router
 
+# PRD-60: RAG v3 Feedback
+from api.rag_feedback import router as rag_feedback_router
+
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
     register_dashboard_routes,
@@ -424,6 +427,7 @@ app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(auth_router)
 app.include_router(workspaces_router)
 app.include_router(api_keys_router)
+app.include_router(rag_feedback_router)  # PRD-60: RAG v3 Feedback
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
