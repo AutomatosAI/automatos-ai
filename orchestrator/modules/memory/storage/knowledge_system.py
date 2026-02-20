@@ -19,7 +19,6 @@ from uuid import uuid4, UUID as PyUUID
 from enum import Enum
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import Column, String, Float, Integer, DateTime, JSON, ForeignKey, Text, Boolean, select, func, text

@@ -75,9 +75,9 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
         """Return embedding dimension based on model"""
         # Map OpenAI models to their dimensions
         if "3-large" in self.config.model:
-            return 1536
+            return 3072
         elif "3-small" in self.config.model:
-            return 384
+            return 1536
         elif "ada-002" in self.config.model:
             return 1536
         else:

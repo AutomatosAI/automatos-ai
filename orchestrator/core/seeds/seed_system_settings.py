@@ -178,6 +178,30 @@ def seed_system_settings(db: Session):
             }
         },
         
+        # Reranking Configuration
+        {
+            "category": SettingCategory.GENERAL.value,
+            "key": "rag_rerank_enabled",
+            "default_value": "false",
+            "value_type": "boolean",
+            "description": "Enable Cohere reranking after vector search (improves precision 15-30%)",
+            "is_required": False,
+            "validation_rules": {
+                "options": ["true", "false"]
+            }
+        },
+        {
+            "category": SettingCategory.GENERAL.value,
+            "key": "rag_rerank_model",
+            "default_value": "rerank-v3.5",
+            "value_type": "string",
+            "description": "Cohere rerank model",
+            "is_required": False,
+            "validation_rules": {
+                "options": ["rerank-v3.5", "rerank-english-v3.0", "rerank-multilingual-v3.0"]
+            }
+        },
+
         # Deployment Configuration (if deployment service exists)
         {
             "category": SettingCategory.GENERAL.value,
@@ -1083,6 +1107,15 @@ def seed_system_settings(db: Session):
         # BACKEND API KEYS SETTINGS
         # ========================================
         
+        {
+            "category": SettingCategory.BACKEND_API_KEYS.value,
+            "key": "cohere_api_key",
+            "default_value": "",
+            "value_type": "string",
+            "description": "Cohere API key for reranking (rerank-v3.5). Get one at dashboard.cohere.com",
+            "is_required": False,
+            "is_sensitive": True
+        },
         {
             "category": SettingCategory.BACKEND_API_KEYS.value,
             "key": "api_key",

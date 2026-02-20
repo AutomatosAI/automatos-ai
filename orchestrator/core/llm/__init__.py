@@ -41,6 +41,7 @@ from core.llm.function_registry import FunctionRegistry, FunctionSpec, FunctionP
 from core.llm.function_executor import FunctionExecutor, FunctionResult
 from core.llm.response_parser import ResponseParser, ParsedResponse
 from core.llm.semantic_skill_matcher import SemanticSkillMatcher, get_skill_matcher
+from core.llm.rerank_manager import RerankManager, get_rerank_manager
 
 __all__ = [
     # Provider management
@@ -74,4 +75,8 @@ __all__ = [
     # Skill matching
     'SemanticSkillMatcher',
     'get_skill_matcher',
+
+    # Reranking
+    'RerankManager',
+    'get_rerank_manager',
 ]

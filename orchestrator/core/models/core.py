@@ -773,7 +773,7 @@ class SystemConfigResponse(BaseModel):
 
 class RAGConfigCreate(BaseModel):
     name: str
-    embedding_model: Optional[str] = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model: Optional[str] = None  # Resolved from system_settings at runtime
     chunk_size: Optional[int] = 1000
     chunk_overlap: Optional[int] = 200
     retrieval_strategy: Optional[str] = "similarity"
