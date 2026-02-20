@@ -6,7 +6,7 @@ AWS S3 Vectors backend for vector storage and retrieval.
 Creates workspace-scoped buckets with cosine similarity search.
 
 Each workspace gets its own S3 vector bucket: automatos-vectors-{workspace_id}
-with a single index: documents-index (dimension=1024, metric=COSINE).
+with a single index: documents-index (dimension from S3_VECTORS_DIMENSION, metric=COSINE).
 """
 
 import logging
