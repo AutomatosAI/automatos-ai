@@ -317,6 +317,60 @@ async def get_recommendations(
     return recs
 
 
+# ── Daily Cost by Model (for multi-line chart) ──────────────────────
+
+
+@router.get("/costs/daily-by-model")
+async def get_daily_costs_by_model(
+    period: str = Query("30d", description="7d|30d|90d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Daily cost breakdown per model for multi-line time-series chart."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    since = _period_start(period)
+
+    rows = (
+        db.query(
+            func.date(LLMUsage.created_at).label("day"),
+            LLMUsage.model_id,
+            func.sum(LLMUsage.total_cost).label("cost"),
+            func.count(LLMUsage.id).label("requests"),
+        )
+        .filter(
+            LLMUsage.workspace_id == ctx.workspace_id,
+            LLMUsage.created_at >= since,
+        )
+        .group_by(func.date(LLMUsage.created_at), LLMUsage.model_id)
+        .order_by("day")
+        .all()
+    )
+
+    # Pivot: {date -> {model -> cost}}
+    date_map: Dict[str, Dict[str, float]] = {}
+    models_set: set = set()
+    for r in rows:
+        day_str = str(r.day)
+        model = r.model_id or "unknown"
+        models_set.add(model)
+        if day_str not in date_map:
+            date_map[day_str] = {}
+        date_map[day_str][model] = round(float(r.cost or 0), 6)
+
+    # Build chart-ready array
+    models = sorted(models_set)
+    series = []
+    for day_str in sorted(date_map.keys()):
+        entry: Dict[str, Any] = {"date": day_str}
+        for m in models:
+            entry[m] = date_map[day_str].get(m, 0)
+        series.append(entry)
+
+    return {"models": models, "series": series}
+
+
 # ── Model Comparison ─────────────────────────────────────────────────
 
 

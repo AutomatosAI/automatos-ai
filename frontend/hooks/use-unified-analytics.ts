@@ -26,6 +26,7 @@ export const unifiedAnalyticsKeys = {
   chartPresets: ['unified-analytics', 'charts', 'presets'] as const,
   modelComparison: (modelIds: string[], period: string) => ['unified-analytics', 'llm', 'comparison', modelIds, period] as const,
   costProjections: (period: string) => ['unified-analytics', 'llm', 'projections', period] as const,
+  dailyCostByModel: (period: string) => ['unified-analytics', 'llm', 'daily-by-model', period] as const,
 }
 
 // ============= OVERVIEW =============
@@ -82,6 +83,17 @@ export function useAnalyticsOverview(days: number = 30) {
 }
 
 // ============= AGENT ANALYTICS =============
+
+interface AgentMemoryStats {
+  agent_id: number
+  memory_count: number
+  avg_importance: number
+  total_accesses: number
+  memory_types: Record<string, number>
+  memory_levels: Record<string, number>
+  last_memory_at: string | null
+}
+
 export function useAgentAnalytics(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.agents(days),
@@ -92,27 +104,43 @@ export function useAgentAnalytics(days: number = 30) {
           return fallback
         })
 
-      const [agents, stats] = await Promise.all([
+      const [agents, stats, memoryStats] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
         safeRequest(() => apiClient.getSystemAgentStatistics(), null),
+        safeRequest(() => apiClient.request<AgentMemoryStats[]>('/api/v1/memory/stats/agents'), []),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
+      const memoryList = Array.isArray(memoryStats) ? memoryStats : []
+
+      // Build lookup map by agent_id
+      const memoryMap = new Map<number, AgentMemoryStats>()
+      memoryList.forEach((m) => memoryMap.set(m.agent_id, m))
 
       return {
-        agents: agentList.map((agent: any) => ({
-          id: agent.id,
-          name: agent.name,
-          status: agent.status,
-          agentType: agent.agent_type,
-          successRate: agent.performance_metrics?.success_rate || 0,
-          avgRunTime: agent.performance_metrics?.avg_execution_time || 0,
-          tokensUsed: agent.model_usage_stats?.total_tokens || 0,
-          cost: agent.model_usage_stats?.total_cost || 0,
-          llmModel: agent.agent_model_config?.model_id || 'unknown',
-          totalRequests: agent.model_usage_stats?.total_requests || 0,
-          lastUsed: agent.model_usage_stats?.last_used_at || agent.updated_at,
-        })),
+        agents: agentList.map((agent: any) => {
+          const mem = memoryMap.get(agent.id)
+          return {
+            id: agent.id,
+            name: agent.name,
+            status: agent.status,
+            agentType: agent.agent_type,
+            successRate: agent.performance_metrics?.success_rate || 0,
+            avgRunTime: agent.performance_metrics?.avg_execution_time || 0,
+            tokensUsed: agent.model_usage_stats?.total_tokens || 0,
+            cost: agent.model_usage_stats?.total_cost || 0,
+            llmModel: agent.agent_model_config?.model_id || 'unknown',
+            totalRequests: agent.model_usage_stats?.total_requests || 0,
+            lastUsed: agent.model_usage_stats?.last_used_at || agent.updated_at,
+            // Memory data
+            memoryCount: mem?.memory_count || 0,
+            avgImportance: mem?.avg_importance || 0,
+            totalAccesses: mem?.total_accesses || 0,
+            memoryTypes: mem?.memory_types || {},
+            memoryLevels: mem?.memory_levels || {},
+            lastMemoryAt: mem?.last_memory_at || null,
+          }
+        }),
         summary: {
           totalAgents: agentList.length,
           activeAgents: agentList.filter((a: any) => a.status === 'active').length,
@@ -138,12 +166,40 @@ export function useWorkflowAnalytics(days: number = 30) {
           return fallback
         })
 
-      const [workflows, stats] = await Promise.all([
+      const [workflows, stats, recipesResp, recipeStats] = await Promise.all([
         safeRequest(() => apiClient.getWorkflows(), []),
         safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
+        safeRequest(() => apiClient.listWorkflowRecipes({ limit: 100 }), null),
+        safeRequest(() => apiClient.request<any>('/api/workflow-recipes/stats/dashboard'), null),
       ])
 
       const workflowList = Array.isArray(workflows) ? workflows : []
+
+      // Normalize recipes
+      const rawRecipes = (recipesResp as any)?.items || (Array.isArray(recipesResp) ? recipesResp : [])
+      const recipes = rawRecipes.map((r: any) => ({
+        id: r.id,
+        templateId: r.template_id,
+        name: r.name,
+        description: r.description || '',
+        useCount: r.use_count || 0,
+        successRate: r.success_rate || 0,
+        qualityScore: r.quality_score,
+        stepsCount: r.steps?.length || 0,
+        tags: r.tags || [],
+        lastUsedAt: r.last_used_at,
+        createdAt: r.created_at,
+        isSystem: r.is_system || false,
+        isFeatured: r.is_featured || false,
+      }))
+
+      const recipeSummary = {
+        totalRecipes: recipeStats?.overview?.total_recipes ?? recipes.length,
+        totalExecutions: recipeStats?.overview?.total_executions ?? 0,
+        avgQualityScore: recipeStats?.overview?.avg_quality_score ?? 0,
+        avgSuccessRate: recipeStats?.overview?.avg_success_rate ?? 0,
+        statusBreakdown: recipeStats?.status_breakdown ?? null,
+      }
 
       return {
         workflows: workflowList.map((wf: any) => ({
@@ -164,6 +220,8 @@ export function useWorkflowAnalytics(days: number = 30) {
           avgDuration: (stats as any)?.today?.avg_duration_today || '0s',
         },
         stats,
+        recipes,
+        recipeSummary,
       }
     },
     staleTime: 60000,
@@ -744,6 +802,25 @@ export function useCostProjections(period: string = '30d') {
       )
     },
     staleTime: 60000, // 1 minute
+  })
+}
+
+// ============= DAILY COST BY MODEL (multi-line chart) =============
+
+interface DailyCostByModelData {
+  models: string[]
+  series: Record<string, any>[]
+}
+
+export function useDailyCostByModel(period: string = '30d') {
+  return useQuery<DailyCostByModelData | null>({
+    queryKey: unifiedAnalyticsKeys.dailyCostByModel(period),
+    queryFn: async () => {
+      return apiClient.request<DailyCostByModelData>(
+        `/api/analytics/llm/costs/daily-by-model?period=${period}`
+      ).catch(() => null)
+    },
+    staleTime: 60000,
   })
 }
 
