@@ -636,7 +636,7 @@ export function CodeGraphPanel() {
         {/* Analytics Tab */}
         <TabsContent value="visualization" className="space-y-4">
           {selectedProject ? (
-            <CodeGraphVisualization project={selectedProject} />
+            <CodeGraphVisualization project={selectedProject} projectId={projects.find(p => p.name === selectedProject)?.id} />
           ) : (
             <Card className="glass-card">
               <CardContent className="py-12">
