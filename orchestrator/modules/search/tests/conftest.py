@@ -5,12 +5,15 @@ Search Module Test Configuration and Fixtures
 Pytest configuration and shared fixtures for Search module testing.
 """
 
+import os
 import pytest
 import numpy as np
 from datetime import datetime
 from typing import List
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+
+TEST_EMBEDDING_DIM = int(os.getenv("VECTOR_STORE_DIMENSIONS", "4096"))
 
 from modules.search import (
     SearchService, SearchConfig,
@@ -52,7 +55,7 @@ async def vector_store():
     """Provide EnhancedVectorStore instance"""
     store = EnhancedVectorStore(
         database_url=TEST_DB_URL,
-        embedding_dimension=1024,
+        embedding_dimension=TEST_EMBEDDING_DIM,
         similarity_function="cosine",
         table_name="test_vector_documents"
     )
@@ -72,7 +75,7 @@ def search_config():
     """Provide SearchConfig for testing"""
     return SearchConfig(
         database_url=TEST_DB_URL,
-        embedding_dimension=1024,
+        embedding_dimension=TEST_EMBEDDING_DIM,
         default_max_results=10,
         mmr_lambda=0.7
     )
@@ -89,7 +92,7 @@ async def search_service(search_config):
 @pytest.fixture
 def sample_embeddings():
     """Generate sample embeddings for testing"""
-    def _generate(count: int = 10, dimension: int = 1024) -> List[List[float]]:
+    def _generate(count: int = 10, dimension: int = TEST_EMBEDDING_DIM) -> List[List[float]]:
         """Generate random normalized embeddings"""
         embeddings = []
         for _ in range(count):

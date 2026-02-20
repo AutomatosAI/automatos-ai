@@ -106,15 +106,16 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.GENERAL.value,
             "key": "openai_embedding_model",
-            "default_value": "text-embedding-ada-002",
+            "default_value": "qwen/qwen3-embedding-8b",
             "value_type": "string",
-            "description": "OpenAI embedding model name",
+            "description": "Embedding model name (via configured provider)",
             "is_required": False,
             "validation_rules": {
                 "options": [
-                    "text-embedding-ada-002",
+                    "qwen/qwen3-embedding-8b",
                     "text-embedding-3-small",
-                    "text-embedding-3-large"
+                    "text-embedding-3-large",
+                    "text-embedding-ada-002"
                 ]
             }
         },
@@ -611,21 +612,19 @@ def seed_system_settings(db: Session):
             }
         },
         
-        # Embedding Model Configuration
+        # Embedding Model Configuration (inherits from general settings by default)
         {
             "category": SettingCategory.CODEGRAPH.value,
             "key": "embedding_model",
-            "default_value": "text-embedding-ada-002",
+            "default_value": "qwen/qwen3-embedding-8b",
             "value_type": "string",
             "description": "Embedding model for CodeGraph semantic search",
             "is_required": False,
             "validation_rules": {
                 "options": [
-                    "text-embedding-ada-002",
+                    "qwen/qwen3-embedding-8b",
                     "text-embedding-3-small",
-                    "text-embedding-3-large",
-                    "sentence-transformers/all-MiniLM-L6-v2",
-                    "sentence-transformers/all-mpnet-base-v2"
+                    "text-embedding-3-large"
                 ]
             }
         },
