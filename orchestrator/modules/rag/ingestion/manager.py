@@ -827,19 +827,21 @@ class DocumentManager:
                 
                 # Create knowledge_items entry for this document (if not exists)
                 cursor.execute("""
-                    INSERT INTO knowledge_items (id, kb_type_id, title, content, metadata, quality_score)
-                    SELECT %s, 
+                    INSERT INTO knowledge_items (id, kb_type_id, title, content, metadata, quality_score, workspace_id)
+                    SELECT %s,
                            (SELECT id FROM kb_types WHERE type_name = 'document' LIMIT 1),
                            %s,
                            %s,
                            %s,
-                           0.8
+                           0.8,
+                           %s
                     WHERE NOT EXISTS (SELECT 1 FROM knowledge_items WHERE id = %s)
                 """, (
                     document_id,
                     os.path.basename(file_path),
                     text[:1000] if text else '',  # First 1000 chars as preview
                     json.dumps({'source': 'document_upload', 'file_type': str(file_type)}),
+                    workspace_id,
                     document_id
                 ))
                 conn.commit()
