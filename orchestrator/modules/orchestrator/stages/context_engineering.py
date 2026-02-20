@@ -639,7 +639,10 @@ class ContextEngineeringIntegrator:
                 from core.database.database import get_database_url as get_db_session_string
                 db_string = get_db_session_string()
                 self.vector_store = PgVectorStore(connection_string=db_string)
-                await self.vector_store.initialize(dimension=1536)
+                # Read dimension from system_settings (matches embedding model)
+                from modules.rag.service import _get_rag_setting_int
+                vector_dim = _get_rag_setting_int("vector_store_dimensions", 4096)
+                await self.vector_store.initialize(dimension=vector_dim)
                 self.logger.info("✅ PgVectorStore initialized for semantic search")
                 
             # Generate query embedding (generate_embeddings returns list of dicts with 'embedding' key)

@@ -217,11 +217,11 @@ class EnhancedVectorStore:
         """Create auxiliary tables for advanced features"""
         
         # Search analytics table
-        await conn.execute("""
+        await conn.execute(f"""
             CREATE TABLE IF NOT EXISTS search_analytics (
                 id SERIAL PRIMARY KEY,
                 query_text TEXT,
-                query_embedding vector(768),
+                query_embedding vector({self.embedding_dimension}),
                 results_count INTEGER,
                 search_mode TEXT,
                 ranking_strategy TEXT,

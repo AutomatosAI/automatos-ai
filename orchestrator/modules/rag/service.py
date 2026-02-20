@@ -61,6 +61,23 @@ def _get_rag_setting_int(key: str, default: int) -> int:
     return default
 
 
+def _get_rag_setting_str(key: str, default: str) -> str:
+    """Get RAG setting string from system_settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+            if setting and setting.value is not None:
+                return setting.value
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return default
+
+
 def _get_rag_setting_float(key: str, default: float) -> float:
     """Get RAG setting from system_settings"""
     try:
@@ -116,7 +133,10 @@ class RAGConfig:
         if self.min_similarity is None:
             self.min_similarity = _get_rag_setting_float("min_similarity", 0.5)
         
-        logger.info(f"RAGConfig loaded: max_tokens={self.max_tokens}, diversity={self.diversity}, min_similarity={self.min_similarity}")
+        # Load reranking toggle from system_settings
+        self.enable_reranking = _get_rag_setting_str("rag_rerank_enabled", "false") == "true"
+
+        logger.info(f"RAGConfig loaded: max_tokens={self.max_tokens}, diversity={self.diversity}, min_similarity={self.min_similarity}, reranking={self.enable_reranking}")
 
 
 class RAGService:
@@ -285,7 +305,7 @@ class RAGService:
         
         # Optional: Cross-encoder re-ranking for higher precision
         if self.config.enable_reranking:
-            candidates = await self._rerank_with_cross_encoder(query, candidates)
+            candidates = await self._rerank_candidates(query, candidates)
 
         # Parent-child context expansion
         candidates = await self._expand_to_parent_context(candidates, self.config.expansion_window)
@@ -351,40 +371,40 @@ class RAGService:
         logger.info(f"RRF fusion: {len(rrf_scored)} unique docs from {len(queries)} queries")
         return rrf_scored
     
-    async def _rerank_with_cross_encoder(
+    async def _rerank_candidates(
         self,
         query: str,
         candidates: List[Dict],
         top_k: int = 10
     ) -> List[Dict]:
         """
-        Re-rank candidates using cross-encoder for higher precision.
-        
-        Cross-encoders are more accurate than bi-encoders but slower.
-        Only use for final re-ranking of top candidates.
+        Re-rank candidates using Cohere Rerank API for higher precision.
+
+        Falls back to original order if Cohere API key is not configured.
         """
         try:
-            # Try to use sentence-transformers cross-encoder
-            from sentence_transformers import CrossEncoder
-            
-            model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-            
-            # Score each candidate
-            pairs = [(query, c.get("content", "")[:512]) for c in candidates[:20]]
-            scores = model.predict(pairs)
-            
-            # Add scores and re-sort
-            for i, score in enumerate(scores):
-                candidates[i]["rerank_score"] = float(score)
-            
-            candidates.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
-            logger.info("Cross-encoder re-ranking applied")
-            
-            return candidates[:top_k]
-            
-        except ImportError:
-            logger.debug("Cross-encoder not available, skipping re-ranking")
-            return candidates
+            from core.llm.rerank_manager import get_rerank_manager
+
+            manager = get_rerank_manager()
+            if not manager.is_available():
+                logger.debug("Reranking unavailable (no Cohere API key), skipping")
+                return candidates
+
+            # Cap at 20 candidates, truncate content to Cohere's limit
+            capped = candidates[:20]
+            documents = [c.get("content", "")[:4096] for c in capped]
+            results = await manager.rerank(query, documents, top_n=top_k)
+
+            # Apply rerank scores and re-sort
+            reranked = []
+            for result in results:
+                if result.index < len(capped):
+                    candidate = capped[result.index].copy()
+                    candidate["rerank_score"] = result.relevance_score
+                    reranked.append(candidate)
+
+            return reranked if reranked else candidates[:top_k]
+
         except Exception as e:
             logger.warning(f"Re-ranking failed: {e}")
             return candidates

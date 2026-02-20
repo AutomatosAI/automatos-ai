@@ -425,6 +425,56 @@ export default function GeneralSettingsTab({
         </CardContent>
       </Card>
 
+      {/* Reranking Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Zap className="h-5 w-5" />
+            Reranking (Cohere)
+          </CardTitle>
+          <CardDescription>
+            Cross-encoder reranking after vector search — improves retrieval precision 15-30%
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="rag_rerank_enabled">Enable Reranking</Label>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  checked={formData.rag_rerank_enabled === 'true'}
+                  onCheckedChange={(checked) => handleInputChange('rag_rerank_enabled', checked.toString())}
+                />
+                <Label className="text-sm text-muted-foreground">
+                  {formData.rag_rerank_enabled === 'true' ? 'Enabled' : 'Disabled'}
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Requires a Cohere API key in Backend API Keys. ~$0.002/query.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="rag_rerank_model">Rerank Model</Label>
+              <Select
+                value={formData.rag_rerank_model || 'rerank-v3.5'}
+                onValueChange={(value) => handleInputChange('rag_rerank_model', value)}
+                disabled={formData.rag_rerank_enabled !== 'true'}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select rerank model" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="rerank-v3.5">rerank-v3.5 (Latest, Best Quality)</SelectItem>
+                  <SelectItem value="rerank-english-v3.0">rerank-english-v3.0 (English Only)</SelectItem>
+                  <SelectItem value="rerank-multilingual-v3.0">rerank-multilingual-v3.0 (Multilingual)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Deployment Settings */}
       <Card>
         <CardHeader>

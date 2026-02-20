@@ -133,8 +133,8 @@ def init_database():
                 },
                 {
                     "config_key": "rag.default_model",
-                    "config_value": {"value": "sentence-transformers/all-MiniLM-L6-v2"},
-                    "description": "Default embedding model for RAG system"
+                    "config_value": {"value": ""},
+                    "description": "Default embedding model for RAG (reads from system_settings.embedding_model at runtime)"
                 },
                 {
                     "config_key": "workflow.max_concurrent",
@@ -160,7 +160,7 @@ def init_database():
             if not existing_rag:
                 default_rag = RAGConfiguration(
                     name="default",
-                    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+                    embedding_model=None,  # Resolved from system_settings at runtime
                     chunk_size=1000,
                     chunk_overlap=200,
                     retrieval_strategy="similarity",
