@@ -827,12 +827,14 @@ class CodeGraphService:
             if current_col_dim != current_dim:
                 logger.info(f"Altering embedding column dimension from {current_col_dim} to {current_dim}")
                 
-                # Drop the index if it exists
-                try:
-                    self.db.execute(text("DROP INDEX IF EXISTS idx_codegraph_symbols_embedding"))
-                except Exception as e:
-                    logger.warning(f"Could not drop index: {e}")
-                
+                # Drop any existing embedding indexes (both possible names)
+                for idx_name in ['idx_codegraph_symbols_embedding', 'codegraph_symbols_embedding_idx',
+                                 'idx_codegraph_symbols_embedding_hnsw']:
+                    try:
+                        self.db.execute(text(f"DROP INDEX IF EXISTS {idx_name}"))
+                    except Exception as e:
+                        logger.warning(f"Could not drop index {idx_name}: {e}")
+
                 # Alter the column
                 # Validate current_dim is a safe integer before interpolating into DDL
                 # (DDL statements cannot use bind parameters for type definitions)
@@ -843,21 +845,34 @@ class CodeGraphService:
                     text("ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector(" + str(current_dim) + ")")
                 )
 
-                # Recreate the index
-                try:
-                    self.db.execute(
-                        text("""
-                            CREATE INDEX idx_codegraph_symbols_embedding
-                            ON codegraph_symbols
-                            USING ivfflat (embedding vector_cosine_ops)
-                            WITH (lists = 100)
-                        """)
+                # Recreate index — use HNSW for dims <= 4000, skip index for larger dims
+                # (pgvector 0.8.x: IVFFlat max 2000, HNSW max 4000)
+                if current_dim <= 2000:
+                    try:
+                        self.db.execute(text(
+                            "CREATE INDEX idx_codegraph_symbols_embedding ON codegraph_symbols "
+                            "USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
+                        ))
+                        logger.info(f"Created IVFFlat index for {current_dim}-dim embeddings")
+                    except Exception as e:
+                        logger.warning(f"Could not create IVFFlat index: {e}")
+                elif current_dim <= 4000:
+                    try:
+                        self.db.execute(text(
+                            "CREATE INDEX idx_codegraph_symbols_embedding_hnsw ON codegraph_symbols "
+                            "USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)"
+                        ))
+                        logger.info(f"Created HNSW index for {current_dim}-dim embeddings")
+                    except Exception as e:
+                        logger.warning(f"Could not create HNSW index: {e}")
+                else:
+                    logger.info(
+                        f"Embedding dimension {current_dim} exceeds pgvector index limits "
+                        f"(IVFFlat: 2000, HNSW: 4000). Using sequential scan — fine for code repos."
                     )
-                except Exception as e:
-                    logger.warning(f"Could not recreate index: {e}")
-                
+
                 self.db.commit()
-                logger.info(f"✅ Updated embedding column dimension to {current_dim} and recreated index")
+                logger.info(f"Updated embedding column dimension to {current_dim}")
             else:
                 logger.debug(f"Embedding column dimension already correct: {current_dim}")
         except Exception as e:
