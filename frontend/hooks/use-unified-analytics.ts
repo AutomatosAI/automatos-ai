@@ -385,6 +385,12 @@ export function useRecommendations() {
       }> = []
 
       // Analyze agent LLM usage
+      const totalCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
+      const totalTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
+      const totalRequests = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_requests || 0), 0)
+      const activeAgents = agentList.filter((a: any) => a.status === 'active').length
+      const unusedAgents = agentList.filter((a: any) => !a.model_usage_stats?.total_requests || a.model_usage_stats.total_requests === 0)
+
       agentList.forEach((agent: any) => {
         const model = agent.agent_model_config?.model_id || ''
         const cost = agent.model_usage_stats?.total_cost || 0
@@ -417,7 +423,43 @@ export function useRecommendations() {
         }
       })
 
-      // Sort by impact (cost savings first)
+      // Summary insight: unused agents
+      if (unusedAgents.length > 0 && agentList.length > 1) {
+        recommendations.push({
+          id: 'unused-agents',
+          type: 'performance',
+          title: `${unusedAgents.length} agent${unusedAgents.length > 1 ? 's have' : ' has'} never been used`,
+          description: `${unusedAgents.map((a: any) => a.name).slice(0, 3).join(', ')}${unusedAgents.length > 3 ? ` and ${unusedAgents.length - 3} more` : ''} — consider assigning them to workflows or removing unused ones.`,
+          impact: 'Cleaner workspace',
+        })
+      }
+
+      // Summary insight: total spend
+      if (totalCost > 0) {
+        const costPerRequest = totalRequests > 0 ? totalCost / totalRequests : 0
+        recommendations.push({
+          id: 'cost-summary',
+          type: 'cost',
+          title: `$${totalCost.toFixed(2)} spent across ${totalRequests.toLocaleString()} requests`,
+          description: `Average cost per request: $${costPerRequest.toFixed(4)}. ${totalTokens.toLocaleString()} tokens used across ${activeAgents} active agent${activeAgents !== 1 ? 's' : ''}.`,
+          impact: 'Cost overview',
+        })
+      }
+
+      // Insight: no usage data yet
+      if (totalRequests === 0 && agentList.length > 0) {
+        recommendations.push({
+          id: 'no-usage',
+          type: 'quota',
+          title: `${agentList.length} agents configured but no LLM usage tracked yet`,
+          description: 'Start a chat conversation or run a recipe to begin tracking token usage and costs automatically.',
+          impact: 'Getting started',
+        })
+      }
+
+      // Sort: cost first, then performance, then others
+      const typePriority: Record<string, number> = { cost: 0, performance: 1, document: 2, quota: 3 }
+      recommendations.sort((a, b) => (typePriority[a.type] ?? 9) - (typePriority[b.type] ?? 9))
       return recommendations.slice(0, 5)
     },
     staleTime: 24 * 60 * 60 * 1000, // Cache for 24 hours

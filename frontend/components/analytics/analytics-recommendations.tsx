@@ -61,9 +61,9 @@ export function AnalyticsRecommendations({ recommendations, isLoading }: Props) 
       <Card className="glass-card">
         <CardContent className="p-6 text-center">
           <Sparkles className="w-10 h-10 mx-auto text-green-400 mb-3" />
-          <p className="font-medium">Everything looks good!</p>
+          <p className="font-medium">No insights yet</p>
           <p className="text-sm text-muted-foreground mt-1">
-            No optimization suggestions right now. We'll check back later.
+            Insights will appear as usage data is collected from chats, recipes, and workflows.
           </p>
         </CardContent>
       </Card>
