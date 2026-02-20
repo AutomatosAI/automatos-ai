@@ -5,29 +5,36 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '@/lib/api-client'
+import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
+
+// Workspace scope for cache correctness: when admin switches workspace,
+// cached data for workspace A must not bleed into workspace B.
+function wsScope() {
+  return getAdminWorkspaceOverride() || 'own'
+}
 
 // ============= QUERY KEYS =============
+// All keys are functions (or thunks) so wsScope() is called at query time, not module load time.
 export const unifiedAnalyticsKeys = {
-  overview: (days: number) => ['unified-analytics', 'overview', days] as const,
-  agents: (days: number) => ['unified-analytics', 'agents', days] as const,
-  workflows: (days: number) => ['unified-analytics', 'workflows', days] as const,
-  documents: (days: number) => ['unified-analytics', 'documents', days] as const,
-  costs: (days: number) => ['unified-analytics', 'costs', days] as const,
-  recommendations: ['unified-analytics', 'recommendations'] as const,
-  planUsage: ['unified-analytics', 'plan-usage'] as const,
-  memory: ['unified-analytics', 'memory'] as const,
-  adminWorkspaces: (days: number) => ['unified-analytics', 'admin', 'workspaces', days] as const,
-  openrouterCredits: ['unified-analytics', 'openrouter', 'credits'] as const,
-  openrouterKeyInfo: ['unified-analytics', 'openrouter', 'key-info'] as const,
-  composioApps: (days: number) => ['unified-analytics', 'composio', 'apps', days] as const,
-  composioActions: (days: number) => ['unified-analytics', 'composio', 'actions', days] as const,
-  composioAgentTools: (days: number) => ['unified-analytics', 'composio', 'agent-tools', days] as const,
-  chartPresets: ['unified-analytics', 'charts', 'presets'] as const,
-  modelComparison: (modelIds: string[], period: string) => ['unified-analytics', 'llm', 'comparison', modelIds, period] as const,
-  costProjections: (period: string) => ['unified-analytics', 'llm', 'projections', period] as const,
-  dailyCostByModel: (period: string) => ['unified-analytics', 'llm', 'daily-by-model', period] as const,
-  adminDashboard: (period: string) => ['unified-analytics', 'admin', 'dashboard', period] as const,
+  overview: (days: number) => ['unified-analytics', wsScope(), 'overview', days] as const,
+  agents: (days: number) => ['unified-analytics', wsScope(), 'agents', days] as const,
+  workflows: (days: number) => ['unified-analytics', wsScope(), 'workflows', days] as const,
+  documents: (days: number) => ['unified-analytics', wsScope(), 'documents', days] as const,
+  costs: (days: number) => ['unified-analytics', wsScope(), 'costs', days] as const,
+  recommendations: () => ['unified-analytics', wsScope(), 'recommendations'] as const,
+  planUsage: () => ['unified-analytics', wsScope(), 'plan-usage'] as const,
+  memory: () => ['unified-analytics', wsScope(), 'memory'] as const,
+  adminWorkspaces: (days: number) => ['unified-analytics', wsScope(), 'admin', 'workspaces', days] as const,
+  openrouterCredits: () => ['unified-analytics', wsScope(), 'openrouter', 'credits'] as const,
+  openrouterKeyInfo: () => ['unified-analytics', wsScope(), 'openrouter', 'key-info'] as const,
+  composioApps: (days: number) => ['unified-analytics', wsScope(), 'composio', 'apps', days] as const,
+  composioActions: (days: number) => ['unified-analytics', wsScope(), 'composio', 'actions', days] as const,
+  composioAgentTools: (days: number) => ['unified-analytics', wsScope(), 'composio', 'agent-tools', days] as const,
+  chartPresets: () => ['unified-analytics', wsScope(), 'charts', 'presets'] as const,
+  modelComparison: (modelIds: string[], period: string) => ['unified-analytics', wsScope(), 'llm', 'comparison', modelIds, period] as const,
+  costProjections: (period: string) => ['unified-analytics', wsScope(), 'llm', 'projections', period] as const,
+  dailyCostByModel: (period: string) => ['unified-analytics', wsScope(), 'llm', 'daily-by-model', period] as const,
+  adminDashboard: (period: string) => ['unified-analytics', wsScope(), 'admin', 'dashboard', period] as const,
 }
 
 // ============= OVERVIEW =============
@@ -391,7 +398,7 @@ export function useCostAnalyticsUnified(days: number = 30) {
 // ============= PLAN USAGE =============
 export function usePlanUsage() {
   return useQuery({
-    queryKey: unifiedAnalyticsKeys.planUsage,
+    queryKey: unifiedAnalyticsKeys.planUsage(),
     queryFn: async () => {
       // For now, return placeholder limits (pilot phase — limits TBD)
       const [agents, workflows, documents] = await Promise.all([
@@ -428,7 +435,7 @@ export function usePlanUsage() {
 // ============= RECOMMENDATIONS (AI-powered, cached daily) =============
 export function useRecommendations() {
   return useQuery({
-    queryKey: unifiedAnalyticsKeys.recommendations,
+    queryKey: unifiedAnalyticsKeys.recommendations(),
     queryFn: async () => {
       // Build recommendations from data analysis
       const agents = await apiClient.getAgents().catch(() => [])
@@ -528,7 +535,7 @@ export function useRecommendations() {
 // ============= WORKSPACE MEMORY =============
 export function useWorkspaceMemory() {
   return useQuery({
-    queryKey: unifiedAnalyticsKeys.memory,
+    queryKey: unifiedAnalyticsKeys.memory(),
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
         Promise.resolve().then(fn).catch((err) => {
@@ -583,7 +590,7 @@ interface OpenRouterSyncResult {
 
 export function useOpenRouterCredits() {
   return useQuery<OpenRouterCreditsData | null>({
-    queryKey: unifiedAnalyticsKeys.openrouterCredits,
+    queryKey: unifiedAnalyticsKeys.openrouterCredits(),
     queryFn: async () => {
       const data = await apiClient.request<OpenRouterCreditsData>(
         '/api/analytics/llm/openrouter/credits'
@@ -600,7 +607,7 @@ export function useOpenRouterCredits() {
 
 export function useOpenRouterKeyInfo() {
   return useQuery<OpenRouterKeyInfoData | null>({
-    queryKey: unifiedAnalyticsKeys.openrouterKeyInfo,
+    queryKey: unifiedAnalyticsKeys.openrouterKeyInfo(),
     queryFn: async () => {
       const data = await apiClient.request<OpenRouterKeyInfoData>(
         '/api/analytics/llm/openrouter/key-info'
@@ -625,8 +632,8 @@ export function useTriggerOpenRouterSync() {
     },
     onSuccess: () => {
       // Invalidate related queries so they refetch with fresh data
-      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterCredits })
-      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterKeyInfo })
+      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterCredits() })
+      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterKeyInfo() })
       queryClient.invalidateQueries({ queryKey: ['unified-analytics', 'costs'] })
     },
   })
@@ -735,7 +742,7 @@ export function useAnalyticsChart() {
 
 export function useChartPresets() {
   return useQuery<ChartPreset[]>({
-    queryKey: unifiedAnalyticsKeys.chartPresets,
+    queryKey: unifiedAnalyticsKeys.chartPresets(),
     queryFn: async () => {
       return apiClient.request<ChartPreset[]>(
         '/api/analytics/charts/presets'
@@ -862,7 +869,7 @@ interface AdminCostAnalyticsData {
 
 export function useAdminCostAnalytics(period: string = '30d') {
   return useQuery<AdminCostAnalyticsData | null>({
-    queryKey: ['unified-analytics', 'admin', 'costs', period],
+    queryKey: ['unified-analytics', wsScope(), 'admin', 'costs', period],
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
         Promise.resolve().then(fn).catch((err) => {

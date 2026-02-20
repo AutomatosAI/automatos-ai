@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import {
   BarChart3,
   Bot,
@@ -24,6 +24,7 @@ import { AnalyticsDocuments } from './analytics-documents'
 import { AnalyticsCosts } from './analytics-costs'
 import { AnalyticsAdmin } from './analytics-admin'
 import { AnalyticsComposio } from './analytics-composio'
+import { AdminWorkspaceSwitcher } from './admin-workspace-switcher'
 
 const TIME_RANGES = [
   { value: '7', label: '7 days' },
@@ -34,6 +35,7 @@ const TIME_RANGES = [
 export function AnalyticsPage() {
   const [timeRange, setTimeRange] = useState('30')
   const [activeTab, setActiveTab] = useState('overview')
+  const [wsLabel, setWsLabel] = useState<string | null>(null)
   const { isAdmin } = useSystemRole()
   const queryClient = useQueryClient()
   const days = parseInt(timeRange)
@@ -41,6 +43,10 @@ export function AnalyticsPage() {
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['unified-analytics'] })
   }
+
+  const handleWorkspaceChange = useCallback((label: string) => {
+    setWsLabel(label === 'My Workspace' ? null : label)
+  }, [])
 
   const tabDefs = [
     { value: 'overview', label: 'Overview', icon: BarChart3 },
@@ -57,9 +63,11 @@ export function AnalyticsPage() {
       <PageHeader
         title=""
         titleAccent="Analytics"
-        subtitle="Your workspace performance, costs, and insights at a glance"
+        subtitle={wsLabel ? `Viewing: ${wsLabel}` : 'Your workspace performance, costs, and insights at a glance'}
         actions={
           <>
+            {isAdmin && <AdminWorkspaceSwitcher onWorkspaceChange={handleWorkspaceChange} />}
+
             <Select value={timeRange} onValueChange={setTimeRange}>
               <SelectTrigger className="w-28 bg-secondary/50">
                 <SelectValue />

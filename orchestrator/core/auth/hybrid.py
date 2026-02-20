@@ -307,6 +307,10 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
 
     workspace_id = _get_workspace_id_from_request(request)
 
+    # Check for admin "__all__" sentinel before UUID parsing discards it
+    raw_ws_header = (request.headers.get("x-workspace-id") or "").strip()
+    admin_all_workspaces = raw_ws_header == "__all__"
+
     # Secure-by-default: auth is required unless explicitly disabled
     _require_auth_raw = os.getenv("REQUIRE_AUTH", "true").strip().lower()
     require_auth = _require_auth_raw not in {"0", "false", "no", "off"}
@@ -323,11 +327,39 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                 info = clerk.extract_user_info(claims)
                 clerk_uid = info.get("clerk_user_id")
 
+                # Determine admin status
+                system_role = info.get("system_role") or info.get("role") or "user"
+                is_admin = system_role in ("admin", "super_admin")
+
+                # Admin "__all__" sentinel: aggregate across all workspaces (no filter)
+                if admin_all_workspaces and is_admin:
+                    # Resolve admin's own workspace for the UserContext, but return
+                    # workspace_id=None so endpoints return unfiltered (all workspaces)
+                    admin_home_ws = _resolve_workspace_for_clerk_user(
+                        db, clerk_user_id=clerk_uid,
+                        org_id=info.get("org_id"),
+                        email=info.get("email"),
+                        name=info.get("name"),
+                    )
+                    user = UserContext(
+                        id=info.get("clerk_user_id") or info.get("email"),
+                        email=info.get("email"),
+                        role=info.get("role") or "user",
+                        system_role=system_role,
+                        clerk_user_id=info.get("clerk_user_id"),
+                        org_id=info.get("org_id"),
+                        raw_claims=claims,
+                    )
+                    # workspace_id=None tells endpoints to skip workspace filter
+                    return RequestContext(workspace_id=admin_home_ws, user=user, auth_type="clerk", admin_all_workspaces=True)
+
                 # If client sent a workspace ID via header, verify the user has access
                 if workspace_id:
                     if not _workspace_exists(db, workspace_id):
                         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-                    if not _user_has_workspace_access(db, clerk_uid, workspace_id):
+
+                    # Admin bypass: admins can access any workspace
+                    if not is_admin and not _user_has_workspace_access(db, clerk_uid, workspace_id):
                         logger.warning("Access denied: user %s tried to access workspace %s", clerk_uid, workspace_id)
                         # Fall through to resolver instead of blocking -- user may have a stale
                         # localStorage value from the old shared-workspace bug

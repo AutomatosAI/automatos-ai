@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useMemo, Fragment } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useMemo } from 'react'
+import { motion } from 'framer-motion'
 import {
   Shield,
   DollarSign,
@@ -9,24 +9,14 @@ import {
   Activity,
   Download,
   Building,
-  Server,
   TrendingUp,
   ChevronDown,
-  ChevronRight,
-  Bot,
-  ChefHat,
-  Play,
   Key,
-  Layers,
   BarChart3,
   PieChart as PieChartIcon,
-  Search,
-  Filter,
-  AppWindow,
-  Wrench,
-  Link2,
-  FileText,
-  X,
+  AlertTriangle,
+  CreditCard,
+  Users,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -36,8 +26,6 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell,
@@ -50,9 +38,6 @@ import {
   useAdminDashboard,
   useAdminWorkspaceAnalytics,
   useAdminCostAnalytics,
-  useComposioApps,
-  useComposioActions,
-  useComposioAgentTools,
 } from '@/hooks/use-unified-analytics'
 
 interface Props {
@@ -73,6 +58,13 @@ const PLAN_COLORS: Record<string, string> = {
   enterprise: 'text-amber-400 border-amber-400/30 bg-amber-400/5',
 }
 
+const PLAN_DONUT_COLORS: Record<string, string> = {
+  starter: '#9ca3af',
+  pilot: '#60a5fa',
+  pro: '#a78bfa',
+  enterprise: '#fbbf24',
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 function formatNumber(n: number): string {
@@ -86,28 +78,6 @@ function formatCost(n: number): string {
   if (n >= 1) return `$${n.toFixed(2)}`
   if (n >= 0.01) return `$${n.toFixed(3)}`
   return `$${n.toFixed(4)}`
-}
-
-function shortenModelName(name: string): string {
-  const parts = name.split('/')
-  return parts[parts.length - 1]
-}
-
-function formatAppName(name: string): string {
-  const known: Record<string, string> = {
-    GOOGLEDRIVE: 'Google Drive', GOOGLECALENDAR: 'Google Calendar',
-    GOOGLEDOCS: 'Google Docs', GOOGLESHEETS: 'Google Sheets',
-    GOOGLEGMAIL: 'Gmail', GITHUB: 'GitHub', SLACK: 'Slack',
-    DROPBOX: 'Dropbox', TELEGRAM: 'Telegram', NOTION: 'Notion',
-    JIRA: 'Jira', TRELLO: 'Trello', DISCORD: 'Discord',
-    LINEAR: 'Linear', ASANA: 'Asana', WHATSAPP: 'WhatsApp',
-  }
-  return known[name] || name.charAt(0) + name.slice(1).toLowerCase()
-}
-
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return 'Never'
-  return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 // ─── Period Toggle ────────────────────────────────────────────────────
@@ -166,85 +136,6 @@ function ProviderCostTooltip({ active, payload, label }: any) {
   )
 }
 
-// ─── Filter Dropdown ──────────────────────────────────────────────────
-
-function FilterDropdown({
-  label,
-  icon: Icon,
-  value,
-  options,
-  onChange,
-}: {
-  label: string
-  icon: any
-  value: string
-  options: { key: string; label: string; sub?: string }[]
-  onChange: (v: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const filtered = options.filter(
-    (o) => o.label.toLowerCase().includes(search.toLowerCase()) || o.key.toLowerCase().includes(search.toLowerCase())
-  )
-  const selectedLabel = value === 'all' ? `All ${label}` : options.find((o) => o.key === value)?.label || value
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border/50 bg-secondary/30 hover:bg-secondary/50 transition-all"
-      >
-        <Icon className="w-3.5 h-3.5 text-muted-foreground" />
-        <span className="text-foreground font-medium truncate max-w-[140px]">{selectedLabel}</span>
-        <ChevronDown className="w-3 h-3 text-muted-foreground" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute z-50 mt-1 w-72 max-h-72 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
-            {options.length > 5 && (
-              <div className="p-2 border-b border-border/50">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                  <input
-                    autoFocus
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder={`Search ${label.toLowerCase()}...`}
-                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-secondary/30 border border-border/30 rounded-lg outline-none focus:border-primary/50 text-foreground placeholder:text-muted-foreground"
-                  />
-                </div>
-              </div>
-            )}
-            <div className="max-h-56 overflow-y-auto">
-              <button
-                className={`w-full text-left px-4 py-2.5 text-xs hover:bg-secondary/50 transition-colors flex items-center justify-between ${value === 'all' ? 'bg-primary/10 text-primary' : ''}`}
-                onClick={() => { onChange('all'); setOpen(false); setSearch('') }}
-              >
-                <span>All {label}</span>
-                {value === 'all' && <span className="text-[10px] text-primary">Active</span>}
-              </button>
-              {filtered.map((o) => (
-                <button
-                  key={o.key}
-                  className={`w-full text-left px-4 py-2.5 text-xs hover:bg-secondary/50 transition-colors flex items-center justify-between ${value === o.key ? 'bg-primary/10 text-primary' : ''}`}
-                  onClick={() => { onChange(o.key); setOpen(false); setSearch('') }}
-                >
-                  <span>{o.label}</span>
-                  {o.sub && <span className="text-[10px] text-muted-foreground">{o.sub}</span>}
-                </button>
-              ))}
-              {filtered.length === 0 && (
-                <p className="px-4 py-3 text-xs text-muted-foreground">No matches</p>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
 // ─── Sortable Header ──────────────────────────────────────────────────
 
 function SortHeader({
@@ -272,46 +163,21 @@ function SortHeader({
 
 export function AnalyticsAdmin({ days }: Props) {
   const [period, setPeriod] = useState('30d')
-  const periodDays = period === '7d' ? 7 : period === '90d' ? 90 : 30
 
   // ─── Data hooks ─────────────────────────────────────────────────────
   const { data: dashboard, isLoading: dashLoading } = useAdminDashboard(period)
   const { data: legacyData, isLoading: legacyLoading } = useAdminWorkspaceAnalytics(days)
-  const { data: legacyCostData, isLoading: legacyCostLoading } = useAdminCostAnalytics(period)
+  const { data: legacyCostData } = useAdminCostAnalytics(period)
 
-  // Composio
-  const { data: composioApps } = useComposioApps(periodDays)
-  const { data: composioActions } = useComposioActions(periodDays)
-  const { data: composioAgentTools } = useComposioAgentTools(periodDays)
-
-  // ─── Filters ────────────────────────────────────────────────────────
-  const [wsFilter, setWsFilter] = useState('all')
-  const [providerFilter, setProviderFilter] = useState('all')
-
-  // ─── Expandable rows ───────────────────────────────────────────────
-  const [expandedWs, setExpandedWs] = useState<Set<string>>(new Set())
-  const toggleExpand = (id: string) => {
-    setExpandedWs((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
+  // ─── Top spenders sorting ──────────────────────────────────────────
+  const [spenderSort, setSpenderSort] = useState<'cost' | 'requests' | 'agents' | 'name'>('cost')
+  const [spenderDir, setSpenderDir] = useState<'asc' | 'desc'>('desc')
+  const toggleSpenderSort = (field: typeof spenderSort) => {
+    if (spenderSort === field) setSpenderDir((d) => (d === 'desc' ? 'asc' : 'desc'))
+    else { setSpenderSort(field); setSpenderDir('desc') }
   }
-
-  // ─── Sorting ────────────────────────────────────────────────────────
-  const [wsSortField, setWsSortField] = useState<'cost' | 'requests' | 'agents' | 'name'>('cost')
-  const [wsSortDir, setWsSortDir] = useState<'asc' | 'desc'>('desc')
-  const toggleSort = (field: typeof wsSortField) => {
-    if (wsSortField === field) setWsSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))
-    else { setWsSortField(field); setWsSortDir('desc') }
-  }
-
-  // Composio action sort
-  const [actionSort, setActionSort] = useState<'total_usage_count' | 'agent_count' | 'action_name'>('total_usage_count')
-  const [actionSortDir, setActionSortDir] = useState<'asc' | 'desc'>('desc')
 
   // ─── Computed data ──────────────────────────────────────────────────
-  const hasDashboard = !!dashboard?.overview
 
   // Merge workspace data from dashboard or legacy
   const allWorkspaces = useMemo(() => {
@@ -327,66 +193,52 @@ export function AnalyticsAdmin({ days }: Props) {
     return []
   }, [dashboard?.workspaces, legacyData?.workspaces])
 
-  // Extract unique providers from models
-  const providers = useMemo(() => {
-    if (!dashboard?.models) return []
-    const set = new Set(dashboard.models.map((m) => m.provider))
-    return Array.from(set).sort()
-  }, [dashboard?.models])
-
-  // Filter + sort workspaces
-  const sortedWorkspaces = useMemo(() => {
-    let ws = [...allWorkspaces]
-    if (wsFilter !== 'all') ws = ws.filter((w) => w.id === wsFilter)
-    return ws.sort((a, b) => {
-      const dir = wsSortDir === 'desc' ? -1 : 1
-      if (wsSortField === 'name') return dir * a.name.localeCompare(b.name) * -1
-      return dir * ((a[wsSortField] || 0) - (b[wsSortField] || 0))
-    })
-  }, [allWorkspaces, wsFilter, wsSortField, wsSortDir])
-
-  // Filter models by provider
-  const filteredModels = useMemo(() => {
-    if (!dashboard?.models) return []
-    if (providerFilter === 'all') return dashboard.models
-    return dashboard.models.filter((m) => m.provider === providerFilter)
-  }, [dashboard?.models, providerFilter])
-
-  const maxWsCost = useMemo(() => Math.max(...allWorkspaces.map((w) => w.cost), 0.001), [allWorkspaces])
-  const maxModelCost = useMemo(() => Math.max(...(filteredModels.map((m) => m.cost) || [0.001])), [filteredModels])
-
   const totalCost = dashboard?.overview?.total_cost || legacyCostData?.total_platform_cost || 0
 
-  // Composio aggregates
-  const composioTotalActions = composioApps?.reduce((s, a) => s + a.total_actions_used, 0) ?? 0
-  const composioActiveApps = composioApps?.filter((a) => a.status === 'active' || a.status === 'connected').length ?? 0
-  const composioTopApp = composioApps?.length ? [...composioApps].sort((a, b) => b.total_actions_used - a.total_actions_used)[0] : null
-
-  const sortedComposioActions = useMemo(() => {
-    if (!composioActions) return []
-    return [...composioActions].sort((a, b) => {
-      const av = a[actionSort], bv = b[actionSort]
-      if (typeof av === 'string' && typeof bv === 'string')
-        return actionSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
-      return actionSortDir === 'asc' ? (Number(av) || 0) - (Number(bv) || 0) : (Number(bv) || 0) - (Number(av) || 0)
+  // Plan distribution
+  const planDistribution = useMemo(() => {
+    const counts: Record<string, number> = {}
+    allWorkspaces.forEach((ws) => {
+      const plan = (ws.plan || 'starter').toLowerCase()
+      counts[plan] = (counts[plan] || 0) + 1
     })
-  }, [composioActions, actionSort, actionSortDir])
+    return Object.entries(counts)
+      .map(([name, value]) => ({
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        value,
+        color: PLAN_DONUT_COLORS[name] || '#9ca3af',
+      }))
+      .sort((a, b) => b.value - a.value)
+  }, [allWorkspaces])
 
-  // Workspace dropdown options
-  const wsOptions = useMemo(() =>
-    allWorkspaces.map((w) => ({ key: w.id, label: w.name, sub: formatCost(w.cost) })),
-    [allWorkspaces]
-  )
+  // Revenue per workspace (sorted by cost)
+  const sortedSpenders = useMemo(() => {
+    return [...allWorkspaces].sort((a, b) => {
+      const dir = spenderDir === 'desc' ? -1 : 1
+      if (spenderSort === 'name') return dir * a.name.localeCompare(b.name) * -1
+      return dir * ((a[spenderSort] || 0) - (b[spenderSort] || 0))
+    })
+  }, [allWorkspaces, spenderSort, spenderDir])
 
-  // Provider dropdown options
-  const providerOptions = useMemo(() =>
-    providers.map((p) => ({
-      key: p,
-      label: p.charAt(0).toUpperCase() + p.slice(1),
-      sub: `${dashboard?.models?.filter((m) => m.provider === p).length || 0} models`,
-    })),
-    [providers, dashboard?.models]
-  )
+  // Cost anomalies: workspaces with cost > 2x the average
+  const costAnomalies = useMemo(() => {
+    if (allWorkspaces.length < 2) return []
+    const avgCost = allWorkspaces.reduce((s, w) => s + w.cost, 0) / allWorkspaces.length
+    if (avgCost <= 0) return []
+    return allWorkspaces
+      .filter((ws) => ws.cost > avgCost * 2)
+      .sort((a, b) => b.cost - a.cost)
+      .map((ws) => ({
+        ...ws,
+        ratio: ws.cost / avgCost,
+      }))
+  }, [allWorkspaces])
+
+  const maxSpenderCost = useMemo(() => Math.max(...allWorkspaces.map((w) => w.cost), 0.001), [allWorkspaces])
+
+  // MRR projection: simple estimate from daily average
+  const dailyAvg = dashboard?.overview?.daily_average || 0
+  const projectedMrr = dashboard?.overview?.projected_monthly || dailyAvg * 30
 
   // ─── CSV Export ─────────────────────────────────────────────────────
   const escapeCsv = (v: string) => {
@@ -395,14 +247,14 @@ export function AnalyticsAdmin({ days }: Props) {
   }
   const handleExport = () => {
     if (!allWorkspaces.length) return
-    const headers = ['Workspace,Plan,Agents,Recipes,Executions,Requests,Tokens,Cost']
+    const headers = ['Workspace,Plan,Agents,Requests,Tokens,Cost']
     const rows = allWorkspaces.map((ws) =>
-      [escapeCsv(ws.name), escapeCsv(ws.plan || 'unknown'), ws.agents, ws.recipes ?? 0, ws.executions ?? 0, ws.requests, ws.tokens, `$${ws.cost.toFixed(4)}`].join(',')
+      [escapeCsv(ws.name), escapeCsv(ws.plan || 'unknown'), ws.agents, ws.requests, ws.tokens, `$${ws.cost.toFixed(4)}`].join(',')
     )
     const blob = new Blob([[...headers, ...rows].join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url
-    a.download = `admin-analytics-${new Date().toISOString().split('T')[0]}.csv`
+    a.download = `admin-billing-${new Date().toISOString().split('T')[0]}.csv`
     a.click(); URL.revokeObjectURL(url)
   }
 
@@ -430,8 +282,8 @@ export function AnalyticsAdmin({ days }: Props) {
             <Shield className="w-4 h-4 text-red-400" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold">Super Admin Dashboard</h2>
-            <p className="text-xs text-muted-foreground">Platform-wide monitoring & revenue insights</p>
+            <h2 className="text-sm font-semibold">Billing & Revenue</h2>
+            <p className="text-xs text-muted-foreground">Plans, costs, and revenue management</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -442,32 +294,15 @@ export function AnalyticsAdmin({ days }: Props) {
         </div>
       </div>
 
-      {/* ═══ FILTERS ═══ */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <Filter className="w-4 h-4 text-muted-foreground" />
-        <FilterDropdown label="Workspaces" icon={Building} value={wsFilter} options={wsOptions} onChange={setWsFilter} />
-        {providers.length > 0 && (
-          <FilterDropdown label="Providers" icon={Server} value={providerFilter} options={providerOptions} onChange={setProviderFilter} />
-        )}
-        {(wsFilter !== 'all' || providerFilter !== 'all') && (
-          <button
-            onClick={() => { setWsFilter('all'); setProviderFilter('all') }}
-            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <X className="w-3 h-3" /> Clear filters
-          </button>
-        )}
-      </div>
-
       {/* ═══ HERO STATS ═══ */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4">
         {[
-          { label: 'Total Platform Cost', value: formatCost(totalCost), sub: 'All workspaces', icon: DollarSign, iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-400', accent: 'border-l-emerald-500' },
-          { label: 'Projected Monthly', value: formatCost(dashboard?.overview?.projected_monthly || 0), sub: `${formatCost(dashboard?.overview?.daily_average || 0)}/day avg`, icon: TrendingUp, iconBg: 'bg-blue-500/10', iconColor: 'text-blue-400', accent: 'border-l-blue-500' },
+          { label: 'Total Revenue', value: formatCost(totalCost), sub: 'Platform cost this period', icon: DollarSign, iconBg: 'bg-emerald-500/10', iconColor: 'text-emerald-400', accent: 'border-l-emerald-500' },
+          { label: 'MRR Projection', value: formatCost(projectedMrr), sub: `${formatCost(dailyAvg)}/day avg`, icon: TrendingUp, iconBg: 'bg-blue-500/10', iconColor: 'text-blue-400', accent: 'border-l-blue-500' },
           { label: 'Workspaces', value: dashboard?.overview?.total_workspaces || legacyData?.platformSummary?.totalWorkspaces || 0, sub: 'Active tenants', icon: Building, iconBg: 'bg-purple-500/10', iconColor: 'text-purple-400', accent: 'border-l-purple-500' },
           { label: 'API Requests', value: formatNumber(dashboard?.overview?.total_requests || legacyData?.platformSummary?.totalApiCalls || 0), sub: 'This period', icon: Activity, iconBg: 'bg-orange-500/10', iconColor: 'text-orange-400', accent: 'border-l-orange-500' },
           { label: 'Total Tokens', value: formatNumber(dashboard?.overview?.total_tokens || legacyData?.platformSummary?.totalTokens || 0), sub: 'Input + Output', icon: Zap, iconBg: 'bg-cyan-500/10', iconColor: 'text-cyan-400', accent: 'border-l-cyan-500' },
-          { label: 'Composio Actions', value: formatNumber(composioTotalActions), sub: `${composioActiveApps} active apps`, icon: AppWindow, iconBg: 'bg-pink-500/10', iconColor: 'text-pink-400', accent: 'border-l-pink-500' },
+          { label: 'BYOK Savings', value: formatCost(dashboard?.byok_split?.byok_cost || 0), sub: 'User-provided keys', icon: Key, iconBg: 'bg-amber-500/10', iconColor: 'text-amber-400', accent: 'border-l-amber-500' },
         ].map((stat, index) => (
           <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: index * 0.06 }}>
             <Card className={`glass-card border-l-2 ${stat.accent} hover:border-l-4 transition-all duration-300`}>
@@ -517,9 +352,7 @@ export function AnalyticsAdmin({ days }: Props) {
                         <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v: string) => { const d = new Date(v); return `${d.getMonth() + 1}/${d.getDate()}` }} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v: number) => formatCost(v)} width={60} />
                         <Tooltip content={<ProviderCostTooltip />} />
-                        {dashboard.daily_by_provider.providers
-                          .filter((p) => providerFilter === 'all' || p === providerFilter)
-                          .map((prov, idx) => (
+                        {dashboard.daily_by_provider.providers.map((prov, idx) => (
                           <Area key={prov} type="monotone" dataKey={prov} stackId="1" stroke={PROVIDER_COLORS[idx % PROVIDER_COLORS.length]} strokeWidth={2} fill={`url(#adm-g-${idx})`} dot={false} activeDot={{ r: 4, strokeWidth: 2, fill: 'hsl(var(--card))' }} />
                         ))}
                       </AreaChart>
@@ -641,18 +474,187 @@ export function AnalyticsAdmin({ days }: Props) {
         </motion.div>
       </div>
 
-      {/* ═══ WORKSPACE DEEP DIVE TABLE ═══ */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.45 }}>
+      {/* ═══ BILLING OVERVIEW + PLAN DISTRIBUTION ═══ */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Billing Overview */}
+        <motion.div className="lg:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.45 }}>
+          <Card className="glass-card h-full">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-emerald-400" />
+                Billing Overview
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Revenue summary cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Platform Revenue', value: formatCost(dashboard?.byok_split?.platform_cost || totalCost), color: 'text-emerald-400' },
+                    { label: 'Avg per Workspace', value: allWorkspaces.length > 0 ? formatCost(totalCost / allWorkspaces.length) : '$0', color: 'text-blue-400' },
+                    { label: 'Cost per Request', value: (dashboard?.overview?.total_requests || 0) > 0 ? formatCost(totalCost / (dashboard?.overview?.total_requests || 1)) : '$0', color: 'text-purple-400' },
+                    { label: 'Daily Run Rate', value: formatCost(dailyAvg), color: 'text-orange-400' },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-lg bg-secondary/20 border border-border/20 p-3">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">{item.label}</p>
+                      <p className={`text-lg font-bold ${item.color}`}>{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Revenue per workspace */}
+                {allWorkspaces.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Revenue by Workspace</p>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {[...allWorkspaces].sort((a, b) => b.cost - a.cost).slice(0, 10).map((ws) => (
+                        <div key={ws.id} className="flex items-center gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs font-medium truncate">{ws.name}</span>
+                              <span className="text-xs font-mono font-medium ml-2">{formatCost(ws.cost)}</span>
+                            </div>
+                            <div className="h-1.5 w-full rounded-full bg-secondary/30 overflow-hidden">
+                              <motion.div
+                                className="h-full rounded-full bg-emerald-400"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${(ws.cost / maxSpenderCost) * 100}%` }}
+                                transition={{ duration: 0.6 }}
+                              />
+                            </div>
+                          </div>
+                          <Badge variant="outline" className={`text-[10px] uppercase shrink-0 ${PLAN_COLORS[(ws.plan || 'starter').toLowerCase()] || PLAN_COLORS.starter}`}>
+                            {ws.plan}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Plan Distribution Donut */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.5 }}>
+          <Card className="glass-card h-full">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-purple-400" />
+                Plan Distribution
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {planDistribution.length === 0 ? (
+                <div className="h-48 flex items-center justify-center">
+                  <div className="text-center">
+                    <PieChartIcon className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
+                    <p className="text-sm text-muted-foreground">No plan data</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="h-44">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={planDistribution}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={70}
+                          paddingAngle={4}
+                          strokeWidth={0}
+                        >
+                          {planDistribution.map((d, i) => <Cell key={i} fill={d.color} />)}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', fontSize: '12px' }}
+                          formatter={(value: number, name: string) => [`${value} workspace${value !== 1 ? 's' : ''}`, name]}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="space-y-2">
+                    {planDistribution.map((plan) => (
+                      <div key={plan.name} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-full" style={{ background: plan.color }} />
+                          <span className="text-xs font-medium">{plan.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono font-medium">{plan.value}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            ({allWorkspaces.length > 0 ? ((plan.value / allWorkspaces.length) * 100).toFixed(0) : 0}%)
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+
+      {/* ═══ COST ALERTS / ANOMALIES ═══ */}
+      {costAnomalies.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.55 }}>
+          <Card className="glass-card border-l-2 border-l-amber-500">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-400" />
+                Cost Anomalies
+                <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-400/30 ml-2">
+                  {costAnomalies.length} alert{costAnomalies.length !== 1 ? 's' : ''}
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground mb-3">
+                Workspaces spending more than 2x the average ({formatCost(totalCost / Math.max(allWorkspaces.length, 1))}/workspace)
+              </p>
+              <div className="space-y-2">
+                {costAnomalies.map((ws) => (
+                  <div key={ws.id} className="flex items-center justify-between rounded-lg bg-amber-500/5 border border-amber-500/20 p-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium truncate block">{ws.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{ws.ratio.toFixed(1)}x avg cost</span>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      <span className="text-sm font-mono font-bold text-amber-400">{formatCost(ws.cost)}</span>
+                      <div className="flex items-center gap-1 justify-end">
+                        <Badge variant="outline" className={`text-[10px] uppercase ${PLAN_COLORS[(ws.plan || 'starter').toLowerCase()] || PLAN_COLORS.starter}`}>
+                          {ws.plan}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* ═══ TOP SPENDERS TABLE ═══ */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.6 }}>
         <Card className="glass-card overflow-hidden">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <Building className="w-5 h-5 text-blue-400" />
-                Workspace Deep Dive
+                Top Spenders
               </span>
               <span className="text-xs text-muted-foreground font-normal">
-                {sortedWorkspaces.length} workspace{sortedWorkspaces.length !== 1 ? 's' : ''}
-                {wsFilter !== 'all' && <span className="text-primary ml-1">(filtered)</span>}
+                {allWorkspaces.length} workspace{allWorkspaces.length !== 1 ? 's' : ''}
               </span>
             </CardTitle>
           </CardHeader>
@@ -660,420 +662,53 @@ export function AnalyticsAdmin({ days }: Props) {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border/50">
-                  <th className="w-8 p-4" />
-                  <SortHeader field="name" label="Workspace" current={wsSortField} dir={wsSortDir} onToggle={toggleSort} />
+                  <SortHeader field="name" label="Workspace" current={spenderSort} dir={spenderDir} onToggle={toggleSpenderSort} />
                   <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Plan</th>
-                  <SortHeader field="agents" label="Agents" current={wsSortField} dir={wsSortDir} onToggle={toggleSort} align="right" />
-                  <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Recipes</th>
-                  <SortHeader field="requests" label="Requests" current={wsSortField} dir={wsSortDir} onToggle={toggleSort} align="right" className="hidden md:table-cell" />
-                  <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden lg:table-cell">Tokens</th>
-                  <SortHeader field="cost" label="Cost" current={wsSortField} dir={wsSortDir} onToggle={toggleSort} align="right" />
+                  <SortHeader field="agents" label="Agents" current={spenderSort} dir={spenderDir} onToggle={toggleSpenderSort} align="right" />
+                  <SortHeader field="requests" label="Requests" current={spenderSort} dir={spenderDir} onToggle={toggleSpenderSort} align="right" className="hidden md:table-cell" />
+                  <SortHeader field="cost" label="Cost" current={spenderSort} dir={spenderDir} onToggle={toggleSpenderSort} align="right" />
                   <th className="p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden lg:table-cell w-36">Share</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedWorkspaces.length === 0 ? (
+                {sortedSpenders.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="p-12 text-center text-muted-foreground">
+                    <td colSpan={6} className="p-12 text-center text-muted-foreground">
                       <Building className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                      <p className="text-sm">{wsFilter !== 'all' ? 'No matching workspaces' : 'No workspace data available'}</p>
+                      <p className="text-sm">No workspace data available</p>
                     </td>
                   </tr>
-                ) : sortedWorkspaces.map((ws) => (
-                  <Fragment key={ws.id}>
-                    <tr className="border-b border-border/20 hover:bg-secondary/10 transition-colors cursor-pointer" onClick={() => toggleExpand(ws.id)}>
-                      <td className="p-4 w-8">
-                        <motion.div animate={{ rotate: expandedWs.has(ws.id) ? 90 : 0 }} transition={{ duration: 0.2 }}>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                        </motion.div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm">{ws.name}</span>
-                          {ws.is_personal && <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-400/30 text-blue-400">personal</Badge>}
+                ) : sortedSpenders.map((ws) => (
+                  <tr key={ws.id} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
+                    <td className="p-4">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{ws.name}</span>
+                        {ws.is_personal && <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-400/30 text-blue-400">personal</Badge>}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <Badge variant="outline" className={`text-[10px] uppercase ${PLAN_COLORS[(ws.plan || 'starter').toLowerCase()] || PLAN_COLORS.starter}`}>{ws.plan}</Badge>
+                    </td>
+                    <td className="p-4 text-sm text-right tabular-nums">{ws.agents}</td>
+                    <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell">{formatNumber(ws.requests)}</td>
+                    <td className="p-4 text-sm text-right tabular-nums font-medium">{formatCost(ws.cost)}</td>
+                    <td className="p-4 hidden lg:table-cell">
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 flex-1 rounded-full bg-secondary/30 overflow-hidden">
+                          <motion.div className="h-full rounded-full bg-blue-400" initial={{ width: 0 }} animate={{ width: `${(ws.cost / maxSpenderCost) * 100}%` }} transition={{ duration: 0.6 }} />
                         </div>
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="outline" className={`text-[10px] uppercase ${PLAN_COLORS[ws.plan] || PLAN_COLORS.starter}`}>{ws.plan}</Badge>
-                      </td>
-                      <td className="p-4 text-sm text-right tabular-nums">{ws.agents}</td>
-                      <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell">{ws.recipes ?? 0}</td>
-                      <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell">{formatNumber(ws.requests)}</td>
-                      <td className="p-4 text-sm text-right tabular-nums hidden lg:table-cell text-muted-foreground">{formatNumber(ws.tokens)}</td>
-                      <td className="p-4 text-sm text-right tabular-nums font-medium">{formatCost(ws.cost)}</td>
-                      <td className="p-4 hidden lg:table-cell">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 flex-1 rounded-full bg-secondary/30 overflow-hidden">
-                            <motion.div className="h-full rounded-full bg-blue-400" initial={{ width: 0 }} animate={{ width: `${(ws.cost / maxWsCost) * 100}%` }} transition={{ duration: 0.6 }} />
-                          </div>
-                          <span className="text-[10px] text-muted-foreground w-8 text-right tabular-nums">
-                            {totalCost > 0 ? `${((ws.cost / totalCost) * 100).toFixed(0)}%` : '0%'}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    <AnimatePresence>
-                      {expandedWs.has(ws.id) && (
-                        <tr>
-                          <td colSpan={9} className="p-0">
-                            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.3 }} className="overflow-hidden">
-                              <div className="px-6 py-4 bg-secondary/5 border-b border-border/20">
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                                  {[
-                                    { icon: Bot, color: 'text-blue-400', label: 'Agents', value: ws.agents },
-                                    { icon: ChefHat, color: 'text-orange-400', label: 'Recipes', value: ws.recipes ?? 0 },
-                                    { icon: Play, color: 'text-green-400', label: 'Executions', value: ws.executions ?? 0 },
-                                    { icon: Zap, color: 'text-cyan-400', label: 'Tokens', value: formatNumber(ws.tokens) },
-                                    { icon: DollarSign, color: 'text-emerald-400', label: 'Cost/Req', value: ws.requests > 0 ? formatCost(ws.cost / ws.requests) : '--' },
-                                  ].map((m) => (
-                                    <div key={m.label} className="rounded-lg bg-secondary/20 border border-border/20 p-3">
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <m.icon className={`w-3.5 h-3.5 ${m.color}`} />
-                                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{m.label}</span>
-                                      </div>
-                                      <p className="text-lg font-bold">{m.value}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                                <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
-                                  <span>Created: {ws.created_at ? new Date(ws.created_at).toLocaleDateString() : 'N/A'}</span>
-                                  <span>Tokens/Req: {ws.requests > 0 ? formatNumber(ws.tokens / ws.requests) : '--'}</span>
-                                </div>
-                              </div>
-                            </motion.div>
-                          </td>
-                        </tr>
-                      )}
-                    </AnimatePresence>
-                  </Fragment>
+                        <span className="text-[10px] text-muted-foreground w-8 text-right tabular-nums">
+                          {totalCost > 0 ? `${((ws.cost / totalCost) * 100).toFixed(0)}%` : '0%'}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </Card>
       </motion.div>
-
-      {/* ═══ PLATFORM MODEL USAGE ═══ */}
-      {filteredModels.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.5 }}>
-          <Card className="glass-card overflow-hidden">
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <Layers className="w-5 h-5 text-purple-400" />
-                  Platform Model Usage
-                </span>
-                {providerFilter !== 'all' && (
-                  <Badge variant="outline" className="text-[10px] capitalize">{providerFilter}</Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border/50">
-                    <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Model</th>
-                    <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Provider</th>
-                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Requests</th>
-                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Tokens</th>
-                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Cost</th>
-                    <th className="p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden lg:table-cell w-36">Share</th>
-                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Workspaces</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredModels.map((model, idx) => (
-                    <tr key={model.model_id} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
-                      <td className="p-4">
-                        <div className="flex items-center gap-2.5">
-                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PROVIDER_COLORS[idx % PROVIDER_COLORS.length] }} />
-                          <Badge variant="secondary" className="font-mono text-xs">{shortenModelName(model.model_id)}</Badge>
-                        </div>
-                      </td>
-                      <td className="p-4 text-xs text-muted-foreground capitalize">{model.provider}</td>
-                      <td className="p-4 text-sm text-right tabular-nums">{formatNumber(model.requests)}</td>
-                      <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">{formatNumber(model.tokens)}</td>
-                      <td className="p-4 text-sm text-right tabular-nums font-medium">{formatCost(model.cost)}</td>
-                      <td className="p-4 hidden lg:table-cell">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 flex-1 rounded-full bg-secondary/30 overflow-hidden">
-                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${(model.cost / maxModelCost) * 100}%`, background: PROVIDER_COLORS[idx % PROVIDER_COLORS.length] }} />
-                          </div>
-                          <span className="text-[10px] text-muted-foreground w-8 text-right tabular-nums">
-                            {totalCost > 0 ? `${((model.cost / totalCost) * 100).toFixed(0)}%` : '0%'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <Building className="w-3 h-3 text-muted-foreground" />
-                          <span className="text-muted-foreground">{model.workspace_count}</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        </motion.div>
-      )}
-
-      {/* ═══ COMPOSIO API ANALYTICS ═══ */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.55 }}>
-        <div className="space-y-6">
-          {/* Section header */}
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center">
-              <AppWindow className="w-4 h-4 text-indigo-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold">Composio API & Tool Analytics</h3>
-              <p className="text-xs text-muted-foreground">Connected apps, action usage, and agent tool mappings</p>
-            </div>
-          </div>
-
-          {/* Composio Stats Row */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { label: 'Connected Apps', value: composioApps?.length ?? 0, sub: `${composioActiveApps} active`, icon: AppWindow, color: 'text-indigo-400', bg: 'bg-indigo-500/10', accent: 'border-l-indigo-500' },
-              { label: 'Total API Actions', value: composioTotalActions, sub: `Last ${periodDays}d`, icon: Zap, color: 'text-yellow-400', bg: 'bg-yellow-500/10', accent: 'border-l-yellow-500' },
-              { label: 'Most Used App', value: composioTopApp ? formatAppName(composioTopApp.app_name) : 'None', sub: composioTopApp ? `${composioTopApp.total_actions_used} actions` : 'No data', icon: Wrench, color: 'text-green-400', bg: 'bg-green-500/10', accent: 'border-l-green-500' },
-              { label: 'Agent Integrations', value: composioAgentTools?.length ?? 0, sub: 'Agents with tools', icon: Link2, color: 'text-cyan-400', bg: 'bg-cyan-500/10', accent: 'border-l-cyan-500' },
-            ].map((stat, idx) => (
-              <motion.div key={stat.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.6 + idx * 0.05 }}>
-                <Card className={`glass-card border-l-2 ${stat.accent}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="space-y-1 min-w-0">
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider truncate">{stat.label}</p>
-                        <p className="text-lg font-bold leading-none truncate">{stat.value}</p>
-                        <p className="text-[10px] text-muted-foreground mt-1">{stat.sub}</p>
-                      </div>
-                      <div className={`w-7 h-7 rounded-lg ${stat.bg} flex items-center justify-center shrink-0`}>
-                        <stat.icon className={`w-3.5 h-3.5 ${stat.color}`} />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </div>
-
-          {/* Connected Apps Grid + Action Leaderboard side by side */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Connected Apps */}
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <AppWindow className="w-5 h-5 text-indigo-400" />
-                  Connected Apps
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {!composioApps || composioApps.length === 0 ? (
-                  <div className="text-center py-8">
-                    <AppWindow className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-                    <p className="text-sm text-muted-foreground">No Composio apps connected</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">Connect apps in Settings to enable tool analytics</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
-                    {[...composioApps].sort((a, b) => b.total_actions_used - a.total_actions_used).map((app) => {
-                      const maxActions = Math.max(...composioApps.map((a) => a.total_actions_used), 1)
-                      return (
-                        <div key={app.app_name} className="rounded-lg border border-border/20 p-3 hover:border-border/40 transition-colors">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium">{formatAppName(app.app_name)}</span>
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] ${app.status === 'active' || app.status === 'connected' ? 'text-green-400 border-green-400/30' : app.status === 'error' ? 'text-red-400 border-red-400/30' : ''}`}
-                            >
-                              {app.status}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-                            <span>{app.total_actions_used} actions &middot; {app.agent_count} agent{app.agent_count !== 1 ? 's' : ''}</span>
-                            {app.documents_synced > 0 && <span>{app.documents_synced} docs</span>}
-                          </div>
-                          <div className="h-1.5 w-full rounded-full bg-secondary/30 overflow-hidden">
-                            <motion.div
-                              className="h-full rounded-full bg-indigo-400"
-                              initial={{ width: 0 }}
-                              animate={{ width: `${(app.total_actions_used / maxActions) * 100}%` }}
-                              transition={{ duration: 0.6 }}
-                            />
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Action Leaderboard */}
-            <Card className="glass-card overflow-hidden">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Zap className="w-5 h-5 text-yellow-400" />
-                  Top API Actions
-                </CardTitle>
-              </CardHeader>
-              {!sortedComposioActions.length ? (
-                <CardContent>
-                  <div className="text-center py-8">
-                    <Zap className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-                    <p className="text-sm text-muted-foreground">No action usage data yet</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">Actions will appear as agents use Composio tools</p>
-                  </div>
-                </CardContent>
-              ) : (
-                <div className="overflow-x-auto max-h-80">
-                  <table className="w-full">
-                    <thead className="sticky top-0 bg-card">
-                      <tr className="border-b border-border/50">
-                        <th
-                          className="text-left p-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-foreground"
-                          onClick={() => { actionSort === 'action_name' ? setActionSortDir((d) => d === 'desc' ? 'asc' : 'desc') : (setActionSort('action_name'), setActionSortDir('desc')) }}
-                        >
-                          Action {actionSort === 'action_name' && <ChevronDown className={`inline w-3 h-3 ${actionSortDir === 'asc' ? 'rotate-180' : ''}`} />}
-                        </th>
-                        <th className="text-left p-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">App</th>
-                        <th
-                          className="text-right p-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-foreground"
-                          onClick={() => { actionSort === 'total_usage_count' ? setActionSortDir((d) => d === 'desc' ? 'asc' : 'desc') : (setActionSort('total_usage_count'), setActionSortDir('desc')) }}
-                        >
-                          Usage {actionSort === 'total_usage_count' && <ChevronDown className={`inline w-3 h-3 ${actionSortDir === 'asc' ? 'rotate-180' : ''}`} />}
-                        </th>
-                        <th
-                          className="text-right p-3 text-[11px] font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-foreground hidden md:table-cell"
-                          onClick={() => { actionSort === 'agent_count' ? setActionSortDir((d) => d === 'desc' ? 'asc' : 'desc') : (setActionSort('agent_count'), setActionSortDir('desc')) }}
-                        >
-                          Agents {actionSort === 'agent_count' && <ChevronDown className={`inline w-3 h-3 ${actionSortDir === 'asc' ? 'rotate-180' : ''}`} />}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedComposioActions.slice(0, 15).map((action) => (
-                        <tr key={`${action.app_name}-${action.action_name}`} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
-                          <td className="p-3">
-                            <Badge variant="secondary" className="font-mono text-[10px]">{action.action_name}</Badge>
-                          </td>
-                          <td className="p-3 text-xs text-muted-foreground">{formatAppName(action.app_name)}</td>
-                          <td className="p-3 text-sm text-right tabular-nums font-medium">{action.total_usage_count}</td>
-                          <td className="p-3 text-sm text-right tabular-nums text-muted-foreground hidden md:table-cell">{action.agent_count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Card>
-          </div>
-
-          {/* Agent Tool Mapping */}
-          {composioAgentTools && composioAgentTools.length > 0 && (
-            <Card className="glass-card overflow-hidden">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Bot className="w-5 h-5 text-green-400" />
-                  Agent Tool Usage
-                </CardTitle>
-              </CardHeader>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border/50">
-                      <th className="w-8 p-4" />
-                      <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Agent</th>
-                      <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Tools</th>
-                      <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Total Usage</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {composioAgentTools.map((agent) => {
-                      const totalUsage = agent.tools.reduce((s, t) => s + t.usage_count, 0)
-                      const isExp = expandedWs.has(`agent-${agent.agent_id}`)
-                      return (
-                        <Fragment key={agent.agent_id}>
-                          <tr
-                            className="border-b border-border/20 hover:bg-secondary/10 transition-colors cursor-pointer"
-                            onClick={() => toggleExpand(`agent-${agent.agent_id}`)}
-                          >
-                            <td className="p-4 w-8">
-                              <motion.div animate={{ rotate: isExp ? 90 : 0 }} transition={{ duration: 0.2 }}>
-                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                              </motion.div>
-                            </td>
-                            <td className="p-4 font-medium text-sm">{agent.agent_name}</td>
-                            <td className="p-4 text-sm text-right tabular-nums">{agent.tools.length}</td>
-                            <td className="p-4 text-sm text-right tabular-nums font-medium">{totalUsage}</td>
-                          </tr>
-                          <AnimatePresence>
-                            {isExp && (
-                              <tr>
-                                <td colSpan={4} className="p-0">
-                                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
-                                    <div className="bg-secondary/5">
-                                      {agent.tools.map((tool) => (
-                                        <div key={tool.tool_name} className="flex items-center justify-between px-6 py-2.5 border-b border-border/10">
-                                          <div className="flex items-center gap-2">
-                                            <FileText className="w-3.5 h-3.5 text-muted-foreground" />
-                                            <Badge variant="secondary" className="font-mono text-[10px]">{tool.tool_name}</Badge>
-                                            <span className="text-xs text-muted-foreground">{formatAppName(tool.app_name)}</span>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            <span className="text-xs tabular-nums">{tool.usage_count}</span>
-                                            {!tool.enabled && <Badge variant="outline" className="text-[10px] px-1.5 py-0">disabled</Badge>}
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </motion.div>
-                                </td>
-                              </tr>
-                            )}
-                          </AnimatePresence>
-                        </Fragment>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          )}
-        </div>
-      </motion.div>
-
-      {/* ═══ PROVIDER BAR CHART (legacy fallback) ═══ */}
-      {!dashboard?.daily_by_provider?.series?.length && legacyCostData?.cost_by_provider?.length ? (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.6 }}>
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Server className="w-5 h-5 text-purple-400" />
-                Cost by Provider
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={legacyCostData.cost_by_provider.map((p) => ({ name: p.key, cost: p.total_cost }))} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v: number) => formatCost(v)} width={60} />
-                    <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', fontSize: '12px' }} formatter={(value: number) => [formatCost(value), 'Cost']} />
-                    <Bar dataKey="cost" radius={[6, 6, 0, 0]}>
-                      {legacyCostData.cost_by_provider.map((_, i) => <Cell key={i} fill={PROVIDER_COLORS[i % PROVIDER_COLORS.length]} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      ) : null}
     </div>
   )
 }
