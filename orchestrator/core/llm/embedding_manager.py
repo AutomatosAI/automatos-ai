@@ -57,25 +57,13 @@ def get_system_setting(key: str, default_value: Optional[str] = None) -> Optiona
 
 
 def get_credential_field(provider_type: str, field: str = "api_key") -> Optional[str]:
-    """Get credential from credential resolver"""
+    """Get credential from credential resolver using the same multi-strategy
+    lookup that LLM manager uses (settings mapping, name variations, type-based, env fallback)."""
     try:
-        from core.credentials.resolver import get_credential_resolver, CredentialNotFoundError
-        resolver = get_credential_resolver()
-        
-        # Try standard naming patterns
-        credential_names = [
-            f"development_{provider_type}_api",
-            f"development_{provider_type}",
-            f"{provider_type}_api",
-            provider_type
-        ]
-        
-        for cred_name in credential_names:
-            try:
-                return resolver.get_credential_field(cred_name, field)
-            except CredentialNotFoundError:
-                continue
-        
+        from core.llm.manager import get_credential_data
+        cred_data = get_credential_data(provider_type, service_name="embeddings")
+        if cred_data and field in cred_data:
+            return cred_data[field]
         return None
     except Exception as e:
         logger.debug(f"Failed to get credential for {provider_type}: {e}")
