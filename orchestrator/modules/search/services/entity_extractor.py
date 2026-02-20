@@ -305,23 +305,24 @@ async def create_or_get_entity(
     entity_type: str,
     canonical_name: str,
     description: Optional[str] = None,
-    embedding: Optional[List[float]] = None
+    embedding: Optional[List[float]] = None,
+    workspace_id: Optional[str] = None
 ) -> int:
     """
     Create entity if it doesn't exist, or return existing entity ID
-    
+
     Returns:
         entity_id
     """
     # Try to get existing entity
     cursor.execute("""
-        SELECT id FROM kb_entities 
+        SELECT id FROM kb_entities
         WHERE LOWER(canonical_name) = LOWER(%s)
         LIMIT 1
     """, [canonical_name])
-    
+
     result = cursor.fetchone()
-    
+
     if result:
         # Update mention count
         cursor.execute(
@@ -329,14 +330,14 @@ async def create_or_get_entity(
             [result[0]]
         )
         return result[0]
-    
+
     # Create new entity
     cursor.execute("""
-        INSERT INTO kb_entities (entity_name, entity_type, canonical_name, description, embedding, mention_count)
-        VALUES (%s, %s, %s, %s, %s, 1)
+        INSERT INTO kb_entities (entity_name, entity_type, canonical_name, description, embedding, mention_count, workspace_id)
+        VALUES (%s, %s, %s, %s, %s, 1, %s)
         RETURNING id
-    """, [entity_name, entity_type, canonical_name, description, embedding])
-    
+    """, [entity_name, entity_type, canonical_name, description, embedding, workspace_id])
+
     result = cursor.fetchone()
     return result[0]
 
