@@ -67,12 +67,20 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.GENERAL.value,
             "key": "embedding_model",
-            "default_value": "openai",
+            "default_value": "qwen/qwen3-embedding-8b",
             "value_type": "string",
-            "description": "Default embedding model type (openai, sentence_transformer, disabled)",
+            "description": "Embedding model name (used by the selected embedding_provider)",
+            "is_required": False
+        },
+        {
+            "category": SettingCategory.GENERAL.value,
+            "key": "embedding_provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": "Embedding provider (openrouter, openai, google, cohere, huggingface_local, huggingface_api, disabled)",
             "is_required": False,
             "validation_rules": {
-                "options": ["openai", "sentence_transformer", "disabled", "local"]
+                "options": ["openrouter", "openai", "google", "cohere", "huggingface_local", "huggingface_api", "disabled"]
             }
         },
         {

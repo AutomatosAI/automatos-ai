@@ -53,6 +53,7 @@ class EmbeddingProvider(Enum):
     COHERE = "cohere"
     HUGGINGFACE_LOCAL = "huggingface_local"
     HUGGINGFACE_API = "huggingface_api"
+    OPENROUTER = "openrouter"  # OpenRouter aggregator (20+ embedding models)
     DISABLED = "disabled"  # Deterministic fallback
 
 

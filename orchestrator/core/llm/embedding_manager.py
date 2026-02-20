@@ -18,6 +18,7 @@ from .clients.base import (
 )
 from .clients.openai_embedding import OpenAIEmbeddingProvider
 from .clients.huggingface_embedding import HuggingFaceLocalEmbeddingProvider
+from .clients.openrouter_embedding import OpenRouterEmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,8 @@ class EmbeddingManager:
                         "openai": "OPENAI_API_KEY",
                         "google": "GOOGLE_API_KEY",
                         "cohere": "COHERE_API_KEY",
-                        "huggingface_api": "HUGGINGFACE_API_KEY"
+                        "huggingface_api": "HUGGINGFACE_API_KEY",
+                        "openrouter": "OPENROUTER_API_KEY"
                     }
                     env_var = env_map.get(provider_type)
                     if env_var:
@@ -173,6 +175,8 @@ class EmbeddingManager:
         """Create embedding provider from config"""
         if config.provider == EmbeddingProvider.OPENAI:
             return OpenAIEmbeddingProvider(config)
+        elif config.provider == EmbeddingProvider.OPENROUTER:
+            return OpenRouterEmbeddingProvider(config)
         elif config.provider == EmbeddingProvider.HUGGINGFACE_LOCAL:
             return HuggingFaceLocalEmbeddingProvider(config)
         elif config.provider == EmbeddingProvider.DISABLED:
@@ -221,6 +225,49 @@ class EmbeddingManager:
         
         return self.provider.generate_embedding_sync(text)
     
+    async def generate_embeddings_batch(
+        self,
+        texts: List[str],
+        max_concurrent: int = 5
+    ) -> List[List[float]]:
+        """
+        Generate embeddings for multiple texts with parallel processing.
+
+        If the provider supports native batch (OpenRouter), uses a single API call.
+        Otherwise falls back to parallel individual calls with semaphore.
+
+        Args:
+            texts: List of texts to embed
+            max_concurrent: Max concurrent API calls
+
+        Returns:
+            List of embedding vectors in same order as input texts
+        """
+        import asyncio
+
+        self._ensure_provider()
+
+        if self.provider is None:
+            raise ValueError("Embedding provider not initialized")
+
+        # Use native batch if provider supports it (OpenRouter)
+        if hasattr(self.provider, 'generate_embeddings_batch'):
+            return await self.provider.generate_embeddings_batch(texts, max_concurrent)
+
+        # Fallback: parallel individual calls
+        semaphore = asyncio.Semaphore(max_concurrent)
+        results = [None] * len(texts)
+
+        async def embed_one(idx: int, text: str):
+            async with semaphore:
+                results[idx] = await self.provider.generate_embedding(text)
+
+        tasks = [embed_one(i, t) for i, t in enumerate(texts)]
+        await asyncio.gather(*tasks)
+
+        logger.info(f"Batch embedded {len(texts)} texts (concurrency={max_concurrent})")
+        return results
+
     def get_dimension(self) -> int:
         """Get embedding dimension from provider or system settings"""
         if self.provider is None:

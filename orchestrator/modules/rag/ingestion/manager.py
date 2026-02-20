@@ -821,7 +821,7 @@ class DocumentManager:
             # Multimodal processing (tables, formulas, images)
             try:
                 from modules.rag.ingestion.multimodal import TableProcessor, FormulaProcessor, ImageProcessor
-                from modules.knowledge import EntityExtractor, create_or_get_entity, create_entity_mention, create_entity_relationship
+                from modules.search.services.entity_extractor import EntityExtractor, create_or_get_entity, create_entity_mention, create_entity_relationship
                 
                 logger.info(f"Starting multimodal processing for document {document_id}")
                 
@@ -1069,6 +1069,8 @@ class DocumentManager:
             embeddings_for_s3 = []
             documents_for_s3 = []
 
+            # Phase 1: Filter and enrich chunks (no I/O)
+            filtered_chunks = []
             for chunk in chunks:
                 chunk.document_id = document_id
 
@@ -1104,9 +1106,29 @@ class DocumentManager:
                             {"table": int(t), "page": int(p)} for t, p in table_markers
                         ]
 
-                # Generate embedding
-                embedding = await self._generate_embedding(chunk.content)
-                chunk.embedding = embedding
+                filtered_chunks.append(chunk)
+
+            # Phase 2: Batch embed all chunks with parallel processing
+            if filtered_chunks:
+                chunk_texts = [c.content for c in filtered_chunks]
+                logger.info(f"Generating embeddings for {len(chunk_texts)} chunks (parallel batch)")
+
+                try:
+                    # Use batch embedding (parallel API calls)
+                    all_embeddings = await self._generate_embeddings_batch(chunk_texts)
+                except Exception as e:
+                    logger.warning(f"Batch embedding failed ({e}), falling back to sequential")
+                    all_embeddings = []
+                    for text in chunk_texts:
+                        emb = await self._generate_embedding(text)
+                        all_embeddings.append(emb)
+
+                for chunk, embedding in zip(filtered_chunks, all_embeddings):
+                    chunk.embedding = embedding
+
+            # Phase 3: Store chunks in database
+            for chunk in filtered_chunks:
+                embedding = chunk.embedding
 
                 if self.use_s3_vectors and self._s3_backend:
                     # Store metadata in postgres WITHOUT embedding (S3 vectors mode)
@@ -1219,6 +1241,60 @@ class DocumentManager:
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
             raise
+
+    async def _generate_embeddings_batch(self, texts: List[str], max_concurrent: int = 5) -> List[List[float]]:
+        """
+        Generate embeddings for multiple texts with caching and parallel processing.
+
+        Checks cache first, then batch-embeds only the cache misses.
+        Uses parallel API calls for providers that support it (OpenRouter).
+        """
+        try:
+            from core.cache import get_cache_service
+            cache = get_cache_service()
+
+            # Check cache for all texts
+            cached = cache.get_embeddings_batch(texts)
+
+            # Separate hits from misses
+            miss_indices = []
+            miss_texts = []
+            results = [None] * len(texts)
+
+            for i, text in enumerate(texts):
+                if cached.get(text) is not None:
+                    results[i] = cached[text]
+                else:
+                    miss_indices.append(i)
+                    miss_texts.append(text)
+
+            cache_hits = len(texts) - len(miss_texts)
+            if cache_hits > 0:
+                logger.info(f"Embedding cache: {cache_hits}/{len(texts)} hits, {len(miss_texts)} misses")
+
+            if not miss_texts:
+                return results
+
+            # Batch embed the misses
+            new_embeddings = await self.embedding_manager.generate_embeddings_batch(
+                miss_texts, max_concurrent=max_concurrent
+            )
+
+            # Fill results and cache the new embeddings
+            new_cache_entries = {}
+            for idx, emb in zip(miss_indices, new_embeddings):
+                results[idx] = emb
+                new_cache_entries[texts[idx]] = emb
+
+            if new_cache_entries:
+                cache.set_embeddings_batch(new_cache_entries)
+                logger.info(f"Cached {len(new_cache_entries)} new embeddings")
+
+            return results
+
+        except Exception as e:
+            logger.warning(f"Batch embedding with cache failed ({e}), falling back to sequential")
+            return [await self._generate_embedding(t) for t in texts]
     
     def list_documents(self, status: Optional[DocumentStatus] = None, 
                       file_type: Optional[DocumentType] = None,

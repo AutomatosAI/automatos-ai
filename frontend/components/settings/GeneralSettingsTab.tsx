@@ -33,6 +33,23 @@ export default function GeneralSettingsTab({
   const [formData, setFormData] = useState<Record<string, string>>({})
 
   const MODEL_DIMENSIONS: Record<string, Record<string, number>> = {
+    openrouter: {
+      'qwen/qwen3-embedding-8b': 1024,
+      'qwen/qwen3-embedding-4b': 1024,
+      'google/gemini-embedding-001': 3072,
+      'openai/text-embedding-3-large': 3072,
+      'openai/text-embedding-3-small': 1536,
+      'openai/text-embedding-ada-002': 1536,
+      'mistralai/mistral-embed-2312': 1024,
+      'mistralai/codestral-embed-2505': 1024,
+      'baai/bge-m3': 1024,
+      'baai/bge-large-en-v1.5': 1024,
+      'intfloat/e5-large-v2': 1024,
+      'intfloat/multilingual-e5-large': 1024,
+      'sentence-transformers/all-mpnet-base-v2': 768,
+      'sentence-transformers/all-minilm-l6-v2': 384,
+      'thenlper/gte-large': 1024,
+    },
     openai: {
       'text-embedding-3-small': 1536,
       'text-embedding-3-large': 3072,
@@ -199,16 +216,19 @@ export default function GeneralSettingsTab({
                   <SelectValue placeholder="Select embedding provider" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="openrouter">OpenRouter (20+ Models, Parallel Batch)</SelectItem>
+                  <SelectItem value="openai">OpenAI (Direct)</SelectItem>
                   <SelectItem value="google">Google</SelectItem>
                   <SelectItem value="cohere">Cohere</SelectItem>
-                  <SelectItem value="huggingface_local">HuggingFace Local (FREE) ⭐</SelectItem>
+                  <SelectItem value="huggingface_local">HuggingFace Local (FREE, Slow CPU)</SelectItem>
                   <SelectItem value="huggingface_api">HuggingFace API</SelectItem>
                   <SelectItem value="disabled">Disabled (Deterministic Fallback)</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Choose your embedding provider. HuggingFace Local runs models on your server (no API costs).
+                {formData.embedding_provider === 'openrouter'
+                  ? 'OpenRouter: 20+ models via single API key. Parallel batch processing. Uses your OPENROUTER_API_KEY.'
+                  : 'Choose your embedding provider. OpenRouter recommended for speed + quality.'}
               </p>
             </div>
 
@@ -232,6 +252,25 @@ export default function GeneralSettingsTab({
                   } />
                 </SelectTrigger>
                 <SelectContent>
+                  {formData.embedding_provider === 'openrouter' && (
+                    <>
+                      <SelectItem value="qwen/qwen3-embedding-8b">Qwen3 8B (1024d, 32K ctx, $0.01/M) — Best Value</SelectItem>
+                      <SelectItem value="qwen/qwen3-embedding-4b">Qwen3 4B (1024d, 32K ctx, $0.02/M) — Lighter</SelectItem>
+                      <SelectItem value="google/gemini-embedding-001">Gemini Embedding (3072d, 20K ctx, $0.15/M) — #1 MTEB</SelectItem>
+                      <SelectItem value="openai/text-embedding-3-large">OpenAI Large (3072d, 8K ctx, $0.13/M)</SelectItem>
+                      <SelectItem value="openai/text-embedding-3-small">OpenAI Small (1536d, 8K ctx, $0.02/M)</SelectItem>
+                      <SelectItem value="mistralai/mistral-embed-2312">Mistral Embed (1024d, 8K ctx, $0.10/M)</SelectItem>
+                      <SelectItem value="mistralai/codestral-embed-2505">Codestral Embed (1024d, 8K ctx, $0.15/M) — Code</SelectItem>
+                      <SelectItem value="baai/bge-m3">BGE-M3 (1024d, 8K ctx, $0.01/M) — Multilingual</SelectItem>
+                      <SelectItem value="baai/bge-large-en-v1.5">BGE-Large (1024d, 512 ctx, $0.01/M)</SelectItem>
+                      <SelectItem value="intfloat/e5-large-v2">E5-Large (1024d, 512 ctx, $0.01/M)</SelectItem>
+                      <SelectItem value="intfloat/multilingual-e5-large">E5-Large Multilingual (1024d, 512 ctx, $0.01/M)</SelectItem>
+                      <SelectItem value="sentence-transformers/all-mpnet-base-v2">MPNet-Base (768d, 512 ctx, $0.005/M)</SelectItem>
+                      <SelectItem value="sentence-transformers/all-minilm-l6-v2">MiniLM-L6 (384d, 512 ctx, $0.005/M) — Fastest</SelectItem>
+                      <SelectItem value="thenlper/gte-large">GTE-Large (1024d, 512 ctx, $0.01/M)</SelectItem>
+                      <SelectItem value="openai/text-embedding-ada-002">Ada 002 (1536d, 8K ctx, $0.10/M) — Legacy</SelectItem>
+                    </>
+                  )}
                   {formData.embedding_provider === 'openai' && (
                     <>
                       <SelectItem value="text-embedding-3-small">text-embedding-3-small (384 dims, fast)</SelectItem>
