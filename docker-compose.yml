@@ -2,12 +2,13 @@
 # Automatos AI - Unified Docker Compose
 # =============================================================================
 # Quick Start:
-#   1. Run: docker-compose up --build
-#   2. Access: http://localhost:3000
-#   3. Go to Settings > Credentials to add API keys (OpenAI, Anthropic, etc.)
+#   1. Copy .env.example to .env and set required values (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY)
+#   2. Run: docker-compose up --build
+#   3. Access: http://localhost:3000
+#   4. Go to Settings > Credentials to add API keys (OpenAI, Anthropic, etc.)
 #
-# No .env file needed! Infrastructure uses secure defaults.
-# All credentials managed via the Settings UI.
+# A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
+# All LLM credentials managed via the Settings UI.
 #
 # Profiles:
 #   - Default: Core services (postgres, redis, backend, frontend)
@@ -25,7 +26,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orchestrator_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-automatos_dev_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - set in .env file}
       POSTGRES_INITDB_ARGS: "-c max_connections=200 -c shared_buffers=256MB"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
@@ -48,13 +49,13 @@ services:
     image: redis:7-alpine
     container_name: automatos_redis
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:-automatos_redis_dev} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required - set in .env file} --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-automatos_redis_dev}", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -81,26 +82,29 @@ services:
       # Database
       POSTGRES_DB: ${POSTGRES_DB:-orchestrator_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-automatos_dev_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-automatos_dev_pass}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
       
       # Redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-automatos_redis_dev}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       
       # LLM API Keys (optional)
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       
+      # Document Generation (PRD-63)
+      GOTENBERG_URL: http://gotenberg:3000
+
       # Environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       
       # Security
-      API_KEY: ${API_KEY:-dev_api_key_change_in_production}
+      API_KEY: ${API_KEY:?API_KEY is required - set in .env file}
       
       # Clerk Authentication
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
@@ -170,6 +174,23 @@ services:
       ADMINER_DESIGN: nette
     ports:
       - "${ADMINER_PORT:-8080}:8080"
+    networks:
+      - automatos
+
+  # ===========================================================================
+  # Gotenberg - Document Conversion Sidecar (PRD-63)
+  # DOCX/XLSX → PDF via Chromium + LibreOffice
+  # ===========================================================================
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: automatos_gotenberg
+    restart: unless-stopped
+    profiles: ["all"]
+    environment:
+      GOTENBERG_API_TIMEOUT: "120s"
+      GOTENBERG_LOG_LEVEL: "info"
+    ports:
+      - "${GOTENBERG_PORT:-3001}:3000"
     networks:
       - automatos
 

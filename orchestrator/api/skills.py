@@ -21,6 +21,8 @@ import tempfile
 import shutil
 from pathlib import Path
 import zipfile
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 # Adjust imports to match your project structure
 from core.database.database import get_db
@@ -182,6 +184,7 @@ def recommend_skills_for_task(
 async def import_git_repository(
     source_data: GitSkillSourceCreate,
     background_tasks: BackgroundTasks,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -229,13 +232,14 @@ async def import_git_repository(
         raise
     except Exception as e:
         logger.error(f"Error importing Git repository: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sources", response_model=List[SkillSourceResponse])
 async def list_skill_sources(
     source_type: Optional[str] = Query(None, description="Filter by source type"),
     status: Optional[str] = Query(None, description="Filter by status"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -260,12 +264,13 @@ async def list_skill_sources(
         
     except Exception as e:
         logger.error(f"Error listing skill sources: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sources/{source_id}", response_model=SkillSourceResponse)
 async def get_skill_source(
     source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -286,12 +291,13 @@ async def get_skill_source(
         raise
     except Exception as e:
         logger.error(f"Error getting skill source: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/sources/{source_id}/update", response_model=Dict[str, Any])
 async def update_git_repository(
     source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -328,13 +334,14 @@ async def update_git_repository(
         raise
     except Exception as e:
         logger.error(f"Error updating Git repository: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/sources/{source_id}/rollback", response_model=Dict[str, Any])
 async def rollback_git_repository(
     source_id: int,
     commit_sha: str = Query(..., description="Commit SHA to rollback to"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -369,13 +376,14 @@ async def rollback_git_repository(
         raise
     except Exception as e:
         logger.error(f"Error rolling back Git repository: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/sources/{source_id}")
 async def deactivate_skill_source(
     source_id: int,
     deactivate_skills: bool = Query(False, description="Also deactivate associated skills"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -408,7 +416,7 @@ async def deactivate_skill_source(
     except Exception as e:
         logger.error(f"Error deactivating skill source: {e}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -423,6 +431,7 @@ async def list_skills(
     tags: Optional[str] = Query(None, description="Comma-separated tags"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -498,12 +507,13 @@ async def list_skills(
         
     except Exception as e:
         logger.error(f"Error listing skills: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{skill_id}", response_model=EnhancedSkillResponse)
 async def get_skill_details(
     skill_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -551,7 +561,7 @@ async def get_skill_details(
         raise
     except Exception as e:
         logger.error(f"Error getting skill details: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{skill_id}/content", response_model=SkillContentResponse)
@@ -559,6 +569,7 @@ async def get_skill_content(
     skill_id: int,
     level: int = Query(2, ge=1, le=3, description="Load level: 1=metadata, 2=core, 3=resource"),
     resource_path: Optional[str] = Query(None, description="Resource path for level 3"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -625,11 +636,12 @@ async def get_skill_content(
         raise
     except Exception as e:
         logger.error(f"Error getting skill content: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/admin/cleanup-old-mappings")  # Admin endpoint to avoid route conflicts
 async def cleanup_old_skill_mappings(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -657,8 +669,10 @@ async def cleanup_old_skill_mappings(
         if old_skill_ids:
             placeholders = ','.join([f':id{i}' for i in range(len(old_skill_ids))])
             params = {f'id{i}': skill_id for i, skill_id in enumerate(old_skill_ids)}
+            # SAFETY: placeholders contains only generated `:idN` bind-parameter names, not user input
+            delete_sql = "DELETE FROM agent_skills WHERE skill_id IN (" + placeholders + ")"
             deleted_count = db.execute(
-                text(f"DELETE FROM agent_skills WHERE skill_id IN ({placeholders})"),
+                text(delete_sql),
                 params
             ).rowcount
         else:
@@ -674,12 +688,13 @@ async def cleanup_old_skill_mappings(
     except Exception as e:
         db.rollback()
         logger.error(f"Error cleaning up old skill mappings: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/{skill_id}")
 async def deactivate_skill(
     skill_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -708,7 +723,7 @@ async def deactivate_skill(
     except Exception as e:
         logger.error(f"Error deactivating skill: {e}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -718,6 +733,7 @@ async def deactivate_skill(
 @router.get("/agents/{agent_id}/skills", response_model=List[EnhancedSkillResponse])
 async def get_agent_skills(
     agent_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -758,7 +774,7 @@ async def get_agent_skills(
         raise
     except Exception as e:
         logger.error(f"Error getting agent skills: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/agents/{agent_id}/skills")
@@ -766,6 +782,7 @@ async def assign_skills_to_agent(
     agent_id: int,
     skill_ids: List[int],
     replace: bool = Query(False, description="Replace existing skills instead of adding"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -814,13 +831,14 @@ async def assign_skills_to_agent(
     except Exception as e:
         logger.error(f"Error assigning skills to agent: {e}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/agents/{agent_id}/skills")
 async def remove_skills_from_agent(
     agent_id: int,
     skill_ids: List[int] = Query(..., description="Skill IDs to remove"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -850,7 +868,7 @@ async def remove_skills_from_agent(
     except Exception as e:
         logger.error(f"Error removing skills from agent: {e}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -860,6 +878,7 @@ async def remove_skills_from_agent(
 @router.post("/recommend", response_model=List[SkillRecommendation])
 async def recommend_skills(
     request: SkillRecommendationRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -893,7 +912,7 @@ async def recommend_skills(
         
     except Exception as e:
         logger.error(f"Error recommending skills: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================

@@ -60,6 +60,7 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
   const [queryHistory, setQueryHistory] = useState<any[]>([])
   const [selectedSourceId, setSelectedSourceId] = useState(selectedSource?.id?.toString() || '')
   const [showVisualization, setShowVisualization] = useState(false)
+  const [confidence, setConfidence] = useState<any>(null)
 
   // Get the selected source name for the delete dialog
   const selectedSourceName = sources.find(s => s.id.toString() === selectedSourceId)?.name || 'this database'
@@ -156,6 +157,7 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
         setGeneratedSQL(data.sql)
         setQueryResult(data.data) // Backend returns 'data' not 'results'
         setValidationResult({ valid: data.success })
+        setConfidence(data.confidence || null)
         setQuery(queryToRun)
         
         // Add to history
@@ -373,6 +375,22 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
               <span className="flex items-center gap-2">
                 <Code className="h-5 w-5" />
                 Generated SQL
+                {confidence && (
+                  <Badge
+                    variant="outline"
+                    className={
+                      confidence.level === 'high'
+                        ? 'bg-green-500/10 text-green-500 border-green-500/30'
+                        : confidence.level === 'medium'
+                        ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30'
+                        : 'bg-red-500/10 text-red-500 border-red-500/30'
+                    }
+                    title={`Score: ${confidence.score}/100 | ${confidence.recommendation || ''}`}
+                  >
+                    {confidence.level === 'high' ? 'High' : confidence.level === 'medium' ? 'Medium' : 'Low'} Confidence
+                    {confidence.score != null && ` (${confidence.score})`}
+                  </Badge>
+                )}
               </span>
               <div className="flex gap-2">
                 <Button
@@ -408,6 +426,28 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
                   <CheckCircle className="h-4 w-4 text-green-500" />
                   <span className="text-sm">Semantic validation passed</span>
                 </div>
+              </div>
+            )}
+
+            {/* Confidence Factor Breakdown */}
+            {confidence?.factors && (
+              <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+                <p className="text-xs font-medium mb-2 text-muted-foreground">Confidence Factors</p>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                  {Object.entries(confidence.factors).map(([key, value]: [string, any]) => (
+                    <div key={key} className="text-center">
+                      <div className="text-sm font-medium">{typeof value === 'number' ? value : 0}</div>
+                      <div className="text-[10px] text-muted-foreground capitalize">
+                        {key.replace(/_/g, ' ')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {confidence.recommendation && (
+                  <p className="text-xs text-muted-foreground mt-2 italic">
+                    {confidence.recommendation}
+                  </p>
+                )}
               </div>
             )}
           </CardContent>

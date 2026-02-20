@@ -575,7 +575,7 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                                 onClick={() => {
                                   initiateConnectionMutation.mutate({
                                     appName: composioAppName,
-                                    callbackUrl: `${window.location.origin}/tools?connected=${composioAppName}`,
+                                    callbackUrl: `${window.location.origin}/tools/callback?connected=${composioAppName}`,
                                   })
                                 }}
                               >

@@ -66,8 +66,8 @@ class AdvancedMemoryManager:
         cache_size: int = 1000,
         locality_threshold: float = 0.7,
         
-        # Augmentation settings
-        embedding_model: str = "all-MiniLM-L6-v2",
+        # Augmentation settings (model read from system settings, not hardcoded)
+        embedding_model: str = None,
         similarity_threshold: float = 0.7,
         max_external_items: int = 10000,
         

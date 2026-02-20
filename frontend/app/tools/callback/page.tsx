@@ -18,20 +18,27 @@ export default function ComposioCallbackPage() {
 
         // Notify the backend so it can mark the app as ACTIVE.
         // Always call if we know the app name — connection_id is optional.
-        // The backend will sync with Composio API if connection_id is missing.
-        if (connected) {
+        // For API_KEY apps, status param is often missing from the redirect —
+        // default to 'active' and let the backend validate at execution time.
+        const fireCallback = async () => {
+            if (!connected) return
+
             const appName = connected.toUpperCase()
             const normalizedStatus = (status || 'active').toLowerCase()
             const params = new URLSearchParams({ status: normalizedStatus })
             if (connectionId) {
                 params.set('connection_id', connectionId)
             }
-            apiClient
-                .post(`/api/composio/connect/${encodeURIComponent(appName)}/callback?${params.toString()}`)
-                .catch((err) => {
-                    console.warn('Failed to sync Composio connection to backend:', err)
-                })
+            try {
+                await apiClient.post(
+                    `/api/composio/connect/${encodeURIComponent(appName)}/callback?${params.toString()}`
+                )
+            } catch (err) {
+                console.warn('Failed to sync Composio connection to backend:', err)
+            }
         }
+
+        fireCallback()
 
         // If successful, close the popup
         if (status === 'success' || status === 'active' || connected) {

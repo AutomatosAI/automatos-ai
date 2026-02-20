@@ -265,7 +265,7 @@ async def list_plugins(
         raise
     except Exception as e:
         logger.error("Error listing marketplace plugins: %s", e)
-        raise HTTPException(status_code=500, detail=f"Failed to list plugins: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/categories", response_model=List[CategoryOut])
@@ -297,7 +297,7 @@ async def list_categories(
 
     except Exception as e:
         logger.error("Error listing categories: %s", e)
-        raise HTTPException(status_code=500, detail=f"Failed to list categories: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{plugin_id}", response_model=PluginDetailOut)
@@ -374,7 +374,7 @@ async def get_plugin_detail(
         raise
     except Exception as e:
         logger.error("Error fetching plugin %s: %s", plugin_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch plugin: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{plugin_id}/content", response_model=PluginContentOut)
@@ -427,4 +427,4 @@ async def get_plugin_content(
         raise
     except Exception as e:
         logger.error("Error fetching plugin content %s: %s", plugin_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch plugin content: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")

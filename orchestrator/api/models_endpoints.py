@@ -14,6 +14,8 @@ from typing import List, Optional, Dict, Any
 from core.database.database import get_db
 from core.llm.model_registry import ModelRegistry, ModelInfo
 import logging
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,7 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 async def list_models(
     provider: Optional[str] = Query(None, description="Filter by provider (openai, anthropic, huggingface)"),
     status: str = Query('active', description="Filter by status (active, deprecated, beta)"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -49,12 +52,13 @@ async def list_models(
         
     except Exception as e:
         logger.error(f"Error listing models: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{model_id}", response_model=Dict[str, Any])
 async def get_model(
     model_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -86,14 +90,11 @@ async def get_model(
         raise
     except Exception as e:
         logger.error(f"Error retrieving model {model_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to retrieve model: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/providers/", response_model=List[Dict[str, Any]])
-async def list_providers(db: Session = Depends(get_db)):
+async def list_providers(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """
     List all available LLM providers with their models.
     
@@ -131,15 +132,13 @@ async def list_providers(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error listing providers: {str(e)}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to list providers: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/recommend", response_model=Dict[str, Any])
 async def recommend_model(
     requirements: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -193,15 +192,13 @@ async def recommend_model(
         raise
     except Exception as e:
         logger.error(f"Error recommending model: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to recommend model: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/estimate-cost", response_model=Dict[str, Any])
 async def estimate_cost(
     request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -272,15 +269,13 @@ async def estimate_cost(
         raise
     except Exception as e:
         logger.error(f"Error estimating cost: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to estimate cost: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/by-task/{task_type}", response_model=List[Dict[str, Any]])
 async def get_models_by_task(
     task_type: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -308,14 +303,11 @@ async def get_models_by_task(
         
     except Exception as e:
         logger.error(f"Error getting models by task: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get models by task: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats/", response_model=Dict[str, Any])
-async def get_model_stats(db: Session = Depends(get_db)):
+async def get_model_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """
     Get overall statistics about available models.
     
@@ -349,8 +341,5 @@ async def get_model_stats(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting model stats: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get model stats: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail="Internal server error")
 

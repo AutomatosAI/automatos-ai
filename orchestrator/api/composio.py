@@ -293,7 +293,7 @@ async def initiate_connection(
         )
     except Exception as e:
         logger.error(f"Failed to initiate connection for {app_name}: {e}")
-        raise HTTPException(status_code=503, detail=f"Failed to initiate OAuth: {str(e)}")
+        raise HTTPException(status_code=503, detail="Failed to initiate OAuth connection")
     
     # Store pending connection
     entity_manager.add_connection(
@@ -344,6 +344,20 @@ async def connection_callback(
                 logger.info(f"[CALLBACK] Resolved connection_id from Composio API: {resolved_connection_id}")
         except Exception as e:
             logger.warning(f"[CALLBACK] Could not resolve connection_id from Composio: {e}")
+
+    # Fallback: scan all entity connections for this app (covers API_KEY apps
+    # where get_connection_status fails due to missing auth_config_id cache)
+    if not resolved_connection_id:
+        try:
+            connections = entity_manager.get_entity_connections(str(entity["id"]))
+            for conn in connections:
+                if (conn.get("app_name") or "").upper() == app_name.upper():
+                    resolved_connection_id = conn.get("connection_id")
+                    if resolved_connection_id:
+                        logger.info(f"[CALLBACK] Resolved connection_id from entity connections: {resolved_connection_id}")
+                    break
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Entity connections fallback failed: {e}")
 
     # Normalize status — treat "success" as "active"
     normalized_status = "active" if status in ("success", "active") else status
@@ -862,7 +876,7 @@ async def subscribe_to_trigger(
         )
     except Exception as e:
         logger.error(f"Failed to subscribe to trigger: {e}")
-        raise HTTPException(status_code=503, detail=f"Failed to subscribe: {str(e)}")
+        raise HTTPException(status_code=503, detail="Failed to subscribe to trigger")
     
     # Store subscription
     subscription = TriggerSubscription(

@@ -88,12 +88,34 @@ class CodeGraphService:
         except Exception as e:
             logger.warning(f"EnhancedVectorStore not available, using fallback: {e}")
         
-        # Supported file extensions
-        self.language_extensions = {
-            'python': ['.py'],
-            'typescript': ['.ts', '.tsx'],
-            'javascript': ['.js', '.jsx']
-        }
+        # Initialize tree-sitter parser (PRD-62: 14+ language support)
+        self._treesitter_parser = None
+        try:
+            from .parsers.treesitter_parser import TreeSitterParser
+            self._treesitter_parser = TreeSitterParser()
+            if self._treesitter_parser.available:
+                logger.info("CodeGraphService using tree-sitter for multi-language parsing (14+ languages)")
+            else:
+                logger.warning("TreeSitterParser created but tree-sitter not available, using fallback parsers")
+                self._treesitter_parser = None
+        except Exception as e:
+            logger.warning(f"TreeSitterParser not available, using legacy parsers: {e}")
+
+        # Supported file extensions (expanded with tree-sitter support)
+        if self._treesitter_parser and self._treesitter_parser.available:
+            # Build from tree-sitter's supported languages
+            self.language_extensions = {}
+            for ext, lang in self._treesitter_parser.SUPPORTED_LANGUAGES.items():
+                if lang not in self.language_extensions:
+                    self.language_extensions[lang] = []
+                self.language_extensions[lang].append(ext)
+        else:
+            # Fallback: original 3-language support
+            self.language_extensions = {
+                'python': ['.py'],
+                'typescript': ['.ts', '.tsx'],
+                'javascript': ['.js', '.jsx']
+            }
         
         # Default exclude patterns
         self.default_excludes = [
@@ -147,47 +169,26 @@ class CodeGraphService:
         # Create or update project record
         if existing:
             project_id = existing.id
-            # Delete old symbols and relationships before re-indexing (to handle dimension changes)
-            logger.info(f"Deleting old symbols and embeddings for project {project_name} before re-indexing...")
-            
-            # Count records before deletion
-            rel_count = self.db.execute(
-                text("SELECT COUNT(*) FROM codegraph_relationships WHERE project_id = :id"),
-                {"id": project_id}
-            ).scalar()
-            sym_count = self.db.execute(
-                text("SELECT COUNT(*) FROM codegraph_symbols WHERE project_id = :id"),
-                {"id": project_id}
-            ).scalar()
-            file_count = self.db.execute(
-                text("SELECT COUNT(*) FROM codegraph_files WHERE project_id = :id"),
-                {"id": project_id}
-            ).scalar()
-            
-            logger.info(f"Found {rel_count} relationships, {sym_count} symbols, {file_count} files to delete")
-            
-            # Delete old data
-            self.db.execute(
-                text("DELETE FROM codegraph_relationships WHERE project_id = :id"),
-                {"id": project_id}
-            )
-            self.db.execute(
-                text("DELETE FROM codegraph_symbols WHERE project_id = :id"),
-                {"id": project_id}
-            )
-            self.db.execute(
-                text("DELETE FROM codegraph_files WHERE project_id = :id"),
-                {"id": project_id}
-            )
+            # PRD-62: Incremental indexing — load existing file hashes for comparison
+            self._existing_file_hashes = {}
+            try:
+                rows = self.db.execute(
+                    text("SELECT file_path, file_hash FROM codegraph_files WHERE project_id = :id"),
+                    {"id": project_id}
+                ).fetchall()
+                self._existing_file_hashes = {r.file_path: r.file_hash for r in rows}
+                logger.info(f"Loaded {len(self._existing_file_hashes)} existing file hashes for incremental indexing")
+            except Exception as e:
+                logger.warning(f"Could not load file hashes, will do full re-index: {e}")
+
+            # Only delete symbols for files that have changed (determined during parse loop)
+            # Don't do a full wipe anymore — incremental indexing handles per-file updates
             self.db.execute(
                 text("UPDATE codegraph_projects SET status = 'indexing', updated_at = NOW() WHERE id = :id"),
                 {"id": project_id}
             )
-            
-            # Commit deletion immediately
             self.db.commit()
-            logger.info(f"✅ Deleted {rel_count} relationships, {sym_count} symbols, {file_count} files")
-            
+
             # Ensure embedding column dimension matches current embedding model
             self._ensure_embedding_dimension()
         else:
@@ -225,13 +226,42 @@ class CodeGraphService:
             files_data = []
             total_files = 0
             
+            skipped_files = 0
+            discovered_paths = set()
+
             for file_path in self._discover_files(repo_path, all_excludes):
                 try:
+                    rel_path = os.path.relpath(file_path, repo_path)
+                    discovered_paths.add(rel_path)
+
+                    # PRD-62: Incremental indexing — skip unchanged files
+                    existing_hashes = getattr(self, '_existing_file_hashes', {})
+                    if existing_hashes:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content_check = f.read()
+                        new_hash = hashlib.sha256(content_check.encode()).hexdigest()
+                        if existing_hashes.get(rel_path) == new_hash:
+                            skipped_files += 1
+                            total_files += 1
+                            continue
+                        # File changed — delete old symbols/relationships for this file
+                        self.db.execute(
+                            text("""
+                                DELETE FROM codegraph_relationships WHERE project_id = :pid
+                                AND (from_symbol_id IN (SELECT id FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp)
+                                  OR to_symbol_id IN (SELECT id FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp))
+                            """),
+                            {"pid": project_id, "fp": rel_path}
+                        )
+                        self.db.execute(
+                            text("DELETE FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp"),
+                            {"pid": project_id, "fp": rel_path}
+                        )
+
                     parse_result = await self._parse_file(file_path, repo_path)
-                    
+
                     if parse_result:
                         # Store file metadata
-                        rel_path = os.path.relpath(file_path, repo_path)
                         files_data.append({
                             "project_id": project_id,
                             "file_path": rel_path,
@@ -276,6 +306,32 @@ class CodeGraphService:
                     logger.warning(f"Failed to parse {file_path}: {e}")
                     continue
             
+            # PRD-62: Remove symbols for files that were deleted from repo
+            if existing_hashes:
+                deleted_paths = set(existing_hashes.keys()) - discovered_paths
+                for del_path in deleted_paths:
+                    self.db.execute(
+                        text("""
+                            DELETE FROM codegraph_relationships WHERE project_id = :pid
+                            AND (from_symbol_id IN (SELECT id FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp)
+                              OR to_symbol_id IN (SELECT id FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp))
+                        """),
+                        {"pid": project_id, "fp": del_path}
+                    )
+                    self.db.execute(
+                        text("DELETE FROM codegraph_symbols WHERE project_id = :pid AND file_path = :fp"),
+                        {"pid": project_id, "fp": del_path}
+                    )
+                    self.db.execute(
+                        text("DELETE FROM codegraph_files WHERE project_id = :pid AND file_path = :fp"),
+                        {"pid": project_id, "fp": del_path}
+                    )
+                if deleted_paths:
+                    logger.info(f"Removed {len(deleted_paths)} deleted files from index")
+
+            if skipped_files:
+                logger.info(f"Incremental indexing: skipped {skipped_files} unchanged files, re-parsed {total_files - skipped_files} changed files")
+
             # Batch insert files
             if files_data:
                 for file_data in files_data:
@@ -417,26 +473,71 @@ class CodeGraphService:
             return pattern in path
     
     async def _parse_file(self, file_path: str, repo_root: str) -> Optional[ParseResult]:
-        """Parse a single file and extract symbols"""
+        """Parse a single file and extract symbols.
+
+        Uses tree-sitter parser (14+ languages) when available,
+        falls back to legacy Python AST / regex parsers.
+        """
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-            
+
             # Calculate file hash
             file_hash = hashlib.sha256(content.encode()).hexdigest()
             lines_of_code = len([line for line in content.split('\n') if line.strip()])
-            
-            # Detect language
+
             extension = Path(file_path).suffix
+
+            # Try tree-sitter first (PRD-62: 14+ language support)
+            if self._treesitter_parser:
+                lang_name = self._treesitter_parser.get_language_for_extension(extension)
+                if lang_name:
+                    ts_result = self._treesitter_parser.parse_file(file_path, content, repo_root)
+                    if not ts_result.errors:
+                        # Convert tree-sitter results to CodeSymbol/CodeRelationship
+                        symbols = [
+                            CodeSymbol(
+                                symbol_type=s.symbol_type,
+                                name=s.name,
+                                qualified_name=f"{s.file_path}::{s.name}",
+                                file_path=s.file_path,
+                                line_number=s.line_number,
+                                signature=s.signature,
+                                docstring=s.docstring,
+                                code_snippet=s.code_snippet,
+                                metadata=s.metadata,
+                            )
+                            for s in ts_result.symbols
+                        ]
+                        relationships = [
+                            CodeRelationship(
+                                from_symbol=r.from_symbol,
+                                to_symbol=r.to_symbol_name,
+                                relationship_type=r.relationship_type,
+                                metadata=r.metadata,
+                            )
+                            for r in ts_result.relationships
+                        ]
+                        return ParseResult(
+                            symbols=symbols,
+                            relationships=relationships,
+                            file_hash=file_hash,
+                            lines_of_code=lines_of_code,
+                            language=ts_result.language,
+                        )
+                    else:
+                        logger.debug(f"tree-sitter parse errors for {file_path}, falling back: {ts_result.errors}")
+
+            # Fallback: legacy parsers (Python AST + regex TS/JS)
             language = self._detect_language(extension)
-            
+
             if language == 'python':
                 symbols, relationships = self._parse_python(content, file_path, repo_root)
             elif language in ['typescript', 'javascript']:
                 symbols, relationships = self._parse_typescript_javascript(content, file_path, repo_root, language)
             else:
                 return None
-            
+
             return ParseResult(
                 symbols=symbols,
                 relationships=relationships,
@@ -444,7 +545,7 @@ class CodeGraphService:
                 lines_of_code=lines_of_code,
                 language=language
             )
-            
+
         except Exception as e:
             logger.warning(f"Failed to parse {file_path}: {e}")
             return None
@@ -723,17 +824,22 @@ class CodeGraphService:
                     logger.warning(f"Could not drop index: {e}")
                 
                 # Alter the column
+                # Validate current_dim is a safe integer before interpolating into DDL
+                # (DDL statements cannot use bind parameters for type definitions)
+                current_dim = int(current_dim)
+                if not (1 <= current_dim <= 10000):
+                    raise ValueError(f"Invalid embedding dimension: {current_dim}")
                 self.db.execute(
-                    text(f"ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector({current_dim})")
+                    text("ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector(" + str(current_dim) + ")")
                 )
-                
+
                 # Recreate the index
                 try:
                     self.db.execute(
-                        text(f"""
-                            CREATE INDEX idx_codegraph_symbols_embedding 
-                            ON codegraph_symbols 
-                            USING ivfflat (embedding vector_cosine_ops) 
+                        text("""
+                            CREATE INDEX idx_codegraph_symbols_embedding
+                            ON codegraph_symbols
+                            USING ivfflat (embedding vector_cosine_ops)
                             WITH (lists = 100)
                         """)
                     )
@@ -970,11 +1076,40 @@ class CodeGraphService:
                     except Exception as e:
                         logger.warning(f"Failed to insert relationship: {e}")
                         continue
-                else:
+                elif from_symbol_id and not to_symbol_id:
+                    # PRD-62 Bug #4: Store as external_reference instead of silently skipping
+                    to_name = rel['to_symbol'].split('::')[-1] if '::' in rel['to_symbol'] else rel['to_symbol']
+                    try:
+                        self.db.execute(
+                            text("""
+                                INSERT INTO codegraph_relationships
+                                (project_id, from_symbol_id, to_symbol_id, relationship_type, metadata, workspace_id)
+                                VALUES (:project_id, :from_symbol_id, NULL, 'external_reference', CAST(:metadata AS jsonb), :workspace_id)
+                            """),
+                            {
+                                "project_id": project_id,
+                                "from_symbol_id": from_symbol_id,
+                                "relationship_type": 'external_reference',
+                                "metadata": json.dumps({
+                                    **rel.get('metadata', {}),
+                                    'status': 'unresolved',
+                                    'reason': 'not_in_project',
+                                    'target_name': to_name,
+                                    'original_type': rel['relationship_type'],
+                                }),
+                                "workspace_id": rel.get('workspace_id')
+                            }
+                        )
+                        relationships_inserted += 1
+                    except Exception:
+                        pass
+                    logger.debug(f"Unresolved reference: {to_name} (from {rel['from_symbol']})")
                     skipped_external += 1
-            
+                else:
+                    skipped_notfound += 1
+
             self.db.commit()
-            logger.info(f"✅ Stored {relationships_inserted} relationships (from {len(relationships_data)} extracted, {matched_fuzzy} fuzzy-matched, {skipped_external} skipped)")
+            logger.info(f"Stored {relationships_inserted} relationships (from {len(relationships_data)} extracted, {matched_fuzzy} fuzzy-matched, {skipped_external} external refs, {skipped_notfound} unresolved)")
             
         except Exception as e:
             logger.error(f"Failed to store relationships: {e}")
@@ -1005,36 +1140,64 @@ class CodeGraphService:
         project_id = project.id
         
         # Build search query
-        type_filter = "AND symbol_type = :symbol_type" if symbol_type else ""
-        
-        search_query = text(f"""
-            SELECT
-                id,
-                symbol_type,
-                name,
-                qualified_name,
-                file_path,
-                line_number,
-                signature,
-                docstring,
-                code_snippet
-            FROM codegraph_symbols
-            WHERE project_id = :project_id
-                {type_filter}
-                AND (
-                    name ILIKE :query
-                    OR qualified_name ILIKE :query
-                    OR signature ILIKE :query
-                )
-            ORDER BY
-                CASE
-                    WHEN name = :exact_query THEN 1
-                    WHEN name ILIKE :starts_with THEN 2
-                    ELSE 3
-                END,
-                name
-            LIMIT :limit
-        """)
+        # Use two separate fully-parameterized queries to avoid f-string SQL interpolation
+        if symbol_type:
+            search_query = text("""
+                SELECT
+                    id,
+                    symbol_type,
+                    name,
+                    qualified_name,
+                    file_path,
+                    line_number,
+                    signature,
+                    docstring,
+                    code_snippet
+                FROM codegraph_symbols
+                WHERE project_id = :project_id
+                    AND symbol_type = :symbol_type
+                    AND (
+                        name ILIKE :query
+                        OR qualified_name ILIKE :query
+                        OR signature ILIKE :query
+                    )
+                ORDER BY
+                    CASE
+                        WHEN name = :exact_query THEN 1
+                        WHEN name ILIKE :starts_with THEN 2
+                        ELSE 3
+                    END,
+                    name
+                LIMIT :limit
+            """)
+        else:
+            search_query = text("""
+                SELECT
+                    id,
+                    symbol_type,
+                    name,
+                    qualified_name,
+                    file_path,
+                    line_number,
+                    signature,
+                    docstring,
+                    code_snippet
+                FROM codegraph_symbols
+                WHERE project_id = :project_id
+                    AND (
+                        name ILIKE :query
+                        OR qualified_name ILIKE :query
+                        OR signature ILIKE :query
+                    )
+                ORDER BY
+                    CASE
+                        WHEN name = :exact_query THEN 1
+                        WHEN name ILIKE :starts_with THEN 2
+                        ELSE 3
+                    END,
+                    name
+                LIMIT :limit
+            """)
         
         params = {
             "project_id": project_id,
@@ -1198,10 +1361,11 @@ class CodeGraphService:
         
         # FALLBACK: Original SQL-based implementation (kept for rollback)
         logger.info("Using fallback SQL-based semantic search")
-        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
-        
-        # Semantic search
-        search_query = text(f"""
+        # Validate embedding values are numeric and build safe string for parameterized query
+        embedding_str = '[' + ','.join(str(float(v)) for v in query_embedding) + ']'
+
+        # Semantic search using parameterized query with CAST for the embedding vector
+        search_query = text("""
             SELECT
                 id,
                 symbol_type,
@@ -1212,17 +1376,17 @@ class CodeGraphService:
                 signature,
                 docstring,
                 code_snippet,
-                1 - (embedding <=> '{embedding_str}'::vector) as similarity
+                1 - (embedding <=> CAST(:embedding AS vector)) as similarity
             FROM codegraph_symbols
             WHERE project_id = :project_id
                 AND embedding IS NOT NULL
-            ORDER BY embedding <=> '{embedding_str}'::vector
+            ORDER BY embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
         """)
         
         results = self.db.execute(
             search_query,
-            {"project_id": project_id, "limit": limit}
+            {"project_id": project_id, "limit": limit, "embedding": embedding_str}
         ).fetchall()
         
         # Format results
@@ -1501,4 +1665,188 @@ class CodeGraphService:
             "edges": edges
         }
 
+    # ── PRD-62: Architecture Analysis (US-007) ────────────────────────
 
+    async def analyze_architecture(
+        self,
+        project_id: int,
+        workspace_id: Optional[str] = None,
+        focus_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get high-level architecture overview: modules, key symbols, dependency patterns.
+
+        Args:
+            project_id: Project to analyze
+            workspace_id: Workspace for isolation
+            focus_path: Optional directory prefix to focus on
+        """
+        # Verify project exists
+        project = self.db.execute(
+            text("SELECT id, name FROM codegraph_projects WHERE id = :id AND workspace_id = :wid"),
+            {"id": project_id, "wid": workspace_id}
+        ).fetchone()
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+
+        # Fetch symbols (optionally filtered by path)
+        if focus_path:
+            symbols = self.db.execute(
+                text("""
+                    SELECT id, name, qualified_name, symbol_type, file_path, line_number
+                    FROM codegraph_symbols
+                    WHERE project_id = :pid AND workspace_id = :wid AND file_path LIKE :fp
+                """),
+                {"pid": project_id, "wid": workspace_id, "fp": f"{focus_path}%"}
+            ).fetchall()
+        else:
+            symbols = self.db.execute(
+                text("""
+                    SELECT id, name, qualified_name, symbol_type, file_path, line_number
+                    FROM codegraph_symbols
+                    WHERE project_id = :pid AND workspace_id = :wid
+                """),
+                {"pid": project_id, "wid": workspace_id}
+            ).fetchall()
+
+        # Fetch relationships
+        relationships = self.db.execute(
+            text("""
+                SELECT r.from_symbol_id, r.to_symbol_id, r.relationship_type
+                FROM codegraph_relationships r
+                WHERE r.project_id = :pid AND r.workspace_id = :wid
+                AND r.relationship_type != 'external_reference'
+            """),
+            {"pid": project_id, "wid": workspace_id}
+        ).fetchall()
+
+        # Group symbols by file
+        files_map: Dict[str, List[Dict]] = {}
+        symbol_type_counts: Dict[str, int] = {}
+        for s in symbols:
+            fp = s.file_path
+            if fp not in files_map:
+                files_map[fp] = []
+            files_map[fp].append({
+                "id": s.id, "name": s.name, "type": s.symbol_type, "line": s.line_number
+            })
+            symbol_type_counts[s.symbol_type] = symbol_type_counts.get(s.symbol_type, 0) + 1
+
+        # Relationship type counts
+        rel_type_counts: Dict[str, int] = {}
+        incoming_counts: Dict[int, int] = {}
+        for r in relationships:
+            rel_type_counts[r.relationship_type] = rel_type_counts.get(r.relationship_type, 0) + 1
+            if r.to_symbol_id:
+                incoming_counts[r.to_symbol_id] = incoming_counts.get(r.to_symbol_id, 0) + 1
+
+        # Top referenced symbols (by incoming relationship count)
+        symbol_id_map = {s.id: s for s in symbols}
+        top_referenced = sorted(incoming_counts.items(), key=lambda x: x[1], reverse=True)[:20]
+        top_symbols = []
+        for sym_id, count in top_referenced:
+            s = symbol_id_map.get(sym_id)
+            if s:
+                top_symbols.append({
+                    "name": s.name, "qualified_name": s.qualified_name,
+                    "type": s.symbol_type, "file": s.file_path,
+                    "incoming_references": count,
+                })
+
+        return {
+            "project_id": project_id,
+            "project_name": project.name,
+            "total_symbols": len(symbols),
+            "total_relationships": len(relationships),
+            "total_files": len(files_map),
+            "symbol_type_counts": symbol_type_counts,
+            "relationship_type_counts": rel_type_counts,
+            "top_referenced_symbols": top_symbols,
+            "files": {fp: syms for fp, syms in sorted(files_map.items())},
+        }
+
+    async def find_dependencies(
+        self,
+        project_id: int,
+        symbol_name: str,
+        direction: str = 'both',
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Find all symbols that depend on a given symbol, or that it depends on.
+
+        Args:
+            project_id: Project to search
+            symbol_name: Symbol name (simple or qualified)
+            direction: 'dependents', 'dependencies', or 'both'
+            workspace_id: Workspace for isolation
+        """
+        # Find the target symbol(s)
+        target_symbols = self.db.execute(
+            text("""
+                SELECT id, name, qualified_name, file_path, symbol_type
+                FROM codegraph_symbols
+                WHERE project_id = :pid AND workspace_id = :wid
+                AND (name = :name OR qualified_name = :name)
+            """),
+            {"pid": project_id, "wid": workspace_id, "name": symbol_name}
+        ).fetchall()
+
+        if not target_symbols:
+            return {
+                "symbol": symbol_name, "direction": direction,
+                "dependents": [], "dependencies": [], "error": "Symbol not found"
+            }
+
+        target_ids = [s.id for s in target_symbols]
+        dependents = []
+        dependencies = []
+
+        if direction in ('dependents', 'both'):
+            # Symbols that reference target (incoming edges)
+            for tid in target_ids:
+                rows = self.db.execute(
+                    text("""
+                        SELECT DISTINCT s.name, s.qualified_name, s.file_path, s.symbol_type, r.relationship_type
+                        FROM codegraph_relationships r
+                        JOIN codegraph_symbols s ON s.id = r.from_symbol_id
+                        WHERE r.to_symbol_id = :tid AND r.project_id = :pid
+                        AND r.relationship_type != 'external_reference'
+                    """),
+                    {"tid": tid, "pid": project_id}
+                ).fetchall()
+                for row in rows:
+                    dependents.append({
+                        "name": row.name, "qualified_name": row.qualified_name,
+                        "file": row.file_path, "type": row.symbol_type,
+                        "relationship": row.relationship_type,
+                    })
+
+        if direction in ('dependencies', 'both'):
+            # Symbols that target depends on (outgoing edges)
+            for tid in target_ids:
+                rows = self.db.execute(
+                    text("""
+                        SELECT DISTINCT s.name, s.qualified_name, s.file_path, s.symbol_type, r.relationship_type
+                        FROM codegraph_relationships r
+                        JOIN codegraph_symbols s ON s.id = r.to_symbol_id
+                        WHERE r.from_symbol_id = :tid AND r.project_id = :pid
+                        AND r.relationship_type != 'external_reference'
+                    """),
+                    {"tid": tid, "pid": project_id}
+                ).fetchall()
+                for row in rows:
+                    dependencies.append({
+                        "name": row.name, "qualified_name": row.qualified_name,
+                        "file": row.file_path, "type": row.symbol_type,
+                        "relationship": row.relationship_type,
+                    })
+
+        return {
+            "symbol": symbol_name,
+            "direction": direction,
+            "dependents": dependents,
+            "dependencies": dependencies,
+            "dependents_count": len(dependents),
+            "dependencies_count": len(dependencies),
+        }

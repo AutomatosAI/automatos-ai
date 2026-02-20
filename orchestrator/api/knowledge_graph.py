@@ -137,7 +137,7 @@ async def list_entities(
         
     except Exception as e:
         logger.error(f"Error listing entities: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/entities/search")
@@ -180,340 +180,323 @@ async def search_entities(
     
     except Exception as e:
         logger.error(f"Error searching entities: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/api/knowledge/entities/{entity_id}", response_model=EntitySearchResult)
-async def get_entity_details(entity_id: int, include_related: bool = True):
+@router.get("/entities/{entity_id}", response_model=EntitySearchResult)
+async def get_entity_details(
+    entity_id: int,
+    include_related: bool = True,
+    db: Session = Depends(get_db)
+):
     """
     Get detailed information about an entity
-    
+
     Args:
         entity_id: Entity ID
         include_related: Whether to include related entities
     """
-    from core.database.database import get_db
-    db = await get_db()
-    
-    # Get entity
-    entity_query = """
-        SELECT id, entity_name, entity_type, canonical_name, description, 
-               mention_count, importance_score, created_at
-        FROM kb_entities
-        WHERE id = $1
-    """
-    entity_row = await db.fetch_one(entity_query, [entity_id])
-    
-    if not entity_row:
-        raise HTTPException(status_code=404, detail="Entity not found")
-    
-    entity = Entity(**dict(entity_row))
-    
-    # Count knowledge items mentioning this entity
-    count_query = """
-        SELECT COUNT(DISTINCT knowledge_item_id) as count
-        FROM knowledge_entity_mentions
-        WHERE entity_id = $1
-    """
-    count_row = await db.fetch_one(count_query, [entity_id])
-    knowledge_items_count = count_row['count'] if count_row else 0
-    
-    # Count relationships
-    rel_count_query = """
-        SELECT COUNT(*) as count
-        FROM entity_relationships
-        WHERE from_entity_id = $1 OR to_entity_id = $1
-    """
-    rel_count_row = await db.fetch_one(rel_count_query, [entity_id])
-    relationships_count = rel_count_row['count'] if rel_count_row else 0
-    
-    # Get related entities
-    related_entities = []
-    if include_related:
-        related_query = """
-            SELECT DISTINCT e.id, e.entity_name, e.entity_type, e.canonical_name, 
-                   e.description, e.mention_count, e.importance_score, e.created_at
-            FROM kb_entities e
-            JOIN entity_relationships er ON 
-                (er.from_entity_id = $1 AND er.to_entity_id = e.id) OR
-                (er.to_entity_id = $1 AND er.from_entity_id = e.id)
-            ORDER BY e.importance_score DESC
-            LIMIT 10
-        """
-        related_rows = await db.fetch_all(related_query, [entity_id])
-        related_entities = [Entity(**dict(row)) for row in related_rows]
-    
-    return EntitySearchResult(
-        entity=entity,
-        knowledge_items_count=knowledge_items_count,
-        relationships_count=relationships_count,
-        related_entities=related_entities
-    )
+    try:
+        # Get entity
+        entity_row = db.execute(text("""
+            SELECT id, entity_name, entity_type, canonical_name, description,
+                   mention_count, importance_score, created_at
+            FROM kb_entities
+            WHERE id = :entity_id
+        """), {"entity_id": entity_id}).fetchone()
+
+        if not entity_row:
+            raise HTTPException(status_code=404, detail="Entity not found")
+
+        entity = Entity(
+            id=entity_row[0], entity_name=entity_row[1], entity_type=entity_row[2],
+            canonical_name=entity_row[3], description=entity_row[4],
+            mention_count=entity_row[5], importance_score=entity_row[6],
+            created_at=entity_row[7]
+        )
+
+        # Count knowledge items mentioning this entity
+        count_row = db.execute(text("""
+            SELECT COUNT(DISTINCT knowledge_item_id) as count
+            FROM knowledge_entity_mentions
+            WHERE entity_id = :entity_id
+        """), {"entity_id": entity_id}).fetchone()
+        knowledge_items_count = count_row[0] if count_row else 0
+
+        # Count relationships
+        rel_count_row = db.execute(text("""
+            SELECT COUNT(*) as count
+            FROM entity_relationships
+            WHERE from_entity_id = :entity_id OR to_entity_id = :entity_id
+        """), {"entity_id": entity_id}).fetchone()
+        relationships_count = rel_count_row[0] if rel_count_row else 0
+
+        # Get related entities
+        related_entities = []
+        if include_related:
+            related_rows = db.execute(text("""
+                SELECT DISTINCT e.id, e.entity_name, e.entity_type, e.canonical_name,
+                       e.description, e.mention_count, e.importance_score, e.created_at
+                FROM kb_entities e
+                JOIN entity_relationships er ON
+                    (er.from_entity_id = :entity_id AND er.to_entity_id = e.id) OR
+                    (er.to_entity_id = :entity_id AND er.from_entity_id = e.id)
+                ORDER BY e.importance_score DESC
+                LIMIT 10
+            """), {"entity_id": entity_id}).fetchall()
+            related_entities = [Entity(
+                id=row[0], entity_name=row[1], entity_type=row[2],
+                canonical_name=row[3], description=row[4],
+                mention_count=row[5], importance_score=row[6],
+                created_at=row[7]
+            ) for row in related_rows]
+
+        return EntitySearchResult(
+            entity=entity,
+            knowledge_items_count=knowledge_items_count,
+            relationships_count=relationships_count,
+            related_entities=related_entities
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting entity details: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/api/knowledge/entities/{entity_id}/graph", response_model=KnowledgeGraphResponse)
+@router.get("/entities/{entity_id}/graph", response_model=KnowledgeGraphResponse)
 async def get_entity_graph(
     entity_id: int,
     depth: int = Query(2, ge=1, le=3),
-    max_nodes: int = Query(50, le=200)
+    max_nodes: int = Query(50, le=200),
+    db: Session = Depends(get_db)
 ):
     """
     Get graph visualization data for an entity
-    
+
     Args:
         entity_id: Center entity ID
         depth: How many relationship hops to include
         max_nodes: Maximum nodes to return
-        
+
     Returns:
         Graph structure with nodes and edges for visualization
     """
-    from core.database.database import get_db
-    db = await get_db()
-    
-    # Get center entity
-    entity_query = """
-        SELECT id, entity_name, entity_type, canonical_name, description, 
-               mention_count, importance_score, created_at
-        FROM kb_entities
-        WHERE id = $1
-    """
-    entity_row = await db.fetch_one(entity_query, [entity_id])
-    
-    if not entity_row:
-        raise HTTPException(status_code=404, detail="Entity not found")
-    
-    center_entity = Entity(**dict(entity_row))
-    
-    # Get related entities with BFS traversal
-    graph_query = """
-        WITH RECURSIVE entity_graph AS (
-            -- Base case: direct relationships
-            SELECT 
-                CASE WHEN from_entity_id = $1 THEN to_entity_id ELSE from_entity_id END as entity_id,
-                from_entity_id,
-                to_entity_id,
-                relationship_type,
-                strength,
-                1 as hop_count
-            FROM entity_relationships
-            WHERE from_entity_id = $1 OR to_entity_id = $1
-            
-            UNION
-            
-            -- Recursive case: follow relationships
-            SELECT 
-                CASE WHEN er.from_entity_id = eg.entity_id THEN er.to_entity_id ELSE er.from_entity_id END as entity_id,
-                er.from_entity_id,
-                er.to_entity_id,
-                er.relationship_type,
-                er.strength,
-                eg.hop_count + 1
-            FROM entity_relationships er
-            INNER JOIN entity_graph eg ON 
-                (er.from_entity_id = eg.entity_id OR er.to_entity_id = eg.entity_id)
-            WHERE eg.hop_count < $2
+    try:
+        # Get center entity
+        entity_row = db.execute(text("""
+            SELECT id, entity_name, entity_type, canonical_name, description,
+                   mention_count, importance_score, created_at
+            FROM kb_entities
+            WHERE id = :entity_id
+        """), {"entity_id": entity_id}).fetchone()
+
+        if not entity_row:
+            raise HTTPException(status_code=404, detail="Entity not found")
+
+        center_entity = Entity(
+            id=entity_row[0], entity_name=entity_row[1], entity_type=entity_row[2],
+            canonical_name=entity_row[3], description=entity_row[4],
+            mention_count=entity_row[5], importance_score=entity_row[6],
+            created_at=entity_row[7]
         )
-        SELECT DISTINCT 
-            eg.entity_id,
-            eg.from_entity_id,
-            eg.to_entity_id,
-            eg.relationship_type,
-            eg.strength,
-            e.entity_name,
-            e.entity_type,
-            e.importance_score,
-            e.mention_count
-        FROM entity_graph eg
-        JOIN kb_entities e ON eg.entity_id = e.id
-        ORDER BY eg.hop_count ASC, e.importance_score DESC
-        LIMIT $3
-    """
-    
-    graph_rows = await db.fetch_all(graph_query, [entity_id, depth, max_nodes])
-    
-    # Build nodes and edges
-    nodes = [GraphNode(
-        id=center_entity.id,
-        label=center_entity.entity_name,
-        type=center_entity.entity_type,
-        importance=center_entity.importance_score,
-        mention_count=center_entity.mention_count
-    )]
-    
-    seen_nodes = {center_entity.id}
-    edges = []
-    
-    for row in graph_rows:
-        # Add node if not seen
-        if row['entity_id'] not in seen_nodes:
-            nodes.append(GraphNode(
-                id=row['entity_id'],
-                label=row['entity_name'],
-                type=row['entity_type'],
-                importance=row['importance_score'],
-                mention_count=row['mention_count']
+
+        # Get related entities with BFS traversal
+        graph_rows = db.execute(text("""
+            WITH RECURSIVE entity_graph AS (
+                SELECT
+                    CASE WHEN from_entity_id = :entity_id THEN to_entity_id ELSE from_entity_id END as entity_id,
+                    from_entity_id, to_entity_id, relationship_type, strength, 1 as hop_count
+                FROM entity_relationships
+                WHERE from_entity_id = :entity_id OR to_entity_id = :entity_id
+                UNION
+                SELECT
+                    CASE WHEN er.from_entity_id = eg.entity_id THEN er.to_entity_id ELSE er.from_entity_id END,
+                    er.from_entity_id, er.to_entity_id, er.relationship_type, er.strength, eg.hop_count + 1
+                FROM entity_relationships er
+                INNER JOIN entity_graph eg ON (er.from_entity_id = eg.entity_id OR er.to_entity_id = eg.entity_id)
+                WHERE eg.hop_count < :depth
+            )
+            SELECT DISTINCT eg.entity_id, eg.from_entity_id, eg.to_entity_id,
+                   eg.relationship_type, eg.strength, e.entity_name, e.entity_type,
+                   e.importance_score, e.mention_count
+            FROM entity_graph eg
+            JOIN kb_entities e ON eg.entity_id = e.id
+            ORDER BY eg.hop_count ASC, e.importance_score DESC
+            LIMIT :max_nodes
+        """), {"entity_id": entity_id, "depth": depth, "max_nodes": max_nodes}).fetchall()
+
+        # Build nodes and edges
+        nodes = [GraphNode(
+            id=center_entity.id, label=center_entity.entity_name,
+            type=center_entity.entity_type, importance=center_entity.importance_score,
+            mention_count=center_entity.mention_count
+        )]
+
+        seen_nodes = {center_entity.id}
+        edges = []
+
+        for row in graph_rows:
+            if row[0] not in seen_nodes:
+                nodes.append(GraphNode(
+                    id=row[0], label=row[5], type=row[6],
+                    importance=row[7], mention_count=row[8]
+                ))
+                seen_nodes.add(row[0])
+
+            edges.append(GraphEdge(
+                source=row[1], target=row[2], label=row[3], strength=row[4]
             ))
-            seen_nodes.add(row['entity_id'])
-        
-        # Add edge
-        edges.append(GraphEdge(
-            source=row['from_entity_id'],
-            target=row['to_entity_id'],
-            label=row['relationship_type'],
-            strength=row['strength']
-        ))
-    
-    return KnowledgeGraphResponse(
-        nodes=nodes,
-        edges=edges,
-        center_entity=center_entity,
-        metadata={
-            "depth": depth,
-            "total_nodes": len(nodes),
-            "total_edges": len(edges)
-        }
-    )
+
+        return KnowledgeGraphResponse(
+            nodes=nodes, edges=edges, center_entity=center_entity,
+            metadata={"depth": depth, "total_nodes": len(nodes), "total_edges": len(edges)}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting entity graph: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/api/knowledge/entities/{entity_id}/documents")
-async def get_entity_documents(entity_id: int, limit: int = Query(20, le=100)):
+@router.get("/entities/{entity_id}/documents")
+async def get_entity_documents(
+    entity_id: int,
+    limit: int = Query(20, le=100),
+    db: Session = Depends(get_db)
+):
     """
     Get all knowledge items (documents, tables, formulas, etc.) mentioning this entity
-    
+
     Args:
         entity_id: Entity ID
         limit: Maximum results
     """
-    from core.database.database import get_db
-    db = await get_db()
-    
-    query = """
-        SELECT 
-            ki.id,
-            ki.title,
-            ki.content,
-            ki.summary,
-            ki.quality_score,
-            ki.created_at,
-            kt.display_name as kb_type,
-            em.mention_context,
-            em.confidence
-        FROM knowledge_items ki
-        JOIN knowledge_entity_mentions em ON ki.id = em.knowledge_item_id
-        JOIN kb_types kt ON ki.kb_type_id = kt.id
-        WHERE em.entity_id = $1
-        ORDER BY ki.quality_score DESC, ki.created_at DESC
-        LIMIT $2
-    """
-    
-    results = await db.fetch_all(query, [entity_id, limit])
-    
-    return [dict(row) for row in results]
+    try:
+        results = db.execute(text("""
+            SELECT
+                ki.id, ki.title, ki.content, ki.summary, ki.quality_score,
+                ki.created_at, kt.display_name as kb_type,
+                em.mention_context, em.confidence
+            FROM knowledge_items ki
+            JOIN knowledge_entity_mentions em ON ki.id = em.knowledge_item_id
+            JOIN kb_types kt ON ki.kb_type_id = kt.id
+            WHERE em.entity_id = :entity_id
+            ORDER BY ki.quality_score DESC, ki.created_at DESC
+            LIMIT :limit
+        """), {"entity_id": entity_id, "limit": limit}).fetchall()
+
+        return [
+            {
+                "id": row[0], "title": row[1], "content": row[2],
+                "summary": row[3], "quality_score": row[4],
+                "created_at": row[5].isoformat() if row[5] else None,
+                "kb_type": row[6], "mention_context": row[7],
+                "confidence": row[8]
+            }
+            for row in results
+        ]
+
+    except Exception as e:
+        logger.error(f"Error getting entity documents: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/api/knowledge/entities/find-connection")
+@router.post("/entities/find-connection")
 async def find_connection(
     entity_a: str = Query(..., description="First entity name"),
     entity_b: str = Query(..., description="Second entity name"),
-    max_hops: int = Query(3, ge=1, le=5)
+    max_hops: int = Query(3, ge=1, le=5),
+    db: Session = Depends(get_db)
 ):
     """
     Find connection path between two entities
-    
+
     Args:
         entity_a: First entity name
         entity_b: Second entity name
         max_hops: Maximum relationship hops to search
-        
+
     Returns:
         Shortest path and supporting evidence
     """
-    from core.database.database import get_db
-    db = await get_db()
-    
-    # Get entity IDs
-    entity_query = "SELECT id, entity_name FROM kb_entities WHERE LOWER(entity_name) = LOWER($1) LIMIT 1"
-    
-    entity_a_row = await db.fetch_one(entity_query, [entity_a])
-    entity_b_row = await db.fetch_one(entity_query, [entity_b])
-    
-    if not entity_a_row or not entity_b_row:
-        raise HTTPException(status_code=404, detail="One or both entities not found")
-    
-    entity_a_id = entity_a_row['id']
-    entity_b_id = entity_b_row['id']
-    
-    # Find shortest path using recursive CTE
-    path_query = """
-        WITH RECURSIVE entity_path AS (
-            -- Base case: direct relationship
-            SELECT 
-                from_entity_id,
-                to_entity_id,
-                relationship_type,
-                evidence_text,
-                1 as depth,
-                ARRAY[from_entity_id, to_entity_id] as path,
-                ARRAY[relationship_type] as relationship_path
-            FROM entity_relationships
-            WHERE from_entity_id = $1
-            
-            UNION
-            
-            -- Recursive case: continue path
-            SELECT 
-                er.from_entity_id,
-                er.to_entity_id,
-                er.relationship_type,
-                er.evidence_text,
-                ep.depth + 1,
-                ep.path || er.to_entity_id,
-                ep.relationship_path || er.relationship_type
-            FROM entity_relationships er
-            INNER JOIN entity_path ep ON er.from_entity_id = ep.to_entity_id
-            WHERE ep.depth < $3
-              AND NOT er.to_entity_id = ANY(ep.path)  -- Prevent cycles
-        )
-        SELECT * FROM entity_path
-        WHERE to_entity_id = $2
-        ORDER BY depth ASC
-        LIMIT 1
-    """
-    
-    path_row = await db.fetch_one(path_query, [entity_a_id, entity_b_id, max_hops])
-    
-    if not path_row:
+    try:
+        # Get entity IDs
+        entity_a_row = db.execute(text(
+            "SELECT id, entity_name FROM kb_entities WHERE LOWER(entity_name) = LOWER(:name) LIMIT 1"
+        ), {"name": entity_a}).fetchone()
+        entity_b_row = db.execute(text(
+            "SELECT id, entity_name FROM kb_entities WHERE LOWER(entity_name) = LOWER(:name) LIMIT 1"
+        ), {"name": entity_b}).fetchone()
+
+        if not entity_a_row or not entity_b_row:
+            raise HTTPException(status_code=404, detail="One or both entities not found")
+
+        entity_a_id = entity_a_row[0]
+        entity_b_id = entity_b_row[0]
+
+        # Find shortest path using recursive CTE
+        path_row = db.execute(text("""
+            WITH RECURSIVE entity_path AS (
+                SELECT from_entity_id, to_entity_id, relationship_type, evidence_text,
+                       1 as depth, ARRAY[from_entity_id, to_entity_id] as path,
+                       ARRAY[relationship_type] as relationship_path
+                FROM entity_relationships
+                WHERE from_entity_id = :entity_a_id
+                UNION
+                SELECT er.from_entity_id, er.to_entity_id, er.relationship_type,
+                       er.evidence_text, ep.depth + 1,
+                       ep.path || er.to_entity_id,
+                       ep.relationship_path || er.relationship_type
+                FROM entity_relationships er
+                INNER JOIN entity_path ep ON er.from_entity_id = ep.to_entity_id
+                WHERE ep.depth < :max_hops
+                  AND NOT er.to_entity_id = ANY(ep.path)
+            )
+            SELECT * FROM entity_path WHERE to_entity_id = :entity_b_id
+            ORDER BY depth ASC LIMIT 1
+        """), {"entity_a_id": entity_a_id, "entity_b_id": entity_b_id, "max_hops": max_hops}).fetchone()
+
+        if not path_row:
+            return {
+                "found": False,
+                "message": f"No connection found between '{entity_a}' and '{entity_b}' within {max_hops} hops"
+            }
+
+        # path_row: (from_entity_id, to_entity_id, relationship_type, evidence_text, depth, path, relationship_path)
+        depth = path_row[4]
+        path_entity_ids = path_row[5]
+        relationship_path = path_row[6]
+
+        # Get entity names for path
+        entities_rows = db.execute(text(
+            "SELECT id, entity_name FROM kb_entities WHERE id = ANY(:ids)"
+        ), {"ids": path_entity_ids}).fetchall()
+        entity_names = {row[0]: row[1] for row in entities_rows}
+
+        # Build path explanation
+        path_steps = []
+        for i in range(len(relationship_path)):
+            path_steps.append({
+                "from": entity_names.get(path_entity_ids[i], "Unknown"),
+                "to": entity_names.get(path_entity_ids[i + 1], "Unknown"),
+                "relationship": relationship_path[i]
+            })
+
         return {
-            "found": False,
-            "message": f"No connection found between '{entity_a}' and '{entity_b}' within {max_hops} hops"
+            "found": True,
+            "depth": depth,
+            "path": path_steps,
+            "summary": " -> ".join([entity_names.get(eid, "Unknown") for eid in path_entity_ids])
         }
-    
-    # Get entity names for path
-    path_entity_ids = path_row['path']
-    entities_query = """
-        SELECT id, entity_name
-        FROM kb_entities
-        WHERE id = ANY($1)
-    """
-    entities_rows = await db.fetch_all(entities_query, [path_entity_ids])
-    entity_names = {row['id']: row['entity_name'] for row in entities_rows}
-    
-    # Build path explanation
-    path_steps = []
-    for i in range(len(path_row['relationship_path'])):
-        path_steps.append({
-            "from": entity_names.get(path_entity_ids[i], "Unknown"),
-            "to": entity_names.get(path_entity_ids[i+1], "Unknown"),
-            "relationship": path_row['relationship_path'][i]
-        })
-    
-    return {
-        "found": True,
-        "depth": path_row['depth'],
-        "path": path_steps,
-        "summary": " → ".join([entity_names.get(eid, "Unknown") for eid in path_entity_ids])
-    }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finding connection: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats/entities")
@@ -572,5 +555,5 @@ async def get_entity_stats(db: Session = Depends(get_db)):
     
     except Exception as e:
         logger.error(f"Error getting entity stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 

@@ -9,6 +9,7 @@ External memory augmentation using vector stores, knowledge graphs, and semantic
 import asyncio
 import json
 import logging
+import os
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict
@@ -59,12 +60,12 @@ class VectorStoreAugmenter:
     
     def __init__(
         self,
-        model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = None,
         index_type: str = "flat",
         max_external_items: int = 10000,
         similarity_threshold: float = 0.7
     ):
-        self.model_name = model_name
+        self.model_name = model_name or os.environ.get("EMBEDDING_MODEL", "")
         self.similarity_threshold = similarity_threshold
         self.max_external_items = max_external_items
         

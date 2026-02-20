@@ -48,7 +48,7 @@ function makeRequest(endpoint) {
       timeout: 5000,
       headers: {
         'Accept': 'application/json',
-        'x-api-key': process.env.NEXT_PUBLIC_API_KEY || 'test_api_key_for_backend_validation_2025'
+        'x-api-key': process.env.API_KEY || ''
       }
     };
 

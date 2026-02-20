@@ -42,6 +42,17 @@ class AgentPlatformTools:
         self.code_graph = CodeGraphService(db_session)
         self.logger = logger
     
+    def _resolve_workspace_id(self, agent_id: int) -> Optional[str]:
+        """Resolve workspace_id from an agent ID."""
+        try:
+            from core.models import Agent as AgentModel
+            agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+            if agent_row and getattr(agent_row, "workspace_id", None):
+                return str(agent_row.workspace_id)
+        except Exception:
+            pass
+        return None
+
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available tools for function calling"""
         return [
@@ -85,25 +96,144 @@ class AgentPlatformTools:
             },
             {
                 "name": "search_codebase",
-                "description": "Search the codebase for functions, classes, and implementations",
+                "description": "Search indexed codebase for symbols (functions, classes, methods) by name or semantic similarity. Results are ranked by structural importance (PageRank).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Code pattern, function name, or concept to search for"
+                            "description": "Search query — symbol name or natural language description"
+                        },
+                        "project_name": {
+                            "type": "string",
+                            "description": "CodeGraph project name to search in"
+                        },
+                        "search_type": {
+                            "type": "string",
+                            "enum": ["fuzzy", "semantic"],
+                            "default": "fuzzy",
+                            "description": "Search type: fuzzy (name matching) or semantic (meaning-based)"
+                        },
+                        "symbol_type": {
+                            "type": "string",
+                            "enum": ["function", "class", "method", "interface", "all"],
+                            "default": "all",
+                            "description": "Filter by symbol type"
                         },
                         "file_type": {
                             "type": "string",
                             "description": "Filter by file extension (e.g., 'py', 'ts', 'js')"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 10,
+                            "description": "Max results to return"
                         }
                     },
                     "required": ["query"]
                 }
             },
+            {
+                "name": "get_call_graph",
+                "description": "Get the call graph for a symbol, showing what it calls and what calls it.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Symbol name to get call graph for"
+                        },
+                        "project_name": {
+                            "type": "string",
+                            "description": "CodeGraph project name"
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "default": 2,
+                            "description": "How many levels deep to traverse (max 5)"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["outgoing", "incoming", "both"],
+                            "default": "both",
+                            "description": "Direction to traverse"
+                        }
+                    },
+                    "required": ["symbol", "project_name"]
+                }
+            },
+            {
+                "name": "analyze_architecture",
+                "description": "Get high-level architecture overview of an indexed codebase: modules, key classes, dependency patterns, top-referenced symbols.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "project_name": {
+                            "type": "string",
+                            "description": "CodeGraph project name"
+                        },
+                        "focus_path": {
+                            "type": "string",
+                            "description": "Optional directory path to focus analysis on"
+                        }
+                    },
+                    "required": ["project_name"]
+                }
+            },
+            {
+                "name": "find_dependencies",
+                "description": "Find all symbols that depend on a given symbol, or that a symbol depends on.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Symbol name to find dependencies for"
+                        },
+                        "project_name": {
+                            "type": "string",
+                            "description": "CodeGraph project name"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["dependents", "dependencies", "both"],
+                            "default": "both",
+                            "description": "dependents = who uses this, dependencies = what this uses"
+                        }
+                    },
+                    "required": ["symbol", "project_name"]
+                }
+            },
 
+            {
+                "name": "generate_document",
+                "description": "Generate a polished PDF, DOCX, or XLSX document from data. Use when the user asks for a report, invoice, export, or any formatted document.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "Document title"
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["pdf", "docx", "xlsx"],
+                            "description": "Output format"
+                        },
+                        "template_name": {
+                            "type": "string",
+                            "description": "Template to use (e.g. 'Basic Report', 'Invoice'). Omit for auto-selection."
+                        },
+                        "data": {
+                            "type": "object",
+                            "description": "Data to populate the template — must match the template's expected schema"
+                        }
+                    },
+                    "required": ["title", "format", "data"]
+                }
+            },
         ]
-    
+
 
 
     async def execute_tool(
@@ -286,12 +416,41 @@ class AgentPlatformTools:
                         tool_name
                     )
                 
+                # PRD-62: Apply PageRank ranking for structurally important results
+                try:
+                    from modules.codegraph.ranking import PageRankRanker
+                    from sqlalchemy import text as sa_text
+
+                    # Fetch relationships for the project to build the graph
+                    proj_row = self.db.execute(
+                        sa_text("SELECT id FROM codegraph_projects WHERE name = :n AND workspace_id = :w"),
+                        {"n": project_name, "w": workspace_id}
+                    ).fetchone()
+
+                    if proj_row:
+                        rels = self.db.execute(
+                            sa_text("""
+                                SELECT from_symbol_id, to_symbol_id, relationship_type
+                                FROM codegraph_relationships
+                                WHERE project_id = :pid AND relationship_type != 'external_reference'
+                            """),
+                            {"pid": proj_row.id}
+                        ).fetchall()
+                        rel_dicts = [
+                            {"from_symbol_id": r.from_symbol_id, "to_symbol_id": r.to_symbol_id,
+                             "relationship_type": r.relationship_type}
+                            for r in rels
+                        ]
+                        ranker = PageRankRanker()
+                        results = ranker.rank_symbols(results, rel_dicts, token_budget=2048)
+                        self.logger.info(f"  PageRank ranked {len(results)} results")
+                except Exception as e:
+                    self.logger.debug(f"  PageRank ranking skipped: {e}")
+
                 # Convert to raw format for formatter
-                # Filter out partial results (less than 50 chars of code) and limit to 10
                 raw_results = []
                 for r in results:
                     code_snippet = r.get("code_snippet", "")
-                    # Skip results with too little code (just signatures, not full functions)
                     if len(code_snippet.strip()) < 50:
                         continue
                     raw_results.append({
@@ -299,12 +458,13 @@ class AgentPlatformTools:
                         "file_path": r.get("file_path", "Unknown"),
                         "symbol_type": r.get("symbol_type", "symbol"),
                         "line_number": r.get("line_number", 0),
-                        "code": code_snippet,  # Full code, no truncation
+                        "code": code_snippet,
                         "docstring": r.get("docstring", ""),
                         "signature": r.get("signature", ""),
-                        "score": r.get("score", 0.8)
+                        "score": r.get("score", 0.8),
+                        "importance_rank": r.get("importance_rank", 0.0),
                     })
-                    if len(raw_results) >= 10:  # Limit to 10 best results
+                    if len(raw_results) >= 10:
                         break
                 
                 # Use unified formatter
@@ -316,6 +476,140 @@ class AgentPlatformTools:
                     tool_name
                 )
             
+            elif tool_name == "get_call_graph":
+                symbol = parameters.get("symbol", "")
+                project_name = parameters.get("project_name", "")
+                depth = min(parameters.get("depth", 2), 5)
+                direction = parameters.get("direction", "both")
+
+                workspace_id = self._resolve_workspace_id(agent_id)
+                self.logger.info(f"  Getting call graph for '{symbol}' in '{project_name}'")
+                try:
+                    result = await self.code_graph.get_call_graph(
+                        project_name=project_name,
+                        symbol=symbol,
+                        depth=depth,
+                        direction=direction,
+                        workspace_id=workspace_id,
+                    )
+                    return ToolResultFormatter.standardize_result(
+                        {"success": True, "results": [result]}, tool_name
+                    )
+                except Exception as e:
+                    return ToolResultFormatter.standardize_result(
+                        {"success": False, "error": str(e)}, tool_name
+                    )
+
+            elif tool_name == "analyze_architecture":
+                project_name = parameters.get("project_name", "")
+                focus_path = parameters.get("focus_path")
+
+                workspace_id = self._resolve_workspace_id(agent_id)
+                self.logger.info(f"  Analyzing architecture of '{project_name}'")
+                try:
+                    # Look up project ID from name
+                    from sqlalchemy import text
+                    row = self.db.execute(
+                        text("SELECT id FROM codegraph_projects WHERE name = :n AND workspace_id = :w"),
+                        {"n": project_name, "w": workspace_id}
+                    ).fetchone()
+                    if not row:
+                        return ToolResultFormatter.standardize_result(
+                            {"success": False, "error": f"Project '{project_name}' not found"}, tool_name
+                        )
+                    result = await self.code_graph.analyze_architecture(
+                        project_id=row.id,
+                        workspace_id=workspace_id,
+                        focus_path=focus_path,
+                    )
+                    return ToolResultFormatter.standardize_result(
+                        {"success": True, "results": [result]}, tool_name
+                    )
+                except Exception as e:
+                    return ToolResultFormatter.standardize_result(
+                        {"success": False, "error": str(e)}, tool_name
+                    )
+
+            elif tool_name == "find_dependencies":
+                symbol = parameters.get("symbol", "")
+                project_name = parameters.get("project_name", "")
+                direction = parameters.get("direction", "both")
+
+                workspace_id = self._resolve_workspace_id(agent_id)
+                self.logger.info(f"  Finding dependencies for '{symbol}' in '{project_name}'")
+                try:
+                    from sqlalchemy import text
+                    row = self.db.execute(
+                        text("SELECT id FROM codegraph_projects WHERE name = :n AND workspace_id = :w"),
+                        {"n": project_name, "w": workspace_id}
+                    ).fetchone()
+                    if not row:
+                        return ToolResultFormatter.standardize_result(
+                            {"success": False, "error": f"Project '{project_name}' not found"}, tool_name
+                        )
+                    result = await self.code_graph.find_dependencies(
+                        project_id=row.id,
+                        symbol_name=symbol,
+                        direction=direction,
+                        workspace_id=workspace_id,
+                    )
+                    return ToolResultFormatter.standardize_result(
+                        {"success": True, "results": [result]}, tool_name
+                    )
+                except Exception as e:
+                    return ToolResultFormatter.standardize_result(
+                        {"success": False, "error": str(e)}, tool_name
+                    )
+
+            elif tool_name == "generate_document":
+                title = parameters.get("title", "Document")
+                fmt = parameters.get("format", "pdf")
+                data = parameters.get("data", {})
+                template_name = parameters.get("template_name")
+
+                self.logger.info(f"  📄 Generating {fmt.upper()} document: '{title}'")
+
+                # Resolve workspace_id from agent
+                workspace_id = None
+                try:
+                    from core.models import Agent as AgentModel
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row and getattr(agent_row, "workspace_id", None):
+                        workspace_id = agent_row.workspace_id
+                except Exception:
+                    pass
+
+                if not workspace_id:
+                    return ToolResultFormatter.standardize_result(
+                        {"success": False, "error": "Cannot resolve workspace for document generation"},
+                        tool_name
+                    )
+
+                from modules.documents.generation_service import DocumentGenerationService
+                gen_service = DocumentGenerationService(self.db, workspace_id)
+                result = await gen_service.generate(
+                    title=title,
+                    format=fmt,
+                    data=data,
+                    workspace_id=workspace_id,
+                    template_name=template_name,
+                )
+
+                self.logger.info(f"  ✅ Document generated: {result.filename} ({result.size // 1024}KB)")
+                return ToolResultFormatter.standardize_result(
+                    {
+                        "success": True,
+                        "results": [{
+                            "status": "success",
+                            "filename": result.filename,
+                            "format": result.format,
+                            "download_url": result.download_url,
+                            "size_kb": result.size // 1024,
+                        }],
+                    },
+                    tool_name
+                )
+
             else:
                 self.logger.error(f"  ❌ Unknown tool: {tool_name}")
                 return ToolResultFormatter.standardize_result(

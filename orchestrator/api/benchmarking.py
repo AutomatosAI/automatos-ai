@@ -14,6 +14,8 @@ import statistics
 import logging
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from core.models import WorkflowExecution, Workflow, Agent
 from modules.orchestrator import orchestration_tracker
 
@@ -24,7 +26,8 @@ router = APIRouter(prefix="/api/v1/benchmarking", tags=["benchmarking"])
 @router.get("/performance-summary")
 async def get_performance_summary(
     days: int = 30,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Get comprehensive performance summary showing system improvements.
@@ -33,8 +36,9 @@ async def get_performance_summary(
     try:
         cutoff_date = datetime.now() - timedelta(days=days)
         
-        # Get all executions in time window
+        # Get all executions in time window - scoped to workspace
         executions = db.query(WorkflowExecution)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.started_at >= cutoff_date)\
             .order_by(WorkflowExecution.started_at)\
             .all()
@@ -149,13 +153,14 @@ async def get_performance_summary(
         
     except Exception as e:
         logger.error(f"Error calculating performance summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/workflow/{workflow_id}/performance-trend")
 async def get_workflow_performance_trend(
     workflow_id: int,
     limit: int = 20,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Get performance trend for a specific workflow over time.
@@ -163,6 +168,7 @@ async def get_workflow_performance_trend(
     """
     try:
         executions = db.query(WorkflowExecution)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
             .filter(WorkflowExecution.status == "completed")\
             .order_by(WorkflowExecution.started_at)\
@@ -241,12 +247,13 @@ async def get_workflow_performance_trend(
         
     except Exception as e:
         logger.error(f"Error getting workflow performance trend: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/agent-performance")
 async def get_agent_performance_metrics(
     days: int = 30,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Get agent performance metrics showing specialization and improvement.
@@ -254,8 +261,8 @@ async def get_agent_performance_metrics(
     try:
         cutoff_date = datetime.now() - timedelta(days=days)
         
-        # Get all agents
-        agents = db.query(Agent).filter(Agent.status == 'active').all()
+        # Get all agents - scoped to workspace
+        agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == 'active').all()
         
         agent_metrics = []
         for agent in agents:
@@ -319,19 +326,21 @@ async def get_agent_performance_metrics(
         
     except Exception as e:
         logger.error(f"Error getting agent performance metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/learning-effectiveness")
 async def get_learning_effectiveness(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Measure the effectiveness of the learning system.
     Shows how patterns and memory improve performance.
     """
     try:
-        # Get recent executions with learning data
+        # Get recent executions with learning data - scoped to workspace
         recent_executions = db.query(WorkflowExecution)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.input_data.isnot(None))\
             .order_by(desc(WorkflowExecution.started_at))\
             .limit(100)\
@@ -425,7 +434,7 @@ async def get_learning_effectiveness(
         
     except Exception as e:
         logger.error(f"Error getting learning effectiveness: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Helper functions
 

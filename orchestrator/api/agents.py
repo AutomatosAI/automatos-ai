@@ -236,6 +236,7 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         performance_metrics=agent.performance_metrics or {},
         created_by=agent.created_by,
         agent_model_config=getattr(agent, 'model_config', None),  # PRD-15: Include model config (field renamed to agent_model_config)
+        model_usage_stats=getattr(agent, 'model_usage_stats', None),  # PRD-54: LLM usage stats
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
@@ -293,7 +294,7 @@ async def get_agent_stats(ctx: RequestContext = Depends(get_request_context_hybr
         }
     except Exception as e:
         logger.error(f"Error getting agent stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/bulk", response_model=List[AgentResponse])
 async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -356,7 +357,7 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating bulk agents: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating bulk agents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/", response_model=AgentResponse)
 async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -434,7 +435,7 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating agent: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating agent: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/", response_model=List[AgentResponse])
 async def list_agents(
@@ -475,7 +476,7 @@ async def list_agents(
         
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{agent_id}/status")
 async def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -501,7 +502,7 @@ async def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_requ
         raise
     except Exception as e:
         logger.error(f"Error getting agent status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{agent_id}/execute")
 async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -531,7 +532,7 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestCo
         raise  
     except Exception as e:
         logger.error(f"Error executing agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -551,7 +552,7 @@ async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_con
         raise
     except Exception as e:
         logger.error(f"Error getting agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{agent_id}/skills")
 async def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -577,7 +578,7 @@ async def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_requ
         raise
     except Exception as e:
         logger.error(f"Error getting agent skills: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{agent_id}/skills")
 async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -602,7 +603,7 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestCont
     except Exception as e:
         db.rollback()
         logger.error(f"Error adding agent skills: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/{agent_id}", response_model=AgentResponse)
 async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -694,7 +695,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
     except Exception as e:
         db.rollback()
         logger.error(f"Error updating agent: {e}")
-        raise HTTPException(status_code=500, detail=f"Error updating agent: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{agent_id}")
 async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -724,7 +725,7 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
                 savepoint.rollback()  # Rollback savepoint, but keep main transaction
                 if required:
                     logger.error(f"Error deleting {table_name} for agent {agent_id}: {e}")
-                    raise HTTPException(status_code=500, detail=f"Error deleting {table_name}: {str(e)}")
+                    raise HTTPException(status_code=500, detail="Internal server error")
                 else:
                     logger.warning(f"Error deleting {table_name} for agent {agent_id}: {e}")
                     # Continue for optional tables
@@ -739,4 +740,4 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting agent: {e}")
-        raise HTTPException(status_code=500, detail=f"Error deleting agent: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

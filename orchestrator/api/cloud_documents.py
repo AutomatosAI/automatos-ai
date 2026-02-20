@@ -272,7 +272,7 @@ async def list_connections(
         raise
     except Exception as e:
         logger.error(f"Error listing cloud connections: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get(
@@ -299,7 +299,7 @@ async def list_folders(
         raise
     except Exception as e:
         logger.error(f"Error listing folders: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get(
@@ -327,7 +327,7 @@ async def list_files(
         raise
     except Exception as e:
         logger.error(f"Error listing files: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post(
@@ -373,7 +373,7 @@ async def select_folder(
     except Exception as e:
         db.rollback()
         logger.error(f"Error selecting folder: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -420,7 +420,7 @@ async def trigger_sync(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error triggering sync: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sync-jobs/{job_id}", response_model=SyncJobResponse)
@@ -454,7 +454,7 @@ async def get_sync_job(
         raise
     except Exception as e:
         logger.error(f"Error getting sync job: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get(
@@ -513,7 +513,7 @@ async def get_sync_status(
         raise
     except Exception as e:
         logger.error(f"Error getting sync status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete(
@@ -570,7 +570,7 @@ async def disconnect_connection(
     except Exception as e:
         db.rollback()
         logger.error(f"Error disconnecting: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -671,4 +671,4 @@ async def cloud_rag_query(
         raise
     except Exception as e:
         logger.error(f"Cloud RAG query error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

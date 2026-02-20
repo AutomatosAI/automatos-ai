@@ -15,6 +15,8 @@ import logging
 
 from core.database.database import get_db
 from core.models import WorkflowExecution, Workflow
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ async def get_workflow_executions(
     workflow_id: int,
     limit: int = 10,
     offset: int = 0,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ) -> List[Dict[str, Any]]:
     """
@@ -34,6 +37,7 @@ async def get_workflow_executions(
     try:
         executions = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .order_by(desc(WorkflowExecution.started_at))\
             .limit(limit)\
             .offset(offset)\
@@ -62,11 +66,12 @@ async def get_workflow_executions(
         
     except Exception as e:
         logger.error(f"Error fetching workflow executions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/executions/{execution_id}")
 async def get_execution_details(
     execution_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -75,6 +80,7 @@ async def get_execution_details(
     try:
         execution = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.id == execution_id)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .first()
         
         if not execution:
@@ -130,11 +136,12 @@ async def get_execution_details(
         raise
     except Exception as e:
         logger.error(f"Error fetching execution details: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{workflow_id}/live-progress")
 async def get_live_progress(
     workflow_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -145,10 +152,11 @@ async def get_live_progress(
         # Get the most recent execution for this workflow
         execution = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.status.in_(["started", "running", "in_progress"]))\
             .order_by(desc(WorkflowExecution.started_at))\
             .first()
-        
+
         if not execution:
             # No active execution, return empty progress
             return {
@@ -224,6 +232,7 @@ async def store_orchestration_event(
     workflow_id: int,
     event_type: str,
     event_data: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -234,10 +243,11 @@ async def store_orchestration_event(
         # Get the active execution
         execution = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.status.in_(["started", "running", "in_progress"]))\
             .order_by(desc(WorkflowExecution.started_at))\
             .first()
-        
+
         if not execution:
             raise HTTPException(status_code=404, detail="No active execution found")
         
@@ -302,4 +312,4 @@ async def store_orchestration_event(
     except Exception as e:
         logger.error(f"Error storing orchestration event: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

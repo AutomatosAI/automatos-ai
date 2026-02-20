@@ -11,6 +11,7 @@ Migrated to: modules/search/vector_store/store.py
 import asyncio
 import logging
 import json
+import re
 from typing import List, Dict, Any, Optional, Tuple, Union
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -109,6 +110,8 @@ class EnhancedVectorStore:
         self.database_url = database_url
         self.embedding_dimension = embedding_dimension or _get_system_dimension()
         self.similarity_function = similarity_function
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table_name):
+            raise ValueError(f"Invalid table name: must match [a-zA-Z_][a-zA-Z0-9_]*")
         self.table_name = table_name
         
         # Initialize mathematical components

@@ -217,6 +217,7 @@ class AgentResponse(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
     created_by: Optional[str] = Field(None, description="Creator")
     agent_model_config: Optional[Dict[str, Any]] = Field(None, description="PRD-15: Model configuration")
+    model_usage_stats: Optional[Dict[str, Any]] = Field(None, description="PRD-54: LLM usage stats")
     
     class Config:
         schema_extra = {

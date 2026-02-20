@@ -174,22 +174,22 @@ export function AnalyticsComposio({ days }: Props) {
                       {app.status}
                     </Badge>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
-                    <div>
-                      <p className="text-foreground font-medium">{app.total_actions_used}</p>
-                      <p>Actions Used</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-foreground font-medium tabular-nums">{app.total_actions_used}</span>
+                      <span className="truncate">Actions Used</span>
                     </div>
-                    <div>
-                      <p className="text-foreground font-medium">{app.agent_count}</p>
-                      <p>Agents</p>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-foreground font-medium tabular-nums">{app.agent_count}</span>
+                      <span className="truncate">Agents</span>
                     </div>
-                    <div>
-                      <p className="text-foreground font-medium">{app.documents_synced}</p>
-                      <p>Docs Synced</p>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-foreground font-medium tabular-nums">{app.documents_synced}</span>
+                      <span className="truncate">Docs Synced</span>
                     </div>
-                    <div>
-                      <p className="text-foreground font-medium">{formatDate(app.last_used_at)}</p>
-                      <p>Last Used</p>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-foreground font-medium">{formatDate(app.last_used_at)}</span>
+                      <span className="truncate">Last Used</span>
                     </div>
                   </div>
                 </div>

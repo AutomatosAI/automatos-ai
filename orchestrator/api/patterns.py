@@ -38,7 +38,7 @@ async def list_patterns(
         
     except Exception as e:
         logger.error(f"Error listing patterns: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/", )
 async def create_pattern(
@@ -83,7 +83,7 @@ async def create_pattern(
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating pattern: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating pattern: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{pattern_id}", )
 async def get_pattern(
@@ -114,7 +114,7 @@ async def get_pattern(
         raise
     except Exception as e:
         logger.error(f"Error getting pattern: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{pattern_id}", )
 async def delete_pattern(
@@ -138,4 +138,4 @@ async def delete_pattern(
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting pattern: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

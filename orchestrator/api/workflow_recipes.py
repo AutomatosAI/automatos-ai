@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func as sa_func
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -233,7 +233,94 @@ async def list_workflow_recipes(
 
     except Exception as e:
         logger.error(f"Error listing workflow recipes: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing recipes: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/stats/dashboard")
+async def get_recipe_stats_dashboard(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Aggregate dashboard stats across all workspace recipes and their executions.
+    Returns overview metrics, execution status breakdown, and top recipes by usage.
+    """
+    try:
+        # Base query: workspace-scoped recipes
+        base_q = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+        )
+
+        total_recipes = base_q.count()
+        recipes_with_steps = base_q.filter(WorkflowRecipe.steps != None).count()
+
+        # Aggregate quality_score and success_rate across recipes
+        agg = db.query(
+            sa_func.avg(WorkflowRecipe.quality_score),
+            sa_func.avg(WorkflowRecipe.success_rate),
+        ).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+        ).first()
+        avg_quality = round(float(agg[0] or 0), 2)
+        avg_success = round(float(agg[1] or 0), 1)
+
+        # Recipe IDs for execution queries
+        recipe_ids = [r.id for r in base_q.with_entities(WorkflowRecipe.id).all()]
+
+        # Execution stats
+        total_executions = 0
+        status_breakdown = {"completed": 0, "failed": 0, "running": 0, "pending": 0}
+        if recipe_ids:
+            exec_q = db.query(RecipeExecution).filter(
+                RecipeExecution.recipe_id.in_(recipe_ids),
+            )
+            total_executions = exec_q.count()
+
+            status_rows = db.query(
+                RecipeExecution.status,
+                sa_func.count(RecipeExecution.id),
+            ).filter(
+                RecipeExecution.recipe_id.in_(recipe_ids),
+            ).group_by(RecipeExecution.status).all()
+
+            for status_val, cnt in status_rows:
+                if status_val in status_breakdown:
+                    status_breakdown[status_val] = cnt
+
+        # Top recipes by use_count
+        top_recipes_orm = base_q.order_by(
+            WorkflowRecipe.use_count.desc()
+        ).limit(10).all()
+
+        top_recipes = []
+        for r in top_recipes_orm:
+            top_recipes.append({
+                "id": r.id,
+                "template_id": r.template_id,
+                "name": r.name,
+                "use_count": r.use_count or 0,
+                "success_rate": r.success_rate or 0.0,
+                "quality_score": r.quality_score,
+                "steps_count": len(r.steps) if r.steps else 0,
+                "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+            })
+
+        return {
+            "overview": {
+                "total_recipes": total_recipes,
+                "total_executions": total_executions,
+                "avg_quality_score": avg_quality,
+                "avg_success_rate": avg_success,
+            },
+            "status_breakdown": status_breakdown,
+            "top_recipes": top_recipes,
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting recipe dashboard stats: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{recipe_id}")
@@ -263,7 +350,7 @@ async def get_workflow_recipe(
         raise
     except Exception as e:
         logger.error(f"Error getting recipe {recipe_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting recipe: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("")
@@ -405,7 +492,7 @@ async def create_workflow_recipe(
     except Exception as e:
         logger.error(f"Error creating workflow recipe: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error creating recipe: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/{recipe_id}")
@@ -526,7 +613,7 @@ async def update_workflow_recipe(
     except Exception as e:
         logger.error(f"Error updating recipe {recipe_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error updating recipe: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/{recipe_id}")
@@ -593,7 +680,7 @@ async def delete_workflow_recipe(
     except Exception as e:
         logger.error(f"Error deleting recipe {recipe_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting recipe: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/{recipe_id}/use")
@@ -631,7 +718,7 @@ async def record_recipe_usage(
     except Exception as e:
         logger.error(f"Error recording recipe usage for {recipe_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error recording usage: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/categories/list")
@@ -663,7 +750,7 @@ async def list_recipe_categories(
 
     except Exception as e:
         logger.error(f"Error listing recipe categories: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing categories: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/featured/list")
@@ -690,7 +777,7 @@ async def list_featured_recipes(
 
     except Exception as e:
         logger.error(f"Error listing featured recipes: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing featured recipes: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/{recipe_id}/execute")
@@ -790,7 +877,7 @@ async def execute_recipe(
     except Exception as e:
         logger.error(f"[execute_recipe] Unhandled error: {e}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error executing recipe: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{recipe_id}/executions/{execution_id}")
@@ -857,7 +944,7 @@ async def get_recipe_execution_detail(
         raise
     except Exception as e:
         logger.error(f"Error getting execution detail: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting execution: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -1005,10 +1092,11 @@ async def analyze_execution_learning(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Execution analysis resource not found for recipe {recipe_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Execution or recipe not found")
     except Exception as e:
-        logger.error(f"Error analyzing execution for recipe {recipe_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error analyzing execution: {str(e)}")
+        logger.error(f"Error analyzing execution for recipe {recipe_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/{recipe_id}/assess-quality")
@@ -1065,10 +1153,11 @@ async def assess_execution_quality(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Quality assessment resource not found for recipe {recipe_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Execution or recipe not found")
     except Exception as e:
-        logger.error(f"Error assessing quality for recipe {recipe_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error assessing quality: {str(e)}")
+        logger.error(f"Error assessing quality for recipe {recipe_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{recipe_id}/suggestions")
@@ -1110,7 +1199,7 @@ async def get_recipe_suggestions(
         raise
     except Exception as e:
         logger.error(f"Error getting suggestions for recipe {recipe_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting suggestions: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{recipe_id}/executions")
@@ -1169,7 +1258,7 @@ async def list_recipe_executions(
         raise
     except Exception as e:
         logger.error(f"Error listing executions for recipe {recipe_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing executions: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================
@@ -1314,7 +1403,7 @@ async def submit_recipe_to_marketplace(
         import traceback
         logger.error(traceback.format_exc())
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error submitting recipe: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/install/{recipe_id}")
@@ -1468,7 +1557,7 @@ async def install_recipe_from_marketplace(
         import traceback
         logger.error(traceback.format_exc())
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error installing recipe: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ===================================================================

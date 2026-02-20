@@ -68,24 +68,27 @@ class OrchestratorLLM:
         provider: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        reasoning_mode: ReasoningMode = ReasoningMode.ADAPTIVE
+        reasoning_mode: ReasoningMode = ReasoningMode.ADAPTIVE,
+        workspace_id=None,
     ):
         """
         Initialize the Orchestrator LLM.
-        
+
         Args:
             model: Model to use (default from config)
             provider: Provider to use (default from config)
             temperature: Creativity level (0-1)
             max_tokens: Maximum response tokens
             reasoning_mode: Default reasoning mode
+            workspace_id: Workspace ID for usage tracking
         """
         self.model = model or config.LLM_MODEL
         self.provider = provider or config.LLM_PROVIDER
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.reasoning_mode = reasoning_mode
-        
+        self._workspace_id = workspace_id
+
         # Initialize LLM manager
         self.llm_manager = self._create_llm_manager()
         
@@ -106,13 +109,16 @@ class OrchestratorLLM:
         """Create LLM manager from system settings (NO hardcoded defaults)"""
         # Use centralized manager that reads from database settings
         from core.llm import create_llm_manager
-        
+
         # Create manager with service_name to get settings from database
         manager = create_llm_manager(service_name="orchestrator")
-        
+
+        # Attach tracking context
+        manager._tracking_ctx["workspace_id"] = self._workspace_id
+        manager._tracking_ctx["request_type"] = "orchestrator"
+
         # Override model/temperature if explicitly provided
         if self.model and self.model != manager.config.model:
-            # Create new config with overrides
             from core.llm.manager import LLMConfig
             new_config = LLMConfig(
                 provider=manager.config.provider,
@@ -122,8 +128,13 @@ class OrchestratorLLM:
                 api_key=manager.config.api_key,
                 base_url=manager.config.base_url
             )
-            return LLMManager(config=new_config)
-        
+            overridden = LLMManager(
+                config=new_config,
+                workspace_id=self._workspace_id,
+                request_type="orchestrator",
+            )
+            return overridden
+
         return manager
     
     async def generate_with_reasoning(

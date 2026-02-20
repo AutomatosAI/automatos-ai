@@ -386,7 +386,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding vector(1024),
+    embedding vector(4096),
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -447,7 +447,7 @@ CREATE TABLE IF NOT EXISTS knowledge_items (
     title VARCHAR(500),
     content TEXT NOT NULL,
     summary TEXT,
-    embedding vector(1024),
+    embedding vector(4096),
     metadata JSONB DEFAULT '{}',
     quality_score FLOAT DEFAULT 0.0,
     importance_score FLOAT DEFAULT 0.0,
@@ -651,7 +651,7 @@ CREATE TABLE IF NOT EXISTS memory_items (
     memory_type VARCHAR(100) NOT NULL,
     memory_level VARCHAR(50) DEFAULT 'working',
     importance FLOAT DEFAULT 0.5,
-    embedding vector(1024),
+    embedding vector(4096),
     access_count INTEGER DEFAULT 0,
     last_access TIMESTAMP DEFAULT NOW(),
     decay_rate FLOAT DEFAULT 0.1,
@@ -674,7 +674,7 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
     concept VARCHAR(255),
     description TEXT,
     node_type VARCHAR(50),
-    embedding vector(1024),
+    embedding vector(4096),
     importance FLOAT,
     confidence FLOAT,
     metadata JSONB,
@@ -706,7 +706,7 @@ CREATE TABLE IF NOT EXISTS kb_entities (
     entity_type VARCHAR(100) NOT NULL,
     canonical_name VARCHAR(255),
     description TEXT,
-    embedding vector(1024),
+    embedding vector(4096),
     mention_count INTEGER DEFAULT 0,
     importance_score FLOAT DEFAULT 0.0,
     metadata JSONB DEFAULT '{}',
@@ -1802,13 +1802,13 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO system_configurations (config_key, config_value, description) VALUES
 ('system.max_agents', '{"value": 100}', 'Maximum number of agents allowed'),
 ('system.default_timeout', '{"value": 300}', 'Default timeout for operations (seconds)'),
-('rag.default_model', '{"value": "text-embedding-ada-002"}', 'Default embedding model'),
+('rag.default_model', '{"value": "qwen/qwen3-embedding-8b"}', 'Default embedding model'),
 ('workflow.max_concurrent', '{"value": 10}', 'Maximum concurrent workflow executions')
 ON CONFLICT (config_key) DO NOTHING;
 
 -- Insert default RAG configuration
 INSERT INTO rag_configurations (name, embedding_model, created_by) VALUES
-('default', 'text-embedding-ada-002', 'system')
+('default', 'qwen/qwen3-embedding-8b', 'system')
 ON CONFLICT DO NOTHING;
 
 -- Insert sample LLM models

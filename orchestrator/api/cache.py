@@ -53,7 +53,7 @@ async def get_cache_stats(
 
     except Exception as e:
         logger.error(f"Error getting cache stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/clear/{namespace}")
@@ -94,7 +94,7 @@ async def clear_cache_namespace(
         raise
     except Exception as e:
         logger.error(f"Error clearing cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/invalidate/cloud/{connection_id}")
@@ -123,4 +123,4 @@ async def invalidate_cloud_cache(
 
     except Exception as e:
         logger.error(f"Error invalidating cloud cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

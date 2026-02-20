@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from typing import Dict, Any, List
 from uuid import UUID
@@ -9,6 +10,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate SQL identifier to prevent injection."""
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_.]*$', name):
+        raise ValueError(f"Invalid SQL identifier: {name}")
+    return name
 
 
 def make_json_serializable(obj):
@@ -102,7 +110,7 @@ class DatabaseIntrospectionService:
                                 col["samples"] = []
                             else:
                                 try:
-                                    sample_sql = text(f'SELECT DISTINCT "{col_name}" FROM "{schema}"."{table}" WHERE "{col_name}" IS NOT NULL LIMIT :lim')
+                                    sample_sql = text(f'SELECT DISTINCT "{_validate_identifier(col_name)}" FROM "{_validate_identifier(schema)}"."{_validate_identifier(table)}" WHERE "{_validate_identifier(col_name)}" IS NOT NULL LIMIT :lim')
                                     samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
                                     col["samples"] = [make_json_serializable(r[0]) for r in samples]
                                 except SQLAlchemyError:
@@ -119,7 +127,7 @@ class DatabaseIntrospectionService:
                         columns.append(col)
                     # Row count
                     try:
-                        cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"'))
+                        cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{_validate_identifier(schema)}"."{_validate_identifier(table)}"'))
                         row_count = cnt.scalar() or 0
                     except SQLAlchemyError:
                         logger.warning(
@@ -201,7 +209,7 @@ class DatabaseIntrospectionService:
                                 columns.append(col)
                                 continue
                             try:
-                                sample_sql = text(f"SELECT DISTINCT `{col_name}` FROM `{table}` WHERE `{col_name}` IS NOT NULL LIMIT :lim")
+                                sample_sql = text(f"SELECT DISTINCT `{_validate_identifier(col_name)}` FROM `{_validate_identifier(table)}` WHERE `{_validate_identifier(col_name)}` IS NOT NULL LIMIT :lim")
                                 samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
                                 col["samples"] = [r[0] for r in samples]
                             except SQLAlchemyError:
@@ -213,7 +221,7 @@ class DatabaseIntrospectionService:
                         columns.append(col)
 
                     try:
-                        cnt = conn.execute(text(f"SELECT COUNT(*) FROM `{table}`"))
+                        cnt = conn.execute(text(f"SELECT COUNT(*) FROM `{_validate_identifier(table)}`"))
                         row_count = cnt.scalar() or 0
                     except SQLAlchemyError:
                         try:

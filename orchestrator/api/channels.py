@@ -238,7 +238,8 @@ async def test_channel(
         return {"status": "error", "detail": f"Unknown platform: {platform}"}
 
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        logger.error("Channel test failed for %s: %s", channel_id, e)
+        return {"status": "error", "detail": "Connection test failed"}
 
 
 @router.post("/{channel_id}/start")
@@ -270,7 +271,7 @@ async def start_channel(
         return {"status": "started"}
     except Exception as e:
         logger.error("Failed to start channel %s: %s", channel_id, e)
-        raise HTTPException(500, f"Failed to start adapter: {str(e)}")
+        raise HTTPException(500, "Internal server error")
 
 
 @router.post("/{channel_id}/stop")
@@ -302,7 +303,7 @@ async def stop_channel(
         return {"status": "stopped"}
     except Exception as e:
         logger.error("Failed to stop channel %s: %s", channel_id, e)
-        raise HTTPException(500, f"Failed to stop adapter: {str(e)}")
+        raise HTTPException(500, "Internal server error")
 
 
 # ── Channel Analytics ──────────────────────────────────────────────

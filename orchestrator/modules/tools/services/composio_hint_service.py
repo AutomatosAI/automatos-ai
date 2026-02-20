@@ -245,10 +245,12 @@ class ComposioHintService:
                 manager = EntityManager(self.db)
                 entity = manager.get_entity_by_workspace(effective_workspace_id)
                 if entity:
+                    # Accept active AND pending connections — the agent assignment
+                    # is the authorization; let the SDK fail gracefully if not truly connected.
                     connected_apps = [
                         (c.get("app_name") or "").upper()
                         for c in manager.get_entity_connections(entity["id"])
-                        if c.get("status") == "active"
+                        if c.get("status") in ("active", "pending")
                     ]
             except Exception as conn_err:
                 logger.warning(f"[ComposioHintService] Connection check failed: {conn_err}")

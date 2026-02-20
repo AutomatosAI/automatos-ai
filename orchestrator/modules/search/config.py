@@ -36,9 +36,9 @@ class SearchConfig:
     # Database configuration
     database_url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
     
-    # Embedding configuration - reads from system settings
+    # Embedding configuration - reads from system settings (no hardcoded defaults)
     embedding_dimension: int = field(default_factory=_get_system_dimension)
-    embedding_model: str = "text-embedding-3-small"
+    embedding_model: str = field(default_factory=lambda: os.getenv("EMBEDDING_MODEL", ""))
     
     # Vector store configuration
     similarity_function: str = "cosine"  # cosine, l2, inner_product
@@ -59,7 +59,7 @@ class SearchConfig:
         return cls(
             database_url=os.getenv("DATABASE_URL", ""),
             embedding_dimension=_get_system_dimension(),  # Always from system settings
-            embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+            embedding_model=os.getenv("EMBEDDING_MODEL", ""),
             similarity_function=os.getenv("SIMILARITY_FUNCTION", "cosine"),
             vector_table_name=os.getenv("VECTOR_TABLE_NAME", "document_chunks"),
             default_max_results=int(os.getenv("DEFAULT_MAX_RESULTS", "10")),

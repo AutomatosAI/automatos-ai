@@ -200,9 +200,13 @@ class SQLValidator:
         if not re.match(r"^\s*SELECT\b", sql_stripped, flags=re.IGNORECASE):
             raise SQLValidationError("Only SELECT statements are allowed")
 
-        # Denylist
+        # PRD-61 Bug Fix (US-009): Check for mutations across entire SQL including
+        # subqueries. Strip string literals first to avoid false positives on
+        # quoted keywords like WHERE name = 'DELETE FROM'.
+        clean_sql = re.sub(r"'[^']*'", "''", sql_stripped)
+        clean_sql = re.sub(r'"[^"]*"', '""', clean_sql)
         for kw in self.DENY_KEYWORDS:
-            if re.search(kw, sql_stripped, flags=re.IGNORECASE):
+            if re.search(kw, clean_sql, flags=re.IGNORECASE):
                 raise SQLValidationError("Statement contains forbidden keyword")
 
         # Schema-based validation
