@@ -970,7 +970,8 @@ class DocumentManager:
                             entity.entity_name,
                             entity.entity_type,
                             entity.canonical_name,
-                            entity.description
+                            entity.description,
+                            workspace_id=workspace_id
                         )
                         entity_ids.append(entity_id)
                         
