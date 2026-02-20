@@ -77,7 +77,7 @@ class SemanticChunker:
         self._embedding_manager = None
         self._embedding_cache: Dict[str, List[float]] = {}
         self._embedding_cache_max_size: int = 1000  # Prevent unbounded memory growth
-        self._use_embeddings = True  # Can be disabled for performance
+        self._use_embeddings = False  # Disabled: keyword similarity is fast; embeddings belong in search not chunking
         
         # Patterns for sentence boundaries
         self.sentence_patterns = [

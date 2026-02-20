@@ -304,15 +304,17 @@ class DocumentProcessor:
         # USE EXISTING SEMANTIC CHUNKER (NOT A DUPLICATE!)
         if SEMANTIC_CHUNKER_AVAILABLE:
             try:
-                # Use ADAPTIVE strategy for best results
+                # Use TOPIC_COHERENCE — fast keyword-based chunking (no local model)
+                # ADAPTIVE runs 3 strategies with embedding calls = ~18s/batch on CPU
                 semantic_chunker = SemanticChunker(
-                    strategy=ChunkingStrategy.ADAPTIVE,
+                    strategy=ChunkingStrategy.TOPIC_COHERENCE,
                     target_chunk_size=500,
                     min_chunk_size=100,
                     max_chunk_size=1500,
                     overlap_ratio=0.1,
                     similarity_threshold=0.7
                 )
+                semantic_chunker._use_embeddings = False  # Skip local model loading
                 
                 doc_id = metadata.get('document_id') if metadata else None
                 semantic_chunks = semantic_chunker.chunk_text(text, document_id=str(doc_id) if doc_id else None)
@@ -338,7 +340,7 @@ class DocumentProcessor:
                         headers={}
                     ))
                 
-                logger.info(f"SemanticChunker (ADAPTIVE) created {len(chunks)} chunks with entropy/coherence metrics")
+                logger.info(f"SemanticChunker (TOPIC_COHERENCE) created {len(chunks)} chunks with entropy/coherence metrics")
                 return chunks
                 
             except Exception as e:
