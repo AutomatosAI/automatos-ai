@@ -187,10 +187,6 @@ class CodeGraphService:
                 text("UPDATE codegraph_projects SET status = 'indexing', updated_at = NOW() WHERE id = :id"),
                 {"id": project_id}
             )
-            self.db.commit()
-
-            # Ensure embedding column dimension matches current embedding model
-            self._ensure_embedding_dimension()
         else:
             result = self.db.execute(
                 text("""
@@ -207,11 +203,18 @@ class CodeGraphService:
                 }
             )
             project_id = result.fetchone()[0]
-            
-            # Ensure embedding column dimension matches current embedding model
-            self._ensure_embedding_dimension()
-        
+
+        # Commit project creation/update before DDL operations
         self.db.commit()
+
+        # Ensure embedding column dimension matches current embedding model
+        # (may issue ALTER TABLE DDL — must be in its own transaction)
+        try:
+            self._ensure_embedding_dimension()
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            logger.warning(f"Could not ensure embedding dimension: {e}")
         
         try:
             # Clone repository to temp directory
@@ -394,13 +397,20 @@ class CodeGraphService:
             }
             
         except Exception as e:
-            # Mark project as failed
-            self.db.execute(
-                text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
-                {"id": project_id}
-            )
-            self.db.commit()
-            
+            # Rollback any failed transaction before trying the status update
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            try:
+                self.db.execute(
+                    text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
+                    {"id": project_id}
+                )
+                self.db.commit()
+            except Exception as update_err:
+                logger.warning(f"Could not mark project as failed: {update_err}")
+
             logger.error(f"Failed to index {project_name}: {e}")
             raise
     
