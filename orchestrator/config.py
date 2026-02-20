@@ -166,7 +166,7 @@ class Config:
     S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
     S3_VECTORS_BUCKET: str = os.getenv("S3_VECTORS_BUCKET")  # e.g., "automatos-ai" or "automatos-vectors-{workspace_id}"
     S3_VECTORS_INDEX_NAME: str = os.getenv("S3_VECTORS_INDEX_NAME", "documents-index")
-    S3_VECTORS_DIMENSION: int = int(os.getenv("S3_VECTORS_DIMENSION", "1024"))
+    S3_VECTORS_DIMENSION: int = int(os.getenv("S3_VECTORS_DIMENSION", "4096"))
     S3_VECTORS_METRIC: str = os.getenv("S3_VECTORS_METRIC", "cosine")
     
     # =============================================================================

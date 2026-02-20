@@ -313,7 +313,32 @@ def get_cache_service() -> CacheService:
 
     if _cache_service is None:
         from core.redis.client import get_redis_client
-        redis_client = get_redis_client()
-        _cache_service = CacheService(redis_client)
+        redis_wrapper = get_redis_client()
+        if redis_wrapper is None:
+            logger.warning("Redis not available — cache operations will be no-ops")
+            # Return a no-op cache service with a fake redis
+            _cache_service = CacheService(_NoOpRedis())
+        else:
+            # RedisClient is a pub/sub wrapper — get the actual redis.Redis instance
+            _cache_service = CacheService(redis_wrapper.get_redis())
 
     return _cache_service
+
+
+class _NoOpRedis:
+    """Stub that silently ignores all cache operations when Redis is unavailable"""
+    def get(self, *a, **kw): return None
+    def set(self, *a, **kw): pass
+    def setex(self, *a, **kw): pass
+    def mget(self, *a, **kw): return [None] * len(a[0]) if a else []
+    def keys(self, *a, **kw): return []
+    def delete(self, *a, **kw): pass
+    def dbsize(self, *a, **kw): return 0
+    def info(self, *a, **kw): return {}
+    def pipeline(self): return _NoOpPipeline()
+
+
+class _NoOpPipeline:
+    """Stub pipeline for no-op Redis"""
+    def set(self, *a, **kw): return self
+    def execute(self): return []
