@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     curl \
+    git \
     postgresql-client \
     libmagic1 \
     tesseract-ocr \
