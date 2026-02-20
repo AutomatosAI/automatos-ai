@@ -111,14 +111,35 @@ async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_contex
 
 @router.get("/stats/agents")
 async def get_agent_memory_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
-    """Get memory stats per agent."""
+    """Get memory stats per agent with type/level breakdown."""
     try:
+        ws_filter = MemoryItem.workspace_id == ctx.workspace_id
+
         agent_stats = db.query(
             MemoryItem.agent_id,
             func.count(MemoryItem.id).label('memory_count'),
             func.avg(MemoryItem.importance).label('avg_importance'),
-            func.sum(MemoryItem.access_count).label('total_accesses')
-        ).filter(MemoryItem.workspace_id == ctx.workspace_id).group_by(MemoryItem.agent_id).all()
+            func.sum(MemoryItem.access_count).label('total_accesses'),
+            func.max(MemoryItem.created_at).label('last_memory_at'),
+        ).filter(ws_filter).group_by(MemoryItem.agent_id).all()
+
+        # Memory type distribution per agent
+        type_rows = db.query(
+            MemoryItem.agent_id, MemoryItem.memory_type, func.count(MemoryItem.id)
+        ).filter(ws_filter).group_by(MemoryItem.agent_id, MemoryItem.memory_type).all()
+
+        type_map: Dict[Any, Dict[str, int]] = {}
+        for agent_id, mtype, cnt in type_rows:
+            type_map.setdefault(agent_id, {})[mtype or "UNKNOWN"] = cnt
+
+        # Memory level distribution per agent
+        level_rows = db.query(
+            MemoryItem.agent_id, MemoryItem.memory_level, func.count(MemoryItem.id)
+        ).filter(ws_filter).group_by(MemoryItem.agent_id, MemoryItem.memory_level).all()
+
+        level_map: Dict[Any, Dict[str, int]] = {}
+        for agent_id, mlevel, cnt in level_rows:
+            level_map.setdefault(agent_id, {})[mlevel or "UNKNOWN"] = cnt
 
         return [
             {
@@ -126,6 +147,9 @@ async def get_agent_memory_stats(ctx: RequestContext = Depends(get_request_conte
                 "memory_count": stat.memory_count,
                 "avg_importance": round(float(stat.avg_importance or 0), 2),
                 "total_accesses": stat.total_accesses or 0,
+                "memory_types": type_map.get(stat.agent_id, {}),
+                "memory_levels": level_map.get(stat.agent_id, {}),
+                "last_memory_at": stat.last_memory_at.isoformat() if stat.last_memory_at else None,
             }
             for stat in agent_stats
         ]

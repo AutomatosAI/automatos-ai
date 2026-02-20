@@ -27,6 +27,7 @@ export const unifiedAnalyticsKeys = {
   modelComparison: (modelIds: string[], period: string) => ['unified-analytics', 'llm', 'comparison', modelIds, period] as const,
   costProjections: (period: string) => ['unified-analytics', 'llm', 'projections', period] as const,
   dailyCostByModel: (period: string) => ['unified-analytics', 'llm', 'daily-by-model', period] as const,
+  adminDashboard: (period: string) => ['unified-analytics', 'admin', 'dashboard', period] as const,
 }
 
 // ============= OVERVIEW =============
@@ -915,6 +916,65 @@ export function useAdminCostAnalytics(period: string = '30d') {
       } as AdminCostAnalyticsData
     },
     staleTime: 120000, // 2 minutes
+  })
+}
+
+// ============= ADMIN: COMPREHENSIVE DASHBOARD =============
+
+interface AdminDashboardData {
+  overview: {
+    total_cost: number
+    total_tokens: number
+    total_requests: number
+    total_workspaces: number
+    daily_average: number
+    projected_monthly: number
+  }
+  byok_split: {
+    platform_cost: number
+    platform_requests: number
+    byok_cost: number
+    byok_requests: number
+  }
+  workspaces: Array<{
+    id: string
+    name: string
+    plan: string
+    is_personal: boolean
+    created_at: string | null
+    agents: number
+    recipes: number
+    executions: number
+    cost: number
+    tokens: number
+    requests: number
+  }>
+  models: Array<{
+    model_id: string
+    provider: string
+    cost: number
+    tokens: number
+    requests: number
+    workspace_count: number
+  }>
+  daily_by_provider: {
+    providers: string[]
+    series: Record<string, any>[]
+  }
+}
+
+export function useAdminDashboard(period: string = '30d') {
+  return useQuery<AdminDashboardData | null>({
+    queryKey: unifiedAnalyticsKeys.adminDashboard(period),
+    queryFn: async () => {
+      return apiClient.request<AdminDashboardData>(
+        `/api/admin/analytics/dashboard?period=${period}`
+      ).catch((err) => {
+        console.warn('[Analytics] Admin dashboard failed:', err?.message || err)
+        return null
+      })
+    },
+    staleTime: 60000,
   })
 }
 

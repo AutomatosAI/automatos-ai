@@ -19,7 +19,8 @@ from sqlalchemy import func, desc, and_
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
-from core.models.core import LLMUsage, LLMModel, UserApiKey
+from core.models.core import LLMUsage, LLMModel, UserApiKey, Agent, RecipeExecution
+from core.models import WorkflowTemplate as WorkflowRecipe
 from core.models.workspaces import Workspace
 from core.credentials.encryption import get_encryption_service
 
@@ -939,3 +940,203 @@ async def get_admin_cost_analytics(
         cost_by_provider=cost_by_provider,
         daily_cost_trend=daily_cost_trend,
     )
+
+
+# ── Comprehensive Admin Dashboard ────────────────────────────────────
+
+
+@admin_router.get("/dashboard")
+async def get_admin_dashboard(
+    period: str = Query("30d", description="7d|30d|90d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Comprehensive admin dashboard: workspaces with resource counts,
+    platform-wide model usage, daily cost by provider, top models,
+    and BYOK cost split.  All in a single call.
+    """
+    _assert_admin(ctx)
+
+    delta = PERIOD_MAP.get(period, timedelta(days=30))
+    since = datetime.utcnow() - delta
+
+    # ── Platform-wide aggregates ──
+    agg = (
+        db.query(
+            func.sum(LLMUsage.total_cost).label("total_cost"),
+            func.sum(LLMUsage.total_tokens).label("total_tokens"),
+            func.count(LLMUsage.id).label("total_requests"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .first()
+    )
+    total_cost = float(agg.total_cost or 0) if agg else 0.0
+    total_tokens = int(agg.total_tokens or 0) if agg else 0
+    total_requests = agg.total_requests or 0 if agg else 0
+
+    # ── All workspaces ──
+    all_ws = db.query(Workspace).filter(Workspace.is_active.is_(True)).all()
+    total_workspaces = len(all_ws)
+
+    # Agent / recipe counts per workspace  (batch queries)
+    agent_counts = dict(
+        db.query(Agent.workspace_id, func.count(Agent.id))
+        .group_by(Agent.workspace_id)
+        .all()
+    )
+    recipe_counts = dict(
+        db.query(WorkflowRecipe.workspace_id, func.count(WorkflowRecipe.id))
+        .filter(WorkflowRecipe.owner_type == "workspace")
+        .group_by(WorkflowRecipe.workspace_id)
+        .all()
+    )
+    execution_counts = dict(
+        db.query(RecipeExecution.workspace_id, func.count(RecipeExecution.id))
+        .filter(RecipeExecution.started_at >= since)
+        .group_by(RecipeExecution.workspace_id)
+        .all()
+    )
+
+    # LLM usage per workspace
+    ws_usage_rows = (
+        db.query(
+            LLMUsage.workspace_id,
+            func.sum(LLMUsage.total_cost).label("cost"),
+            func.sum(LLMUsage.total_tokens).label("tokens"),
+            func.count(LLMUsage.id).label("requests"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .group_by(LLMUsage.workspace_id)
+        .all()
+    )
+    ws_usage_map = {str(r.workspace_id): r for r in ws_usage_rows}
+
+    workspaces = []
+    for ws in all_ws:
+        ws_id = str(ws.id)
+        usage = ws_usage_map.get(ws_id)
+        workspaces.append({
+            "id": ws_id,
+            "name": ws.name,
+            "plan": ws.plan or "starter",
+            "is_personal": ws.is_personal,
+            "created_at": ws.created_at.isoformat() if ws.created_at else None,
+            "agents": agent_counts.get(ws.id, 0),
+            "recipes": recipe_counts.get(ws.id, 0),
+            "executions": execution_counts.get(ws.id, 0),
+            "cost": round(float(usage.cost or 0), 6) if usage else 0.0,
+            "tokens": int(usage.tokens or 0) if usage else 0,
+            "requests": usage.requests or 0 if usage else 0,
+        })
+
+    # Sort by cost descending
+    workspaces.sort(key=lambda w: w["cost"], reverse=True)
+
+    # ── Top models platform-wide ──
+    top_models = (
+        db.query(
+            LLMUsage.model_id,
+            LLMUsage.provider,
+            func.sum(LLMUsage.total_cost).label("cost"),
+            func.sum(LLMUsage.total_tokens).label("tokens"),
+            func.count(LLMUsage.id).label("requests"),
+            func.count(func.distinct(LLMUsage.workspace_id)).label("workspace_count"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .group_by(LLMUsage.model_id, LLMUsage.provider)
+        .order_by(desc("cost"))
+        .limit(15)
+        .all()
+    )
+
+    models = [
+        {
+            "model_id": r.model_id or "unknown",
+            "provider": r.provider or "unknown",
+            "cost": round(float(r.cost or 0), 6),
+            "tokens": int(r.tokens or 0),
+            "requests": r.requests or 0,
+            "workspace_count": r.workspace_count or 0,
+        }
+        for r in top_models
+    ]
+
+    # ── Daily cost by provider (for stacked area chart) ──
+    daily_provider_rows = (
+        db.query(
+            func.date(LLMUsage.created_at).label("day"),
+            LLMUsage.provider,
+            func.sum(LLMUsage.total_cost).label("cost"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .group_by(func.date(LLMUsage.created_at), LLMUsage.provider)
+        .order_by("day")
+        .all()
+    )
+
+    # Pivot into chart-ready series
+    providers_set: set = set()
+    day_map: Dict[str, Dict[str, float]] = {}
+    for r in daily_provider_rows:
+        d = str(r.day)
+        p = r.provider or "unknown"
+        providers_set.add(p)
+        if d not in day_map:
+            day_map[d] = {}
+        day_map[d][p] = round(float(r.cost or 0), 6)
+
+    providers = sorted(providers_set)
+    daily_by_provider = []
+    for d in sorted(day_map.keys()):
+        entry: Dict[str, Any] = {"date": d}
+        for p in providers:
+            entry[p] = day_map[d].get(p, 0)
+        daily_by_provider.append(entry)
+
+    # ── BYOK vs Platform split ──
+    byok_rows = (
+        db.query(
+            LLMUsage.is_byok,
+            func.sum(LLMUsage.total_cost).label("cost"),
+            func.count(LLMUsage.id).label("requests"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .group_by(LLMUsage.is_byok)
+        .all()
+    )
+    byok_map = {r.is_byok: r for r in byok_rows}
+    p_row = byok_map.get(False)
+    b_row = byok_map.get(True)
+
+    # ── Revenue metrics ──
+    # Compute daily average and projected monthly (for billing planning)
+    days_with_data = (
+        db.query(func.count(func.distinct(func.date(LLMUsage.created_at))))
+        .filter(LLMUsage.created_at >= since)
+        .scalar() or 0
+    )
+    daily_avg = total_cost / days_with_data if days_with_data > 0 else 0.0
+
+    return {
+        "overview": {
+            "total_cost": round(total_cost, 6),
+            "total_tokens": total_tokens,
+            "total_requests": total_requests,
+            "total_workspaces": total_workspaces,
+            "daily_average": round(daily_avg, 6),
+            "projected_monthly": round(daily_avg * 30, 6),
+        },
+        "byok_split": {
+            "platform_cost": round(float(p_row.cost or 0), 6) if p_row else 0.0,
+            "platform_requests": p_row.requests or 0 if p_row else 0,
+            "byok_cost": round(float(b_row.cost or 0), 6) if b_row else 0.0,
+            "byok_requests": b_row.requests or 0 if b_row else 0,
+        },
+        "workspaces": workspaces,
+        "models": models,
+        "daily_by_provider": {
+            "providers": providers,
+            "series": daily_by_provider,
+        },
+    }
