@@ -41,8 +41,8 @@ export function AnalyticsOverview({ days }: OverviewProps) {
   const [channelStats, setChannelStats] = useState<any>({})
 
   useEffect(() => {
-    fetch('/api/heartbeat/analytics').then(r => r.json()).then(setHeartbeatStats).catch(() => {})
-    fetch('/api/channels/analytics').then(r => r.json()).then(data => setChannelStats(data.by_source || {})).catch(() => {})
+    fetch('/api/heartbeat/analytics').then(r => r.json()).then(setHeartbeatStats).catch((err) => { console.warn('[Analytics] Heartbeat fetch failed:', err?.message || err) })
+    fetch('/api/channels/analytics').then(r => r.json()).then(data => setChannelStats(data.by_source || {})).catch((err) => { console.warn('[Analytics] Channel fetch failed:', err?.message || err) })
   }, [days])
 
   const summaryCards = [

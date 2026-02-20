@@ -77,6 +77,19 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
   'demo': true,              // 🧪 Always use mocks for demos
 }
 
+// ─── Admin workspace override ────────────────────────────────────────
+// Module-level override that takes priority over localStorage.
+// Set by AdminWorkspaceSwitcher; reset on unmount.
+let _adminWorkspaceOverride: string | null = null
+
+export function setAdminWorkspaceOverride(wsId: string | null) {
+  _adminWorkspaceOverride = wsId
+}
+
+export function getAdminWorkspaceOverride(): string | null {
+  return _adminWorkspaceOverride
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -838,12 +851,13 @@ class ApiClient {
       ...(options.headers as Record<string, string>),
     }
 
-    // [FIX] Inject Workspace ID from LocalStorage to ensure correct backend context
+    // Inject Workspace ID: admin override takes priority over localStorage
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride
+        || localStorage.getItem('last_active_workspace')
+        || localStorage.getItem('last_active_org')
       if (workspaceId) {
         headers['X-Workspace-ID'] = workspaceId
-        // console.log('🏢 injected workspace context:', workspaceId)
       }
     }
 

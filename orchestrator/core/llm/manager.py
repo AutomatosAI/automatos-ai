@@ -7,6 +7,7 @@ Supports per-service configuration via system settings.
 """
 
 import os
+import time
 import logging
 from typing import Dict, Any, List, Optional
 from functools import lru_cache
@@ -363,18 +364,35 @@ class LLMManager:
         config: LLMConfig = None,
         service_name: str = "orchestrator",
         provider: Optional[str] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        workspace_id=None,
+        agent_id: Optional[int] = None,
+        execution_id: Optional[str] = None,
+        request_type: Optional[str] = None,
+        is_byok: bool = False,
     ):
         """
         Initialize LLM Manager.
-        
+
         Args:
             config: Optional LLMConfig (if None, loads from settings/env)
             service_name: Service name for per-service configuration ('orchestrator', 'codegraph', etc.)
             provider: Optional provider override
             model: Optional model override
+            workspace_id: Workspace ID for usage tracking
+            agent_id: Agent ID for usage tracking
+            execution_id: Execution ID for usage tracking
+            request_type: Request type label (chat, recipe, orchestrator, etc.)
+            is_byok: Whether this uses a BYOK key
         """
         self.service_name = service_name
+        self._tracking_ctx: Dict[str, Any] = {
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+            "execution_id": execution_id,
+            "request_type": request_type or service_name,
+            "is_byok": is_byok,
+        }
         
         if config is None:
             config = self._load_config_from_settings(service_name, provider, model)
@@ -580,14 +598,58 @@ class LLMManager:
             raise ValueError(f"Unsupported provider: {self.config.provider}")
     
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> Any:
-        """Generate response using the configured provider"""
+        """Generate response using the configured provider, with automatic usage tracking."""
         self._ensure_provider_initialized()
-        return await self.provider.generate_response(messages, tools)
-    
+        start = time.monotonic()
+        try:
+            response = await self.provider.generate_response(messages, tools)
+            self._track_usage(response, start)
+            return response
+        except Exception:
+            self._track_usage(None, start, status="error")
+            raise
+
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> Any:
-        """Generate response using the configured provider (synchronous)"""
+        """Generate response using the configured provider (synchronous), with automatic usage tracking."""
         self._ensure_provider_initialized()
-        return self.provider.generate_response_sync(messages)
+        start = time.monotonic()
+        try:
+            response = self.provider.generate_response_sync(messages)
+            self._track_usage(response, start)
+            return response
+        except Exception:
+            self._track_usage(None, start, status="error")
+            raise
+
+    def _track_usage(self, response: Any, start: float, status: str = "success") -> None:
+        """Track LLM usage via UsageTracker if workspace_id is set."""
+        ws = self._tracking_ctx.get("workspace_id")
+        if not ws:
+            return
+        try:
+            from .usage_tracker import UsageTracker
+
+            latency_ms = int((time.monotonic() - start) * 1000)
+
+            usage = getattr(response, "usage", None) or {}
+            input_tokens = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+
+            UsageTracker.track(
+                workspace_id=ws,
+                model_id=self.config.model or "unknown",
+                provider=self.config.provider.value if self.config.provider else "unknown",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                agent_id=self._tracking_ctx.get("agent_id"),
+                execution_id=self._tracking_ctx.get("execution_id"),
+                request_type=self._tracking_ctx.get("request_type", self.service_name),
+                latency_ms=latency_ms,
+                status=status,
+                is_byok=self._tracking_ctx.get("is_byok", False),
+            )
+        except Exception as e:
+            logger.debug(f"Usage tracking failed: {e}")
     
     def get_provider_info(self) -> Dict[str, Any]:
         """Get information about the current provider configuration"""

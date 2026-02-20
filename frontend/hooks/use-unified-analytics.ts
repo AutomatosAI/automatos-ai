@@ -5,27 +5,36 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '@/lib/api-client'
+import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
+
+// Workspace scope for cache correctness: when admin switches workspace,
+// cached data for workspace A must not bleed into workspace B.
+function wsScope() {
+  return getAdminWorkspaceOverride() || 'own'
+}
 
 // ============= QUERY KEYS =============
+// All keys are functions (or thunks) so wsScope() is called at query time, not module load time.
 export const unifiedAnalyticsKeys = {
-  overview: (days: number) => ['unified-analytics', 'overview', days] as const,
-  agents: (days: number) => ['unified-analytics', 'agents', days] as const,
-  workflows: (days: number) => ['unified-analytics', 'workflows', days] as const,
-  documents: (days: number) => ['unified-analytics', 'documents', days] as const,
-  costs: (days: number) => ['unified-analytics', 'costs', days] as const,
-  recommendations: ['unified-analytics', 'recommendations'] as const,
-  planUsage: ['unified-analytics', 'plan-usage'] as const,
-  memory: ['unified-analytics', 'memory'] as const,
-  adminWorkspaces: (days: number) => ['unified-analytics', 'admin', 'workspaces', days] as const,
-  openrouterCredits: ['unified-analytics', 'openrouter', 'credits'] as const,
-  openrouterKeyInfo: ['unified-analytics', 'openrouter', 'key-info'] as const,
-  composioApps: (days: number) => ['unified-analytics', 'composio', 'apps', days] as const,
-  composioActions: (days: number) => ['unified-analytics', 'composio', 'actions', days] as const,
-  composioAgentTools: (days: number) => ['unified-analytics', 'composio', 'agent-tools', days] as const,
-  chartPresets: ['unified-analytics', 'charts', 'presets'] as const,
-  modelComparison: (modelIds: string[], period: string) => ['unified-analytics', 'llm', 'comparison', modelIds, period] as const,
-  costProjections: (period: string) => ['unified-analytics', 'llm', 'projections', period] as const,
+  overview: (days: number) => ['unified-analytics', wsScope(), 'overview', days] as const,
+  agents: (days: number) => ['unified-analytics', wsScope(), 'agents', days] as const,
+  workflows: (days: number) => ['unified-analytics', wsScope(), 'workflows', days] as const,
+  documents: (days: number) => ['unified-analytics', wsScope(), 'documents', days] as const,
+  costs: (days: number) => ['unified-analytics', wsScope(), 'costs', days] as const,
+  recommendations: () => ['unified-analytics', wsScope(), 'recommendations'] as const,
+  planUsage: () => ['unified-analytics', wsScope(), 'plan-usage'] as const,
+  memory: () => ['unified-analytics', wsScope(), 'memory'] as const,
+  adminWorkspaces: (days: number) => ['unified-analytics', wsScope(), 'admin', 'workspaces', days] as const,
+  openrouterCredits: () => ['unified-analytics', wsScope(), 'openrouter', 'credits'] as const,
+  openrouterKeyInfo: () => ['unified-analytics', wsScope(), 'openrouter', 'key-info'] as const,
+  composioApps: (days: number) => ['unified-analytics', wsScope(), 'composio', 'apps', days] as const,
+  composioActions: (days: number) => ['unified-analytics', wsScope(), 'composio', 'actions', days] as const,
+  composioAgentTools: (days: number) => ['unified-analytics', wsScope(), 'composio', 'agent-tools', days] as const,
+  chartPresets: () => ['unified-analytics', wsScope(), 'charts', 'presets'] as const,
+  modelComparison: (modelIds: string[], period: string) => ['unified-analytics', wsScope(), 'llm', 'comparison', modelIds, period] as const,
+  costProjections: (period: string) => ['unified-analytics', wsScope(), 'llm', 'projections', period] as const,
+  dailyCostByModel: (period: string) => ['unified-analytics', wsScope(), 'llm', 'daily-by-model', period] as const,
+  adminDashboard: (period: string) => ['unified-analytics', wsScope(), 'admin', 'dashboard', period] as const,
 }
 
 // ============= OVERVIEW =============
@@ -37,7 +46,10 @@ export function useAnalyticsOverview(days: number = 30) {
 
       // Each call wrapped in try/catch to prevent synchronous TypeError from breaking Promise.all
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       const [agents, llmSummary, workflowStats, docStats] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
@@ -79,34 +91,64 @@ export function useAnalyticsOverview(days: number = 30) {
 }
 
 // ============= AGENT ANALYTICS =============
+
+interface AgentMemoryStats {
+  agent_id: number
+  memory_count: number
+  avg_importance: number
+  total_accesses: number
+  memory_types: Record<string, number>
+  memory_levels: Record<string, number>
+  last_memory_at: string | null
+}
+
 export function useAgentAnalytics(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.agents(days),
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
-      const [agents, stats] = await Promise.all([
+      const [agents, stats, memoryStats] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
         safeRequest(() => apiClient.getSystemAgentStatistics(), null),
+        safeRequest(() => apiClient.request<AgentMemoryStats[]>('/api/v1/memory/stats/agents'), []),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
+      const memoryList = Array.isArray(memoryStats) ? memoryStats : []
+
+      // Build lookup map by agent_id
+      const memoryMap = new Map<number, AgentMemoryStats>()
+      memoryList.forEach((m) => memoryMap.set(m.agent_id, m))
 
       return {
-        agents: agentList.map((agent: any) => ({
-          id: agent.id,
-          name: agent.name,
-          status: agent.status,
-          agentType: agent.agent_type,
-          successRate: agent.performance_metrics?.success_rate || 0,
-          avgRunTime: agent.performance_metrics?.avg_execution_time || 0,
-          tokensUsed: agent.model_usage_stats?.total_tokens || 0,
-          cost: agent.model_usage_stats?.total_cost || 0,
-          llmModel: agent.model_config?.model_id || 'unknown',
-          totalRequests: agent.model_usage_stats?.total_requests || 0,
-          lastUsed: agent.model_usage_stats?.last_used_at || agent.updated_at,
-        })),
+        agents: agentList.map((agent: any) => {
+          const mem = memoryMap.get(agent.id)
+          return {
+            id: agent.id,
+            name: agent.name,
+            status: agent.status,
+            agentType: agent.agent_type,
+            successRate: agent.performance_metrics?.success_rate || 0,
+            avgRunTime: agent.performance_metrics?.avg_execution_time || 0,
+            tokensUsed: agent.model_usage_stats?.total_tokens || 0,
+            cost: agent.model_usage_stats?.total_cost || 0,
+            llmModel: agent.agent_model_config?.model_id || 'unknown',
+            totalRequests: agent.model_usage_stats?.total_requests || 0,
+            lastUsed: agent.model_usage_stats?.last_used_at || agent.updated_at,
+            // Memory data
+            memoryCount: mem?.memory_count || 0,
+            avgImportance: mem?.avg_importance || 0,
+            totalAccesses: mem?.total_accesses || 0,
+            memoryTypes: mem?.memory_types || {},
+            memoryLevels: mem?.memory_levels || {},
+            lastMemoryAt: mem?.last_memory_at || null,
+          }
+        }),
         summary: {
           totalAgents: agentList.length,
           activeAgents: agentList.filter((a: any) => a.status === 'active').length,
@@ -127,14 +169,45 @@ export function useWorkflowAnalytics(days: number = 30) {
     queryKey: unifiedAnalyticsKeys.workflows(days),
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
-      const [workflows, stats] = await Promise.all([
+      const [workflows, stats, recipesResp, recipeStats] = await Promise.all([
         safeRequest(() => apiClient.getWorkflows(), []),
         safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
+        safeRequest(() => apiClient.listWorkflowRecipes({ limit: 100 }), null),
+        safeRequest(() => apiClient.request<any>('/api/workflow-recipes/stats/dashboard'), null),
       ])
 
       const workflowList = Array.isArray(workflows) ? workflows : []
+
+      // Normalize recipes
+      const rawRecipes = (recipesResp as any)?.items || (Array.isArray(recipesResp) ? recipesResp : [])
+      const recipes = rawRecipes.map((r: any) => ({
+        id: r.id,
+        templateId: r.template_id,
+        name: r.name,
+        description: r.description || '',
+        useCount: r.use_count || 0,
+        successRate: r.success_rate || 0,
+        qualityScore: r.quality_score,
+        stepsCount: r.steps?.length || 0,
+        tags: r.tags || [],
+        lastUsedAt: r.last_used_at,
+        createdAt: r.created_at,
+        isSystem: r.is_system || false,
+        isFeatured: r.is_featured || false,
+      }))
+
+      const recipeSummary = {
+        totalRecipes: recipeStats?.overview?.total_recipes ?? recipes.length,
+        totalExecutions: recipeStats?.overview?.total_executions ?? 0,
+        avgQualityScore: recipeStats?.overview?.avg_quality_score ?? 0,
+        avgSuccessRate: recipeStats?.overview?.avg_success_rate ?? 0,
+        statusBreakdown: recipeStats?.status_breakdown ?? null,
+      }
 
       return {
         workflows: workflowList.map((wf: any) => ({
@@ -155,6 +228,8 @@ export function useWorkflowAnalytics(days: number = 30) {
           avgDuration: (stats as any)?.today?.avg_duration_today || '0s',
         },
         stats,
+        recipes,
+        recipeSummary,
       }
     },
     staleTime: 60000,
@@ -169,7 +244,10 @@ export function useDocumentAnalyticsUnified(days: number = 30) {
       const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
 
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       const [documents, usage] = await Promise.all([
         safeRequest(() => apiClient.getDocuments(), []),
@@ -214,7 +292,10 @@ export function useCostAnalyticsUnified(days: number = 30) {
       const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
 
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       // Fetch from backend LLM analytics + agent data as fallback
       const [summary, usageByModel, agents] = await Promise.all([
@@ -258,7 +339,7 @@ export function useCostAnalyticsUnified(days: number = 30) {
         // Derive from agent model_usage_stats
         const modelMap: Record<string, { requests: number; inputTokens: number; outputTokens: number; cost: number; agents: Set<string> }> = {}
         agentList.forEach((agent: any) => {
-          const model = agent.model_config?.model_id || 'unknown'
+          const model = agent.agent_model_config?.model_id || 'unknown'
           if (!modelMap[model]) modelMap[model] = { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0, agents: new Set() }
           modelMap[model].requests += agent.model_usage_stats?.total_requests || 0
           modelMap[model].inputTokens += agent.model_usage_stats?.input_tokens || 0
@@ -292,14 +373,14 @@ export function useCostAnalyticsUnified(days: number = 30) {
           mostExpensiveAgent: mostExpensive?.model_usage_stats?.total_cost > 0 ? {
             name: mostExpensive.name,
             cost: mostExpensive.model_usage_stats.total_cost,
-            model: mostExpensive.model_config?.model_id || 'unknown',
+            model: mostExpensive.agent_model_config?.model_id || 'unknown',
           } : null,
         },
         byModel,
         byAgent: agentList.map((agent: any) => ({
           id: agent.id,
           name: agent.name,
-          model: agent.model_config?.model_id || 'unknown',
+          model: agent.agent_model_config?.model_id || 'unknown',
           tokens: agent.model_usage_stats?.total_tokens || 0,
           cost: agent.model_usage_stats?.total_cost || 0,
           requests: agent.model_usage_stats?.total_requests || 0,
@@ -317,7 +398,7 @@ export function useCostAnalyticsUnified(days: number = 30) {
 // ============= PLAN USAGE =============
 export function usePlanUsage() {
   return useQuery({
-    queryKey: unifiedAnalyticsKeys.planUsage,
+    queryKey: unifiedAnalyticsKeys.planUsage(),
     queryFn: async () => {
       // For now, return placeholder limits (pilot phase — limits TBD)
       const [agents, workflows, documents] = await Promise.all([
@@ -354,7 +435,7 @@ export function usePlanUsage() {
 // ============= RECOMMENDATIONS (AI-powered, cached daily) =============
 export function useRecommendations() {
   return useQuery({
-    queryKey: unifiedAnalyticsKeys.recommendations,
+    queryKey: unifiedAnalyticsKeys.recommendations(),
     queryFn: async () => {
       // Build recommendations from data analysis
       const agents = await apiClient.getAgents().catch(() => [])
@@ -370,8 +451,14 @@ export function useRecommendations() {
       }> = []
 
       // Analyze agent LLM usage
+      const totalCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
+      const totalTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
+      const totalRequests = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_requests || 0), 0)
+      const activeAgents = agentList.filter((a: any) => a.status === 'active').length
+      const unusedAgents = agentList.filter((a: any) => !a.model_usage_stats?.total_requests || a.model_usage_stats.total_requests === 0)
+
       agentList.forEach((agent: any) => {
-        const model = agent.model_config?.model_id || ''
+        const model = agent.agent_model_config?.model_id || ''
         const cost = agent.model_usage_stats?.total_cost || 0
         const tokens = agent.model_usage_stats?.total_tokens || 0
         const avgTokens = agent.model_usage_stats?.total_requests > 0
@@ -402,7 +489,43 @@ export function useRecommendations() {
         }
       })
 
-      // Sort by impact (cost savings first)
+      // Summary insight: unused agents
+      if (unusedAgents.length > 0 && agentList.length > 1) {
+        recommendations.push({
+          id: 'unused-agents',
+          type: 'performance',
+          title: `${unusedAgents.length} agent${unusedAgents.length > 1 ? 's have' : ' has'} never been used`,
+          description: `${unusedAgents.map((a: any) => a.name).slice(0, 3).join(', ')}${unusedAgents.length > 3 ? ` and ${unusedAgents.length - 3} more` : ''} — consider assigning them to workflows or removing unused ones.`,
+          impact: 'Cleaner workspace',
+        })
+      }
+
+      // Summary insight: total spend
+      if (totalCost > 0) {
+        const costPerRequest = totalRequests > 0 ? totalCost / totalRequests : 0
+        recommendations.push({
+          id: 'cost-summary',
+          type: 'cost',
+          title: `$${totalCost.toFixed(2)} spent across ${totalRequests.toLocaleString()} requests`,
+          description: `Average cost per request: $${costPerRequest.toFixed(4)}. ${totalTokens.toLocaleString()} tokens used across ${activeAgents} active agent${activeAgents !== 1 ? 's' : ''}.`,
+          impact: 'Cost overview',
+        })
+      }
+
+      // Insight: no usage data yet
+      if (totalRequests === 0 && agentList.length > 0) {
+        recommendations.push({
+          id: 'no-usage',
+          type: 'quota',
+          title: `${agentList.length} agents configured but no LLM usage tracked yet`,
+          description: 'Start a chat conversation or run a recipe to begin tracking token usage and costs automatically.',
+          impact: 'Getting started',
+        })
+      }
+
+      // Sort: cost first, then performance, then others
+      const typePriority: Record<string, number> = { cost: 0, performance: 1, document: 2, quota: 3 }
+      recommendations.sort((a, b) => (typePriority[a.type] ?? 9) - (typePriority[b.type] ?? 9))
       return recommendations.slice(0, 5)
     },
     staleTime: 24 * 60 * 60 * 1000, // Cache for 24 hours
@@ -412,12 +535,28 @@ export function useRecommendations() {
 // ============= WORKSPACE MEMORY =============
 export function useWorkspaceMemory() {
   return useQuery({
-    queryKey: unifiedAnalyticsKeys.memory,
+    queryKey: unifiedAnalyticsKeys.memory(),
     queryFn: async () => {
-      const memoryData = await apiClient.request('/api/v1/memory/stats/real').catch(() => null)
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
+
+      const [memoryData, recentMemories] = await Promise.all([
+        safeRequest(() => apiClient.request('/api/v1/memory/stats/real'), null),
+        safeRequest(() => apiClient.request<any[]>('/api/v1/memory/stats/recent?limit=8'), []),
+      ])
+
+      const items = Array.isArray(recentMemories) ? recentMemories.map((mem: any) => ({
+        key: mem.memory_type || 'memory',
+        value: mem.content || `${mem.memory_level || 'memory'} (importance: ${mem.importance ?? 'N/A'})`,
+        source: mem.agent_id ? 'learned' : 'system',
+        updated_at: mem.created_at,
+      })) : []
 
       return {
-        items: (memoryData as any)?.user_preferences || [],
+        items,
         totalMemories: (memoryData as any)?.system_stats?.total_memories || 0,
         hitRate: (memoryData as any)?.access_metrics?.hit_rate || 0,
       }
@@ -451,7 +590,7 @@ interface OpenRouterSyncResult {
 
 export function useOpenRouterCredits() {
   return useQuery<OpenRouterCreditsData | null>({
-    queryKey: unifiedAnalyticsKeys.openrouterCredits,
+    queryKey: unifiedAnalyticsKeys.openrouterCredits(),
     queryFn: async () => {
       const data = await apiClient.request<OpenRouterCreditsData>(
         '/api/analytics/llm/openrouter/credits'
@@ -468,7 +607,7 @@ export function useOpenRouterCredits() {
 
 export function useOpenRouterKeyInfo() {
   return useQuery<OpenRouterKeyInfoData | null>({
-    queryKey: unifiedAnalyticsKeys.openrouterKeyInfo,
+    queryKey: unifiedAnalyticsKeys.openrouterKeyInfo(),
     queryFn: async () => {
       const data = await apiClient.request<OpenRouterKeyInfoData>(
         '/api/analytics/llm/openrouter/key-info'
@@ -493,8 +632,8 @@ export function useTriggerOpenRouterSync() {
     },
     onSuccess: () => {
       // Invalidate related queries so they refetch with fresh data
-      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterCredits })
-      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterKeyInfo })
+      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterCredits() })
+      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterKeyInfo() })
       queryClient.invalidateQueries({ queryKey: ['unified-analytics', 'costs'] })
     },
   })
@@ -603,7 +742,7 @@ export function useAnalyticsChart() {
 
 export function useChartPresets() {
   return useQuery<ChartPreset[]>({
-    queryKey: unifiedAnalyticsKeys.chartPresets,
+    queryKey: unifiedAnalyticsKeys.chartPresets(),
     queryFn: async () => {
       return apiClient.request<ChartPreset[]>(
         '/api/analytics/charts/presets'
@@ -674,6 +813,25 @@ export function useCostProjections(period: string = '30d') {
   })
 }
 
+// ============= DAILY COST BY MODEL (multi-line chart) =============
+
+interface DailyCostByModelData {
+  models: string[]
+  series: Record<string, any>[]
+}
+
+export function useDailyCostByModel(period: string = '30d') {
+  return useQuery<DailyCostByModelData | null>({
+    queryKey: unifiedAnalyticsKeys.dailyCostByModel(period),
+    queryFn: async () => {
+      return apiClient.request<DailyCostByModelData>(
+        `/api/analytics/llm/costs/daily-by-model?period=${period}`
+      ).catch(() => null)
+    },
+    staleTime: 60000,
+  })
+}
+
 // ============= ADMIN: COST ANALYTICS =============
 
 interface AdminWorkspaceCostEntry {
@@ -711,10 +869,13 @@ interface AdminCostAnalyticsData {
 
 export function useAdminCostAnalytics(period: string = '30d') {
   return useQuery<AdminCostAnalyticsData | null>({
-    queryKey: ['unified-analytics', 'admin', 'costs', period],
+    queryKey: ['unified-analytics', wsScope(), 'admin', 'costs', period],
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       // Fetch from backend + agent data as fallback
       const [backendData, agents] = await Promise.all([
@@ -738,7 +899,7 @@ export function useAdminCostAnalytics(period: string = '30d') {
       // Build provider breakdown from agent model configs
       const providerMap: Record<string, { cost: number; requests: number }> = {}
       agentList.forEach((a: any) => {
-        const provider = a.model_config?.provider || 'unknown'
+        const provider = a.agent_model_config?.provider || 'unknown'
         if (!providerMap[provider]) providerMap[provider] = { cost: 0, requests: 0 }
         providerMap[provider].cost += a.model_usage_stats?.total_cost || 0
         providerMap[provider].requests += a.model_usage_stats?.total_requests || 0
@@ -765,13 +926,75 @@ export function useAdminCostAnalytics(period: string = '30d') {
   })
 }
 
+// ============= ADMIN: COMPREHENSIVE DASHBOARD =============
+
+interface AdminDashboardData {
+  overview: {
+    total_cost: number
+    total_tokens: number
+    total_requests: number
+    total_workspaces: number
+    daily_average: number
+    projected_monthly: number
+  }
+  byok_split: {
+    platform_cost: number
+    platform_requests: number
+    byok_cost: number
+    byok_requests: number
+  }
+  workspaces: Array<{
+    id: string
+    name: string
+    plan: string
+    is_personal: boolean
+    created_at: string | null
+    agents: number
+    recipes: number
+    executions: number
+    cost: number
+    tokens: number
+    requests: number
+  }>
+  models: Array<{
+    model_id: string
+    provider: string
+    cost: number
+    tokens: number
+    requests: number
+    workspace_count: number
+  }>
+  daily_by_provider: {
+    providers: string[]
+    series: Record<string, any>[]
+  }
+}
+
+export function useAdminDashboard(period: string = '30d') {
+  return useQuery<AdminDashboardData | null>({
+    queryKey: unifiedAnalyticsKeys.adminDashboard(period),
+    queryFn: async () => {
+      return apiClient.request<AdminDashboardData>(
+        `/api/admin/analytics/dashboard?period=${period}`
+      ).catch((err) => {
+        console.warn('[Analytics] Admin dashboard failed:', err?.message || err)
+        return null
+      })
+    },
+    staleTime: 60000,
+  })
+}
+
 // ============= ADMIN: CROSS-WORKSPACE =============
 export function useAdminWorkspaceAnalytics(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.adminWorkspaces(days),
     queryFn: async () => {
       const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch(() => fallback)
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] API call failed:', err?.message || err)
+          return fallback
+        })
 
       const [agents] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),

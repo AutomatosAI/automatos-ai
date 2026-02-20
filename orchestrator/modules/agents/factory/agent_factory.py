@@ -868,7 +868,13 @@ Available Shell Tools:
             f"provider={model_config.provider}, model={model_config.model_id}, source={resolved.source}"
         )
 
-        return LLMManager(config=llm_config), resolved
+        manager = LLMManager(
+            config=llm_config,
+            workspace_id=workspace_id,
+            agent_id=None,  # not known at this point
+            is_byok=resolved.is_byok if resolved else False,
+        )
+        return manager, resolved
 
     async def _resolve_api_key(self, provider_name: str, agent_name: str = "", workspace_id=None) -> Optional[ResolvedKey]:
         """
@@ -1115,7 +1121,12 @@ Available Shell Tools:
                 max_tokens=llm_config_dict.get("max_tokens", 2000),
                 api_key=resolved.api_key if resolved else None,
             )
-            llm_manager = LLMManager(llm_config)
+            llm_manager = LLMManager(
+                config=llm_config,
+                workspace_id=db_agent.workspace_id,
+                agent_id=agent_id,
+                is_byok=resolved.is_byok if resolved else False,
+            )
 
             # Create metadata from database agent
             metadata = AgentMetadata(

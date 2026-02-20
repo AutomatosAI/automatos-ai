@@ -634,6 +634,7 @@ class AgentResponse(BaseModel):
     tools: List[Dict[str, Any]] = []  # Assigned apps/integrations (Composio)
     plugins: List[Dict[str, Any]] = []  # Assigned marketplace plugins
     agent_model_config: Optional[Dict[str, Any]] = None  # PRD-15: Model configuration (renamed from model_config - Pydantic reserved)
+    model_usage_stats: Optional[Dict[str, Any]] = None  # PRD-54: LLM usage stats
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
