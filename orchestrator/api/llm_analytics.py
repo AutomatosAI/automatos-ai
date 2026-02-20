@@ -745,9 +745,22 @@ def _is_admin(ctx: RequestContext) -> bool:
     return getattr(ctx.user, "system_role", "user") == "admin"
 
 
-def _assert_admin(ctx: RequestContext) -> None:
-    if not _is_admin(ctx):
-        raise HTTPException(status_code=403, detail="Admin access required")
+def _assert_admin(ctx: RequestContext, db: Session = None) -> None:
+    """Check admin access.  In single-tenant / bootstrap mode (≤2 active
+    workspaces) any authenticated user with a workspace is promoted so the
+    first user can access admin analytics before Clerk metadata is configured."""
+    if _is_admin(ctx):
+        return
+    # Bootstrap bypass — single-tenant or pilot mode
+    if db and ctx.workspace_id:
+        ws_count = (
+            db.query(func.count(Workspace.id))
+            .filter(Workspace.is_active.is_(True))
+            .scalar() or 0
+        )
+        if ws_count <= 2:
+            return
+    raise HTTPException(status_code=403, detail="Admin access required")
 
 
 # ── Admin Analytics schemas ──────────────────────────────────────────
@@ -790,7 +803,7 @@ async def get_admin_cost_analytics(
     db: Session = Depends(get_db),
 ):
     """Platform-wide cost analytics across all workspaces (admin only)."""
-    _assert_admin(ctx)
+    _assert_admin(ctx, db)
 
     delta = PERIOD_MAP.get(period, timedelta(days=30))
     since = datetime.utcnow() - delta
@@ -956,7 +969,7 @@ async def get_admin_dashboard(
     platform-wide model usage, daily cost by provider, top models,
     and BYOK cost split.  All in a single call.
     """
-    _assert_admin(ctx)
+    _assert_admin(ctx, db)
 
     delta = PERIOD_MAP.get(period, timedelta(days=30))
     since = datetime.utcnow() - delta
