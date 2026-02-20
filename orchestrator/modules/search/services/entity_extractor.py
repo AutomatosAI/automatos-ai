@@ -367,33 +367,34 @@ async def create_entity_relationship(
     relationship_type: str,
     strength: float = 1.0,
     evidence_source_id: Optional[int] = None,
-    evidence_text: Optional[str] = None
+    evidence_text: Optional[str] = None,
+    workspace_id: Optional[str] = None
 ):
     """Create relationship between two entities"""
-    
+
     # Get entity IDs
     cursor.execute("SELECT id FROM kb_entities WHERE LOWER(canonical_name) = LOWER(%s) LIMIT 1", [from_entity_name.lower()])
     from_result = cursor.fetchone()
-    
+
     cursor.execute("SELECT id FROM kb_entities WHERE LOWER(canonical_name) = LOWER(%s) LIMIT 1", [to_entity_name.lower()])
     to_result = cursor.fetchone()
-    
+
     if not from_result or not to_result:
         logger.warning(f"Could not create relationship: entities not found ({from_entity_name} -> {to_entity_name})")
         return
-    
+
     from_entity_id = from_result[0]
     to_entity_id = to_result[0]
-    
+
     # Create relationship
     cursor.execute("""
-        INSERT INTO entity_relationships 
-        (from_entity_id, to_entity_id, relationship_type, strength, evidence_source_id, evidence_text)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        ON CONFLICT (from_entity_id, to_entity_id, relationship_type) 
-        DO UPDATE SET 
+        INSERT INTO entity_relationships
+        (from_entity_id, to_entity_id, relationship_type, strength, evidence_source_id, evidence_text, workspace_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (from_entity_id, to_entity_id, relationship_type)
+        DO UPDATE SET
             strength = GREATEST(entity_relationships.strength, EXCLUDED.strength),
             evidence_text = COALESCE(EXCLUDED.evidence_text, entity_relationships.evidence_text),
             updated_at = NOW()
-    """, [from_entity_id, to_entity_id, relationship_type, strength, evidence_source_id, evidence_text])
+    """, [from_entity_id, to_entity_id, relationship_type, strength, evidence_source_id, evidence_text, workspace_id])
 

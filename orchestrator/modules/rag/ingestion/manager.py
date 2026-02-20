@@ -1001,7 +1001,8 @@ class DocumentManager:
                                 rel.relationship_type,
                                 rel.strength,
                                 document_id,
-                                rel.evidence
+                                rel.evidence,
+                                workspace_id=workspace_id
                             )
                         
                         conn.commit()
