@@ -28,7 +28,7 @@ class MockS3VectorsBackend:
     """
 
     INDEX_NAME = "documents-index"
-    INDEX_DIMENSION = 1024
+    INDEX_DIMENSION = 4096
     DISTANCE_METRIC = "cosine"
 
     def __init__(self, workspace_id: str, region: str = None):

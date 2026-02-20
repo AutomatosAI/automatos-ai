@@ -132,9 +132,9 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.GENERAL.value,
             "key": "vector_store_dimensions",
-            "default_value": "1024",
+            "default_value": "4096",
             "value_type": "number",
-            "description": "Vector dimensions",
+            "description": "Vector embedding dimensions (matches your embedding model output)",
             "is_required": False,
             "validation_rules": {
                 "min": 128,

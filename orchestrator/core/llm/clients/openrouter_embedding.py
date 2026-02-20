@@ -26,27 +26,28 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Model ID → (default_dimension, max_context_tokens)
+# Model ID → (native_dimension, max_context_tokens)
+# These are the NATIVE output dimensions — no truncation, full quality
 OPENROUTER_EMBEDDING_MODELS = {
     # Top-tier (best quality/price)
-    "qwen/qwen3-embedding-8b":        (1024, 32000),
-    "qwen/qwen3-embedding-4b":        (1024, 32768),
-    "google/gemini-embedding-001":     (3072, 20000),
+    "qwen/qwen3-embedding-8b":        (4096, 32000),   # Matryoshka: supports 32-4096
+    "qwen/qwen3-embedding-4b":        (2560, 32768),   # Matryoshka: supports 32-2560
+    "google/gemini-embedding-001":     (3072, 20000),   # Fixed 3072
     # OpenAI
-    "openai/text-embedding-3-large":   (3072, 8192),
-    "openai/text-embedding-3-small":   (1536, 8192),
-    "openai/text-embedding-ada-002":   (1536, 8192),
+    "openai/text-embedding-3-large":   (3072, 8192),    # Matryoshka: supports 256-3072
+    "openai/text-embedding-3-small":   (1536, 8192),    # Matryoshka: supports 256-1536
+    "openai/text-embedding-ada-002":   (1536, 8192),    # Fixed 1536
     # Mistral
-    "mistralai/mistral-embed-2312":    (1024, 8192),
-    "mistralai/codestral-embed-2505":  (1024, 8192),
+    "mistralai/mistral-embed-2312":    (1024, 8192),    # Fixed 1024
+    "mistralai/codestral-embed-2505":  (1024, 8192),    # Fixed 1024
     # BAAI (open source)
-    "baai/bge-m3":                     (1024, 8192),
-    "baai/bge-large-en-v1.5":         (1024, 512),
-    "baai/bge-base-en-v1.5":          (768,  512),
+    "baai/bge-m3":                     (1024, 8192),    # Fixed 1024
+    "baai/bge-large-en-v1.5":         (1024, 512),      # Fixed 1024
+    "baai/bge-base-en-v1.5":          (768,  512),      # Fixed 768
     # Intfloat / E5
-    "intfloat/e5-large-v2":           (1024, 512),
-    "intfloat/e5-base-v2":            (768,  512),
-    "intfloat/multilingual-e5-large": (1024, 512),
+    "intfloat/e5-large-v2":           (1024, 512),      # Fixed 1024
+    "intfloat/e5-base-v2":            (768,  512),      # Fixed 768
+    "intfloat/multilingual-e5-large": (1024, 512),      # Fixed 1024
     # Sentence Transformers
     "sentence-transformers/all-mpnet-base-v2":       (768, 512),
     "sentence-transformers/all-minilm-l6-v2":        (384, 512),
@@ -84,7 +85,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
                 api_key=api_key,
                 base_url="https://openrouter.ai/api/v1",
             )
-            model_info = OPENROUTER_EMBEDDING_MODELS.get(self.config.model, (1024, 8192))
+            model_info = OPENROUTER_EMBEDDING_MODELS.get(self.config.model, (4096, 8192))
             logger.info(
                 f"Initialized OpenRouter embedding client — "
                 f"model: {self.config.model}, dim: {self.config.dimension}, "
@@ -100,7 +101,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
             )
 
         # Truncate based on model context length
-        model_info = OPENROUTER_EMBEDDING_MODELS.get(self.config.model, (1024, 8192))
+        model_info = OPENROUTER_EMBEDDING_MODELS.get(self.config.model, (4096, 8192))
         max_chars = model_info[1] * 4  # ~4 chars per token estimate
         if len(text) > max_chars:
             text = text[:max_chars]
@@ -144,7 +145,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
         if not texts:
             return []
 
-        model_info = OPENROUTER_EMBEDDING_MODELS.get(self.config.model, (1024, 8192))
+        model_info = OPENROUTER_EMBEDDING_MODELS.get(self.config.model, (4096, 8192))
         max_chars = model_info[1] * 4
 
         # Truncate all texts

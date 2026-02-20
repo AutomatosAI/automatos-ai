@@ -34,8 +34,8 @@ export default function GeneralSettingsTab({
 
   const MODEL_DIMENSIONS: Record<string, Record<string, number>> = {
     openrouter: {
-      'qwen/qwen3-embedding-8b': 1024,
-      'qwen/qwen3-embedding-4b': 1024,
+      'qwen/qwen3-embedding-8b': 4096,
+      'qwen/qwen3-embedding-4b': 2560,
       'google/gemini-embedding-001': 3072,
       'openai/text-embedding-3-large': 3072,
       'openai/text-embedding-3-small': 1536,
@@ -254,8 +254,8 @@ export default function GeneralSettingsTab({
                 <SelectContent>
                   {formData.embedding_provider === 'openrouter' && (
                     <>
-                      <SelectItem value="qwen/qwen3-embedding-8b">Qwen3 8B (1024d, 32K ctx, $0.01/M) — Best Value</SelectItem>
-                      <SelectItem value="qwen/qwen3-embedding-4b">Qwen3 4B (1024d, 32K ctx, $0.02/M) — Lighter</SelectItem>
+                      <SelectItem value="qwen/qwen3-embedding-8b">Qwen3 8B (4096d, 32K ctx, $0.01/M) — Best Value</SelectItem>
+                      <SelectItem value="qwen/qwen3-embedding-4b">Qwen3 4B (2560d, 32K ctx, $0.02/M) — Lighter</SelectItem>
                       <SelectItem value="google/gemini-embedding-001">Gemini Embedding (3072d, 20K ctx, $0.15/M) — #1 MTEB</SelectItem>
                       <SelectItem value="openai/text-embedding-3-large">OpenAI Large (3072d, 8K ctx, $0.13/M)</SelectItem>
                       <SelectItem value="openai/text-embedding-3-small">OpenAI Small (1536d, 8K ctx, $0.02/M)</SelectItem>

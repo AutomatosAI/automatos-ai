@@ -101,7 +101,7 @@ class EmbeddingManager:
             provider_type = get_system_setting("embedding_provider")
             model = get_system_setting("embedding_model")
             cache_dir = get_system_setting("embedding_cache_dir") or "./model_cache"
-            dimension_str = get_system_setting("vector_store_dimensions") or "1024"
+            dimension_str = get_system_setting("vector_store_dimensions") or "4096"
             
             logger.debug(f"Loaded embedding settings: provider={provider_type}, model={model}, dim={dimension_str}")
             
@@ -113,8 +113,8 @@ class EmbeddingManager:
             if not model:
                 model = os.getenv("EMBEDDING_MODEL")
                 
-            if dimension_str == "1024": # If default was used
-                dimension_str = os.getenv("VECTOR_STORE_DIMENSIONS", "1024")
+            if dimension_str == "4096": # If default was used
+                dimension_str = os.getenv("VECTOR_STORE_DIMENSIONS", "4096")
                 
             dimension = int(dimension_str)
             
@@ -168,7 +168,7 @@ class EmbeddingManager:
             
         except Exception as e:
             logger.error(f"Failed to load embedding provider: {e}. Using fallback.")
-            dimension_str = get_system_setting("vector_store_dimensions") or "1024"
+            dimension_str = get_system_setting("vector_store_dimensions") or "4096"
             self.provider = DeterministicEmbeddingProvider(dimension=int(dimension_str))
     
     def _create_provider(self, config: EmbeddingConfig) -> BaseEmbeddingProvider:
@@ -275,7 +275,7 @@ class EmbeddingManager:
             dimension_str = get_system_setting("vector_store_dimensions")
             if dimension_str:
                 return int(dimension_str)
-            return 1024  # Last resort fallback
+            return 4096  # Last resort fallback
         return self.provider.get_dimension()
     
     def get_provider_info(self) -> dict:

@@ -116,7 +116,7 @@ class VectorStoreAugmenter:
             from modules.memory import get_embedding_dimension
             return get_embedding_dimension()
         except Exception:
-            return 1024  # Fallback
+            return 4096  # Fallback
     
     async def add_external_knowledge(
         self,
