@@ -65,7 +65,7 @@ def upgrade() -> None:
     )
     op.create_index('idx_codegraph_files_project', 'codegraph_files', ['project_id'])
     op.create_index('idx_codegraph_files_hash', 'codegraph_files', ['file_hash'])
-    op.create_index('idx_codegraph_files_path', 'codegraph_files', ['project_id', 'file_path'])
+    op.create_unique_constraint('uq_codegraph_files_project_path', 'codegraph_files', ['project_id', 'file_path'])
 
     # ── codegraph_symbols ──────────────────────────────────────────
     op.create_table(
