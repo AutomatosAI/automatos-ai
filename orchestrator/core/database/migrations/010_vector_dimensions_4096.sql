@@ -1,48 +1,86 @@
--- Migration 010: Upgrade to Qwen3 Embedding 8B (4096 dimensions via OpenRouter)
+-- Migration 010: Full RAG Reset — OpenRouter/Qwen3-8B @ 4096 dimensions
 -- =============================================================================
 --
--- Switches embedding provider to OpenRouter with Qwen3-Embedding-8B (4096d).
--- Vectors are stored in S3 Vectors (not pgvector), so no ALTER TABLE needed.
--- This migration only updates system_settings and clears document metadata
--- so all documents get re-embedded at the new dimension.
+-- NUCLEAR RESET: Wipes ALL document, chunk, entity, knowledge, and memory data.
+-- Vectors stored in S3 (not pgvector) — no ALTER TABLE needed for vector columns.
+-- After this migration, S3 index must also be deleted/recreated at 4096d.
 --
--- S3 INDEX NOTE: The existing S3 index (dim=1024) must be deleted separately
--- before re-syncing. The app will auto-create a new index at 4096d on startup.
--- Use: python -m scripts.recreate_s3_index  (or delete via AWS console)
+-- Run: python -m scripts.recreate_s3_index  (handles S3 side)
+--
+-- Post-migration Railway env vars:
+--   S3_VECTORS_DIMENSION=4096
+--   EMBEDDING_PROVIDER=openrouter
+--   EMBEDDING_MODEL=qwen/qwen3-embedding-8b
+--   OPENROUTER_API_KEY=<key>
 
--- Step 1: Update system settings for new embedding config
--- Schema: system_settings(category, key, value, ...)
+BEGIN;
+
+-- =============================================================================
+-- Step 1: Wipe leaf/junction tables first (FK dependency order)
+-- =============================================================================
+
+-- RAG v3 entity graph (migration 20260218)
+DO $$ BEGIN TRUNCATE document_relationships CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE document_entities CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE rag_feedback CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+
+-- Knowledge graph entities (migration 007)
+DO $$ BEGIN TRUNCATE knowledge_entity_mentions CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE entity_relationships CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE entity_clusters CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE kb_entities CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+
+-- Knowledge base content (PRD-19)
+DO $$ BEGIN TRUNCATE knowledge_collection_items CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE knowledge_collections CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE knowledge_usage CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE knowledge_relationships CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE kb_tables CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE kb_images CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE kb_formulas CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE multimodal_content CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE knowledge_items CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+
+-- Knowledge graph nodes/edges
+DO $$ BEGIN TRUNCATE knowledge_edges CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE knowledge_nodes CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE external_knowledge CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+
+-- Memory
+DO $$ BEGIN TRUNCATE memory_items CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+
+-- Document analytics
+DO $$ BEGIN TRUNCATE document_usage CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+
+-- =============================================================================
+-- Step 2: Wipe core document tables
+-- =============================================================================
+
+TRUNCATE document_chunks CASCADE;
+DELETE FROM documents;
+
+-- Cloud sync metadata
+DO $$ BEGIN TRUNCATE cloud_sync_jobs CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE cloud_documents CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+DO $$ BEGIN TRUNCATE cloud_sync_config CASCADE; EXCEPTION WHEN undefined_table THEN NULL; END $$;
+
+-- =============================================================================
+-- Step 3: Update system settings for new embedding config
+-- =============================================================================
+
 UPDATE system_settings
-SET value = '4096',
-    updated_at = NOW()
+SET value = '4096', updated_at = NOW()
 WHERE category = 'general' AND key = 'vector_store_dimensions';
 
 UPDATE system_settings
-SET value = 'openrouter',
-    updated_at = NOW()
+SET value = 'openrouter', updated_at = NOW()
 WHERE category = 'general' AND key = 'embedding_provider';
 
 UPDATE system_settings
-SET value = 'qwen/qwen3-embedding-8b',
-    updated_at = NOW()
+SET value = 'qwen/qwen3-embedding-8b', updated_at = NOW()
 WHERE category = 'general' AND key = 'embedding_model';
 
--- Step 2: Clear all document chunks (old 1024d embeddings are useless)
-DELETE FROM document_chunks;
+COMMIT;
 
--- Step 3: Reset all documents to pending so they get re-processed
-UPDATE documents SET status = 'pending', chunk_count = 0, updated_at = NOW();
-
--- Step 4: Clear entity data (will be re-extracted during re-sync)
-DO $$ BEGIN
-    DELETE FROM entity_mentions;
-EXCEPTION WHEN undefined_table THEN NULL;
-END $$;
-
-DO $$ BEGIN
-    DELETE FROM entity_relationships;
-EXCEPTION WHEN undefined_table THEN NULL;
-END $$;
-
-SELECT 'Migration 010 complete: switched to OpenRouter/Qwen3-8B (4096d)' AS status;
-SELECT 'ACTION REQUIRED: Delete S3 index + update Railway env vars + re-sync docs' AS next_step;
+SELECT 'Migration 010: Full RAG reset complete' AS status;
+SELECT 'NEXT: Run recreate_s3_index.py + update Railway env vars + re-sync' AS action;
