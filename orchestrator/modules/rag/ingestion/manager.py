@@ -940,13 +940,14 @@ class DocumentManager:
                             
                             cursor.execute("""
                                 INSERT INTO kb_formulas (
-                                    knowledge_item_id, latex, mathml, ascii_math
-                                ) VALUES (%s, %s, %s, %s)
+                                    knowledge_item_id, latex, mathml, ascii_math, workspace_id
+                                ) VALUES (%s, %s, %s, %s, %s)
                             """, (
                                 document_id,
                                 latex_content,
                                 mathml_content or '',
-                                formula_data.ascii_math if hasattr(formula_data, 'ascii_math') else ''
+                                formula_data.ascii_math if hasattr(formula_data, 'ascii_math') else '',
+                                workspace_id
                             ))
                         
                         conn.commit()
