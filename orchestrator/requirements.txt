@@ -65,6 +65,7 @@ opencv-python-headless==4.8.1.78
 chromadb==0.4.18
 openai>=1.10.0  # Compatible with langchain-openai 1.0.1
 anthropic>=0.40.0,<1.0.0  # Upper bound for API stability
+google-generativeai>=0.8.0  # Google Gemini native API (used by google_client.py)
 sentence-transformers>=2.2.2
 transformers>=4.21.0
 huggingface-hub>=0.10.0
