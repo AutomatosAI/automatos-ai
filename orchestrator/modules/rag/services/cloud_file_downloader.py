@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Composio action names for downloading files per cloud provider
 _DOWNLOAD_ACTIONS = {
     "GOOGLEDRIVE": "GOOGLEDRIVE_DOWNLOAD_FILE",
-    "DROPBOX": "DROPBOX_DOWNLOAD_FILE",
+    "DROPBOX": "DROPBOX_READ_FILE",
     "ONEDRIVE": "ONEDRIVE_DOWNLOAD_FILE",
     "BOX": "BOX_DOWNLOAD_FILE",
 }
