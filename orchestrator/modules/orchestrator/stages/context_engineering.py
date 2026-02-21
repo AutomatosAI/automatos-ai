@@ -641,7 +641,7 @@ class ContextEngineeringIntegrator:
                 self.vector_store = PgVectorStore(connection_string=db_string)
                 # Read dimension from system_settings (matches embedding model)
                 from modules.rag.service import _get_rag_setting_int
-                vector_dim = _get_rag_setting_int("vector_store_dimensions", 4096)
+                vector_dim = _get_rag_setting_int("vector_store_dimensions", 2048)
                 await self.vector_store.initialize(dimension=vector_dim)
                 self.logger.info("✅ PgVectorStore initialized for semantic search")
                 

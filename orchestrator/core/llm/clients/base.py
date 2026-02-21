@@ -31,7 +31,7 @@ def _get_system_dimension() -> int:
             db.close()
     except Exception:
         pass
-    return 4096  # Fallback if DB unavailable (matches Qwen3-Embedding-8B native output)
+    return 2048  # Fallback if DB unavailable (Qwen3-8B Matryoshka truncated to 2048)
 
 
 class LLMProvider(Enum):

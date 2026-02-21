@@ -30,7 +30,7 @@ class MockS3VectorsBackend:
     """
 
     INDEX_NAME = config.S3_VECTORS_INDEX_NAME if hasattr(config, 'S3_VECTORS_INDEX_NAME') else "documents-index"
-    INDEX_DIMENSION = config.S3_VECTORS_DIMENSION if hasattr(config, 'S3_VECTORS_DIMENSION') else 4096
+    INDEX_DIMENSION = config.S3_VECTORS_DIMENSION if hasattr(config, 'S3_VECTORS_DIMENSION') else 2048
     DISTANCE_METRIC = config.S3_VECTORS_METRIC if hasattr(config, 'S3_VECTORS_METRIC') else "cosine"
 
     def __init__(self, workspace_id: str, region: str = None):

@@ -197,13 +197,22 @@ class S3VectorsBackend:
         if not vector_objects:
             return []
 
+        # Batch puts to stay under S3 Vectors max request size (~10MB)
+        # With 4096-dim float32 vectors (~16KB each) + metadata, ~50 vectors per batch is safe
+        BATCH_SIZE = 50
         try:
-            # S3 Vectors supports batch puts
-            self.client.put_vectors(
-                vectorBucketName=self.bucket_name,
-                indexName=self.index_name,
-                vectors=vector_objects,
-            )
+            for i in range(0, len(vector_objects), BATCH_SIZE):
+                batch = vector_objects[i:i + BATCH_SIZE]
+                self.client.put_vectors(
+                    vectorBucketName=self.bucket_name,
+                    indexName=self.index_name,
+                    vectors=batch,
+                )
+                if len(vector_objects) > BATCH_SIZE:
+                    logger.info(
+                        f"Stored batch {i // BATCH_SIZE + 1}/{(len(vector_objects) + BATCH_SIZE - 1) // BATCH_SIZE} "
+                        f"({len(batch)} vectors) in {self.bucket_name}/{self.index_name}"
+                    )
             logger.info(
                 f"Stored {len(vector_objects)} vectors in {self.bucket_name}/{self.index_name}"
             )

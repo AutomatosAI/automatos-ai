@@ -102,7 +102,7 @@ def main():
 
     print()
     print("Done! Next steps:")
-    print("  1. Update Railway env: S3_VECTORS_DIMENSION=4096")
+    print("  1. Update Railway env: S3_VECTORS_DIMENSION=2048")
     print("  2. Update Railway env: EMBEDDING_MODEL=qwen/qwen3-embedding-8b")
     print("  3. Update Railway env: EMBEDDING_PROVIDER=openrouter")
     print("  4. Re-sync all documents from Google Drive")
