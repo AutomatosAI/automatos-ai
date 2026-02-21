@@ -69,7 +69,11 @@ class S3VectorsBackend:
         self._ensure_setup()
 
     def _ensure_setup(self) -> None:
-        """Create bucket and index if they don't already exist."""
+        """Create bucket and index if they don't already exist.
+
+        If an existing index has a different dimension than configured,
+        it is deleted and recreated so embeddings can be stored correctly.
+        """
         # Create bucket
         try:
             self.client.create_vector_bucket(vectorBucketName=self.bucket_name)
@@ -81,7 +85,7 @@ class S3VectorsBackend:
             else:
                 raise
 
-        # Create index
+        # Create index (with dimension mismatch detection)
         try:
             self.client.create_index(
                 vectorBucketName=self.bucket_name,
@@ -90,15 +94,72 @@ class S3VectorsBackend:
                 dataType="float32",
                 distanceMetric=self.distance_metric,
             )
-            logger.info(f"Created S3 vector index: {self.index_name}")
+            logger.info(f"Created S3 vector index: {self.index_name} (dimension={self.index_dimension})")
         except ClientError as e:
             code = e.response["Error"]["Code"]
             if code in ("ConflictException", "ResourceAlreadyExistsException"):
-                logger.debug(f"S3 vector index already exists: {self.index_name}")
+                # Index exists — verify the dimension matches
+                self._verify_or_recreate_index()
             else:
                 raise
 
         self._setup_complete = True
+
+    def _verify_or_recreate_index(self) -> None:
+        """Check existing index dimension and recreate if it doesn't match config."""
+        try:
+            response = self.client.get_index(
+                vectorBucketName=self.bucket_name,
+                indexName=self.index_name,
+            )
+            existing_dim = response.get("dimension", 0)
+
+            if existing_dim == self.index_dimension:
+                logger.debug(
+                    f"S3 vector index already exists with correct dimension {existing_dim}"
+                )
+                return
+
+            logger.warning(
+                f"S3 vector index dimension mismatch: index has {existing_dim}, "
+                f"config expects {self.index_dimension}. Recreating index..."
+            )
+
+            # Delete the old index
+            self.client.delete_index(
+                vectorBucketName=self.bucket_name,
+                indexName=self.index_name,
+            )
+            logger.info(f"Deleted stale S3 vector index (dimension={existing_dim})")
+
+            # Create with the correct dimension
+            self.client.create_index(
+                vectorBucketName=self.bucket_name,
+                indexName=self.index_name,
+                dimension=self.index_dimension,
+                dataType="float32",
+                distanceMetric=self.distance_metric,
+            )
+            logger.info(
+                f"Recreated S3 vector index: {self.index_name} "
+                f"(dimension={self.index_dimension})"
+            )
+
+        except ClientError as e:
+            code = e.response["Error"]["Code"]
+            if code in ("NotFoundException", "ResourceNotFoundException"):
+                # Index was deleted between check and recreate — just create it
+                self.client.create_index(
+                    vectorBucketName=self.bucket_name,
+                    indexName=self.index_name,
+                    dimension=self.index_dimension,
+                    dataType="float32",
+                    distanceMetric=self.distance_metric,
+                )
+                logger.info(f"Created S3 vector index: {self.index_name}")
+            else:
+                logger.error(f"Failed to verify/recreate S3 vector index: {e}")
+                raise
 
     def search(
         self,
