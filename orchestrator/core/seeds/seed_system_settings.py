@@ -133,9 +133,9 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.GENERAL.value,
             "key": "vector_store_dimensions",
-            "default_value": "4096",
+            "default_value": "2048",
             "value_type": "number",
-            "description": "Vector embedding dimensions (matches your embedding model output)",
+            "description": "Vector embedding dimensions (Qwen3-8B Matryoshka truncated to 2048)",
             "is_required": False,
             "validation_rules": {
                 "min": 128,

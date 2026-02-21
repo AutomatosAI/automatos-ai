@@ -49,7 +49,7 @@ def get_embedding_dimension() -> int:
                 return int(result[0])
     except Exception:
         pass
-    return 4096  # Default
+    return 2048  # Default
 
 
 __all__ = [

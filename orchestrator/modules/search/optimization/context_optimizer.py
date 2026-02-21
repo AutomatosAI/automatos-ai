@@ -56,7 +56,7 @@ def _get_system_dimension() -> int:
             db.close()
     except Exception:
         pass
-    return 4096  # Fallback if DB unavailable
+    return 2048  # Fallback if DB unavailable
 
 # PromptType and PromptTemplate defined locally (only consumer)
 from enum import Enum

@@ -13,7 +13,7 @@ from typing import List
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
-TEST_EMBEDDING_DIM = int(os.getenv("VECTOR_STORE_DIMENSIONS", "4096"))
+TEST_EMBEDDING_DIM = int(os.getenv("VECTOR_STORE_DIMENSIONS", "2048"))
 
 from modules.search import (
     SearchService, SearchConfig,
