@@ -391,7 +391,15 @@ export default function SystemLLMSettingsTab({
                   <Label htmlFor="llm_model">LLM Model</Label>
                   <Select
                     value={formData.llm_model || ''}
-                    onValueChange={(value) => handleInputChange('llm_model', value)}
+                    onValueChange={(value) => {
+                      handleInputChange('llm_model', value)
+                      // If user picks an aggregator model, auto-switch provider to openrouter
+                      // (aggregator models use OpenRouter paths like "anthropic/claude-opus-4.6")
+                      const picked = allModels.find((m: any) => m.model_id === value)
+                      if (picked && (picked as any).tier === 'aggregator' && formData.llm_provider !== 'openrouter') {
+                        handleInputChange('llm_provider', 'openrouter')
+                      }
+                    }}
                     disabled={modelsLoading || !selectedProvider}
                   >
                     <SelectTrigger>
