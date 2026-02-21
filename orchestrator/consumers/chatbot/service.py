@@ -547,10 +547,11 @@ class StreamingChatService:
             if not is_simple and tools and supports_native_tools:
                 # 1. Identify Core Tools (always included)
                 core_tool_names = {
-                    "search_knowledge", "semantic_search", "search_codebase", 
-                    "query_database", "smart_query_database", 
+                    "search_knowledge", "semantic_search", "search_codebase",
+                    "query_database", "smart_query_database",
                     "read_file", "write_file", "switch_context",
-                    "search_tables", "search_images", "search_formulas", "search_multimodal"
+                    "search_tables", "search_images", "search_formulas", "search_multimodal",
+                    "generate_document", "composio_execute",
                 }
                 
                 # 2. Get relevant tools via ranking

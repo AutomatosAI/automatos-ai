@@ -45,27 +45,32 @@ class SmartToolRouter:
     CORE_TOOLS = {
         "search_knowledge",
         "semantic_search",
+        "search_codebase",
         "smart_query_database",
         "query_database",
+        "composio_execute",
+        "generate_document",
     }
 
     # Tool categories
     TOOL_CATEGORIES = {
         "data": ["query_database", "smart_query_database", "sql_query"],
-        "search": ["search_knowledge", "semantic_search", "search_codebase", "search_multimodal"],
+        "search": ["search_knowledge", "semantic_search", "search_codebase", "search_multimodal",
+                    "search_tables", "search_images", "search_formulas"],
         "files": ["read_file", "write_file", "list_directory", "create_directory", "delete_file"],
         "external": ["composio_execute", "composio_actions"],
-        "creation": ["write_file", "create_directory"],
+        "creation": ["write_file", "create_directory", "generate_document"],
+        "document": ["generate_document", "write_file"],
         "code": ["search_codebase", "execute_code", "run_command"],
     }
 
     # Intent to tool category mapping
     INTENT_TO_TOOLS = {
         Intent.DATA_QUERY: ["data", "search"],
-        Intent.SEARCH: ["search"],
-        Intent.EXTERNAL_ACTION: ["external"],
-        Intent.CREATION: ["files", "creation"],
-        Intent.MULTI_STEP: ["data", "search", "files", "external"],  # All tools
+        Intent.SEARCH: ["search", "code"],
+        Intent.EXTERNAL_ACTION: ["external", "document"],
+        Intent.CREATION: ["files", "creation", "document", "external"],
+        Intent.MULTI_STEP: ["data", "search", "files", "external", "document", "code"],  # All tools
         Intent.MEMORY_RECALL: [],  # No tools needed
         Intent.GREETING: [],  # No tools needed
         Intent.CHITCHAT: [],  # No tools needed
@@ -193,6 +198,7 @@ class SmartToolRouter:
             "search": ["search", "find", "lookup", "knowledge"],
             "files": ["file", "directory", "folder", "write", "read"],
             "external": ["email", "slack", "github", "compose"],
+            "document": ["document", "report", "pdf", "docx", "xlsx", "invoice", "export", "generate"],
             "code": ["code", "execute", "run", "command"],
         }
 

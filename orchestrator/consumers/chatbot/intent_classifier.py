@@ -103,9 +103,11 @@ class SmartIntentClassifier:
 
     # Creation patterns - need file/document tools
     CREATION_PATTERNS = [
-        r"\bcreate\b.*\b(file|report|document)\b",
-        r"\bwrite\b.*\b(to|a)\b.*\b(file|report)\b",
-        r"\bgenerate\b.*\b(report|analysis|summary)\b",
+        r"\bcreate\b.*\b(file|report|document|pdf|docx|xlsx|spreadsheet)\b",
+        r"\bwrite\b.*\b(to|a)\b.*\b(file|report|document)\b",
+        r"\bgenerate\b.*\b(report|analysis|summary|document|pdf|invoice)\b",
+        r"\bmake\b.*\b(a|me|the)\b.*\b(report|document|pdf|spreadsheet)\b",
+        r"\bexport\b.*\b(as|to)\b",
         r"\bsave\b.*\b(as|to)\b"
     ]
 
@@ -214,8 +216,22 @@ class SmartIntentClassifier:
                 is_simple=False
             )
 
-        # 6. Check for external actions
-        if self._matches_patterns(query, self._external_re):
+        # 6 & 7. Check for external actions AND creation — if BOTH match, it's multi-step
+        is_external = self._matches_patterns(query, self._external_re)
+        is_creation = self._matches_patterns(query, self._creation_re)
+
+        if is_external and is_creation:
+            return IntentResult(
+                primary_intent=Intent.MULTI_STEP,
+                confidence=0.85,
+                requires_tools=True,
+                requires_memory=False,
+                suggested_tools=["generate_document", "composio_execute"],
+                reasoning="Multi-step: create document + external action",
+                is_simple=False
+            )
+
+        if is_external:
             return IntentResult(
                 primary_intent=Intent.EXTERNAL_ACTION,
                 confidence=0.85,
@@ -226,14 +242,13 @@ class SmartIntentClassifier:
                 is_simple=False
             )
 
-        # 7. Check for creation tasks
-        if self._matches_patterns(query, self._creation_re):
+        if is_creation:
             return IntentResult(
                 primary_intent=Intent.CREATION,
                 confidence=0.8,
                 requires_tools=True,
                 requires_memory=False,
-                suggested_tools=["write_file", "create_directory"],
+                suggested_tools=["generate_document", "write_file"],
                 reasoning="Content creation requested",
                 is_simple=False
             )

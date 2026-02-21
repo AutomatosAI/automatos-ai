@@ -1281,11 +1281,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             
             # Context Map (TODO: make dynamic when tool taxonomy stabilizes)
             CONTEXT_MAP = {
-                "general": ["communication", "research", "productivity", "system", "collaboration", "developer", "api"],
-                "coding": ["developer", "github", "git", "code", "file_ops", "devtools"],
+                "general": ["communication", "research", "productivity", "system", "collaboration", "developer", "api", "file_ops", "database"],
+                "coding": ["developer", "github", "git", "code", "file_ops", "devtools", "research"],
                 "ops": ["cloud", "k8s", "aws", "infrastructure", "monitoring", "database", "shell"],
                 "communication": ["communication", "slack", "email", "chat", "collaboration"],
-                "research": ["research", "data", "search", "rag"],
+                "research": ["research", "data", "search", "rag", "database"],
             }
             
             allowed_categories = CONTEXT_MAP.get(active_context)
