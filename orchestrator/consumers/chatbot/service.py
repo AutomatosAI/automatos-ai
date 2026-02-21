@@ -1305,23 +1305,25 @@ class StreamingChatService:
         chat_id: str,
         messages: List[Dict[str, Any]],
         agent_id: int,
-        user_id: int
+        user_id: int,
+        use_system_llm: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream chat response using a specialized agent from AgentFactory.
-        
+
         PRD: Unified Agent-Chat System
         - Activates agent from factory
         - Uses agent's LLM manager, skills, and tools
         - Builds system prompt from agent's skills
         - Uses shared user-level memory
-        
+
         Args:
             chat_id: Chat session ID
             messages: Chat messages
             agent_id: ID of agent to use
             user_id: User ID for memory
-            
+            use_system_llm: Use orchestrator LLM settings instead of agent's model
+
         Yields:
             AI SDK formatted response chunks
         """
@@ -1346,7 +1348,7 @@ class StreamingChatService:
             if fresh_start:
                 messages = [m for m in messages if m.get("role") == "user"][-1:]
 
-            agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id))
+            agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id, use_system_llm=use_system_llm))
 
             # Send chat_id to frontend
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)

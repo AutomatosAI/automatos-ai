@@ -248,13 +248,14 @@ async def stream_chat(
 
     routing_decision = None
     routing_request_id = None
+    use_system_llm = False  # True = use orchestrator LLM settings, not agent's model
 
     if request.agentId:
         # User explicitly selected an agent — skip routing, use directly
         effective_agent_id = request.agentId
         logger.info(f"[chat] User override: agent_id={effective_agent_id}")
     else:
-        # No agent selected — use universal router to auto-select
+        # No agent selected (Auto mode) — use universal router to auto-select
         try:
             ingestor = ChatbotIngestor()
             envelope = ingestor.ingest(
@@ -278,8 +279,10 @@ async def stream_chat(
             )
         else:
             # Router returned None or non-agent route — fall back to default
+            # Use orchestrator LLM settings (Settings > Orchestrator tab)
             effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
-            logger.info(f"[chat] Router returned no agent route; using default agent_id={effective_agent_id} for workspace={ctx.workspace_id}")
+            use_system_llm = True
+            logger.info(f"[chat] Auto mode fallback: agent_id={effective_agent_id}, use_system_llm=True")
 
     # Build response headers (include routing metadata when available)
     response_headers = {
@@ -304,7 +307,8 @@ async def stream_chat(
             chat_id=chat_id,
             messages=message_history,
             agent_id=effective_agent_id,
-            user_id=user_id
+            user_id=user_id,
+            use_system_llm=use_system_llm,
         ),
         media_type="text/plain; charset=utf-8",
         headers=response_headers,
