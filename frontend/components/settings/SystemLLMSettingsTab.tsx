@@ -32,7 +32,7 @@ import {
   bulkUpdateSettings,
   resetSettingsToDefaults,
 } from '@/lib/api/system-settings'
-import { useModels } from '@/hooks/use-model-api'
+import { useWorkspaceModels } from '@/hooks/use-model-api'
 import { apiClient } from '@/lib/api-client'
 
 interface SystemLLMSettingsTabProps {
@@ -135,8 +135,8 @@ export default function SystemLLMSettingsTab({
   const [heartbeatOpen, setHeartbeatOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
 
-  // Load models from API
-  const { data: allModels = [], isLoading: modelsLoading } = useModels(undefined, 'active')
+  // Load workspace-installed models (same catalog agents use)
+  const { data: allModels = [], isLoading: modelsLoading } = useWorkspaceModels()
 
   const selectedProvider = formData.llm_provider || ''
 
