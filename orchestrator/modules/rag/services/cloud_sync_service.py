@@ -553,8 +553,13 @@ class CloudSyncService:
             )
             if is_folder:
                 continue
+            # Dropbox READ_FILE needs path, not id; Google Drive needs id
+            if app_name == "DROPBOX":
+                ext_id = item.get("path_display") or item.get("id") or ""
+            else:
+                ext_id = item.get("id") or item.get("path_display") or ""
             files.append({
-                "external_file_id": item.get("id") or item.get("path_display") or "",
+                "external_file_id": ext_id,
                 "name": item.get("name") or item.get("title") or "",
                 "path": item.get("path_display") or item.get("path") or "",
                 "mime_type": item.get("mimeType") or item.get("mime_type") or "",
