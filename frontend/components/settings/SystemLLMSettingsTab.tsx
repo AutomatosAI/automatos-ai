@@ -143,7 +143,14 @@ export default function SystemLLMSettingsTab({
   const availableModels = useMemo(() => {
     if (!Array.isArray(allModels)) return []
     if (!selectedProvider) return allModels
-    return allModels.filter((model: { provider: string }) => model.provider === selectedProvider)
+    // For aggregator providers (openrouter), also include aggregator-tier models
+    // whose underlying provider differs (e.g. Claude Opus 4.6 via OpenRouter has
+    // provider="anthropic" but tier="aggregator")
+    const isAggregator = selectedProvider === 'openrouter'
+    return allModels.filter((model: any) =>
+      model.provider === selectedProvider ||
+      (isAggregator && model.tier === 'aggregator')
+    )
   }, [allModels, selectedProvider])
 
   // Self-load settings when in standalone mode
