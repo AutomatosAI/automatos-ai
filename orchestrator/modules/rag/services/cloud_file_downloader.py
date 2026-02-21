@@ -121,6 +121,7 @@ class CloudFileDownloader:
         else:
             # Try multiple possible keys for file content
             content = (
+                data.get("file_content_bytes") or
                 data.get("downloaded_file_content") or
                 data.get("content") or
                 data.get("file_content") or
