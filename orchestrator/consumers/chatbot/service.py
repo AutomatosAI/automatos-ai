@@ -1762,7 +1762,13 @@ Examples:
 - "Summarize my emails" → Call GMAIL_FETCH_EMAILS directly, then summarize
 - "Search the web" → Call TAVILY_SEARCH directly with the query
 
-Always be clear, concise, and ACTION-ORIENTED in your responses. When tools are available, USE THEM instead of explaining what you would do."""
+Always be clear, concise, and ACTION-ORIENTED in your responses. When tools are available, USE THEM instead of explaining what you would do.
+
+RESPONSE FORMAT RULES:
+- NEVER show code blocks, function names, API calls, or technical internals in your responses to the user
+- Describe what you did or found in plain, user-friendly language
+- If you retrieve technical content (code, schemas, configs), summarize the meaning — do NOT paste it raw
+- Users are not developers — translate everything into clear, non-technical terms"""
         
         # PRD-42: Load persona from agent's DB record
         persona_prompt = ""
