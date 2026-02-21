@@ -2,28 +2,31 @@
 Cloud File Downloader (PRD-42)
 ==============================
 
-Downloads files from cloud storage providers using the existing
-ComposioToolExecutor. Thin wrapper that maps app names to Composio
-download actions and saves results to temp files.
+Downloads files from cloud storage providers via the Composio REST API.
 
-Provider-agnostic: instead of hardcoding per-provider response keys,
-we search the Composio response for anything that looks like file content
-(binary data, base64, URL, or file path). Works for Google Drive,
-Dropbox, OneDrive, Box, and any future provider without code changes.
+Bypasses the Composio SDK entirely — the SDK mangles binary responses
+(saves to disk, returns paths instead of content). The REST API returns
+file content inline as expected.
+
+For Google Drive downloads that already work through the SDK/executor,
+we keep that path. For all other providers, we call the REST API directly.
 """
 
 import base64
 import logging
 import os
 import tempfile
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 from uuid import UUID
 
+import httpx
 from sqlalchemy.orm import Session
 
 from core.composio.tool_executor import ComposioToolExecutor
 
 logger = logging.getLogger(__name__)
+
+COMPOSIO_API_BASE = "https://backend.composio.dev/api/v2"
 
 # Composio action names for downloading files per cloud provider
 _DOWNLOAD_ACTIONS = {
@@ -33,7 +36,7 @@ _DOWNLOAD_ACTIONS = {
     "BOX": "BOX_DOWNLOAD_FILE",
 }
 
-# Keys that likely contain file content (checked in priority order)
+# Known content keys across providers (priority order)
 _CONTENT_KEYS = [
     "file_content_bytes",       # Dropbox
     "downloaded_file_content",  # Google Drive
@@ -43,7 +46,7 @@ _CONTENT_KEYS = [
     "raw",                      # Some APIs
 ]
 
-# Keys that likely contain a download URL
+# Known URL keys
 _URL_KEYS = [
     "downloadUrl", "download_url", "url",
     "webContentLink", "web_content_link",
@@ -53,13 +56,14 @@ _URL_KEYS = [
 
 class CloudFileDownloader:
     """
-    Downloads files from cloud storage via the existing ComposioToolExecutor.
+    Downloads files from cloud storage.
 
-    Provider-agnostic content extraction: scans the Composio response for
-    file content or download URLs regardless of provider-specific key names.
+    Uses Composio REST API directly (bypasses SDK) for reliable content
+    extraction across all providers.
     """
 
     def __init__(self, db: Session):
+        self.db = db
         self.executor = ComposioToolExecutor(db)
 
     async def download_file(
@@ -85,29 +89,15 @@ class CloudFileDownloader:
 
         params = self._build_params(app_upper, external_file_id)
 
-        result = await self.executor.execute(
-            action=action,
-            params=params,
-            agent_id=0,
-            workspace_id=workspace_id,
-            app_name=app_upper,
-            skip_validation=True,
-        )
-
-        if not result.get("success"):
-            error = result.get("error", "Unknown download error")
-            raise RuntimeError(
-                f"Failed to download {external_file_id} from {app_upper}: {error}"
-            )
-
-        # Unwrap nested Composio response: {data: {data: {...actual content...}}}
-        data = self._unwrap_response(result)
+        # Call Composio REST API directly (bypasses SDK response mangling)
+        data = await self._execute_via_rest_api(action, app_upper, params, workspace_id)
 
         logger.info(
-            f"Composio {app_upper} response keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}"
+            f"Composio {app_upper} response keys: "
+            f"{list(data.keys()) if isinstance(data, dict) else type(data).__name__}"
         )
 
-        # Extract file content — provider-agnostic
+        # Extract file content
         content = self._extract_content(data)
 
         if content is None:
@@ -136,32 +126,71 @@ class CloudFileDownloader:
         return tmp.name
 
     # ------------------------------------------------------------------
-    # Provider-agnostic helpers
+    # Direct REST API call (bypasses SDK)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _unwrap_response(result: Dict[str, Any]) -> Dict[str, Any]:
-        """Unwrap nested Composio response to get the actual data dict."""
-        outer = result.get("data", {})
-        if not isinstance(outer, dict):
-            return outer
+    async def _execute_via_rest_api(
+        self,
+        action: str,
+        app_name: str,
+        params: dict,
+        workspace_id: UUID,
+    ) -> Dict[str, Any]:
+        """
+        Call Composio REST API directly instead of going through the SDK.
 
-        # Composio often nests: {data: {data: {actual_content}}}
-        inner = outer.get("data")
-        if isinstance(inner, dict):
-            return inner
-        return outer
+        The SDK transforms binary responses (saves to disk, returns paths).
+        The REST API returns content inline as JSON.
+        """
+        # Get API key
+        api_key = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
+        if not api_key:
+            raise RuntimeError("COMPOSIO_API_KEY/COMPOSIO_KEY not set")
+
+        # Get entity ID for this workspace
+        entity = self.executor.get_entity_for_workspace(workspace_id)
+        entity_id = entity.get("composio_entity_id")
+        if not entity_id:
+            raise RuntimeError(f"No Composio entity for workspace {workspace_id}")
+
+        url = f"{COMPOSIO_API_BASE}/actions/{action}/execute"
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                url,
+                headers={
+                    "x-api-key": api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "entityId": entity_id,
+                    "appName": app_name,
+                    "input": params,
+                },
+            )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Composio API error {response.status_code}: {response.text[:500]}"
+            )
+
+        result = response.json()
+
+        # Check for API-level failure
+        if not result.get("successful", result.get("success", True)):
+            error = result.get("error") or result.get("message") or "Unknown error"
+            raise RuntimeError(f"Composio action {action} failed: {error}")
+
+        # Return the data dict (top-level "data" key from API response)
+        return result.get("data", result)
+
+    # ------------------------------------------------------------------
+    # Content extraction
+    # ------------------------------------------------------------------
 
     @classmethod
     def _extract_content(cls, data: Dict[str, Any]) -> Optional[Any]:
-        """
-        Extract file content from a Composio response — provider-agnostic.
-
-        Strategy:
-        1. Check known content keys
-        2. Check known URL keys (download from URL if found)
-        3. Deep-search: scan all values for anything that looks like file data
-        """
+        """Extract file content from Composio response — provider-agnostic."""
         if not isinstance(data, dict):
             return data if data else None
 
@@ -177,28 +206,17 @@ class CloudFileDownloader:
             if url and isinstance(url, str) and url.startswith("http"):
                 return cls._download_from_url(url)
 
-        # 3. Deep-search: look for any string value that's large enough to be
-        #    file content (>100 chars) or looks like base64/binary, or any
-        #    bytes value. Skip metadata-like short strings.
+        # 3. Deep-search: any large string value is likely content
         for key, val in data.items():
             if key in ("successful", "success", "error", "message", "metadata",
                        "file_name", "name", "id", "rev", "path_display",
-                       "path_lower", "client_modified", "server_modified"):
+                       "path_lower", "client_modified", "server_modified",
+                       "logId", "successfull"):
                 continue
             if isinstance(val, bytes):
                 return val
-            if isinstance(val, str):
-                # URL?
-                if val.startswith("http") and ("download" in val.lower() or "content" in val.lower()):
-                    return cls._download_from_url(val)
-                # File path on disk?
-                if os.path.exists(val):
-                    logger.info(f"Content key '{key}' is a file path: {val}")
-                    with open(val, 'rb') as f:
-                        return f.read()
-                # Large string = likely content or base64
-                if len(val) > 200:
-                    return val
+            if isinstance(val, str) and len(val) > 200:
+                return val
 
         return None
 
@@ -219,13 +237,12 @@ class CloudFileDownloader:
         if isinstance(content, bytes):
             return content
         if isinstance(content, str):
-            # Check if it's a file path (Composio saves large files to disk
-            # and returns the path instead of inline content)
+            # File path on disk (Composio sometimes saves files locally)
             if os.path.isfile(content):
                 logger.info(f"Content is a file path, reading from: {content}")
                 with open(content, 'rb') as f:
                     return f.read()
-            # Try base64 (common for binary files from APIs)
+            # Try base64 (common for binary files)
             try:
                 decoded = base64.b64decode(content, validate=True)
                 if len(decoded) > 0:
@@ -233,7 +250,6 @@ class CloudFileDownloader:
             except Exception:
                 pass
             return content.encode("utf-8")
-        # Fallback: try to convert
         return str(content).encode("utf-8")
 
     @staticmethod
@@ -243,5 +259,4 @@ class CloudFileDownloader:
             return {"fileId": external_file_id}
         if app_name in ("DROPBOX", "ONEDRIVE"):
             return {"path": external_file_id}
-        # BOX and others use generic "id"
         return {"id": external_file_id}
