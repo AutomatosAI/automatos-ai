@@ -114,4 +114,4 @@ boto3>=1.39.5
 weasyprint>=62.0
 docxtpl>=0.18.0
 xlsxwriter>=3.2.0
-gotenberg-client>=1.0.0
+gotenberg-client>=0.8.0
