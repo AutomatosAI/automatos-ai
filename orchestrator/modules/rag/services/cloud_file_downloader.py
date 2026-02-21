@@ -215,14 +215,19 @@ class CloudFileDownloader:
 
     @staticmethod
     def _to_bytes(content: Any) -> bytes:
-        """Convert content (bytes, str, base64) to raw bytes."""
+        """Convert content (bytes, str, file path, base64) to raw bytes."""
         if isinstance(content, bytes):
             return content
         if isinstance(content, str):
-            # Try base64 first (common for binary files from APIs)
+            # Check if it's a file path (Composio saves large files to disk
+            # and returns the path instead of inline content)
+            if os.path.isfile(content):
+                logger.info(f"Content is a file path, reading from: {content}")
+                with open(content, 'rb') as f:
+                    return f.read()
+            # Try base64 (common for binary files from APIs)
             try:
                 decoded = base64.b64decode(content, validate=True)
-                # Sanity: base64 of real content should be significantly shorter
                 if len(decoded) > 0:
                     return decoded
             except Exception:
