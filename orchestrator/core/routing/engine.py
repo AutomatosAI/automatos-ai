@@ -428,8 +428,15 @@ class UniversalRouter:
 
             return decision
 
-        except Exception:
-            logger.exception("[router] Tier 3: LLM classification failed")
+        except Exception as exc:
+            try:
+                info = llm_manager.get_provider_info()
+                logger.exception(
+                    "[router] Tier 3: LLM classification failed — provider=%s model=%s error=%s",
+                    info.get("provider"), info.get("model"), exc,
+                )
+            except Exception:
+                logger.exception("[router] Tier 3: LLM classification failed")
             return None
 
     def _build_agent_descriptions(self, agents: List[Agent]) -> List[Dict]:
