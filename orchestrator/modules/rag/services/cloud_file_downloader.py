@@ -5,11 +5,18 @@ Cloud File Downloader (PRD-42)
 Downloads files from cloud storage providers using the existing
 ComposioToolExecutor. Thin wrapper that maps app names to Composio
 download actions and saves results to temp files.
+
+Provider-agnostic: instead of hardcoding per-provider response keys,
+we search the Composio response for anything that looks like file content
+(binary data, base64, URL, or file path). Works for Google Drive,
+Dropbox, OneDrive, Box, and any future provider without code changes.
 """
 
+import base64
 import logging
+import os
 import tempfile
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -26,21 +33,30 @@ _DOWNLOAD_ACTIONS = {
     "BOX": "BOX_DOWNLOAD_FILE",
 }
 
+# Keys that likely contain file content (checked in priority order)
+_CONTENT_KEYS = [
+    "file_content_bytes",       # Dropbox
+    "downloaded_file_content",  # Google Drive
+    "content",                  # Generic
+    "file_content",             # OneDrive
+    "body",                     # Some APIs
+    "raw",                      # Some APIs
+]
+
+# Keys that likely contain a download URL
+_URL_KEYS = [
+    "downloadUrl", "download_url", "url",
+    "webContentLink", "web_content_link",
+    "temporary_link", "link",
+]
+
 
 class CloudFileDownloader:
     """
     Downloads files from cloud storage via the existing ComposioToolExecutor.
 
-    Usage::
-
-        downloader = CloudFileDownloader(db)
-        tmp_path = await downloader.download_file(
-            app_name="GOOGLEDRIVE",
-            external_file_id="1a2b3c",
-            workspace_id=workspace_uuid,
-        )
-        # ... process tmp_path ...
-        os.unlink(tmp_path)  # caller is responsible for cleanup
+    Provider-agnostic content extraction: scans the Composio response for
+    file content or download URLs regardless of provider-specific key names.
     """
 
     def __init__(self, db: Session):
@@ -56,18 +72,8 @@ class CloudFileDownloader:
         """
         Download a file from cloud storage and save to a temp file.
 
-        Args:
-            app_name: Cloud provider (GOOGLEDRIVE, DROPBOX, ONEDRIVE, BOX).
-            external_file_id: Provider-specific file identifier.
-            workspace_id: Workspace UUID for Composio entity resolution.
-            file_name: Optional original file name (used for temp suffix).
-
         Returns:
             Path to the temporary file. Caller must delete when done.
-
-        Raises:
-            ValueError: If app_name is unsupported.
-            RuntimeError: If the Composio download action fails.
         """
         app_upper = app_name.upper()
         action = _DOWNLOAD_ACTIONS.get(app_upper)
@@ -77,15 +83,12 @@ class CloudFileDownloader:
                 f"Supported: {', '.join(_DOWNLOAD_ACTIONS.keys())}"
             )
 
-        # Build provider-specific params
         params = self._build_params(app_upper, external_file_id)
 
-        # Execute download via existing ToolExecutor (skip agent validation —
-        # this is a system-level service call, not an agent action).
         result = await self.executor.execute(
             action=action,
             params=params,
-            agent_id=0,  # system-level; no real agent
+            agent_id=0,
             workspace_id=workspace_id,
             app_name=app_upper,
             skip_validation=True,
@@ -97,88 +100,136 @@ class CloudFileDownloader:
                 f"Failed to download {external_file_id} from {app_upper}: {error}"
             )
 
-        # Extract file content from response
-        # Composio wraps response in nested "data" key: {data: {data: {downloaded_file_content: ...}}}
-        outer_data = result.get("data", {})
-        data = outer_data.get("data", {}) if isinstance(outer_data, dict) and "data" in outer_data else outer_data
+        # Unwrap nested Composio response: {data: {data: {...actual content...}}}
+        data = self._unwrap_response(result)
 
-        # DEBUG: Log the actual response structure
-        logger.warning(f"DEBUG - Composio response keys: {list(data.keys())}")
-        logger.warning(f"DEBUG - Full response data: {str(data)[:1000]}")
+        logger.info(
+            f"Composio {app_upper} response keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}"
+        )
 
-        # Check if response contains a download URL instead of content
-        download_url = data.get("downloadUrl") or data.get("download_url") or data.get("url") or data.get("webContentLink")
+        # Extract file content — provider-agnostic
+        content = self._extract_content(data)
 
-        if download_url:
-            logger.info(f"Downloading file from URL: {download_url[:100]}...")
-            import requests
-            response = requests.get(download_url)
-            if response.status_code == 200:
-                content = response.content
-                logger.info(f"Downloaded {len(content)} bytes from URL")
-            else:
-                raise RuntimeError(f"Failed to download from URL: {response.status_code}")
-        else:
-            # Try multiple possible keys for file content
-            content = (
-                data.get("downloaded_file_content") or
-                data.get("content") or
-                data.get("file_content") or
-                data.get("data")
+        if content is None:
+            raise RuntimeError(
+                f"Download returned no file content for {external_file_id}. "
+                f"Response keys: {list(data.keys()) if isinstance(data, dict) else 'N/A'}"
             )
 
-            if content is None:
-                raise RuntimeError(
-                    f"Download returned no file content or URL for {external_file_id}. "
-                    f"Response structure: {list(data.keys())}"
-                )
-
-        # Determine temp file suffix from original file name
+        # Write to temp file
         suffix = ""
         if file_name and "." in file_name:
             suffix = file_name[file_name.rfind("."):]
 
-        # Check if content is a file path (Composio saves large files to disk)
-        import os
-        if isinstance(content, str) and os.path.exists(content):
-            logger.info(f"Content is a file path, reading from: {content}")
-            # Read the actual file from the Composio output directory
-            with open(content, 'rb') as source_file:
-                file_content = source_file.read()
-            # Write to our temp file
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, mode='wb')
-            try:
-                tmp.write(file_content)
-            finally:
-                tmp.close()
-        else:
-            # Write content directly to temp file
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, mode='wb')
-            try:
-                if isinstance(content, str):
-                    # Check if it's base64-encoded (common for binary files from APIs)
-                    import base64
-                    try:
-                        # Try to decode as base64
-                        binary_content = base64.b64decode(content)
-                        tmp.write(binary_content)
-                        logger.debug(f"Decoded base64 content for {file_name}")
-                    except Exception:
-                        # Not base64, write as UTF-8
-                        tmp.write(content.encode("utf-8"))
-                else:
-                    tmp.write(content)
-            finally:
-                tmp.close()
+        binary = self._to_bytes(content)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, mode='wb')
+        try:
+            tmp.write(binary)
+        finally:
+            tmp.close()
 
-        # Log file size for debugging
-        import os
         file_size = os.path.getsize(tmp.name)
         logger.info(
             f"Downloaded {app_upper}/{external_file_id} → {tmp.name} "
-            f"(size: {file_size} bytes)"
+            f"({file_size:,} bytes)"
         )
         return tmp.name
+
+    # ------------------------------------------------------------------
+    # Provider-agnostic helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _unwrap_response(result: Dict[str, Any]) -> Dict[str, Any]:
+        """Unwrap nested Composio response to get the actual data dict."""
+        outer = result.get("data", {})
+        if not isinstance(outer, dict):
+            return outer
+
+        # Composio often nests: {data: {data: {actual_content}}}
+        inner = outer.get("data")
+        if isinstance(inner, dict):
+            return inner
+        return outer
+
+    @classmethod
+    def _extract_content(cls, data: Dict[str, Any]) -> Optional[Any]:
+        """
+        Extract file content from a Composio response — provider-agnostic.
+
+        Strategy:
+        1. Check known content keys
+        2. Check known URL keys (download from URL if found)
+        3. Deep-search: scan all values for anything that looks like file data
+        """
+        if not isinstance(data, dict):
+            return data if data else None
+
+        # 1. Check known content keys
+        for key in _CONTENT_KEYS:
+            val = data.get(key)
+            if val is not None and val != "":
+                return val
+
+        # 2. Check known URL keys → download
+        for key in _URL_KEYS:
+            url = data.get(key)
+            if url and isinstance(url, str) and url.startswith("http"):
+                return cls._download_from_url(url)
+
+        # 3. Deep-search: look for any string value that's large enough to be
+        #    file content (>100 chars) or looks like base64/binary, or any
+        #    bytes value. Skip metadata-like short strings.
+        for key, val in data.items():
+            if key in ("successful", "success", "error", "message", "metadata",
+                       "file_name", "name", "id", "rev", "path_display",
+                       "path_lower", "client_modified", "server_modified"):
+                continue
+            if isinstance(val, bytes):
+                return val
+            if isinstance(val, str):
+                # URL?
+                if val.startswith("http") and ("download" in val.lower() or "content" in val.lower()):
+                    return cls._download_from_url(val)
+                # File path on disk?
+                if os.path.exists(val):
+                    logger.info(f"Content key '{key}' is a file path: {val}")
+                    with open(val, 'rb') as f:
+                        return f.read()
+                # Large string = likely content or base64
+                if len(val) > 200:
+                    return val
+
+        return None
+
+    @staticmethod
+    def _download_from_url(url: str) -> bytes:
+        """Download file content from a URL."""
+        import requests
+        logger.info(f"Downloading from URL: {url[:100]}...")
+        response = requests.get(url, timeout=60)
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to download from URL: {response.status_code}")
+        logger.info(f"Downloaded {len(response.content):,} bytes from URL")
+        return response.content
+
+    @staticmethod
+    def _to_bytes(content: Any) -> bytes:
+        """Convert content (bytes, str, base64) to raw bytes."""
+        if isinstance(content, bytes):
+            return content
+        if isinstance(content, str):
+            # Try base64 first (common for binary files from APIs)
+            try:
+                decoded = base64.b64decode(content, validate=True)
+                # Sanity: base64 of real content should be significantly shorter
+                if len(decoded) > 0:
+                    return decoded
+            except Exception:
+                pass
+            return content.encode("utf-8")
+        # Fallback: try to convert
+        return str(content).encode("utf-8")
 
     @staticmethod
     def _build_params(app_name: str, external_file_id: str) -> dict:

@@ -420,7 +420,7 @@ class CloudSyncService:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for result in results:
-                if isinstance(result, Exception):
+                if isinstance(result, BaseException):
                     logger.error(f"Unexpected sync error: {result}")
                     files_errored += 1
                 elif result[0] == "synced":
