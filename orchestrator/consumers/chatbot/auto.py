@@ -249,7 +249,11 @@ class AutoBrain:
         """
         Find the workspace agent with the best tool coverage for the task.
 
-        Scores each agent by how many of the required tools it has assigned.
+        Scoring:
+        1. Primary: how many required tools does this agent have?
+        2. Tiebreaker: among equal scores, prefer the agent with MORE total
+           external apps (a "Communication" agent with GMAIL+SLACK+GCAL
+           should beat a "Research" agent that happens to also have GMAIL).
         """
         agents = self._get_workspace_agents()
         if not agents:
@@ -258,20 +262,24 @@ class AutoBrain:
         required_set = {t.upper() for t in required_tools}
         best: Optional[AgentCapability] = None
         best_score = 0
+        best_total_apps = 0
 
         for agent in agents:
             agent_apps = {a.upper() for a in agent.app_names}
             overlap = required_set & agent_apps
             score = len(overlap)
-            if score > best_score:
+            total_apps = len(agent_apps)
+
+            if score > best_score or (score == best_score and score > 0 and total_apps > best_total_apps):
                 best_score = score
+                best_total_apps = total_apps
                 best = agent
 
         if best and best_score > 0:
             logger.info(
-                "[AutoBrain] Best agent for %s: %s (id=%d, score=%d/%d)",
+                "[AutoBrain] Best agent for %s: %s (id=%d, score=%d/%d, total_apps=%d)",
                 required_tools, best.name, best.agent_id,
-                best_score, len(required_set),
+                best_score, len(required_set), best_total_apps,
             )
             return best
 
@@ -283,6 +291,8 @@ class AutoBrain:
 
         Used by the chat API when UniversalRouter returns no match.
         Finds the agent whose tools best match the user's request.
+
+        Tiebreaker: agent with more total external apps wins (more specialized).
         """
         msg_lower = message.lower().strip()
         matched = self._match_external_tools(msg_lower)
@@ -296,12 +306,16 @@ class AutoBrain:
         required_set = {t.upper() for t in matched}
         best_id: Optional[int] = None
         best_score = 0
+        best_total_apps = 0
 
         for agent in agents:
             agent_apps = {a.upper() for a in agent.app_names}
             score = len(required_set & agent_apps)
-            if score > best_score:
+            total_apps = len(agent_apps)
+
+            if score > best_score or (score == best_score and score > 0 and total_apps > best_total_apps):
                 best_score = score
+                best_total_apps = total_apps
                 best_id = agent.agent_id
 
         return best_id if best_score > 0 else None

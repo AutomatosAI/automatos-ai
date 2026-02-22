@@ -3,13 +3,65 @@ Mem0 Client Integration
 =======================
 
 Wrapper around standard mem0ai usage to connect to internal Railway instance.
+
+Includes:
+- Configurable timeout
+- Exponential backoff retry (max 2 retries)
+- Circuit breaker: after N consecutive failures, fail fast for a cooldown period
 """
 
 import logging
+import time
 from typing import List, Dict, Any, Optional
 import requests
 
 logger = logging.getLogger(__name__)
+
+# Circuit breaker settings
+_CB_FAILURE_THRESHOLD = 5      # Open circuit after 5 consecutive failures
+_CB_COOLDOWN_SECONDS = 60      # Stay open for 60 seconds before retrying
+_DEFAULT_TIMEOUT = 10           # Seconds (was 15 — tighter to fail faster)
+_MAX_RETRIES = 1                # One retry with backoff
+
+
+class _CircuitBreaker:
+    """Simple circuit breaker for Mem0 calls."""
+    __slots__ = ("failures", "last_failure_time", "is_open")
+
+    def __init__(self):
+        self.failures = 0
+        self.last_failure_time = 0.0
+        self.is_open = False
+
+    def record_success(self):
+        self.failures = 0
+        self.is_open = False
+
+    def record_failure(self):
+        self.failures += 1
+        self.last_failure_time = time.monotonic()
+        if self.failures >= _CB_FAILURE_THRESHOLD:
+            self.is_open = True
+            logger.warning(
+                "[Mem0] Circuit breaker OPEN after %d failures — "
+                "skipping Mem0 calls for %ds",
+                self.failures, _CB_COOLDOWN_SECONDS,
+            )
+
+    def allow_request(self) -> bool:
+        if not self.is_open:
+            return True
+        # Check cooldown
+        elapsed = time.monotonic() - self.last_failure_time
+        if elapsed >= _CB_COOLDOWN_SECONDS:
+            logger.info("[Mem0] Circuit breaker half-open — allowing probe request")
+            return True  # Half-open: allow one probe
+        return False
+
+
+# Shared circuit breaker instance
+_breaker = _CircuitBreaker()
+
 
 class Mem0Client:
     """
@@ -20,17 +72,56 @@ class Mem0Client:
         from config import config
         self.api_url = api_url or config.MEM0_API_URL
         self.api_key = api_key or config.MEM0_API_KEY
-        
+        self.timeout = _DEFAULT_TIMEOUT
+
         # Ensure URL has correct format
         if not self.api_url.startswith("http"):
             self.api_url = f"https://{self.api_url}"
-            
+
         self.api_url = self.api_url.rstrip("/")
         self.headers = {}
         if self.api_key:
             self.headers["Authorization"] = f"Token {self.api_key}"
-            
+
         logger.info(f"Initialized Mem0Client with URL: {self.api_url}")
+
+    def _request(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
+        """
+        Make an HTTP request with retry + circuit breaker.
+
+        Returns the response or None if all attempts fail.
+        """
+        if not _breaker.allow_request():
+            logger.debug("[Mem0] Circuit breaker open — skipping request")
+            return None
+
+        kwargs.setdefault("timeout", self.timeout)
+        kwargs.setdefault("headers", self.headers)
+        last_exc = None
+
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                resp = requests.request(method, url, **kwargs)
+                _breaker.record_success()
+                return resp
+            except (requests.Timeout, requests.ConnectionError) as e:
+                last_exc = e
+                if attempt < _MAX_RETRIES:
+                    wait = 1.5 ** attempt  # 1s, 1.5s
+                    logger.warning(
+                        "[Mem0] Request failed (attempt %d/%d): %s — retrying in %.1fs",
+                        attempt + 1, _MAX_RETRIES + 1, e, wait,
+                    )
+                    time.sleep(wait)
+                else:
+                    logger.error("[Mem0] Request failed after %d attempts: %s", _MAX_RETRIES + 1, e)
+                    _breaker.record_failure()
+            except Exception as e:
+                logger.error("[Mem0] Unexpected request error: %s", e)
+                _breaker.record_failure()
+                return None
+
+        return None
 
     def add(self, messages: List[Dict[str, str]], user_id: str, metadata: Optional[Dict] = None) -> Dict:
         """
@@ -47,7 +138,6 @@ class Mem0Client:
         url = f"{self.api_url}/api/v1/memories/"
 
         # Convert messages to text format for OpenMemory API
-        # API expects: {"user_id": "...", "text": "...", "infer": true}
         text_parts = []
         for msg in messages:
             role = msg.get("role", "user").capitalize()
@@ -58,40 +148,31 @@ class Mem0Client:
         payload = {
             "user_id": user_id,
             "text": text_content,
-            "infer": True,  # Let Mem0 extract facts/memories from the text
+            "infer": True,
         }
         if metadata:
             payload["metadata"] = metadata
 
+        logger.debug("[Mem0] Adding memory for user_id=%s (text_len=%d)", user_id, len(text_content))
+
+        resp = self._request("POST", url, json=payload)
+        if resp is None:
+            return {"success": False, "error": "Mem0 unavailable (circuit breaker or timeout)"}
+
+        if resp.status_code >= 400:
+            logger.error("[Mem0] Add failed: status=%s", resp.status_code)
+            return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+
+        normalized = (resp.text or "").strip().lower()
+        if normalized == "" or normalized == "null":
+            logger.warning("[Mem0] Empty/null response — memory may not have been stored")
+            return {"success": False, "error": "Empty response from Mem0"}
+
         try:
-            logger.info(
-                "[Mem0] Adding memory: user_id_len=%s, text_len=%s, has_metadata=%s",
-                len(user_id) if user_id else 0,
-                len(text_content),
-                bool(metadata),
-            )
-            logger.debug("[Mem0] Payload (redacted): user_id and text omitted for PII")
-            resp = requests.post(url, json=payload, headers=self.headers, timeout=15)
-            logger.info("[Mem0] Add response status: %s", resp.status_code)
-            logger.debug("[Mem0] Add response body: %s", (resp.text or "")[:300])
-
-            if resp.status_code >= 400:
-                logger.error("[Mem0] Add failed: status=%s", resp.status_code)
-                return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
-
-            resp.raise_for_status()
-
-            normalized = (resp.text or "").strip().lower()
-            if normalized == "" or normalized == "null":
-                logger.warning("[Mem0] Empty/null response - memory may not have been stored!")
-                return {"success": False, "error": "Empty response from Mem0"}
-
             result = resp.json()
-            logger.debug("[Mem0] Add result (omitted for PII)")
             return result if result else {"success": True}
-        except Exception as e:
-            logger.error(f"[Mem0] Failed to add memory: {e}")
-            return {"error": str(e)}
+        except Exception:
+            return {"success": True}
 
     def search(self, query: str, user_id: str, limit: int = 5) -> List[Dict]:
         """
@@ -105,60 +186,50 @@ class Mem0Client:
         Returns:
             List of memory items
         """
-        # OpenMemory API: GET /api/v1/memories/
-        # NOTE: search_query param doesn't work reliably, so we fetch all and filter client-side
         url = f"{self.api_url}/api/v1/memories/"
-
-        # Get more memories to allow for client-side filtering
         params = {
             "user_id": user_id,
             "page": 1,
-            "size": 50,  # Fetch more to filter from
+            "size": 50,
         }
 
+        logger.debug("[Mem0] Fetching memories for user=%s", user_id)
+
+        resp = self._request("GET", url, params=params)
+        if resp is None:
+            return []
+
+        if resp.status_code >= 400:
+            logger.warning("[Mem0] Fetch returned %s", resp.status_code)
+            return []
+
         try:
-            logger.info(f"[Mem0] Fetching memories for user={user_id}")
-            resp = requests.get(url, params=params, headers=self.headers, timeout=15)
-            logger.info(f"[Mem0] Response status: {resp.status_code}")
-
-            if resp.status_code >= 400:
-                logger.warning(f"[Mem0] Fetch returned {resp.status_code}: {resp.text[:100]}")
-                return []
-
-            resp.raise_for_status()
-
             data = resp.json()
+        except Exception:
+            return []
 
-            # OpenMemory returns Page[MemoryResponse]: {"items": [...], "total": int, ...}
-            if isinstance(data, dict):
-                items = data.get("items", [])
-                total = data.get("total", 0)
-                logger.info(f"[Mem0] ✅ Found {len(items)} memories (total: {total})")
+        if isinstance(data, dict):
+            items = data.get("items", [])
+            logger.info("[Mem0] Found %d memories (total: %s)", len(items), data.get("total", "?"))
 
-                results = []
-                for m in items:
-                    results.append({
-                        "id": m.get("id"),
-                        "memory": m.get("content"),  # OpenMemory uses 'content'
-                        "score": m.get("score"),
-                        "metadata": m.get("metadata_"),
-                        "created_at": m.get("created_at"),
-                    })
+            results = []
+            for m in items:
+                results.append({
+                    "id": m.get("id"),
+                    "memory": m.get("content"),
+                    "score": m.get("score"),
+                    "metadata": m.get("metadata_"),
+                    "created_at": m.get("created_at"),
+                })
 
-                # Log some of the memories found
-                if results:
-                    sample = [r.get("memory", "")[:40] for r in results[:3]]
-                    logger.info(f"[Mem0] Sample memories: {sample}")
+            if results:
+                sample = [r.get("memory", "")[:40] for r in results[:3]]
+                logger.info("[Mem0] Sample memories: %s", sample)
 
-                # Return most recent memories (sorted by created_at desc)
-                results.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-                return results[:limit]
-            else:
-                logger.warning(f"[Mem0] Unexpected response format: {type(data)}")
-                return []
-
-        except Exception as e:
-            logger.error(f"[Mem0] Failed to fetch memories: {e}")
+            results.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+            return results[:limit]
+        else:
+            logger.warning("[Mem0] Unexpected response format: %s", type(data))
             return []
 
     def get_all(self, user_id: str, limit: int = 100) -> List[Dict]:
@@ -166,28 +237,28 @@ class Mem0Client:
         url = f"{self.api_url}/api/v1/memories/"
         params = {"user_id": user_id}
 
-        try:
-            resp = requests.get(url, params=params, headers=self.headers, timeout=15)
-            if resp.status_code >= 400:
-                return []
-            resp.raise_for_status()
-            data = resp.json()
-            # Handle various response formats
-            if isinstance(data, list):
-                return data[:limit]
-            return data.get("memories", data.get("results", data.get("items", [])))[:limit]
-        except Exception as e:
-            logger.error(f"[Mem0] Failed to get memories: {e}")
+        resp = self._request("GET", url, params=params)
+        if resp is None:
             return []
+
+        if resp.status_code >= 400:
+            return []
+
+        try:
+            data = resp.json()
+        except Exception:
+            return []
+
+        if isinstance(data, list):
+            return data[:limit]
+        return data.get("memories", data.get("results", data.get("items", [])))[:limit]
 
     def delete(self, memory_id: str) -> bool:
         """Delete a specific memory."""
-        url = f"{self.api_url}/api/v1/memories/{memory_id}" 
-        
-        try:
-            resp = requests.delete(url, headers=self.headers, timeout=15)
-            resp.raise_for_status()
-            return True
-        except Exception as e:
-            logger.error(f"[Mem0] Failed to delete memory {memory_id}: {e}")
+        url = f"{self.api_url}/api/v1/memories/{memory_id}"
+
+        resp = self._request("DELETE", url)
+        if resp is None:
             return False
+
+        return resp.status_code < 400

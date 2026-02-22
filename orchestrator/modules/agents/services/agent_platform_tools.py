@@ -31,7 +31,7 @@ class AgentPlatformTools:
     
     def __init__(self, db_session: Session):
         self.db = db_session
-        self.rag_service = RAGService()
+        self.rag_service = RAGService()  # auto-detects S3 vs pgvector from config
         # RAG config (min_similarity etc.) from modules.rag (DB-backed)
         try:
             from modules.rag.config import RAGModuleConfig
