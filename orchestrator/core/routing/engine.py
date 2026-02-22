@@ -375,6 +375,11 @@ class UniversalRouter:
                 logger.warning("[router] Tier 3: empty LLM response")
                 return None
 
+            logger.debug(
+                "[router] Tier 3: raw LLM response (first 500 chars): %s",
+                response.content[:500],
+            )
+
             # Parse the response
             agent_id, confidence = self._parse_llm_routing_response(
                 response.content, agents
@@ -382,7 +387,8 @@ class UniversalRouter:
 
             if agent_id is None:
                 logger.warning(
-                    "[router] Tier 3: could not parse agent_id from LLM response"
+                    "[router] Tier 3: could not parse agent_id from LLM response: %s",
+                    response.content[:300],
                 )
                 return None
 
@@ -505,21 +511,50 @@ class UniversalRouter:
     ) -> tuple[Optional[int], float]:
         """Parse the LLM response to extract agent_id and confidence.
 
+        Resilient parser: extracts JSON from anywhere in the response,
+        handles markdown fences, extra text, and alternative key names.
+
         Returns (agent_id, confidence) or (None, 0.0) on parse failure.
         """
         try:
             # Strip markdown code fences if present
             text = response_text.strip()
             if text.startswith("```"):
-                # Remove opening fence (possibly with language tag)
                 text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
             if text.endswith("```"):
                 text = text[:-3]
             text = text.strip()
 
-            parsed = json.loads(text)
-            agent_id = int(parsed["agent_id"])
-            confidence = float(parsed.get("confidence", 0.0))
+            # Try direct parse first
+            parsed = None
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                # Extract first JSON object from the response text
+                import re
+                json_match = re.search(r'\{[^{}]*\}', text)
+                if json_match:
+                    parsed = json.loads(json_match.group())
+
+            if not parsed or not isinstance(parsed, dict):
+                return None, 0.0
+
+            # Try multiple key names for agent_id
+            raw_id = (
+                parsed.get("agent_id")
+                or parsed.get("agentId")
+                or parsed.get("id")
+                or parsed.get("agent")
+            )
+            if raw_id is None:
+                return None, 0.0
+
+            agent_id = int(raw_id)
+            confidence = float(
+                parsed.get("confidence")
+                or parsed.get("score")
+                or 0.7  # default if model omits confidence
+            )
 
             # Validate agent_id is in the workspace agent list
             valid_ids = {a.id for a in agents}
