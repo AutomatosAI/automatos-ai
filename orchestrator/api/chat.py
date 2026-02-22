@@ -16,11 +16,13 @@ from pydantic import BaseModel
 
 from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService
+from consumers.chatbot.auto import AutoBrain
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.chatbot import ChatbotIngestor
+from core.session_queue import get_session_queue
 
 logger = logging.getLogger(__name__)
 
@@ -249,13 +251,24 @@ async def stream_chat(
     routing_decision = None
     routing_request_id = None
     use_system_llm = False  # True = use orchestrator LLM settings, not agent's model
+    complexity_assessment = None
 
     if request.agentId:
-        # User explicitly selected an agent — skip routing, use directly
+        # User explicitly selected an agent — skip Auto, use directly
         effective_agent_id = request.agentId
-        logger.info(f"[chat] User override: agent_id={effective_agent_id}")
+        logger.info(f"[chat] Direct mode: agent_id={effective_agent_id}")
     else:
-        # No agent selected (Auto mode) — use universal router to auto-select
+        # --- Auto mode: the brain decides ---
+        auto_brain = AutoBrain(db, str(ctx.workspace_id))
+        complexity_assessment = await auto_brain.assess(message_text, len(message_history))
+        logger.info(
+            f"[Auto] Complexity={complexity_assessment.complexity.value} "
+            f"action={complexity_assessment.action.value} "
+            f"tools={complexity_assessment.matched_tools} "
+            f"reasoning={complexity_assessment.reasoning}"
+        )
+
+        # Try UniversalRouter first (cache, rules, LLM classification)
         try:
             ingestor = ChatbotIngestor()
             envelope = ingestor.ingest(
@@ -268,21 +281,35 @@ async def stream_chat(
             universal_router = UniversalRouter(db, cache=get_routing_cache())
             routing_decision = await universal_router.route(envelope)
         except Exception:
-            logger.exception("[chat] Router failed — falling back to default agent")
+            logger.exception("[chat] Router failed — using Auto brain fallback")
             routing_decision = None
 
         if routing_decision is not None and routing_decision.route_type == "agent" and routing_decision.agent_id is not None:
             effective_agent_id = routing_decision.agent_id
             logger.info(
-                f"[chat] Router selected agent_id={effective_agent_id} "
+                f"[Auto] Router selected agent_id={effective_agent_id} "
                 f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
             )
         else:
-            # Router returned None or non-agent route — fall back to default
-            # Use orchestrator LLM settings (Settings > Orchestrator tab)
-            effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+            # Router returned None — Auto brain picks the best agent by tool match
+            if complexity_assessment.target_agent_id:
+                effective_agent_id = complexity_assessment.target_agent_id
+                logger.info(
+                    f"[Auto] Brain selected agent_id={effective_agent_id} "
+                    f"({complexity_assessment.target_agent_name}) "
+                    f"for tools {complexity_assessment.matched_tools}"
+                )
+            else:
+                # No tool match — Auto brain picks by message content
+                brain_pick = auto_brain.select_best_agent_id(message_text)
+                if brain_pick:
+                    effective_agent_id = brain_pick
+                    logger.info(f"[Auto] Brain tool-match fallback: agent_id={effective_agent_id}")
+                else:
+                    # Final fallback: default agent with orchestrator LLM
+                    effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+                    logger.info(f"[Auto] Default fallback: agent_id={effective_agent_id}")
             use_system_llm = True
-            logger.info(f"[chat] Auto mode fallback: agent_id={effective_agent_id}, use_system_llm=True")
 
     # Build response headers (include routing metadata when available)
     response_headers = {
@@ -298,18 +325,32 @@ async def stream_chat(
         response_headers["x-routing-reasoning"] = routing_decision.reasoning[:200]
         if routing_request_id:
             response_headers["x-routing-request-id"] = routing_request_id
+    if complexity_assessment is not None:
+        response_headers["x-auto-complexity"] = complexity_assessment.complexity.value
+        response_headers["x-auto-action"] = complexity_assessment.action.value
+        response_headers["x-auto-confidence"] = f"{complexity_assessment.confidence:.2f}"
 
     # PRD: Unified Agent-Chat System
     # Use agent-based streaming for all resolved agents
     logger.info(f"Using agent-based streaming with agent_id={effective_agent_id}")
+
+    # Session-scoped queue: serialize concurrent requests for the same chat
+    session_key = f"{ctx.workspace_id}:{chat_id}"
+    session_queue = get_session_queue()
+
+    async def _guarded_stream():
+        async with session_queue.acquire(session_key):
+            async for chunk in streaming_service.stream_response_with_agent(
+                chat_id=chat_id,
+                messages=message_history,
+                agent_id=effective_agent_id,
+                user_id=user_id,
+                use_system_llm=use_system_llm,
+            ):
+                yield chunk
+
     return StreamingResponse(
-        streaming_service.stream_response_with_agent(
-            chat_id=chat_id,
-            messages=message_history,
-            agent_id=effective_agent_id,
-            user_id=user_id,
-            use_system_llm=use_system_llm,
-        ),
+        _guarded_stream(),
         media_type="text/plain; charset=utf-8",
         headers=response_headers,
     )

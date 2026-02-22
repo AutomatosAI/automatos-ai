@@ -410,7 +410,7 @@ Let's get stuff done! What can I help you with?"""
                     tool_names.append(tool_name)
             tool_names = sorted(set(tool_names))
 
-        if tool_names:
+        if tool_names and system_prompt:
             max_list = 30
             listed = ", ".join(tool_names[:max_list])
             extra = "" if len(tool_names) <= max_list else f" (+{len(tool_names) - max_list} more)"
@@ -421,8 +421,10 @@ Let's get stuff done! What can I help you with?"""
                 "searching docs for information, or connecting to external apps. "
                 "But for regular conversation? I'll just chat naturally, no tools needed!"
             )
-        
-        llm_messages.append({"role": "system", "content": system_prompt})
+
+        # Only add system prompt if non-empty (orchestrated paths build their own)
+        if system_prompt:
+            llm_messages.append({"role": "system", "content": system_prompt})
         
         # Convert each message
         for msg in messages:
