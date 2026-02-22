@@ -151,10 +151,23 @@ class RAGService:
     def __init__(
         self,
         config: RAGConfig = None,
-        vector_backend: str = "pgvector",
+        vector_backend: str = None,
         workspace_id: str = None,
     ):
         self.config = config or RAGConfig()
+
+        # Auto-detect vector backend from config when not explicitly set
+        if vector_backend is None:
+            try:
+                from config import config as app_config
+                if getattr(app_config, "S3_VECTORS_ENABLED", False):
+                    vector_backend = "s3_vectors"
+                    logger.info("[RAGService] S3_VECTORS_ENABLED=true → using s3_vectors backend")
+                else:
+                    vector_backend = "pgvector"
+            except Exception:
+                vector_backend = "pgvector"
+
         self._vector_backend = vector_backend
         self._workspace_id = workspace_id
         self._context_optimizer = None

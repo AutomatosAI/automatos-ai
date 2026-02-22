@@ -66,6 +66,62 @@ class ComposioToolService:
     # Matches patterns like GITHUB_CREATE_A_REFERENCE, JIRA_GET_ISSUE, etc.
     _ACTION_NAME_RE = re.compile(r"\b([A-Z][A-Z0-9]+(?:_[A-Z0-9]+){2,})\b")
 
+    # Map conversational verbs → Composio-friendly action queries per app domain.
+    # Composio SDK search works best with action-oriented keywords.
+    _QUERY_REWRITES: Dict[str, List[tuple]] = {
+        "GMAIL": [
+            (r"\b(check|read|view|see|show|get|pull up|look at)\b.*(email|mail|inbox)", "list emails fetch inbox messages"),
+            (r"\b(send|compose|write|draft)\b.*(email|mail)", "send email create draft message"),
+            (r"\b(reply|respond)\b.*(email|mail)", "reply to email send reply"),
+            (r"\b(search|find)\b.*(email|mail)", "search emails find messages"),
+            (r"\b(delete|remove|trash)\b.*(email|mail)", "delete email trash message"),
+        ],
+        "SLACK": [
+            (r"\b(send|post|write)\b.*(message|slack|channel|dm)", "send message to channel"),
+            (r"\b(read|check|see|get)\b.*(message|slack|channel)", "list messages fetch channel"),
+            (r"\b(create)\b.*(channel)", "create channel"),
+        ],
+        "GOOGLE_CALENDAR": [
+            (r"\b(check|view|see|show|get|what)\b.*(calendar|schedule|meeting|event)", "list events get calendar"),
+            (r"\b(create|add|schedule|book)\b.*(meeting|event|appointment)", "create event schedule meeting"),
+            (r"\b(cancel|delete|remove)\b.*(meeting|event)", "delete event cancel meeting"),
+        ],
+        "GITHUB": [
+            (r"\b(create|open|make)\b.*(issue|bug|ticket)", "create issue"),
+            (r"\b(create|open|make)\b.*(pull request|pr)", "create pull request"),
+            (r"\b(list|show|get)\b.*(issue|pr|pull request)", "list issues pull requests"),
+            (r"\b(merge)\b.*(pr|pull request)", "merge pull request"),
+        ],
+        "JIRA": [
+            (r"\b(create|open|make)\b.*(ticket|issue|story|task)", "create issue ticket"),
+            (r"\b(list|show|get|find)\b.*(ticket|issue|sprint|backlog)", "list issues search tickets"),
+            (r"\b(update|move|assign)\b.*(ticket|issue)", "update issue transition"),
+        ],
+    }
+
+    @classmethod
+    def _rewrite_query(cls, prompt: str, app_names: List[str]) -> str:
+        """
+        Rewrite a conversational prompt into Composio-friendly action keywords.
+
+        If the user says "check my emails for today", this returns
+        "list emails fetch inbox messages" which matches Composio action names
+        much better in semantic search.
+        """
+        prompt_lower = prompt.lower()
+        for app in app_names:
+            app_upper = app.upper()
+            rewrites = cls._QUERY_REWRITES.get(app_upper, [])
+            for pattern, replacement in rewrites:
+                if re.search(pattern, prompt_lower, re.IGNORECASE):
+                    logger.info(
+                        "[ComposioToolService] Query rewrite for %s: %r → %r",
+                        app_upper, prompt[:60], replacement,
+                    )
+                    return replacement
+        # No rewrite matched — return original (truncated)
+        return prompt[:200].strip()
+
     def get_tools_for_step(
         self,
         agent_id: int,
@@ -150,10 +206,10 @@ class ComposioToolService:
 
             # FALLBACK: SDK semantic search (when no explicit names or lookup empty)
             if not result.tools:
-                search_query = task_prompt[:200].strip()
+                search_query = self._rewrite_query(task_prompt, allowed_apps)
                 logger.info(
-                    "[ComposioToolService] SDK search fallback: query=%r",
-                    search_query[:120],
+                    "[ComposioToolService] SDK search fallback: query=%r (original=%r)",
+                    search_query[:120], task_prompt[:60],
                 )
                 search_results = client.search_actions_for_step(
                     search_query=search_query,
