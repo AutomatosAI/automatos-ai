@@ -546,6 +546,37 @@ class UniversalRouter:
                 or parsed.get("id")
                 or parsed.get("agent")
             )
+
+            # Fallback: LLM returned agent name instead of ID
+            # e.g. {"route": "Communication", ...} or {"agent": "Research Analyst", ...}
+            if raw_id is None or (isinstance(raw_id, str) and not raw_id.isdigit()):
+                raw_name = (
+                    raw_id  # "agent" key had a name string
+                    or parsed.get("route")
+                    or parsed.get("name")
+                    or parsed.get("agent_name")
+                )
+                if isinstance(raw_name, str) and raw_name.strip():
+                    name_lower = raw_name.strip().lower()
+                    for a in agents:
+                        if (a.name or "").lower() == name_lower:
+                            raw_id = a.id
+                            logger.info(
+                                "[router] Resolved agent name '%s' → id=%d",
+                                raw_name, a.id,
+                            )
+                            break
+                    else:
+                        # Fuzzy: check if the name is contained in agent name
+                        for a in agents:
+                            if name_lower in (a.name or "").lower():
+                                raw_id = a.id
+                                logger.info(
+                                    "[router] Fuzzy-resolved agent name '%s' → '%s' id=%d",
+                                    raw_name, a.name, a.id,
+                                )
+                                break
+
             if raw_id is None:
                 return None, 0.0
 
