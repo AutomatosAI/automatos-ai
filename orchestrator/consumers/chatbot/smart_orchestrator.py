@@ -280,11 +280,20 @@ class SmartChatOrchestrator:
         return ""
 
     def _convert_messages(self, messages: List[Dict]) -> List[Dict[str, str]]:
-        """Convert messages to simple role/content format for LLM."""
+        """Convert messages to simple role/content format for LLM.
+
+        Filters out system-role messages since the orchestrator builds
+        its own system prompt via personality.py.
+        """
         converted = []
 
         for msg in messages:
             role = msg.get("role", "user")
+
+            # Skip system messages — we build our own system prompt
+            if role == "system":
+                continue
+
             content = ""
 
             # Handle parts format

@@ -498,10 +498,19 @@ class StreamingChatService:
         agent_id: int = 1
     ) -> AsyncGenerator[str, None]:
         """
-        Stream chat response using AI SDK Data Stream format.
-        
-        Format: 0:"text"\n for text, d:{json}\n for data, e:{json}\n for errors
+        DEPRECATED: This method is no longer called from the chat API.
+        All chat now flows through stream_response_with_agent() which uses
+        SmartChatOrchestrator for personality, memory, and tool orchestration.
+
+        Kept temporarily for backward compatibility with any direct callers.
+        Will be removed in a future cleanup pass.
         """
+        import warnings
+        warnings.warn(
+            "stream_response_aisdk is deprecated. Use stream_response_with_agent instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         # Import from core.llm
         from core.llm import create_llm_manager
         import asyncio
@@ -1381,17 +1390,19 @@ class StreamingChatService:
                 agent_name=agent_runtime.metadata.name
             )
 
-            # Build tools: get_chat_tools + skill_tools from agent
-            _sys_prompt_base, skill_tools = await self._build_agent_system_prompt(agent_runtime)
+            # Load agent context: persona, description, skill tools
+            agent_ctx = await self._load_agent_context(agent_runtime)
+            skill_tools = agent_ctx["skill_tools"]
             from consumers.chatbot.tool_router import get_chat_tools
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
             all_tools = None if is_simple else get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
             if not is_simple and skill_tools:
                 all_tools = (all_tools or []) + skill_tools
 
-            # Convert messages to LLM format
+            # Convert messages to LLM format (no system prompt — orchestrator builds it)
             llm_messages = self.prompt_analyzer.convert_to_llm_messages(
                 messages,
+                system_prompt="",
                 available_tools=all_tools
             )
 
@@ -1407,9 +1418,24 @@ class StreamingChatService:
                 f"prep={orchestrated.preparation_time_ms:.0f}ms"
             )
 
+            # Inject agent persona + description (after orchestrator system prompt)
+            agent_identity_parts = []
+            if agent_ctx.get("description"):
+                agent_identity_parts.append(agent_ctx["description"])
+            if agent_ctx.get("persona"):
+                agent_identity_parts.append(f"## Persona & Communication Style\n{agent_ctx['persona']}")
+            if agent_ctx.get("extra_context"):
+                agent_identity_parts.append(agent_ctx["extra_context"])
+            if agent_identity_parts:
+                llm_messages.insert(1, {
+                    "role": "system",
+                    "content": "\n\n".join(agent_identity_parts),
+                })
+
             # Multi-step execution policy
+            insert_pos = 2 if agent_identity_parts else 1
             llm_messages.insert(
-                1,
+                insert_pos,
                 {
                     "role": "system",
                     "content": (
@@ -1468,13 +1494,29 @@ class StreamingChatService:
             except Exception as exc:
                 logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
 
+            # Context Window Guard — auto-compact if approaching context limit
+            from core.context_guard import ContextGuard
+            _guard = ContextGuard()
+            _model_name = getattr(agent_runtime.llm_manager, 'config', None)
+            _model_name = getattr(_model_name, 'model', 'gpt-4') if _model_name else 'gpt-4'
+            llm_messages, _was_compacted = await _guard.check_and_compact(
+                messages=llm_messages,
+                model_name=_model_name,
+                llm_manager=agent_runtime.llm_manager,
+                workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                agent_id=agent_id,
+                db_session=self.db,
+            )
+            if _was_compacted:
+                logger.info("[ContextGuard] Messages compacted before LLM call")
+
             # Generate response using agent's LLM manager
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
-            logger.info(f"🔍 Agent tools - count: {len(use_tools) if use_tools else 0}, is_simple: {is_simple}")
+            logger.info(f"Agent tools - count: {len(use_tools) if use_tools else 0}, is_simple: {is_simple}")
             if use_tools:
                 tool_names = [t.get("function", {}).get("name") for t in use_tools if isinstance(t, dict)]
-                logger.info(f"🔍 Available tools: {tool_names}")
-            
+                logger.info(f"Available tools: {tool_names}")
+
             response = await agent_runtime.llm_manager.generate_response(
                 messages=llm_messages,
                 tools=use_tools
@@ -1750,87 +1792,44 @@ class StreamingChatService:
             provider = None
 
         return provider, model
-    
-    async def _build_agent_system_prompt(self, agent_runtime) -> tuple[str, list]:
+    async def _load_agent_context(self, agent_runtime) -> dict:
         """
-        Build system prompt from agent's skills.
-        
-        Combines:
-        1. Base chatbot prompt
-        2. Agent-specific prompt (from description/type)
-        3. Skills (prompt templates from database)
-        
-        Args:
-            agent_runtime: AgentRuntime from factory
-            
-        Returns:
-            Tuple of (system_prompt, tool_schemas)
+        Load agent-specific context: persona, description, plugins/skills, tool schemas.
+
+        Returns a dict with keys:
+            - persona: str (agent's persona/communication style prompt)
+            - description: str (agent name + type + description)
+            - skill_tools: list (tool schemas from skills)
         """
         from core.models import Skill
-        
-        # Base chatbot system prompt
-        base_prompt = """You are a helpful AI assistant with access to various tools and knowledge.
 
-CRITICAL INSTRUCTIONS:
-- When asked to CREATE, WRITE, GENERATE, POST, SEND, or MESSAGE something, you MUST use your tools to actually do it
-- DO NOT explain how to do something - ACTUALLY DO IT using function calls
-- If you have a write_file or create_document tool, USE IT to create files
-- If you have database query tools, USE THEM to get real data
-- If you need external apps (Gmail/Slack/etc.), call the tool by its exact action name (e.g. TAVILY_SEARCH, GMAIL_SEND_EMAIL). Do NOT use composio_execute — call the action tool directly.
-- EXECUTE first, explain later (if needed)
-
-Examples:
-- "Create a report" → Call write_file tool with the report content
-- "Query the database" → Call smart_query_database tool
-- "Search for code" → Call search_codebase tool
-- "Post a message to Slack" → Call SLACK_SEND_A_MESSAGE_TO_A_SLACK_CHANNEL directly with the required params
-- "Summarize my emails" → Call GMAIL_FETCH_EMAILS directly, then summarize
-- "Search the web" → Call TAVILY_SEARCH directly with the query
-
-Always be clear, concise, and ACTION-ORIENTED in your responses. When tools are available, USE THEM instead of explaining what you would do.
-
-RESPONSE FORMAT RULES:
-- NEVER show code blocks, function names, API calls, or technical internals in your responses to the user
-- Describe what you did or found in plain, user-friendly language
-- If you retrieve technical content (code, schemas, configs), summarize the meaning — do NOT paste it raw
-- Users are not developers — translate everything into clear, non-technical terms"""
-        
-        # PRD-42: Load persona from agent's DB record
-        persona_prompt = ""
+        # Load persona from agent's DB record
+        persona = ""
         try:
             from core.models import Agent as AgentModel
             db_agent = self.db.query(AgentModel).filter(AgentModel.id == agent_runtime.agent_id).first()
             if db_agent:
-                if db_agent.use_custom_persona and db_agent.custom_persona_prompt:
-                    persona_prompt = db_agent.custom_persona_prompt
+                if getattr(db_agent, "use_custom_persona", False) and getattr(db_agent, "custom_persona_prompt", None):
+                    persona = db_agent.custom_persona_prompt
                     logger.info(f"Loaded custom persona for agent {agent_runtime.agent_id}")
-                elif db_agent.persona_id and db_agent.persona:
-                    persona_prompt = db_agent.persona.system_prompt or ""
+                elif getattr(db_agent, "persona_id", None) and getattr(db_agent, "persona", None):
+                    persona = db_agent.persona.system_prompt or ""
                     logger.info(f"Loaded persona '{db_agent.persona.name}' for agent {agent_runtime.agent_id}")
         except Exception as e:
             logger.warning(f"Failed to load persona for agent {agent_runtime.agent_id}: {e}")
 
-        # Add agent-specific context
-        agent_context = f"""
+        # Agent description
+        description = (
+            f"You are {agent_runtime.metadata.name}, "
+            f"a specialized {agent_runtime.metadata.agent_type} agent.\n"
+            f"{agent_runtime.metadata.description or ''}"
+        )
 
-You are {agent_runtime.metadata.name}, a specialized {agent_runtime.metadata.agent_type} agent.
-
-AGENT DESCRIPTION:
-{agent_runtime.metadata.description or f"Specialized {agent_runtime.metadata.agent_type} with expertise in specific domains."}
-"""
-        # Inject persona before skills
-        if persona_prompt:
-            agent_context += f"""
-## Persona & Communication Style
-{persona_prompt}
-"""
-
-        # PRD-42: Load plugins — if present, skip skills entirely
-        plugin_context = ""
+        # Load plugins OR skills for additional context
+        extra_context = ""
         has_plugins = False
         try:
             from core.services.plugin_context_service import PluginContextService
-
             plugin_svc = PluginContextService(self.db)
             plugin_rows = plugin_svc.get_assigned_plugins(agent_runtime.agent_id)
             if plugin_rows:
@@ -1840,7 +1839,7 @@ AGENT DESCRIPTION:
                     plugin_rows,
                     task_context=agent_runtime.metadata.description,
                 )
-                plugin_context = f"\n{tier1}\n{tier2}" if tier2 else f"\n{tier1}"
+                extra_context = f"\n{tier1}\n{tier2}" if tier2 else f"\n{tier1}"
                 logger.info(
                     "Loaded plugin context for agent %s (%d plugins)",
                     agent_runtime.agent_id, len(plugin_rows),
@@ -1848,48 +1847,39 @@ AGENT DESCRIPTION:
         except Exception as e:
             logger.warning(f"Failed to load plugins for agent {agent_runtime.agent_id}: {e}")
 
-        if has_plugins:
-            # Plugins replace skills
-            agent_context += plugin_context
-        else:
-            agent_context += """
-YOUR SPECIALIZED SKILLS:
-"""
-            # Load and inject skills from database
-            skills_text = ""
-            if agent_runtime.metadata.skills:
-                # Query database for skill details
-                skills = self.db.query(Skill).filter(
-                    Skill.name.in_(agent_runtime.metadata.skills),
-                    Skill.is_active.is_(True)
-                ).all()
+        if not has_plugins and agent_runtime.metadata.skills:
+            skills = self.db.query(Skill).filter(
+                Skill.name.in_(agent_runtime.metadata.skills),
+                Skill.is_active.is_(True),
+            ).all()
+            parts = []
+            for skill in skills:
+                if skill.prompt_template:
+                    parts.append(skill.prompt_template)
+                elif skill.description:
+                    parts.append(f"- {skill.name}: {skill.description}")
+            if parts:
+                extra_context = "\n".join(parts)
 
-                for skill in skills:
-                    if skill.prompt_template:
-                        skills_text += f"\n{skill.prompt_template}\n"
-                    elif skill.description:
-                        skills_text += f"\n- {skill.name}: {skill.description}\n"
-            agent_context += skills_text
-
-        # Build complete prompt
-        complete_prompt = f"{base_prompt}\n\n{agent_context}"
-
-        # Extract tool schemas from skills for function calling
+        # Extract tool schemas from skills
         tool_schemas = []
         if not has_plugins and agent_runtime.metadata.skills:
             skills = self.db.query(Skill).filter(
                 Skill.name.in_(agent_runtime.metadata.skills),
-                Skill.is_active == True
+                Skill.is_active == True,  # noqa: E712
             ).all()
-
             for skill in skills:
                 if skill.content and isinstance(skill.content, dict):
-                    tools_schema = skill.content.get('tools_schema', [])
-                    if tools_schema:
-                        logger.info(f"Extracted {len(tools_schema)} tools from skill '{skill.name}'")
-                        tool_schemas.extend(tools_schema)
+                    schemas = skill.content.get("tools_schema", [])
+                    if schemas:
+                        tool_schemas.extend(schemas)
 
-        return (complete_prompt, tool_schemas)
+        return {
+            "persona": persona,
+            "description": description,
+            "extra_context": extra_context,
+            "skill_tools": tool_schemas,
+        }
     
     async def _handle_tool_calls_aisdk(
         self,
