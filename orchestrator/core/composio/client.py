@@ -916,6 +916,48 @@ class ComposioClient:
                 app_upper, e, exc_info=True,
             )
 
+    def get_all_schemas_for_apps(
+        self,
+        app_names: List[str],
+        entity_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get ALL OpenAI function-calling schemas for the given apps.
+
+        Populates the per-app schema cache (via SDK ``toolset.tools.get``),
+        then returns every cached action schema.  The LLM decides which
+        action to call — no semantic search, no query rewriting.
+
+        Returns:
+            List of dicts with ``action_name`` and ``schema`` keys.
+        """
+        if not self.toolset:
+            logger.warning("[ComposioClient] Toolset not initialized")
+            return []
+
+        import time as _time
+        now = _time.monotonic()
+
+        results: List[Dict[str, Any]] = []
+        seen: set = set()
+
+        for app in app_names:
+            app_upper = app.upper()
+            cache_age = now - self._schema_cache_ts.get(app_upper, 0)
+            if app_upper not in self._schema_cache or cache_age > self._schema_cache_ttl:
+                self._populate_schema_cache(app, entity_id)
+
+            for action_name, schema in self._schema_cache.get(app_upper, {}).items():
+                if action_name not in seen:
+                    results.append({"action_name": action_name, "schema": schema})
+                    seen.add(action_name)
+
+        logger.info(
+            "[ComposioClient] get_all_schemas_for_apps: apps=%s → %d actions",
+            [a.upper() for a in app_names], len(results),
+        )
+        return results
+
     def search_actions_for_step(
         self,
         search_query: str,
