@@ -1316,6 +1316,7 @@ class StreamingChatService:
         agent_id: int,
         user_id: int,
         use_system_llm: bool = False,
+        skip_composio: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream chat response using a specialized agent from AgentFactory.
@@ -1450,7 +1451,7 @@ class StreamingChatService:
             # Composio per-action tools (primary) or hint fallback
             _composio_result = None
             try:
-                if latest_text and agent_id and self.workspace_id:
+                if latest_text and agent_id and self.workspace_id and not skip_composio:
                     from modules.tools.services.composio_tool_service import ComposioToolService
 
                     _composio_svc = ComposioToolService(self.db)

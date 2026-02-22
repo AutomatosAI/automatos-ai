@@ -9,11 +9,8 @@ Each action becomes its own top-level function with correct param names baked in
 Strategy:
   1. Extract explicit action names from the prompt (e.g. GITHUB_CREATE_A_REFERENCE)
      → fetch exact schemas from per-app cache.
-  2. No explicit names → load ALL actions for the agent's assigned apps from cache.
-     The LLM is smart enough to pick the right action.
-
-The per-app cache is populated via the Composio SDK's ``toolset.tools.get()``
-which fetches every action for a toolkit. No semantic search, no query rewriting.
+  2. No explicit names → use the Composio SDK's semantic search scoped to the
+     agent's assigned apps, with a per-app limit to stay within context limits.
 
 Consumers:
   - Recipe executor (Phase 1)
@@ -36,6 +33,10 @@ from core.models.core import Agent
 
 logger = logging.getLogger(__name__)
 
+# Max tools per app to avoid blowing the LLM context window.
+# 15 tools × ~600 tokens each ≈ 9K tokens per app — safe for 64K+ models.
+_MAX_TOOLS_PER_APP = 15
+
 
 # ---------------------------------------------------------------------------
 # Result dataclass
@@ -48,7 +49,7 @@ class ComposioToolResult:
     action_set: Set[str] = field(default_factory=set)
     entity_id: str = ""
     app_names: List[str] = field(default_factory=list)
-    strategy: str = "none"  # "exact_lookup" | "all_app_tools" | "none"
+    strategy: str = "none"  # "exact_lookup" | "sdk_search" | "none"
     search_ms: int = 0
 
 
@@ -77,7 +78,7 @@ class ComposioToolService:
         agent_id: int,
         workspace_id: UUID,
         task_prompt: str,
-        limit: int = 8,
+        limit: int = _MAX_TOOLS_PER_APP,
     ) -> ComposioToolResult:
         """
         Resolve Composio tools for a step.
@@ -85,8 +86,8 @@ class ComposioToolService:
         Strategy:
           1. Extract explicit action names from the prompt
              (e.g. GITHUB_CREATE_A_REFERENCE) → fetch exact schemas.
-          2. No explicit names → give the LLM ALL actions for the
-             agent's assigned apps. The LLM picks the right one.
+          2. No explicit names → SDK semantic search per app, capped
+             at ``limit`` tools per app to stay within context limits.
 
         Returns:
             ComposioToolResult with OpenAI function-calling schemas,
@@ -146,13 +147,15 @@ class ComposioToolService:
                     )
                     return result
 
-            # 4. No explicit names (or lookup empty) → ALL tools for the apps.
-            #    The SDK cache has every action per app. Let the LLM choose.
-            all_schemas = client.get_all_schemas_for_apps(
+            # 4. SDK semantic search — let Composio find the best actions
+            #    for this prompt, scoped to the agent's apps, limited per app.
+            search_results = client.search_actions_for_step(
+                search_query=task_prompt[:200],
                 app_names=[a.lower() for a in allowed_apps],
                 entity_id=entity_id,
+                limit=limit,
             )
-            for item in all_schemas:
+            for item in search_results:
                 action_name = item.get("action_name", "")
                 schema = item.get("schema")
                 if action_name and schema and action_name not in result.action_set:
@@ -162,11 +165,12 @@ class ComposioToolService:
             result.search_ms = int((time.monotonic() - t0) * 1000)
 
             if result.tools:
-                result.strategy = "all_app_tools"
+                result.strategy = "sdk_search"
                 logger.info(
-                    "[ComposioToolService] All app tools: agent=%s apps=%s "
-                    "actions=%d (%dms)",
-                    agent_id, allowed_apps, len(result.tools), result.search_ms,
+                    "[ComposioToolService] SDK search: agent=%s apps=%s "
+                    "actions=%d/%d (%dms) → %s",
+                    agent_id, allowed_apps, len(result.tools), limit,
+                    result.search_ms, sorted(result.action_set),
                 )
             else:
                 logger.warning(
