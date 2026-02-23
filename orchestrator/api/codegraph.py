@@ -138,11 +138,23 @@ async def index_github_repository(
         # Create or update project record immediately so UI can track status
         from core.database.database import SessionLocal
         existing = service.db.execute(
-            text("SELECT id FROM codegraph_projects WHERE name = :name AND workspace_id = :ws LIMIT 1"),
+            text("SELECT id, status FROM codegraph_projects WHERE name = :name AND workspace_id = :ws LIMIT 1"),
             {"name": request.project_name, "ws": str(ctx.workspace_id)}
         ).fetchone()
+
+        # Guard: reject if already indexing (prevents duplicate background tasks)
+        if existing and existing.status == 'indexing':
+            return {
+                "project_id": existing.id,
+                "project_name": request.project_name,
+                "total_files": 0,
+                "total_symbols": 0,
+                "duration_seconds": 0.0,
+                "status": "indexing",
+            }
+
         if existing:
-            project_id = existing[0]
+            project_id = existing.id
             service.db.execute(
                 text("UPDATE codegraph_projects SET status = 'indexing', source_url = :url, branch = :branch, updated_at = NOW() WHERE id = :id"),
                 {"id": project_id, "url": request.github_url, "branch": request.branch}
@@ -173,6 +185,7 @@ async def index_github_repository(
             router._background_tasks = background_tasks
 
         async def run_indexing():
+            logger.info(f"[CodeGraph] Background indexing started for {req_project_name}")
             db = SessionLocal()
             try:
                 bg_service = CodeGraphService(db)
@@ -185,11 +198,11 @@ async def index_github_repository(
                     workspace_id=req_workspace_id,
                 )
                 logger.info(
-                    f"✅ Indexing complete: {req_project_name} — "
+                    f"[CodeGraph] Indexing complete: {req_project_name} — "
                     f"{result.get('total_files', 0)} files, {result.get('total_symbols', 0)} symbols"
                 )
             except Exception as e:
-                logger.exception(f"Background indexing failed for {req_project_name}: {e}")
+                logger.exception(f"[CodeGraph] Background indexing FAILED for {req_project_name}: {e}")
                 try:
                     db.execute(
                         text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),

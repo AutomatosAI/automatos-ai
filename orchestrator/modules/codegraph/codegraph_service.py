@@ -358,8 +358,18 @@ class CodeGraphService:
             if relationships_data:
                 await self._store_relationships(project_id, relationships_data)
             
-            # Update project stats
+            # Update project stats — for incremental re-index, query actual DB counts
+            # (symbols_data only has NEW symbols, not the ones we skipped)
             duration = time.time() - start_time
+            actual_symbols = self.db.execute(
+                text("SELECT COUNT(*) FROM codegraph_symbols WHERE project_id = :pid"),
+                {"pid": project_id}
+            ).scalar() or len(symbols_data)
+            actual_relationships = self.db.execute(
+                text("SELECT COUNT(*) FROM codegraph_relationships WHERE project_id = :pid"),
+                {"pid": project_id}
+            ).scalar() or len(relationships_data)
+
             self.db.execute(
                 text("""
                     UPDATE codegraph_projects
@@ -375,23 +385,23 @@ class CodeGraphService:
                 {
                     "id": project_id,
                     "total_files": total_files,
-                    "total_symbols": len(symbols_data),
-                    "total_relationships": len(relationships_data),
+                    "total_symbols": actual_symbols,
+                    "total_relationships": actual_relationships,
                     "duration": duration
                 }
             )
             self.db.commit()
-            
+
             # Cleanup temp directory
             shutil.rmtree(repo_path, ignore_errors=True)
-            
-            logger.info(f"✅ Indexed {project_name}: {total_files} files, {len(symbols_data)} symbols in {duration:.1f}s")
-            
+
+            logger.info(f"✅ Indexed {project_name}: {total_files} files, {actual_symbols} symbols, {actual_relationships} relationships in {duration:.1f}s")
+
             return {
                 "project_id": project_id,
                 "project_name": project_name,
                 "total_files": total_files,
-                "total_symbols": len(symbols_data),
+                "total_symbols": actual_symbols,
                 "duration_seconds": round(duration, 2),
                 "status": "success"
             }
@@ -411,7 +421,7 @@ class CodeGraphService:
             except Exception as update_err:
                 logger.warning(f"Could not mark project as failed: {update_err}")
 
-            logger.error(f"Failed to index {project_name}: {e}")
+            logger.error(f"Failed to index {project_name}: {e}", exc_info=True)
             raise
     
     async def _clone_github_repo(
@@ -420,28 +430,29 @@ class CodeGraphService:
         branch: str,
         auth_token: Optional[str]
     ) -> str:
-        """Clone GitHub repository to temp directory"""
+        """Clone GitHub repository to temp directory (non-blocking)"""
+        import asyncio
         from git import Repo
-        
+
         temp_dir = tempfile.mkdtemp(prefix="codegraph_")
-        
+
         try:
             # Add auth token to URL if provided
             if auth_token and 'github.com' in github_url:
-                # Convert https://github.com/user/repo.git to https://token@github.com/user/repo.git
                 github_url = github_url.replace('https://', f'https://{auth_token}@')
-            
+
             logger.info(f"Cloning {github_url} (branch: {branch}) to {temp_dir}")
-            
-            Repo.clone_from(
-                github_url,
-                temp_dir,
-                branch=branch,
-                depth=1  # Shallow clone for speed
+
+            # Run blocking git clone in thread pool to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: Repo.clone_from(github_url, temp_dir, branch=branch, depth=1)
             )
-            
+
+            logger.info(f"Clone complete: {temp_dir}")
             return temp_dir
-            
+
         except Exception as e:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise ValueError(f"Failed to clone repository: {e}")
@@ -845,8 +856,7 @@ class CodeGraphService:
                     text("ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector(" + str(current_dim) + ")")
                 )
 
-                # Recreate index — use HNSW for dims <= 4000, skip index for larger dims
-                # (pgvector 0.8.x: IVFFlat max 2000, HNSW max 4000)
+                # Recreate index — pgvector limits: IVFFlat max 2000, HNSW max 2000
                 if current_dim <= 2000:
                     try:
                         self.db.execute(text(
@@ -856,19 +866,10 @@ class CodeGraphService:
                         logger.info(f"Created IVFFlat index for {current_dim}-dim embeddings")
                     except Exception as e:
                         logger.warning(f"Could not create IVFFlat index: {e}")
-                elif current_dim <= 4000:
-                    try:
-                        self.db.execute(text(
-                            "CREATE INDEX idx_codegraph_symbols_embedding_hnsw ON codegraph_symbols "
-                            "USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)"
-                        ))
-                        logger.info(f"Created HNSW index for {current_dim}-dim embeddings")
-                    except Exception as e:
-                        logger.warning(f"Could not create HNSW index: {e}")
                 else:
                     logger.info(
-                        f"Embedding dimension {current_dim} exceeds pgvector index limits "
-                        f"(IVFFlat: 2000, HNSW: 4000). Using sequential scan — fine for code repos."
+                        f"Embedding dimension {current_dim} exceeds pgvector index limit (2000). "
+                        f"Using sequential scan — fine for code repos."
                     )
 
                 self.db.commit()
@@ -1003,7 +1004,7 @@ class CodeGraphService:
                 logger.debug(f"🔍 Successfully committed batch of {len(batch)} symbols")
                 
             except Exception as e:
-                logger.error(f"Failed to generate embeddings for batch: {e}")
+                logger.error(f"Failed to generate embeddings for batch: {e}", exc_info=True)
                 # Store without embeddings as fallback
                 for symbol in batch:
                     self.db.execute(
