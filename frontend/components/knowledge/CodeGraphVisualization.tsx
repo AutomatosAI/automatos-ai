@@ -14,7 +14,7 @@ import ReactFlow, {
   Panel,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
-import { Search, Download, ZoomIn, ZoomOut, Maximize2, Flame, Layers, Code, ChevronRight, ChevronLeft, AlertTriangle } from 'lucide-react'
+import { Search, Download, ZoomIn, ZoomOut, Maximize2, Minimize2, Flame, Layers, Code, ChevronRight, ChevronLeft, AlertTriangle } from 'lucide-react'
 
 interface CodeGraphVisualizationProps {
   project: string
@@ -59,19 +59,20 @@ interface SelectedNodeData {
   code_snippet?: string
 }
 
+// Automatos brand palette — orange primary with warm supporting tones
 const nodeColors = {
-  function: '#3b82f6',
-  class: '#10b981',
-  method: '#8b5cf6',
-  import: '#f59e0b',
-  interface: '#ec4899',
+  function: '#e8590c',   // brand orange
+  class: '#d97706',      // amber
+  method: '#c2410c',     // deep orange
+  import: '#b45309',     // warm brown
+  interface: '#ea580c',  // bright orange
 }
 
-// Cluster palette for Louvain communities
+// Cluster palette — brand-consistent warm tones
 const clusterColors = [
-  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
-  '#ec4899', '#06b6d4', '#f97316', '#84cc16', '#a855f7',
-  '#14b8a6', '#e11d48', '#0ea5e9', '#d946ef', '#65a30d',
+  '#e8590c', '#d97706', '#c2410c', '#dc2626', '#ea580c',
+  '#b45309', '#f59e0b', '#f97316', '#ef4444', '#ca8a04',
+  '#a16207', '#e11d48', '#fb923c', '#fbbf24', '#78350f',
 ]
 
 // Heatmap: green (low risk) → yellow → red (high risk)
@@ -101,11 +102,23 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
   const [selectedNode, setSelectedNode] = useState<SelectedNodeData | null>(null)
   const [codePanelOpen, setCodePanelOpen] = useState(false)
 
+  // Fullscreen state
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
   // PRD-62: File tree sidebar state (US-018)
   const [fileTreeOpen, setFileTreeOpen] = useState(false)
   const [fileTreeData, setFileTreeData] = useState<Array<{ file_path: string; language: string; lines_of_code: number; symbol_count?: number }>>([])
   const [fileFilter, setFileFilter] = useState('')
   const [highlightedFile, setHighlightedFile] = useState<string | null>(null)
+
+  // Escape key exits fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) setIsFullscreen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isFullscreen])
 
   // PRD-62: Fetch architecture data
   const fetchArchitecture = useCallback(async () => {
@@ -226,7 +239,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
             style: {
               background: bgColor,
               color: 'white',
-              border: isRoot ? '3px solid #ef4444' : isHotspot ? '2px dashed #f59e0b' : '1px solid #94a3b8',
+              border: isRoot ? '3px solid #fff' : isHotspot ? '2px dashed #fbbf24' : '1px solid rgba(255,255,255,0.15)',
               borderRadius: '8px',
               padding: '12px',
               minWidth: '150px',
@@ -251,8 +264,8 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
         data.edges.forEach((edge: any) => {
           const isCycle = cycleEdges.has(`${edge.from}->${edge.to}`)
           const edgeColor = isCycle ? '#ef4444' :
-                           edge.type === 'extends' ? '#10b981' :
-                           edge.type === 'calls' ? '#3b82f6' : '#f59e0b'
+                           edge.type === 'extends' ? '#d97706' :
+                           edge.type === 'calls' ? '#e8590c' : '#f59e0b'
 
           flowEdges.push({
             id: `${edge.from}->${edge.to}`,
@@ -286,6 +299,13 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
     }
   }
 
+  // Re-render graph when viewMode or archData changes (to recolor nodes)
+  useEffect(() => {
+    if (selectedSymbol && nodes.length > 0) {
+      fetchCallGraph(selectedSymbol)
+    }
+  }, [viewMode, archData])
+
   // PRD-62: Handle node click for code panel
   const handleNodeClick = useCallback((_: any, node: Node) => {
     const nodeData = node.data as any
@@ -299,7 +319,9 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
   }, [])
 
   return (
-    <div className="flex flex-col h-[600px] bg-slate-900/50 backdrop-blur-sm rounded-lg border border-slate-700">
+    <div className={`flex flex-col bg-slate-900/50 backdrop-blur-sm rounded-lg border border-slate-700 ${
+      isFullscreen ? 'fixed inset-0 z-50 rounded-none h-screen' : 'h-[600px]'
+    }`}>
       {/* Controls */}
       <div className="p-4 border-b border-slate-700 space-y-3">
         {/* Search */}
@@ -312,13 +334,20 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-orange-500"
             />
           </div>
           <button
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-600"
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+          <button
             onClick={handleSearch}
             disabled={loading || !searchQuery.trim()}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+            className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
           >
             {loading ? 'Loading...' : 'Visualize'}
           </button>
@@ -371,26 +400,30 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
           <div className="flex items-center gap-1 ml-auto">
             <button
               onClick={() => setViewMode('default')}
-              className={`px-2 py-1 rounded text-xs transition-colors ${viewMode === 'default' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+              className={`px-2 py-1 rounded text-xs transition-colors ${viewMode === 'default' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
               title="Default colors by type"
             >
               Default
             </button>
             <button
-              onClick={() => setViewMode('clusters')}
-              disabled={!archData}
-              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'clusters' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'} disabled:opacity-30`}
+              onClick={() => {
+                if (!archData && !archLoading) fetchArchitecture()
+                setViewMode('clusters')
+              }}
+              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'clusters' ? 'bg-orange-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
               title="Color by Louvain module cluster"
             >
-              <Layers className="w-3 h-3" /> Clusters
+              <Layers className="w-3 h-3" /> Clusters {archLoading && '...'}
             </button>
             <button
-              onClick={() => setViewMode('heatmap')}
-              disabled={!archData}
-              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'heatmap' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'} disabled:opacity-30`}
+              onClick={() => {
+                if (!archData && !archLoading) fetchArchitecture()
+                setViewMode('heatmap')
+              }}
+              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'heatmap' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
               title="Heatmap by complexity (green=low, red=high)"
             >
-              <Flame className="w-3 h-3" /> Heatmap
+              <Flame className="w-3 h-3" /> Heatmap {archLoading && '...'}
             </button>
             {archData && archData.hotspots.length > 0 && (
               <span className="ml-2 px-2 py-0.5 bg-yellow-900/50 text-yellow-400 text-xs rounded flex items-center gap-1">
@@ -418,7 +451,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 placeholder="Filter files..."
                 value={fileFilter}
                 onChange={(e) => setFileFilter(e.target.value)}
-                className="w-full px-2 py-1 bg-slate-800 border border-slate-600 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                className="w-full px-2 py-1 bg-slate-800 border border-slate-600 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
               />
             </div>
             <div className="flex-1 overflow-y-auto">
@@ -435,12 +468,12 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                       style: {
                         ...n.style,
                         boxShadow: file.file_path === highlightedFile ? 'none' :
-                          (n.data?.file === file.file_path ? '0 0 12px rgba(59, 130, 246, 0.8)' : 'none'),
+                          (n.data?.file === file.file_path ? '0 0 12px rgba(232, 89, 12, 0.8)' : 'none'),
                       }
                     })))
                   }}
                   className={`w-full text-left px-2 py-1.5 text-xs hover:bg-slate-800 transition-colors ${
-                    highlightedFile === file.file_path ? 'bg-blue-900/30 border-l-2 border-blue-500' : ''
+                    highlightedFile === file.file_path ? 'bg-orange-900/30 border-l-2 border-orange-500' : ''
                   }`}
                 >
                   <div className="text-slate-300 truncate font-mono">{file.file_path.split('/').pop()}</div>
@@ -488,7 +521,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
               fitView
               attributionPosition="bottom-right"
             >
-              <Background color="#475569" gap={16} />
+              <Background color="#78350f" gap={16} />
               <Controls className="bg-slate-800 border-slate-600" />
               <MiniMap
                 nodeColor={(node) => {
