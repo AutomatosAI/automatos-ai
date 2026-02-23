@@ -46,8 +46,10 @@ _CONTENT_KEYS = [
     "raw",                      # Some APIs
 ]
 
-# Known URL keys
+# Known URL keys (checked BEFORE content keys for Google Drive,
+# because Composio returns full file at s3url but truncated content inline)
 _URL_KEYS = [
+    "s3url", "s3Url",                      # Composio R2 presigned URL (full content)
     "downloadUrl", "download_url", "url",
     "webContentLink", "web_content_link",
     "temporary_link", "link",
@@ -96,6 +98,16 @@ class CloudFileDownloader:
             f"Composio {app_upper} response keys: "
             f"{list(data.keys()) if isinstance(data, dict) else type(data).__name__}"
         )
+        # Log URL keys and content sizes for debugging truncation
+        if isinstance(data, dict):
+            for k in _URL_KEYS:
+                if k in data:
+                    logger.info(f"  Found URL key '{k}': {str(data[k])[:120]}...")
+            for k in _CONTENT_KEYS:
+                if k in data:
+                    val = data[k]
+                    size = len(val) if isinstance(val, (str, bytes)) else "N/A"
+                    logger.info(f"  Found content key '{k}': size={size}")
 
         # Extract file content
         content = self._extract_content(data)
@@ -212,8 +224,27 @@ class CloudFileDownloader:
             error = result.get("error") or result.get("message") or "Unknown error"
             raise RuntimeError(f"Composio action {action} failed: {error}")
 
-        # Return the data dict (top-level "data" key from API response)
-        return result.get("data", result)
+        # Log full response structure to find s3url / download URLs
+        logger.info(
+            f"Composio full response keys: {list(result.keys())}"
+        )
+        # Check for metadata section (Composio sometimes puts s3url here)
+        metadata = result.get("metadata", {})
+        if metadata:
+            logger.info(f"Composio metadata keys: {list(metadata.keys()) if isinstance(metadata, dict) else type(metadata).__name__}")
+
+        # Return the data dict, merging in any metadata that has URLs
+        data = result.get("data", result)
+        if isinstance(data, dict) and isinstance(metadata, dict):
+            # Merge s3url and other URL keys from metadata into data
+            for key in _URL_KEYS:
+                if key in metadata and key not in data:
+                    data[key] = metadata[key]
+            # Also check top-level result for s3url
+            for key in _URL_KEYS:
+                if key in result and key not in data:
+                    data[key] = result[key]
+        return data
 
     # ------------------------------------------------------------------
     # Content extraction
@@ -221,21 +252,29 @@ class CloudFileDownloader:
 
     @classmethod
     def _extract_content(cls, data: Dict[str, Any]) -> Optional[Any]:
-        """Extract file content from Composio response — provider-agnostic."""
+        """Extract file content from Composio response — provider-agnostic.
+
+        Priority:
+        1. URL keys (s3url etc.) — Composio hosts full file on R2/S3; the
+           inline ``downloaded_file_content`` is often truncated to ~500 bytes.
+        2. Content keys — inline content (works for Dropbox, small files).
+        3. Deep-search fallback.
+        """
         if not isinstance(data, dict):
             return data if data else None
 
-        # 1. Check known content keys
+        # 1. Check URL keys FIRST — full file content lives here
+        for key in _URL_KEYS:
+            url = data.get(key)
+            if url and isinstance(url, str) and url.startswith("http"):
+                logger.info(f"Found download URL in response key '{key}'")
+                return cls._download_from_url(url)
+
+        # 2. Check known inline content keys
         for key in _CONTENT_KEYS:
             val = data.get(key)
             if val is not None and val != "":
                 return val
-
-        # 2. Check known URL keys → download
-        for key in _URL_KEYS:
-            url = data.get(key)
-            if url and isinstance(url, str) and url.startswith("http"):
-                return cls._download_from_url(url)
 
         # 3. Deep-search: any large string value is likely content
         for key, val in data.items():
