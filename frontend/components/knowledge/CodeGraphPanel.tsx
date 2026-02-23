@@ -80,6 +80,23 @@ export function CodeGraphPanel() {
     loadProjects()
   }, [])
 
+  // Poll for indexing progress — reload projects every 5s while any project is indexing
+  useEffect(() => {
+    const hasIndexing = projects.some(p => p.status === 'indexing')
+    if (!hasIndexing) return
+
+    const interval = setInterval(async () => {
+      try {
+        const data = await apiClient.codegraphListProjects()
+        if (data) setProjects(data)
+      } catch {
+        // Silently ignore polling errors
+      }
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [projects])
+
   const loadProjects = async () => {
     try {
       setLoading(true)
@@ -217,15 +234,15 @@ export function CodeGraphPanel() {
 
   const handleReindex = async (projectId: number) => {
     try {
-      setLoading(true)
       setError(null)
+      // Optimistically show indexing status immediately
+      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, status: 'indexing' } : p))
       await apiClient.codegraphReindexProject(projectId)
-      await loadProjects()
+      // Polling useEffect will auto-refresh while status === 'indexing'
     } catch (e: any) {
       setError(e?.message || 'Failed to re-index project')
       console.error('Error re-indexing:', e)
-    } finally {
-      setLoading(false)
+      await loadProjects() // Reload to get real status on error
     }
   }
 
@@ -381,7 +398,8 @@ export function CodeGraphPanel() {
                         <span>{project.branch || 'main'}</span>
                       </div>
                     </div>
-                    <Badge variant={project.status === 'active' ? 'default' : 'secondary'}>
+                    <Badge variant={project.status === 'active' ? 'default' : project.status === 'indexing' ? 'outline' : 'secondary'} className={project.status === 'indexing' ? 'animate-pulse border-blue-500 text-blue-400' : ''}>
+                      {project.status === 'indexing' && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
                       {project.status}
                     </Badge>
                   </div>

@@ -914,50 +914,20 @@ class CodeGraphService:
                 texts.append("\n".join(text_parts))
             
             try:
-                # Generate embeddings using centralized manager
-                embeddings = []
-                
-                # Debug: Check embedding_manager type
+                # Generate embeddings using batch API (single call per batch)
                 if not self.embedding_manager:
                     raise ValueError("embedding_manager is None")
-                
-                logger.debug(f"🔍 embedding_manager type: {type(self.embedding_manager)}")
-                logger.debug(f"🔍 embedding_manager has generate_embedding: {hasattr(self.embedding_manager, 'generate_embedding')}")
-                
-                if not hasattr(self.embedding_manager, 'generate_embedding'):
-                    raise ValueError(f"embedding_manager has no generate_embedding method. Type: {type(self.embedding_manager)}")
-                
-                # Check if generate_embedding is callable
-                gen_method = getattr(self.embedding_manager, 'generate_embedding', None)
-                logger.debug(f"🔍 generate_embedding type: {type(gen_method)}, callable: {callable(gen_method)}")
-                logger.debug(f"🔍 generate_embedding value (first 200 chars): {repr(gen_method)[:200]}")
-                
-                if not callable(gen_method):
-                    raise ValueError(
-                        f"embedding_manager.generate_embedding is not callable. "
-                        f"Type: {type(gen_method)}, Value: {repr(gen_method)[:200]}"
-                    )
-                
-                logger.debug(f"🔍 About to call generate_embedding for {len(texts)} texts")
-                for idx, text_content in enumerate(texts):
-                    logger.debug(f"🔍 Calling generate_embedding for text {idx+1}/{len(texts)}")
-                    embedding = await gen_method(text_content)
-                    # Ensure embedding is a list/array, not a string
-                    if isinstance(embedding, str):
-                        raise ValueError(f"Embedding returned as string instead of array for text {idx+1}")
-                    # Convert numpy array to list if needed
-                    try:
-                        import numpy as np
-                        if isinstance(embedding, np.ndarray):
-                            embedding = embedding.tolist()
-                    except ImportError:
-                        pass  # numpy not available, assume it's already a list
-                    if not isinstance(embedding, (list, tuple)):
-                        raise ValueError(f"Embedding is not a list/array: {type(embedding)}")
-                    embeddings.append(embedding)
-                    logger.debug(f"🔍 Got embedding of length {len(embedding)}, type: {type(embedding)}")
-                
-                logger.debug(f"🔍 Successfully generated {len(embeddings)} embeddings, now storing...")
+
+                embeddings = await self.embedding_manager.generate_embeddings_batch(texts, max_concurrent=10)
+
+                # Normalize: ensure all embeddings are lists
+                import numpy as np
+                for idx in range(len(embeddings)):
+                    emb = embeddings[idx]
+                    if isinstance(emb, np.ndarray):
+                        embeddings[idx] = emb.tolist()
+                    elif isinstance(emb, str):
+                        raise ValueError(f"Embedding {idx} returned as string")
                 
                 # Store symbols with embeddings
                 for j, symbol in enumerate(batch):
