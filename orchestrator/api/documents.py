@@ -1229,12 +1229,13 @@ async def rag_retrieve(
             **config_kwargs
         )
         
-        rag_service = RAGService(config)
+        rag_service = RAGService(config, workspace_id=str(ctx.workspace_id) if ctx.workspace_id else None)
         result = await rag_service.retrieve(
             query=query,
             max_chunks=max_chunks,
             max_tokens=max_tokens,  # Pass through (can be None)
-            diversity=diversity  # Pass through (can be None)
+            diversity=diversity,  # Pass through (can be None)
+            workspace_id=str(ctx.workspace_id) if ctx.workspace_id else None
         )
         
         execution_time_ms = int((time.time() - start_time) * 1000)

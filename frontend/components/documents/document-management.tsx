@@ -22,6 +22,7 @@ import {
   Cloud,
   Layout,
   ExternalLink,
+  Brain,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,6 +47,7 @@ import { DocumentDetailsModal } from './document-details-modal'
 import { DeleteConfirmationModal } from './delete-confirmation-modal'
 import { UploadProviderModal } from './upload-provider-modal'
 import { SemanticSearch } from './semantic-search'
+import { RAGContextBuilder } from '@/components/context/rag-context-builder'
 import type { SearchResult } from '@/hooks/use-semantic-search-api'
 import { TemplateManager } from './template-manager'
 import { DocumentProcessing } from './document-processing'
@@ -487,6 +489,10 @@ export function DocumentManagement() {
                     <Search className="w-4 h-4" />
                     <span>Search</span>
                   </TabsTrigger>
+                  <TabsTrigger value="rag" className="flex items-center space-x-2">
+                    <Brain className="w-4 h-4" />
+                    <span>RAG Test</span>
+                  </TabsTrigger>
                   <TabsTrigger value="upload" className="flex items-center space-x-2">
                     <Upload className="w-4 h-4" />
                     <span>Upload</span>
@@ -652,6 +658,10 @@ export function DocumentManagement() {
                       )}
                     </div>
                   </div>
+                </TabsContent>
+
+                <TabsContent value="rag" className="space-y-6">
+                  <RAGContextBuilder />
                 </TabsContent>
 
                 <TabsContent value="upload" className="space-y-6">

@@ -1657,6 +1657,14 @@ class ApiClient {
     })
   }
 
+  async ragRetrieve(params: { query: string; max_chunks?: number; max_tokens?: number; diversity?: number }) {
+    const searchParams = new URLSearchParams({ query: params.query })
+    if (params.max_chunks != null) searchParams.set('max_chunks', String(params.max_chunks))
+    if (params.max_tokens != null) searchParams.set('max_tokens', String(params.max_tokens))
+    if (params.diversity != null) searchParams.set('diversity', String(params.diversity))
+    return this.request(`/api/documents/rag/retrieve?${searchParams}`, { method: 'POST' })
+  }
+
   // ===== SKILLS ENDPOINTS =====
   async getSkills() {
     const skills = await this.request('/api/v1/skills') as any[]
