@@ -77,6 +77,10 @@ class PlatformActionExecutor:
             return await handler(params)
         except Exception as e:
             logger.error(f"[PlatformExecutor] {action_name} failed: {e}", exc_info=True)
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
             return {"success": False, "error": str(e)}
 
     # ── Agent Handlers ──────────────────────────────────────────────
@@ -492,6 +496,9 @@ class PlatformActionExecutor:
             status="active",
             configuration=config,
             workspace_id=self.workspace_id,
+            created_by="platform",
+            owner_type="workspace",
+            owner_id=str(self.workspace_id),
         )
         self.db.add(agent)
         self.db.flush()  # Get the ID without committing (caller commits)
@@ -571,6 +578,7 @@ class PlatformActionExecutor:
             workspace_id=self.workspace_id,
             owner_type="workspace",
             owner_id=str(self.workspace_id),
+            created_by="platform",
             tags=tags,
             template_definition={"steps": [], "agents": [], "config": {}, "variables": []},
         )
