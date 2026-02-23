@@ -135,17 +135,77 @@ async def index_github_repository(
     - Stores in database for search
     """
     try:
-        result = await service.index_github_project(
-            project_name=request.project_name,
-            github_url=request.github_url,
-            branch=request.branch,
-            auth_token=request.auth_token,
-            exclude_patterns=request.exclude_patterns,
-            workspace_id=ctx.workspace_id
+        # Create project record immediately so UI can track status
+        from core.database.database import SessionLocal
+        project_row = service.db.execute(
+            text("""
+                INSERT INTO codegraph_projects (name, source_type, source_url, branch, status, workspace_id, created_at, updated_at)
+                VALUES (:name, 'github', :url, :branch, 'indexing', :ws, NOW(), NOW())
+                ON CONFLICT (name, workspace_id) DO UPDATE SET status = 'indexing', updated_at = NOW()
+                RETURNING id
+            """),
+            {"name": request.project_name, "url": request.github_url, "branch": request.branch, "ws": str(ctx.workspace_id)}
         )
-        
-        return IndexResponse(**result)
-        
+        row = project_row.fetchone()
+        project_id = row[0] if row else 0
+        service.db.commit()
+
+        # Capture request params for background task
+        req_project_name = request.project_name
+        req_github_url = request.github_url
+        req_branch = request.branch
+        req_auth_token = request.auth_token
+        req_exclude_patterns = request.exclude_patterns
+        req_workspace_id = ctx.workspace_id
+
+        # Store background tasks to prevent garbage collection
+        background_tasks: set = getattr(router, '_background_tasks', set())
+        if not hasattr(router, '_background_tasks'):
+            router._background_tasks = background_tasks
+
+        async def run_indexing():
+            db = SessionLocal()
+            try:
+                bg_service = CodeGraphService(db)
+                result = await bg_service.index_github_project(
+                    project_name=req_project_name,
+                    github_url=req_github_url,
+                    branch=req_branch,
+                    auth_token=req_auth_token,
+                    exclude_patterns=req_exclude_patterns,
+                    workspace_id=req_workspace_id,
+                )
+                logger.info(
+                    f"✅ Indexing complete: {req_project_name} — "
+                    f"{result.get('total_files', 0)} files, {result.get('total_symbols', 0)} symbols"
+                )
+            except Exception as e:
+                logger.exception(f"Background indexing failed for {req_project_name}: {e}")
+                try:
+                    db.execute(
+                        text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
+                        {"id": project_id}
+                    )
+                    db.commit()
+                except Exception:
+                    pass
+            finally:
+                db.close()
+                background_tasks.discard(task)
+
+        task = asyncio.create_task(run_indexing())
+        background_tasks.add(task)
+
+        # Return immediately — indexing runs in background
+        return {
+            "project_id": project_id,
+            "project_name": request.project_name,
+            "total_files": 0,
+            "total_symbols": 0,
+            "duration_seconds": 0.0,
+            "status": "indexing",
+        }
+
     except ValueError as e:
         logger.error(f"Validation error indexing GitHub repository: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Invalid repository indexing parameters")
