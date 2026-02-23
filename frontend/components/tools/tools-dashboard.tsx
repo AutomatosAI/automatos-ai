@@ -507,8 +507,19 @@ export function ToolsDashboard() {
 
       console.log('[CONNECT] API Response:', redirectUrlResult)
 
-      if (!redirectUrlResult || !redirectUrlResult.redirect_url) {
-        throw new Error('Invalid response from server: Missing redirect_url')
+      if (!redirectUrlResult) {
+        throw new Error('Invalid response from server')
+      }
+
+      // NO_AUTH apps (e.g. composio_search) are activated immediately — no OAuth redirect needed
+      if (!redirectUrlResult.redirect_url) {
+        console.log('[CONNECT] NO_AUTH app — activated immediately, refreshing...')
+        popup?.close()
+        setConnectingTool(null)
+        await queryClient.invalidateQueries({ queryKey: ['tools'] })
+        await queryClient.refetchQueries({ queryKey: ['tools'], type: 'active' })
+        await queryClient.invalidateQueries({ queryKey: ['composio', 'connections'] })
+        return
       }
 
       console.log('[CONNECT] Starting OAuth flow:', redirectUrlResult.redirect_url)

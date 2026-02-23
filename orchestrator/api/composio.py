@@ -234,20 +234,23 @@ async def list_connections(
 
         # For pending connections, check Composio API for actual status
         if status == "pending":
-            composio_status = client.get_connection_status(
-                entity_id=entity["composio_entity_id"],
-                app=conn["app_name"]
-            )
-            if composio_status and composio_status.get("status") == "ACTIVE":
-                # Connection is now active on Composio - update local DB
-                entity_manager.update_connection_status(
-                    entity_id=entity["id"],
-                    app_name=conn["app_name"],
-                    status="active",
-                    connection_id=composio_status.get("id")
+            try:
+                composio_status = client.get_connection_status(
+                    entity_id=entity["composio_entity_id"],
+                    app=conn["app_name"]
                 )
-                status = "active"
-                logger.info(f"Connection {conn['app_name']} synced to ACTIVE status")
+                if composio_status and composio_status.get("status") in ("ACTIVE", "INITIATED"):
+                    # Connection completed on Composio side — upgrade to active
+                    entity_manager.update_connection_status(
+                        entity_id=entity["id"],
+                        app_name=conn["app_name"],
+                        status="active",
+                        connection_id=composio_status.get("id")
+                    )
+                    status = "active"
+                    logger.info(f"Connection {conn['app_name']} synced to active (was {composio_status.get('status')})")
+            except Exception as e:
+                logger.warning(f"Failed to sync pending connection {conn['app_name']}: {e}")
         
         result.append(ConnectionResponse(
             app_name=conn["app_name"],
@@ -278,13 +281,26 @@ async def initiate_connection(
     entity = entity_manager.get_or_create_entity(ctx.workspace_id)
     composio_entity_id = entity["composio_entity_id"]
     
+    # NO_AUTH apps (e.g. composio_search) don't need OAuth — activate immediately
+    if client.is_no_auth_app(app_name):
+        entity_manager.add_connection(
+            entity_id=entity["id"],
+            app_name=app_name.upper(),
+            status="active",
+        )
+        logger.info(f"[CONNECT] {app_name.upper()} is NO_AUTH — activated immediately")
+        return InitiateConnectionResponse(
+            redirect_url="",
+            app_name=app_name.upper(),
+        )
+
     # Default callback URL
     callback_url = request.callback_url if request else None
     if not callback_url:
         # Use frontend callback URL (popup callback page)
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         callback_url = f"{frontend_url}/tools/callback?connected={app_name.upper()}"
-    
+
     try:
         redirect_url = client.initiate_connection(
             entity_id=composio_entity_id,
@@ -294,14 +310,14 @@ async def initiate_connection(
     except Exception as e:
         logger.error(f"Failed to initiate connection for {app_name}: {e}")
         raise HTTPException(status_code=503, detail="Failed to initiate OAuth connection")
-    
+
     # Store pending connection
     entity_manager.add_connection(
         entity_id=entity["id"],
         app_name=app_name.upper(),
         status="pending"
     )
-    
+
     return InitiateConnectionResponse(
         redirect_url=redirect_url,
         app_name=app_name.upper()
