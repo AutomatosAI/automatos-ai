@@ -795,8 +795,25 @@ async def semantic_search(
         # Generate embedding asynchronously
         query_embedding = await embedding_manager.generate_embedding(query)
         
-        logger.info(f"Embedding generated, performing vector search...")
-        
+        logger.info(f"Embedding generated (dim={len(query_embedding)}), performing vector search...")
+
+        # Diagnostic: check what's actually in the DB for this workspace
+        diag = db.execute(text("""
+            SELECT
+                COUNT(*) as total_chunks,
+                COUNT(dc.embedding) as chunks_with_embeddings,
+                COUNT(DISTINCT d.id) as total_docs,
+                array_length(dc.embedding, 1) as embedding_dim
+            FROM document_chunks dc
+            JOIN documents d ON dc.document_id = d.id
+            WHERE d.workspace_id = :workspace_id
+            GROUP BY array_length(dc.embedding, 1)
+        """), {"workspace_id": ctx.workspace_id}).fetchall()
+        for row in diag:
+            logger.info(f"📋 Workspace {ctx.workspace_id}: {row.total_chunks} chunks, {row.chunks_with_embeddings} with embeddings, {row.total_docs} docs, embedding_dim={row.embedding_dim}")
+        if not diag:
+            logger.warning(f"📋 Workspace {ctx.workspace_id}: NO document chunks found at all!")
+
         # Build pgvector similarity search query
         # Using <=> operator for cosine distance (pgvector)
         # Similarity = 1 - distance
