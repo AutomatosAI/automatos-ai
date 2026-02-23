@@ -797,6 +797,33 @@ class RAGService:
             effective_workspace_id = workspace_id or self._workspace_id
 
             try:
+                # Diagnostic: check chunk/embedding state for this workspace
+                diag = await conn.fetch("""
+                    SELECT
+                        COUNT(*) as total_chunks,
+                        COUNT(dc.embedding) as with_embeddings,
+                        COUNT(DISTINCT d.id) as docs,
+                        d.workspace_id::text as ws
+                    FROM document_chunks dc
+                    JOIN documents d ON dc.document_id = d.id
+                    GROUP BY d.workspace_id
+                """)
+                for row in diag:
+                    logger.info(f"📋 DB workspace={row['ws']}: {row['total_chunks']} chunks, {row['with_embeddings']} with embeddings, {row['docs']} docs")
+                if not diag:
+                    logger.warning("📋 DB has ZERO document_chunks rows!")
+
+                emb_dim_check = await conn.fetch("""
+                    SELECT array_length(dc.embedding, 1) as dim, COUNT(*) as cnt
+                    FROM document_chunks dc
+                    WHERE dc.embedding IS NOT NULL
+                    GROUP BY array_length(dc.embedding, 1)
+                    LIMIT 5
+                """)
+                for row in emb_dim_check:
+                    logger.info(f"📐 Embedding dimension={row['dim']}, count={row['cnt']}")
+                logger.info(f"📐 Query embedding dimension={len(query_embedding)}")
+
                 logger.info(f"🔎 Executing SQL vector similarity search: min_similarity={min_similarity}, limit={limit}, workspace={effective_workspace_id}")
 
                 if effective_workspace_id:
