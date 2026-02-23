@@ -431,12 +431,27 @@ async def reindex_project(
         github_url = project["source_url"]
         branch = project["branch"] or "main"
         
-        # Update status to indexing immediately
+        # Clear existing data so re-index does a full re-parse
+        # (incremental indexing skips unchanged files, which means new parser
+        # features like relationship extraction never get applied to old data)
+        service.db.execute(
+            text("DELETE FROM codegraph_relationships WHERE project_id = :pid"),
+            {"pid": project_id}
+        )
+        service.db.execute(
+            text("DELETE FROM codegraph_symbols WHERE project_id = :pid"),
+            {"pid": project_id}
+        )
+        service.db.execute(
+            text("DELETE FROM codegraph_files WHERE project_id = :pid"),
+            {"pid": project_id}
+        )
         service.db.execute(
             text("UPDATE codegraph_projects SET status = 'indexing', updated_at = NOW() WHERE id = :id"),
             {"id": project_id}
         )
         service.db.commit()
+        logger.info(f"[CodeGraph] Cleared existing data for project {project_id}, starting full re-index")
         
         # Store background tasks to prevent garbage collection
         background_tasks: set = getattr(router, '_background_tasks', set())
