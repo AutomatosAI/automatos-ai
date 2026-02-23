@@ -212,8 +212,19 @@ class AutoBrain:
                 confidence=0.85,
             )
 
-        # Internal tools only → Molecule (agent can handle with internal tools)
+        # Internal tools only
         if matched_internal:
+            # Platform tools are handled by Auto directly — don't delegate
+            # to Universal Router which doesn't know about platform actions
+            all_platform = all(t.startswith("platform_") for t in matched_internal)
+            if all_platform:
+                return ComplexityAssessment(
+                    complexity=Complexity.MOLECULE,
+                    action=Action.RESPOND,
+                    reasoning=f"Platform self-awareness query: {', '.join(set(matched_internal))}",
+                    matched_tools=list(set(matched_internal)),
+                    confidence=0.90,
+                )
             complexity = Complexity.CELL if is_multi_step else Complexity.MOLECULE
             return ComplexityAssessment(
                 complexity=complexity,
