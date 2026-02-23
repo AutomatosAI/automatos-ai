@@ -106,12 +106,43 @@ class CloudFileDownloader:
                 f"Response keys: {list(data.keys()) if isinstance(data, dict) else 'N/A'}"
             )
 
+        binary = self._to_bytes(content)
+
+        # Google Drive via Composio truncates content to ~500 bytes.
+        # Detect this and fall back to direct Google Drive API download.
+        MIN_EXPECTED_SIZE = 2048  # text files should be > 2KB
+        if app_upper == "GOOGLEDRIVE" and len(binary) < MIN_EXPECTED_SIZE:
+            logger.warning(
+                f"Composio returned only {len(binary)} bytes for "
+                f"{external_file_id} — likely truncated. "
+                f"Falling back to direct Google Drive API download."
+            )
+            try:
+                direct_binary = await self._download_google_drive_direct(
+                    external_file_id, workspace_id
+                )
+                if direct_binary and len(direct_binary) > len(binary):
+                    logger.info(
+                        f"Direct Google Drive download: {len(direct_binary):,} bytes "
+                        f"(vs {len(binary)} from Composio)"
+                    )
+                    binary = direct_binary
+                else:
+                    logger.warning(
+                        "Direct download returned same or less content, "
+                        "keeping Composio result"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Direct Google Drive download failed, "
+                    f"using Composio result ({len(binary)} bytes): {e}"
+                )
+
         # Write to temp file
         suffix = ""
         if file_name and "." in file_name:
             suffix = file_name[file_name.rfind("."):]
 
-        binary = self._to_bytes(content)
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, mode='wb')
         try:
             tmp.write(binary)
@@ -251,6 +282,131 @@ class CloudFileDownloader:
                 pass
             return content.encode("utf-8")
         return str(content).encode("utf-8")
+
+    # ------------------------------------------------------------------
+    # Direct Google Drive API download (bypasses Composio truncation)
+    # ------------------------------------------------------------------
+
+    async def _download_google_drive_direct(
+        self, file_id: str, workspace_id: UUID
+    ) -> bytes:
+        """
+        Download file content directly from Google Drive API.
+
+        Composio's GOOGLEDRIVE_DOWNLOAD_FILE action truncates content to ~500
+        bytes. This method gets the OAuth token from Composio's connected
+        accounts and calls the Google Drive Files API directly with alt=media.
+        """
+        access_token = await self._get_google_oauth_token(workspace_id)
+
+        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.get(
+                url,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+        if response.status_code == 401:
+            raise RuntimeError(
+                "Google Drive OAuth token expired or revoked. "
+                "User may need to reconnect Google Drive."
+            )
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Google Drive API error {response.status_code}: "
+                f"{response.text[:300]}"
+            )
+
+        return response.content
+
+    async def _get_google_oauth_token(self, workspace_id: UUID) -> str:
+        """
+        Get a valid Google OAuth access token via Composio connected accounts.
+
+        Calls GET /api/v2/connectedAccounts to find the Google Drive connection
+        for this workspace's entity, then extracts the access_token.
+        """
+        api_key = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
+        if not api_key:
+            raise RuntimeError("COMPOSIO_API_KEY/COMPOSIO_KEY not set")
+
+        entity = self.executor.get_entity_for_workspace(workspace_id)
+        entity_id = entity.get("composio_entity_id")
+        if not entity_id:
+            raise RuntimeError(f"No Composio entity for workspace {workspace_id}")
+
+        # List connected accounts for this entity filtered to Google Drive
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{COMPOSIO_API_BASE}/connectedAccounts",
+                headers={"x-api-key": api_key},
+                params={
+                    "user_uuid": entity_id,
+                    "showActiveOnly": "true",
+                },
+            )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Failed to list connected accounts: {response.status_code}"
+            )
+
+        data = response.json()
+        accounts = data.get("items", data.get("data", []))
+
+        # Find the Google Drive connection
+        gdrive_account = None
+        for acct in accounts:
+            app = (acct.get("appName") or acct.get("appUniqueId") or "").upper()
+            if "GOOGLEDRIVE" in app or "GOOGLE_DRIVE" in app:
+                if acct.get("status", "").upper() in ("ACTIVE", "INITIATED"):
+                    gdrive_account = acct
+                    break
+
+        if not gdrive_account:
+            raise RuntimeError(
+                "No active Google Drive connection found for this workspace. "
+                f"Found {len(accounts)} accounts: "
+                f"{[a.get('appName') for a in accounts[:5]]}"
+            )
+
+        account_id = gdrive_account.get("id")
+
+        # The list endpoint may not include connectionParams.
+        # If missing, fetch the specific account by ID.
+        conn_params = gdrive_account.get("connectionParams", {})
+        if not conn_params and account_id:
+            logger.info(f"Fetching Google Drive connection details for {account_id}")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                detail_resp = await client.get(
+                    f"{COMPOSIO_API_BASE}/connectedAccounts/{account_id}",
+                    headers={"x-api-key": api_key},
+                )
+            if detail_resp.status_code == 200:
+                detail = detail_resp.json()
+                conn_params = detail.get("connectionParams", {})
+
+        logger.info(
+            f"Google Drive connection params keys: {list(conn_params.keys())}"
+        )
+
+        # Extract access token — Composio uses different structures
+        access_token = (
+            conn_params.get("access_token")
+            or conn_params.get("accessToken")
+            # Some Composio versions nest under "headers"
+            or conn_params.get("headers", {}).get(
+                "Authorization", ""
+            ).replace("Bearer ", "")
+        )
+
+        if not access_token:
+            raise RuntimeError(
+                "Google Drive connected account has no access_token. "
+                f"Connection params keys: {list(conn_params.keys())}"
+            )
+
+        return access_token
 
     @staticmethod
     def _build_params(app_name: str, external_file_id: str) -> dict:

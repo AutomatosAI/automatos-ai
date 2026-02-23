@@ -1550,23 +1550,117 @@ async def reprocess_all_documents(
     Runs in background - check status via /status endpoint.
     """
     try:
-        from modules.rag import get_rag_service
-        
-        # Run in background
-        async def run_reprocessing():
-            rag_service = get_rag_service()
-            result = await rag_service.reprocess_all_documents()
-            logger.info(f"Batch re-processing complete: {result}")
-        
+        workspace_id = str(ctx.workspace_id)
+
+        # Count documents to reprocess
+        doc_count = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id
+        ).count()
+
+        if doc_count == 0:
+            return {"status": "skipped", "message": "No documents found to reprocess"}
+
+        # Run in background — iterate documents and reprocess each one
         import asyncio
+
+        async def run_reprocessing():
+            """Reprocess all documents using DocumentManager."""
+            from sqlalchemy import text as sql_text
+
+            doc_manager = get_document_manager(workspace_id)
+            conn = None
+            succeeded = 0
+            failed = 0
+
+            try:
+                import psycopg2
+                conn = psycopg2.connect(**db_config)
+                cursor = conn.cursor()
+
+                # Get all documents for this workspace
+                cursor.execute(
+                    "SELECT id, file_path, filename, file_type FROM documents "
+                    "WHERE workspace_id = %s ORDER BY id",
+                    (workspace_id,)
+                )
+                docs = cursor.fetchall()
+                cursor.close()
+                conn.close()
+                conn = None
+
+                for doc_id, file_path, filename, file_type in docs:
+                    try:
+                        if not file_path:
+                            logger.warning(f"Document {doc_id} has no file_path, skipping")
+                            failed += 1
+                            continue
+
+                        # For S3-stored files, download to temp
+                        local_path = file_path
+                        tmp_path = None
+                        if file_path.startswith("s3://"):
+                            import boto3
+                            s3_client = boto3.client(
+                                's3',
+                                region_name=os.getenv('AWS_REGION', 'us-east-1'),
+                                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+                            )
+                            # Parse s3://bucket/key
+                            parts = file_path.replace("s3://", "").split("/", 1)
+                            bucket, key = parts[0], parts[1]
+                            import tempfile
+                            suffix = os.path.splitext(filename)[1] if filename else ""
+                            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                            tmp.close()
+                            tmp_path = tmp.name
+                            s3_client.download_file(bucket, key, tmp_path)
+                            local_path = tmp_path
+
+                        if not os.path.exists(local_path):
+                            logger.warning(f"Document {doc_id} file not found: {local_path}")
+                            failed += 1
+                            continue
+
+                        # Delete existing chunks (DB + S3 vectors)
+                        conn2 = psycopg2.connect(**db_config)
+                        c2 = conn2.cursor()
+                        c2.execute("DELETE FROM document_chunks WHERE document_id = %s", (doc_id,))
+                        conn2.commit()
+                        c2.close()
+                        conn2.close()
+
+                        # Reprocess
+                        from modules.rag.ingestion.manager import DocumentType
+                        ft = doc_manager.processor.detect_file_type(local_path)
+                        await doc_manager._process_document(doc_id, local_path, ft)
+                        succeeded += 1
+                        logger.info(f"Reprocessed document {doc_id}/{len(docs)}: {filename}")
+
+                        # Clean up temp file
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+
+                    except Exception as e:
+                        logger.error(f"Failed to reprocess document {doc_id}: {e}", exc_info=True)
+                        failed += 1
+
+                logger.info(
+                    f"Batch reprocessing complete: {succeeded} succeeded, "
+                    f"{failed} failed out of {len(docs)} total"
+                )
+
+            except Exception as e:
+                logger.error(f"Batch reprocessing error: {e}", exc_info=True)
+
         background_tasks.add_task(lambda: asyncio.run(run_reprocessing()))
-        
+
         return {
             "status": "started",
-            "message": "Re-processing started in background. This may take several minutes.",
-            "note": "Check document status via GET /api/documents/ to monitor progress"
+            "message": f"Re-processing {doc_count} documents in background.",
+            "note": "Check progress via GET /api/documents/reprocess-status"
         }
-        
+
     except Exception as e:
         logger.error(f"Error starting batch re-processing: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
