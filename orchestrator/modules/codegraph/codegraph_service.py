@@ -222,17 +222,21 @@ class CodeGraphService:
             
             # Merge exclude patterns
             all_excludes = self.default_excludes + (exclude_patterns or [])
-            
-            # Discover and parse files
+
+            # Discover files first so we can log the count
+            discovered_files = self._discover_files(repo_path, all_excludes)
+            logger.info(f"[CodeGraph] Discovered {len(discovered_files)} code files to parse in {project_name}")
+
+            # Parse files
             symbols_data = []
-            relationships_data = []  # NEW: Collect relationships
+            relationships_data = []
             files_data = []
             total_files = 0
-            
+
             skipped_files = 0
             discovered_paths = set()
 
-            for file_path in self._discover_files(repo_path, all_excludes):
+            for file_path in discovered_files:
                 try:
                     rel_path = os.path.relpath(file_path, repo_path)
                     discovered_paths.add(rel_path)
@@ -337,6 +341,8 @@ class CodeGraphService:
 
             if skipped_files:
                 logger.info(f"Incremental indexing: skipped {skipped_files} unchanged files, re-parsed {total_files - skipped_files} changed files")
+
+            logger.info(f"[CodeGraph] Parsing complete: {total_files} files, {len(symbols_data)} symbols, {len(relationships_data)} relationships. Storing to DB...")
 
             # Batch insert files
             if files_data:
