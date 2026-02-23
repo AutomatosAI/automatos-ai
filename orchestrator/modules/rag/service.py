@@ -694,15 +694,13 @@ class RAGService:
     
     async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
-        Get candidate chunks from database using centralized EnhancedVectorStore.
-
-        MIGRATED: Now uses modules.search.EnhancedVectorStore for consistent vector search.
-        Old SQL-based implementation kept below for rollback if needed.
+        Get candidate chunks via S3 Vectors (embeddings are stored there, not in PostgreSQL).
 
         Args:
             workspace_id: Optional workspace ID for multi-tenant isolation.
                           Falls back to self._workspace_id if not provided.
         """
+        from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
         if not self._embedding_manager:
             return []
         
@@ -710,190 +708,47 @@ class RAGService:
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)
             
-            # Use centralized EnhancedVectorStore if available
-            if self._vector_store:
-                try:
-                    from modules.search import SearchMode, RankingStrategy
-                    
-                    # Initialize vector store if needed
-                    if not self._vector_store.pool:
-                        await self._vector_store.initialize()
-                    
-                    search_mode = SearchMode.HYBRID if self.config.hybrid_search_enabled else SearchMode.VECTOR_ONLY
-                    logger.info(f"🔎 Using EnhancedVectorStore: mode={search_mode.value}, min_similarity={min_similarity}, limit={limit}")
+            # Use S3 Vectors backend directly (embeddings are NOT in PostgreSQL)
+            if self._vector_store and isinstance(self._vector_store, S3VectorsBackend):
+                logger.info(f"🔎 Using S3VectorsBackend: min_similarity={min_similarity}, limit={limit}")
+                await self._vector_store.initialize()
 
-                    # Build search filter with workspace isolation
-                    from modules.search import SearchFilter
-                    effective_ws = workspace_id or getattr(self, '_workspace_id', None)
-                    search_filter = SearchFilter(workspace_id=effective_ws) if effective_ws else None
+                # S3VectorsBackend.search() is sync (boto3)
+                results = self._vector_store.search(
+                    query_embedding=query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding),
+                    limit=limit,
+                    min_score=min_similarity,
+                )
 
-                    # Perform search using centralized vector store
-                    search_results = await self._vector_store.search(
-                        query_embedding=query_embedding,
-                        mode=search_mode,
-                        ranking_strategy=RankingStrategy.SIMILARITY,
-                        limit=limit,
-                        search_filter=search_filter,
-                        query_text=query
-                    )
-                    
-                    # Convert SearchResult objects to RAG's expected format
-                    candidates = []
-                    source_file_counts = {}
-                    similarity_scores = []
-                    
-                    for result in search_results:
-                        doc = result.document
-                        similarity = result.similarity_score
-                        
-                        # Filter by minimum similarity
-                        if similarity < min_similarity:
-                            continue
-                        
-                        # Extract source file from metadata or source field
-                        source_file = doc.metadata.get('filename', doc.source or 'unknown')
-                        
-                        # Track source distribution
-                        source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
-                        similarity_scores.append(similarity)
-                        
-                        candidates.append({
-                            "id": doc.id,
-                            "content": doc.content,
-                            "source_file": source_file,
-                            "document_id": doc.metadata.get('document_id', doc.id),
-                            "file_type": doc.metadata.get('file_type', ''),
-                            "similarity": similarity,
-                            "metadata": doc.metadata,
-                            "parent_content": None,
-                            "headers": {}
-                        })
-                    
-                    logger.info(f"📁 Candidate sources: {source_file_counts}")
-                    if similarity_scores:
-                        logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
-                    logger.info(f"✅ Retrieved {len(candidates)} candidates using EnhancedVectorStore")
-                    
-                    return candidates
-                    
-                except Exception as e:
-                    logger.warning(f"EnhancedVectorStore search failed, falling back to SQL: {e}")
-                    # Fall through to SQL fallback below
-            
-            # FALLBACK: Original SQL-based implementation (kept for rollback)
-            logger.info("Using fallback SQL-based vector search")
-            embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
-
-            import asyncpg
-            import os
-
-            db_url = os.getenv("DATABASE_URL", "")
-            if not db_url:
-                db_url = "postgresql://postgres:postgres@localhost:5432/automatos"
-
-            conn = await asyncpg.connect(db_url)
-
-            # Resolve workspace_id for multi-tenant isolation
-            effective_workspace_id = workspace_id or self._workspace_id
-
-            try:
-                # Diagnostic: check chunk/embedding state for this workspace
-                diag = await conn.fetch("""
-                    SELECT
-                        COUNT(*) as total_chunks,
-                        COUNT(dc.embedding) as with_embeddings,
-                        COUNT(DISTINCT d.id) as docs,
-                        d.workspace_id::text as ws
-                    FROM document_chunks dc
-                    JOIN documents d ON dc.document_id = d.id
-                    GROUP BY d.workspace_id
-                """)
-                for row in diag:
-                    logger.info(f"📋 DB workspace={row['ws']}: {row['total_chunks']} chunks, {row['with_embeddings']} with embeddings, {row['docs']} docs")
-                if not diag:
-                    logger.warning("📋 DB has ZERO document_chunks rows!")
-
-                emb_dim_check = await conn.fetch("""
-                    SELECT array_length(dc.embedding, 1) as dim, COUNT(*) as cnt
-                    FROM document_chunks dc
-                    WHERE dc.embedding IS NOT NULL
-                    GROUP BY array_length(dc.embedding, 1)
-                    LIMIT 5
-                """)
-                for row in emb_dim_check:
-                    logger.info(f"📐 Embedding dimension={row['dim']}, count={row['cnt']}")
-                logger.info(f"📐 Query embedding dimension={len(query_embedding)}")
-
-                logger.info(f"🔎 Executing SQL vector similarity search: min_similarity={min_similarity}, limit={limit}, workspace={effective_workspace_id}")
-
-                if effective_workspace_id:
-                    results = await conn.fetch("""
-                        SELECT
-                            dc.id,
-                            dc.content,
-                            d.filename as source_file,
-                            d.id as document_id,
-                            d.file_type,
-                            1 - (dc.embedding <=> $1::vector) as similarity,
-                            dc.metadata
-                        FROM document_chunks dc
-                        JOIN documents d ON dc.document_id = d.id
-                        WHERE 1 - (dc.embedding <=> $1::vector) >= $2
-                            AND d.workspace_id = $4
-                        ORDER BY dc.embedding <=> $1::vector
-                        LIMIT $3
-                    """, embedding_str, min_similarity, limit, effective_workspace_id)
-                else:
-                    results = await conn.fetch("""
-                        SELECT
-                            dc.id,
-                            dc.content,
-                            d.filename as source_file,
-                            d.id as document_id,
-                            d.file_type,
-                            1 - (dc.embedding <=> $1::vector) as similarity,
-                            dc.metadata
-                        FROM document_chunks dc
-                        JOIN documents d ON dc.document_id = d.id
-                        WHERE 1 - (dc.embedding <=> $1::vector) >= $2
-                        ORDER BY dc.embedding <=> $1::vector
-                        LIMIT $3
-                    """, embedding_str, min_similarity, limit)
-                
-                logger.info(f"📊 Database returned {len(results)} results")
-                
                 candidates = []
                 source_file_counts = {}
                 similarity_scores = []
-                
+
                 for r in results:
-                    source_file = r["source_file"]
-                    similarity = r["similarity"]
-                    
+                    source_file = r.get("file_name", r.get("file_path", "unknown"))
+                    similarity = r.get("score", 0.0)
+
                     source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
                     similarity_scores.append(similarity)
-                    
+
                     candidates.append({
-                        "id": r["id"],
-                        "content": r["content"],
+                        "id": r.get("key", ""),
+                        "content": r.get("content", ""),
                         "source_file": source_file,
-                        "document_id": r["document_id"],
-                        "file_type": r["file_type"],
+                        "document_id": r.get("metadata", {}).get("document_id", 0),
+                        "file_type": r.get("file_path", "").rsplit(".", 1)[-1] if r.get("file_path") else "",
                         "similarity": similarity,
-                        "metadata": json.loads(r["metadata"]) if isinstance(r["metadata"], str) else (r["metadata"] or {}),
+                        "metadata": r.get("metadata", {}),
                         "parent_content": None,
                         "headers": {}
                     })
-                
+
                 logger.info(f"📁 Candidate sources: {source_file_counts}")
                 if similarity_scores:
                     logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
-                logger.info(f"✅ Retrieved {len(candidates)} candidates with SQL fallback")
-                
+                logger.info(f"✅ Retrieved {len(candidates)} candidates from S3 Vectors")
+
                 return candidates
-                
-            finally:
-                await conn.close()
             
         except Exception as e:
             logger.error(f"Error getting candidates: {e}")

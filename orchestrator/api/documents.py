@@ -787,8 +787,7 @@ async def semantic_search(
         # Generate query embedding using centralized embedding manager
         # NOTE: import directly from module for compatibility across deployments
         from core.llm.embedding_manager import create_embedding_manager
-        import asyncio
-        
+
         embedding_manager = create_embedding_manager()
         logger.info(f"Generating embedding for query: {query[:50]}...")
         
@@ -797,90 +796,63 @@ async def semantic_search(
         
         logger.info(f"Embedding generated (dim={len(query_embedding)}), performing vector search...")
 
-        # Diagnostic: check what's actually in the DB for this workspace
-        diag = db.execute(text("""
-            SELECT
-                COUNT(*) as total_chunks,
-                COUNT(dc.embedding) as chunks_with_embeddings,
-                COUNT(DISTINCT d.id) as total_docs,
-                array_length(dc.embedding, 1) as embedding_dim
-            FROM document_chunks dc
-            JOIN documents d ON dc.document_id = d.id
-            WHERE d.workspace_id = :workspace_id
-            GROUP BY array_length(dc.embedding, 1)
-        """), {"workspace_id": ctx.workspace_id}).fetchall()
-        for row in diag:
-            logger.info(f"📋 Workspace {ctx.workspace_id}: {row.total_chunks} chunks, {row.chunks_with_embeddings} with embeddings, {row.total_docs} docs, embedding_dim={row.embedding_dim}")
-        if not diag:
-            logger.warning(f"📋 Workspace {ctx.workspace_id}: NO document chunks found at all!")
+        # Search via S3 Vectors (embeddings stored there, not in PostgreSQL)
+        from config import config as app_config
+        from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
 
-        # Build pgvector similarity search query
-        # Using <=> operator for cosine distance (pgvector)
-        # Similarity = 1 - distance
-        
-        doc_filter = ""
-        if document_ids:
-            doc_filter = "AND d.id = ANY(:document_ids)"
-        
-        # Format embedding as PostgreSQL array string for pgvector
-        # Pass as parameterized value to avoid SQL injection
-        embedding_str = '[' + ','.join(str(float(v)) for v in query_embedding) + ']'
+        s3_backend = S3VectorsBackend(workspace_id=str(ctx.workspace_id))
+        await s3_backend.initialize()
 
-        similarity_query = text("""
-            SELECT
-                dc.id as chunk_id,
-                dc.document_id,
-                dc.chunk_index,
-                dc.content,
-                dc.metadata,
-                d.filename,
-                d.file_type,
-                d.file_size,
-                d.upload_date,
-                1 - (dc.embedding <=> cast(:embedding as vector)) as similarity
-            FROM document_chunks dc
-            JOIN documents d ON dc.document_id = d.id
-            WHERE dc.embedding IS NOT NULL
-                AND d.workspace_id = :workspace_id
-                {doc_filter}
-                AND (1 - (dc.embedding <=> cast(:embedding as vector))) >= :min_similarity
-            ORDER BY dc.embedding <=> cast(:embedding as vector)
-            LIMIT :limit
-        """.format(doc_filter=doc_filter))
+        embedding_list = query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding)
+        s3_results = s3_backend.search(
+            query_embedding=embedding_list,
+            limit=limit * 3,  # Over-fetch to allow grouping by document
+            min_score=min_similarity,
+        )
 
-        params = {
-            "embedding": embedding_str,
-            "min_similarity": min_similarity,
-            "limit": limit,
-            "workspace_id": ctx.workspace_id
-        }
-        
-        if document_ids:
-            params["document_ids"] = document_ids
-        
-        result = db.execute(similarity_query, params)
-        rows = result.fetchall()
-        
-        # Group results by document so we can surface full files
+        logger.info(f"S3 Vectors returned {len(s3_results)} chunks")
+
+        # Map S3 results back to document metadata from PostgreSQL
+        # S3 stores: key, score, content (chunk_text), file_name, chunk_index, metadata
+        # We need: document_id, filename, file_type, file_size, upload_date from DB
         grouped_results: Dict[int, Dict[str, Any]] = {}
         doc_order: List[int] = []
 
-        for row in rows:
-            doc_id = row.document_id
-            similarity = float(row.similarity)
+        for s3_hit in s3_results:
+            similarity = s3_hit.get("score", 0.0)
+            file_name = s3_hit.get("file_name", "")
+            chunk_text = s3_hit.get("content", "")
+            chunk_index = s3_hit.get("chunk_index", 0)
+
+            # Look up document in PostgreSQL by filename + workspace
+            doc_row = db.execute(text("""
+                SELECT id, filename, file_type, file_size, upload_date
+                FROM documents
+                WHERE workspace_id = :workspace_id AND filename = :filename
+                LIMIT 1
+            """), {"workspace_id": ctx.workspace_id, "filename": file_name}).fetchone()
+
+            if not doc_row:
+                continue
+
+            doc_id = doc_row.id
+
+            # Optional: filter by document_ids if provided
+            if document_ids and doc_id not in document_ids:
+                continue
 
             if doc_id not in grouped_results:
                 grouped_results[doc_id] = {
                     "document_id": doc_id,
                     "best_similarity": similarity,
-                    "best_excerpt": row.content,
-                    "best_chunk_index": row.chunk_index,
-                    "metadata": row.metadata if row.metadata else {},
+                    "best_excerpt": chunk_text,
+                    "best_chunk_index": chunk_index,
+                    "metadata": {},
                     "source": {
-                        "filename": row.filename,
-                        "file_type": row.file_type,
-                        "file_size": row.file_size,
-                        "upload_date": row.upload_date.isoformat() if row.upload_date else None,
+                        "filename": doc_row.filename,
+                        "file_type": doc_row.file_type,
+                        "file_size": doc_row.file_size,
+                        "upload_date": doc_row.upload_date.isoformat() if doc_row.upload_date else None,
                     },
                 }
                 doc_order.append(doc_id)
@@ -888,8 +860,8 @@ async def semantic_search(
                 existing = grouped_results[doc_id]
                 if similarity > existing["best_similarity"]:
                     existing["best_similarity"] = similarity
-                    existing["best_excerpt"] = row.content
-                    existing["best_chunk_index"] = row.chunk_index
+                    existing["best_excerpt"] = chunk_text
+                    existing["best_chunk_index"] = chunk_index
 
         # Fetch limited previews + stats for surfaced docs
         # Collect doc_ids and calculate preview ranges upfront
