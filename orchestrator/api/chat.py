@@ -301,6 +301,16 @@ async def stream_chat(
                     f"[Auto] Router selected agent_id={effective_agent_id} "
                     f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
                 )
+            elif routing_decision is not None and routing_decision.route_type == "orchestrate":
+                # LLM explicitly chose Auto / orchestrate — use default agent with system LLM
+                effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+                use_system_llm = True
+                logger.info(
+                    f"[Auto] Router → orchestrate "
+                    f"(confidence={routing_decision.confidence:.2f}, "
+                    f"reasoning={routing_decision.reasoning}): "
+                    f"agent_id={effective_agent_id} with orchestrator LLM"
+                )
             elif complexity_assessment.target_agent_id:
                 # Auto brain already matched tools to an agent
                 effective_agent_id = complexity_assessment.target_agent_id

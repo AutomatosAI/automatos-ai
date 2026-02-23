@@ -392,6 +392,27 @@ class UniversalRouter:
                 )
                 return None
 
+            # Auto sentinel (id=0) → orchestrate with the LLM's own confidence
+            if agent_id == 0:
+                logger.info(
+                    "[router] Tier 3: LLM selected Auto (orchestrate) confidence=%.2f",
+                    confidence,
+                )
+                decision = RoutingDecision(
+                    route_type="orchestrate",
+                    agent_id=None,
+                    confidence=confidence,
+                    reasoning=f"LLM selected Auto — orchestrate (confidence={confidence:.2f})",
+                )
+                if self._cache is not None:
+                    self._cache.put(
+                        envelope.workspace_id,
+                        envelope.content,
+                        envelope.source,
+                        decision,
+                    )
+                return decision
+
             # Low confidence → orchestrate (full decomposition needed)
             if confidence < _LLM_CONFIDENCE_THRESHOLD:
                 logger.info(
@@ -446,7 +467,11 @@ class UniversalRouter:
             return None
 
     def _build_agent_descriptions(self, agents: List[Agent]) -> List[Dict]:
-        """Build a list of agent info dicts for the LLM prompt."""
+        """Build a list of agent info dicts for the LLM prompt.
+
+        Includes a synthetic "Auto" entry (id=0) so the LLM can explicitly
+        route platform queries and general questions back to the orchestrator.
+        """
         descriptions: List[Dict] = []
         for agent in agents:
             # Look up assigned app names
@@ -468,6 +493,22 @@ class UniversalRouter:
                     "apps": app_names,
                 }
             )
+
+        # Synthetic "Auto" route — the orchestrator itself
+        descriptions.append(
+            {
+                "agent_id": 0,
+                "name": "Auto",
+                "description": (
+                    "Platform orchestrator. Handles: list agents, token usage, "
+                    "recipes, workspace info, connected apps, general questions, "
+                    "greetings, and anything that doesn't clearly match a "
+                    "specialized agent."
+                ),
+                "apps": [],
+            }
+        )
+
         return descriptions
 
     @staticmethod
@@ -501,6 +542,11 @@ class UniversalRouter:
             "to handle it from the list below.\n\n"
             f"User request: {content}\n\n"
             f"Available agents:\n{agents_block}\n\n"
+            "Rules:\n"
+            "- Pick a specialized agent when its tools/description clearly match the request.\n"
+            "- Pick \"Auto\" (ID 0) for platform queries (list agents, token usage, "
+            "workspace info), general questions, greetings, or when unsure.\n"
+            "- Prefer Auto over a poor-fit specialized agent.\n\n"
             "Respond with ONLY a JSON object (no markdown, no explanation):\n"
             '{"agent_id": <int>, "confidence": <float between 0 and 1>}\n'
         )
@@ -558,24 +604,28 @@ class UniversalRouter:
                 )
                 if isinstance(raw_name, str) and raw_name.strip():
                     name_lower = raw_name.strip().lower()
-                    for a in agents:
-                        if (a.name or "").lower() == name_lower:
-                            raw_id = a.id
-                            logger.info(
-                                "[router] Resolved agent name '%s' → id=%d",
-                                raw_name, a.id,
-                            )
-                            break
+                    # Handle "Auto" virtual route by name
+                    if name_lower == "auto":
+                        raw_id = 0
                     else:
-                        # Fuzzy: check if the name is contained in agent name
                         for a in agents:
-                            if name_lower in (a.name or "").lower():
+                            if (a.name or "").lower() == name_lower:
                                 raw_id = a.id
                                 logger.info(
-                                    "[router] Fuzzy-resolved agent name '%s' → '%s' id=%d",
-                                    raw_name, a.name, a.id,
+                                    "[router] Resolved agent name '%s' → id=%d",
+                                    raw_name, a.id,
                                 )
                                 break
+                        else:
+                            # Fuzzy: check if the name is contained in agent name
+                            for a in agents:
+                                if name_lower in (a.name or "").lower():
+                                    raw_id = a.id
+                                    logger.info(
+                                        "[router] Fuzzy-resolved agent name '%s' → '%s' id=%d",
+                                        raw_name, a.name, a.id,
+                                    )
+                                    break
 
             if raw_id is None:
                 return None, 0.0
@@ -586,6 +636,10 @@ class UniversalRouter:
                 or parsed.get("score")
                 or 0.7  # default if model omits confidence
             )
+
+            # Auto sentinel (id=0) — valid, skip workspace validation
+            if agent_id == 0:
+                return 0, confidence
 
             # Validate agent_id is in the workspace agent list
             valid_ids = {a.id for a in agents}

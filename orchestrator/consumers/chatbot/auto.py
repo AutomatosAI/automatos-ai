@@ -97,22 +97,28 @@ _TOOL_KEYWORDS = {
 }
 
 # Internal tool keyword mapping
+# NOTE: Platform tools are checked FIRST (dict insertion order) so they win
+# over generic matches like "how many" in query_database.
 _INTERNAL_TOOL_KEYWORDS = {
+    # --- PRD-64: Platform self-awareness (check first) ---
+    "platform_list_agents": ["my agent", "list agent", "what agent", "show agent",
+                             "agents", "how many agents"],
+    "platform_list_recipes": ["my recipe", "list recipe", "what recipe", "show recipe",
+                              "my workflow", "list workflow", "recipes", "how many recipes"],
+    "platform_get_llm_usage": ["token usage", "llm usage", "api calls", "how much spent",
+                               "my cost", "my spend", "tokens", "how many tokens",
+                               "cost", "usage", "spending"],
+    "platform_list_documents": ["my document", "uploaded document", "uploaded file",
+                                "list document", "documents", "how many documents"],
+    "platform_get_workspace_info": ["workspace info", "my workspace", "workspace"],
+    "platform_list_connected_apps": ["connected app", "integration", "what app",
+                                     "integrations", "connected apps", "my apps"],
+    # --- General internal tools ---
     "search_knowledge": ["search", "find doc", "knowledge", "documentation", "guide"],
-    "query_database": ["database", "query", "sql", "how many", "count", "analytics"],
+    "query_database": ["database", "query", "sql", "analytics"],
     "smart_query_database": ["data", "metrics", "statistics", "report"],
     "generate_document": ["create report", "generate document", "write report", "export"],
     "search_codebase": ["code", "codebase", "implementation", "function"],
-    # PRD-64: Platform self-awareness
-    "platform_list_agents": ["my agent", "list agent", "what agent", "show agent"],
-    "platform_list_recipes": ["my recipe", "list recipe", "what recipe", "show recipe",
-                              "my workflow", "list workflow"],
-    "platform_get_llm_usage": ["token usage", "llm usage", "api calls", "how much spent",
-                               "my cost", "my spend"],
-    "platform_list_documents": ["my document", "uploaded document", "uploaded file",
-                                "list document"],
-    "platform_get_workspace_info": ["workspace info", "my workspace"],
-    "platform_list_connected_apps": ["connected app", "integration", "what app"],
 }
 
 _MULTI_STEP_SIGNALS = [
