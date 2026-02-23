@@ -135,19 +135,28 @@ async def index_github_repository(
     - Stores in database for search
     """
     try:
-        # Create project record immediately so UI can track status
+        # Create or update project record immediately so UI can track status
         from core.database.database import SessionLocal
-        project_row = service.db.execute(
-            text("""
-                INSERT INTO codegraph_projects (name, source_type, source_url, branch, status, workspace_id, created_at, updated_at)
-                VALUES (:name, 'github', :url, :branch, 'indexing', :ws, NOW(), NOW())
-                ON CONFLICT (name, workspace_id) DO UPDATE SET status = 'indexing', updated_at = NOW()
-                RETURNING id
-            """),
-            {"name": request.project_name, "url": request.github_url, "branch": request.branch, "ws": str(ctx.workspace_id)}
-        )
-        row = project_row.fetchone()
-        project_id = row[0] if row else 0
+        existing = service.db.execute(
+            text("SELECT id FROM codegraph_projects WHERE name = :name AND workspace_id = :ws LIMIT 1"),
+            {"name": request.project_name, "ws": str(ctx.workspace_id)}
+        ).fetchone()
+        if existing:
+            project_id = existing[0]
+            service.db.execute(
+                text("UPDATE codegraph_projects SET status = 'indexing', source_url = :url, branch = :branch, updated_at = NOW() WHERE id = :id"),
+                {"id": project_id, "url": request.github_url, "branch": request.branch}
+            )
+        else:
+            row = service.db.execute(
+                text("""
+                    INSERT INTO codegraph_projects (name, source_type, source_url, branch, status, workspace_id, created_at, updated_at)
+                    VALUES (:name, 'github', :url, :branch, 'indexing', :ws, NOW(), NOW())
+                    RETURNING id
+                """),
+                {"name": request.project_name, "url": request.github_url, "branch": request.branch, "ws": str(ctx.workspace_id)}
+            ).fetchone()
+            project_id = row[0] if row else 0
         service.db.commit()
 
         # Capture request params for background task
