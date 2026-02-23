@@ -212,7 +212,29 @@ async def connected(
 
     connections = entity_manager.get_entity_connections(entity["id"])
 
-    # PERFORMANCE FIX: Removed pending sync from page loads (see marketplace endpoint comment)
+    # Lightweight pending sync: check Composio API for any pending connections
+    # and upgrade to active if OAuth completed. Only hits Composio for pending apps.
+    pending = [c for c in connections if (c.get("status") or "").lower() == "pending"]
+    if pending and entity.get("composio_entity_id"):
+        client = get_composio_client()
+        for conn in pending:
+            try:
+                composio_status = client.get_connection_status(
+                    entity_id=entity["composio_entity_id"],
+                    app=conn.get("app_name", ""),
+                )
+                if composio_status and composio_status.get("status") in ("ACTIVE", "INITIATED"):
+                    entity_manager.update_connection_status(
+                        entity_id=entity["id"],
+                        app_name=conn.get("app_name", ""),
+                        status="active",
+                        connection_id=composio_status.get("id"),
+                    )
+                    conn["status"] = "active"
+                    conn["connection_id"] = composio_status.get("id")
+                    logger.info(f"[CONNECTED_APPS] Synced {conn.get('app_name')} from pending → active")
+            except Exception as e:
+                logger.debug(f"[CONNECTED_APPS] Pending sync failed for {conn.get('app_name')}: {e}")
 
     # Include active (connected), added (in workspace, auth revoked), and pending (OAuth in progress) apps.
     # All three represent apps the user has interacted with in their workspace.
