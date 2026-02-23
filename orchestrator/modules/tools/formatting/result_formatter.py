@@ -609,14 +609,27 @@ class ToolResultFormatter:
     def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 4500) -> str:
         """
         Format tool result for LLM context (truncated summary).
-        
+
         Full data goes to frontend, summary goes to LLM.
         """
+        # Platform tools return data under custom keys (agents, recipes, etc.)
+        # Bypass standardizer which only looks for "results"/"result" keys.
+        if tool_name.startswith("platform_"):
+            if not result.get("success"):
+                return f"Tool {tool_name} failed: {result.get('error', 'Unknown error')}"
+            platform_data = {k: v for k, v in result.items() if k != "success"}
+            try:
+                platform_json = json.dumps(platform_data, default=str, indent=2)
+            except Exception:
+                platform_json = str(platform_data)
+            llm_text = f"Tool: {tool_name}\nStatus: success\n\n{platform_json}"
+            return llm_text[:max_chars]
+
         standardized = ToolResultFormatter.standardize_result(result, tool_name)
-        
+
         if not standardized['success']:
             return f"Tool {tool_name} failed: {standardized.get('error', 'Unknown error')}"
-        
+
         summary_parts = [f"Tool: {tool_name}"]
         summary_parts.append(f"Status: {standardized['status']}")
         summary_parts.append(f"Results: {standardized['metadata']['count']} items")
