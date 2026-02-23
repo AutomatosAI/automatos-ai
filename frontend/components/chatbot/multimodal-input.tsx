@@ -60,6 +60,13 @@ export function MultimodalInput({
     adjustHeight()
   }, [safeInput, adjustHeight])
 
+  // Refocus textarea when streaming finishes
+  useEffect(() => {
+    if (status !== 'streaming') {
+      textareaRef.current?.focus()
+    }
+  }, [status])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const trimmedInput = safeInput.trim()
@@ -86,9 +93,10 @@ export function MultimodalInput({
     setInput('')
     setUploadedDocs([])
 
-    // Reset height
+    // Reset height and refocus
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
+      textareaRef.current.focus()
     }
   }
 

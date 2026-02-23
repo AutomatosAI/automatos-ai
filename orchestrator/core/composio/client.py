@@ -178,36 +178,54 @@ class ComposioClient:
             logger.error(f"Error resolving auth config for {app_slug}: {e}")
             return None
 
+    def _get_auth_schemes(self, app_slug: str) -> List[str]:
+        """Get auth schemes for an app from Composio's toolkit metadata."""
+        try:
+            toolkits = self.composio.toolkits.get()
+            app_info = next(
+                (t for t in toolkits if getattr(t, 'slug', '').lower() == app_slug.lower()),
+                None,
+            )
+            if app_info:
+                return getattr(app_info, 'auth_schemes', []) or []
+        except Exception as e:
+            logger.warning(f"Failed to inspect auth schemes for {app_slug}: {e}")
+        return []
+
+    def is_no_auth_app(self, app_slug: str) -> bool:
+        """Check if an app requires no authentication (e.g. composio_search)."""
+        schemes = self._get_auth_schemes(app_slug)
+        return schemes == ["NO_AUTH"] or (len(schemes) == 1 and "NO_AUTH" in schemes)
+
     def _ensure_auth_config_id(self, app_slug: str) -> str:
         """
         Get existing Auth Config ID or create a new one with correct scheme.
+
+        Raises ValueError for NO_AUTH apps — they don't need auth configs.
         """
         existing_id = self._resolve_auth_config_id(app_slug)
         if existing_id:
             return existing_id
-            
+
+        # Check auth schemes
+        schemes = self._get_auth_schemes(app_slug)
+        logger.info(f"Detected auth schemes for {app_slug}: {schemes}")
+
+        # NO_AUTH apps don't need auth configs — can't create one
+        if "NO_AUTH" in schemes:
+            raise ValueError(
+                f"{app_slug} does not require authentication. "
+                f"It can be used directly without a connected account."
+            )
+
         try:
             # Default options
             options = {"type": "use_composio_managed_auth"}
-            
-            # Inspect tool to determine correct auth scheme
-            try:
-                # We need to find the app to see its auth_schemes
-                # Note: This might be slow if there are many tools, but it's a one-time setup per app
-                toolkits = self.composio.toolkits.get()
-                app_info = next((t for t in toolkits if getattr(t, 'slug', '').lower() == app_slug.lower()), None)
-                
-                if app_info:
-                    schemes = getattr(app_info, 'auth_schemes', []) or []
-                    logger.info(f"Detected auth schemes for {app_slug}: {schemes}")
-                    
-                    if "API_KEY" in schemes:
-                        options = {"type": "use_custom_auth", "authScheme": "API_KEY"}
-                    elif "BASIC" in schemes:
-                        options = {"type": "use_custom_auth", "authScheme": "BASIC"}
-                    # If OAUTH2, we stick to default managed auth for now, or could check properties
-            except Exception as e:
-                logger.warning(f"Failed to inspect auth schemes for {app_slug}: {e}")
+
+            if "API_KEY" in schemes:
+                options = {"type": "use_custom_auth", "authScheme": "API_KEY"}
+            elif "BASIC" in schemes:
+                options = {"type": "use_custom_auth", "authScheme": "BASIC"}
 
             # Create new auth config
             logger.info(f"Creating new Auth Config for {app_slug} with options={options}")
@@ -289,8 +307,9 @@ class ComposioClient:
             connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
             
             for conn in connections:
-                # Check for active or initiated status
-                if conn.status == 'ACTIVE':
+                # ACTIVE = fully connected, INITIATED = OAuth completed but
+                # Composio is still provisioning. Treat both as connected.
+                if conn.status in ('ACTIVE', 'INITIATED'):
                     return {
                         "id": conn.id,
                         "status": conn.status,
