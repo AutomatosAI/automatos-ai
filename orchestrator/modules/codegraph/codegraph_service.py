@@ -304,7 +304,10 @@ class CodeGraphService:
                             })
                         
                         total_files += 1
-                        
+
+                        if total_files % 100 == 0:
+                            logger.info(f"[CodeGraph] Parsed {total_files} files, {len(symbols_data)} symbols, {len(relationships_data)} relationships so far...")
+
                 except Exception as e:
                     logger.warning(f"Failed to parse {file_path}: {e}")
                     continue
@@ -881,9 +884,13 @@ class CodeGraphService:
     
     async def _store_symbols_with_embeddings(self, symbols_data: List[Dict[str, Any]]):
         """Store symbols in database with embeddings"""
+        total_batches = (len(symbols_data) + 99) // 100
+        logger.info(f"[CodeGraph] Storing {len(symbols_data)} symbols in {total_batches} batches with embeddings...")
         # Batch generate embeddings
         for i in range(0, len(symbols_data), 100):  # Process in batches of 100
+            batch_num = i // 100 + 1
             batch = symbols_data[i:i+100]
+            logger.info(f"[CodeGraph] Embedding batch {batch_num}/{total_batches} ({len(batch)} symbols)...")
             
             # Generate embeddings for batch
             texts = []
