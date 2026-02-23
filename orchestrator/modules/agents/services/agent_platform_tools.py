@@ -263,9 +263,19 @@ class AgentPlatformTools:
             if tool_name == "search_knowledge":
                 query = parameters.get("query", "")
                 limit = parameters.get("limit", 5)
-                
+
                 self.logger.info(f"  🔍 Searching knowledge base: '{query}' (limit: {limit})")
-                
+
+                # Resolve workspace_id for multi-tenant isolation
+                workspace_id = None
+                try:
+                    from core.models import Agent as AgentModel
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row and getattr(agent_row, "workspace_id", None):
+                        workspace_id = str(agent_row.workspace_id)
+                except Exception:
+                    workspace_id = None
+
                 # Call RAG service retrieve_context method
                 min_similarity = 0.65
                 try:
@@ -277,7 +287,8 @@ class AgentPlatformTools:
                 rag_result = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
-                    min_similarity=min_similarity
+                    min_similarity=min_similarity,
+                    workspace_id=workspace_id
                 )
                 
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)
@@ -310,8 +321,19 @@ class AgentPlatformTools:
                 # Use RAG service for semantic search as well
                 query = parameters.get("query", "")
                 limit = parameters.get("limit", 5)
-                
+
                 self.logger.info(f"  🔍 Semantic search via RAG: '{query}'")
+
+                # Resolve workspace_id for multi-tenant isolation
+                workspace_id = None
+                try:
+                    from core.models import Agent as AgentModel
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row and getattr(agent_row, "workspace_id", None):
+                        workspace_id = str(agent_row.workspace_id)
+                except Exception:
+                    workspace_id = None
+
                 min_similarity = 0.65
                 try:
                     if self.rag_config is not None:
@@ -322,7 +344,8 @@ class AgentPlatformTools:
                 rag_result = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
-                    min_similarity=min_similarity
+                    min_similarity=min_similarity,
+                    workspace_id=workspace_id
                 )
                 
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)

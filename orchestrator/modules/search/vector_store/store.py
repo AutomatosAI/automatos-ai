@@ -78,13 +78,15 @@ class SearchFilter:
         sources: Optional[List[str]] = None,
         date_range: Optional[Tuple[datetime, datetime]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
-        min_importance: Optional[float] = None
+        min_importance: Optional[float] = None,
+        workspace_id: Optional[str] = None,
     ):
         self.document_types = document_types or []
         self.sources = sources or []
         self.date_range = date_range
         self.metadata_filters = metadata_filters or {}
         self.min_importance = min_importance
+        self.workspace_id = workspace_id
 
 @dataclass
 class SearchResult:
@@ -612,7 +614,12 @@ class EnhancedVectorStore:
                 conditions.append(f"metadata->>'{key}' = ${param_count}")
                 params.append(str(value))
                 param_count += 1
-        
+
+        if search_filter.workspace_id:
+            conditions.append(f"workspace_id = ${param_count}")
+            params.append(search_filter.workspace_id)
+            param_count += 1
+
         return conditions, params
     
     def _get_similarity_operator(self) -> str:

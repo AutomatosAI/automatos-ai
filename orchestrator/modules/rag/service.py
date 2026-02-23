@@ -255,7 +255,8 @@ class RAGService:
         max_chunks: int = 8,
         max_tokens: int = None,
         diversity: float = None,
-        context_type: str = "chatbot"
+        context_type: str = "chatbot",
+        workspace_id: str = None
     ) -> RAGResult:
         """
         Retrieve optimized RAG context using existing ContextOptimizer.
@@ -297,14 +298,16 @@ class RAGService:
             candidates = await self._multi_query_retrieval_with_rrf(
                 queries_to_search,
                 limit_per_query=max_chunks * 2,
-                min_similarity=self.config.min_similarity
+                min_similarity=self.config.min_similarity,
+                workspace_id=workspace_id
             )
         else:
             # Single query retrieval
             candidates = await self._get_candidates(
-                query, 
+                query,
                 limit=max_chunks * 3,
-                min_similarity=self.config.min_similarity
+                min_similarity=self.config.min_similarity,
+                workspace_id=workspace_id
             )
         
         if not candidates:
@@ -336,7 +339,8 @@ class RAGService:
         self,
         queries: List[str],
         limit_per_query: int = 20,
-        min_similarity: float = 0.5
+        min_similarity: float = 0.5,
+        workspace_id: str = None
     ) -> List[Dict]:
         """
         Perform multi-query retrieval with Reciprocal Rank Fusion.
@@ -354,7 +358,8 @@ class RAGService:
                 results = await self._get_candidates(
                     query,
                     limit=limit_per_query,
-                    min_similarity=min_similarity
+                    min_similarity=min_similarity,
+                    workspace_id=workspace_id
                 )
                 
                 for rank, doc in enumerate(results):
@@ -429,7 +434,8 @@ class RAGService:
         top_k: int = 8,
         max_chunks: int = None,
         max_tokens: int = 2000,
-        min_similarity: float = 0.5
+        min_similarity: float = 0.5,
+        workspace_id: str = None
     ) -> RAGResult:
         """Backward-compatible alias for retrieve()."""
         chunks = max_chunks if max_chunks is not None else top_k
@@ -437,7 +443,8 @@ class RAGService:
             query=query,
             max_chunks=chunks,
             max_tokens=max_tokens,
-            diversity=0.3
+            diversity=0.3,
+            workspace_id=workspace_id
         )
     
     
@@ -715,12 +722,18 @@ class RAGService:
                     search_mode = SearchMode.HYBRID if self.config.hybrid_search_enabled else SearchMode.VECTOR_ONLY
                     logger.info(f"🔎 Using EnhancedVectorStore: mode={search_mode.value}, min_similarity={min_similarity}, limit={limit}")
 
+                    # Build search filter with workspace isolation
+                    from modules.search import SearchFilter
+                    effective_ws = workspace_id or getattr(self, '_workspace_id', None)
+                    search_filter = SearchFilter(workspace_id=effective_ws) if effective_ws else None
+
                     # Perform search using centralized vector store
                     search_results = await self._vector_store.search(
                         query_embedding=query_embedding,
                         mode=search_mode,
                         ranking_strategy=RankingStrategy.SIMILARITY,
                         limit=limit,
+                        search_filter=search_filter,
                         query_text=query
                     )
                     
