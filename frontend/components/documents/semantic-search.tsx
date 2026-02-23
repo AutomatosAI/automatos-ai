@@ -237,7 +237,7 @@ export function SemanticSearch({
                   {/* Content Preview */}
                   <div className="bg-muted/30 rounded-lg p-4 mb-3">
                     <p className="text-sm text-foreground line-clamp-4 whitespace-pre-wrap">
-                      {result.preview || result.excerpt || result.content || ''}
+                      {result.preview || result.excerpt || ''}
                     </p>
                   </div>
 

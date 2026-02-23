@@ -21,6 +21,7 @@ import {
   History,
   Cloud,
   Layout,
+  ExternalLink,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -45,6 +46,7 @@ import { DocumentDetailsModal } from './document-details-modal'
 import { DeleteConfirmationModal } from './delete-confirmation-modal'
 import { UploadProviderModal } from './upload-provider-modal'
 import { SemanticSearch } from './semantic-search'
+import type { SearchResult } from '@/hooks/use-semantic-search-api'
 import { TemplateManager } from './template-manager'
 import { DocumentProcessing } from './document-processing'
 // DocumentAnalytics removed — analytics consolidated into /analytics
@@ -108,7 +110,8 @@ export function DocumentManagement() {
   // Cloud storage state
   const [selectedProvider, setSelectedProvider] = useState<any>(null)
   const [showProviderBrowser, setShowProviderBrowser] = useState(false)
-  
+  const [selectedSearchResult, setSelectedSearchResult] = useState<SearchResult | null>(null)
+
   // API hooks
   const { data: documents = [], isLoading, error } = useDocuments()
   const { data: documentStats } = useDocumentStats()
@@ -572,18 +575,83 @@ export function DocumentManagement() {
                 </TabsContent>
 
                 <TabsContent value="search" className="space-y-6">
-                  <SemanticSearch
-                    context="documents"
-                    onResultSelect={(result) => {
-                      const doc = typedDocuments.find(d => d.id === result.document_id)
-                      if (doc) {
-                        setSelectedDocumentId(doc.id)
-                        setShowDetailsModal(true)
-                      }
-                    }}
-                    showActions={true}
-                    maxResults={10}
-                  />
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-2">
+                      <SemanticSearch
+                        context="documents"
+                        onResultSelect={(result) => setSelectedSearchResult(result)}
+                        standalone={true}
+                        showActions={true}
+                        maxResults={20}
+                      />
+                    </div>
+                    <div className="lg:col-span-1">
+                      {selectedSearchResult ? (
+                        <Card className="glass-card sticky top-6">
+                          <CardHeader>
+                            <div className="flex items-center gap-2">
+                              <FileText className="w-5 h-5 text-blue-400" />
+                              <CardTitle className="text-base truncate">
+                                {selectedSearchResult.source?.filename || 'Document'}
+                              </CardTitle>
+                            </div>
+                            <div className="flex items-center gap-2 mt-2">
+                              <Badge className="text-green-400 bg-green-500/10 border-green-500/20">
+                                {(selectedSearchResult.similarity * 100).toFixed(0)}% Match
+                              </Badge>
+                              {selectedSearchResult.source?.file_type && (
+                                <Badge variant="outline">
+                                  {selectedSearchResult.source.file_type.toUpperCase()}
+                                </Badge>
+                              )}
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <div className="bg-muted/30 rounded-lg p-4 max-h-96 overflow-y-auto">
+                              <p className="text-sm whitespace-pre-wrap">
+                                {selectedSearchResult.preview || selectedSearchResult.excerpt || ''}
+                              </p>
+                            </div>
+                            <div className="space-y-2 text-xs text-muted-foreground">
+                              {selectedSearchResult.chunk_count && (
+                                <div>{selectedSearchResult.chunk_count} chunks in document</div>
+                              )}
+                              {selectedSearchResult.source?.file_size != null && (
+                                <div>{(selectedSearchResult.source.file_size / 1024).toFixed(1)} KB</div>
+                              )}
+                              {selectedSearchResult.source?.upload_date && (
+                                <div>Uploaded: {new Date(selectedSearchResult.source.upload_date).toLocaleDateString()}</div>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              {selectedSearchResult.document_id && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setSelectedDocumentId(selectedSearchResult.document_id!)
+                                    setShowDetailsModal(true)
+                                  }}
+                                >
+                                  <ExternalLink className="w-3 h-3 mr-1" />
+                                  Open Document
+                                </Button>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ) : (
+                        <Card className="glass-card">
+                          <CardContent className="p-12 text-center">
+                            <FileText className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
+                            <p className="text-sm text-muted-foreground">
+                              Select a search result to view details
+                            </p>
+                          </CardContent>
+                        </Card>
+                      )}
+                    </div>
+                  </div>
                 </TabsContent>
 
                 <TabsContent value="upload" className="space-y-6">
