@@ -1590,7 +1590,7 @@ class CodeGraphService:
             
             visited.add(current_symbol)
             
-            # Get symbol details
+            # Get symbol details — try qualified_name first, fall back to name
             symbol_info = self.db.execute(
                 text("""
                     SELECT id, symbol_type, name, qualified_name, file_path, line_number
@@ -1600,7 +1600,19 @@ class CodeGraphService:
                 """),
                 {"project_id": project_id, "symbol": current_symbol}
             ).fetchone()
-            
+
+            if not symbol_info:
+                # Fallback: match by name (user may type just "AgentFactory" not "path::AgentFactory")
+                symbol_info = self.db.execute(
+                    text("""
+                        SELECT id, symbol_type, name, qualified_name, file_path, line_number
+                        FROM codegraph_symbols
+                        WHERE project_id = :project_id AND name = :symbol
+                        LIMIT 1
+                    """),
+                    {"project_id": project_id, "symbol": current_symbol}
+                ).fetchone()
+
             if not symbol_info:
                 continue
             
