@@ -170,7 +170,7 @@ class SmartChatOrchestrator:
         # 3. Route Tools (if needed)
         tool_result = None
         if intent_result.requires_tools and available_tools:
-            tool_result = self.tool_router.route(
+            tool_result = await self.tool_router.route(
                 query=latest_query,
                 available_tools=available_tools,
                 conversation_context=messages

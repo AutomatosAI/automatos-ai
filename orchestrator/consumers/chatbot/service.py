@@ -550,51 +550,10 @@ class StreamingChatService:
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
             supports_native_tools = provider in ['openai', 'anthropic', 'grok', 'openrouter', 'google'] if provider else False
             
-            # --- TOOL FILTERING (PRD Refinement) ---
-            # To prevent context overload (600+ tools), we filter to the top N relevant tools.
-            use_tools = None
-            if not is_simple and tools and supports_native_tools:
-                # 1. Identify Core Tools (always included)
-                core_tool_names = {
-                    "search_knowledge", "semantic_search", "search_codebase",
-                    "query_database", "smart_query_database",
-                    "read_file", "write_file", "switch_context",
-                    "search_tables", "search_images", "search_formulas", "search_multimodal",
-                    "generate_document", "composio_execute",
-                }
-                
-                # 2. Get relevant tools via ranking
-                ranked_candidates = self.prompt_analyzer.rank_tools_for_query(
-                    latest_text, 
-                    tools, 
-                    max_tools=25
-                )
-                
-                # 3. Build final allowed list
-                filtered_tools = []
-                included_names = set()
-                
-                # Add core tools first
-                for tool in tools:
-                    t_name = tool.get("function", {}).get("name")
-                    if t_name in core_tool_names:
-                        filtered_tools.append(tool)
-                        included_names.add(t_name)
-                
-                # Add top ranked tools
-                for candidate in ranked_candidates:
-                    c_name = candidate.get("name")
-                    if c_name not in included_names:
-                        # Find the full tool definition
-                        full_tool = next((t for t in tools if t.get("function", {}).get("name") == c_name), None)
-                        if full_tool:
-                            filtered_tools.append(full_tool)
-                            included_names.add(c_name)
-                
-                use_tools = filtered_tools
-                logger.info(f"Filtering tools: {len(tools)} -> {len(use_tools)} relevant tools")
-            
-            # Use filtered tools (if applicable) for LLM context generation
+            # --- TOOL FILTERING (DEPRECATED path) ---
+            # This deprecated method passes all tools through without ranking.
+            # Active chat uses SmartChatOrchestrator + SmartToolRouter for semantic ranking.
+            use_tools = tools if (not is_simple and tools and supports_native_tools) else None
             context_tools = use_tools if use_tools is not None else tools
 
             # Convert messages to LLM format (include tool names for stronger tool routing)
@@ -622,30 +581,6 @@ class StreamingChatService:
                 if memory_context:
                     logger.info(f"[Memory] Injecting {len(memory_context)} chars")
                     llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
-
-            # Add dynamic tool candidates (hint) - only suggest, don't force
-            # NOTE: Removed "Tool candidates for this request" phrasing which was triggering
-            # force_tool_choice=required in OpenAI client. Tools should be optional.
-            if context_tools and latest_text:
-                candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, context_tools)
-                # Only hint at tools if there's a high-confidence match (score > 2)
-                high_confidence_candidates = [c for c in candidates if c.get("score", 0) > 2]
-                if high_confidence_candidates:
-                    candidate_names = ", ".join([c["name"] for c in high_confidence_candidates[:3] if c.get("name")])
-                    if candidate_names:
-                        insert_at = 2 if memory_context else 1
-                        llm_messages.insert(
-                            insert_at,
-                            {
-                                "role": "system",
-                                "content": (
-                                    f"Available tools: {candidate_names}. "
-                                    "When the user asks you to perform an action (fetch data, send messages, "
-                                    "list items, etc.), call the appropriate tool immediately. "
-                                    "For pure conversation or memory questions, respond naturally."
-                                )
-                            }
-                        )
 
             # Composio per-action tools (primary) or hint fallback
             _composio_result = None
@@ -795,21 +730,6 @@ class StreamingChatService:
                             pass  # Never block chat for eval
 
                     return
-            
-            # Pre-trigger tools for models without native tool calling
-            if not is_simple and not supports_native_tools:
-                detected_tools = self.prompt_analyzer.detect_explicit_tool_requests(latest_text)
-                if detected_tools:
-                    logger.info(f"Pre-triggering tools: {detected_tools}")
-                    async for chunk in self._execute_pretriggered_tools(
-                        detected_tools,
-                        latest_text,
-                        llm_messages,
-                        tool_data,
-                        agent_id
-                    ):
-                        yield chunk
-                        await asyncio.sleep(0)
             
             # Generate response via shared.llm
             response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
