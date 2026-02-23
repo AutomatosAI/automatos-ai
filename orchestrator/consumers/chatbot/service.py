@@ -1628,7 +1628,7 @@ class StreamingChatService:
                     
                     for tool_call in response.tool_calls:
                         tool_name = tool_call.get('function', {}).get('name')
-                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
+                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
                         tool_id = tool_call.get('id')
                         
                         result = await self.tool_router.execute_and_format(
@@ -1875,9 +1875,9 @@ class StreamingChatService:
             executed_call_key_repeat = False
             for tool_id, tool_name, tool_call in tool_calls_prepared:
                 try:
-                    # Parse arguments
+                    # Parse arguments (handle empty string from LLM)
                     args_str = tool_call.get('function', {}).get('arguments', '{}')
-                    tool_args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    tool_args = json.loads(args_str or '{}') if isinstance(args_str, str) else (args_str or {})
 
                     # Loop detection key (same tool + same args)
                     try:
@@ -2462,7 +2462,7 @@ class StreamingChatService:
             # Execute tools in parallel when possible
             async def execute_single_tool(tool_call):
                 tool_name = tool_call.get('function', {}).get('name')
-                tool_args = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
+                tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
                 tool_id = tool_call.get('id')
                 
                 logger.info(f"Executing tool: {tool_name}")
