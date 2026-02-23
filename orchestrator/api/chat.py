@@ -350,6 +350,12 @@ async def stream_chat(
     session_key = f"{ctx.workspace_id}:{chat_id}"
     session_queue = get_session_queue()
 
+    # Skip Composio tool loading for simple conversational messages (RESPOND)
+    _skip_composio = (
+        complexity_assessment is not None
+        and complexity_assessment.action == Action.RESPOND
+    )
+
     async def _guarded_stream():
         async with session_queue.acquire(session_key):
             async for chunk in streaming_service.stream_response_with_agent(
@@ -358,6 +364,7 @@ async def stream_chat(
                 agent_id=effective_agent_id,
                 user_id=user_id,
                 use_system_llm=use_system_llm,
+                skip_composio=_skip_composio,
             ):
                 yield chunk
 
