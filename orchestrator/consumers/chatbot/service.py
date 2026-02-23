@@ -1415,6 +1415,25 @@ class StreamingChatService:
             except Exception as exc:
                 logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
 
+            # PRD-64: Inject platform tool scope message so LLM knows to call them
+            if use_tools:
+                platform_tool_names = [
+                    t.get("function", {}).get("name")
+                    for t in use_tools
+                    if isinstance(t, dict) and t.get("function", {}).get("name", "").startswith("platform_")
+                ]
+                if platform_tool_names:
+                    llm_messages.insert(2, {
+                        "role": "system",
+                        "content": (
+                            "You have platform introspection tools available. "
+                            "When the user asks about their agents, recipes, workflows, documents, "
+                            "workspace, usage, costs, integrations, or memory — ALWAYS call the "
+                            "appropriate platform_* tool to get real data. Never guess or say you "
+                            "can't — use the tools."
+                        ),
+                    })
+
             # Context Window Guard — auto-compact if approaching context limit
             from core.context_guard import ContextGuard
             _guard = ContextGuard()
