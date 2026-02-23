@@ -85,6 +85,18 @@ class SmartIntentClassifier:
         r"\bmy agents?\b", r"\bmy recipes?\b", r"\bmy workflows?\b",
         r"\busage\b", r"\bcosts?\b", r"\btoken (usage|costs?|spend)\b",
         r"\bconnected apps?\b", r"\bmy documents?\b",
+        # PRD-64: Broader platform entity queries (catch "what agents do I have?" etc.)
+        r"\b(what|which|show|list|get|display|tell)\b.*\bagents?\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\brecipes?\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bworkflows?\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bdocuments?\b.*\b(uploaded|have|stored|exist)\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bworkspace\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bintegrations?\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bconnected\b",
+        r"\bagents?\b.*\b(do i have|exist|available|set up|configured|running)\b",
+        r"\brecipes?\b.*\b(do i have|exist|available|set up|configured|running)\b",
+        r"\bmemory\b.*\b(stats?|stored|count|how many)\b",
+        r"\bhow much\b.*\b(spend|cost|spent|spending)\b",
     ]
 
     # Search patterns - need knowledge base tools

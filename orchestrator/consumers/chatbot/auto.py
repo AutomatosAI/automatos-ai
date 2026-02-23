@@ -103,6 +103,16 @@ _INTERNAL_TOOL_KEYWORDS = {
     "smart_query_database": ["data", "metrics", "statistics", "report"],
     "generate_document": ["create report", "generate document", "write report", "export"],
     "search_codebase": ["code", "codebase", "implementation", "function"],
+    # PRD-64: Platform self-awareness
+    "platform_list_agents": ["my agent", "list agent", "what agent", "show agent"],
+    "platform_list_recipes": ["my recipe", "list recipe", "what recipe", "show recipe",
+                              "my workflow", "list workflow"],
+    "platform_get_llm_usage": ["token usage", "llm usage", "api calls", "how much spent",
+                               "my cost", "my spend"],
+    "platform_list_documents": ["my document", "uploaded document", "uploaded file",
+                                "list document"],
+    "platform_get_workspace_info": ["workspace info", "my workspace"],
+    "platform_list_connected_apps": ["connected app", "integration", "what app"],
 }
 
 _MULTI_STEP_SIGNALS = [
