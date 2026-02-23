@@ -2,14 +2,12 @@
 Cloud File Downloader (PRD-42)
 ==============================
 
-Downloads files from cloud storage providers via the Composio REST API.
+Downloads files from cloud storage providers via the Composio API.
 
-Bypasses the Composio SDK entirely — the SDK mangles binary responses
-(saves to disk, returns paths instead of content). The REST API returns
-file content inline as expected.
-
-For Google Drive downloads that already work through the SDK/executor,
-we keep that path. For all other providers, we call the REST API directly.
+Strategy per provider:
+- **Dropbox, OneDrive, Box**: Composio v3 REST API returns full content.
+- **Google Drive**: Composio truncates inline content to ~500 bytes.
+  Fallback chain: v3 API → SDK → GOOGLEDRIVE_DOWNLOAD_FILE2 (long-running).
 """
 
 import base64
@@ -26,7 +24,7 @@ from core.composio.tool_executor import ComposioToolExecutor
 
 logger = logging.getLogger(__name__)
 
-COMPOSIO_API_BASE = "https://backend.composio.dev/api/v2"
+COMPOSIO_API_BASE = "https://backend.composio.dev/api/v3"
 
 # Composio action names for downloading files per cloud provider
 _DOWNLOAD_ACTIONS = {
@@ -46,8 +44,8 @@ _CONTENT_KEYS = [
     "raw",                      # Some APIs
 ]
 
-# Known URL keys (checked BEFORE content keys for Google Drive,
-# because Composio returns full file at s3url but truncated content inline)
+# Known URL keys (checked BEFORE content keys — Composio hosts full
+# file at s3url but truncates inline content)
 _URL_KEYS = [
     "s3url", "s3Url",                      # Composio R2 presigned URL (full content)
     "downloadUrl", "download_url", "url",
@@ -55,13 +53,16 @@ _URL_KEYS = [
     "temporary_link", "link",
 ]
 
+# Minimum expected file size for text documents (below = likely truncated)
+_MIN_EXPECTED_SIZE = 2048
+
 
 class CloudFileDownloader:
     """
-    Downloads files from cloud storage.
+    Downloads files from cloud storage via Composio.
 
-    Uses Composio REST API directly (bypasses SDK) for reliable content
-    extraction across all providers.
+    Uses v3 REST API as primary, with SDK and long-running operation
+    fallbacks for Google Drive truncation.
     """
 
     def __init__(self, db: Session):
@@ -91,65 +92,55 @@ class CloudFileDownloader:
 
         params = self._build_params(app_upper, external_file_id)
 
-        # Call Composio REST API directly (bypasses SDK response mangling)
+        # ---- Layer 1: Composio v3 REST API ----
         data = await self._execute_via_rest_api(action, app_upper, params, workspace_id)
+        binary = self._extract_binary(data, label="v3 REST")
 
-        logger.info(
-            f"Composio {app_upper} response keys: "
-            f"{list(data.keys()) if isinstance(data, dict) else type(data).__name__}"
-        )
-        # Log URL keys and content sizes for debugging truncation
-        if isinstance(data, dict):
-            for k in _URL_KEYS:
-                if k in data:
-                    logger.info(f"  Found URL key '{k}': {str(data[k])[:120]}...")
-            for k in _CONTENT_KEYS:
-                if k in data:
-                    val = data[k]
-                    size = len(val) if isinstance(val, (str, bytes)) else "N/A"
-                    logger.info(f"  Found content key '{k}': size={size}")
-
-        # Extract file content
-        content = self._extract_content(data)
-
-        if content is None:
-            raise RuntimeError(
-                f"Download returned no file content for {external_file_id}. "
-                f"Response keys: {list(data.keys()) if isinstance(data, dict) else 'N/A'}"
-            )
-
-        binary = self._to_bytes(content)
-
-        # Google Drive REST API truncates content to ~500 bytes.
-        # Detect and fall back to Composio SDK (which saves full file to disk).
-        MIN_EXPECTED_SIZE = 2048  # text files should be > 2KB
-        if app_upper == "GOOGLEDRIVE" and len(binary) < MIN_EXPECTED_SIZE:
+        # ---- Layer 2: SDK fallback (Google Drive only, if truncated) ----
+        if app_upper == "GOOGLEDRIVE" and (binary is None or len(binary) < _MIN_EXPECTED_SIZE):
+            truncated_size = len(binary) if binary else 0
             logger.warning(
-                f"Composio REST API returned only {len(binary)} bytes for "
-                f"{external_file_id} — likely truncated. "
-                f"Falling back to Composio SDK download."
+                f"v3 REST returned {truncated_size} bytes for "
+                f"{external_file_id} — likely truncated. Trying SDK..."
             )
             try:
                 sdk_binary = await self._download_via_sdk(
                     action, app_upper, external_file_id, workspace_id
                 )
-                if sdk_binary and len(sdk_binary) > len(binary):
+                if sdk_binary and len(sdk_binary) > truncated_size:
                     logger.info(
-                        f"Composio SDK download: {len(sdk_binary):,} bytes "
-                        f"(vs {len(binary)} from REST API)"
+                        f"SDK download: {len(sdk_binary):,} bytes "
+                        f"(vs {truncated_size} from REST)"
                     )
                     binary = sdk_binary
-                else:
-                    logger.warning(
-                        "SDK download returned same or less content, "
-                        "keeping REST API result"
-                    )
             except Exception as e:
-                logger.warning(
-                    f"Composio SDK download failed, "
-                    f"using REST API result ({len(binary)} bytes): {e}",
-                    exc_info=True
+                logger.warning(f"SDK fallback failed: {e}", exc_info=True)
+
+        # ---- Layer 3: GOOGLEDRIVE_DOWNLOAD_FILE2 (long-running op) ----
+        if app_upper == "GOOGLEDRIVE" and (binary is None or len(binary) < _MIN_EXPECTED_SIZE):
+            truncated_size = len(binary) if binary else 0
+            logger.warning(
+                f"SDK also returned {truncated_size} bytes. "
+                f"Trying GOOGLEDRIVE_DOWNLOAD_FILE2 (long-running)..."
+            )
+            try:
+                lr_binary = await self._download_via_long_running(
+                    external_file_id, workspace_id
                 )
+                if lr_binary and len(lr_binary) > truncated_size:
+                    logger.info(
+                        f"Long-running download: {len(lr_binary):,} bytes "
+                        f"(vs {truncated_size} from previous attempts)"
+                    )
+                    binary = lr_binary
+            except Exception as e:
+                logger.warning(f"Long-running fallback failed: {e}", exc_info=True)
+
+        if binary is None or len(binary) == 0:
+            raise RuntimeError(
+                f"All download methods failed for {external_file_id}. "
+                f"Response keys: {list(data.keys()) if isinstance(data, dict) else 'N/A'}"
+            )
 
         # Write to temp file
         suffix = ""
@@ -170,7 +161,51 @@ class CloudFileDownloader:
         return tmp.name
 
     # ------------------------------------------------------------------
-    # Direct REST API call (bypasses SDK)
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _get_api_key(self) -> str:
+        """Get Composio API key from environment."""
+        api_key = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
+        if not api_key:
+            raise RuntimeError("COMPOSIO_API_KEY/COMPOSIO_KEY not set")
+        return api_key
+
+    def _get_entity_id(self, workspace_id: UUID) -> str:
+        """Get Composio entity ID for a workspace."""
+        entity = self.executor.get_entity_for_workspace(workspace_id)
+        entity_id = entity.get("composio_entity_id")
+        if not entity_id:
+            raise RuntimeError(f"No Composio entity for workspace {workspace_id}")
+        return entity_id
+
+    def _extract_binary(self, data: Dict[str, Any], label: str = "") -> Optional[bytes]:
+        """Extract file content from API response and convert to bytes."""
+        if isinstance(data, dict):
+            self._log_response_keys(data)
+        content = self._extract_content(data)
+        if content is None:
+            logger.warning(f"[{label}] No content found in response")
+            return None
+        binary = self._to_bytes(content)
+        logger.info(f"[{label}] Extracted {len(binary):,} bytes")
+        return binary
+
+    @staticmethod
+    def _log_response_keys(data: Dict[str, Any]) -> None:
+        """Log response structure for debugging."""
+        logger.info(f"Response keys: {list(data.keys())}")
+        for k in _URL_KEYS:
+            if k in data:
+                logger.info(f"  URL key '{k}': {str(data[k])[:120]}...")
+        for k in _CONTENT_KEYS:
+            if k in data:
+                val = data[k]
+                size = len(val) if isinstance(val, (str, bytes)) else "N/A"
+                logger.info(f"  Content key '{k}': size={size}")
+
+    # ------------------------------------------------------------------
+    # Layer 1: Composio v3 REST API
     # ------------------------------------------------------------------
 
     async def _execute_via_rest_api(
@@ -181,25 +216,18 @@ class CloudFileDownloader:
         workspace_id: UUID,
     ) -> Dict[str, Any]:
         """
-        Call Composio REST API directly instead of going through the SDK.
+        Call Composio v3 REST API directly.
 
-        The SDK transforms binary responses (saves to disk, returns paths).
-        The REST API returns content inline as JSON.
+        v3 endpoint: POST /api/v3/tools/execute/{action}
+        Uses entity_id (snake_case) instead of v2's entityId (camelCase).
         """
-        # Get API key
-        api_key = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
-        if not api_key:
-            raise RuntimeError("COMPOSIO_API_KEY/COMPOSIO_KEY not set")
+        api_key = self._get_api_key()
+        entity_id = self._get_entity_id(workspace_id)
 
-        # Get entity ID for this workspace
-        entity = self.executor.get_entity_for_workspace(workspace_id)
-        entity_id = entity.get("composio_entity_id")
-        if not entity_id:
-            raise RuntimeError(f"No Composio entity for workspace {workspace_id}")
+        url = f"{COMPOSIO_API_BASE}/tools/execute/{action}"
+        logger.info(f"Calling Composio v3: {url}")
 
-        url = f"{COMPOSIO_API_BASE}/actions/{action}/execute"
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 url,
                 headers={
@@ -207,44 +235,42 @@ class CloudFileDownloader:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "entityId": entity_id,
-                    "appName": app_name,
-                    "input": params,
+                    "entity_id": entity_id,
+                    "arguments": params,
                 },
             )
 
         if response.status_code != 200:
+            logger.error(
+                f"Composio v3 API error {response.status_code}: "
+                f"{response.text[:500]}"
+            )
             raise RuntimeError(
                 f"Composio API error {response.status_code}: {response.text[:500]}"
             )
 
         result = response.json()
+        logger.info(f"Composio v3 full response keys: {list(result.keys())}")
 
         # Check for API-level failure
         if not result.get("successful", result.get("success", True)):
             error = result.get("error") or result.get("message") or "Unknown error"
             raise RuntimeError(f"Composio action {action} failed: {error}")
 
-        # Log full response structure to find s3url / download URLs
-        logger.info(
-            f"Composio full response keys: {list(result.keys())}"
-        )
-        # Check for metadata section (Composio sometimes puts s3url here)
-        metadata = result.get("metadata", {})
-        if metadata:
-            logger.info(f"Composio metadata keys: {list(metadata.keys()) if isinstance(metadata, dict) else type(metadata).__name__}")
-
-        # Return the data dict, merging in any metadata that has URLs
+        # Extract data dict, merging URL keys from metadata/top-level
         data = result.get("data", result)
-        if isinstance(data, dict) and isinstance(metadata, dict):
-            # Merge s3url and other URL keys from metadata into data
-            for key in _URL_KEYS:
-                if key in metadata and key not in data:
-                    data[key] = metadata[key]
-            # Also check top-level result for s3url
-            for key in _URL_KEYS:
-                if key in result and key not in data:
-                    data[key] = result[key]
+        metadata = result.get("metadata", {})
+
+        if metadata and isinstance(metadata, dict):
+            logger.info(f"Composio metadata keys: {list(metadata.keys())}")
+
+        if isinstance(data, dict):
+            # Merge URL keys from metadata and top-level into data
+            for source in (metadata if isinstance(metadata, dict) else {}, result):
+                for key in _URL_KEYS:
+                    if key in source and key not in data:
+                        data[key] = source[key]
+
         return data
 
     # ------------------------------------------------------------------
@@ -256,8 +282,7 @@ class CloudFileDownloader:
         """Extract file content from Composio response — provider-agnostic.
 
         Priority:
-        1. URL keys (s3url etc.) — Composio hosts full file on R2/S3; the
-           inline ``downloaded_file_content`` is often truncated to ~500 bytes.
+        1. URL keys (s3url etc.) — Composio hosts full file on R2/S3.
         2. Content keys — inline content (works for Dropbox, small files).
         3. Deep-search fallback.
         """
@@ -278,11 +303,14 @@ class CloudFileDownloader:
                 return val
 
         # 3. Deep-search: any large string value is likely content
+        _skip = {
+            "successful", "success", "error", "message", "metadata",
+            "file_name", "name", "id", "rev", "path_display",
+            "path_lower", "client_modified", "server_modified",
+            "logId", "successfull",
+        }
         for key, val in data.items():
-            if key in ("successful", "success", "error", "message", "metadata",
-                       "file_name", "name", "id", "rev", "path_display",
-                       "path_lower", "client_modified", "server_modified",
-                       "logId", "successfull"):
+            if key in _skip:
                 continue
             if isinstance(val, bytes):
                 return val
@@ -324,7 +352,7 @@ class CloudFileDownloader:
         return str(content).encode("utf-8")
 
     # ------------------------------------------------------------------
-    # SDK-based download (handles binary files properly)
+    # Layer 2: SDK-based download
     # ------------------------------------------------------------------
 
     async def _download_via_sdk(
@@ -333,13 +361,12 @@ class CloudFileDownloader:
         app_name: str,
         file_id: str,
         workspace_id: UUID,
-    ) -> bytes:
+    ) -> Optional[bytes]:
         """
-        Download file via Composio Python SDK instead of REST API.
+        Download file via Composio Python SDK.
 
-        The SDK handles binary responses differently — it may save files to
-        disk and return a path, or return an s3url to the full content.
-        The REST API truncates inline content to ~500 bytes.
+        The SDK (composio.tools.execute) may handle binary responses
+        differently — saving to disk, returning s3url, etc.
         """
         from core.composio.client import get_composio_client
 
@@ -347,14 +374,9 @@ class CloudFileDownloader:
         if not client or not client.composio:
             raise RuntimeError("Composio SDK client not available")
 
-        entity = self.executor.get_entity_for_workspace(workspace_id)
-        entity_id = entity.get("composio_entity_id")
-        if not entity_id:
-            raise RuntimeError(f"No Composio entity for workspace {workspace_id}")
-
+        entity_id = self._get_entity_id(workspace_id)
         params = self._build_params(app_name, file_id)
 
-        # Execute via SDK — this may download the file properly
         result = client.execute_action(
             action=action,
             params=params,
@@ -362,21 +384,19 @@ class CloudFileDownloader:
         )
 
         logger.info(
-            f"Composio SDK response: success={result.get('success')}, "
+            f"SDK response: success={result.get('success')}, "
             f"data type={type(result.get('data')).__name__}"
         )
 
         sdk_data = result.get("data", {})
-
-        # The SDK response may contain the full data at various levels
-        # Log all keys for debugging
         if isinstance(sdk_data, dict):
             logger.info(f"SDK data keys: {list(sdk_data.keys())}")
-            # Check for s3url or download URLs at any level
+
+            # Check for download URLs at top level
             for key in _URL_KEYS:
                 val = sdk_data.get(key)
                 if val and isinstance(val, str) and val.startswith("http"):
-                    logger.info(f"SDK returned URL in '{key}', downloading...")
+                    logger.info(f"SDK URL in '{key}', downloading...")
                     return self._download_from_url(val)
 
             # Check nested 'data' dict (SDK sometimes double-wraps)
@@ -389,23 +409,129 @@ class CloudFileDownloader:
                         logger.info(f"SDK nested URL in '{key}', downloading...")
                         return self._download_from_url(val)
 
-            # Check for file path on disk (SDK saves files locally)
+            # Check for file path on disk
             for key in ("file_path", "path", "local_path", "file"):
-                path = sdk_data.get(key) or (nested.get(key) if isinstance(nested, dict) else None)
+                path = sdk_data.get(key) or (
+                    nested.get(key) if isinstance(nested, dict) else None
+                )
                 if path and isinstance(path, str) and os.path.isfile(path):
                     logger.info(f"SDK saved file to disk: {path}")
                     with open(path, "rb") as f:
                         return f.read()
 
-        # Try extracting content from SDK response
+        # Try extracting inline content
         content = self._extract_content(sdk_data)
         if content is not None:
             return self._to_bytes(content)
 
-        raise RuntimeError(
+        logger.warning(
             f"SDK response had no extractable content. "
             f"Keys: {list(sdk_data.keys()) if isinstance(sdk_data, dict) else 'N/A'}"
         )
+        return None
+
+    # ------------------------------------------------------------------
+    # Layer 3: Long-running download (GOOGLEDRIVE_DOWNLOAD_FILE2)
+    # ------------------------------------------------------------------
+
+    async def _download_via_long_running(
+        self,
+        file_id: str,
+        workspace_id: UUID,
+    ) -> Optional[bytes]:
+        """
+        Download via GOOGLEDRIVE_DOWNLOAD_FILE2 — a long-running operation
+        that returns the full file content without truncation.
+        """
+        api_key = self._get_api_key()
+        entity_id = self._get_entity_id(workspace_id)
+
+        action = "GOOGLEDRIVE_DOWNLOAD_FILE2"
+        url = f"{COMPOSIO_API_BASE}/tools/execute/{action}"
+        logger.info(f"Calling long-running download: {url}")
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                url,
+                headers={
+                    "x-api-key": api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "entity_id": entity_id,
+                    "arguments": {"fileId": file_id},
+                },
+            )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Long-running download error {response.status_code}: "
+                f"{response.text[:500]}"
+            )
+            return None
+
+        result = response.json()
+        logger.info(f"Long-running response keys: {list(result.keys())}")
+
+        # Long-running operations may return an operation ID to poll
+        operation_id = result.get("operation_id") or result.get("operationId")
+        if operation_id:
+            logger.info(f"Got operation ID: {operation_id}, polling for result...")
+            return await self._poll_operation(operation_id, api_key)
+
+        # Or it may return data directly
+        data = result.get("data", result)
+        if isinstance(data, dict):
+            logger.info(f"Long-running data keys: {list(data.keys())}")
+        return self._extract_binary(data, label="long-running")
+
+    async def _poll_operation(
+        self,
+        operation_id: str,
+        api_key: str,
+        max_polls: int = 30,
+        poll_interval: float = 2.0,
+    ) -> Optional[bytes]:
+        """Poll a long-running Composio operation until complete."""
+        import asyncio
+
+        url = f"{COMPOSIO_API_BASE}/tools/operations/{operation_id}"
+
+        for attempt in range(max_polls):
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    url,
+                    headers={"x-api-key": api_key},
+                )
+
+            if response.status_code != 200:
+                logger.warning(
+                    f"Poll attempt {attempt + 1}: HTTP {response.status_code}"
+                )
+                await asyncio.sleep(poll_interval)
+                continue
+
+            result = response.json()
+            status = result.get("status", "").lower()
+            logger.info(f"Poll attempt {attempt + 1}: status={status}")
+
+            if status in ("completed", "done", "success"):
+                data = result.get("data", result)
+                return self._extract_binary(data, label="poll-result")
+
+            if status in ("failed", "error"):
+                error = result.get("error") or result.get("message") or "Unknown"
+                logger.error(f"Long-running operation failed: {error}")
+                return None
+
+            await asyncio.sleep(poll_interval)
+
+        logger.error(f"Operation {operation_id} timed out after {max_polls} polls")
+        return None
+
+    # ------------------------------------------------------------------
+    # Build params
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _build_params(app_name: str, external_file_id: str) -> dict:
