@@ -319,27 +319,27 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
   }, [])
 
   return (
-    <div className={`flex flex-col bg-slate-900/50 backdrop-blur-sm rounded-lg border border-slate-700 ${
-      isFullscreen ? 'fixed inset-0 z-50 rounded-none h-screen' : 'h-[600px]'
+    <div className={`flex flex-col bg-background/50 backdrop-blur-sm rounded-lg border border-border/50 ${
+      isFullscreen ? 'fixed inset-0 z-50 rounded-none h-screen bg-background' : 'h-[600px]'
     }`}>
       {/* Controls */}
-      <div className="p-4 border-b border-slate-700 space-y-3">
+      <div className="p-4 border-b border-border/50 space-y-3">
         {/* Search */}
         <div className="flex gap-2">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Enter symbol name (e.g., AgentFactory, execute_task)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-orange-500"
+              className="w-full pl-10 pr-4 py-2 bg-secondary/80 border border-border/40 rounded-lg text-white placeholder-muted-foreground focus:outline-none focus:border-orange-500"
             />
           </div>
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-600"
+            className="px-3 py-2 bg-secondary/80 hover:bg-secondary text-foreground/80 rounded-lg transition-colors border border-border/40"
             title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -347,7 +347,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
           <button
             onClick={handleSearch}
             disabled={loading || !searchQuery.trim()}
-            className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+            className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-secondary/50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
           >
             {loading ? 'Loading...' : 'Visualize'}
           </button>
@@ -357,11 +357,11 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
         <div className="flex gap-4 text-sm flex-wrap">
           {/* Graph Type */}
           <div className="flex items-center gap-2">
-            <label className="text-slate-300">Type:</label>
+            <label className="text-foreground/80">Type:</label>
             <select
               value={graphType}
               onChange={(e) => setGraphType(e.target.value as any)}
-              className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white"
+              className="bg-secondary/80 border border-border/40 rounded px-2 py-1 text-white"
             >
               <option value="calls">Call Graph</option>
               <option value="imports">Dependencies</option>
@@ -371,11 +371,11 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
 
           {/* Direction */}
           <div className="flex items-center gap-2">
-            <label className="text-slate-300">Direction:</label>
+            <label className="text-foreground/80">Direction:</label>
             <select
               value={direction}
               onChange={(e) => setDirection(e.target.value as any)}
-              className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white"
+              className="bg-secondary/80 border border-border/40 rounded px-2 py-1 text-white"
             >
               <option value="outgoing">Outgoing</option>
               <option value="incoming">Incoming</option>
@@ -385,14 +385,14 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
 
           {/* Depth */}
           <div className="flex items-center gap-2">
-            <label className="text-slate-300">Depth:</label>
+            <label className="text-foreground/80">Depth:</label>
             <input
               type="number"
               min="1"
               max="5"
               value={depth}
               onChange={(e) => setDepth(parseInt(e.target.value))}
-              className="w-16 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white"
+              className="w-16 bg-secondary/80 border border-border/40 rounded px-2 py-1 text-white"
             />
           </div>
 
@@ -400,7 +400,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
           <div className="flex items-center gap-1 ml-auto">
             <button
               onClick={() => setViewMode('default')}
-              className={`px-2 py-1 rounded text-xs transition-colors ${viewMode === 'default' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+              className={`px-2 py-1 rounded text-xs transition-colors ${viewMode === 'default' ? 'bg-orange-600 text-white' : 'bg-secondary/80 text-muted-foreground hover:text-white'}`}
               title="Default colors by type"
             >
               Default
@@ -410,7 +410,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 if (!archData && !archLoading) fetchArchitecture()
                 setViewMode('clusters')
               }}
-              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'clusters' ? 'bg-orange-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
+              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'clusters' ? 'bg-orange-700 text-white' : 'bg-secondary/80 text-muted-foreground hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
               title="Color by Louvain module cluster"
             >
               <Layers className="w-3 h-3" /> Clusters {archLoading && '...'}
@@ -420,7 +420,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 if (!archData && !archLoading) fetchArchitecture()
                 setViewMode('heatmap')
               }}
-              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'heatmap' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
+              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'heatmap' ? 'bg-red-600 text-white' : 'bg-secondary/80 text-muted-foreground hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
               title="Heatmap by complexity (green=low, red=high)"
             >
               <Flame className="w-3 h-3" /> Heatmap {archLoading && '...'}
@@ -438,10 +438,10 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
       <div className="flex-1 flex relative">
         {/* PRD-62: File Tree Sidebar (US-018) */}
         {fileTreeOpen && (
-          <div className="w-56 border-r border-slate-700 bg-slate-900/80 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between p-2 border-b border-slate-700">
-              <span className="text-xs font-medium text-slate-300">Files</span>
-              <button onClick={() => setFileTreeOpen(false)} className="text-slate-400 hover:text-white text-xs">
+          <div className="w-56 border-r border-border/50 bg-background/80 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-2 border-b border-border/50">
+              <span className="text-xs font-medium text-foreground/80">Files</span>
+              <button onClick={() => setFileTreeOpen(false)} className="text-muted-foreground hover:text-white text-xs">
                 Close
               </button>
             </div>
@@ -451,7 +451,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 placeholder="Filter files..."
                 value={fileFilter}
                 onChange={(e) => setFileFilter(e.target.value)}
-                className="w-full px-2 py-1 bg-slate-800 border border-slate-600 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
+                className="w-full px-2 py-1 bg-secondary/80 border border-border/40 rounded text-xs text-white placeholder-muted-foreground focus:outline-none focus:border-orange-500"
               />
             </div>
             <div className="flex-1 overflow-y-auto">
@@ -472,20 +472,20 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                       }
                     })))
                   }}
-                  className={`w-full text-left px-2 py-1.5 text-xs hover:bg-slate-800 transition-colors ${
+                  className={`w-full text-left px-2 py-1.5 text-xs hover:bg-secondary/80 transition-colors ${
                     highlightedFile === file.file_path ? 'bg-orange-900/30 border-l-2 border-orange-500' : ''
                   }`}
                 >
-                  <div className="text-slate-300 truncate font-mono">{file.file_path.split('/').pop()}</div>
-                  <div className="text-slate-500 text-[10px] truncate">{file.file_path}</div>
-                  <div className="flex gap-2 text-[10px] text-slate-600 mt-0.5">
+                  <div className="text-foreground/80 truncate font-mono">{file.file_path.split('/').pop()}</div>
+                  <div className="text-muted-foreground/70 text-[10px] truncate">{file.file_path}</div>
+                  <div className="flex gap-2 text-[10px] text-muted-foreground/50 mt-0.5">
                     {file.symbol_count ? <span>{file.symbol_count} symbols</span> : null}
                     {file.lines_of_code ? <span>{file.lines_of_code} LOC</span> : null}
                   </div>
                 </button>
               ))}
               {fileTreeData.length === 0 && (
-                <div className="text-slate-500 text-xs p-2 text-center">No files indexed</div>
+                <div className="text-muted-foreground/70 text-xs p-2 text-center">No files indexed</div>
               )}
             </div>
           </div>
@@ -495,16 +495,16 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
         {!fileTreeOpen && nodes.length > 0 && fileTreeData.length > 0 && (
           <button
             onClick={() => setFileTreeOpen(true)}
-            className="absolute left-2 top-2 bg-slate-800 border border-slate-700 p-1.5 rounded hover:bg-slate-700 transition-colors z-10"
+            className="absolute left-2 top-2 bg-secondary/80 border border-border/50 p-1.5 rounded hover:bg-secondary transition-colors z-10"
             title="Show file tree"
           >
-            <ChevronRight className="w-4 h-4 text-slate-400" />
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </button>
         )}
         {/* Graph Area */}
         <div className={`flex-1 relative ${codePanelOpen ? 'w-2/3' : 'w-full'}`}>
           {nodes.length === 0 ? (
-            <div className="absolute inset-0 flex items-center justify-center text-slate-400">
+            <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
               <div className="text-center">
                 <Maximize2 className="w-12 h-12 mx-auto mb-2 opacity-50" />
                 <p>Search for a symbol to visualize its relationships</p>
@@ -521,57 +521,57 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
               fitView
               attributionPosition="bottom-right"
             >
-              <Background color="#78350f" gap={16} />
-              <Controls className="bg-slate-800 border-slate-600" />
+              <Background color="hsl(16 30% 20%)" gap={16} />
+              <Controls />
               <MiniMap
                 nodeColor={(node) => {
                   const style = node.style as any
-                  return style?.background || '#3b82f6'
+                  return style?.background || '#e8590c'
                 }}
-                className="bg-slate-800 border-slate-600"
+                maskColor="rgba(0, 0, 0, 0.7)"
               />
-              <Panel position="top-right" className="bg-slate-800/90 backdrop-blur-sm p-3 rounded-lg border border-slate-700">
+              <Panel position="top-right" className="bg-secondary/80/90 backdrop-blur-sm p-3 rounded-lg border border-border/50">
                 <div className="text-xs space-y-1">
                   {viewMode === 'default' ? (
                     <>
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded" style={{ background: nodeColors.function }}></div>
-                        <span className="text-slate-300">Function</span>
+                        <span className="text-foreground/80">Function</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded" style={{ background: nodeColors.class }}></div>
-                        <span className="text-slate-300">Class</span>
+                        <span className="text-foreground/80">Class</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded" style={{ background: nodeColors.method }}></div>
-                        <span className="text-slate-300">Method</span>
+                        <span className="text-foreground/80">Method</span>
                       </div>
                     </>
                   ) : viewMode === 'clusters' ? (
                     <>
-                      <div className="text-slate-300 font-medium mb-1">Module Clusters</div>
+                      <div className="text-foreground/80 font-medium mb-1">Module Clusters</div>
                       {archData?.communities.slice(0, 5).map((c, i) => (
                         <div key={c.cluster_id} className="flex items-center gap-2">
                           <div className="w-3 h-3 rounded" style={{ background: clusterColors[c.cluster_id % clusterColors.length] }}></div>
-                          <span className="text-slate-300">Cluster {c.cluster_id} ({c.size})</span>
+                          <span className="text-foreground/80">Cluster {c.cluster_id} ({c.size})</span>
                         </div>
                       ))}
                       {archData && archData.modularity_score > 0 && (
-                        <div className="text-slate-500 mt-1">
+                        <div className="text-muted-foreground/70 mt-1">
                           Modularity: {archData.modularity_score.toFixed(3)}
                         </div>
                       )}
                     </>
                   ) : (
                     <>
-                      <div className="text-slate-300 font-medium mb-1">Complexity Heatmap</div>
+                      <div className="text-foreground/80 font-medium mb-1">Complexity Heatmap</div>
                       <div className="flex items-center gap-1">
                         <div className="w-3 h-3 rounded" style={{ background: 'rgb(0, 200, 80)' }}></div>
-                        <span className="text-slate-400">Low</span>
+                        <span className="text-muted-foreground">Low</span>
                         <div className="w-3 h-3 rounded ml-1" style={{ background: 'rgb(255, 200, 60)' }}></div>
-                        <span className="text-slate-400">Med</span>
+                        <span className="text-muted-foreground">Med</span>
                         <div className="w-3 h-3 rounded ml-1" style={{ background: 'rgb(255, 60, 60)' }}></div>
-                        <span className="text-slate-400">High</span>
+                        <span className="text-muted-foreground">High</span>
                       </div>
                     </>
                   )}
@@ -583,15 +583,15 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
 
         {/* PRD-62: Code Snippet Panel (US-017) */}
         {codePanelOpen && (
-          <div className="w-1/3 border-l border-slate-700 bg-slate-900/80 flex flex-col">
-            <div className="flex items-center justify-between p-3 border-b border-slate-700">
-              <div className="flex items-center gap-2 text-sm text-slate-300">
+          <div className="w-1/3 border-l border-border/50 bg-background/80 flex flex-col">
+            <div className="flex items-center justify-between p-3 border-b border-border/50">
+              <div className="flex items-center gap-2 text-sm text-foreground/80">
                 <Code className="w-4 h-4" />
                 <span className="font-medium">Symbol Details</span>
               </div>
               <button
                 onClick={() => setCodePanelOpen(false)}
-                className="text-slate-400 hover:text-white p-1"
+                className="text-muted-foreground hover:text-white p-1"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -601,16 +601,16 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
               <div className="flex-1 overflow-auto p-3 space-y-3">
                 <div>
                   <div className="text-white font-mono text-sm">{selectedNode.name}</div>
-                  <div className="text-slate-400 text-xs mt-1">{selectedNode.file}</div>
+                  <div className="text-muted-foreground text-xs mt-1">{selectedNode.file}</div>
                   {selectedNode.line && (
-                    <div className="text-slate-500 text-xs">Line {selectedNode.line}</div>
+                    <div className="text-muted-foreground/70 text-xs">Line {selectedNode.line}</div>
                   )}
                 </div>
 
                 {selectedNode.signature && (
                   <div>
-                    <div className="text-slate-400 text-xs mb-1">Signature</div>
-                    <pre className="bg-slate-800 p-2 rounded text-xs text-green-400 overflow-x-auto">
+                    <div className="text-muted-foreground text-xs mb-1">Signature</div>
+                    <pre className="bg-secondary/80 p-2 rounded text-xs text-green-400 overflow-x-auto">
                       {selectedNode.signature}
                     </pre>
                   </div>
@@ -618,8 +618,8 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
 
                 {selectedNode.docstring && (
                   <div>
-                    <div className="text-slate-400 text-xs mb-1">Documentation</div>
-                    <div className="bg-slate-800 p-2 rounded text-xs text-slate-300">
+                    <div className="text-muted-foreground text-xs mb-1">Documentation</div>
+                    <div className="bg-secondary/80 p-2 rounded text-xs text-foreground/80">
                       {selectedNode.docstring}
                     </div>
                   </div>
@@ -627,15 +627,15 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
 
                 {selectedNode.code_snippet && (
                   <div>
-                    <div className="text-slate-400 text-xs mb-1">Source Code</div>
-                    <pre className="bg-slate-800 p-2 rounded text-xs text-slate-200 overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                    <div className="text-muted-foreground text-xs mb-1">Source Code</div>
+                    <pre className="bg-secondary/80 p-2 rounded text-xs text-foreground/90 overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
                       {selectedNode.code_snippet}
                     </pre>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
+              <div className="flex-1 flex items-center justify-center text-muted-foreground/70 text-sm">
                 Click a node to view details
               </div>
             )}
@@ -646,10 +646,10 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
         {!codePanelOpen && nodes.length > 0 && (
           <button
             onClick={() => setCodePanelOpen(true)}
-            className="absolute right-2 top-2 bg-slate-800 border border-slate-700 p-1.5 rounded hover:bg-slate-700 transition-colors z-10"
+            className="absolute right-2 top-2 bg-secondary/80 border border-border/50 p-1.5 rounded hover:bg-secondary transition-colors z-10"
             title="Show code panel"
           >
-            <ChevronLeft className="w-4 h-4 text-slate-400" />
+            <ChevronLeft className="w-4 h-4 text-muted-foreground" />
           </button>
         )}
       </div>
