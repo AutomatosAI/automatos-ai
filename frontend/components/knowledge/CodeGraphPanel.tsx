@@ -188,17 +188,8 @@ export function CodeGraphPanel() {
     setNlLoading(true)
     setNlAnswer(null)
     try {
-      const res = await fetch(`/api/code-graph/projects/${proj.id}/ask`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: nlQuestion }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setNlAnswer(data)
-      } else {
-        setError('Failed to process code question')
-      }
+      const data = await apiClient.codegraphAskQuestion(proj.id, nlQuestion)
+      setNlAnswer(data)
     } catch (e: any) {
       setError(e?.message || 'Code question failed')
     } finally {

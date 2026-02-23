@@ -1507,6 +1507,25 @@ class ApiClient {
     })
   }
 
+  /** Ask a natural language question about code */
+  async codegraphAskQuestion(projectId: number, question: string) {
+    return this.request(`/api/code-graph/projects/${projectId}/ask`, {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    })
+  }
+
+  /** Get call graph for a symbol */
+  async codegraphGetCallGraph(params: { project: string; symbol: string; depth?: number; direction?: string }) {
+    const searchParams = new URLSearchParams({
+      project: params.project,
+      symbol: params.symbol,
+      ...(params.depth && { depth: params.depth.toString() }),
+      ...(params.direction && { direction: params.direction }),
+    })
+    return this.request(`/api/code-graph/call-graph?${searchParams}`)
+  }
+
   /** Health check */
   async codegraphHealth() {
     return this.request('/api/code-graph/health')
