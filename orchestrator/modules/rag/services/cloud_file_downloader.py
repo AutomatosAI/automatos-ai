@@ -120,34 +120,35 @@ class CloudFileDownloader:
 
         binary = self._to_bytes(content)
 
-        # Google Drive via Composio truncates content to ~500 bytes.
-        # Detect this and fall back to direct Google Drive API download.
+        # Google Drive REST API truncates content to ~500 bytes.
+        # Detect and fall back to Composio SDK (which saves full file to disk).
         MIN_EXPECTED_SIZE = 2048  # text files should be > 2KB
         if app_upper == "GOOGLEDRIVE" and len(binary) < MIN_EXPECTED_SIZE:
             logger.warning(
-                f"Composio returned only {len(binary)} bytes for "
+                f"Composio REST API returned only {len(binary)} bytes for "
                 f"{external_file_id} — likely truncated. "
-                f"Falling back to direct Google Drive API download."
+                f"Falling back to Composio SDK download."
             )
             try:
-                direct_binary = await self._download_google_drive_direct(
-                    external_file_id, workspace_id
+                sdk_binary = await self._download_via_sdk(
+                    action, app_upper, external_file_id, workspace_id
                 )
-                if direct_binary and len(direct_binary) > len(binary):
+                if sdk_binary and len(sdk_binary) > len(binary):
                     logger.info(
-                        f"Direct Google Drive download: {len(direct_binary):,} bytes "
-                        f"(vs {len(binary)} from Composio)"
+                        f"Composio SDK download: {len(sdk_binary):,} bytes "
+                        f"(vs {len(binary)} from REST API)"
                     )
-                    binary = direct_binary
+                    binary = sdk_binary
                 else:
                     logger.warning(
-                        "Direct download returned same or less content, "
-                        "keeping Composio result"
+                        "SDK download returned same or less content, "
+                        "keeping REST API result"
                     )
             except Exception as e:
                 logger.warning(
-                    f"Direct Google Drive download failed, "
-                    f"using Composio result ({len(binary)} bytes): {e}"
+                    f"Composio SDK download failed, "
+                    f"using REST API result ({len(binary)} bytes): {e}",
+                    exc_info=True
                 )
 
         # Write to temp file
@@ -323,129 +324,88 @@ class CloudFileDownloader:
         return str(content).encode("utf-8")
 
     # ------------------------------------------------------------------
-    # Direct Google Drive API download (bypasses Composio truncation)
+    # SDK-based download (handles binary files properly)
     # ------------------------------------------------------------------
 
-    async def _download_google_drive_direct(
-        self, file_id: str, workspace_id: UUID
+    async def _download_via_sdk(
+        self,
+        action: str,
+        app_name: str,
+        file_id: str,
+        workspace_id: UUID,
     ) -> bytes:
         """
-        Download file content directly from Google Drive API.
+        Download file via Composio Python SDK instead of REST API.
 
-        Composio's GOOGLEDRIVE_DOWNLOAD_FILE action truncates content to ~500
-        bytes. This method gets the OAuth token from Composio's connected
-        accounts and calls the Google Drive Files API directly with alt=media.
+        The SDK handles binary responses differently — it may save files to
+        disk and return a path, or return an s3url to the full content.
+        The REST API truncates inline content to ~500 bytes.
         """
-        access_token = await self._get_google_oauth_token(workspace_id)
+        from core.composio.client import get_composio_client
 
-        url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.get(
-                url,
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-
-        if response.status_code == 401:
-            raise RuntimeError(
-                "Google Drive OAuth token expired or revoked. "
-                "User may need to reconnect Google Drive."
-            )
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"Google Drive API error {response.status_code}: "
-                f"{response.text[:300]}"
-            )
-
-        return response.content
-
-    async def _get_google_oauth_token(self, workspace_id: UUID) -> str:
-        """
-        Get a valid Google OAuth access token via Composio connected accounts.
-
-        Calls GET /api/v2/connectedAccounts to find the Google Drive connection
-        for this workspace's entity, then extracts the access_token.
-        """
-        api_key = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
-        if not api_key:
-            raise RuntimeError("COMPOSIO_API_KEY/COMPOSIO_KEY not set")
+        client = get_composio_client()
+        if not client or not client.composio:
+            raise RuntimeError("Composio SDK client not available")
 
         entity = self.executor.get_entity_for_workspace(workspace_id)
         entity_id = entity.get("composio_entity_id")
         if not entity_id:
             raise RuntimeError(f"No Composio entity for workspace {workspace_id}")
 
-        # List connected accounts for this entity filtered to Google Drive
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                f"{COMPOSIO_API_BASE}/connectedAccounts",
-                headers={"x-api-key": api_key},
-                params={
-                    "user_uuid": entity_id,
-                    "showActiveOnly": "true",
-                },
-            )
+        params = self._build_params(app_name, file_id)
 
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"Failed to list connected accounts: {response.status_code}"
-            )
-
-        data = response.json()
-        accounts = data.get("items", data.get("data", []))
-
-        # Find the Google Drive connection
-        gdrive_account = None
-        for acct in accounts:
-            app = (acct.get("appName") or acct.get("appUniqueId") or "").upper()
-            if "GOOGLEDRIVE" in app or "GOOGLE_DRIVE" in app:
-                if acct.get("status", "").upper() in ("ACTIVE", "INITIATED"):
-                    gdrive_account = acct
-                    break
-
-        if not gdrive_account:
-            raise RuntimeError(
-                "No active Google Drive connection found for this workspace. "
-                f"Found {len(accounts)} accounts: "
-                f"{[a.get('appName') for a in accounts[:5]]}"
-            )
-
-        account_id = gdrive_account.get("id")
-
-        # The list endpoint may not include connectionParams.
-        # If missing, fetch the specific account by ID.
-        conn_params = gdrive_account.get("connectionParams", {})
-        if not conn_params and account_id:
-            logger.info(f"Fetching Google Drive connection details for {account_id}")
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                detail_resp = await client.get(
-                    f"{COMPOSIO_API_BASE}/connectedAccounts/{account_id}",
-                    headers={"x-api-key": api_key},
-                )
-            if detail_resp.status_code == 200:
-                detail = detail_resp.json()
-                conn_params = detail.get("connectionParams", {})
+        # Execute via SDK — this may download the file properly
+        result = client.execute_action(
+            action=action,
+            params=params,
+            entity_id=entity_id,
+        )
 
         logger.info(
-            f"Google Drive connection params keys: {list(conn_params.keys())}"
+            f"Composio SDK response: success={result.get('success')}, "
+            f"data type={type(result.get('data')).__name__}"
         )
 
-        # Extract access token — Composio uses different structures
-        access_token = (
-            conn_params.get("access_token")
-            or conn_params.get("accessToken")
-            # Some Composio versions nest under "headers"
-            or conn_params.get("headers", {}).get(
-                "Authorization", ""
-            ).replace("Bearer ", "")
+        sdk_data = result.get("data", {})
+
+        # The SDK response may contain the full data at various levels
+        # Log all keys for debugging
+        if isinstance(sdk_data, dict):
+            logger.info(f"SDK data keys: {list(sdk_data.keys())}")
+            # Check for s3url or download URLs at any level
+            for key in _URL_KEYS:
+                val = sdk_data.get(key)
+                if val and isinstance(val, str) and val.startswith("http"):
+                    logger.info(f"SDK returned URL in '{key}', downloading...")
+                    return self._download_from_url(val)
+
+            # Check nested 'data' dict (SDK sometimes double-wraps)
+            nested = sdk_data.get("data", {})
+            if isinstance(nested, dict):
+                logger.info(f"SDK nested data keys: {list(nested.keys())}")
+                for key in _URL_KEYS:
+                    val = nested.get(key)
+                    if val and isinstance(val, str) and val.startswith("http"):
+                        logger.info(f"SDK nested URL in '{key}', downloading...")
+                        return self._download_from_url(val)
+
+            # Check for file path on disk (SDK saves files locally)
+            for key in ("file_path", "path", "local_path", "file"):
+                path = sdk_data.get(key) or (nested.get(key) if isinstance(nested, dict) else None)
+                if path and isinstance(path, str) and os.path.isfile(path):
+                    logger.info(f"SDK saved file to disk: {path}")
+                    with open(path, "rb") as f:
+                        return f.read()
+
+        # Try extracting content from SDK response
+        content = self._extract_content(sdk_data)
+        if content is not None:
+            return self._to_bytes(content)
+
+        raise RuntimeError(
+            f"SDK response had no extractable content. "
+            f"Keys: {list(sdk_data.keys()) if isinstance(sdk_data, dict) else 'N/A'}"
         )
-
-        if not access_token:
-            raise RuntimeError(
-                "Google Drive connected account has no access_token. "
-                f"Connection params keys: {list(conn_params.keys())}"
-            )
-
-        return access_token
 
     @staticmethod
     def _build_params(app_name: str, external_file_id: str) -> dict:
