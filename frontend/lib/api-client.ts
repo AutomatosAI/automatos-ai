@@ -1526,6 +1526,11 @@ class ApiClient {
     return this.request(`/api/code-graph/call-graph?${searchParams}`)
   }
 
+  /** Get architecture analysis for a project */
+  async codegraphGetArchitecture(projectId: number) {
+    return this.request(`/api/code-graph/projects/${projectId}/architecture`)
+  }
+
   /** Health check */
   async codegraphHealth() {
     return this.request('/api/code-graph/health')

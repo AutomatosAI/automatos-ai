@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
+import { apiClient } from '@/lib/api-client'
 import ReactFlow, {
   Node,
   Edge,
@@ -111,11 +112,8 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
     if (!projectId) return
     setArchLoading(true)
     try {
-      const res = await fetch(`/api/code-graph/projects/${projectId}/architecture`)
-      if (res.ok) {
-        const data = await res.json()
-        setArchData(data)
-      }
+      const data = await apiClient.codegraphGetArchitecture(projectId)
+      setArchData(data)
     } catch (err) {
       console.error('Architecture fetch failed:', err)
     } finally {
@@ -127,9 +125,8 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
   const fetchFileTree = useCallback(async () => {
     if (!projectId) return
     try {
-      const res = await fetch(`/api/code-graph/projects/${projectId}/architecture`)
-      if (res.ok) {
-        const data = await res.json()
+      const data = await apiClient.codegraphGetArchitecture(projectId)
+      if (data) {
         // Extract file info from communities
         const fileMap = new Map<string, { language: string; symbol_count: number; lines_of_code: number }>()
         if (data.communities) {
@@ -166,17 +163,12 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
 
     setLoading(true)
     try {
-      const response = await fetch(
-        `/api/code-graph/call-graph?` +
-        `project=${encodeURIComponent(project)}&` +
-        `symbol=${encodeURIComponent(symbol)}&` +
-        `depth=${depth}&` +
-        `direction=${direction}`
-      )
-
-      if (!response.ok) throw new Error('Failed to fetch call graph')
-
-      const data = await response.json()
+      const data = await apiClient.codegraphGetCallGraph({
+        project,
+        symbol,
+        depth,
+        direction,
+      })
 
       const flowNodes: Node[] = []
       const flowEdges: Edge[] = []
