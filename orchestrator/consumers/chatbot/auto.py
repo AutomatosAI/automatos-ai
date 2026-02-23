@@ -113,12 +113,20 @@ _INTERNAL_TOOL_KEYWORDS = {
     "platform_get_workspace_info": ["workspace info", "my workspace", "workspace"],
     "platform_list_connected_apps": ["connected app", "integration", "what app",
                                      "integrations", "connected apps", "my apps"],
-    # --- General internal tools ---
-    "search_knowledge": ["search", "find doc", "knowledge", "documentation", "guide"],
-    "query_database": ["database", "query", "sql", "analytics"],
-    "smart_query_database": ["data", "metrics", "statistics", "report"],
-    "generate_document": ["create report", "generate document", "write report", "export"],
-    "search_codebase": ["code", "codebase", "implementation", "function"],
+    # --- General internal tools (also handled by Auto — no agent routing needed) ---
+    "search_knowledge": ["search my", "search document", "find in my", "knowledge base",
+                         "in my docs", "in my files", "in our docs", "documentation",
+                         "uploaded", "rag", "look up in"],
+    "query_database": ["database", "query db", "run query", "sql", "analytics",
+                       "from the database"],
+    "smart_query_database": ["show me data", "show metrics", "analyze data",
+                             "statistics", "report on"],
+    "generate_document": ["create report", "generate document", "write report",
+                          "create a doc", "create doc", "generate report",
+                          "make a report", "write a doc", "export report"],
+    "search_codebase": ["search code", "search the code", "codebase", "codegraph",
+                        "code search", "in the code", "find the function",
+                        "implementation of"],
 }
 
 _MULTI_STEP_SIGNALS = [
@@ -218,26 +226,19 @@ class AutoBrain:
                 confidence=0.85,
             )
 
-        # Internal tools only
+        # Internal tools only — Auto handles directly (no agent routing needed).
+        # All internal tools (platform_*, search_knowledge, query_database,
+        # generate_document, search_codebase) are platform-level capabilities
+        # available to any agent via ToolRegistry. Routing to a specialized
+        # agent adds 3-5s of LLM overhead for zero benefit.
         if matched_internal:
-            # Platform tools are handled by Auto directly — don't delegate
-            # to Universal Router which doesn't know about platform actions
-            all_platform = all(t.startswith("platform_") for t in matched_internal)
-            if all_platform:
-                return ComplexityAssessment(
-                    complexity=Complexity.MOLECULE,
-                    action=Action.RESPOND,
-                    reasoning=f"Platform self-awareness query: {', '.join(set(matched_internal))}",
-                    matched_tools=list(set(matched_internal)),
-                    confidence=0.90,
-                )
             complexity = Complexity.CELL if is_multi_step else Complexity.MOLECULE
             return ComplexityAssessment(
                 complexity=complexity,
-                action=Action.DELEGATE,
-                reasoning=f"Task requires internal tools: {', '.join(set(matched_internal))}",
+                action=Action.RESPOND,
+                reasoning=f"Internal tools (Auto handles): {', '.join(set(matched_internal))}",
                 matched_tools=list(set(matched_internal)),
-                confidence=0.80,
+                confidence=0.90,
             )
 
         # Long/complex query with no clear tool match → Cell (needs reasoning)
