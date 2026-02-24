@@ -94,6 +94,9 @@ _TOOL_KEYWORDS = {
     "TELEGRAM": ["telegram"],
     "WHATSAPP": ["whatsapp"],
     "TAVILY": ["search the web", "web search", "look up online", "tavily"],
+    "WEBSEARCH": ["flight", "flights", "hotel", "hotels", "travel", "book a", "booking"],
+    "IMAGE_GENERATION": ["create image", "generate image", "draw", "picture of",
+                         "image of", "create a picture", "design a", "illustration"],
 }
 
 # Internal tool keyword mapping
@@ -259,10 +262,13 @@ class AutoBrain:
                 confidence=0.85,
             )
 
-        # Default → Atom (conversational, let Auto respond)
+        # Default → Delegate to router (it has LLM + semantic to pick the right agent).
+        # Previously this was RESPOND, which meant anything not matching hardcoded
+        # keywords was answered conversationally — breaking routing for agents like
+        # Scout (flights/travel), Graphics Generator (images), etc.
         return ComplexityAssessment(
-            complexity=Complexity.ATOM,
-            action=Action.RESPOND,
+            complexity=Complexity.MOLECULE,
+            action=Action.DELEGATE,
             reasoning="General conversation — Auto responds directly",
             confidence=0.70,
         )
