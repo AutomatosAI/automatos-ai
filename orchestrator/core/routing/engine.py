@@ -6,11 +6,10 @@ using a tiered strategy:
 
   Tier 0   — User override (agent_id or workflow_id explicitly set)
   Tier 1   — Cache lookup (RoutingCache hit)
-  Tier 2   — Rule-based matching:
-    2a: routing_rules table (workspace + source pattern)
-    2b: TriggerSubscription (for jira_trigger source)
-    2c: IntentClassifier keyword matching against routing rules
+  Tier 2a  — routing_rules table (workspace + explicit source pattern)
+  Tier 2b  — TriggerSubscription (for jira_trigger source)
   Tier 2.5 — Semantic similarity (PRD-64: cosine sim on agent embeddings)
+  Tier 2c  — IntentClassifier keyword matching against routing rules
   Tier 3   — LLM classification (fallback, uses semantic candidates if available)
 
 Returns None only when all tiers (including LLM) fail to route.
@@ -125,20 +124,23 @@ class UniversalRouter:
             self._log_decision(envelope, decision, env_hash)
             return decision
 
-        # Tier 2c — IntentClassifier keyword matching against routing rules
-        decision = self._tier2c_intent_classifier(envelope)
-        if decision is not None:
-            logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
-            self._log_decision(envelope, decision, env_hash)
-            return decision
-
         # Tier 2.5 — Semantic similarity (PRD-64)
+        # Runs BEFORE Tier 2c (intent keywords) because semantic matching
+        # understands agent capabilities, while keyword matching is coarse
+        # and easily hijacked by overly broad rules.
         decision = await self._tier2_5_semantic(envelope)
         if decision is not None:
             logger.info(
                 "[router] Tier 2.5 hit (semantic): agent_id=%s confidence=%.2f",
                 decision.agent_id, decision.confidence,
             )
+            self._log_decision(envelope, decision, env_hash)
+            return decision
+
+        # Tier 2c — IntentClassifier keyword matching against routing rules
+        decision = self._tier2c_intent_classifier(envelope)
+        if decision is not None:
+            logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
             self._log_decision(envelope, decision, env_hash)
             return decision
 
