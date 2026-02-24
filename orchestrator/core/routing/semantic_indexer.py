@@ -21,8 +21,8 @@ from core.models.core import Agent
 logger = logging.getLogger(__name__)
 
 # --- Thresholds ---
-SIMILARITY_DIRECT_ROUTE = 0.75   # Route directly if top match exceeds this
-SIMILARITY_CANDIDATE_MIN = 0.45  # Include in Tier 3 candidate list above this
+SIMILARITY_DIRECT_ROUTE = 0.95   # Only direct-route for near-perfect matches
+SIMILARITY_CANDIDATE_MIN = 0.40  # Include in Tier 3 candidate list above this
 MAX_LLM_CANDIDATES = 5           # Max agents passed to Tier 3
 
 
