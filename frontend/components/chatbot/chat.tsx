@@ -276,6 +276,30 @@ export function Chat({
           } as any)
         }
 
+        // PRD-63: Create widget for generated documents
+        if (toolData.generated_document) {
+          const genDoc = toolData.generated_document
+          console.log('[Widget] Creating generated document widget:', genDoc.filename)
+          addWidget({
+            type: 'document',
+            title: genDoc.title || genDoc.filename || 'Generated Document',
+            data: {
+              content: `Document generated successfully.\n\n**File:** ${genDoc.filename}\n**Format:** ${(genDoc.format || 'pdf').toUpperCase()}\n**Size:** ${genDoc.size_kb || 0} KB`,
+              format: 'markdown',
+              filename: genDoc.filename,
+              downloadUrl: genDoc.download_url,
+              hasFullContent: true,
+            },
+            metadata: {
+              source: { type: 'tool', name: 'generate_document', provider: 'document_generation' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
+
         // Create widget for terminal/command output
         if (toolData.terminal_output) {
           const term = toolData.terminal_output

@@ -709,7 +709,19 @@ class ToolResultFormatter:
             frontend_data["api_results"] = standardized["results"]
             frontend_data["api_metadata"] = standardized.get("metadata", {})
             frontend_data["detected_type"] = widget_type  # Let frontend know what was detected
-        
+
+        elif tool_name == "generate_document":
+            # PRD-63: Document Generation — provide download widget data
+            frontend_data['generated_document'] = {
+                'filename': result.get('filename', 'document'),
+                'format': result.get('format', 'pdf'),
+                'download_url': result.get('download_url', ''),
+                'preview_url': result.get('preview_url'),
+                'size_kb': round(result.get('size', 0) / 1024, 1),
+                'title': result.get('title', result.get('filename', 'Document')),
+            }
+            logger.info(f"[FrontendData] generate_document: {frontend_data['generated_document']['filename']}")
+
         return frontend_data
     
     @staticmethod
@@ -796,7 +808,14 @@ class ToolResultFormatter:
             else:
                 logger.warning("[LLM-Context] Composio returned 0 items - LLM will hallucinate!")
                 summary_parts.append("\nAPI returned 0 items for this query.")
-        
+
+        elif tool_name == "generate_document":
+            filename = result.get('filename', 'document')
+            fmt = result.get('format', 'pdf')
+            size_kb = round(result.get('size', 0) / 1024, 1)
+            summary_parts.append(f"\nGenerated {fmt.upper()} document: {filename} ({size_kb} KB)")
+            summary_parts.append("The document is ready for download via the widget below.")
+
         full_summary = "\n".join(summary_parts)
         
         # Truncate if too long

@@ -25,6 +25,47 @@ logger = logging.getLogger(__name__)
 # Base directory for generated documents
 GENERATED_DIR = os.environ.get("DOCUMENT_STORAGE_DIR", "documents")
 
+# Inline fallback template used when no DB template is available
+_FALLBACK_PDF_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: #1a1a2e; line-height: 1.6; }
+  .header { border-bottom: 3px solid #ff6b35; padding-bottom: 1rem; margin-bottom: 2rem; }
+  .header h1 { margin: 0 0 0.5rem 0; font-size: 28pt; color: #1a1a2e; }
+  .header .meta { color: #666; font-size: 10pt; }
+  h2 { color: #1a1a2e; border-bottom: 1px solid #eee; padding-bottom: 0.5rem; margin-top: 2rem; }
+  .metrics { display: flex; gap: 1rem; margin: 1.5rem 0; flex-wrap: wrap; }
+  .metric-card { flex: 1; min-width: 120px; background: #f8f9fa; border-radius: 8px; padding: 1rem; border-left: 4px solid #ff6b35; text-align: center; }
+  .metric-card .label { font-size: 9pt; color: #666; text-transform: uppercase; }
+  .metric-card .value { font-size: 20pt; font-weight: 700; color: #1a1a2e; }
+  .section-content { margin-bottom: 1.5rem; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>{{ title | default('Report') }}</h1>
+    <div class="meta">Generated: {{ date | default('') }} | Author: {{ author | default('Automatos AI') }}</div>
+  </div>
+  {% if metrics %}
+  <div class="metrics">
+    {% for key, value in metrics.items() %}
+    <div class="metric-card"><div class="label">{{ key }}</div><div class="value">{{ value }}</div></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if sections %}
+    {% for section in sections %}
+    <h2>{{ section.title }}</h2>
+    <div class="section-content">{{ section.content }}</div>
+    {% endfor %}
+  {% elif content %}
+    <div class="section-content">{{ content }}</div>
+  {% endif %}
+</body>
+</html>"""
+
 
 class DocumentGenerationService:
     """Generates documents from templates + data."""
@@ -94,14 +135,18 @@ class DocumentGenerationService:
             )
 
         if not template or not template.template_content:
-            raise ValueError("PDF generation requires a template with HTML content.")
+            logger.info("No template found — using inline fallback for PDF generation")
+            template_html = _FALLBACK_PDF_TEMPLATE
+        else:
+            template_html = template.template_content
 
-        # Validate data against schema
-        self._validate_data(data, template.data_schema)
+        # Validate data against schema (skip if using fallback — no schema)
+        if template and hasattr(template, 'data_schema'):
+            self._validate_data(data, template.data_schema)
 
         # Render Jinja2
         try:
-            jinja_template = self._jinja_env.from_string(template.template_content)
+            jinja_template = self._jinja_env.from_string(template_html)
             rendered_html = jinja_template.render(**data)
         except jinja2.TemplateError as e:
             raise ValueError(f"Template rendering error: {e}")

@@ -221,6 +221,21 @@ async def lifespan(app: FastAPI):
                 seed_system_prompts(db)
         except Exception as e:
             logger.warning(f"PRD-58 table/seed init: {e}")
+
+        # PRD-63: Ensure document_templates table exists + seed starter templates
+        try:
+            import core.models.core  # noqa: F811 — registers DocumentTemplate with Base
+            from core.database.database import create_tables as _ct, get_db_session as _gdb
+            _ct()  # idempotent — creates any missing tables
+            from modules.documents.seed_templates import seed_starter_templates
+            from core.models.workspaces import Workspace
+            with _gdb() as db:
+                workspace_ids = [w.id for w in db.query(Workspace.id).all()]
+                for ws_id in workspace_ids:
+                    seed_starter_templates(db, ws_id)
+            logger.info(f"PRD-63: Document templates seeded for {len(workspace_ids)} workspace(s)")
+        except Exception as e:
+            logger.warning(f"PRD-63 template seed init: {e}")
         logger.info("Database ready")
         
         # NOTE: Redis client uses lazy initialization via get_redis_client()
