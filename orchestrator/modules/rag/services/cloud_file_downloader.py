@@ -96,12 +96,34 @@ class CloudFileDownloader:
         data = await self._execute_via_rest_api(action, app_upper, params, workspace_id)
         binary = self._extract_binary(data, label="v3 REST")
 
-        # ---- Layer 2: SDK fallback (Google Drive only, if truncated) ----
+        # ---- Layer 2: Google Drive export (for native Google Docs) ----
+        # Composio truncates downloaded_file_content to ~500 bytes.
+        # The dedicated export action may return full content.
         if app_upper == "GOOGLEDRIVE" and (binary is None or len(binary) < _MIN_EXPECTED_SIZE):
             truncated_size = len(binary) if binary else 0
             logger.warning(
                 f"v3 REST returned {truncated_size} bytes for "
-                f"{external_file_id} — likely truncated. Trying SDK..."
+                f"{external_file_id} — likely truncated. "
+                f"Trying GOOGLEDRIVE_EXPORT_GOOGLE_WORKSPACE_FILE..."
+            )
+            try:
+                export_binary = await self._export_google_workspace_file(
+                    external_file_id, workspace_id
+                )
+                if export_binary and len(export_binary) > truncated_size:
+                    logger.info(
+                        f"Export action: {len(export_binary):,} bytes "
+                        f"(vs {truncated_size} from download)"
+                    )
+                    binary = export_binary
+            except Exception as e:
+                logger.warning(f"Export fallback failed: {e}", exc_info=True)
+
+        # ---- Layer 3: SDK fallback (different code path) ----
+        if app_upper == "GOOGLEDRIVE" and (binary is None or len(binary) < _MIN_EXPECTED_SIZE):
+            truncated_size = len(binary) if binary else 0
+            logger.warning(
+                f"Export also returned {truncated_size} bytes. Trying SDK..."
             )
             try:
                 sdk_binary = await self._download_via_sdk(
@@ -115,26 +137,6 @@ class CloudFileDownloader:
                     binary = sdk_binary
             except Exception as e:
                 logger.warning(f"SDK fallback failed: {e}", exc_info=True)
-
-        # ---- Layer 3: GOOGLEDRIVE_DOWNLOAD_FILE2 (long-running op) ----
-        if app_upper == "GOOGLEDRIVE" and (binary is None or len(binary) < _MIN_EXPECTED_SIZE):
-            truncated_size = len(binary) if binary else 0
-            logger.warning(
-                f"SDK also returned {truncated_size} bytes. "
-                f"Trying GOOGLEDRIVE_DOWNLOAD_FILE2 (long-running)..."
-            )
-            try:
-                lr_binary = await self._download_via_long_running(
-                    external_file_id, workspace_id
-                )
-                if lr_binary and len(lr_binary) > truncated_size:
-                    logger.info(
-                        f"Long-running download: {len(lr_binary):,} bytes "
-                        f"(vs {truncated_size} from previous attempts)"
-                    )
-                    binary = lr_binary
-            except Exception as e:
-                logger.warning(f"Long-running fallback failed: {e}", exc_info=True)
 
         if binary is None or len(binary) == 0:
             raise RuntimeError(
@@ -419,7 +421,16 @@ class CloudFileDownloader:
                     with open(path, "rb") as f:
                         return f.read()
 
-        # Try extracting inline content
+        # Try extracting inline content — check nested data FIRST
+        # (SDK wraps: {data: {data: {downloaded_file_content: ...}}})
+        if isinstance(sdk_data, dict):
+            nested = sdk_data.get("data", {})
+            if isinstance(nested, dict):
+                content = self._extract_content(nested)
+                if content is not None:
+                    return self._to_bytes(content)
+
+        # Then try outer level
         content = self._extract_content(sdk_data)
         if content is not None:
             return self._to_bytes(content)
@@ -431,24 +442,27 @@ class CloudFileDownloader:
         return None
 
     # ------------------------------------------------------------------
-    # Layer 3: Long-running download (GOOGLEDRIVE_DOWNLOAD_FILE2)
+    # Layer 2b: Export Google Workspace file
     # ------------------------------------------------------------------
 
-    async def _download_via_long_running(
+    async def _export_google_workspace_file(
         self,
         file_id: str,
         workspace_id: UUID,
     ) -> Optional[bytes]:
         """
-        Download via GOOGLEDRIVE_DOWNLOAD_FILE2 — a long-running operation
-        that returns the full file content without truncation.
+        Export a native Google Doc/Sheet/Slide using the dedicated
+        GOOGLEDRIVE_EXPORT_GOOGLE_WORKSPACE_FILE action.
+
+        This is a different Composio action that may not have the same
+        ~500 byte truncation as GOOGLEDRIVE_DOWNLOAD_FILE.
         """
         api_key = self._get_api_key()
         entity_id = self._get_entity_id(workspace_id)
 
-        action = "GOOGLEDRIVE_DOWNLOAD_FILE2"
+        action = "GOOGLEDRIVE_EXPORT_GOOGLE_WORKSPACE_FILE"
         url = f"{COMPOSIO_API_BASE}/tools/execute/{action}"
-        logger.info(f"Calling long-running download: {url}")
+        logger.info(f"Calling export action: {url}")
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
@@ -459,75 +473,38 @@ class CloudFileDownloader:
                 },
                 json={
                     "entity_id": entity_id,
-                    "arguments": {"fileId": file_id},
+                    "arguments": {
+                        "fileId": file_id,
+                        "mimeType": "text/plain",
+                    },
                 },
             )
 
         if response.status_code != 200:
             logger.error(
-                f"Long-running download error {response.status_code}: "
+                f"Export action error {response.status_code}: "
                 f"{response.text[:500]}"
             )
             return None
 
         result = response.json()
-        logger.info(f"Long-running response keys: {list(result.keys())}")
+        logger.info(f"Export response keys: {list(result.keys())}")
 
-        # Long-running operations may return an operation ID to poll
-        operation_id = result.get("operation_id") or result.get("operationId")
-        if operation_id:
-            logger.info(f"Got operation ID: {operation_id}, polling for result...")
-            return await self._poll_operation(operation_id, api_key)
+        if not result.get("successful", result.get("success", True)):
+            error = result.get("error") or result.get("message") or "Unknown"
+            logger.error(f"Export action failed: {error}")
+            return None
 
-        # Or it may return data directly
         data = result.get("data", result)
         if isinstance(data, dict):
-            logger.info(f"Long-running data keys: {list(data.keys())}")
-        return self._extract_binary(data, label="long-running")
-
-    async def _poll_operation(
-        self,
-        operation_id: str,
-        api_key: str,
-        max_polls: int = 30,
-        poll_interval: float = 2.0,
-    ) -> Optional[bytes]:
-        """Poll a long-running Composio operation until complete."""
-        import asyncio
-
-        url = f"{COMPOSIO_API_BASE}/tools/operations/{operation_id}"
-
-        for attempt in range(max_polls):
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    url,
-                    headers={"x-api-key": api_key},
-                )
-
-            if response.status_code != 200:
-                logger.warning(
-                    f"Poll attempt {attempt + 1}: HTTP {response.status_code}"
-                )
-                await asyncio.sleep(poll_interval)
-                continue
-
-            result = response.json()
-            status = result.get("status", "").lower()
-            logger.info(f"Poll attempt {attempt + 1}: status={status}")
-
-            if status in ("completed", "done", "success"):
-                data = result.get("data", result)
-                return self._extract_binary(data, label="poll-result")
-
-            if status in ("failed", "error"):
-                error = result.get("error") or result.get("message") or "Unknown"
-                logger.error(f"Long-running operation failed: {error}")
-                return None
-
-            await asyncio.sleep(poll_interval)
-
-        logger.error(f"Operation {operation_id} timed out after {max_polls} polls")
-        return None
+            logger.info(f"Export data keys: {list(data.keys())}")
+            # Merge URL keys from metadata
+            metadata = result.get("metadata", {})
+            if isinstance(metadata, dict):
+                for key in _URL_KEYS:
+                    if key in metadata and key not in data:
+                        data[key] = metadata[key]
+        return self._extract_binary(data, label="export")
 
     # ------------------------------------------------------------------
     # Build params
