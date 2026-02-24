@@ -540,7 +540,7 @@ class UniversalRouter:
                     route_type="orchestrate",
                     agent_id=None,
                     confidence=confidence,
-                    reasoning=f"LLM selected Auto — orchestrate (confidence={confidence:.2f})",
+                    reasoning=f"LLM selected Auto - orchestrate (confidence={confidence:.2f})",
                 )
                 if self._cache is not None:
                     self._cache.put(

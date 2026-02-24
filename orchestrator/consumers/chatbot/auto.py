@@ -191,7 +191,7 @@ class AutoBrain:
             return ComplexityAssessment(
                 complexity=Complexity.CELL,
                 action=Action.RESPOND,
-                reasoning="Memory recall — Auto handles with context",
+                reasoning="Memory recall - Auto handles with context",
                 confidence=0.85,
             )
 

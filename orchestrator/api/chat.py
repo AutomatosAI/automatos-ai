@@ -329,7 +329,7 @@ async def stream_chat(
         response_headers["x-routing-agent-id"] = str(routing_decision.agent_id or "")
         response_headers["x-routing-confidence"] = f"{routing_decision.confidence:.2f}"
         response_headers["x-routing-type"] = routing_decision.route_type
-        response_headers["x-routing-reasoning"] = routing_decision.reasoning[:200]
+        response_headers["x-routing-reasoning"] = routing_decision.reasoning[:200].encode("ascii", "replace").decode("ascii")
         if routing_request_id:
             response_headers["x-routing-request-id"] = routing_request_id
     if complexity_assessment is not None:
