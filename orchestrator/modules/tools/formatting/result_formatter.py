@@ -67,24 +67,79 @@ class ToolResultFormatter:
         return excerpt
     
     @staticmethod
+    def _download_text_from_s3(s3_uri: str) -> str:
+        """Download a text file from S3 given an s3:// URI."""
+        try:
+            import boto3
+            parts = s3_uri.replace("s3://", "").split("/", 1)
+            bucket = parts[0]
+            key = parts[1] if len(parts) > 1 else ""
+            if not key:
+                return ""
+
+            s3_client = boto3.client(
+                's3',
+                region_name=os.getenv('AWS_REGION', 'us-east-1'),
+                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            )
+            response = s3_client.get_object(Bucket=bucket, Key=key)
+            content = response['Body'].read().decode('utf-8')
+            logger.info(f"[FullContent] ✅ Downloaded original from S3 ({len(content)} chars): {key}")
+            return content
+        except Exception as e:
+            logger.warning(f"[FullContent] S3 download failed for {s3_uri}: {e}")
+            return ""
+
+    # File types that can be read as plain text from S3
+    _TEXT_EXTENSIONS = frozenset({
+        '.md', '.txt', '.json', '.csv', '.yaml', '.yml',
+        '.xml', '.html', '.htm', '.py', '.js', '.ts', '.tsx',
+        '.jsx', '.go', '.rs', '.java', '.rb', '.sh', '.toml',
+    })
+
+    @staticmethod
     def _fetch_document_content_from_db(document_id: int) -> str:
         """
-        Fetch full document content by reassembling all chunks from document_chunks table.
-        This is the real content — documents are stored in S3/PostgreSQL, not local filesystem.
+        Fetch full document content:
+        1. Try downloading the original file from S3 (perfect formatting)
+        2. Fall back to reassembling chunks from document_chunks table
         """
-        logger.info(f"[FullContent] Fetching full document from DB for document_id={document_id}")
+        logger.info(f"[FullContent] Fetching full document for document_id={document_id}")
         try:
             from sqlalchemy import create_engine, text
             from config import config as app_config
             db_url = getattr(app_config, "DATABASE_URL", None)
             if not db_url:
-                import os
                 db_url = os.getenv("DATABASE_URL")
             if not db_url:
                 logger.warning("[FullContent] No DATABASE_URL — cannot fetch document content")
                 return ""
 
             engine = create_engine(db_url)
+
+            # Step 1: Try to get original file from S3
+            with engine.connect() as conn:
+                doc_row = conn.execute(
+                    text("SELECT file_path, filename FROM documents WHERE id = :doc_id"),
+                    {"doc_id": document_id},
+                ).fetchone()
+
+            if doc_row and doc_row[0] and str(doc_row[0]).startswith("s3://"):
+                file_path = str(doc_row[0])
+                filename = str(doc_row[1] or "").lower()
+
+                # Only download text-based files (not PDFs, DOCX, etc.)
+                ext = Path(filename).suffix.lower() if filename else ""
+                if ext in ToolResultFormatter._TEXT_EXTENSIONS:
+                    s3_content = ToolResultFormatter._download_text_from_s3(file_path)
+                    if s3_content:
+                        return s3_content
+                    logger.info(f"[FullContent] S3 download failed, falling back to chunk reassembly")
+                else:
+                    logger.info(f"[FullContent] Non-text file ({ext}), using chunk reassembly")
+
+            # Step 2: Fall back to chunk reassembly
             with engine.connect() as conn:
                 rows = conn.execute(
                     text("""
@@ -99,10 +154,10 @@ class ToolResultFormatter:
                 full_content = "\n\n".join(row[0] for row in rows if row[0])
                 logger.info(f"[FullContent] ✅ Assembled {len(rows)} chunks ({len(full_content)} chars) for doc {document_id}")
                 return full_content
-            logger.warning(f"[FullContent] No chunks found in document_chunks for document_id={document_id}")
+            logger.warning(f"[FullContent] No content found for document_id={document_id}")
             return ""
         except Exception as e:
-            logger.warning(f"[FullContent] Failed to fetch document content from DB for doc {document_id}: {e}", exc_info=True)
+            logger.warning(f"[FullContent] Failed for doc {document_id}: {e}", exc_info=True)
             return ""
 
     @staticmethod
