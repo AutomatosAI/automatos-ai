@@ -294,23 +294,51 @@ class AgentPlatformTools:
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)
                 chunks = rag_result.chunks if hasattr(rag_result, 'chunks') else []
                 self.logger.info(f"  📊 RAG returned {len(chunks)} results")
-                
-                # Convert chunks to raw dicts for formatter
+
+                # Look up real document names from PostgreSQL using document_ids
+                # S3 Vectors stores temp filenames — the real names are in the documents table
+                doc_name_cache = {}
+                doc_ids = set()
+                for chunk in chunks:
+                    doc_id = chunk.get("document_id") or chunk.get("metadata", {}).get("document_id")
+                    if doc_id:
+                        doc_ids.add(int(doc_id) if doc_id else 0)
+
+                if doc_ids:
+                    try:
+                        from sqlalchemy import text as _text
+                        rows = self.db.execute(
+                            _text("SELECT id, filename, file_path FROM documents WHERE id = ANY(:ids)"),
+                            {"ids": list(doc_ids)},
+                        ).fetchall()
+                        for row in rows:
+                            doc_name_cache[row[0]] = {"filename": row[1], "file_path": row[2]}
+                    except Exception as e:
+                        self.logger.warning(f"  ⚠️ Failed to look up document names: {e}")
+
+                # Convert chunks to raw dicts — include document_id and real filename
                 raw_results = []
                 for chunk in chunks[:limit]:
+                    doc_id = chunk.get("document_id") or chunk.get("metadata", {}).get("document_id")
+                    doc_id = int(doc_id) if doc_id else None
+                    doc_info = doc_name_cache.get(doc_id, {})
+                    real_filename = doc_info.get("filename") or chunk.get("source_file", "knowledge-base")
+
                     raw_results.append({
                         "content": chunk.get("content", ""),
-                        "source": chunk.get("source_file", "knowledge-base"),
-                        "similarity": float(chunk.get("similarity", 0.0))
+                        "source": real_filename,
+                        "document_id": doc_id,
+                        "similarity": float(chunk.get("similarity", 0.0)),
+                        "metadata": chunk.get("metadata", {}),
                     })
-                
-                # Use unified formatter - NO MORE DUPLICATE LOGIC
+
+                # Use unified formatter
                 formatted = ToolResultFormatter.format_documents(raw_results)
-                
+
                 self.logger.info(f"  ✅ Returning {len(formatted)} formatted results")
                 if formatted:
                     self.logger.info(f"  📄 Sample: {formatted[0].get('excerpt', '')[:100]}...")
-                
+
                 # Return standardized format (empty results are still success)
                 return ToolResultFormatter.standardize_result(
                     {"success": True, "results": formatted},
@@ -350,14 +378,41 @@ class AgentPlatformTools:
                 
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)
                 chunks = rag_result.chunks if hasattr(rag_result, 'chunks') else []
-                
-                # Convert to raw format for formatter
+
+                # Look up real document names (same pattern as search_knowledge)
+                doc_name_cache = {}
+                doc_ids = set()
+                for chunk in chunks:
+                    doc_id = chunk.get("document_id") or chunk.get("metadata", {}).get("document_id")
+                    if doc_id:
+                        doc_ids.add(int(doc_id) if doc_id else 0)
+
+                if doc_ids:
+                    try:
+                        from sqlalchemy import text as _text
+                        rows = self.db.execute(
+                            _text("SELECT id, filename, file_path FROM documents WHERE id = ANY(:ids)"),
+                            {"ids": list(doc_ids)},
+                        ).fetchall()
+                        for row in rows:
+                            doc_name_cache[row[0]] = {"filename": row[1], "file_path": row[2]}
+                    except Exception as e:
+                        self.logger.warning(f"  ⚠️ Failed to look up document names: {e}")
+
+                # Convert to raw format — include document_id and real filename
                 raw_results = []
                 for chunk in chunks[:limit]:
+                    doc_id = chunk.get("document_id") or chunk.get("metadata", {}).get("document_id")
+                    doc_id = int(doc_id) if doc_id else None
+                    doc_info = doc_name_cache.get(doc_id, {})
+                    real_filename = doc_info.get("filename") or chunk.get("source_file", "knowledge-base")
+
                     raw_results.append({
                         "content": chunk.get("content", ""),
-                        "source": chunk.get("source_file", "knowledge-base"),
-                        "similarity": float(chunk.get("similarity", 0.0))
+                        "source": real_filename,
+                        "document_id": doc_id,
+                        "similarity": float(chunk.get("similarity", 0.0)),
+                        "metadata": chunk.get("metadata", {}),
                     })
                 
                 # Use unified formatter

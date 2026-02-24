@@ -67,9 +67,43 @@ class ToolResultFormatter:
         return excerpt
     
     @staticmethod
+    def _fetch_document_content_from_db(document_id: int) -> str:
+        """
+        Fetch full document content by reassembling all chunks from document_chunks table.
+        This is the real content — documents are stored in S3/PostgreSQL, not local filesystem.
+        """
+        try:
+            from sqlalchemy import create_engine, text
+            from config import config as app_config
+            db_url = getattr(app_config, "DATABASE_URL", None)
+            if not db_url:
+                import os
+                db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                return ""
+
+            engine = create_engine(db_url)
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text("""
+                        SELECT content FROM document_chunks
+                        WHERE document_id = :doc_id
+                        ORDER BY (metadata->>'chunk_index')::int NULLS LAST, id
+                    """),
+                    {"doc_id": document_id},
+                ).fetchall()
+
+            if rows:
+                return "\n\n".join(row[0] for row in rows if row[0])
+            return ""
+        except Exception as e:
+            logger.warning(f"Failed to fetch document content from DB for doc {document_id}: {e}")
+            return ""
+
+    @staticmethod
     def _fetch_document_content(file_path: str, max_size_kb: int = 500) -> str:
         """
-        Fetch full document content from file system.
+        Fetch full document content from file system (legacy fallback).
         
         Args:
             file_path: Full path to document file
@@ -442,62 +476,72 @@ class ToolResultFormatter:
         frontend_data = {}
         
         if tool_name in ['search_knowledge', 'search_documents', 'semantic_search']:
-            # Group documents by source file
-            docs_by_source = {}
+            # Group chunks by document_id (not filename — filenames from S3 Vectors can be temp names)
+            docs_by_id = {}
             for doc in standardized['results']:
                 source = doc.get('filename', doc.get('source', 'Unknown'))
                 content = doc.get('content', '')
                 excerpt = doc.get('excerpt', '')
                 similarity = doc.get('similarity', 0.0)
-                
-                # Use the source (filename) directly - this is the actual file on disk
-                resolved = ToolResultFormatter._resolve_document_path(source)
-                file_path = str(resolved) if resolved else f"/var/automatos/documents/{source}"
-                
-                if source not in docs_by_source:
-                    docs_by_source[source] = {
+                document_id = doc.get('document_id')
+
+                # Group by document_id when available, fall back to filename
+                group_key = document_id if document_id else source
+
+                if group_key not in docs_by_id:
+                    docs_by_id[group_key] = {
                         'source': source,
-                        'file_path': file_path,
+                        'document_id': document_id,
                         'chunks': [],
                         'max_similarity': 0.0,
                         'title': source.replace('.md', '').replace('.pdf', '').replace('-', ' ').replace('_', ' ').title()
                     }
-                
-                docs_by_source[source]['chunks'].append({
+
+                docs_by_id[group_key]['chunks'].append({
                     'content': content,
-                    'excerpt': excerpt
+                    'excerpt': excerpt,
+                    'similarity': similarity,
                 })
-                docs_by_source[source]['max_similarity'] = max(
-                    docs_by_source[source]['max_similarity'],
+                docs_by_id[group_key]['max_similarity'] = max(
+                    docs_by_id[group_key]['max_similarity'],
                     similarity
                 )
-            
+
             # Sort by relevance and convert to list
             grouped_docs = sorted(
-                docs_by_source.values(),
+                docs_by_id.values(),
                 key=lambda d: d['max_similarity'],
                 reverse=True
             )
-            
-            # Format for frontend display
-            frontend_data['documents'] = [
-                {
+
+            # Fetch full document content from document_chunks table (not local filesystem)
+            frontend_data['documents'] = []
+            for doc in grouped_docs:
+                document_id = doc.get('document_id')
+                full_content = ""
+
+                # Reconstruct full document from all chunks in DB
+                if document_id:
+                    full_content = ToolResultFormatter._fetch_document_content_from_db(document_id)
+
+                # Fall back to concatenating matched chunks if DB fetch fails
+                if not full_content:
+                    full_content = "\n\n".join(c['content'] for c in doc['chunks'])
+
+                frontend_data['documents'].append({
                     'filename': doc['source'],
                     'title': doc['title'],
-                    'file_path': doc['file_path'],
+                    'document_id': document_id,
                     'relevance': int(doc['max_similarity'] * 100),
                     'chunk_count': len(doc['chunks']),
-                    'preview': doc['chunks'][0]['excerpt'] if doc['chunks'] else '',
-                    'download_url': f"/api/documents/download?path={doc['file_path']}",
-                    # Fetch FULL document content from file system for artifact viewer
-                    'full_content': ToolResultFormatter._fetch_document_content(doc['file_path']),
-                    'has_full_content': True,  # Flag for frontend to know full content is loaded
+                    'preview': doc['chunks'][0].get('excerpt') or doc['chunks'][0].get('content', '')[:200] if doc['chunks'] else '',
+                    'download_url': f"/api/documents/{document_id}/download" if document_id else None,
+                    'full_content': full_content,
+                    'content': full_content,
+                    'has_full_content': bool(document_id and full_content),
                     'content_type': ToolResultFormatter._detect_content_type(doc['source']),
-                    # Provide chunk list for RAG chunk inspector UI
                     'chunks': doc['chunks'],
-                }
-                for doc in grouped_docs
-            ]
+                })
         
         elif tool_name in ['search_codebase', 'search_code']:
             frontend_data['code_snippets'] = standardized['results']
