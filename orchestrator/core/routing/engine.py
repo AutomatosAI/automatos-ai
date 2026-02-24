@@ -196,20 +196,31 @@ class UniversalRouter:
     # ------------------------------------------------------------------
 
     def _tier2a_rules(self, envelope: RequestEnvelope) -> Optional[RoutingDecision]:
-        """Match against routing_rules for the workspace + source."""
+        """Match against routing_rules that have an explicit source_pattern.
+
+        Rules with ``source_pattern=None`` are NOT matched here — they are
+        catch-all rules that should only fire via Tier 2c (intent keywords).
+        This prevents a single rule from hijacking ALL requests regardless of
+        content (the bug that routed everything to Document Generation).
+        """
         rules = (
             self._db.query(RoutingRule)
             .filter(
                 RoutingRule.workspace_id == envelope.workspace_id,
                 RoutingRule.is_active.is_(True),
+                RoutingRule.source_pattern.isnot(None),
             )
             .order_by(RoutingRule.priority.desc())
             .all()
         )
 
+        logger.debug(
+            "[router] Tier 2a: %d rules with source_pattern for workspace %s",
+            len(rules), envelope.workspace_id,
+        )
+
         for rule in rules:
-            # Source pattern match (None / empty means "match any")
-            if rule.source_pattern and rule.source_pattern != envelope.source.value:
+            if rule.source_pattern != envelope.source.value:
                 continue
 
             # Build decision from matching rule
@@ -363,8 +374,38 @@ class UniversalRouter:
             )
 
             if not scored:
-                logger.debug("[router] Tier 2.5: no agents with embeddings — skipping")
+                # Check why — are there agents but none with embeddings?
+                agent_count = (
+                    self._db.query(Agent)
+                    .filter(
+                        Agent.workspace_id == envelope.workspace_id,
+                        Agent.status == "active",
+                    )
+                    .count()
+                )
+                embedded_count = (
+                    self._db.query(Agent)
+                    .filter(
+                        Agent.workspace_id == envelope.workspace_id,
+                        Agent.status == "active",
+                        Agent.semantic_embedding.isnot(None),
+                    )
+                    .count()
+                )
+                logger.warning(
+                    "[router] Tier 2.5: no scored agents — "
+                    "%d active agents, %d with embeddings in workspace %s",
+                    agent_count, embedded_count, envelope.workspace_id,
+                )
                 return None
+
+            # Log top scores for visibility
+            top_3 = scored[:3]
+            for agent, score in top_3:
+                logger.info(
+                    "[router] Tier 2.5 candidate: '%s' (id=%d) score=%.3f",
+                    agent.name, agent.id, score,
+                )
 
             top_agent, top_score = scored[0]
 

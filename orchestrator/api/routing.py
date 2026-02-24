@@ -444,3 +444,98 @@ async def setup_trigger(
         logger.error("Error setting up trigger: %s", e)
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# POST /api/routing/semantic/reindex  (PRD-64)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/semantic/reindex")
+async def reindex_semantic_embeddings(
+    force: bool = Query(False, description="Force re-embed even if unchanged"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Force regenerate semantic embeddings for all agents in the workspace."""
+    try:
+        from core.routing.semantic_indexer import embed_workspace_agents
+
+        count = await embed_workspace_agents(ctx.workspace_id, db, force=force)
+
+        # Report total agents vs embedded
+        from core.models.core import Agent
+
+        total = (
+            db.query(Agent)
+            .filter(
+                Agent.workspace_id == ctx.workspace_id,
+                Agent.status == "active",
+            )
+            .count()
+        )
+        embedded = (
+            db.query(Agent)
+            .filter(
+                Agent.workspace_id == ctx.workspace_id,
+                Agent.status == "active",
+                Agent.semantic_embedding.isnot(None),
+            )
+            .count()
+        )
+
+        return {
+            "status": "ok",
+            "reindexed": count,
+            "total_agents": total,
+            "agents_with_embeddings": embedded,
+            "force": force,
+        }
+    except Exception as e:
+        logger.error("Error reindexing semantic embeddings: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /api/routing/semantic/status  (PRD-64)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/semantic/status")
+async def semantic_status(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Check semantic embedding status for all agents in the workspace."""
+    try:
+        from core.models.core import Agent
+
+        agents = (
+            db.query(Agent)
+            .filter(
+                Agent.workspace_id == ctx.workspace_id,
+                Agent.status == "active",
+            )
+            .all()
+        )
+
+        agent_status = []
+        for a in agents:
+            has_embedding = a.semantic_embedding is not None
+            embedding_dims = len(a.semantic_embedding) if has_embedding else 0
+            agent_status.append({
+                "id": a.id,
+                "name": a.name,
+                "has_embedding": has_embedding,
+                "embedding_dims": embedding_dims,
+                "text_hash": a.semantic_text_hash,
+            })
+
+        return {
+            "total_agents": len(agents),
+            "agents_with_embeddings": sum(1 for a in agent_status if a["has_embedding"]),
+            "agents": agent_status,
+        }
+    except Exception as e:
+        logger.error("Error checking semantic status: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

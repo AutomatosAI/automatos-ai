@@ -263,8 +263,16 @@ async def lifespan(app: FastAPI):
                 """Background task: embed agents in all workspaces."""
                 try:
                     from core.database.database import SessionLocal as _SL
+                    from core.llm.embedding_manager import get_embedding_manager
+                    from core.models.core import Agent as _Agent
+
                     _db = _SL()
                     try:
+                        # Log provider info for debugging
+                        emgr = get_embedding_manager()
+                        emgr._ensure_provider()
+                        logger.info(f"PRD-64: Embedding provider: {emgr.get_provider_info()}")
+
                         ws_ids = [w.id for w in _db.query(_Workspace.id).all()]
                         total = 0
                         for ws_id in ws_ids:
@@ -272,11 +280,21 @@ async def lifespan(app: FastAPI):
                                 total += await _embed_ws(ws_id, _db)
                             except Exception:
                                 logger.warning("PRD-64: Failed to embed workspace %s", ws_id, exc_info=True)
-                        logger.info(f"PRD-64: Semantic embeddings seeded — {total} agent(s) across {len(ws_ids)} workspace(s)")
+
+                        # Report embedding coverage
+                        all_agents = _db.query(_Agent).filter(_Agent.status == "active").count()
+                        with_embeddings = _db.query(_Agent).filter(
+                            _Agent.status == "active",
+                            _Agent.semantic_embedding.isnot(None),
+                        ).count()
+                        logger.info(
+                            f"PRD-64: Semantic embeddings seeded — "
+                            f"{total} new, {with_embeddings}/{all_agents} agents have embeddings"
+                        )
                     finally:
                         _db.close()
                 except Exception as e:
-                    logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}")
+                    logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}", exc_info=True)
 
             _asyncio.create_task(_embed_all_agents_on_startup())
         except Exception as e:
