@@ -28,7 +28,41 @@ from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/agents", tags=["agents"]) 
+router = APIRouter(prefix="/api/agents", tags=["agents"])
+
+
+# ------------------------------------------------------------------
+# PRD-64: Semantic embedding helper (fire-and-forget)
+# ------------------------------------------------------------------
+
+def _reindex_agent_embedding(agent: Agent, db: Session) -> None:
+    """Trigger semantic re-embedding for a single agent in background.
+
+    Creates its own DB session to avoid lifecycle issues with the request session.
+    Non-blocking: failures are logged but never bubble up to the API caller.
+    """
+    import asyncio
+
+    agent_id = agent.id  # Capture before session closes
+
+    async def _do_embed():
+        from core.database.database import SessionLocal
+        _db = SessionLocal()
+        try:
+            from core.routing.semantic_indexer import embed_agent
+            _agent = _db.query(Agent).get(agent_id)
+            if _agent:
+                await embed_agent(_agent, _db)
+        except Exception:
+            logger.warning("[semantic] Background embed failed for agent %d", agent_id, exc_info=True)
+        finally:
+            _db.close()
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_do_embed())
+    except RuntimeError:
+        pass
 
 
 def _stable_tool_id(name: str) -> int:
@@ -342,14 +376,16 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
             created_agents.append(agent)
         
         db.commit()
-        
+
         # Refresh and build responses
         result = []
         for agent in created_agents:
             db.refresh(agent)
+            # PRD-64: Trigger semantic embedding (non-blocking)
+            _reindex_agent_embedding(agent, db)
             agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
             result.append(_build_agent_response(agent_with_skills, db))
-        
+
         return result
         
     except HTTPException:
@@ -422,14 +458,17 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         
         db.commit()
         db.refresh(agent)
-        
+
+        # PRD-64: Trigger semantic embedding (non-blocking)
+        _reindex_agent_embedding(agent, db)
+
         # Load skills and tools for response
         agent_with_skills_and_tools = db.query(Agent).options(
             joinedload(Agent.skills),
         ).filter(Agent.id == agent.id).first()
-        
+
         return _build_agent_response(agent_with_skills_and_tools, db)
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -596,7 +635,10 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestCont
         
         agent.skills.extend(skills)
         db.commit()
-        
+
+        # PRD-64: Trigger semantic embedding (non-blocking)
+        _reindex_agent_embedding(agent, db)
+
         return {"data": {"message": "Skills added successfully", "agent_id": agent_id, "skill_ids": skill_ids}}
     except HTTPException:
         raise
@@ -684,12 +726,15 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
         
         db.commit()
         db.refresh(agent)
-        
+
+        # PRD-64: Trigger semantic embedding (non-blocking)
+        _reindex_agent_embedding(agent, db)
+
         # Load with skills for response
         agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
-        
+
         return _build_agent_response(agent_with_skills, db)
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -741,3 +786,36 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
         db.rollback()
         logger.error(f"Error deleting agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ------------------------------------------------------------------
+# PRD-64: Bulk re-index semantic embeddings
+# ------------------------------------------------------------------
+
+@router.post("/reindex-embeddings")
+async def reindex_embeddings(
+    force: bool = Query(False, description="Force re-embed even if text unchanged"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Re-embed all active agents in the workspace for semantic routing.
+
+    Use ``force=true`` to regenerate even when the semantic text hash has not changed.
+    """
+    try:
+        from core.routing.semantic_indexer import embed_workspace_agents
+
+        count = await embed_workspace_agents(ctx.workspace_id, db, force=force)
+        total = db.query(Agent).filter(
+            Agent.workspace_id == ctx.workspace_id, Agent.status == "active"
+        ).count()
+
+        return {
+            "embedded": count,
+            "total_active": total,
+            "force": force,
+            "workspace_id": str(ctx.workspace_id),
+        }
+    except Exception as e:
+        logger.error(f"Error reindexing embeddings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to reindex embeddings")

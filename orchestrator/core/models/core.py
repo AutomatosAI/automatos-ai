@@ -211,6 +211,10 @@ class Agent(Base):
     custom_persona_prompt = Column(Text, nullable=True)
     use_custom_persona = Column(Boolean, default=False, server_default='false')
 
+    # PRD-64: Semantic routing embedding
+    semantic_embedding = Column(JSONB, nullable=True)       # 2048-float vector for cosine similarity
+    semantic_text_hash = Column(String(64), nullable=True)  # SHA-256 for staleness detection
+
     # Evaluation fields for enhanced assessment
     quality_score = Column(Float, nullable=True)  # Quality metric
     emergence_score = Column(Float, nullable=True)  # Emergence metric

@@ -4,13 +4,14 @@ Universal Router Engine (PRD-50: US-003, US-004).
 Core routing engine that resolves a RequestEnvelope to a RoutingDecision
 using a tiered strategy:
 
-  Tier 0 — User override (agent_id or workflow_id explicitly set)
-  Tier 1 — Cache lookup (RoutingCache hit)
-  Tier 2 — Rule-based matching:
+  Tier 0   — User override (agent_id or workflow_id explicitly set)
+  Tier 1   — Cache lookup (RoutingCache hit)
+  Tier 2   — Rule-based matching:
     2a: routing_rules table (workspace + source pattern)
     2b: TriggerSubscription (for jira_trigger source)
     2c: IntentClassifier keyword matching against routing rules
-  Tier 3 — LLM classification (fallback when tiers 0-2 produce no match)
+  Tier 2.5 — Semantic similarity (PRD-64: cosine sim on agent embeddings)
+  Tier 3   — LLM classification (fallback, uses semantic candidates if available)
 
 Returns None only when all tiers (including LLM) fail to route.
 """
@@ -70,6 +71,8 @@ class UniversalRouter:
         self._db = db
         self._cache = cache
         self._intent_classifier = IntentClassifier()
+        # PRD-64: Semantic candidates from Tier 2.5 (used to narrow Tier 3)
+        self._semantic_candidates: list = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -82,6 +85,9 @@ class UniversalRouter:
         or ``None`` when no tier can resolve the request (the caller
         should fall back to LLM classification or default agent).
         """
+
+        # PRD-64: Reset semantic candidates each routing pass
+        self._semantic_candidates = []
 
         env_hash = _envelope_hash(envelope)
         logger.info(
@@ -123,6 +129,16 @@ class UniversalRouter:
         decision = self._tier2c_intent_classifier(envelope)
         if decision is not None:
             logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
+            self._log_decision(envelope, decision, env_hash)
+            return decision
+
+        # Tier 2.5 — Semantic similarity (PRD-64)
+        decision = await self._tier2_5_semantic(envelope)
+        if decision is not None:
+            logger.info(
+                "[router] Tier 2.5 hit (semantic): agent_id=%s confidence=%.2f",
+                decision.agent_id, decision.confidence,
+            )
             self._log_decision(envelope, decision, env_hash)
             return decision
 
@@ -326,6 +342,64 @@ class UniversalRouter:
         return None
 
     # ------------------------------------------------------------------
+    # Tier 2.5 — Semantic similarity (PRD-64)
+    # ------------------------------------------------------------------
+
+    async def _tier2_5_semantic(
+        self, envelope: RequestEnvelope
+    ) -> Optional[RoutingDecision]:
+        """Use pre-computed agent embeddings to find the best match via cosine
+        similarity.  High-confidence match routes directly; ambiguous results
+        are stored as candidates for Tier 3 (narrowed LLM prompt)."""
+        try:
+            from core.routing.semantic_indexer import (
+                find_similar_agents,
+                SIMILARITY_DIRECT_ROUTE,
+                MAX_LLM_CANDIDATES,
+            )
+
+            scored = await find_similar_agents(
+                envelope.content, envelope.workspace_id, self._db
+            )
+
+            if not scored:
+                logger.debug("[router] Tier 2.5: no agents with embeddings — skipping")
+                return None
+
+            top_agent, top_score = scored[0]
+
+            if top_score >= SIMILARITY_DIRECT_ROUTE:
+                decision = RoutingDecision(
+                    route_type="agent",
+                    agent_id=top_agent.id,
+                    confidence=top_score,
+                    reasoning=f"Semantic match '{top_agent.name}' (score={top_score:.2f})",
+                )
+                if self._cache is not None:
+                    self._cache.put(
+                        envelope.workspace_id,
+                        envelope.content,
+                        envelope.source,
+                        decision,
+                    )
+                return decision
+
+            # Below direct threshold — store top candidates for Tier 3
+            self._semantic_candidates = [
+                agent for agent, _score in scored[:MAX_LLM_CANDIDATES]
+            ]
+            logger.info(
+                "[router] Tier 2.5: no direct match (top=%.2f), "
+                "passing %d candidates to Tier 3",
+                top_score, len(self._semantic_candidates),
+            )
+            return None
+
+        except Exception:
+            logger.exception("[router] Tier 2.5 failed — falling through")
+            return None
+
+    # ------------------------------------------------------------------
     # Tier 3 — LLM classification
     # ------------------------------------------------------------------
 
@@ -341,15 +415,23 @@ class UniversalRouter:
         low-confidence results) or None on failure.
         """
         try:
-            # Query active agents in the workspace
-            agents: List[Agent] = (
-                self._db.query(Agent)
-                .filter(
-                    Agent.workspace_id == envelope.workspace_id,
-                    Agent.status == "active",
+            # PRD-64: Use pre-filtered semantic candidates if available
+            if self._semantic_candidates:
+                agents = self._semantic_candidates
+                logger.info(
+                    "[router] Tier 3: using %d pre-filtered semantic candidates",
+                    len(agents),
                 )
-                .all()
-            )
+            else:
+                # Query active agents in the workspace
+                agents: List[Agent] = (
+                    self._db.query(Agent)
+                    .filter(
+                        Agent.workspace_id == envelope.workspace_id,
+                        Agent.status == "active",
+                    )
+                    .all()
+                )
 
             if not agents:
                 logger.warning(

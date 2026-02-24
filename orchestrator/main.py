@@ -236,8 +236,54 @@ async def lifespan(app: FastAPI):
             logger.info(f"PRD-63: Document templates seeded for {len(workspace_ids)} workspace(s)")
         except Exception as e:
             logger.warning(f"PRD-63 template seed init: {e}")
+        # PRD-64: Ensure semantic routing columns exist on agents table
+        try:
+            from sqlalchemy import text as _t64
+            from core.database.database import engine as _engine64
+            with _engine64.connect() as conn:
+                conn.execute(_t64(
+                    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
+                    "semantic_embedding JSONB"
+                ))
+                conn.execute(_t64(
+                    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
+                    "semantic_text_hash VARCHAR(64)"
+                ))
+                conn.commit()
+        except Exception as col_err:
+            logger.debug(f"PRD-64 column migration check: {col_err}")
+
+        # PRD-64: Seed semantic embeddings for agents (non-blocking fire-and-forget)
+        try:
+            import asyncio as _asyncio
+            from core.routing.semantic_indexer import embed_workspace_agents as _embed_ws
+            from core.models.workspaces import Workspace as _Workspace
+
+            async def _embed_all_agents_on_startup():
+                """Background task: embed agents in all workspaces."""
+                try:
+                    from core.database.database import SessionLocal as _SL
+                    _db = _SL()
+                    try:
+                        ws_ids = [w.id for w in _db.query(_Workspace.id).all()]
+                        total = 0
+                        for ws_id in ws_ids:
+                            try:
+                                total += await _embed_ws(ws_id, _db)
+                            except Exception:
+                                logger.warning("PRD-64: Failed to embed workspace %s", ws_id, exc_info=True)
+                        logger.info(f"PRD-64: Semantic embeddings seeded — {total} agent(s) across {len(ws_ids)} workspace(s)")
+                    finally:
+                        _db.close()
+                except Exception as e:
+                    logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}")
+
+            _asyncio.create_task(_embed_all_agents_on_startup())
+        except Exception as e:
+            logger.warning(f"PRD-64: Could not schedule startup embedding (non-fatal): {e}")
+
         logger.info("Database ready")
-        
+
         # NOTE: Redis client uses lazy initialization via get_redis_client()
         # Services will auto-initialize on first use from environment variables
         logger.info("Redis client will lazy-initialize on first use")

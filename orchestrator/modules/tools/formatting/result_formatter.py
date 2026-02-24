@@ -712,13 +712,15 @@ class ToolResultFormatter:
 
         elif tool_name == "generate_document":
             # PRD-63: Document Generation — provide download widget data
+            # Raw result is {"success": True, "results": [{"filename": ..., "download_url": ..., "size_kb": ...}]}
+            doc_result = (result.get('results') or [{}])[0] if isinstance(result.get('results'), list) else result
             frontend_data['generated_document'] = {
-                'filename': result.get('filename', 'document'),
-                'format': result.get('format', 'pdf'),
-                'download_url': result.get('download_url', ''),
-                'preview_url': result.get('preview_url'),
-                'size_kb': round(result.get('size', 0) / 1024, 1),
-                'title': result.get('title', result.get('filename', 'Document')),
+                'filename': doc_result.get('filename', 'document'),
+                'format': doc_result.get('format', 'pdf'),
+                'download_url': doc_result.get('download_url', ''),
+                'preview_url': doc_result.get('preview_url'),
+                'size_kb': doc_result.get('size_kb', 0),
+                'title': doc_result.get('title', doc_result.get('filename', 'Document')),
             }
             logger.info(f"[FrontendData] generate_document: {frontend_data['generated_document']['filename']}")
 
@@ -810,11 +812,14 @@ class ToolResultFormatter:
                 summary_parts.append("\nAPI returned 0 items for this query.")
 
         elif tool_name == "generate_document":
-            filename = result.get('filename', 'document')
-            fmt = result.get('format', 'pdf')
-            size_kb = round(result.get('size', 0) / 1024, 1)
+            doc_result = (result.get('results') or [{}])[0] if isinstance(result.get('results'), list) else result
+            filename = doc_result.get('filename', 'document')
+            fmt = doc_result.get('format', 'pdf')
+            size_kb = doc_result.get('size_kb', 0)
+            download_url = doc_result.get('download_url', '')
             summary_parts.append(f"\nGenerated {fmt.upper()} document: {filename} ({size_kb} KB)")
-            summary_parts.append("The document is ready for download via the widget below.")
+            summary_parts.append(f"Download URL: {download_url}")
+            summary_parts.append("IMPORTANT: Show the download link to the user using the exact URL above. Do NOT invent document:// links.")
 
         full_summary = "\n".join(summary_parts)
         
