@@ -488,6 +488,15 @@ class UniversalRouter:
             # Build agent descriptions including assigned app names
             agent_descriptions = self._build_agent_descriptions(agents)
 
+            # Log what the LLM will see
+            for desc in agent_descriptions:
+                apps_str = ", ".join(desc["apps"]) if desc["apps"] else "none"
+                logger.info(
+                    "[router] Tier 3 agent: id=%s name='%s' apps=[%s] desc='%s'",
+                    desc["agent_id"], desc["name"], apps_str,
+                    (desc["description"] or "")[:100],
+                )
+
             # Build the classification prompt
             prompt = self._build_classification_prompt(
                 envelope.content, agent_descriptions
@@ -502,9 +511,9 @@ class UniversalRouter:
                 logger.warning("[router] Tier 3: empty LLM response")
                 return None
 
-            logger.debug(
-                "[router] Tier 3: raw LLM response (first 500 chars): %s",
-                response.content[:500],
+            logger.info(
+                "[router] Tier 3: LLM response: %s",
+                response.content[:300],
             )
 
             # Parse the response
