@@ -1225,17 +1225,43 @@ class DocumentManager:
             
             raise
     
+    def _get_target_dimension(self) -> int:
+        """Get the configured embedding dimension for validation."""
+        try:
+            return self.embedding_manager.get_dimension()
+        except Exception:
+            return int(os.getenv("S3_VECTORS_DIMENSION", "2048"))
+
+    def _ensure_embedding_dimension(self, embedding: List[float]) -> List[float]:
+        """Truncate embedding to target dimension if needed (Matryoshka support)."""
+        target = self._get_target_dimension()
+        if len(embedding) > target:
+            return embedding[:target]
+        return embedding
+
     async def _generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for text with caching"""
         try:
             # Try cache first (massive cost savings!)
             from core.cache import get_cache_service
             cache = get_cache_service()
+            target_dim = self._get_target_dimension()
 
             cached_embedding = cache.get_embedding(text)
             if cached_embedding is not None:
-                logger.debug(f"✅ Using cached embedding (saved API call)")
-                return cached_embedding
+                # Validate dimension — stale cache may have wrong size
+                if len(cached_embedding) == target_dim:
+                    logger.debug(f"✅ Using cached embedding (saved API call)")
+                    return cached_embedding
+                elif len(cached_embedding) > target_dim:
+                    # Matryoshka: truncate and re-cache
+                    truncated = cached_embedding[:target_dim]
+                    cache.set_embedding(text, truncated)
+                    logger.debug(f"✅ Truncated cached embedding {len(cached_embedding)}→{target_dim}")
+                    return truncated
+                else:
+                    # Dimension too small — discard, regenerate
+                    logger.warning(f"Cached embedding dim {len(cached_embedding)} < {target_dim}, regenerating")
 
             # Cache miss - generate new embedding
             embedding = await self.embedding_manager.generate_embedding(text)
@@ -1263,21 +1289,44 @@ class DocumentManager:
             # Check cache for all texts
             cached = cache.get_embeddings_batch(texts)
 
-            # Separate hits from misses
+            # Separate hits from misses (with dimension validation)
             miss_indices = []
             miss_texts = []
             results = [None] * len(texts)
+            target_dim = self._get_target_dimension()
+            stale_count = 0
+            recache_entries = {}
 
             for i, text in enumerate(texts):
-                if cached.get(text) is not None:
-                    results[i] = cached[text]
+                emb = cached.get(text)
+                if emb is not None:
+                    if len(emb) == target_dim:
+                        results[i] = emb
+                    elif len(emb) > target_dim:
+                        # Matryoshka: truncate stale cache entry
+                        truncated = emb[:target_dim]
+                        results[i] = truncated
+                        recache_entries[text] = truncated
+                        stale_count += 1
+                    else:
+                        # Too small — treat as miss
+                        miss_indices.append(i)
+                        miss_texts.append(text)
+                        stale_count += 1
                 else:
                     miss_indices.append(i)
                     miss_texts.append(text)
 
             cache_hits = len(texts) - len(miss_texts)
+            if stale_count > 0:
+                logger.warning(f"Embedding cache: {stale_count} stale entries (dim != {target_dim}), truncating/regenerating")
             if cache_hits > 0:
                 logger.info(f"Embedding cache: {cache_hits}/{len(texts)} hits, {len(miss_texts)} misses")
+
+            # Re-cache truncated entries
+            if recache_entries:
+                cache.set_embeddings_batch(recache_entries)
+                logger.info(f"Re-cached {len(recache_entries)} truncated embeddings")
 
             if not miss_texts:
                 return results

@@ -6,8 +6,8 @@ Downloads files from cloud storage providers via the Composio API.
 
 Strategy per provider:
 - **Dropbox, OneDrive, Box**: Composio v3 REST API returns full content.
-- **Google Drive**: Composio truncates inline content to ~500 bytes.
-  Fallback chain: v3 API → SDK → GOOGLEDRIVE_DOWNLOAD_FILE2 (long-running).
+- **Google Drive**: Composio v3 API truncates inline content to ~500 bytes.
+  Fallback: SDK (which saves full file to disk on the container).
 """
 
 import base64
@@ -96,34 +96,14 @@ class CloudFileDownloader:
         data = await self._execute_via_rest_api(action, app_upper, params, workspace_id)
         binary = self._extract_binary(data, label="v3 REST")
 
-        # ---- Layer 2: Google Drive export (for native Google Docs) ----
-        # Composio truncates downloaded_file_content to ~500 bytes.
-        # The dedicated export action may return full content.
+        # ---- Layer 2: SDK fallback (Google Drive only) ----
+        # Composio v3 API truncates Google Drive inline content to ~500 bytes.
+        # The SDK saves the full file to disk on the container.
         if app_upper == "GOOGLEDRIVE" and (binary is None or len(binary) < _MIN_EXPECTED_SIZE):
             truncated_size = len(binary) if binary else 0
             logger.warning(
                 f"v3 REST returned {truncated_size} bytes for "
-                f"{external_file_id} — likely truncated. "
-                f"Trying GOOGLEDRIVE_EXPORT_GOOGLE_WORKSPACE_FILE..."
-            )
-            try:
-                export_binary = await self._export_google_workspace_file(
-                    external_file_id, workspace_id
-                )
-                if export_binary and len(export_binary) > truncated_size:
-                    logger.info(
-                        f"Export action: {len(export_binary):,} bytes "
-                        f"(vs {truncated_size} from download)"
-                    )
-                    binary = export_binary
-            except Exception as e:
-                logger.warning(f"Export fallback failed: {e}", exc_info=True)
-
-        # ---- Layer 3: SDK fallback (different code path) ----
-        if app_upper == "GOOGLEDRIVE" and (binary is None or len(binary) < _MIN_EXPECTED_SIZE):
-            truncated_size = len(binary) if binary else 0
-            logger.warning(
-                f"Export also returned {truncated_size} bytes. Trying SDK..."
+                f"{external_file_id} — likely truncated. Trying SDK..."
             )
             try:
                 sdk_binary = await self._download_via_sdk(
@@ -354,7 +334,7 @@ class CloudFileDownloader:
         return str(content).encode("utf-8")
 
     # ------------------------------------------------------------------
-    # Layer 2: SDK-based download
+    # Layer 2: SDK-based download (Google Drive fallback)
     # ------------------------------------------------------------------
 
     async def _download_via_sdk(
@@ -440,71 +420,6 @@ class CloudFileDownloader:
             f"Keys: {list(sdk_data.keys()) if isinstance(sdk_data, dict) else 'N/A'}"
         )
         return None
-
-    # ------------------------------------------------------------------
-    # Layer 2b: Export Google Workspace file
-    # ------------------------------------------------------------------
-
-    async def _export_google_workspace_file(
-        self,
-        file_id: str,
-        workspace_id: UUID,
-    ) -> Optional[bytes]:
-        """
-        Export a native Google Doc/Sheet/Slide using the dedicated
-        GOOGLEDRIVE_EXPORT_GOOGLE_WORKSPACE_FILE action.
-
-        This is a different Composio action that may not have the same
-        ~500 byte truncation as GOOGLEDRIVE_DOWNLOAD_FILE.
-        """
-        api_key = self._get_api_key()
-        entity_id = self._get_entity_id(workspace_id)
-
-        action = "GOOGLEDRIVE_EXPORT_GOOGLE_WORKSPACE_FILE"
-        url = f"{COMPOSIO_API_BASE}/tools/execute/{action}"
-        logger.info(f"Calling export action: {url}")
-
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                url,
-                headers={
-                    "x-api-key": api_key,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "entity_id": entity_id,
-                    "arguments": {
-                        "fileId": file_id,
-                        "mimeType": "text/plain",
-                    },
-                },
-            )
-
-        if response.status_code != 200:
-            logger.error(
-                f"Export action error {response.status_code}: "
-                f"{response.text[:500]}"
-            )
-            return None
-
-        result = response.json()
-        logger.info(f"Export response keys: {list(result.keys())}")
-
-        if not result.get("successful", result.get("success", True)):
-            error = result.get("error") or result.get("message") or "Unknown"
-            logger.error(f"Export action failed: {error}")
-            return None
-
-        data = result.get("data", result)
-        if isinstance(data, dict):
-            logger.info(f"Export data keys: {list(data.keys())}")
-            # Merge URL keys from metadata
-            metadata = result.get("metadata", {})
-            if isinstance(metadata, dict):
-                for key in _URL_KEYS:
-                    if key in metadata and key not in data:
-                        data[key] = metadata[key]
-        return self._extract_binary(data, label="export")
 
     # ------------------------------------------------------------------
     # Build params
