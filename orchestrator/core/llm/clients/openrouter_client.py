@@ -75,6 +75,12 @@ class OpenRouterProvider(BaseLLMProvider):
                             formatted_tools.append({"type": "function", "function": t})
                         else:
                             formatted_tools.append(t)
+                    # Sanitize: some providers (xAI, etc.) reject strict=null;
+                    # ensure it's a real boolean or drop it entirely.
+                    for ft in formatted_tools:
+                        fn = ft.get("function", {})
+                        if "strict" in fn and fn["strict"] is None:
+                            del fn["strict"]
                     kwargs["tools"] = formatted_tools
 
                     has_tool_results = any(

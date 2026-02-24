@@ -119,6 +119,11 @@ class OpenAIProvider(BaseLLMProvider):
                         else:
                              formatted_tools.append(t)
                     
+                    # Sanitize: drop strict=null (some providers reject it)
+                    for ft in formatted_tools:
+                        fn = ft.get("function", {})
+                        if "strict" in fn and fn["strict"] is None:
+                            del fn["strict"]
                     kwargs["tools"] = formatted_tools
 
                     # Check if tool results already exist in conversation
@@ -169,6 +174,10 @@ class OpenAIProvider(BaseLLMProvider):
                                     formatted_tools.append({"type": "function", "function": t})
                                 else:
                                     formatted_tools.append(t)
+                            for ft in formatted_tools:
+                                fn = ft.get("function", {})
+                                if "strict" in fn and fn["strict"] is None:
+                                    del fn["strict"]
                             kwargs["tools"] = formatted_tools
                             # Check if tool results already exist
                             has_tool_results = any(
