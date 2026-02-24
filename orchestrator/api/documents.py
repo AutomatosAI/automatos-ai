@@ -91,6 +91,12 @@ ALLOWED_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
     "text/plain": [".txt", ".md", ".csv"],
     "text/markdown": [".md"],
+    "text/html": [".md", ".html"],  # python-magic often misdetects .md with HTML tags as text/html
+    "text/x-c": [".md"],            # magic misdetects some markdown as C source
+    "text/x-c++": [".md"],          # magic misdetects some markdown as C++ source
+    "text/x-python": [".md", ".py"],# magic misdetects some markdown as Python
+    "text/x-java": [".md"],         # magic misdetects some markdown as Java
+    "text/x-script.python": [".md"],
     "text/csv": [".csv"],
     "application/json": [".json"],
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
@@ -125,6 +131,7 @@ async def handle_request(
         file_extension = Path(file.filename).suffix.lower()
 
         if detected_mime not in ALLOWED_MIME_TYPES:
+            logger.warning(f"Upload rejected: {file.filename} — detected MIME '{detected_mime}', extension '{file_extension}'")
             raise HTTPException(
                 status_code=400,
                 detail=f"File type not allowed. Detected MIME type: {detected_mime}"
@@ -133,6 +140,7 @@ async def handle_request(
         # Verify extension matches detected MIME type
         allowed_extensions = ALLOWED_MIME_TYPES[detected_mime]
         if file_extension not in allowed_extensions:
+            logger.warning(f"Upload rejected: {file.filename} — extension '{file_extension}' not in {allowed_extensions} for MIME '{detected_mime}'")
             raise HTTPException(
                 status_code=400,
                 detail=f"File extension '{file_extension}' does not match detected content type '{detected_mime}'. "
