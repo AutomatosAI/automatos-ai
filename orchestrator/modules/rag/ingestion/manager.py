@@ -765,7 +765,7 @@ class DocumentManager:
             conn.commit()
 
             # Process document (it will read from local temp file)
-            await self._process_document(document_id, file_path, file_type, s3_key)
+            await self._process_document(document_id, file_path, file_type, s3_key, filename=filename)
             
             cursor.close()
             conn.close()
@@ -777,7 +777,7 @@ class DocumentManager:
             logger.error(f"Error uploading document: {e}")
             raise
     
-    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None):
+    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None, filename: str = None):
         """
         Process document: extract text, chunk, and generate embeddings.
 
@@ -786,6 +786,7 @@ class DocumentManager:
             file_path: Local temp file path for processing
             file_type: Document type
             s3_key: S3 key where document is stored (for reference)
+            filename: Real document filename (not the temp path basename)
         """
         self._ensure_database_initialized()
         try:
@@ -1152,16 +1153,17 @@ class DocumentManager:
 
                     # Collect for S3 batch insert
                     embeddings_for_s3.append(embedding)
+                    real_name = filename or os.path.basename(file_path)
                     documents_for_s3.append({
-                        "external_file_id": str(document_id),  # Use document_id as external_file_id
-                        "document_id": str(document_id),  # Keep for backwards compatibility
+                        "external_file_id": str(document_id),  # = PostgreSQL documents.id
+                        "document_id": str(document_id),
                         "chunk_index": chunk.chunk_index,
-                        "chunk_text": chunk.content[:500],  # Preview
-                        "file_name": os.path.basename(file_path),  # Match expected field name
-                        "source_file": os.path.basename(file_path),  # Keep for backwards compatibility
+                        "chunk_text": chunk.content[:500],
+                        "file_name": real_name,
+                        "source_file": real_name,
                         "file_path": file_path,
                         "file_type": file_type.value if hasattr(file_type, 'value') else str(file_type),
-                        "app_name": "document_sync",  # Add app_name field
+                        "app_name": "document_sync",
                         "workspace_id": workspace_id
                     })
                 else:

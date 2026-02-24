@@ -297,13 +297,22 @@ class AgentPlatformTools:
 
                 # Look up real document names from PostgreSQL using document_ids
                 # S3 Vectors stores temp filenames — the real names are in the documents table
+                # external_file_id in S3 Vectors = PostgreSQL documents.id
                 doc_name_cache = {}
                 doc_ids = set()
                 for chunk in chunks:
-                    doc_id = chunk.get("document_id") or chunk.get("metadata", {}).get("document_id")
+                    doc_id = (
+                        chunk.get("document_id")
+                        or chunk.get("metadata", {}).get("external_file_id")
+                        or chunk.get("metadata", {}).get("document_id")
+                    )
                     if doc_id:
-                        doc_ids.add(int(doc_id) if doc_id else 0)
+                        try:
+                            doc_ids.add(int(doc_id))
+                        except (ValueError, TypeError):
+                            pass
 
+                self.logger.info(f"  📋 Document IDs from chunks: {doc_ids}")
                 if doc_ids:
                     try:
                         from sqlalchemy import text as _text
@@ -319,8 +328,15 @@ class AgentPlatformTools:
                 # Convert chunks to raw dicts — include document_id and real filename
                 raw_results = []
                 for chunk in chunks[:limit]:
-                    doc_id = chunk.get("document_id") or chunk.get("metadata", {}).get("document_id")
-                    doc_id = int(doc_id) if doc_id else None
+                    doc_id = (
+                        chunk.get("document_id")
+                        or chunk.get("metadata", {}).get("external_file_id")
+                        or chunk.get("metadata", {}).get("document_id")
+                    )
+                    try:
+                        doc_id = int(doc_id) if doc_id else None
+                    except (ValueError, TypeError):
+                        doc_id = None
                     doc_info = doc_name_cache.get(doc_id, {})
                     real_filename = doc_info.get("filename") or chunk.get("source_file", "knowledge-base")
 
@@ -383,10 +399,18 @@ class AgentPlatformTools:
                 doc_name_cache = {}
                 doc_ids = set()
                 for chunk in chunks:
-                    doc_id = chunk.get("document_id") or chunk.get("metadata", {}).get("document_id")
+                    doc_id = (
+                        chunk.get("document_id")
+                        or chunk.get("metadata", {}).get("external_file_id")
+                        or chunk.get("metadata", {}).get("document_id")
+                    )
                     if doc_id:
-                        doc_ids.add(int(doc_id) if doc_id else 0)
+                        try:
+                            doc_ids.add(int(doc_id))
+                        except (ValueError, TypeError):
+                            pass
 
+                self.logger.info(f"  📋 Document IDs from chunks: {doc_ids}")
                 if doc_ids:
                     try:
                         from sqlalchemy import text as _text
@@ -402,8 +426,15 @@ class AgentPlatformTools:
                 # Convert to raw format — include document_id and real filename
                 raw_results = []
                 for chunk in chunks[:limit]:
-                    doc_id = chunk.get("document_id") or chunk.get("metadata", {}).get("document_id")
-                    doc_id = int(doc_id) if doc_id else None
+                    doc_id = (
+                        chunk.get("document_id")
+                        or chunk.get("metadata", {}).get("external_file_id")
+                        or chunk.get("metadata", {}).get("document_id")
+                    )
+                    try:
+                        doc_id = int(doc_id) if doc_id else None
+                    except (ValueError, TypeError):
+                        doc_id = None
                     doc_info = doc_name_cache.get(doc_id, {})
                     real_filename = doc_info.get("filename") or chunk.get("source_file", "knowledge-base")
 
@@ -457,8 +488,11 @@ class AgentPlatformTools:
                         ).fetchone()
                         if row and row[0]:
                             project_name = row[0]
+                            self.logger.info(f"  📂 Resolved CodeGraph project: '{project_name}' for workspace {workspace_id}")
+                        else:
+                            self.logger.warning(f"  ⚠️ No active CodeGraph project found for workspace {workspace_id}")
                     except Exception as e:
-                        self.logger.warning(f"  ⚠️ Failed to look up CodeGraph project: {e}")
+                        self.logger.warning(f"  ⚠️ Failed to look up CodeGraph project: {e}", exc_info=True)
                         project_name = None
 
                 # No hardcoded fallback — fail gracefully if no project found

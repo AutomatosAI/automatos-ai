@@ -695,11 +695,19 @@ class RAGService:
                 source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
                 similarity_scores.append(similarity)
 
+                # external_file_id in S3 Vectors = PostgreSQL documents.id
+                doc_id = (
+                    r.get("external_file_id")
+                    or r.get("metadata", {}).get("external_file_id")
+                    or r.get("metadata", {}).get("document_id")
+                    or 0
+                )
+
                 candidates.append({
                     "id": r.get("key", ""),
                     "content": r.get("content", ""),
                     "source_file": source_file,
-                    "document_id": r.get("metadata", {}).get("document_id", 0),
+                    "document_id": doc_id,
                     "file_type": r.get("file_path", "").rsplit(".", 1)[-1] if r.get("file_path") else "",
                     "similarity": similarity,
                     "metadata": r.get("metadata", {}),
