@@ -387,8 +387,9 @@ class AgentPlatformTools:
                 # If project_name not provided, pick the most recently indexed active project
                 if not project_name and workspace_id:
                     try:
+                        from sqlalchemy import text as _text
                         row = self.db.execute(
-                            text(
+                            _text(
                                 """
                                 SELECT name
                                 FROM codegraph_projects
@@ -401,11 +402,23 @@ class AgentPlatformTools:
                         ).fetchone()
                         if row and row[0]:
                             project_name = row[0]
-                    except Exception:
+                    except Exception as e:
+                        self.logger.warning(f"  ⚠️ Failed to look up CodeGraph project: {e}")
                         project_name = None
 
-                # Backward-compatible default (only if nothing else is available)
-                project_name = project_name or "Automatos-ai"
+                # No hardcoded fallback — fail gracefully if no project found
+                if not project_name:
+                    return ToolResultFormatter.standardize_result(
+                        {
+                            "success": False,
+                            "error": (
+                                "No CodeGraph project found for this workspace. "
+                                "Please index a codebase first via the CodeGraph UI, "
+                                "or specify a project_name in your query."
+                            ),
+                        },
+                        tool_name
+                    )
                 
                 if not self.code_graph:
                     self.logger.warning(f"  ⚠️ CodeGraphService not available (missing API key)")
