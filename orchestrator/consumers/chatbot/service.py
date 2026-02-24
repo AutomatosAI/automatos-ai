@@ -2295,9 +2295,8 @@ class StreamingChatService:
                             "role": "system",
                             "content": (
                                 f"The tool `{tool_name}` returned no results after multiple attempts. "
-                                "STOP searching and proceed with what you have. "
-                                "If the user asked for a document or report, call `generate_document` now "
-                                "with whatever information you've gathered. Do NOT call any more search tools."
+                                "STOP calling search tools. Use the information you already have "
+                                "and proceed to fulfill the user's request with your other available tools."
                             ),
                         })
                         logger.info(f"[tool-loop] Search spiral detected for {tool_name} — injecting proceed instruction")
@@ -2335,8 +2334,8 @@ class StreamingChatService:
                                 "content": (
                                     f"You have already called `{tool_name}` multiple times. "
                                     f"Do NOT call `{tool_name}` again. "
-                                    "Use the results you already have and proceed to the next step. "
-                                    "If the user asked for a document or report, call `generate_document` now."
+                                    "Use the results you already have and proceed to fulfill the user's request "
+                                    "with your other available tools."
                                 ),
                             })
                             logger.info(f"[tool-loop] Tool {tool_name} hit retry limit — injecting proceed instruction")
