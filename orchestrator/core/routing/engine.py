@@ -138,11 +138,14 @@ class UniversalRouter:
             return decision
 
         # Tier 2c — IntentClassifier keyword matching against routing rules
-        decision = self._tier2c_intent_classifier(envelope)
-        if decision is not None:
-            logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
-            self._log_decision(envelope, decision, env_hash)
-            return decision
+        # Skip if Tier 2.5 already found semantic candidates — those go
+        # straight to Tier 3 (LLM) which is smarter than keyword matching.
+        if not self._semantic_candidates:
+            decision = self._tier2c_intent_classifier(envelope)
+            if decision is not None:
+                logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
+                self._log_decision(envelope, decision, env_hash)
+                return decision
 
         # Tier 3 — LLM classification (fallback)
         decision = await self._classify_with_llm(envelope)
