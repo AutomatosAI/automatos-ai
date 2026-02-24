@@ -458,22 +458,21 @@ class UniversalRouter:
         low-confidence results) or None on failure.
         """
         try:
-            # PRD-64: Use pre-filtered semantic candidates if available
-            if self._semantic_candidates:
-                agents = self._semantic_candidates
-                logger.info(
-                    "[router] Tier 3: using %d pre-filtered semantic candidates",
-                    len(agents),
+            # Always give the LLM ALL active agents — it's smart enough to
+            # pick the right one from 14 agents.  Semantic pre-filtering was
+            # removing correct agents before the LLM could see them.
+            agents: List[Agent] = (
+                self._db.query(Agent)
+                .filter(
+                    Agent.workspace_id == envelope.workspace_id,
+                    Agent.status == "active",
                 )
-            else:
-                # Query active agents in the workspace
-                agents: List[Agent] = (
-                    self._db.query(Agent)
-                    .filter(
-                        Agent.workspace_id == envelope.workspace_id,
-                        Agent.status == "active",
-                    )
-                    .all()
+                .all()
+            )
+            if self._semantic_candidates:
+                logger.info(
+                    "[router] Tier 3: %d agents (semantic shortlisted %d)",
+                    len(agents), len(self._semantic_candidates),
                 )
 
             if not agents:
