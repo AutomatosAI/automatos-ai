@@ -665,15 +665,15 @@ export function Chat({
           <ResizablePanelGroup direction="horizontal" className="h-full">
             {/* Chat Column - LEFT (resizable, default 35%, min 20%) */}
             <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
-              <div className="relative h-full bg-muted dark:bg-background border-r border-border/50">
-                <div className="flex h-full flex-col items-center justify-between">
+              <div className="relative h-full bg-muted dark:bg-background border-r border-border/50 overflow-hidden">
+                <div className="flex h-full flex-col items-center justify-between min-w-0">
                   {/* Messages */}
                   <div
                     ref={messagesContainerRef}
-                    className="flex-1 w-full overflow-y-scroll overscroll-contain"
+                    className="flex-1 w-full overflow-y-scroll overflow-x-hidden overscroll-contain"
                     style={{ overflowAnchor: 'none' }}
                   >
-                    <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6">
+                    <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6 break-words">
                       {messages.map((message, index) => (
                         <Message
                           key={message.id}
@@ -752,10 +752,10 @@ export function Chat({
           >
             <ResizablePanelGroup direction="horizontal" className="h-full">
               <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
-                <div className="relative h-full bg-muted dark:bg-background">
-                  <div className="flex h-full flex-col">
-                    <div className="flex-1 w-full overflow-y-scroll">
-                      <div className="flex flex-col gap-4 px-4 py-4">
+                <div className="relative h-full bg-muted dark:bg-background overflow-hidden">
+                  <div className="flex h-full flex-col min-w-0">
+                    <div className="flex-1 w-full overflow-y-scroll overflow-x-hidden">
+                      <div className="flex flex-col gap-4 px-4 py-4 min-w-0 break-words">
                         {messages.map((message, index) => (
                           <Message
                             key={message.id}

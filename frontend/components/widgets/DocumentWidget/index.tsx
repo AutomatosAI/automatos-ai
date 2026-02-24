@@ -307,7 +307,7 @@ export function DocumentWidget({
                       <code>{formattedContent}</code>
                     </pre>
                   ) : (
-                    <article className="prose prose-sm prose-invert max-w-none">
+                    <article className="prose prose-sm prose-invert max-w-none break-words [overflow-wrap:anywhere]">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={markdownComponents}
@@ -345,7 +345,7 @@ export function DocumentWidget({
                   <code>{formattedContent}</code>
                 </pre>
               ) : (
-                <article className="prose prose-sm prose-invert max-w-none">
+                <article className="prose prose-sm prose-invert max-w-none break-words [overflow-wrap:anywhere]">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={markdownComponents}

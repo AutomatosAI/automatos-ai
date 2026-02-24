@@ -446,7 +446,11 @@ class RAGService:
                 source=source,
                 context_type="documentation",
                 relevance_score=adjusted_score,  # Use quality-adjusted score
-                token_count=_count_tokens(content)
+                token_count=_count_tokens(content),
+                metadata={
+                    "document_id": c.get("document_id"),
+                    "original_metadata": c.get("metadata", {}),
+                }
             )
             context_items.append(item)
             
@@ -485,7 +489,9 @@ class RAGService:
                 "content": ctx.content,
                 "source_file": ctx.source,
                 "similarity": ctx.relevance_score,
-                "tokens": ctx.token_count
+                "tokens": ctx.token_count,
+                "document_id": ctx.metadata.get("document_id") if ctx.metadata else None,
+                "metadata": ctx.metadata.get("original_metadata", {}) if ctx.metadata else {},
             })
             total_tokens += ctx.token_count
             final_source_counts[ctx.source] = final_source_counts.get(ctx.source, 0) + 1
@@ -636,7 +642,9 @@ class RAGService:
                 "content": content,
                 "source_file": c.get("source_file", c.get("filename", "unknown")),
                 "similarity": c.get("similarity", 0),
-                "tokens": chunk_tokens
+                "tokens": chunk_tokens,
+                "document_id": c.get("document_id"),
+                "metadata": c.get("metadata", {}),
             })
             total_tokens += chunk_tokens
         
@@ -745,9 +753,15 @@ class RAGService:
 
             try:
                 for candidate in candidates:
-                    doc_id = candidate.get("document_id")
+                    raw_doc_id = candidate.get("document_id")
                     chunk_metadata = candidate.get("metadata", {})
                     chunk_index = chunk_metadata.get("chunk_index") if isinstance(chunk_metadata, dict) else None
+
+                    # Cast document_id to int (S3 Vectors stores as string)
+                    try:
+                        doc_id = int(raw_doc_id) if raw_doc_id else None
+                    except (ValueError, TypeError):
+                        doc_id = None
 
                     if doc_id is None or chunk_index is None:
                         candidate["expanded_content"] = candidate.get("content", "")
