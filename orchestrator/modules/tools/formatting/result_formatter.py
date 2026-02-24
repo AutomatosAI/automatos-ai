@@ -72,6 +72,7 @@ class ToolResultFormatter:
         Fetch full document content by reassembling all chunks from document_chunks table.
         This is the real content — documents are stored in S3/PostgreSQL, not local filesystem.
         """
+        logger.info(f"[FullContent] Fetching full document from DB for document_id={document_id}")
         try:
             from sqlalchemy import create_engine, text
             from config import config as app_config
@@ -80,6 +81,7 @@ class ToolResultFormatter:
                 import os
                 db_url = os.getenv("DATABASE_URL")
             if not db_url:
+                logger.warning("[FullContent] No DATABASE_URL — cannot fetch document content")
                 return ""
 
             engine = create_engine(db_url)
@@ -94,10 +96,13 @@ class ToolResultFormatter:
                 ).fetchall()
 
             if rows:
-                return "\n\n".join(row[0] for row in rows if row[0])
+                full_content = "\n\n".join(row[0] for row in rows if row[0])
+                logger.info(f"[FullContent] ✅ Assembled {len(rows)} chunks ({len(full_content)} chars) for doc {document_id}")
+                return full_content
+            logger.warning(f"[FullContent] No chunks found in document_chunks for document_id={document_id}")
             return ""
         except Exception as e:
-            logger.warning(f"Failed to fetch document content from DB for doc {document_id}: {e}")
+            logger.warning(f"[FullContent] Failed to fetch document content from DB for doc {document_id}: {e}", exc_info=True)
             return ""
 
     @staticmethod
@@ -306,6 +311,8 @@ class ToolResultFormatter:
                 'source': clean_name,
                 'content': content,  # Full content for LLM
                 'title': clean_name,  # Alias for consistency
+                'document_id': r.get('document_id'),
+                'metadata': r.get('metadata', {}),
             })
         
         return formatted
@@ -484,6 +491,7 @@ class ToolResultFormatter:
                 excerpt = doc.get('excerpt', '')
                 similarity = doc.get('similarity', 0.0)
                 document_id = doc.get('document_id')
+                logger.info(f"[FrontendData] Chunk: source={source}, document_id={document_id}")
 
                 # Group by document_id when available, fall back to filename
                 group_key = document_id if document_id else source
