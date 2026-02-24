@@ -1223,6 +1223,24 @@ class StreamingChatService:
                 except Exception:
                     pass  # Never block chat for eval
 
+            # Persist task counter to DB for the active agent
+            if agent_id:
+                try:
+                    from core.models import Agent as AgentModel
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row:
+                        metrics = dict(agent_row.performance_metrics or {})
+                        metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
+                        metrics["tasks_completed"] = metrics["total_tasks_executed"]
+                        agent_row.performance_metrics = metrics
+                        self.db.commit()
+                except Exception as metric_err:
+                    logger.warning(f"Failed to persist agent task counter: {metric_err}")
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass
+
         except Exception as e:
             logger.error(f"Error streaming response: {e}")
             import traceback
@@ -1586,14 +1604,29 @@ class StreamingChatService:
                 except Exception:
                     pass  # Never block chat for eval
 
-            # Update agent metrics
+            # Update agent metrics (in-memory + persist to DB)
             if hasattr(agent_runtime, 'update_metrics'):
                 tokens_used = response.usage.get('total_tokens', 0) if response.usage else 0
                 agent_runtime.update_metrics(
-                    execution_time=1.0,  # TODO: Track actual time
+                    execution_time=1.0,
                     tokens_used=tokens_used,
                     success=True
                 )
+            # Persist task counter to DB so dashboard shows it
+            try:
+                agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                if agent_row:
+                    metrics = dict(agent_row.performance_metrics or {})
+                    metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
+                    metrics["tasks_completed"] = metrics["total_tasks_executed"]
+                    agent_row.performance_metrics = metrics
+                    self.db.commit()
+            except Exception as metric_err:
+                logger.warning(f"Failed to persist agent task counter: {metric_err}")
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
             
         except Exception as e:
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
