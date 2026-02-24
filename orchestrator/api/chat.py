@@ -278,8 +278,9 @@ async def stream_chat(
                 f"agent_id={effective_agent_id} with orchestrator LLM"
             )
         else:
-            # DELEGATE or WORKFLOW — route to the right sub-agent
-            # Try UniversalRouter first (cache, rules, LLM classification)
+            # DELEGATE — Universal Router picks the right specialized agent.
+            # AutoBrain already filtered greetings/platform/memory → RESPOND.
+            # Everything reaching here needs a specialized agent.
             try:
                 ingestor = ChatbotIngestor()
                 envelope = ingestor.ingest(
@@ -292,13 +293,13 @@ async def stream_chat(
                 universal_router = UniversalRouter(db, cache=get_routing_cache())
                 routing_decision = await universal_router.route(envelope)
             except Exception:
-                logger.exception("[chat] Router failed — using Auto brain fallback")
+                logger.exception("[chat] Router failed — falling back to default agent")
                 routing_decision = None
 
             if routing_decision is not None and routing_decision.route_type == "agent" and routing_decision.agent_id is not None:
                 effective_agent_id = routing_decision.agent_id
                 logger.info(
-                    f"[Auto] Router selected agent_id={effective_agent_id} "
+                    f"[Auto] Router → agent_id={effective_agent_id} "
                     f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
                 )
             elif routing_decision is not None and routing_decision.route_type == "orchestrate":
@@ -311,27 +312,11 @@ async def stream_chat(
                     f"reasoning={routing_decision.reasoning}): "
                     f"agent_id={effective_agent_id} with orchestrator LLM"
                 )
-            elif complexity_assessment.target_agent_id:
-                # Auto brain already matched tools to an agent
-                effective_agent_id = complexity_assessment.target_agent_id
-                use_system_llm = True
-                logger.info(
-                    f"[Auto] Brain selected agent_id={effective_agent_id} "
-                    f"({complexity_assessment.target_agent_name}) "
-                    f"for tools {complexity_assessment.matched_tools}"
-                )
             else:
-                # No tool match — Auto brain picks by message content
-                brain_pick = auto_brain.select_best_agent_id(message_text)
-                if brain_pick:
-                    effective_agent_id = brain_pick
-                    use_system_llm = True
-                    logger.info(f"[Auto] Brain tool-match fallback: agent_id={effective_agent_id}")
-                else:
-                    # Final fallback: default agent with orchestrator LLM
-                    effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
-                    use_system_llm = True
-                    logger.info(f"[Auto] Default fallback: agent_id={effective_agent_id}")
+                # Router couldn't decide — fall back to default agent
+                effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+                use_system_llm = True
+                logger.info(f"[Auto] Router returned no match — default agent_id={effective_agent_id}")
 
     # Build response headers (include routing metadata when available)
     response_headers = {

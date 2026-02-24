@@ -497,9 +497,11 @@ class UniversalRouter:
                     (desc["description"] or "")[:100],
                 )
 
-            # Build the classification prompt
+            # Build the classification prompt (pass semantic candidates as hints)
             prompt = self._build_classification_prompt(
-                envelope.content, agent_descriptions
+                envelope.content,
+                agent_descriptions,
+                semantic_candidates=self._semantic_candidates or None,
             )
 
             # Call the LLM
@@ -606,7 +608,7 @@ class UniversalRouter:
         """Build a list of agent info dicts for the LLM prompt.
 
         Includes a synthetic "Auto" entry (id=0) so the LLM can explicitly
-        route platform queries and general questions back to the orchestrator.
+        route back to the orchestrator when no specialized agent fits.
         """
         descriptions: List[Dict] = []
         for agent in agents:
@@ -627,21 +629,24 @@ class UniversalRouter:
                     "name": agent.name,
                     "description": agent.description or "",
                     "apps": app_names,
+                    "tags": agent.tags or [],
                 }
             )
 
-        # Synthetic "Auto" route — the orchestrator itself
+        # Synthetic "Auto" route — the orchestrator itself.
+        # NOTE: By the time we reach Tier 3, AutoBrain has already filtered
+        # greetings, platform queries, and memory recalls.  Auto should only
+        # be selected here when genuinely NO specialized agent fits.
         descriptions.append(
             {
                 "agent_id": 0,
                 "name": "Auto",
                 "description": (
-                    "Platform orchestrator. Handles: list agents, token usage, "
-                    "recipes, workspace info, connected apps, general questions, "
-                    "greetings, and anything that doesn't clearly match a "
-                    "specialized agent."
+                    "Fallback orchestrator. Only use when NO specialized agent "
+                    "above is a reasonable match for the request."
                 ),
                 "apps": [],
+                "tags": [],
             }
         )
 
@@ -649,17 +654,39 @@ class UniversalRouter:
 
     @staticmethod
     def _build_classification_prompt(
-        content: str, agent_descriptions: List[Dict]
+        content: str,
+        agent_descriptions: List[Dict],
+        semantic_candidates: Optional[List] = None,
     ) -> str:
-        """Build a lightweight routing prompt for the LLM."""
+        """Build the routing prompt for the LLM.
+
+        The prompt is biased toward specialized agents because AutoBrain
+        already filtered greetings, platform queries, and memory recalls.
+        Everything reaching Tier 3 is a real task that likely needs an agent.
+        """
         agent_lines = []
         for desc in agent_descriptions:
             apps_str = ", ".join(desc["apps"]) if desc["apps"] else "none"
+            tags_str = ", ".join(str(t) for t in desc.get("tags", []))
+            tags_part = f", Tags: [{tags_str}]" if tags_str else ""
             agent_lines.append(
                 f"  - ID: {desc['agent_id']}, Name: {desc['name']}, "
-                f"Description: {desc['description']}, Apps: {apps_str}"
+                f"Description: {desc['description']}, Apps: [{apps_str}]{tags_part}"
             )
         agents_block = "\n".join(agent_lines)
+
+        # Semantic hints — give the LLM a head start from Tier 2.5
+        semantic_hint = ""
+        if semantic_candidates:
+            names = [
+                f"'{c.name}' (ID {c.id})"
+                for c in semantic_candidates[:3]
+            ]
+            semantic_hint = (
+                f"\nSemantic analysis suggests: {', '.join(names)}. "
+                "Consider these first, but use your judgment based on the "
+                "full agent list.\n"
+            )
 
         # PRD-58: Try PromptRegistry (admin-editable), fallback to hardcoded
         try:
@@ -674,17 +701,21 @@ class UniversalRouter:
             pass
 
         return (
-            "You are a request router. Given the user's request, select the best agent "
-            "to handle it from the list below.\n\n"
-            f"User request: {content}\n\n"
-            f"Available agents:\n{agents_block}\n\n"
+            "You are a request router for an AI platform. The user's message "
+            "has already been screened — it is NOT a greeting, platform query, "
+            "or trivial message. It needs a specialized agent.\n\n"
+            f"User request: \"{content}\"\n\n"
+            f"Available agents:\n{agents_block}\n"
+            f"{semantic_hint}\n"
             "Rules:\n"
-            "- Pick a specialized agent when its tools/description clearly match the request.\n"
-            "- Pick \"Auto\" (ID 0) for platform queries (list agents, token usage, "
-            "workspace info), general questions, greetings, or when unsure.\n"
-            "- Prefer Auto over a poor-fit specialized agent.\n\n"
+            "- Match the request to the agent whose description, tools, tags, "
+            "or apps are most relevant.\n"
+            "- Prefer a specialized agent. Only pick \"Auto\" (ID 0) if "
+            "genuinely NO specialized agent fits.\n"
+            "- High confidence (0.8-1.0) when description/tools clearly match.\n"
+            "- Medium confidence (0.5-0.8) when it's a reasonable but imperfect fit.\n\n"
             "Respond with ONLY a JSON object (no markdown, no explanation):\n"
-            '{"agent_id": <int>, "confidence": <float between 0 and 1>}\n'
+            '{"agent_id": <int>, "confidence": <float 0-1>}\n'
         )
 
     @staticmethod
