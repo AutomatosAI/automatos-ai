@@ -111,6 +111,7 @@ export function Chat({
       // PRD-38.1: Auto-create widgets when tool-data arrives
       if (dataPart.type === 'tool-data' && dataPart.data) {
         const toolData = dataPart.data
+        console.log('[WIDGET-DEBUG] tool-data keys:', Object.keys(toolData), 'has generated_document:', !!toolData.generated_document)
 
         // Create widgets for database results
         if (toolData.database_results && Array.isArray(toolData.database_results)) {

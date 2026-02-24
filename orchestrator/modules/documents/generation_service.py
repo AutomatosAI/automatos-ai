@@ -105,6 +105,11 @@ class DocumentGenerationService:
         if not template and format == "pdf":
             template = self.template_service.get_template_by_name(ws, "Basic Report")
 
+        # Inject top-level title into data so templates can reference {{ title }}.
+        # The tool schema separates title from data, but templates expect it inside data.
+        if "title" not in data:
+            data["title"] = title
+
         if format == "pdf":
             return await self.generate_pdf(template, data, ws, title)
         elif format == "docx":

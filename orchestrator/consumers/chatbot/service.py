@@ -2080,6 +2080,7 @@ class StreamingChatService:
                     # CRITICAL: Yield tool-data for frontend widgets (documents, code, etc.)
                     # This was missing for selected agents - widgets only worked with default agent
                     frontend_data = result.get("frontend_data", {})
+                    logger.info(f"[TOOL-DATA-DEBUG] tool={tool_name} success={result.get('success')} frontend_data_keys={list(frontend_data.keys()) if frontend_data else 'EMPTY'}")
                     if result.get("success") and frontend_data:
                         tool_data.update(frontend_data)
                         logger.info(f"[TOOL-DATA] Yielding tool-data for {tool_name}: keys={list(frontend_data.keys())}")
