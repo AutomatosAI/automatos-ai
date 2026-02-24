@@ -746,7 +746,7 @@ class StreamingChatService:
                 # Emit tool lifecycle events + stream tool-data incrementally
                 import time
 
-                max_iterations = 5
+                max_iterations = 10
                 iteration = 0
                 current_response = response
                 sent_tool_data = False
@@ -1880,7 +1880,7 @@ class StreamingChatService:
         import asyncio
         import time
         
-        max_iterations = 5
+        max_iterations = 10
         iteration = 0
         current_response = response
         # Allow ONE recovery attempt when the model picks an unmapped action name.
@@ -1894,7 +1894,7 @@ class StreamingChatService:
         last_tool_name: Optional[str] = None
         empty_same_tool_streak = 0
         # Stop "rephrase and retry" loops: for most internal tools, we only allow one attempt
-        # per user request (multi-step exceptions: composio_execute and file tools).
+        # per user request (multi-step exceptions: composio_execute, file tools, and generation tools).
         tool_attempts: dict[str, int] = {}
         
         while current_response.tool_calls and iteration < max_iterations:
@@ -2284,18 +2284,23 @@ class StreamingChatService:
 
                     # --- Hard stop conditions to prevent looping for single requests ---
                     #
-                    # 1) Search tools: stop after FIRST empty result.
-                    if empty_same_tool_streak >= 1 and (
+                    # 1) Search tools: after 2+ consecutive empty results from the SAME
+                    #    search tool, tell the LLM to stop searching and proceed.
+                    #    We do NOT return/kill the loop — the agent may still need to
+                    #    call other tools (e.g. generate_document after research).
+                    if empty_same_tool_streak >= 2 and (
                         tool_name.startswith("search_") or tool_name in {"semantic_search"}
                     ):
-                        from types import SimpleNamespace
-                        message = (
-                            "I couldn't find any matching results and will stop retrying to avoid looping. "
-                            "If you expected results, it likely means the underlying knowledge/code index isn't ingested "
-                            "or the query is targeting the wrong index/type."
-                        )
-                        yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
-                        return
+                        llm_messages.append({
+                            "role": "system",
+                            "content": (
+                                f"The tool `{tool_name}` returned no results after multiple attempts. "
+                                "STOP searching and proceed with what you have. "
+                                "If the user asked for a document or report, call `generate_document` now "
+                                "with whatever information you've gathered. Do NOT call any more search tools."
+                            ),
+                        })
+                        logger.info(f"[tool-loop] Search spiral detected for {tool_name} — injecting proceed instruction")
 
                     # 2) Database tools: stop after FIRST successful result (avoid paraphrase loops).
                     if tool_name in {"query_database", "smart_query_database"} and result.get("success"):
@@ -2313,19 +2318,22 @@ class StreamingChatService:
                         yield {"_final_response": SimpleNamespace(content=final_response.content or "", tool_calls=None, usage=getattr(final_response, "usage", None))}
                         return
 
-                    # 3) Generic: for most non-Composio tools, don't allow multiple attempts in one request.
+                    # 3) Generic: for most non-Composio tools, don’t allow multiple attempts in one request.
                     # This prevents the model from re-issuing the same tool with slightly different phrasing.
-                    if tool_name not in {"composio_execute"} and not tool_name.startswith("composio_"):
-                        # Allow file operations to be multi-step for report saving.
-                        if tool_name not in {"read_file", "write_file", "list_directory", "create_directory", "delete_file"}:
-                            if tool_attempts.get(tool_name, 0) >= 2:
-                                from types import SimpleNamespace
-                                message = (
-                                    f"I already tried `{tool_name}` and won’t retry again in the same request "
-                                    "to avoid looping. If you want me to try a different approach, tell me what to change."
-                                )
-                                yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
-                                return
+                    _MULTI_STEP_TOOLS = {
+                        "composio_execute",
+                        "read_file", "write_file", "list_directory", "create_directory", "delete_file",
+                        "generate_document",  # PRD-63: doc gen is a creation step, not a retry
+                    }
+                    if tool_name not in _MULTI_STEP_TOOLS and not tool_name.startswith("composio_"):
+                        if tool_attempts.get(tool_name, 0) >= 2:
+                            from types import SimpleNamespace
+                            message = (
+                                f"I already tried `{tool_name}` and won’t retry again in the same request "
+                                "to avoid looping. If you want me to try a different approach, tell me what to change."
+                            )
+                            yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
+                            return
                     
                 except Exception as e:
                     logger.error(f"Tool {tool_name} failed: {e}")
@@ -2491,7 +2499,7 @@ class StreamingChatService:
         llm_messages: List[Dict],
         tool_data: Dict,
         tools: Optional[List[Any]] = None,
-        max_iterations: int = 5
+        max_iterations: int = 10
     ) -> tuple:
         """
         Handle tool calls from LLM response with multi-turn support.
