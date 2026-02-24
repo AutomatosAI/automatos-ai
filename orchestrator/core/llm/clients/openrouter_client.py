@@ -69,19 +69,7 @@ class OpenRouterProvider(BaseLLMProvider):
                     "max_tokens": self.config.max_tokens,
                 }
                 if tools:
-                    formatted_tools = []
-                    for t in tools:
-                        if "type" not in t:
-                            formatted_tools.append({"type": "function", "function": t})
-                        else:
-                            formatted_tools.append(t)
-                    # Sanitize: some providers (xAI, etc.) reject strict=null;
-                    # ensure it's a real boolean or drop it entirely.
-                    for ft in formatted_tools:
-                        fn = ft.get("function", {})
-                        if "strict" in fn and fn["strict"] is None:
-                            del fn["strict"]
-                    kwargs["tools"] = formatted_tools
+                    kwargs["tools"] = self._sanitize_tools(tools)
 
                     has_tool_results = any(
                         m.get("role") == "tool" for m in (messages or [])

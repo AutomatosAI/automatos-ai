@@ -68,7 +68,7 @@ class AzureProvider(BaseLLMProvider):
                 }
                 # PRD-17: Add tools if provided
                 if tools:
-                    kwargs["tools"] = tools
+                    kwargs["tools"] = self._sanitize_tools(tools, keep_strict=True)
                     kwargs["tool_choice"] = "auto"
                 return self.client.chat.completions.create(**kwargs)
             

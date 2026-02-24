@@ -95,26 +95,67 @@ class LLMResponse:
 
 class BaseLLMProvider(ABC):
     """Abstract base class for LLM providers"""
-    
+
+    # Fields that only OpenAI's API actually supports on function defs.
+    # Other providers (xAI, Anthropic, Google, etc.) reject or ignore them.
+    _OPENAI_ONLY_FUNCTION_FIELDS = {"strict"}
+
     def __init__(self, config: LLMConfig):
         self.config = config
         self.client = None
         self._initialize_client()
-    
+
     @abstractmethod
     def _initialize_client(self):
         """Initialize the provider-specific client"""
         pass
-    
+
     @abstractmethod
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate response from the LLM (async)"""
         pass
-    
+
     @abstractmethod
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
         """Generate response from the LLM (synchronous)"""
         pass
+
+    # ------------------------------------------------------------------
+    # Shared tool sanitisation
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _wrap_tool(tool: Dict) -> Dict:
+        """Ensure a tool definition is wrapped in {"type": "function", "function": {...}}."""
+        if "type" not in tool:
+            return {"type": "function", "function": tool}
+        return tool
+
+    @classmethod
+    def _sanitize_tools(cls, tools: List[Dict], *, keep_strict: bool = False) -> List[Dict]:
+        """
+        Normalise tool definitions for safe delivery to any LLM provider.
+
+        - Wraps bare function dicts in the {"type":"function","function":{…}} envelope.
+        - Removes ``strict`` when it is ``None`` (always invalid).
+        - Removes ``strict`` entirely unless *keep_strict* is True (only
+          real OpenAI endpoints honour it; xAI, Anthropic, Google reject it).
+
+        Call this in every client's ``generate_response`` before building the
+        API request.  For OpenAI-native calls pass ``keep_strict=True``.
+        """
+        if not tools:
+            return tools
+        sanitized = []
+        for t in tools:
+            t = cls._wrap_tool(t)
+            fn = t.get("function")
+            if isinstance(fn, dict):
+                if "strict" in fn:
+                    if fn["strict"] is None or not keep_strict:
+                        fn = {k: v for k, v in fn.items() if k != "strict"}
+                        t = {**t, "function": fn}
+            sanitized.append(t)
+        return sanitized
 
 
 class BaseEmbeddingProvider(ABC):

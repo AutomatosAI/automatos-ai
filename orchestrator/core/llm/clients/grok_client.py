@@ -66,12 +66,7 @@ class GrokProvider(BaseLLMProvider):
                     "max_tokens": self.config.max_tokens
                 }
                 if tools:
-                    # Sanitize: drop strict=null (xAI rejects it)
-                    for ft in (tools or []):
-                        fn = ft.get("function", {})
-                        if "strict" in fn and fn["strict"] is None:
-                            del fn["strict"]
-                    kwargs["tools"] = tools
+                    kwargs["tools"] = self._sanitize_tools(tools)
                     kwargs["tool_choice"] = "auto"
                 return self.client.chat.completions.create(**kwargs)
             
