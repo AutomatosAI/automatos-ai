@@ -2320,6 +2320,9 @@ class StreamingChatService:
 
                     # 3) Generic: for most non-Composio tools, don’t allow multiple attempts in one request.
                     # This prevents the model from re-issuing the same tool with slightly different phrasing.
+                    # IMPORTANT: Do NOT `return` here — that kills the entire loop and prevents
+                    # the agent from calling other tools (e.g. generate_document after research).
+                    # Instead, inject a system message telling the LLM to stop using THAT tool.
                     _MULTI_STEP_TOOLS = {
                         "composio_execute",
                         "read_file", "write_file", "list_directory", "create_directory", "delete_file",
@@ -2327,13 +2330,16 @@ class StreamingChatService:
                     }
                     if tool_name not in _MULTI_STEP_TOOLS and not tool_name.startswith("composio_"):
                         if tool_attempts.get(tool_name, 0) >= 2:
-                            from types import SimpleNamespace
-                            message = (
-                                f"I already tried `{tool_name}` and won’t retry again in the same request "
-                                "to avoid looping. If you want me to try a different approach, tell me what to change."
-                            )
-                            yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
-                            return
+                            llm_messages.append({
+                                "role": "system",
+                                "content": (
+                                    f"You have already called `{tool_name}` multiple times. "
+                                    f"Do NOT call `{tool_name}` again. "
+                                    "Use the results you already have and proceed to the next step. "
+                                    "If the user asked for a document or report, call `generate_document` now."
+                                ),
+                            })
+                            logger.info(f"[tool-loop] Tool {tool_name} hit retry limit — injecting proceed instruction")
                     
                 except Exception as e:
                     logger.error(f"Tool {tool_name} failed: {e}")
