@@ -2064,11 +2064,13 @@ class StreamingChatService:
                     except Exception:
                         pass
 
-                    # Extract LLM context from result and truncate to prevent context overflow
+                    # Extract LLM context from result.
+                    # format_for_llm() already produces a concise summary (max ~4500 chars).
+                    # We allow up to 6000 chars so the LLM has enough research context to
+                    # populate report sections when calling generate_document.
                     llm_context = result.get('llm_context', str(result.get('raw_result', '')))
-                    # Truncate to max 1000 chars to keep context manageable
-                    if len(llm_context) > 1000:
-                        llm_context = llm_context[:1000] + f"\n... (truncated {len(llm_context) - 1000} chars)"
+                    if len(llm_context) > 6000:
+                        llm_context = llm_context[:6000] + f"\n... (truncated {len(llm_context) - 6000} chars)"
                     
                     # Store result
                     tool_results.append({

@@ -351,17 +351,64 @@ async def serve_generated_file(
     filename: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Serve a generated document file for download."""
+    """Serve a generated document file for download.
+
+    Tries local filesystem first, then falls back to S3 (containers are ephemeral).
+    """
     file_path = os.path.join(GENERATED_DIR, str(ctx.workspace_id), "generated", filename)
-    if not os.path.exists(file_path):
+
+    # Try local filesystem first
+    if os.path.exists(file_path):
+        ext = os.path.splitext(filename)[1].lower()
+        media_type = MIME_TYPES.get(ext, "application/octet-stream")
+        return FileResponse(
+            path=file_path,
+            media_type=media_type,
+            filename=filename,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # Fallback: redirect to S3 presigned URL
+    try:
+        from config import config as app_config
+        import boto3
+        from botocore.config import Config as BotoConfig
+
+        if not app_config.AWS_ACCESS_KEY_ID or not app_config.AWS_SECRET_ACCESS_KEY:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        bucket = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
+        s3_key = f"workspaces/{ctx.workspace_id}/generated-documents/{filename}"
+
+        boto_cfg = BotoConfig(
+            region_name=app_config.AWS_REGION or "us-east-1",
+            signature_version="v4",
+        )
+        client = boto3.client(
+            "s3",
+            aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
+            config=boto_cfg,
+        )
+
+        # Check the object exists
+        client.head_object(Bucket=bucket, Key=s3_key)
+
+        # Generate presigned URL and redirect
+        from fastapi.responses import RedirectResponse
+        presigned_url = client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": bucket,
+                "Key": s3_key,
+                "ResponseContentDisposition": f'attachment; filename="{filename}"',
+            },
+            ExpiresIn=3600,
+        )
+        return RedirectResponse(url=presigned_url, status_code=302)
+
+    except ImportError:
         raise HTTPException(status_code=404, detail="File not found")
-
-    ext = os.path.splitext(filename)[1].lower()
-    media_type = MIME_TYPES.get(ext, "application/octet-stream")
-
-    return FileResponse(
-        path=file_path,
-        media_type=media_type,
-        filename=filename,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    except Exception as e:
+        logger.warning(f"S3 fallback failed for {filename}: {e}")
+        raise HTTPException(status_code=404, detail="File not found")

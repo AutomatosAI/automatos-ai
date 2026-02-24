@@ -3,9 +3,15 @@ Document Generation Service (PRD-63).
 
 Generates PDF (WeasyPrint), DOCX (python-docx-template), and XLSX (XlsxWriter)
 documents from templates + data.
+
+Files are generated locally then uploaded to S3 for persistent storage.
+On Railway (ephemeral containers) the local file vanishes after the request,
+so S3 is the source of truth for downloads.
 """
 
+import asyncio
 import logging
+import mimetypes
 import os
 import re
 from datetime import datetime
@@ -16,6 +22,14 @@ import jinja2
 import jsonschema
 from sqlalchemy.orm import Session
 
+try:
+    import boto3
+    from botocore.config import Config as BotoConfig
+    from botocore.exceptions import ClientError
+except ImportError:
+    boto3 = None
+
+from config import config
 from core.models.core import DocumentTemplate
 from modules.documents.models import GeneratedDocument
 from modules.documents.template_service import DocumentTemplateService
@@ -109,6 +123,10 @@ class DocumentGenerationService:
         # The tool schema separates title from data, but templates expect it inside data.
         if "title" not in data:
             data["title"] = title
+
+        # Normalize section keys: LLMs may use heading/body instead of title/content.
+        # Templates and _data_to_markdown() expect title/content.
+        self._normalize_sections(data)
 
         logger.info(f"[DocGen] Data keys from LLM: {list(data.keys())}")
 
@@ -293,6 +311,42 @@ class DocumentGenerationService:
     # Helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _normalize_sections(data: dict) -> None:
+        """Normalize section keys so templates always get title/content.
+
+        LLMs sometimes use heading/body, header/text, name/description, etc.
+        This maps common variants to the canonical title/content keys.
+        """
+        sections = data.get("sections")
+        if not isinstance(sections, list):
+            return
+
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+
+            # Normalize title
+            if "title" not in section:
+                for alt in ("heading", "header", "name", "section_title", "label"):
+                    if alt in section:
+                        section["title"] = section.pop(alt)
+                        break
+
+            # Normalize content
+            if "content" not in section:
+                for alt in ("body", "text", "description", "section_content", "detail", "details", "paragraph"):
+                    if alt in section:
+                        section["content"] = section.pop(alt)
+                        break
+
+            # Warn on empty content (helps debug LLM output)
+            if not section.get("content"):
+                logger.warning(
+                    "[DocGen] Section '%s' has empty content. Keys present: %s",
+                    section.get("title", "?"), list(section.keys()),
+                )
+
     def _validate_and_backfill(self, data: dict, schema: dict) -> None:
         """Validate data against the template's JSON Schema.
 
@@ -458,14 +512,80 @@ class DocumentGenerationService:
         return os.path.join(directory, f"{timestamp}_{safe_title}.{ext}")
 
     def _build_result(self, path: str, fmt: str, title: str) -> GeneratedDocument:
-        """Build a GeneratedDocument from a file on disk."""
+        """Build a GeneratedDocument from a file on disk, uploading to S3 for persistence."""
         filename = os.path.basename(path)
         size = os.path.getsize(path)
+
+        # Upload to S3 for persistent storage (containers are ephemeral)
+        download_url = f"/api/documents/generated/{filename}"
+        s3_url = self._upload_to_s3(path, filename)
+        if s3_url:
+            download_url = s3_url
+
         return GeneratedDocument(
             path=path,
             format=fmt,
             filename=filename,
             size=size,
-            download_url=f"/api/documents/generated/{filename}",
-            preview_url=f"/api/documents/generated/{filename}" if fmt == "pdf" else None,
+            download_url=download_url,
+            preview_url=download_url if fmt == "pdf" else None,
         )
+
+    def _upload_to_s3(self, local_path: str, filename: str) -> Optional[str]:
+        """Upload generated document to S3 and return a presigned download URL.
+
+        Returns None if S3 is not configured (falls back to local serving).
+        """
+        if not boto3:
+            logger.debug("[DocGen] boto3 not available, skipping S3 upload")
+            return None
+
+        if not config.AWS_ACCESS_KEY_ID or not config.AWS_SECRET_ACCESS_KEY:
+            logger.debug("[DocGen] AWS credentials not configured, skipping S3 upload")
+            return None
+
+        bucket = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
+        s3_key = f"workspaces/{self.workspace_id}/generated-documents/{filename}"
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+        try:
+            boto_cfg = BotoConfig(
+                region_name=config.AWS_REGION or "us-east-1",
+                signature_version="v4",
+                retries={"max_attempts": 3, "mode": "adaptive"},
+            )
+            client = boto3.client(
+                "s3",
+                aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
+                config=boto_cfg,
+            )
+
+            with open(local_path, "rb") as f:
+                client.put_object(
+                    Bucket=bucket,
+                    Key=s3_key,
+                    Body=f,
+                    ContentType=content_type,
+                )
+
+            # Generate presigned URL (1 hour expiry)
+            presigned_url = client.generate_presigned_url(
+                "get_object",
+                Params={
+                    "Bucket": bucket,
+                    "Key": s3_key,
+                    "ResponseContentDisposition": f'attachment; filename="{filename}"',
+                },
+                ExpiresIn=3600,
+            )
+
+            logger.info(
+                "[DocGen] Uploaded to S3: s3://%s/%s (%d bytes)",
+                bucket, s3_key, os.path.getsize(local_path),
+            )
+            return presigned_url
+
+        except Exception:
+            logger.exception("[DocGen] S3 upload failed, falling back to local serving")
+            return None
