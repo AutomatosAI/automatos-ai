@@ -110,14 +110,19 @@ class DocumentGenerationService:
         if "title" not in data:
             data["title"] = title
 
+        # Generate the format-specific file
         if format == "pdf":
-            return await self.generate_pdf(template, data, ws, title)
+            result = await self.generate_pdf(template, data, ws, title)
         elif format == "docx":
-            return await self.generate_docx(template, data, ws, title)
+            result = await self.generate_docx(template, data, ws, title)
         elif format == "xlsx":
-            return await self.generate_xlsx(data, ws, title=title, template=template)
+            result = await self.generate_xlsx(data, ws, title=title, template=template)
         else:
             raise ValueError(f"Unsupported format: {format}. Use pdf, docx, or xlsx.")
+
+        # Attach markdown content for live widget display
+        result.content = self._data_to_markdown(data, title)
+        return result
 
     # ------------------------------------------------------------------
     # PDF Generation (Jinja2 + WeasyPrint)
@@ -332,6 +337,87 @@ class DocumentGenerationService:
                     f'<img src="data:image/png;base64,{b64}" style="max-width:100%"/>',
                 )
         return html
+
+    @staticmethod
+    def _data_to_markdown(data: dict, title: str) -> str:
+        """Convert structured template data to markdown for widget display."""
+        lines: list[str] = [f"# {title}", ""]
+
+        # Author / date metadata
+        meta_parts = []
+        if data.get("author"):
+            meta_parts.append(f"**Author:** {data['author']}")
+        if data.get("date"):
+            meta_parts.append(f"**Date:** {data['date']}")
+        if meta_parts:
+            lines.append(" | ".join(meta_parts))
+            lines.append("")
+
+        # Sections (most common structure)
+        for section in data.get("sections", []):
+            if isinstance(section, dict):
+                lines.append(f"## {section.get('title', 'Section')}")
+                lines.append("")
+                lines.append(str(section.get("content", "")))
+                lines.append("")
+            elif isinstance(section, str):
+                lines.append(section)
+                lines.append("")
+
+        # Metrics block
+        metrics = data.get("metrics", {})
+        if metrics and isinstance(metrics, dict):
+            lines.append("## Key Metrics")
+            lines.append("")
+            lines.append("| Metric | Value |")
+            lines.append("|--------|-------|")
+            for k, v in metrics.items():
+                lines.append(f"| {k} | {v} |")
+            lines.append("")
+
+        # Highlights (executive summary style)
+        highlights = data.get("highlights", [])
+        if highlights:
+            lines.append("## Highlights")
+            lines.append("")
+            for h in highlights:
+                lines.append(f"- {h}")
+            lines.append("")
+
+        # Recommendations
+        recs = data.get("recommendations", [])
+        if recs:
+            lines.append("## Recommendations")
+            lines.append("")
+            for r in recs:
+                lines.append(f"- {r}")
+            lines.append("")
+
+        # Tabular data (xlsx-style)
+        columns = data.get("columns", [])
+        rows = data.get("rows", [])
+        if columns and rows:
+            lines.append("| " + " | ".join(str(c) for c in columns) + " |")
+            lines.append("| " + " | ".join("---" for _ in columns) + " |")
+            for row in rows[:50]:  # Cap at 50 rows for widget display
+                lines.append("| " + " | ".join(str(v) for v in row) + " |")
+            if len(rows) > 50:
+                lines.append(f"\n*... and {len(rows) - 50} more rows*")
+            lines.append("")
+
+        # Fallback: dump any remaining top-level string fields
+        shown = {"title", "author", "date", "sections", "metrics",
+                 "highlights", "recommendations", "columns", "rows", "_charts"}
+        for key, val in data.items():
+            if key in shown or key.startswith("_"):
+                continue
+            if isinstance(val, str) and val:
+                lines.append(f"## {key.replace('_', ' ').title()}")
+                lines.append("")
+                lines.append(val)
+                lines.append("")
+
+        return "\n".join(lines)
 
     def _output_path(self, workspace_id: UUID, title: str, ext: str) -> str:
         """Build output file path, creating directories as needed."""

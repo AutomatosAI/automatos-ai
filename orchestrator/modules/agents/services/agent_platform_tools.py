@@ -730,6 +730,7 @@ class AgentPlatformTools:
                             "format": result.format,
                             "download_url": result.download_url,
                             "size_kb": result.size // 1024,
+                            "content": result.content,
                         }],
                     },
                     tool_name

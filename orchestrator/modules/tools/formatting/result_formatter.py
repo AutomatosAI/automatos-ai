@@ -721,6 +721,7 @@ class ToolResultFormatter:
                 'preview_url': doc_result.get('preview_url'),
                 'size_kb': doc_result.get('size_kb', 0),
                 'title': doc_result.get('title', doc_result.get('filename', 'Document')),
+                'content': doc_result.get('content', ''),
             }
             logger.info(f"[FrontendData] generate_document: {frontend_data['generated_document']['filename']}")
 

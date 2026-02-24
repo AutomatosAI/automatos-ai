@@ -285,7 +285,7 @@ export function Chat({
             type: 'document',
             title: genDoc.title || genDoc.filename || 'Generated Document',
             data: {
-              content: `Document generated successfully.\n\n**File:** ${genDoc.filename}\n**Format:** ${(genDoc.format || 'pdf').toUpperCase()}\n**Size:** ${genDoc.size_kb || 0} KB`,
+              content: genDoc.content || `*Document generated: ${genDoc.filename}*`,
               format: 'markdown',
               filename: genDoc.filename,
               downloadUrl: genDoc.download_url,
