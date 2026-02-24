@@ -226,8 +226,24 @@ class SmartIntentClassifier:
                 is_simple=False
             )
 
-        # 5. Check for document search
-        if self._matches_patterns(query, self._search_re):
+        # 5-7. Check for compound intents BEFORE returning single intents.
+        # "Search docs and create a PDF" is MULTI_STEP, not just SEARCH.
+        is_search = self._matches_patterns(query, self._search_re)
+        is_creation = self._matches_patterns(query, self._creation_re)
+        is_external = self._matches_patterns(query, self._external_re)
+
+        if is_search and is_creation:
+            return IntentResult(
+                primary_intent=Intent.MULTI_STEP,
+                confidence=0.9,
+                requires_tools=True,
+                requires_memory=False,
+                suggested_tools=["search_knowledge", "generate_document"],
+                reasoning="Multi-step: search knowledge then generate document",
+                is_simple=False
+            )
+
+        if is_search:
             return IntentResult(
                 primary_intent=Intent.SEARCH,
                 confidence=0.85,
@@ -238,10 +254,7 @@ class SmartIntentClassifier:
                 is_simple=False
             )
 
-        # 6 & 7. Check for external actions AND creation — if BOTH match, it's multi-step
-        is_external = self._matches_patterns(query, self._external_re)
-        is_creation = self._matches_patterns(query, self._creation_re)
-
+        # External + creation combo (already have is_external, is_creation from above)
         if is_external and is_creation:
             return IntentResult(
                 primary_intent=Intent.MULTI_STEP,
