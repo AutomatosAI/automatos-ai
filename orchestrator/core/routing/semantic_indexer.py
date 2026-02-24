@@ -126,9 +126,30 @@ def build_agent_semantic_text(agent: Agent, db: Session) -> str:
     return "\n".join(parts)
 
 
+def _get_embedding_model_id() -> str:
+    """Return current embedding model identifier for cache-busting.
+
+    When the provider or model changes, the hash changes, forcing
+    all agents to be re-embedded with the new model automatically.
+    """
+    try:
+        from core.llm.embedding_manager import get_embedding_manager
+        info = get_embedding_manager().get_provider_info()
+        return f"{info.get('provider', 'unknown')}:{info.get('model', 'unknown')}"
+    except Exception:
+        return "unknown"
+
+
 def compute_text_hash(text: str) -> str:
-    """SHA-256 hex digest for change detection."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    """SHA-256 hex digest for change detection.
+
+    Includes the embedding model identifier so that switching providers
+    (e.g. from deterministic fallback to OpenRouter) automatically
+    invalidates all cached embeddings.
+    """
+    model_id = _get_embedding_model_id()
+    raw = f"{model_id}|{text}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 # ------------------------------------------------------------------
@@ -140,16 +161,17 @@ async def embed_agent(agent: Agent, db: Session, *, force: bool = False) -> bool
 
     Returns True if the embedding was (re)generated, False if skipped.
     """
+    from core.llm.embedding_manager import get_embedding_manager
+
+    embedding_mgr = get_embedding_manager()
+
     text = build_agent_semantic_text(agent, db)
-    text_hash = compute_text_hash(text)
+    text_hash = compute_text_hash(text)  # Includes model ID — auto-invalidates on provider change
 
     if not force and agent.semantic_text_hash == text_hash and agent.semantic_embedding:
         logger.debug("[semantic] Agent %d text unchanged, skipping embed", agent.id)
         return False
 
-    from core.llm.embedding_manager import get_embedding_manager
-
-    embedding_mgr = get_embedding_manager()
     try:
         vector = await embedding_mgr.generate_embedding(text)
     except Exception:
