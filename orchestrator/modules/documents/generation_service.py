@@ -147,7 +147,7 @@ class DocumentGenerationService:
 
         # Validate data against schema (skip if using fallback — no schema)
         if template and hasattr(template, 'data_schema'):
-            self._validate_data(data, template.data_schema)
+            self._validate_and_backfill(data, template.data_schema)
 
         # Render Jinja2
         try:
@@ -286,14 +286,40 @@ class DocumentGenerationService:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _validate_data(self, data: dict, schema: dict) -> None:
-        """Validate data against the template's JSON Schema."""
+    def _validate_and_backfill(self, data: dict, schema: dict) -> None:
+        """Validate data against the template's JSON Schema.
+
+        Non-fatal: missing required fields are backfilled with sensible
+        defaults so Jinja2 rendering doesn't crash on {% for %} loops.
+        """
         if not schema:
             return
+
+        # Backfill missing required fields with type-appropriate defaults
+        # so templates render gracefully even with partial LLM output.
+        props = schema.get("properties", {})
+        for field in schema.get("required", []):
+            if field not in data:
+                field_type = props.get(field, {}).get("type", "string")
+                default = {
+                    "string": "",
+                    "array": [],
+                    "object": {},
+                    "number": 0,
+                    "integer": 0,
+                    "boolean": False,
+                }.get(field_type, "")
+                data[field] = default
+                logger.warning(
+                    f"[DocGen] Backfilled missing required field '{field}' "
+                    f"with default {type(default).__name__}"
+                )
+
         try:
             jsonschema.validate(instance=data, schema=schema)
         except jsonschema.ValidationError as e:
-            raise ValueError(f"Data validation failed: {e.message}")
+            # Log but don't raise — let Jinja2 try rendering.
+            logger.warning(f"[DocGen] Schema validation warning: {e.message}")
 
     def _embed_charts(self, html: str, data: dict) -> str:
         """Replace {{ chart:field_name }} tags with base64 PNG images."""
