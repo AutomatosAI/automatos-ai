@@ -110,6 +110,8 @@ class DocumentGenerationService:
         if "title" not in data:
             data["title"] = title
 
+        logger.info(f"[DocGen] Data keys from LLM: {list(data.keys())}")
+
         # Generate the format-specific file
         if format == "pdf":
             result = await self.generate_pdf(template, data, ws, title)
@@ -405,16 +407,44 @@ class DocumentGenerationService:
                 lines.append(f"\n*... and {len(rows) - 50} more rows*")
             lines.append("")
 
-        # Fallback: dump any remaining top-level string fields
+        # Fallback: render any remaining fields the LLM included
         shown = {"title", "author", "date", "sections", "metrics",
                  "highlights", "recommendations", "columns", "rows", "_charts"}
         for key, val in data.items():
-            if key in shown or key.startswith("_"):
+            if key in shown or key.startswith("_") or not val:
                 continue
-            if isinstance(val, str) and val:
-                lines.append(f"## {key.replace('_', ' ').title()}")
+            heading = key.replace("_", " ").title()
+            if isinstance(val, str):
+                lines.append(f"## {heading}")
                 lines.append("")
                 lines.append(val)
+                lines.append("")
+            elif isinstance(val, list):
+                lines.append(f"## {heading}")
+                lines.append("")
+                for item in val:
+                    if isinstance(item, dict):
+                        # List of objects — render each with sub-heading if it has a title/name
+                        sub_title = item.get("title") or item.get("name") or item.get("heading") or ""
+                        if sub_title:
+                            lines.append(f"### {sub_title}")
+                            lines.append("")
+                        for k, v in item.items():
+                            if k in ("title", "name", "heading"):
+                                continue
+                            lines.append(str(v))
+                            lines.append("")
+                    else:
+                        lines.append(f"- {item}")
+                lines.append("")
+            elif isinstance(val, dict):
+                lines.append(f"## {heading}")
+                lines.append("")
+                # Render dict as key-value pairs or a table
+                lines.append("| Key | Value |")
+                lines.append("|-----|-------|")
+                for k, v in val.items():
+                    lines.append(f"| {k} | {v} |")
                 lines.append("")
 
         return "\n".join(lines)

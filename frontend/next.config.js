@@ -2,6 +2,7 @@
 const path = require('path')
 
 const nextConfig = {
+  output: 'standalone',
   reactStrictMode: false,
   // SECURITY: Disable X-Powered-By header to reduce information leakage (OWASP A05:2021)
   poweredByHeader: false,
