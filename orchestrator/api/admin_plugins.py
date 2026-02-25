@@ -190,7 +190,8 @@ async def upload_plugin(
         )
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning(f"Plugin upload validation error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid plugin upload")
     except HTTPException:
         raise
     except Exception as e:

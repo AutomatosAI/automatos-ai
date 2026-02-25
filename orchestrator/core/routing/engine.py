@@ -70,8 +70,6 @@ class UniversalRouter:
         self._db = db
         self._cache = cache
         self._intent_classifier = IntentClassifier()
-        # PRD-64: Semantic candidates from Tier 2.5 (used to narrow Tier 3)
-        self._semantic_candidates: list = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -84,9 +82,6 @@ class UniversalRouter:
         or ``None`` when no tier can resolve the request (the caller
         should fall back to LLM classification or default agent).
         """
-
-        # PRD-64: Reset semantic candidates each routing pass
-        self._semantic_candidates = []
 
         env_hash = _envelope_hash(envelope)
         logger.info(
@@ -128,7 +123,9 @@ class UniversalRouter:
         # Runs BEFORE Tier 2c (intent keywords) because semantic matching
         # understands agent capabilities, while keyword matching is coarse
         # and easily hijacked by overly broad rules.
-        decision = await self._tier2_5_semantic(envelope)
+        # Returns (decision, candidates) — candidates are request-local to
+        # avoid race conditions under concurrent async requests.
+        decision, semantic_candidates = await self._tier2_5_semantic(envelope)
         if decision is not None:
             logger.info(
                 "[router] Tier 2.5 hit (semantic): agent_id=%s confidence=%.2f",
@@ -140,7 +137,7 @@ class UniversalRouter:
         # Tier 2c — IntentClassifier keyword matching against routing rules
         # Skip if Tier 2.5 already found semantic candidates — those go
         # straight to Tier 3 (LLM) which is smarter than keyword matching.
-        if not self._semantic_candidates:
+        if not semantic_candidates:
             decision = self._tier2c_intent_classifier(envelope)
             if decision is not None:
                 logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
@@ -148,7 +145,7 @@ class UniversalRouter:
                 return decision
 
         # Tier 3 — LLM classification (fallback)
-        decision = await self._classify_with_llm(envelope)
+        decision = await self._classify_with_llm(envelope, semantic_candidates)
         if decision is not None:
             logger.info(
                 "[router] Tier 3 hit (LLM): route_type=%s agent_id=%s confidence=%.2f",
@@ -363,10 +360,14 @@ class UniversalRouter:
 
     async def _tier2_5_semantic(
         self, envelope: RequestEnvelope
-    ) -> Optional[RoutingDecision]:
+    ) -> tuple[Optional[RoutingDecision], list]:
         """Use pre-computed agent embeddings to find the best match via cosine
         similarity.  High-confidence match routes directly; ambiguous results
-        are stored as candidates for Tier 3 (narrowed LLM prompt)."""
+        are returned as candidates for Tier 3 (narrowed LLM prompt).
+
+        Returns (decision, candidates) — candidates is a request-local list
+        so no per-request state is stored on the router instance.
+        """
         try:
             from core.routing.semantic_indexer import (
                 find_similar_agents,
@@ -402,7 +403,7 @@ class UniversalRouter:
                     "%d active agents, %d with embeddings in workspace %s",
                     agent_count, embedded_count, envelope.workspace_id,
                 )
-                return None
+                return None, []
 
             # Log top scores for visibility
             top_3 = scored[:3]
@@ -428,34 +429,41 @@ class UniversalRouter:
                         envelope.source,
                         decision,
                     )
-                return decision
+                return decision, []
 
-            # Below direct threshold — store top candidates for Tier 3
-            self._semantic_candidates = [
+            # Below direct threshold — return top candidates for Tier 3
+            candidates = [
                 agent for agent, _score in scored[:MAX_LLM_CANDIDATES]
             ]
             logger.info(
                 "[router] Tier 2.5: no direct match (top=%.2f), "
                 "passing %d candidates to Tier 3",
-                top_score, len(self._semantic_candidates),
+                top_score, len(candidates),
             )
-            return None
+            return None, candidates
 
         except Exception:
             logger.exception("[router] Tier 2.5 failed — falling through")
-            return None
+            return None, []
 
     # ------------------------------------------------------------------
     # Tier 3 — LLM classification
     # ------------------------------------------------------------------
 
     async def _classify_with_llm(
-        self, envelope: RequestEnvelope
+        self,
+        envelope: RequestEnvelope,
+        semantic_candidates: Optional[list] = None,
     ) -> Optional[RoutingDecision]:
         """Use workspace-configured LLM to classify the request and select an agent.
 
         Queries all active agents in the workspace, builds a lightweight prompt,
         and parses the LLM response to extract agent_id and confidence.
+
+        Parameters
+        ----------
+        semantic_candidates : list | None
+            Agents shortlisted by Tier 2.5 (passed as hints to the LLM prompt).
 
         Returns a RoutingDecision (possibly with route_type='orchestrate' for
         low-confidence results) or None on failure.
@@ -472,10 +480,10 @@ class UniversalRouter:
                 )
                 .all()
             )
-            if self._semantic_candidates:
+            if semantic_candidates:
                 logger.info(
                     "[router] Tier 3: %d agents (semantic shortlisted %d)",
-                    len(agents), len(self._semantic_candidates),
+                    len(agents), len(semantic_candidates),
                 )
 
             if not agents:
@@ -501,7 +509,7 @@ class UniversalRouter:
             prompt = self._build_classification_prompt(
                 envelope.content,
                 agent_descriptions,
-                semantic_candidates=self._semantic_candidates or None,
+                semantic_candidates=semantic_candidates or None,
             )
 
             # Call the LLM

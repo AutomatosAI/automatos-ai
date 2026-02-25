@@ -493,7 +493,7 @@ async def reindex_semantic_embeddings(
         }
     except Exception as e:
         logger.error("Error reindexing semantic embeddings: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to reindex semantic embeddings")
 
 
 # ---------------------------------------------------------------------------
@@ -538,4 +538,4 @@ async def semantic_status(
         }
     except Exception as e:
         logger.error("Error checking semantic status: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to check semantic status")

@@ -1,0 +1,122 @@
+# Ralph Progress Log
+Started: 2026-02-25T00:00:00Z
+---
+
+## Codebase Patterns
+- Auth dependency: `get_request_context_hybrid` from `core.auth.hybrid` — returns `RequestContext` with `.user`, `.workspace_id`, `.auth_type`
+- Admin check pattern: `ctx.user.system_role == "admin"` or `ctx.auth_type == "api_key"` for service-to-service
+- Router imports: `from core.auth.hybrid import get_request_context_hybrid` + `from core.auth.dependencies import RequestContext`
+- Error handling: `raise HTTPException(status_code=..., detail=...)` — should use generic messages, log details server-side
+- Existing error utility: `core/utils/error_handling.py` has `raise_safe_error()` already
+- File structure: routers in `orchestrator/api/`, core in `orchestrator/core/`, modules in `orchestrator/modules/`
+- Docker pattern: non-root `automatos` user (UID 1000) with `chown -R automatos:automatos /app`
+- Audit logging: dedicated `audit` logger name, JSON-formatted structured records
+
+---
+
+## 2026-02-25 - US-001
+- **What was implemented:** Added auth to generated_images endpoint
+- **Files changed:** orchestrator/api/generated_images.py
+- **Learnings for future iterations:**
+  - Simple endpoint — just add Depends(get_request_context_hybrid) and the import
+
+---
+
+## 2026-02-25 - US-002
+- **What was implemented:** Fixed _assert_admin in admin_prompts to check actual admin role
+- **Files changed:** orchestrator/api/admin_prompts.py
+- **Learnings for future iterations:**
+  - The old code had `if ctx.auth_type in ("clerk", "api_key"): return` which bypassed ALL role checks
+  - Fix: only api_key gets pass-through; Clerk users must have system_role == "admin"
+
+---
+
+## 2026-02-25 - US-003
+- **What was implemented:** Added admin role check to system_settings mutation endpoints
+- **Files changed:** orchestrator/api/system_settings.py
+- **Learnings for future iterations:**
+  - Created _require_admin() helper matching the pattern from admin_prompts
+  - Applied to PUT, POST, DELETE, bulk-update, reset-to-defaults (5 endpoints)
+  - GETs left open for any authenticated user
+
+---
+
+## 2026-02-25 - US-004
+- **What was implemented:** Added admin check to GET /credentials/{id} (returns decrypted data)
+- **Files changed:** orchestrator/api/credentials.py
+- **Learnings for future iterations:**
+  - POST /resolve already had admin check at line 552
+  - GET /{credential_id} returned decrypted credential_data without admin check — fixed
+
+---
+
+## 2026-02-25 - US-005
+- **What was implemented:** Replaced all detail=str(e) patterns with generic error messages
+- **Files changed:** orchestrator/api/document_generation.py, cloud_documents.py, routing.py, admin_plugins.py
+- **Learnings for future iterations:**
+  - raise_safe_error() already existed in core/utils/error_handling.py
+  - Some ValueError catches used for validation — still logged server-side but generic message to client
+  - context_engineering.py had commented-out instances — left as-is
+
+---
+
+## 2026-02-25 - US-007
+- **Status:** Partial — AuditService implemented; router wiring pending
+- **What was implemented:** AuditService implementation replacing 199-byte stub
+- **Files changed:** orchestrator/core/services/audit_service.py, orchestrator/core/services/__init__.py
+- **Learnings for future iterations:**
+  - Uses dedicated "audit" logger name for independent routing
+  - AuditEventType enum with 5 event types
+  - Security-sensitive events (auth.failure, credential.access) logged at WARNING level
+  - Wiring into routers is a separate step
+
+---
+
+## 2026-02-25 - US-008
+- **What was implemented:** Database SSL enforcement in production
+- **Files changed:** orchestrator/core/database/database.py
+- **Learnings for future iterations:**
+  - Checks if sslmode already in URL before appending
+  - Uses ?sslmode=require or &sslmode=require depending on existing query params
+
+---
+
+## 2026-02-25 - US-009
+- **What was implemented:** Global request body size limit middleware
+- **Files changed:** orchestrator/main.py
+- **Learnings for future iterations:**
+  - 10MB default, 50MB for upload paths
+  - Checks Content-Length header; returns 413 JSON response
+  - Upload paths: /api/documents/upload, /api/admin/plugins/upload, /api/documents/templates/upload
+
+---
+
+## 2026-02-25 - US-010
+- **What was implemented:** Fixed SET LOCAL f-string SQL pattern
+- **Files changed:** orchestrator/api/database_knowledge.py
+- **Learnings for future iterations:**
+  - Converted f-string to text() with bindparams dict
+  - channels.py dynamic SQL verified safe — hardcoded column names with parameterized values
+
+---
+
+## 2026-02-25 - US-011
+- **What was implemented:** Non-root user in Docker development stage
+- **Files changed:** orchestrator/Dockerfile
+- **Learnings for future iterations:**
+  - Matches production stage pattern: useradd -m -u 1000 automatos + chown + USER automatos
+
+---
+
+## 2026-02-25 - US-013, US-014
+- **What was verified:** Already complete
+- **US-013:** No endpoints accept user_id as query parameter — already cleaned up
+- **US-014:** docker-compose.yml uses ${VAR:?error} syntax — already requires explicit credentials
+
+---
+
+## Deferred Stories
+- **US-006 (Dependencies):** Requires running environment for compatibility testing
+- **US-012 (TypeScript):** ~798 TS errors need fixing first — separate PR
+
+---

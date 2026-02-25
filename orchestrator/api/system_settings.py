@@ -35,6 +35,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system-settings", tags=["system-settings"])
 
 
+def _require_admin(ctx: RequestContext) -> None:
+    """Require admin role for mutations; allow API key auth (service-to-service)."""
+    if ctx.auth_type == "api_key":
+        return
+    if ctx.user and getattr(ctx.user, "system_role", "user") in ("admin", "super_admin"):
+        return
+    raise HTTPException(status_code=403, detail="Admin access required")
+
+
 @router.get("/", response_model=List[SystemSettingResponse])
 async def list_system_settings(
     category: Optional[str] = None,
@@ -154,7 +163,8 @@ async def update_system_setting(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Update a system setting"""
-    
+    _require_admin(ctx)
+
     try:
         setting = db.query(SystemSetting).filter(SystemSetting.id == setting_id).first()
         if not setting:
@@ -166,8 +176,9 @@ async def update_system_setting(
         
         db.commit()
         db.refresh(setting)
-        
-        logger.info(f"Updated system setting {setting.key} = {setting.value}")
+
+        _val = "****" if setting.is_sensitive else setting.value
+        logger.info(f"Updated system setting {setting.key} = {_val}")
         return setting
     except HTTPException:
         raise
@@ -183,7 +194,8 @@ async def create_system_setting(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Create a new system setting"""
-    
+    _require_admin(ctx)
+
     try:
         # Check if setting already exists
         existing = db.query(SystemSetting).filter(
@@ -218,7 +230,8 @@ async def delete_system_setting(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Delete a system setting"""
-    
+    _require_admin(ctx)
+
     try:
         setting = db.query(SystemSetting).filter(SystemSetting.id == setting_id).first()
         if not setting:
@@ -251,40 +264,32 @@ async def bulk_update_settings(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Bulk update multiple settings"""
-    
+    _require_admin(ctx)
+
     try:
-        # Log the raw body for debugging
-        body = await request.body()
-        logger.info(f"Raw request body: {body.decode('utf-8')}")
-        
         if updates is None:
             raise HTTPException(status_code=422, detail="No updates provided")
-        
+
         logger.info(f"Received bulk update request with {len(updates)} items")
         updated_count = 0
         updated_settings = []
-        
+
         for update in updates:
             setting = db.query(SystemSetting).filter(SystemSetting.id == update.id).first()
             if setting:
                 old_value = setting.value
                 new_value = update.value
-                
-                # Log comparison details for debugging
-                logger.info(
-                    f"Comparing setting {setting.category}.{setting.key} (id={update.id}): "
-                    f"old='{old_value}' (type={type(old_value).__name__}) vs "
-                    f"new='{new_value}' (type={type(new_value).__name__})"
-                )
-                
+
                 # Always update when explicitly requested (user clicked save)
-                # The frontend should handle preventing unnecessary saves
                 setting.value = new_value
                 # Explicitly update timestamp (onupdate may not always trigger)
                 setting.updated_at = datetime.utcnow()
                 updated_settings.append(setting)
                 updated_count += 1
-                logger.info(f"Updated setting {setting.category}.{setting.key}: '{old_value}' → '{new_value}'")
+
+                _old = "****" if setting.is_sensitive else old_value
+                _new = "****" if setting.is_sensitive else new_value
+                logger.info(f"Updated setting {setting.category}.{setting.key}: '{_old}' → '{_new}'")
             else:
                 logger.warning(f"Setting {update.id} not found")
         
@@ -312,7 +317,8 @@ async def reset_settings_to_defaults(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Reset settings to their default values"""
-    
+    _require_admin(ctx)
+
     try:
         query = db.query(SystemSetting)
         if category:

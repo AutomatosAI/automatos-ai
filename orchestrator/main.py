@@ -539,6 +539,24 @@ limiter = Limiter(key_func=_get_real_client_ip, default_limits=["60/minute"])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Request body size limit middleware (10MB default, 50MB for uploads)
+MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
+UPLOAD_PATHS = ("/api/documents/upload", "/api/admin/plugins/upload", "/api/documents/templates/upload")
+
+@app.middleware("http")
+async def limit_request_body(request, call_next):
+    from starlette.responses import JSONResponse
+    content_length = request.headers.get("content-length")
+    limit = MAX_UPLOAD_SIZE if any(request.url.path.startswith(p) for p in UPLOAD_PATHS) else MAX_BODY_SIZE
+    if content_length:
+        try:
+            if int(content_length) > limit:
+                return JSONResponse(status_code=413, content={"detail": "Payload too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
+    return await call_next(request)
+
 # Security headers middleware
 @app.middleware("http")
 async def add_security_headers(request, call_next):

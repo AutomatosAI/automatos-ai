@@ -64,8 +64,12 @@ RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh 
 # Copy application code (Dockerfile is in orchestrator/, so copy from current dir)
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
+# Create necessary directories and non-root user (matches production stage)
+RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports && \
+    useradd -m -u 1000 automatos && \
+    chown -R automatos:automatos /app
+
+USER automatos
 
 # Expose port
 EXPOSE 8000

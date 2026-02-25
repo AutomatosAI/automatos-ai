@@ -24,14 +24,11 @@ from modules.tools.services.database_tool_integration import get_database_tool_i
 from core.credentials.resolver import get_credential_resolver
 
 import logging
-logger = logging.getLogger(__name__)
 
 # NEW imports for introspection wiring
-from core.models.database_knowledge import DatabaseKnowledgeSource
+from core.models.database_knowledge import DatabaseKnowledgeSource, DatabaseQueryAudit
 from core.credentials.service import CredentialStore
 from modules.nl2sql import DatabaseIntrospectionService
-# NEW import for auditing
-from core.models.database_knowledge import DatabaseQueryAudit
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 
@@ -87,8 +84,8 @@ async def get_item(
     List all database knowledge sources for the current tenant.
     """
     try:
-        query = db.query(DatabaseKnowledgeSource).filter(DatabaseKnowledgeSource.workspace_id == ctx.workspace_id).filter(
-            DatabaseKnowledgeSource.tenant_id == str(ctx.workspace_id)
+        query = db.query(DatabaseKnowledgeSource).filter(
+            DatabaseKnowledgeSource.workspace_id == ctx.workspace_id
         )
         
         if active_only:
@@ -139,7 +136,7 @@ async def create_database_source(
         result = await service.add_database_source(
             name=source.name,
             credential_id=source.credential_id,
-            tenant_id=str(ctx.workspace_id),
+            workspace_id=ctx.workspace_id,
             description=source.description
         )
         
@@ -477,12 +474,12 @@ async def execute_validated_sql(
     except SQLValidationError as e:
         # audit failure
         db.add(DatabaseQueryAudit(
-            tenant_id=str(ctx.workspace_id),
+            tenant_id=1,  # legacy integer column
             source_id=source.id,
             user_id=None,
             agent_id=None,
             session_id=None,
-            natural_language_query=None,
+            natural_language_query=sql or "",
             generated_sql=sql,
             validated_sql=None,
             execution_time_ms=0,
@@ -512,19 +509,19 @@ async def execute_validated_sql(
     except Exception as e:
         # audit failure
         db.add(DatabaseQueryAudit(
-            tenant_id=str(ctx.workspace_id),
+            tenant_id=1,  # legacy integer column
             source_id=source.id,
             user_id=None,
             agent_id=None,
             session_id=None,
-            natural_language_query=None,
+            natural_language_query=sql or "",
             generated_sql=sql,
             validated_sql=validated_sql,
             execution_time_ms=0,
             row_count=0,
             bytes_processed=None,
             success=False,
-            error_message=f"Credential error: {e}",
+            error_message="Credential resolution failed",
             validation_errors=None,
             was_cached=False,
             cache_key=None,
@@ -571,7 +568,7 @@ async def execute_validated_sql(
             # Set timeout for Postgres
             if dialect.startswith("postgres") and (source.query_timeout_seconds or 0) > 0:
                 timeout_ms = int((source.query_timeout_seconds or 30) * 1000)
-                conn.execute(text(f"SET LOCAL statement_timeout = {timeout_ms}"))
+                conn.execute(text("SET LOCAL statement_timeout = :timeout_ms"), {"timeout_ms": timeout_ms})
             import time
             start = time.time()
             result = conn.execute(text(validated_sql))
@@ -580,12 +577,12 @@ async def execute_validated_sql(
             duration_ms = int((time.time() - start) * 1000)
             # audit success
             db.add(DatabaseQueryAudit(
-                tenant_id=str(ctx.workspace_id),
+                tenant_id=1,  # legacy integer column
                 source_id=source.id,
                 user_id=None,
                 agent_id=None,
                 session_id=None,
-                natural_language_query=None,
+                natural_language_query=sql or "",
                 generated_sql=sql,
                 validated_sql=validated_sql,
                 execution_time_ms=duration_ms,
@@ -603,12 +600,12 @@ async def execute_validated_sql(
     except Exception as e:
         # audit failure
         db.add(DatabaseQueryAudit(
-            tenant_id=str(ctx.workspace_id),
+            tenant_id=1,  # legacy integer column
             source_id=source.id,
             user_id=None,
             agent_id=None,
             session_id=None,
-            natural_language_query=None,
+            natural_language_query=sql or "",
             generated_sql=sql,
             validated_sql=validated_sql,
             execution_time_ms=duration_ms,
