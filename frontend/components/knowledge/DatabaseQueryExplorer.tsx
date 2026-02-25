@@ -39,6 +39,7 @@ import {
   RefreshCw
 } from 'lucide-react'
 import { toast } from 'sonner'
+import apiClient from '@/lib/api-client'
 
 // Use simple CSS-based visualization (no SSR issues)
 import { SimpleDataVisualization } from './SimpleDataVisualization'
@@ -80,34 +81,25 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
     setIsDeleting(true)
     
     try {
-      const response = await fetch(`/api/knowledge/sources/database/${selectedSourceId}`, {
+      const data = await apiClient.request(`/api/knowledge/sources/database/${selectedSourceId}`, {
         method: 'DELETE'
       })
 
-      console.log('[Delete] Response status:', response.status)
+      console.log('[Delete] Success:', data)
+      toast.success((data as any)?.message || 'Database source deleted successfully')
 
-      if (response.ok) {
-        const data = await response.json()
-        console.log('[Delete] Success:', data)
-        toast.success(data.message || 'Database source deleted successfully')
-        
-        // Clear current selection and results
-        setSelectedSourceId('')
-        setGeneratedSQL('')
-        setQueryResult(null)
-        setValidationResult(null)
-        setQuery('')
-        
-        // Notify parent to refresh sources list
-        onSourceDeleted?.()
-      } else {
-        const error = await response.json()
-        console.error('[Delete] Error response:', error)
-        toast.error(error.detail || 'Failed to delete database source')
-      }
-    } catch (error) {
+      // Clear current selection and results
+      setSelectedSourceId('')
+      setGeneratedSQL('')
+      setQueryResult(null)
+      setValidationResult(null)
+      setQuery('')
+
+      // Notify parent to refresh sources list
+      onSourceDeleted?.()
+    } catch (error: any) {
       console.error('[Delete] Exception:', error)
-      toast.error('Failed to delete database source')
+      toast.error(error?.message || 'Failed to delete database source')
     } finally {
       setIsDeleting(false)
     }
@@ -143,41 +135,34 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
     
     try {
       // Call the API to process natural language query
-      const response = await fetch(`/api/knowledge/sources/database/${selectedSourceId}/query`, {
+      const data = await apiClient.request<any>(`/api/knowledge/sources/database/${selectedSourceId}/query`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           source_id: selectedSourceId,
           query: queryToRun
-        })
+        } as any
       })
 
-      if (response.ok) {
-        const data = await response.json()
-        setGeneratedSQL(data.sql)
-        setQueryResult(data.data) // Backend returns 'data' not 'results'
-        setValidationResult({ valid: data.success })
-        setConfidence(data.confidence || null)
-        setQuery(queryToRun)
-        
-        // Add to history
-        setQueryHistory([
-          {
-            timestamp: new Date().toISOString(),
-            query: queryToRun,
-            sql: data.sql,
-            rowCount: data.row_count || 0
-          },
-          ...queryHistory.slice(0, 9)
-        ])
-        
-        toast.success(`Query executed successfully! ${data.row_count} rows returned`)
-      } else {
-        const error = await response.json()
-        toast.error(error.detail || error.error || 'Query failed')
-      }
-    } catch (error) {
-      toast.error('Failed to execute query')
+      setGeneratedSQL(data.sql)
+      setQueryResult(data.data) // Backend returns 'data' not 'results'
+      setValidationResult({ valid: data.success })
+      setConfidence(data.confidence || null)
+      setQuery(queryToRun)
+
+      // Add to history
+      setQueryHistory([
+        {
+          timestamp: new Date().toISOString(),
+          query: queryToRun,
+          sql: data.sql,
+          rowCount: data.row_count || 0
+        },
+        ...queryHistory.slice(0, 9)
+      ])
+
+      toast.success(`Query executed successfully! ${data.row_count} rows returned`)
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to execute query')
     } finally {
       setIsLoading(false)
     }
@@ -225,10 +210,9 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
 
     try {
       // Send to Context Engineering
-      const response = await fetch('/api/context/add', {
+      await apiClient.request('/api/context/add', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           type: 'database_query',
           content: {
             query: query,
@@ -237,16 +221,12 @@ export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted
             source_id: selectedSourceId,
             timestamp: new Date().toISOString()
           }
-        })
+        } as any
       })
 
-      if (response.ok) {
-        toast.success('Query results added to context')
-      } else {
-        toast.error('Failed to add to context')
-      }
-    } catch (error) {
-      toast.error('Failed to send to context')
+      toast.success('Query results added to context')
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to send to context')
     }
   }
 
