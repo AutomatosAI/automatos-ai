@@ -1,45 +1,67 @@
+"""
+Widget CORS Middleware (ASGI-native)
+=====================================
+
+Dynamic CORS for ``/api/widgets/*`` routes.  Implemented as a pure ASGI
+middleware (not ``BaseHTTPMiddleware``) so that ``StreamingResponse`` /
+SSE connections are **not buffered**.
+"""
+
 import logging
-from typing import Optional
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
-from core.database.database import SessionLocal
-from core.services.api_key_service import ApiKeyService
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
 
-class WidgetCORSMiddleware(BaseHTTPMiddleware):
-    """Dynamic CORS middleware that validates origins per API key.
-    Applies ONLY to /api/widgets/* routes.
-    """
+class WidgetCORSMiddleware:
+    """Add CORS headers to /api/widgets/* without buffering responses."""
 
-    async def dispatch(self, request: Request, call_next):
-        # Only apply to /api/widgets/ routes
-        if not request.url.path.startswith("/api/widgets"):
-            return await call_next(request)
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
-        origin = request.headers.get("origin")
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path: str = scope.get("path", "")
+        if not path.startswith("/api/widgets"):
+            await self.app(scope, receive, send)
+            return
+
+        # Extract Origin header from raw ASGI headers
+        headers = dict(scope.get("headers", []))
+        origin = (headers.get(b"origin") or b"").decode("latin-1")
 
         # Handle OPTIONS preflight
-        if request.method == "OPTIONS":
+        if scope["method"] == "OPTIONS":
             if not origin:
-                return Response(status_code=400)
+                response_headers = [
+                    (b"content-type", b"text/plain"),
+                ]
+                await send({"type": "http.response.start", "status": 400, "headers": response_headers})
+                await send({"type": "http.response.body", "body": b""})
+                return
 
-            # For preflight, we do a permissive check since the actual
-            # request will be fully validated
-            response = Response(status_code=200)
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Workspace-ID"
-            response.headers["Access-Control-Max-Age"] = "86400"
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            return response
+            response_headers = [
+                (b"access-control-allow-origin", origin.encode("latin-1")),
+                (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS"),
+                (b"access-control-allow-headers", b"Authorization, Content-Type, X-Workspace-ID"),
+                (b"access-control-max-age", b"86400"),
+                (b"access-control-allow-credentials", b"true"),
+            ]
+            await send({"type": "http.response.start", "status": 200, "headers": response_headers})
+            await send({"type": "http.response.body", "body": b""})
+            return
 
-        # For actual requests, add CORS headers to response
-        response = await call_next(request)
-        if origin:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Vary"] = "Origin"
-        return response
+        # For actual requests, inject CORS headers into the response
+        async def send_with_cors(message: dict) -> None:
+            if message["type"] == "http.response.start" and origin:
+                headers = list(message.get("headers", []))
+                headers.append((b"access-control-allow-origin", origin.encode("latin-1")))
+                headers.append((b"access-control-allow-credentials", b"true"))
+                headers.append((b"vary", b"Origin"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_cors)
