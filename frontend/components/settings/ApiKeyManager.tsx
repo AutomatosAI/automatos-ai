@@ -57,11 +57,11 @@ type ExpiryOption = "none" | "30d" | "90d" | "1y";
 interface SdkApiKey {
   id: string;
   name: string;
-  prefix: string;
+  key_prefix: string;
   key_type: KeyType;
   permissions: Permission[];
   allowed_domains: string[] | null;
-  rate_limit: number | null;
+  rate_limit_requests: number | null;
   expires_at: string | null;
   created_at: string;
   last_used_at: string | null;
@@ -73,13 +73,17 @@ interface CreateKeyPayload {
   key_type: KeyType;
   permissions: Permission[];
   allowed_domains?: string[];
-  rate_limit?: number | null;
-  expires_in?: ExpiryOption;
+  rate_limit_requests?: number | null;
+  expires_at?: string | null;
 }
 
 interface CreateKeyResponse {
-  key: SdkApiKey;
-  full_key: string;
+  id: string;
+  name: string;
+  key: string;
+  key_type: string;
+  permissions: string[];
+  created_at: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +147,7 @@ function isExpired(expiresAt: string | null): boolean {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function ApiKeyManager() {
+export function ApiKeyManager() {
   const { workspace } = useWorkspace();
   const workspaceId = workspace?.id ?? "";
 
@@ -286,11 +290,21 @@ export default function ApiKeyManager() {
 
       const rateLimitNum = parseInt(formRateLimit, 10);
       if (!isNaN(rateLimitNum) && rateLimitNum > 0) {
-        payload.rate_limit = rateLimitNum;
+        payload.rate_limit_requests = rateLimitNum;
       }
 
       if (formExpiry !== "none") {
-        payload.expires_in = formExpiry;
+        const now = new Date();
+        const expiryMap: Record<string, number> = {
+          "30d": 30,
+          "90d": 90,
+          "1y": 365,
+        };
+        const days = expiryMap[formExpiry] ?? 0;
+        if (days > 0) {
+          const exp = new Date(now.getTime() + days * 86400000);
+          payload.expires_at = exp.toISOString();
+        }
       }
 
       const res = await fetch(`${apiBase}/api/api-keys`, {
@@ -307,7 +321,7 @@ export default function ApiKeyManager() {
       }
 
       const data: CreateKeyResponse = await res.json();
-      setCreatedKey(data.full_key);
+      setCreatedKey(data.key);
       setCreateOpen(false);
       resetForm();
       await fetchKeys();
@@ -484,7 +498,7 @@ export default function ApiKeyManager() {
                         </TableCell>
                         <TableCell>
                           <code className="rounded bg-muted/50 px-2 py-0.5 text-xs font-mono">
-                            {key.prefix}...
+                            {key.key_prefix}
                           </code>
                         </TableCell>
                         <TableCell>
