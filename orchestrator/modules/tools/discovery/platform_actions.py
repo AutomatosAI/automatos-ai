@@ -312,7 +312,7 @@ def _register_write_actions(registry: ActionRegistry) -> None:
         name="platform_create_agent",
         description=(
             "Create a new agent in the workspace. Requires a name and agent type. "
-            "Optionally accepts a description, model configuration, and tags. "
+            "Optionally accepts a description, model, system prompt, temperature, and tags. "
             "Use when the user asks to create, add, or set up a new agent."
         ),
         category="agents",
@@ -332,9 +332,33 @@ def _register_write_actions(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": "Brief description of the agent's purpose.",
                 },
-                "model": {
+                "model_id": {
                     "type": "string",
-                    "description": "LLM model to use (e.g. 'gpt-4o', 'claude-sonnet-4-20250514').",
+                    "description": (
+                        "LLM model ID to use. Examples: 'gpt-4o', 'gpt-4o-mini', "
+                        "'claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001'. "
+                        "Defaults to 'gpt-4o' if not specified."
+                    ),
+                },
+                "system_prompt": {
+                    "type": "string",
+                    "description": (
+                        "Custom system prompt that defines the agent's persona, behaviour, "
+                        "and constraints. This is the instruction text the agent sees at the "
+                        "start of every conversation."
+                    ),
+                },
+                "temperature": {
+                    "type": "number",
+                    "description": (
+                        "Sampling temperature (0.0–2.0). Lower values are more deterministic, "
+                        "higher values are more creative. Defaults to 0.7."
+                    ),
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tags for categorisation (e.g. ['support', 'customer-facing']).",
                 },
             },
             "required": ["name"],
@@ -345,6 +369,7 @@ def _register_write_actions(registry: ActionRegistry) -> None:
         examples=[
             "create an agent called DevOps Bot",
             "make a new researcher agent",
+            "create a support agent using claude sonnet with a helpful persona",
         ],
     ))
 
@@ -352,7 +377,8 @@ def _register_write_actions(registry: ActionRegistry) -> None:
         name="platform_update_agent",
         description=(
             "Update an existing agent's configuration. Can change name, description, "
-            "status, model, or tags. Use when the user asks to modify or update an agent."
+            "status, model, system prompt, temperature, or tags. "
+            "Use when the user asks to modify, update, or reconfigure an agent."
         ),
         category="agents",
         parameters={
@@ -379,6 +405,27 @@ def _register_write_actions(registry: ActionRegistry) -> None:
                     "enum": ["active", "inactive"],
                     "description": "New status.",
                 },
+                "model_id": {
+                    "type": "string",
+                    "description": (
+                        "New LLM model ID (e.g. 'gpt-4o', 'claude-sonnet-4-20250514')."
+                    ),
+                },
+                "system_prompt": {
+                    "type": "string",
+                    "description": (
+                        "New system prompt / persona instructions for the agent."
+                    ),
+                },
+                "temperature": {
+                    "type": "number",
+                    "description": "New sampling temperature (0.0–2.0).",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Replace the agent's tags with this list.",
+                },
             },
             "required": [],
         },
@@ -388,6 +435,8 @@ def _register_write_actions(registry: ActionRegistry) -> None:
         examples=[
             "rename agent 5 to CodeReview Bot",
             "deactivate the DevOps agent",
+            "change the support agent's model to claude sonnet",
+            "update agent 3's system prompt to be more formal",
         ],
     ))
 
