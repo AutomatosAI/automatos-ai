@@ -571,7 +571,7 @@ async def execute_validated_sql(
             # Set timeout for Postgres
             if dialect.startswith("postgres") and (source.query_timeout_seconds or 0) > 0:
                 timeout_ms = int((source.query_timeout_seconds or 30) * 1000)
-                conn.execute(text(f"SET LOCAL statement_timeout = {timeout_ms}"))
+                conn.execute(text("SET LOCAL statement_timeout = :timeout_ms"), {"timeout_ms": timeout_ms})
             import time
             start = time.time()
             result = conn.execute(text(validated_sql))

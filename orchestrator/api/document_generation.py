@@ -228,7 +228,8 @@ async def preview_template(
             template_id=template.id,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Document preview failed: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Document preview failed")
 
     return {"preview_url": result.download_url, "filename": result.filename}
 
@@ -318,7 +319,8 @@ async def generate_document(
             template_id=UUID(body.template_id) if body.template_id else None,
         )
     except (ValueError, FileNotFoundError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning(f"Document generation validation error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid document generation request")
     except ImportError as e:
         logger.error(f"Document generation import error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

@@ -35,6 +35,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system-settings", tags=["system-settings"])
 
 
+def _require_admin(ctx: RequestContext) -> None:
+    """Require admin role for mutations; allow API key auth (service-to-service)."""
+    if ctx.auth_type == "api_key":
+        return
+    if ctx.user and getattr(ctx.user, "system_role", "user") == "admin":
+        return
+    raise HTTPException(status_code=403, detail="Admin access required")
+
+
 @router.get("/", response_model=List[SystemSettingResponse])
 async def list_system_settings(
     category: Optional[str] = None,
@@ -154,7 +163,8 @@ async def update_system_setting(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Update a system setting"""
-    
+    _require_admin(ctx)
+
     try:
         setting = db.query(SystemSetting).filter(SystemSetting.id == setting_id).first()
         if not setting:
@@ -183,7 +193,8 @@ async def create_system_setting(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Create a new system setting"""
-    
+    _require_admin(ctx)
+
     try:
         # Check if setting already exists
         existing = db.query(SystemSetting).filter(
@@ -218,7 +229,8 @@ async def delete_system_setting(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Delete a system setting"""
-    
+    _require_admin(ctx)
+
     try:
         setting = db.query(SystemSetting).filter(SystemSetting.id == setting_id).first()
         if not setting:
@@ -251,7 +263,8 @@ async def bulk_update_settings(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Bulk update multiple settings"""
-    
+    _require_admin(ctx)
+
     try:
         # Log the raw body for debugging
         body = await request.body()
@@ -312,7 +325,8 @@ async def reset_settings_to_defaults(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Reset settings to their default values"""
-    
+    _require_admin(ctx)
+
     try:
         query = db.query(SystemSetting)
         if category:

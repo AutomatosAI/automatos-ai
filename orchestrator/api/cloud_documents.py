@@ -417,7 +417,8 @@ async def trigger_sync(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning(f"Cloud document sync validation error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid sync request")
     except Exception as e:
         logger.error(f"Error triggering sync: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

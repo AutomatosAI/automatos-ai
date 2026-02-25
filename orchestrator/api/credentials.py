@@ -339,7 +339,11 @@ async def get_credential(
 ):
     """Get credential with decrypted values for editing"""
     set_request_id(str(uuid.uuid4()))
-    
+
+    # Restrict decrypted credential access to admin or API key auth
+    if ctx.auth_type not in ("api_key",) and getattr(ctx.user, "system_role", "user") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     try:
         cred = store.get_credential(credential_id)
         if not cred:

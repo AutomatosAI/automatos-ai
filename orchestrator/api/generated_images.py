@@ -7,9 +7,11 @@ GET /api/generated-images/{image_id}
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
+from core.auth.dependencies import RequestContext
+from core.auth.hybrid import get_request_context_hybrid
 from core.services.image_store import get_image_store
 
 logger = logging.getLogger(__name__)
@@ -18,7 +20,10 @@ router = APIRouter(prefix="/api/generated-images", tags=["Generated Images"])
 
 
 @router.get("/{image_id}")
-async def get_generated_image(image_id: str):
+async def get_generated_image(
+    image_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
     """Fetch a generated image by its UUID."""
     store = get_image_store()
     result = await store.get_image(image_id)
