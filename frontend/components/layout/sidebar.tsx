@@ -18,7 +18,6 @@ import {
   Store,
   BarChart3,
   LayoutDashboard,
-  Puzzle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSystemRole } from '@/contexts/role-context'
@@ -63,13 +62,6 @@ const navigationItems = [
     icon: Store,
     iconColor: 'text-primary',
     description: 'Discover agents, recipes & tools'
-  },
-  {
-    name: 'Widget Marketplace',
-    href: '/marketplace/widgets',
-    icon: Puzzle,
-    iconColor: 'text-[hsl(var(--info))]',
-    description: 'Browse and install widgets'
   },
   {
     name: 'Knowledge Bases',
