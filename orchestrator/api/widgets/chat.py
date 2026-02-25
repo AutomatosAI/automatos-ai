@@ -167,7 +167,8 @@ async def widget_chat(
     messages = chat_service.get_messages_by_chat_id(chat_id)
     message_history = [{"role": msg.role, "parts": msg.parts} for msg in messages]
 
-    effective_agent_id = body.agent_id or 1
+    # API key can lock the agent — ignore client-provided agent_id when set
+    effective_agent_id = auth.default_agent_id or body.agent_id or 1
 
     # ------------------------------------------------------------------
     # Stream

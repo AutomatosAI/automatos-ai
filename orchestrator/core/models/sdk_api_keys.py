@@ -51,6 +51,9 @@ class SdkApiKey(Base):
     rate_limit_requests = Column(Integer, nullable=True)
     rate_limit_tokens = Column(Integer, nullable=True)
 
+    # Agent lock — force all widget chats to use this agent
+    default_agent_id = Column(Integer, nullable=True)
+
     # Access restrictions
     allowed_domains = Column(ARRAY(String), nullable=True)
     allowed_ips = Column(ARRAY(String), nullable=True)

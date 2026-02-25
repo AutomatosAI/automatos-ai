@@ -50,6 +50,7 @@ class WidgetAuthContext:
     workspace_id: UUID
     api_key_id: UUID
     permissions: List[str] = field(default_factory=list)
+    default_agent_id: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -154,10 +155,12 @@ async def widget_auth(
                 detail="Workspace mismatch between token and header",
             )
 
+        default_agent_id = jwt_payload.get("default_agent_id")
         ctx = WidgetAuthContext(
             workspace_id=workspace_id,
             api_key_id=api_key_id,
             permissions=permissions,
+            default_agent_id=int(default_agent_id) if default_agent_id else None,
         )
         request.state.workspace_id = workspace_id
         request.state.api_key_id = api_key_id
@@ -193,6 +196,7 @@ async def widget_auth(
         workspace_id=api_key_record.workspace_id,
         api_key_id=api_key_record.id,
         permissions=permissions,
+        default_agent_id=api_key_record.default_agent_id,
     )
     request.state.workspace_id = api_key_record.workspace_id
     request.state.api_key_id = api_key_record.id
