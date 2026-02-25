@@ -45,6 +45,7 @@ from api.cache import router as cache_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
+from api.widget_memory import router as widget_memory_router  # US-013: Widget memory panel
 from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
 from api.benchmarking import router as benchmarking_router
@@ -92,6 +93,11 @@ try:
     from api.bug_reports import router as bug_reports_router
 except ImportError:
     bug_reports_router = None
+# US-012: Widget Email operations (optional — Composio dependency)
+try:
+    from api.widget_email import router as widget_email_router
+except ImportError:
+    widget_email_router = None
 # PRD-37: SaaS Foundation stubs (optional — may not exist in all branches)
 try:
     from api.auth import router as auth_router
@@ -105,6 +111,14 @@ try:
     from api.evaluation import router as evaluation_router
 except ImportError:
     evaluation_router = None
+try:
+    from api.widgets.router import router as widget_api_router
+except ImportError:
+    widget_api_router = None
+try:
+    from api.widget_marketplace import router as widget_marketplace_router
+except ImportError:
+    widget_marketplace_router = None
 
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
@@ -142,6 +156,7 @@ from api.execution_history import router as execution_history_router  # Enhanced
 from api.database_knowledge import router as database_knowledge_router  # PRD-21: Database Knowledge
 from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
 from api.document_generation import router as document_generation_router  # PRD-63: Document Generation
+from api.widget_workflows import router as widget_workflows_router  # US-014: Widget Workflow Control
 
 # PRD-55: Autonomous Assistant Platform (optional modules)
 try:
@@ -523,6 +538,19 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "X-Routing-Agent-ID", "X-Routing-Confidence", "X-Routing-Type", "X-Routing-Reasoning", "X-Routing-Request-ID"],
 )
 
+# PRD-38.4: Widget SDK middleware
+try:
+    from api.widgets.cors import WidgetCORSMiddleware
+    app.add_middleware(WidgetCORSMiddleware)
+except ImportError:
+    pass
+
+try:
+    from api.widgets.rate_limit import WidgetRateLimitMiddleware
+    app.add_middleware(WidgetRateLimitMiddleware)
+except ImportError:
+    pass
+
 # Rate limiting (US-017)
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -616,6 +644,7 @@ async def api_tracking_middleware(request, call_next):
 # Include API routers
 app.include_router(agents_router)
 app.include_router(models_router)  # PRD-15: Model management
+app.include_router(widget_workflows_router)  # US-014: Widget workflow control (pause/resume/cancel) — must be before workflows_router to avoid /{id} catch-all
 app.include_router(workflows_router)
 app.include_router(workflow_templates_router)  # Legacy - backward compatibility
 app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
@@ -628,6 +657,7 @@ app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(context_engineering_router)
 app.include_router(memory_router)
+app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/memory)
 app.include_router(memory_stats_router)  # Real memory stats from database
 app.include_router(analytics_router)
 app.include_router(workflow_history_router)
@@ -696,10 +726,16 @@ app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
+if widget_email_router is not None:
+    app.include_router(widget_email_router)  # US-012: Widget Email operations
 if auth_router is not None:
     app.include_router(auth_router)  # PRD-37: Auth endpoints
 if api_keys_router is not None:
     app.include_router(api_keys_router)  # PRD-37: API key management
+if widget_api_router is not None:
+    app.include_router(widget_api_router)  # PRD-38.4: Widget SDK API
+if widget_marketplace_router is not None:
+    app.include_router(widget_marketplace_router)  # PRD-38.5: Widget Marketplace
 if evaluation_router is not None:
     app.include_router(evaluation_router)  # Evaluation methodologies
 
