@@ -191,7 +191,7 @@ class DocumentGenerationService:
         except Exception as e:
             raise RuntimeError(f"PDF generation failed: {e}")
 
-        return self._build_result(output_path, "pdf", title)
+        return self._build_result(output_path, "pdf", title, ws)
 
     # ------------------------------------------------------------------
     # DOCX Generation (python-docx-template)
@@ -239,7 +239,7 @@ class DocumentGenerationService:
         output_path = self._output_path(workspace_id, title, "docx")
         doc.save(output_path)
 
-        return self._build_result(output_path, "docx", title)
+        return self._build_result(output_path, "docx", title, ws)
 
     # ------------------------------------------------------------------
     # XLSX Generation (XlsxWriter)
@@ -305,7 +305,7 @@ class DocumentGenerationService:
             worksheet.set_column(col, col, min(max_width + 2, 50))
 
         workbook.close()
-        return self._build_result(output_path, "xlsx", title)
+        return self._build_result(output_path, "xlsx", title, workspace_id)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -511,14 +511,16 @@ class DocumentGenerationService:
         os.makedirs(directory, exist_ok=True)
         return os.path.join(directory, f"{timestamp}_{safe_title}.{ext}")
 
-    def _build_result(self, path: str, fmt: str, title: str) -> GeneratedDocument:
+    def _build_result(
+        self, path: str, fmt: str, title: str, workspace_id: UUID = None
+    ) -> GeneratedDocument:
         """Build a GeneratedDocument from a file on disk, uploading to S3 for persistence."""
         filename = os.path.basename(path)
         size = os.path.getsize(path)
 
         # Upload to S3 for persistent storage (containers are ephemeral)
         download_url = f"/api/documents/generated/{filename}"
-        s3_url = self._upload_to_s3(path, filename)
+        s3_url = self._upload_to_s3(path, filename, workspace_id)
         if s3_url:
             download_url = s3_url
 
@@ -531,7 +533,9 @@ class DocumentGenerationService:
             preview_url=download_url if fmt == "pdf" else None,
         )
 
-    def _upload_to_s3(self, local_path: str, filename: str) -> Optional[str]:
+    def _upload_to_s3(
+        self, local_path: str, filename: str, workspace_id: UUID = None
+    ) -> Optional[str]:
         """Upload generated document to S3 and return a presigned download URL.
 
         Returns None if S3 is not configured (falls back to local serving).
@@ -544,8 +548,9 @@ class DocumentGenerationService:
             logger.debug("[DocGen] AWS credentials not configured, skipping S3 upload")
             return None
 
+        ws_id = workspace_id or self.workspace_id
         bucket = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
-        s3_key = f"workspaces/{self.workspace_id}/generated-documents/{filename}"
+        s3_key = f"workspaces/{ws_id}/generated-documents/{filename}"
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
         try:

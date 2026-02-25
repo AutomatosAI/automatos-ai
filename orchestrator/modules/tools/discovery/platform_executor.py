@@ -54,13 +54,13 @@ class PlatformActionExecutor:
         if not handler:
             return {"success": False, "error": f"Unknown platform action: {action_name}"}
 
-        # Permission check for write/destructive actions
+        # Permission check for write/destructive actions (fail-closed)
         try:
             from modules.tools.discovery import get_action_registry
             action_def = get_action_registry().get(action_name)
             if action_def and action_def.requires_confirmation:
                 return {
-                    "success": True,
+                    "success": False,
                     "requires_confirmation": True,
                     "action": action_name,
                     "permission_level": action_def.permission_level,
@@ -70,8 +70,23 @@ class PlatformActionExecutor:
                     ),
                     "params": params,
                 }
-        except Exception:
-            pass  # If registry check fails, proceed (fail open for read actions)
+        except Exception as e:
+            # Fail-closed: if we can't verify permissions, require confirmation
+            logger.warning(
+                "[PlatformExecutor] Registry lookup failed for %s: %s — requiring confirmation",
+                action_name, e,
+            )
+            return {
+                "success": False,
+                "requires_confirmation": True,
+                "action": action_name,
+                "permission_level": "unknown",
+                "message": (
+                    f"Could not verify permissions for '{action_name}'. "
+                    "Confirmation required for safety."
+                ),
+                "params": params,
+            }
 
         try:
             return await handler(params)
