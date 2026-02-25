@@ -18,6 +18,37 @@ import {
   routeToolToWidget,
   transformToolResultToWidget,
 } from '@/components/widgets/router'
+import type {
+  MemoryInjectedEvent,
+  MemoryStoredEvent,
+  WorkflowUpdateEvent,
+} from '@/types'
+import apiClient from '@/lib/api-client'
+
+// ── US-006: API response types matching backend Pydantic schemas ────
+
+/** Workspace summary returned by GET /api/workspaces */
+export interface SavedWorkspaceSummary {
+  id: string
+  name: string
+  description: string | null
+  layout_mode: string
+  visibility: string
+  updated_at: string | null
+}
+
+/** Full workspace detail returned by GET /api/workspaces/:id */
+export interface SavedWorkspaceDetail {
+  id: string
+  name: string
+  description: string | null
+  layout_mode: string
+  visibility: string
+  layout: Record<string, unknown> | null
+  widgets: Array<Record<string, unknown>> | null
+  updated_at: string | null
+  created_at: string | null
+}
 
 /**
  * Workspace state interface
@@ -46,6 +77,18 @@ interface WorkspaceState {
   // Persistence tracking
   isDirty: boolean
   lastSaved: Date | null
+
+  // US-006: Workspace persistence state
+  currentWorkspaceId: string | null
+  savedWorkspaces: SavedWorkspaceSummary[]
+  isLoading: boolean
+  isSaving: boolean
+  hasUnsavedChanges: boolean
+
+  // US-015: Live SSE widget data
+  lastMemoryInjected: MemoryInjectedEvent | null
+  lastMemoryStored: MemoryStoredEvent | null
+  lastWorkflowUpdate: WorkflowUpdateEvent | null
 }
 
 /**
@@ -93,6 +136,17 @@ interface WorkspaceActions {
   // Batch operations
   addWidgets: (widgets: Omit<Widget, 'id'>[]) => string[]
   removeWidgets: (ids: string[]) => void
+
+  // US-006: Workspace persistence actions
+  loadWorkspaces: () => Promise<void>
+  loadWorkspace: (id: string) => Promise<void>
+  saveWorkspace: (name?: string, description?: string) => Promise<string>
+  deleteWorkspace: (id: string) => Promise<void>
+
+  // US-015: SSE event dispatchers
+  dispatchMemoryInjected: (event: MemoryInjectedEvent) => void
+  dispatchMemoryStored: (event: MemoryStoredEvent) => void
+  dispatchWorkflowUpdate: (event: WorkflowUpdateEvent) => void
 }
 
 /**
@@ -172,6 +226,14 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       selectedWidgetForContext: null,
       isDirty: false,
       lastSaved: null,
+      currentWorkspaceId: null,
+      savedWorkspaces: [],
+      isLoading: false,
+      isSaving: false,
+      hasUnsavedChanges: false,
+      lastMemoryInjected: null,
+      lastMemoryStored: null,
+      lastWorkflowUpdate: null,
 
       // Widget CRUD
       addWidget: (widgetData) => {
@@ -203,6 +265,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           sizes: { ...state.sizes, [id]: size },
           activeWidgetId: id,
           isDirty: true,
+          hasUnsavedChanges: true,
         }))
 
         return id
@@ -222,6 +285,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
               },
             },
             isDirty: true,
+            hasUnsavedChanges: true,
           }
         })
       },
@@ -240,6 +304,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             activeWidgetId: state.activeWidgetId === id ? null : state.activeWidgetId,
             widgetsInContext: state.widgetsInContext.filter((wid) => wid !== id),
             isDirty: true,
+            hasUnsavedChanges: true,
           }
         })
       },
@@ -253,6 +318,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           activeWidgetId: null,
           widgetsInContext: [],
           isDirty: true,
+          hasUnsavedChanges: true,
         })
       },
 
@@ -289,13 +355,14 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
 
       // Layout
       setLayoutMode: (mode) => {
-        set({ layoutMode: mode, isDirty: true })
+        set({ layoutMode: mode, isDirty: true, hasUnsavedChanges: true })
       },
 
       updatePosition: (id, position) => {
         set((state) => ({
           positions: { ...state.positions, [id]: position },
           isDirty: true,
+          hasUnsavedChanges: true,
         }))
       },
 
@@ -303,6 +370,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         set((state) => ({
           sizes: { ...state.sizes, [id]: size },
           isDirty: true,
+          hasUnsavedChanges: true,
         }))
       },
 
@@ -324,6 +392,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           positions: newPositions,
           sizes: newSizes,
           isDirty: true,
+          hasUnsavedChanges: true,
         })
       },
 
@@ -394,6 +463,164 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         return get().addWidget(widgetData)
       },
 
+      // ── US-006: Workspace persistence actions ──────────────────────────
+
+      loadWorkspaces: async () => {
+        set({ isLoading: true })
+        try {
+          const data = await apiClient.get<SavedWorkspaceSummary[]>('/api/workspaces')
+          set({ savedWorkspaces: data, isLoading: false })
+        } catch (err) {
+          console.error('[Workspace Store] Failed to load workspaces:', err)
+          set({ isLoading: false })
+        }
+      },
+
+      loadWorkspace: async (id: string) => {
+        set({ isLoading: true })
+        try {
+          const ws = await apiClient.get<SavedWorkspaceDetail>(`/api/workspaces/${id}`)
+
+          // Restore widgets from the persisted array
+          const restoredWidgets: Record<string, Widget> = {}
+          const restoredIds: string[] = []
+          const restoredPositions: Record<string, WidgetPosition> = {}
+          const restoredSizes: Record<string, WidgetSize> = {}
+
+          const widgetArray = ws.widgets ?? []
+          for (const raw of widgetArray) {
+            const w = raw as Record<string, unknown>
+            const wId = (w.id as string) || generateWidgetId()
+            restoredWidgets[wId] = w as unknown as Widget
+            restoredIds.push(wId)
+
+            if (w.position && typeof w.position === 'object') {
+              restoredPositions[wId] = w.position as WidgetPosition
+            }
+            if (w.size && typeof w.size === 'object') {
+              restoredSizes[wId] = w.size as WidgetSize
+            }
+          }
+
+          // Restore layout / grid config
+          const layout = ws.layout as Record<string, unknown> | null
+          const restoredGridConfig: GridConfig = {
+            columns: (layout?.columns as number) ?? DEFAULT_GRID_CONFIG.columns,
+            rowHeight: (layout?.rowHeight as number) ?? DEFAULT_GRID_CONFIG.rowHeight,
+            margin: (layout?.margin as [number, number]) ?? DEFAULT_GRID_CONFIG.margin,
+            containerPadding: (layout?.containerPadding as [number, number]) ?? DEFAULT_GRID_CONFIG.containerPadding,
+          }
+
+          set({
+            currentWorkspaceId: ws.id,
+            widgets: restoredWidgets,
+            widgetIds: restoredIds,
+            positions: restoredPositions,
+            sizes: restoredSizes,
+            layoutMode: (ws.layout_mode as LayoutMode) || 'grid',
+            gridConfig: restoredGridConfig,
+            activeWidgetId: null,
+            widgetsInContext: [],
+            isDirty: false,
+            hasUnsavedChanges: false,
+            isLoading: false,
+          })
+        } catch (err) {
+          console.error('[Workspace Store] Failed to load workspace:', err)
+          set({ isLoading: false })
+        }
+      },
+
+      saveWorkspace: async (name?: string, description?: string) => {
+        const state = get()
+        set({ isSaving: true })
+
+        // Serialize current widgets into the array format the backend expects
+        const widgetsArray = state.widgetIds.map((wId) => ({
+          ...state.widgets[wId],
+          position: state.positions[wId],
+          size: state.sizes[wId],
+        }))
+
+        const payload = {
+          name: name ?? 'Untitled Workspace',
+          description: description ?? null,
+          layout_mode: state.layoutMode,
+          layout: {
+            columns: state.gridConfig.columns,
+            rowHeight: state.gridConfig.rowHeight,
+            margin: state.gridConfig.margin,
+            containerPadding: state.gridConfig.containerPadding,
+          },
+          widgets: widgetsArray,
+        }
+
+        try {
+          let saved: SavedWorkspaceDetail
+
+          if (state.currentWorkspaceId) {
+            // PUT existing workspace
+            saved = await apiClient.put<SavedWorkspaceDetail>(
+              `/api/workspaces/${state.currentWorkspaceId}`,
+              payload
+            )
+          } else {
+            // POST new workspace
+            saved = await apiClient.post<SavedWorkspaceDetail>(
+              '/api/workspaces',
+              payload
+            )
+          }
+
+          set({
+            currentWorkspaceId: saved.id,
+            isSaving: false,
+            isDirty: false,
+            hasUnsavedChanges: false,
+            lastSaved: new Date(),
+          })
+
+          // Refresh the savedWorkspaces list so the sidebar/manager stays current
+          get().loadWorkspaces()
+
+          return saved.id
+        } catch (err) {
+          console.error('[Workspace Store] Failed to save workspace:', err)
+          set({ isSaving: false })
+          throw err
+        }
+      },
+
+      deleteWorkspace: async (id: string) => {
+        set({ isLoading: true })
+        try {
+          await apiClient.delete(`/api/workspaces/${id}`)
+
+          set((state) => ({
+            savedWorkspaces: state.savedWorkspaces.filter((ws) => ws.id !== id),
+            currentWorkspaceId: state.currentWorkspaceId === id ? null : state.currentWorkspaceId,
+            isLoading: false,
+          }))
+        } catch (err) {
+          console.error('[Workspace Store] Failed to delete workspace:', err)
+          set({ isLoading: false })
+          throw err
+        }
+      },
+
+      // US-015: SSE event dispatchers
+      dispatchMemoryInjected: (event) => {
+        set({ lastMemoryInjected: event })
+      },
+
+      dispatchMemoryStored: (event) => {
+        set({ lastMemoryStored: event })
+      },
+
+      dispatchWorkflowUpdate: (event) => {
+        set({ lastWorkflowUpdate: event })
+      },
+
       // Batch operations
       addWidgets: (widgetsData) => {
         const ids: string[] = []
@@ -420,8 +647,8 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         isChatCollapsed: state.isChatCollapsed,
         isWidgetTrayOpen: state.isWidgetTrayOpen,
         gridConfig: state.gridConfig,
-        // Note: Widget data is NOT persisted by default
-        // This can be enabled in Phase 3 for workspace persistence
+        // US-006: Persist last active workspace ID so it can be restored on reload
+        currentWorkspaceId: state.currentWorkspaceId,
       }),
     }
   )
@@ -455,3 +682,29 @@ export const useWidgetPosition = (id: string) =>
  */
 export const useWidgetSize = (id: string) =>
   useWorkspaceStore((state) => state.sizes[id])
+
+/**
+ * US-006: Selectors for workspace persistence state
+ */
+export const useCurrentWorkspaceId = () =>
+  useWorkspaceStore((state) => state.currentWorkspaceId)
+export const useSavedWorkspaces = () =>
+  useWorkspaceStore((state) => state.savedWorkspaces)
+export const useIsWorkspaceLoading = () =>
+  useWorkspaceStore((state) => state.isLoading)
+export const useIsWorkspaceSaving = () =>
+  useWorkspaceStore((state) => state.isSaving)
+export const useHasUnsavedChanges = () =>
+  useWorkspaceStore((state) => state.hasUnsavedChanges)
+export const useLastSaved = () =>
+  useWorkspaceStore((state) => state.lastSaved)
+
+/**
+ * US-015: Selectors for live SSE widget data
+ */
+export const useLastMemoryInjected = () =>
+  useWorkspaceStore((state) => state.lastMemoryInjected)
+export const useLastMemoryStored = () =>
+  useWorkspaceStore((state) => state.lastMemoryStored)
+export const useLastWorkflowUpdate = () =>
+  useWorkspaceStore((state) => state.lastWorkflowUpdate)

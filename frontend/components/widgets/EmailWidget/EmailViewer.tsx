@@ -9,7 +9,7 @@
  */
 
 import { useMemo } from 'react'
-import DOMPurify from 'dompurify'
+import DOMPurify, { type Config as DOMPurifyConfig } from 'dompurify'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -37,7 +37,7 @@ import type { EmailFull, EmailAddress, EmailAttachment } from '../types'
  * DOMPurify configuration for email HTML sanitization
  * Strict whitelist to prevent XSS attacks
  */
-const DOMPURIFY_CONFIG: DOMPurify.Config = {
+const DOMPURIFY_CONFIG: DOMPurifyConfig = {
   ALLOWED_TAGS: [
     'p', 'br', 'div', 'span', 'a', 'b', 'i', 'u', 'strong', 'em',
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -161,9 +161,6 @@ export function EmailViewer({
       return email.date
     }
   }, [email.date])
-
-  // Check if we have body content
-  const hasBodyContent = Boolean(email.body || sanitizedHtml)
 
   return (
     <div className="flex flex-col h-full">
@@ -305,10 +302,10 @@ export function EmailViewer({
                 )}
                 dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
               />
-            ) : hasBodyContent ? (
-              <div className="whitespace-pre-wrap font-sans text-sm text-foreground/90 leading-relaxed">
+            ) : email.body ? (
+              <pre className="whitespace-pre-wrap font-sans text-sm text-foreground/90 leading-relaxed m-0">
                 {email.body}
-              </div>
+              </pre>
             ) : (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <FileText className="h-12 w-12 text-muted-foreground/30 mb-3" />

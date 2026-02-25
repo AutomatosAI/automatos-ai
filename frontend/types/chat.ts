@@ -261,6 +261,52 @@ export interface StreamData {
   data: any
 }
 
+// ---------------------------------------------------------------------------
+// US-015: SSE Widget Events
+// ---------------------------------------------------------------------------
+
+/**
+ * A memory record surfaced from the backend memory system.
+ */
+export interface MemorySummary {
+  id: string
+  memory: string
+  tier: 'global' | 'agent' | string
+}
+
+/**
+ * Payload of the `memory-injected` SSE data event.
+ * Emitted when relevant memories are retrieved and injected into the LLM context.
+ */
+export interface MemoryInjectedEvent {
+  memories: MemorySummary[]
+  totalMatched: number
+}
+
+/**
+ * Payload of the `memory-stored` SSE data event.
+ * Emitted after a conversation exchange is persisted to memory.
+ */
+export interface MemoryStoredEvent {
+  memory: {
+    userMessage: string
+    assistantResponse: string
+    chatId?: string
+  }
+  reason: string
+}
+
+/**
+ * Payload of the `workflow-update` SSE data event.
+ * Emitted when a workflow execution changes state.
+ */
+export interface WorkflowUpdateEvent {
+  workflowId: string
+  status: string
+  currentStep?: string
+  progress?: number
+}
+
 /**
  * Model information
  */

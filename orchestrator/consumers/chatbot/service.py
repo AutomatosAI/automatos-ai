@@ -1357,6 +1357,22 @@ class StreamingChatService:
                 f"prep={orchestrated.preparation_time_ms:.0f}ms"
             )
 
+            # US-015: Emit memory-injected SSE event when memories were retrieved
+            if orchestrated.memory_context:
+                _mem_result = getattr(smart_chat.orchestrator, '_last_memory_result', None)
+                _memories_list = _mem_result.memories if _mem_result else []
+                _total_matched = len(_memories_list)
+                # Build lightweight summaries for the frontend
+                _mem_summaries = [
+                    {"id": m.get("id", ""), "memory": m.get("memory", ""), "tier": m.get("_tier", "global")}
+                    for m in _memories_list[:10]
+                ]
+                yield self.streaming_handler.format_aisdk_memory_injected(
+                    memories=_mem_summaries,
+                    total_matched=_total_matched,
+                )
+                await asyncio.sleep(0)
+
             # Inject agent persona + description (after orchestrator system prompt)
             agent_identity_parts = []
             if agent_ctx.get("description"):
@@ -1585,7 +1601,19 @@ class StreamingChatService:
             # Store memory via SmartChatIntegration (two-tier Mem0)
             if latest_text and full_response:
                 try:
-                    await smart_chat.store(latest_text, full_response, chat_id)
+                    _stored = await smart_chat.store(latest_text, full_response, chat_id)
+                    # US-015: Emit memory-stored SSE event on success
+                    if _stored:
+                        _tier = getattr(smart_chat.orchestrator.memory_manager, '_last_tier', 'conversation')
+                        yield self.streaming_handler.format_aisdk_memory_stored(
+                            memory={
+                                "userMessage": latest_text[:200],
+                                "assistantResponse": full_response[:200],
+                                "chatId": chat_id,
+                            },
+                            reason=_tier if isinstance(_tier, str) else "conversation",
+                        )
+                        await asyncio.sleep(0)
                 except Exception as mem_err:
                     logger.warning(f"Failed to store memory exchange: {mem_err}")
 
@@ -2087,6 +2115,19 @@ class StreamingChatService:
                         tool_data.update(frontend_data)
                         logger.info(f"[TOOL-DATA] Yielding tool-data for {tool_name}: keys={list(frontend_data.keys())}")
                         yield self.streaming_handler.format_aisdk_tool_data(frontend_data)
+                        await asyncio.sleep(0)
+
+                    # US-015: Emit workflow-update when workflow/recipe tools execute
+                    _WORKFLOW_TOOL_PREFIXES = ("platform_list_recipes", "platform_create_recipe", "platform_execute_recipe")
+                    if tool_name.startswith(_WORKFLOW_TOOL_PREFIXES) or "workflow" in tool_name.lower():
+                        _raw = result.get("raw_result") or {}
+                        _wf_id = str(_raw.get("id") or _raw.get("workflow_id") or _raw.get("recipe_id") or tool_id)
+                        _wf_status = "completed" if result.get("success") else "failed"
+                        yield self.streaming_handler.format_aisdk_workflow_update(
+                            workflow_id=_wf_id,
+                            status=_wf_status,
+                            current_step=tool_name,
+                        )
                         await asyncio.sleep(0)
 
                     # Stop immediately on deterministic "unavailable" errors (no point retrying),

@@ -72,6 +72,8 @@
     "@radix-ui/react-toggle-group": "1.1.0",
     "@radix-ui/react-tooltip": "1.1.2",
     "@tanstack/react-query": "4.36.1",
+    "@tiptap/react": "^3.20.0",
+    "@tiptap/starter-kit": "^3.20.0",
     "ai": "^5.0.87",
     "ansi-to-react": "^6.2.6",
     "autoprefixer": "10.4.15",

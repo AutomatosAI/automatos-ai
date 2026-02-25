@@ -124,6 +124,19 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
+ * Format file size to human-readable string with appropriate unit.
+ * Examples: "0 B", "512 B", "2.4 KB", "1.2 MB", "3.7 GB", "1.0 TB"
+ */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 0) return '0 B'
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const size = bytes / Math.pow(1024, i)
+  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`
+}
+
+/**
  * Debounce function
  */
 export function debounce<T extends (...args: any[]) => any>(

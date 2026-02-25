@@ -58,6 +58,11 @@ export function Chat({
   const clearWidgets = useWorkspaceStore((s) => s.clearWidgets)
   const hasWidgets = widgetIds.length > 0
 
+  // US-015: SSE event dispatchers for memory & workflow widgets
+  const dispatchMemoryInjected = useWorkspaceStore((s) => s.dispatchMemoryInjected)
+  const dispatchMemoryStored = useWorkspaceStore((s) => s.dispatchMemoryStored)
+  const dispatchWorkflowUpdate = useWorkspaceStore((s) => s.dispatchWorkflowUpdate)
+
   // Handler to close canvas and reset all overlay states
   const handleCloseCanvas = useCallback(() => {
     clearWidgets()
@@ -325,6 +330,17 @@ export function Chat({
             createdAt: new Date().toISOString(),
           } as any)
         }
+      }
+
+      // US-015: Dispatch memory & workflow SSE events to workspace store
+      if (dataPart.type === 'memory-injected' && dataPart.data) {
+        dispatchMemoryInjected(dataPart.data)
+      }
+      if (dataPart.type === 'memory-stored' && dataPart.data) {
+        dispatchMemoryStored(dataPart.data)
+      }
+      if (dataPart.type === 'workflow-update' && dataPart.data) {
+        dispatchWorkflowUpdate(dataPart.data)
       }
     },
     onChatIdUpdate: (newChatId) => {

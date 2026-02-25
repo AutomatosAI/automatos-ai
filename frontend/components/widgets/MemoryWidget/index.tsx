@@ -7,7 +7,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react'
-import { Brain, Plus, Search } from 'lucide-react'
+import { Brain, Plus } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,7 +17,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import {
@@ -113,7 +112,7 @@ export function MemoryWidget({
     toast.info('Delete functionality requires backend integration')
   }, [])
 
-  // Handle add memory
+  // Handle add memory (from dialog)
   const handleAddMemory = useCallback(() => {
     if (!newMemory.content.trim()) return
 
@@ -121,6 +120,14 @@ export function MemoryWidget({
     setShowAddDialog(false)
     setNewMemory({ type: 'fact', content: '' })
   }, [newMemory])
+
+  // Handle add memory (from inline search form)
+  const handleAddMemoryInline = useCallback(
+    (memory: { type: MemoryType; content: string }) => {
+      toast.success(`Memory added: ${memory.type} (simulated)`)
+    },
+    []
+  )
 
   // Count memories for badges
   const injectedCount = data.injectedMemories?.length || 0
@@ -149,7 +156,7 @@ export function MemoryWidget({
       <div className="flex flex-col h-full">
         {/* Search bar */}
         <div className="px-3 py-2 border-b border-border/30">
-          <MemorySearch onSearch={handleSearch} />
+          <MemorySearch onSearch={handleSearch} onAdd={handleAddMemoryInline} />
         </div>
 
         {/* Tabs */}
