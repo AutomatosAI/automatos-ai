@@ -113,8 +113,9 @@ class DatabaseKnowledgeService:
         self,
         name: str,
         credential_id: str,
-        tenant_id: str,
-        description: Optional[str] = None
+        workspace_id=None,
+        description: Optional[str] = None,
+        tenant_id: str = None,  # deprecated, use workspace_id
     ) -> Dict[str, Any]:
         """
         Add a new database as a knowledge source.
@@ -142,22 +143,25 @@ class DatabaseKnowledgeService:
         from core.database.database import SessionLocal
         from sqlalchemy.exc import IntegrityError
         
+        # Resolve workspace_id (prefer new param, fall back to legacy tenant_id)
+        ws_id = workspace_id or tenant_id
+
         db_session = SessionLocal()
         try:
             # Check if source already exists (trim whitespace for comparison)
             name_trimmed = name.strip()
             existing = db_session.query(DatabaseKnowledgeSource).filter(
-                DatabaseKnowledgeSource.tenant_id == tenant_id,
+                DatabaseKnowledgeSource.workspace_id == ws_id,
                 DatabaseKnowledgeSource.name == name_trimmed
             ).first()
-            
+
             # Also check for name with trailing/leading spaces (case-insensitive)
             if not existing:
                 existing = db_session.query(DatabaseKnowledgeSource).filter(
-                    DatabaseKnowledgeSource.tenant_id == tenant_id,
+                    DatabaseKnowledgeSource.workspace_id == ws_id,
                     DatabaseKnowledgeSource.name.ilike(name_trimmed)
                 ).first()
-            
+
             if existing:
                 # Update existing source instead of creating duplicate
                 existing.name = name_trimmed  # Normalize name (remove trailing spaces)
@@ -168,27 +172,28 @@ class DatabaseKnowledgeService:
                 db_session.refresh(existing)
                 logger.info(f"Updated existing database source '{name_trimmed}' (ID: {existing.id})")
                 return existing
-            
+
             db_source = DatabaseKnowledgeSource(
-                tenant_id=tenant_id,
+                workspace_id=ws_id,
+                tenant_id=1,  # legacy column, kept for schema compat
                 name=name_trimmed,  # Use trimmed name
                 description=description,
-                credential_id=credential_id,  # Use credential_id (as per current schema)
+                credential_id=credential_id,
                 dialect='postgresql',  # TODO: detect from credentials
                 schema_metadata={},  # Will be populated during introspection
                 is_active=True
             )
-            
+
             db_session.add(db_source)
             db_session.commit()
             db_session.refresh(db_source)
-            
+
             result = db_source
         except IntegrityError as e:
             db_session.rollback()
             # Check again in case of race condition (with trimmed name)
             existing = db_session.query(DatabaseKnowledgeSource).filter(
-                DatabaseKnowledgeSource.tenant_id == tenant_id,
+                DatabaseKnowledgeSource.workspace_id == ws_id,
                 DatabaseKnowledgeSource.name.ilike(name_trimmed)
             ).first()
             if existing:
@@ -204,7 +209,7 @@ class DatabaseKnowledgeService:
             raise
         finally:
             db_session.close()
-        
+
         return result
     
     async def query_database(
