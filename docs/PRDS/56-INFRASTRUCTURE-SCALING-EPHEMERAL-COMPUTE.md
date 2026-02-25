@@ -1,17 +1,24 @@
-# PRD-56: Infrastructure Scaling & Ephemeral Agent Compute
+# PRD-56: Infrastructure Scaling, Physical Workspaces & Ephemeral Agent Compute
 
-**Version:** 1.0
-**Status:** Planning Phase
-**Date:** February 15, 2026
+**Version:** 2.0
+**Status:** Planning Phase → Phase 2 Implementation
+**Date:** February 15, 2026 (v1.0) · February 25, 2026 (v2.0 — Physical Workspaces)
 **Author:** Automatos Core Team
 **Prerequisites:** PRD-37 (SaaS Foundation), PRD-54 (LLM Marketplace)
 **Blocks:** None (Foundation for enterprise scaling)
+
+### Changelog
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2026-02-15 | Initial 4-phase roadmap: TaskRunner → ARQ Workers → K8s → Enterprise |
+| 2.0 | 2026-02-25 | **Major extension:** Physical Workspace architecture for pilot launch. Added: persistent workspace volumes, workspace filesystem model, tool execution routing (API vs Worker), command sandboxing & whitelist, storage quotas (5GB default), credential injection, Railway Volume integration, `services/workspace-worker/` layout, security model for 15-user pilot. Extended Phase 2 from ephemeral `/tmp/` to persistent `/workspaces/{id}/` with repo caching. |
 
 ---
 
 ## Executive Summary
 
-This PRD defines the infrastructure evolution path for Automatos AI — from the current Railway-hosted pilot to a fully scalable, workspace-isolated, enterprise-grade compute platform. The core architectural change: **agent tasks execute in ephemeral, isolated compute environments** rather than in-process with the API server.
+This PRD defines the infrastructure evolution path for Automatos AI — from the current Railway-hosted pilot to a fully scalable, workspace-isolated, enterprise-grade compute platform. The core architectural change: **agent tasks execute in isolated compute environments with persistent physical workspaces** rather than in-process with the API server.
 
 ### The Problem
 
@@ -19,6 +26,7 @@ Today, all agent execution (workflows, subtasks, tool calls) runs inside the Fas
 
 - **No isolation** — One workspace's heavy agent task starves all others
 - **No persistence** — Tasks are lost if the server restarts
+- **No physical workspace** — Agents can't clone repos, run tests, or persist build artifacts between tasks
 - **No resource limits** — Can't enforce plan-tier CPU/memory caps
 - **No security boundary** — Agent code execution (shell tools, file ops) shares the API server's filesystem and network
 - **No horizontal scaling** — Everything runs in one process on one container
@@ -26,24 +34,37 @@ Today, all agent execution (workflows, subtasks, tool calls) runs inside the Fas
 
 ### The Solution
 
-A **3-phase migration** introducing a `TaskRunner` abstraction that decouples task dispatch from task execution:
+A **4-phase migration** introducing a `TaskRunner` abstraction that decouples task dispatch from task execution, with **physical workspaces** as the foundation for agent compute:
 
 | Phase | Infrastructure | Timeline | User Scale |
 |-------|---------------|----------|------------|
 | **Phase 1** (Now) | Railway + `LocalTaskRunner` | Week 1 | Pilot (<50 users) |
-| **Phase 2** (Soft Launch) | Railway/VPS + Redis Queue + Worker Containers | Weeks 2-6 | Early adopters (50-500 users) |
+| **Phase 2** (Soft Launch) | Railway + ARQ Workers + **Physical Workspaces** + Persistent Volume | Weeks 2-6 | Pilot (15 users) |
 | **Phase 3** (Scale) | Managed Kubernetes + Ephemeral Pods | Months 3-6 | Growth (500+ workspaces) |
 | **Phase 4** (Enterprise) | Multi-cluster / Bring-Your-Own-Cloud | Month 6+ | Enterprise tenants |
 
-### Key Architecture Decision
+### Key Architecture Decisions
 
-Introduce a **`TaskRunner` interface** at the boundary between task dispatch and task execution. All agent work flows through this interface. Swap implementations without touching business logic:
+**1. TaskRunner Interface:** Abstract boundary between task dispatch and execution. Swap implementations without touching business logic:
 
 ```
 LocalTaskRunner     → asyncio (current behavior, Railway-compatible)
 QueuedTaskRunner    → Redis queue + worker containers (Phase 2)
 KubernetesTaskRunner → K8s Jobs with ephemeral pods (Phase 3)
 ```
+
+**2. Physical Workspaces (NEW in v2.0):** Each workspace gets a persistent filesystem on the worker volume. Repos clone once and persist. Test results, build artifacts, and data survive between tasks. Agents work in a real development environment — not a throwaway `/tmp/` dir.
+
+```
+/workspaces/{workspace_id}/
+├── repos/          ← Cloned repos persist (git pull, not re-clone)
+├── tasks/          ← Ephemeral per-task execution dirs (cleaned up)
+├── artifacts/      ← Test reports, coverage, build outputs (kept)
+├── .ssh/           ← Deploy keys (injected from credential store)
+└── .gitconfig      ← Per-workspace git config
+```
+
+**3. Tool Execution Routing:** Tools split between API (instant, stateless) and Worker (filesystem, subprocess). Agent code is unaware of which backend runs which tool.
 
 ---
 
@@ -52,15 +73,19 @@ KubernetesTaskRunner → K8s Jobs with ephemeral pods (Phase 3)
 1. [Current Architecture Analysis](#1-current-architecture-analysis)
 2. [Target Architecture](#2-target-architecture)
 3. [Phase 1: TaskRunner Abstraction](#3-phase-1-taskrunner-abstraction)
-4. [Phase 2: Queue-Based Worker Isolation](#4-phase-2-queue-based-worker-isolation)
-5. [Phase 3: Kubernetes Ephemeral Pods](#5-phase-3-kubernetes-ephemeral-pods)
-6. [Phase 4: Enterprise Multi-Tenant](#6-phase-4-enterprise-multi-tenant)
-7. [Data Models & Schema](#7-data-models--schema)
-8. [API Changes](#8-api-changes)
-9. [Security Model](#9-security-model)
-10. [Cost Analysis](#10-cost-analysis)
-11. [Implementation Roadmap](#11-implementation-roadmap)
-12. [Risk Assessment](#12-risk-assessment)
+4. [Phase 2: Queue-Based Worker + Physical Workspaces](#4-phase-2-queue-based-worker--physical-workspaces)
+5. [Physical Workspace Architecture](#5-physical-workspace-architecture) **(NEW v2.0)**
+6. [Tool Execution Routing](#6-tool-execution-routing) **(NEW v2.0)**
+7. [Workspace Worker Service](#7-workspace-worker-service) **(NEW v2.0)**
+8. [Pilot Security Model](#8-pilot-security-model) **(NEW v2.0)**
+9. [Phase 3: Kubernetes Ephemeral Pods](#9-phase-3-kubernetes-ephemeral-pods)
+10. [Phase 4: Enterprise Multi-Tenant](#10-phase-4-enterprise-multi-tenant)
+11. [Data Models & Schema](#11-data-models--schema)
+12. [API Changes](#12-api-changes)
+13. [Security Model (Full)](#13-security-model-full)
+14. [Cost Analysis](#14-cost-analysis)
+15. [Implementation Roadmap](#15-implementation-roadmap)
+16. [Risk Assessment](#16-risk-assessment)
 
 ---
 
@@ -337,24 +362,43 @@ class TaskStatusEnum(str, Enum):
 
 ---
 
-## 4. Phase 2: Queue-Based Worker Isolation (Weeks 2-6)
+## 4. Phase 2: Queue-Based Worker + Physical Workspaces (Weeks 2-6)
 
 ### Goal
 
-Move agent task execution from the API process to dedicated worker containers connected via a Redis task queue. Each task runs in an isolated worker with its own filesystem and resource limits.
+Move agent task execution from the API process to a dedicated **workspace worker** container connected via a Redis task queue. Each workspace gets a **persistent physical filesystem** on a Railway Volume. Agents can clone repos, run tests, save artifacts, and work in a real development environment.
 
 ### Architecture
 
 ```
-┌─────────────────┐    Redis Queue     ┌──────────────────┐
-│   FastAPI API    │ ──── tasks ──────→ │  Worker Pool     │
-│   (Control)      │ ←── results ────── │  (2-8 workers)   │
-│                  │ ←── events ──────  │                  │
-│ QueuedTaskRunner │    (pub/sub)       │  ARQ Consumer    │
-└─────────────────┘                     │  AgentFactory    │
-                                        │  Tool Executor   │
-                                        └──────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      RAILWAY PROJECT                         │
+│                                                              │
+│  ┌──────────┐     ┌──────────┐     ┌──────────────────────┐ │
+│  │ Frontend  │────▶│ API      │────▶│ Redis                │ │
+│  │ (Next.js) │◀────│ (FastAPI)│◀────│ Queue + Pub/Sub      │ │
+│  └──────────┘     └────┬─────┘     └──────────┬───────────┘ │
+│       ▲                │                       │             │
+│       │                │                       ▼             │
+│       │                │              ┌──────────────────┐   │
+│       │                │              │ Workspace Worker │   │
+│       │                │              │ (ARQ Consumer)   │   │
+│       │                │              │                  │   │
+│       │                │              │  /workspaces/    │   │
+│       │                ▼              │    ├─ ws_abc/    │   │
+│       │         ┌────────────┐        │    ├─ ws_def/    │   │
+│       │         │ PostgreSQL │◀───────│    └─ ws_ghi/    │   │
+│       └─────────│  tasks     │        │                  │   │
+│                 │  results   │        └────────┬─────────┘   │
+│                 └────────────┘                 │             │
+│                                        ┌───────┴──────┐     │
+│                                        │ Railway Vol  │     │
+│                                        │ (persistent) │     │
+│                                        └──────────────┘     │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+**Key difference from v1.0:** The worker mounts a **persistent Railway Volume** instead of using throwaway `/tmp/` dirs. Repos survive between tasks. Each workspace gets its own directory tree.
 
 ### Technology Choice: ARQ (Async Redis Queue)
 
@@ -368,6 +412,34 @@ Move agent task execution from the API process to dedicated worker containers co
 | Memory footprint | ~30MB per worker | ~80MB per worker |
 | Configuration | Minimal | Complex (broker, backend, serializer) |
 | Our stack | Already using Redis | Would need Redis anyway |
+
+### Task Lifecycle
+
+```
+ User asks: "Clone my repo, run pytest, fix the failing test"
+
+ ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌──────────────┐
+ │ SUBMIT  │───▶│ QUEUED  │───▶│ RUNNING │───▶│  COMPLETED   │
+ └─────────┘    └─────────┘    └─────────┘    └──────────────┘
+     │               │              │                │
+     ▼               ▼              ▼                ▼
+  API creates    Redis queue    Worker picks     Results written
+  task record    receives job   up job           to DB + Redis
+  in Postgres    (priority)     creates dir      pub/sub notifies
+                                executes         frontend via WS
+```
+
+### Progress Streaming
+
+```
+Worker                    Redis Pub/Sub              Frontend
+  │                           │                         │
+  ├─ "Cloning repo..."  ────▶│────▶ WS channel ──────▶│  Cloning...
+  ├─ "Running pytest..." ───▶│────▶ WS channel ──────▶│  Running tests...
+  ├─ "3 passed, 1 failed" ─▶│────▶ WS channel ──────▶│  1 failure found
+  ├─ "Fixing test_auth..." ─▶│────▶ WS channel ──────▶│  Fixing...
+  └─ "All 4 passed"     ───▶│────▶ WS channel ──────▶│  Done
+```
 
 ### User Stories
 
@@ -384,28 +456,31 @@ Move agent task execution from the API process to dedicated worker containers co
 - [ ] Dead letter queue for failed tasks (`tasks:dead`)
 - [ ] Configurable worker concurrency per queue
 
-#### US-06: Worker Container
-**Description:** Standalone worker process that consumes tasks from Redis queue and executes agent work.
+#### US-06: Workspace Worker Service
+**Description:** Standalone worker process that consumes tasks from Redis queue and executes agent work within persistent physical workspaces.
 
 **Acceptance Criteria:**
-- [ ] `worker/main.py` — ARQ worker entry point
+- [ ] `services/workspace-worker/main.py` — ARQ worker entry point
 - [ ] Reuses `AgentFactory`, `UnifiedToolExecutor`, LLM clients
-- [ ] Each task gets isolated temp directory (`/tmp/task_{id}/`)
-- [ ] Temp directory cleaned after task completion
+- [ ] Mounts Railway Volume at `/workspaces/`
+- [ ] Each workspace gets persistent dir: `/workspaces/{workspace_id}/`
+- [ ] Each task gets ephemeral dir: `/workspaces/{workspace_id}/tasks/task_{id}/`
+- [ ] Task dir cleaned after completion; workspace dir persists
 - [ ] Worker reports health to Redis (heartbeat)
 - [ ] Graceful shutdown (finish current task, don't accept new)
-- [ ] Docker container: `Dockerfile.worker` (same base as backend)
+- [ ] Storage quota enforcement before task execution
 
-#### US-07: Worker Dockerfile
-**Description:** Docker image for worker containers with all agent dependencies.
+#### US-07: Workspace Worker Dockerfile
+**Description:** Docker image for the workspace worker with full DevOps toolchain.
 
 **Acceptance Criteria:**
-- [ ] `Dockerfile.worker` — Multi-stage build
-- [ ] Includes: Python 3.11, git, tesseract, ghostscript (same as backend)
-- [ ] Non-root user execution
+- [ ] `services/workspace-worker/Dockerfile` — Multi-stage build
+- [ ] Includes: Python 3.12, git, Node.js, npm/pnpm
+- [ ] Pre-installed tools: pytest, pytest-cov, ruff, black, mypy, vitest
+- [ ] Non-root user execution (UID 1000)
 - [ ] Configurable via env vars: `WORKER_CONCURRENCY`, `WORKER_QUEUES`
-- [ ] Health check endpoint
-- [ ] Resource limits in docker-compose: `deploy.resources.limits`
+- [ ] Health check endpoint or heartbeat
+- [ ] Volume mount point: `/workspaces/`
 
 #### US-08: Task Persistence & Recovery
 **Description:** Tasks survive API server restarts and worker crashes.
@@ -417,67 +492,695 @@ Move agent task execution from the API process to dedicated worker containers co
 - [ ] Failed tasks stored with error info for retry/debugging
 - [ ] Task history queryable via API
 
-#### US-09: Per-Workspace Queue Limits
-**Description:** Enforce concurrent task limits based on workspace plan tier.
+#### US-09: Per-Workspace Queue & Storage Limits
+**Description:** Enforce concurrent task limits and storage quotas based on workspace plan tier.
 
 **Acceptance Criteria:**
-- [ ] Starter plan: 2 concurrent tasks max
-- [ ] Pro plan: 10 concurrent tasks max
-- [ ] Enterprise plan: 50 concurrent tasks max (configurable)
-- [ ] Tasks exceeding limit are queued (not rejected)
+- [ ] Pilot plan: 1 concurrent task, 5GB storage
+- [ ] Business plan: 3 concurrent tasks, 10GB storage
+- [ ] Enterprise plan: 10 concurrent tasks, 50GB storage (configurable)
+- [ ] Tasks exceeding concurrency limit are queued (not rejected)
 - [ ] Workspace usage tracked in Redis counter
+- [ ] Storage quota checked via `du -sh` before each task; task rejected if over limit
+- [ ] Storage quotas configurable in `config.py` / environment variable
 
 #### US-10: Docker Compose Worker Profile
-**Description:** Add worker containers to docker-compose for local development.
+**Description:** Add workspace worker to docker-compose for local development.
 
 **Acceptance Criteria:**
-- [ ] `docker-compose.yml` updated with worker service
+- [ ] `docker-compose.yml` updated with workspace-worker service
 - [ ] `--profile workers` to enable worker containers
-- [ ] Default: 2 worker replicas
+- [ ] Default: 1 worker replica (pilot scale)
 - [ ] Environment: shares backend env vars + worker-specific config
-- [ ] Volume mount for development hot-reload
+- [ ] Volume mount: `./workspaces:/workspaces` for local dev
+- [ ] Railway: persistent volume mounted at `/workspaces`
 
 ### Phase 2 Infrastructure
 
 ```yaml
 # docker-compose.yml additions
 services:
-  worker:
+  workspace-worker:
     build:
-      context: ./orchestrator
-      dockerfile: Dockerfile.worker
+      context: .
+      dockerfile: services/workspace-worker/Dockerfile
     deploy:
-      replicas: ${WORKER_REPLICAS:-2}
+      replicas: ${WORKER_REPLICAS:-1}
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
+          cpus: '2.0'
+          memory: 2G
     environment:
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-5}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
       WORKER_QUEUES: "critical,high,normal,low"
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
+      WORKSPACE_VOLUME_PATH: /workspaces
+      WORKSPACE_DEFAULT_QUOTA_GB: 5
       # LLM keys inherited from backend
+    volumes:
+      - workspace-data:/workspaces
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
     profiles: ["workers"]
+
+volumes:
+  workspace-data:
+    driver: local
 ```
 
 ### Phase 2 on Railway
 
-Railway supports multiple services per project. Workers deploy as separate services:
-- **backend** service: API server (no agent execution)
-- **worker** service: 2+ replicas consuming Redis queue
-- **postgres**, **redis**: existing managed services
+Railway supports multiple services per project. The workspace worker deploys as a separate service with a persistent volume:
 
-Cost impact: ~$10-20/mo additional for 2 worker replicas on Railway.
+```
+railway.json (or Railway Dashboard)
+│
+├── Service: api              ← Existing FastAPI
+│   ├── Dockerfile: orchestrator/Dockerfile
+│   └── Variables: DATABASE_URL, REDIS_URL, ...
+│
+├── Service: workspace-worker ← NEW
+│   ├── Dockerfile: services/workspace-worker/Dockerfile
+│   ├── Variables: DATABASE_URL, REDIS_URL, WORKSPACE_VOLUME_PATH, ...
+│   └── Volume: /workspaces (Railway persistent volume, 100GB)
+│
+├── Service: agent-opt-worker ← Existing (FutureAGI scoring)
+│   └── Dockerfile: services/agent-opt-worker/Dockerfile
+│
+├── Service: postgres         ← Existing (shared)
+├── Service: redis            ← Existing (shared)
+└── Service: frontend         ← Existing Next.js
+```
+
+**Isolation guarantee:** The API, workspace-worker, agent-opt-worker, and frontend are **separate Railway containers**. They share Postgres and Redis via internal networking, but their filesystems are completely isolated. A user in the workspace-worker cannot access the API container's filesystem, and vice versa.
+
+Cost impact: ~$10-20/mo additional for 1 workspace-worker replica + ~$2/mo for persistent volume.
 
 ---
 
-## 5. Phase 3: Kubernetes Ephemeral Pods (Months 3-6)
+## 5. Physical Workspace Architecture (NEW in v2.0)
+
+### Goal
+
+Give each workspace a **persistent, isolated filesystem** on the worker volume. Agents work in a real development environment — they can clone repos, run tests, build projects, and persist results between tasks. This is the foundation for Automatos AI's DevOps capabilities.
+
+### Workspace Filesystem Layout
+
+```
+/workspaces/                              ← Railway Volume (mounted on worker)
+│
+├── ws_abc123/                            ← Workspace A (user's workspace)
+│   ├── repos/                            ← Cloned repositories (PERSISTENT)
+│   │   ├── automatos-ai/                 ← Full repo checkout
+│   │   │   ├── .git/
+│   │   │   ├── orchestrator/
+│   │   │   ├── frontend/
+│   │   │   └── ...
+│   │   └── another-project/
+│   │       └── ...
+│   ├── tasks/                            ← Per-task execution dirs (EPHEMERAL)
+│   │   ├── task_7f3a/                    ← Active task workspace
+│   │   │   ├── .task_env                 ← Injected credentials (cleaned up)
+│   │   │   ├── .task_log                 ← Execution log
+│   │   │   └── scratch/                  ← Temp files for this task
+│   │   └── (cleaned up after completion)
+│   ├── artifacts/                        ← Test reports, build outputs (PERSISTENT)
+│   │   ├── 2026-02-25_pytest_report.html
+│   │   ├── coverage.xml
+│   │   └── build_output.tar.gz
+│   ├── .ssh/                             ← Deploy keys (injected from credential store)
+│   │   └── id_ed25519
+│   ├── .gitconfig                        ← Per-workspace git identity
+│   └── .workspace_meta.json              ← Workspace metadata (quota, created_at, etc.)
+│
+├── ws_def456/                            ← Workspace B (different user — ISOLATED)
+│   ├── repos/
+│   ├── tasks/
+│   └── artifacts/
+│
+└── ws_ghi789/                            ← Workspace C
+    └── ...
+```
+
+### Persistence Model
+
+| Directory | Lifecycle | Purpose | Size Impact |
+|-----------|-----------|---------|-------------|
+| `repos/` | **Persistent** — survives across all tasks | Cloned repos; `git pull` instead of re-clone | High (biggest consumer) |
+| `tasks/` | **Ephemeral** — cleaned after each task completes | Scratch space for active execution | Low (auto-cleaned) |
+| `artifacts/` | **Persistent** — kept until workspace cleanup | Test reports, coverage, build outputs | Medium (user-managed) |
+| `.ssh/` | **Persistent** — injected from credential store | Deploy keys for private repo access | Negligible |
+| `.gitconfig` | **Persistent** — set once | Git author identity for commits | Negligible |
+
+### Repo Caching (Key Performance Win)
+
+```
+Task 1: "Clone automatos-ai and run tests"
+  → git clone https://github.com/.../automatos-ai.git
+  → /workspaces/ws_abc/repos/automatos-ai/  [CREATED — 3.5GB]
+  → pytest runs, results saved to artifacts/
+  → Task dir cleaned up
+
+  3 hours later...
+
+Task 2: "Run tests again on automatos-ai"
+  → /workspaces/ws_abc/repos/automatos-ai/  [ALREADY EXISTS]
+  → git fetch && git pull  (fast — delta only)
+  → pytest runs immediately
+  → NO 3.5GB re-clone
+
+  Next day...
+
+Task 3: "Clone my-other-project too"
+  → /workspaces/ws_abc/repos/my-other-project/  [CREATED]
+  → automatos-ai STILL THERE from before
+```
+
+### Storage Quotas
+
+Each workspace has a configurable storage limit. Enforced before task execution starts:
+
+```python
+# Workspace storage limits (configurable per plan tier)
+WORKSPACE_STORAGE_LIMITS = {
+    "pilot":      5 * 1024**3,    # 5GB  — soft launch default
+    "starter":    2 * 1024**3,    # 2GB  — free tier (future)
+    "business":  10 * 1024**3,    # 10GB
+    "enterprise": 50 * 1024**3,   # 50GB
+}
+```
+
+**Enforcement flow:**
+
+```
+Task arrives at worker
+  │
+  ├── 1. Resolve workspace dir: /workspaces/{workspace_id}/
+  ├── 2. Check storage: du -sh /workspaces/{workspace_id}/
+  ├── 3. Compare against workspace quota
+  │
+  ├── UNDER LIMIT → Execute task normally
+  │
+  └── OVER LIMIT → Reject task with error:
+      "Workspace storage at 4.8GB / 5.0GB. Free space by deleting
+       old repos (workspace cleanup tool) or upgrade your plan."
+```
+
+**For the 15-user pilot at 5GB each:** 75GB max. Railway persistent volumes support up to 100GB on Pro plan. Plenty of headroom.
+
+### Workspace Metadata
+
+Each workspace stores metadata for tracking and quota enforcement:
+
+```json
+// /workspaces/{workspace_id}/.workspace_meta.json
+{
+  "workspace_id": "ws_abc123",
+  "created_at": "2026-02-25T10:00:00Z",
+  "plan_tier": "pilot",
+  "storage_quota_bytes": 5368709120,
+  "last_task_at": "2026-02-25T14:30:00Z",
+  "repos_cached": ["automatos-ai", "client-project"],
+  "total_tasks_run": 47
+}
+```
+
+---
+
+## 6. Tool Execution Routing (NEW in v2.0)
+
+### Goal
+
+Define which tools execute in the API process (instant, stateless) vs. the workspace worker (filesystem, subprocess). Agents are unaware of the routing — the `TaskRunner` handles dispatch transparently.
+
+### Routing Matrix
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              TOOL EXECUTION ROUTING                          │
+│                                                              │
+│  ┌─────────────────────────┐  ┌────────────────────────────┐│
+│  │  RUNS IN API (instant)  │  │  RUNS IN WORKER (queued)   ││
+│  │                         │  │                            ││
+│  │  search_codebase    ✓   │  │  execute_command       ✓   ││
+│  │  semantic_search    ✓   │  │  read_file (workspace) ✓   ││
+│  │  search_documents   ✓   │  │  write_file            ✓   ││
+│  │  search_images      ✓   │  │  create_directory      ✓   ││
+│  │  search_tables      ✓   │  │  list_directory        ✓   ││
+│  │  database_query     ✓   │  │                            ││
+│  │  composio_execute   ✓   │  │  (anything touching the    ││
+│  │  http_request       ✓   │  │   filesystem or running     ││
+│  │                         │  │   subprocesses)            ││
+│  │  (reads from DB/index,  │  │                            ││
+│  │   no filesystem needed) │  │                            ││
+│  └─────────────────────────┘  └────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Detailed Tool Classification
+
+| Tool | Location | Security Level | Rationale |
+|------|----------|---------------|-----------|
+| `search_codebase` | API | SAFE | Reads from CodeGraph index in Postgres, no filesystem |
+| `semantic_search` | API | SAFE | Reads from pgvector, no filesystem |
+| `search_documents` | API | SAFE | Reads from document index in Postgres |
+| `search_images` | API | SAFE | Reads from image index in Postgres |
+| `search_tables` | API | SAFE | Reads structured data from Postgres |
+| `database_query` | API | CAUTIOUS | NL2SQL against Postgres (read-only) |
+| `composio_execute` | API | CAUTIOUS | Calls external APIs (Jira, Slack, GitHub) |
+| `http_request` | API | CAUTIOUS | Whitelisted HTTP calls to internal/platform URLs |
+| `read_file` | **Worker** | CAUTIOUS | Reads files from workspace filesystem |
+| `write_file` | **Worker** | CAUTIOUS | Writes files to workspace filesystem |
+| `create_directory` | **Worker** | CAUTIOUS | Creates dirs in workspace filesystem |
+| `list_directory` | **Worker** | SAFE | Lists workspace directory contents |
+| `execute_command` | **Worker** | DANGEROUS | Runs shell commands (git, pytest, npm, etc.) |
+| `ssh_execute` | **Disabled for pilot** | DANGEROUS | See notes below |
+
+### SSH Execute — Pilot Decision
+
+`ssh_execute` lets agents SSH into arbitrary hosts. For the 15-user pilot:
+
+**Decision: DISABLE for pilot.** Agents use `execute_command` locally in their workspace instead. Re-enable in Phase 3 with per-workspace allowed-host configuration.
+
+**Future (post-pilot):** Each workspace registers allowed SSH targets via credentials. Agents can only SSH to hosts that workspace has credentials for.
+
+### Tool Routing Implementation
+
+The `WorkspaceToolExecutor` wraps all worker-side tools with path validation and sandboxing:
+
+```python
+class WorkspaceToolExecutor:
+    """All tool calls in worker are sandboxed to workspace dir."""
+
+    def __init__(self, workspace_id: str, volume_path: str = "/workspaces"):
+        self.workspace_id = workspace_id
+        self.workspace_root = Path(volume_path) / workspace_id
+        self.task_dir: Optional[Path] = None
+
+    def resolve_safe_path(self, relative_path: str) -> Path:
+        """Resolve a path and verify it stays within the workspace."""
+        resolved = (self.workspace_root / relative_path).resolve()
+        if not str(resolved).startswith(str(self.workspace_root.resolve())):
+            raise SecurityError(f"Path traversal blocked: {relative_path}")
+        return resolved
+
+    async def execute_command(self, command: str, timeout: int = 60) -> dict:
+        """Execute a shell command, sandboxed to workspace directory."""
+        binary = command.split()[0]
+        if binary not in ALLOWED_COMMANDS:
+            return {"error": f"Command '{binary}' not allowed", "allowed": list(ALLOWED_COMMANDS)}
+
+        result = await asyncio.create_subprocess_shell(
+            command,
+            cwd=str(self.workspace_root),        # JAILED to workspace
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=self._sandboxed_env(),            # Stripped-down PATH
+        )
+        stdout, stderr = await asyncio.wait_for(
+            result.communicate(), timeout=timeout
+        )
+        return {
+            "exit_code": result.returncode,
+            "stdout": stdout.decode()[:100_000],  # Cap output at 100KB
+            "stderr": stderr.decode()[:50_000],
+        }
+```
+
+### Command Whitelist
+
+```python
+# Commands agents are allowed to execute in their workspace
+ALLOWED_COMMANDS = {
+    # Version control
+    "git",
+
+    # Python ecosystem
+    "python", "python3", "pip", "pip3", "uv",
+    "pytest", "ruff", "black", "mypy", "isort", "flake8",
+
+    # Node.js ecosystem
+    "node", "npm", "npx", "pnpm", "yarn", "vitest", "jest",
+    "tsc", "eslint", "prettier",
+
+    # General tools
+    "ls", "cat", "grep", "find", "tree", "wc", "sort", "head", "tail",
+    "diff", "patch", "jq",
+    "curl", "wget",       # For API testing
+    "make",               # Build automation
+    "tar", "gzip", "zip", "unzip",
+
+    # Language runtimes (polyglot repos)
+    "cargo", "go", "ruby", "java", "javac", "mvn", "gradle",
+}
+
+# Explicitly blocked — never allowed regardless of whitelist
+BLOCKED_PATTERNS = [
+    "rm -rf /",           # Filesystem destruction
+    "sudo",               # Privilege escalation
+    "su ",                # User switching
+    "chmod 777",          # Dangerous permissions
+    "docker",             # Container escape risk (pilot)
+    "kubectl",            # K8s access (pilot)
+    "ssh ",               # Use ssh_execute tool instead (disabled)
+    "> /dev/",            # Device access
+    "mkfs",               # Filesystem formatting
+    "dd if=",             # Raw disk operations
+]
+```
+
+---
+
+## 7. Workspace Worker Service (NEW in v2.0)
+
+### Service Location
+
+Follows existing pattern alongside `services/agent-opt-worker/`:
+
+```
+services/
+├── agent-opt-worker/              ← Existing (FutureAGI scoring — HTTP service)
+│   ├── Dockerfile
+│   ├── main.py
+│   └── requirements.txt
+│
+└── workspace-worker/              ← NEW (code execution — ARQ queue consumer)
+    ├── Dockerfile
+    ├── main.py                    ← ARQ consumer entry point
+    ├── executor.py                ← WorkspaceToolExecutor (sandboxed commands)
+    ├── workspace_manager.py       ← Workspace dir provisioning, quotas, cleanup
+    ├── requirements.txt
+    └── README.md
+```
+
+**Key difference from agent-opt-worker:** The agent-opt-worker is a **FastAPI HTTP service** (request/response). The workspace-worker is an **ARQ queue consumer** (pull-based, long-running tasks).
+
+### Dockerfile
+
+```dockerfile
+# services/workspace-worker/Dockerfile
+FROM python:3.12-slim AS base
+
+# System dependencies — DevOps toolchain
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl wget openssh-client \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js (LTS)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g pnpm vitest jest
+
+# Python dev/test tools (pre-installed so agents don't need to pip install)
+RUN pip install --no-cache-dir \
+    pytest pytest-cov pytest-asyncio \
+    ruff black mypy isort flake8 \
+    uv
+
+# Application code
+WORKDIR /app
+COPY services/workspace-worker/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY orchestrator/ /app/orchestrator/
+COPY services/workspace-worker/ /app/worker/
+
+# Non-root user
+RUN useradd -m -u 1000 worker \
+    && mkdir -p /workspaces \
+    && chown -R worker:worker /app /workspaces
+USER worker
+
+# Volume mount point
+VOLUME /workspaces
+
+# Entry point — ARQ worker consumer
+CMD ["python", "-m", "worker.main"]
+```
+
+### Worker Main (ARQ Consumer)
+
+```python
+# services/workspace-worker/main.py
+"""
+Workspace Worker — ARQ Consumer
+Pulls tasks from Redis queue, executes in isolated workspace directories.
+"""
+import asyncio
+import logging
+from arq import create_pool
+from arq.connections import RedisSettings
+
+from worker.executor import WorkspaceToolExecutor
+from worker.workspace_manager import WorkspaceManager
+
+logger = logging.getLogger("workspace-worker")
+
+async def execute_workspace_task(ctx, task_payload: dict):
+    """Main task handler — called by ARQ for each queued task."""
+    workspace_id = task_payload["workspace_id"]
+    task_id = task_payload["task_id"]
+    redis = ctx["redis"]
+
+    # 1. Provision workspace if first use
+    ws_manager = WorkspaceManager(workspace_id)
+    ws_manager.ensure_workspace_exists()
+
+    # 2. Check storage quota
+    if not ws_manager.check_quota():
+        await _publish_error(redis, task_id, workspace_id,
+            f"Workspace storage exceeds quota ({ws_manager.usage_human}/{ws_manager.quota_human})")
+        return
+
+    # 3. Create ephemeral task directory
+    task_dir = ws_manager.create_task_dir(task_id)
+
+    # 4. Inject credentials (SSH keys, tokens)
+    ws_manager.inject_credentials(task_id, task_payload.get("credentials", {}))
+
+    try:
+        # 5. Execute task steps
+        executor = WorkspaceToolExecutor(workspace_id)
+        for step in task_payload.get("steps", []):
+            await _publish_progress(redis, task_id, workspace_id, step)
+            result = await executor.execute_step(step)
+
+            if result.get("error"):
+                await _publish_error(redis, task_id, workspace_id, result["error"])
+                return result
+
+        # 6. Publish completion
+        await _publish_complete(redis, task_id, workspace_id, result)
+        return result
+
+    finally:
+        # 7. Cleanup: task dir + credentials (workspace persists)
+        ws_manager.cleanup_task(task_id)
+
+
+class WorkerSettings:
+    """ARQ worker configuration."""
+    functions = [execute_workspace_task]
+    redis_settings = RedisSettings.from_dsn(os.environ["REDIS_URL"])
+    max_jobs = int(os.environ.get("WORKER_CONCURRENCY", 3))
+    job_timeout = 600    # 10 min max per task
+    keep_result = 3600   # Keep results for 1 hour
+    health_check_interval = 30
+```
+
+### Workspace Manager
+
+```python
+# services/workspace-worker/workspace_manager.py
+"""
+Manages physical workspace directories on the persistent volume.
+Handles provisioning, quota enforcement, and cleanup.
+"""
+import json
+import shutil
+from pathlib import Path
+from datetime import datetime, timezone
+
+VOLUME_PATH = os.environ.get("WORKSPACE_VOLUME_PATH", "/workspaces")
+DEFAULT_QUOTA_GB = int(os.environ.get("WORKSPACE_DEFAULT_QUOTA_GB", 5))
+
+class WorkspaceManager:
+    def __init__(self, workspace_id: str):
+        self.workspace_id = workspace_id
+        self.root = Path(VOLUME_PATH) / workspace_id
+        self.quota_bytes = DEFAULT_QUOTA_GB * 1024**3
+
+    def ensure_workspace_exists(self):
+        """Create workspace directory tree if first use."""
+        for subdir in ["repos", "tasks", "artifacts"]:
+            (self.root / subdir).mkdir(parents=True, exist_ok=True)
+
+        meta_path = self.root / ".workspace_meta.json"
+        if not meta_path.exists():
+            meta_path.write_text(json.dumps({
+                "workspace_id": self.workspace_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "plan_tier": "pilot",
+                "storage_quota_bytes": self.quota_bytes,
+                "total_tasks_run": 0,
+            }))
+
+    def check_quota(self) -> bool:
+        """Check if workspace is under storage quota."""
+        usage = sum(f.stat().st_size for f in self.root.rglob("*") if f.is_file())
+        self._current_usage = usage
+        return usage < self.quota_bytes
+
+    @property
+    def usage_human(self) -> str:
+        return f"{self._current_usage / 1024**3:.1f}GB"
+
+    @property
+    def quota_human(self) -> str:
+        return f"{self.quota_bytes / 1024**3:.0f}GB"
+
+    def create_task_dir(self, task_id: str) -> Path:
+        """Create ephemeral task execution directory."""
+        task_dir = self.root / "tasks" / f"task_{task_id}"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        return task_dir
+
+    def cleanup_task(self, task_id: str):
+        """Remove ephemeral task directory + injected credentials."""
+        task_dir = self.root / "tasks" / f"task_{task_id}"
+        if task_dir.exists():
+            shutil.rmtree(task_dir)
+        # Clean credential files
+        ssh_dir = self.root / ".ssh"
+        task_env = self.root / f".task_env_{task_id}"
+        if task_env.exists():
+            task_env.unlink()
+
+    def inject_credentials(self, task_id: str, credentials: dict):
+        """Inject SSH keys and tokens for this task."""
+        if "ssh_private_key" in credentials:
+            ssh_dir = self.root / ".ssh"
+            ssh_dir.mkdir(exist_ok=True)
+            key_file = ssh_dir / "id_ed25519"
+            key_file.write_text(credentials["ssh_private_key"])
+            key_file.chmod(0o600)
+        # Git config for commits
+        if "git_name" in credentials:
+            gitconfig = self.root / ".gitconfig"
+            gitconfig.write_text(
+                f'[user]\n  name = {credentials["git_name"]}\n'
+                f'  email = {credentials.get("git_email", "agent@automatos.app")}\n'
+            )
+```
+
+---
+
+## 8. Pilot Security Model (NEW in v2.0)
+
+### Threat Model (15 Trusted Beta Users)
+
+Not bulletproof, but reasonable for trusted pilot. Hardens progressively in Phase 3.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│               PILOT SECURITY LAYERS (Phase 2)                 │
+│                                                               │
+│  Layer 1: Container Isolation (Railway)                       │
+│  ├── API and Worker are separate Railway containers           │
+│  ├── Each has its own filesystem, process space, network      │
+│  ├── Worker can't access API filesystem and vice versa        │
+│  └── Worker connects to Postgres/Redis via internal network   │
+│                                                               │
+│  Layer 2: Workspace Directory Isolation (Code)                │
+│  ├── All paths resolved via resolve_safe_path()               │
+│  ├── symlink-resolved, must start with /workspaces/{ws_id}    │
+│  ├── Path traversal (../../) blocked before execution         │
+│  └── One workspace cannot access another's directory          │
+│                                                               │
+│  Layer 3: Command Sandboxing (Whitelist)                      │
+│  ├── Only whitelisted binaries can execute                    │
+│  ├── Blocked patterns: sudo, rm -rf /, docker, etc.          │
+│  ├── All commands run with cwd pinned to workspace dir        │
+│  └── Stripped-down PATH (no access to system binaries)        │
+│                                                               │
+│  Layer 4: Credential Isolation                                │
+│  ├── SSH keys loaded per-task from encrypted credential store │
+│  ├── Injected into workspace .ssh/ dir                        │
+│  ├── Cleaned up after task completion                         │
+│  ├── LLM API keys loaded per-workspace (Fernet-encrypted)    │
+│  └── Never written to repo directories or task logs           │
+│                                                               │
+│  Layer 5: Resource Limits                                     │
+│  ├── Storage quota: du -sh check before each task             │
+│  ├── Task timeout: subprocess.run(timeout=300) default        │
+│  ├── Output cap: stdout/stderr truncated at 100KB             │
+│  ├── Concurrent tasks: 1 per workspace (pilot)                │
+│  └── Railway container limits: 2 CPU, 2GB RAM                 │
+│                                                               │
+│  Layer 6: Network Restrictions                                │
+│  ├── Worker connects to: Redis, Postgres (internal)           │
+│  ├── Outbound: github.com, pypi.org, npmjs.org (for installs)│
+│  ├── ssh_execute: DISABLED for pilot                          │
+│  └── http_request: whitelisted domains only (existing)        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Path Traversal Prevention (Critical)
+
+```python
+def resolve_safe_path(workspace_id: str, relative_path: str) -> Path:
+    """
+    Resolve a path and guarantee it stays within the workspace.
+    Blocks: ../../, symlink escape, absolute paths, null bytes.
+    """
+    base = Path(f"/workspaces/{workspace_id}").resolve()
+
+    # Block null bytes (bypass attempt)
+    if "\x00" in relative_path:
+        raise SecurityError("Null byte in path")
+
+    # Block absolute paths
+    if relative_path.startswith("/"):
+        raise SecurityError(f"Absolute path not allowed: {relative_path}")
+
+    # Resolve and check containment
+    resolved = (base / relative_path).resolve()
+    if not str(resolved).startswith(str(base)):
+        raise SecurityError(f"Path traversal blocked: {relative_path}")
+
+    return resolved
+```
+
+### What Users CAN Do (Within Their Workspace)
+
+- Clone any public or credentialed-private repo
+- Run test suites (pytest, vitest, jest, go test, cargo test)
+- Install dependencies (pip install, npm install — into workspace)
+- Read and write any file in their workspace
+- Run linters, formatters, type checkers
+- Build projects (make, npm run build, cargo build)
+- Save test reports, coverage data, build artifacts
+- Use curl/wget for API testing
+
+### What Users CANNOT Do
+
+- Access another workspace's files (path validation)
+- Run privileged commands (sudo, docker, kubectl)
+- Access system files outside /workspaces/{their_id}
+- SSH to external servers (disabled for pilot)
+- Send HTTP requests to non-whitelisted domains
+- Exceed their storage quota
+- Run tasks longer than the timeout (killed)
+- Access Postgres/Redis connection strings (not in subprocess env)
+
+---
+
+## 9. Phase 3: Kubernetes Ephemeral Pods (Months 3-6)
 
 ### Goal
 
@@ -672,7 +1375,7 @@ spec:
 
 ---
 
-## 6. Phase 4: Enterprise Multi-Tenant (Month 6+)
+## 10. Phase 4: Enterprise Multi-Tenant (Month 6+)
 
 ### Goal
 
@@ -713,7 +1416,7 @@ Support enterprise customers with dedicated compute, compliance requirements, an
 
 ---
 
-## 7. Data Models & Schema
+## 11. Data Models & Schema
 
 ### New Database Table: `task_executions`
 
@@ -797,7 +1500,7 @@ ws:{workspace_id}:agent_events → Pub/Sub channel
 
 ---
 
-## 8. API Changes
+## 12. API Changes
 
 ### New Endpoints (Phase 2+)
 
@@ -824,7 +1527,7 @@ No breaking changes. The `POST /api/workflows/{id}/execute` endpoint continues t
 
 ---
 
-## 9. Security Model
+## 13. Security Model (Full)
 
 ### Phase 2 Security (Workers)
 
@@ -858,19 +1561,22 @@ No breaking changes. The `POST /api/workflows/{id}/execute` endpoint continues t
 
 ---
 
-## 10. Cost Analysis
+## 14. Cost Analysis
 
 ### Phase 1: No Change
 - Railway: ~$20-40/mo (current pilot)
 - No additional infra cost
 
-### Phase 2: Railway + Workers
-- Backend service: ~$10/mo
-- 2 Worker replicas: ~$20/mo
+### Phase 2: Railway + Physical Workspaces (Pilot — 15 Users)
+- Backend service (API): ~$10/mo
+- Workspace worker (1 replica): ~$10-15/mo
+- Agent-opt worker (existing): ~$5/mo
+- Persistent volume (100GB): ~$2/mo
 - Postgres: ~$10/mo
 - Redis: ~$5/mo
-- **Total: ~$45-60/mo**
-- Per-workspace cost: negligible (shared workers)
+- **Total: ~$45-55/mo**
+- Storage per workspace: 5GB default (15 users × 5GB = 75GB max capacity)
+- Per-workspace cost: ~$3/mo (amortized across pilot users)
 
 ### Phase 3: Managed Kubernetes
 - **GKE Autopilot** (recommended):
@@ -897,7 +1603,7 @@ Healthy margins at scale. The ephemeral model means idle workspaces cost $0.
 
 ---
 
-## 11. Implementation Roadmap
+## 15. Implementation Roadmap
 
 ### Phase 1: TaskRunner Abstraction (Week 1)
 **Effort: 2-3 days**
@@ -909,18 +1615,23 @@ Healthy margins at scale. The ephemeral model means idle workspaces cost $0.
 | 2 | Integration point documentation | Call site inventory |
 | 3 | Tests | Unit tests for LocalTaskRunner |
 
-### Phase 2: Queue + Workers (Weeks 2-6)
-**Effort: 2-3 weeks**
+### Phase 2: Physical Workspaces + Queue Workers (Weeks 2-6)
+**Effort: 3-4 weeks**
 
 | Week | Task | Deliverable |
 |------|------|-------------|
 | 2 | ARQ integration + QueuedTaskRunner | `core/task_runner/queued.py` |
-| 2-3 | Worker container + Dockerfile | `worker/`, `Dockerfile.worker` |
-| 3 | Wire TaskRunner into execution pipeline | Replace `asyncio.create_task()` calls |
-| 4 | Workspace queue limits + priority | Per-plan enforcement |
-| 4-5 | Task persistence + recovery | Restart resilience |
-| 5 | Docker Compose + Railway deployment | Multi-service deployment |
-| 6 | Testing + monitoring | Load testing, metrics |
+| 2 | WorkspaceManager (dir provisioning, quotas) | `services/workspace-worker/workspace_manager.py` |
+| 2-3 | WorkspaceToolExecutor (sandboxed commands) | `services/workspace-worker/executor.py` |
+| 3 | Worker Dockerfile + DevOps toolchain | `services/workspace-worker/Dockerfile` |
+| 3 | ARQ consumer entry point | `services/workspace-worker/main.py` |
+| 3-4 | Wire TaskRunner into execution pipeline | Replace `asyncio.create_task()` calls |
+| 4 | Tool routing (API vs Worker split) | Tool registry update + dispatcher |
+| 4 | Storage quota enforcement + command whitelist | Security layer |
+| 5 | Credential injection (SSH keys, git config) | Per-workspace credential flow |
+| 5 | Docker Compose + Railway deployment | Multi-service with persistent volume |
+| 5-6 | Path traversal hardening + security testing | Penetration test workspace isolation |
+| 6 | End-to-end testing (clone → test → fix → push) | DevOps workflow validation |
 
 ### Phase 3: Kubernetes (Months 3-6)
 **Effort: 4-6 weeks**
@@ -930,6 +1641,7 @@ Healthy margins at scale. The ephemeral model means idle workspaces cost $0.
 | 3 | KubernetesTaskRunner | `core/task_runner/kubernetes.py` |
 | 3 | Task Controller | `worker/controller.py` |
 | 3-4 | Namespace provisioning | Auto-namespace per workspace |
+| 3-4 | Migrate workspace volumes to PersistentVolumeClaims | Per-workspace PVCs |
 | 4 | NetworkPolicy + RBAC | Security boundaries |
 | 4-5 | KEDA autoscaling | Scale from zero |
 | 5 | Helm chart | Deployment package |
@@ -942,22 +1654,29 @@ Healthy margins at scale. The ephemeral model means idle workspaces cost $0.
 |---------|------|-------------|
 | Q3 2026 | Dedicated node pools | Enterprise isolation |
 | Q3 2026 | External Secrets Operator | Vault/AWS SM integration |
+| Q3 2026 | Per-workspace PersistentVolumeClaims | True storage isolation |
 | Q4 2026 | BYOC agent deployment | Customer-cluster support |
 | Q4 2026 | Helm chart for air-gap | Self-hosted package |
 
 ---
 
-## 12. Risk Assessment
+## 16. Risk Assessment
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|-----------|
-| Phase 2 introduces latency (queue overhead) | Medium | Low | Queue adds ~50-100ms; acceptable for agent tasks (seconds-long) |
-| Worker container crashes during task | Medium | Medium | Task heartbeat + auto-requeue; result idempotency |
-| K8s complexity slows feature development | Medium | High | Phase 3 only when revenue justifies; managed K8s (Autopilot) reduces ops |
-| Pod startup latency (cold start) | Medium | Medium | Pre-pull images on nodes; KEDA warm pool |
-| Redis as task queue: message loss | Low | High | Redis AOF persistence; critical tasks also written to Postgres |
-| Namespace proliferation (1000+ workspaces) | Low | Medium | Lazy provisioning; cleanup inactive namespaces after 30 days |
-| Cost overrun on K8s | Medium | Medium | KEDA scale-to-zero; spot instances; per-workspace billing |
+| Risk | Likelihood | Impact | Phase | Mitigation |
+|------|-----------|--------|-------|-----------|
+| Phase 2 introduces latency (queue overhead) | Medium | Low | 2 | Queue adds ~50-100ms; acceptable for agent tasks (seconds-long) |
+| Worker container crashes during task | Medium | Medium | 2 | Task heartbeat + auto-requeue; result idempotency |
+| **Path traversal escape from workspace** | Low | **Critical** | 2 | `resolve_safe_path()` with symlink resolution + null byte check. Security testing before pilot launch |
+| **Storage exhaustion (large repo clones)** | Medium | Medium | 2 | Quota enforcement before each task; cleanup tooling for old repos; monitoring alerts at 80% |
+| **Cross-workspace data leak (shared worker)** | Low | High | 2 | All paths validated per-request; subprocess `cwd` pinned; credentials cleaned per-task |
+| **Command injection via agent tool calls** | Low | High | 2 | Whitelist enforcement; blocked patterns list; no shell expansion on user input |
+| **Railway volume data loss** | Low | High | 2 | Railway volumes persist across deploys. Backup strategy: periodic `tar` to S3 for critical workspaces |
+| **Single worker bottleneck (15 users)** | Medium | Low | 2 | 1 worker handles ~3 concurrent tasks; pilot users unlikely to saturate. Scale to 2 replicas if needed |
+| K8s complexity slows feature development | Medium | High | 3 | Phase 3 only when revenue justifies; managed K8s (Autopilot) reduces ops |
+| Pod startup latency (cold start) | Medium | Medium | 3 | Pre-pull images on nodes; KEDA warm pool |
+| Redis as task queue: message loss | Low | High | 2-3 | Redis AOF persistence; critical tasks also written to Postgres |
+| Namespace proliferation (1000+ workspaces) | Low | Medium | 3 | Lazy provisioning; cleanup inactive namespaces after 30 days |
+| Cost overrun on K8s | Medium | Medium | 3 | KEDA scale-to-zero; spot instances; per-workspace billing |
 
 ---
 
