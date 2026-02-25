@@ -1,0 +1,189 @@
+{
+  "project": "Automatos AI Platform — Security Hardening v2",
+  "branchName": "ralph/security-hardening-v2",
+  "description": "PRD-44 v2: Security Hardening & Remediation (Updated Feb 2026). Full security re-audit found 12 of original 45 stories already completed (auth defaults, rate limiting, CORS, security headers, webhook verification, workspace membership, MIME validation, swagger disabled, browser API key removed, auto-admin removed). This v2 PRD contains only the REMAINING work plus NEW findings: unauthenticated generated-images endpoint, broken admin role checks in admin_prompts and system_settings, 8 error-response leaks, outdated deps (fastapi 0.104.1), audit service stub, dev Docker running as root. 4 phases: (1) Critical auth/authz fixes, (2) Error sanitization and dependency updates, (3) Infrastructure hardening, (4) Code quality remediation.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add authentication to generated_images endpoint",
+      "description": "As a security engineer, I need the GET /api/generated-images/{image_id} endpoint protected with authentication. Currently it has ZERO auth — anyone knowing/guessing a UUID can access generated images.",
+      "acceptanceCriteria": [
+        "Add get_request_context_hybrid dependency to the get_generated_image endpoint in orchestrator/api/generated_images.py",
+        "Unauthenticated requests receive 401 Unauthorized",
+        "Authenticated requests can still fetch images normally",
+        "Typecheck passes"
+      ],
+      "priority": 1
+    },
+    {
+      "id": "US-002",
+      "title": "Fix admin_prompts _assert_admin to actually check admin role",
+      "description": "As a security engineer, I need the _assert_admin function in admin_prompts.py to actually verify admin role instead of allowing any authenticated user. Currently lines 49-55 return immediately for ANY clerk or api_key auth type, bypassing role checks entirely.",
+      "acceptanceCriteria": [
+        "Modify _assert_admin in orchestrator/api/admin_prompts.py to check ctx.user.system_role == 'admin' for Clerk auth",
+        "API key auth continues to pass (service-to-service trust)",
+        "Non-admin Clerk users receive 403 Forbidden",
+        "Admin Clerk users can still manage prompts",
+        "Typecheck passes"
+      ],
+      "priority": 2
+    },
+    {
+      "id": "US-003",
+      "title": "Add admin role check to system_settings endpoints",
+      "description": "As a security engineer, I need system-settings CRUD endpoints restricted to admin users. Currently any authenticated user can read, create, update, and delete platform-wide system settings.",
+      "acceptanceCriteria": [
+        "Add admin role verification to all mutation endpoints (POST, PUT, DELETE) in orchestrator/api/system_settings.py",
+        "GET endpoints remain accessible to any authenticated user (read-only is acceptable)",
+        "Non-admin users receive 403 Forbidden on mutation attempts",
+        "Admin users can still manage settings",
+        "Typecheck passes"
+      ],
+      "priority": 3
+    },
+    {
+      "id": "US-004",
+      "title": "Lock down credential resolve endpoint to admin-only",
+      "description": "As a security engineer, I need the credential resolve endpoint restricted to admin-only access so that decrypted secrets cannot be accessed by regular users.",
+      "acceptanceCriteria": [
+        "POST /api/credentials/resolve requires authenticated admin role",
+        "GET /api/credentials/{credential_id} that returns decrypted data requires admin role",
+        "Non-admin users receive 403 Forbidden",
+        "API key auth continues to pass (service-to-service)",
+        "Typecheck passes"
+      ],
+      "priority": 4
+    },
+    {
+      "id": "US-005",
+      "title": "Sanitize error responses across all routers",
+      "description": "As a security engineer, I need all detail=str(e) patterns replaced with generic error messages. Currently 8 endpoints leak internal exception details (table names, file paths, stack traces) to API callers.",
+      "acceptanceCriteria": [
+        "Create a safe_error_response utility in orchestrator/core/utils/ that logs full exception server-side and returns generic message to client",
+        "Fix orchestrator/api/document_generation.py lines 231, 321: replace detail=str(e) with safe generic message",
+        "Fix orchestrator/api/cloud_documents.py line 420: replace detail=str(e)",
+        "Fix orchestrator/api/routing.py lines 496, 541: replace detail=str(e)",
+        "Fix orchestrator/api/admin_plugins.py line 193: replace detail=str(e)",
+        "Grep confirms zero remaining detail=str(e) patterns across orchestrator/api/",
+        "Internal details (table names, file paths, stack traces) never appear in HTTP response bodies",
+        "Typecheck passes"
+      ],
+      "priority": 5
+    },
+    {
+      "id": "US-006",
+      "title": "Update outdated dependencies with known CVEs",
+      "description": "As a platform operator, I need dependencies updated to address known CVEs. FastAPI is 0.104.1 (Nov 2023), uvicorn 0.24.0, python-jose is unmaintained (PyJWT already used instead), and passlib is unmaintained.",
+      "acceptanceCriteria": [
+        "Update fastapi from 0.104.1 to latest stable (0.115+) in orchestrator/requirements.txt",
+        "Update uvicorn[standard] from 0.24.0 to latest stable",
+        "Update python-multipart from 0.0.6 to latest stable",
+        "Remove python-jose[cryptography] from requirements (unused, PyJWT is the active JWT library)",
+        "Update scikit-learn from 1.3.2 to latest stable",
+        "Update psutil from 5.9.6 to latest stable",
+        "Verify the application starts and key endpoints respond after all updates",
+        "Typecheck passes"
+      ],
+      "priority": 6
+    },
+    {
+      "id": "US-007",
+      "title": "Implement functional audit service",
+      "description": "As a security engineer, I need the audit service to actually log security-relevant events. Currently orchestrator/core/services/audit_service.py is a 199-byte stub with no implementation.",
+      "acceptanceCriteria": [
+        "Implement AuditService in orchestrator/core/services/audit_service.py with log_event(event_type, actor, resource, details) method",
+        "Log to structured JSON format via Python logging (audit-specific logger)",
+        "Capture at minimum: auth failures, permission changes, credential access, admin actions, system setting changes",
+        "Wire audit logging into the admin_prompts, system_settings, credentials, and permissions routers",
+        "Audit logs include timestamp, actor_id, action, resource_type, resource_id, workspace_id, ip_address",
+        "Typecheck passes"
+      ],
+      "priority": 7
+    },
+    {
+      "id": "US-008",
+      "title": "Enforce database connection SSL",
+      "description": "As a security engineer, I need database connections to enforce SSL/TLS in production. Currently sslmode is not specified in DATABASE_URL construction.",
+      "acceptanceCriteria": [
+        "In orchestrator/core/database/database.py, append ?sslmode=require to DATABASE_URL when ENVIRONMENT is production",
+        "Development mode continues to work without SSL requirement",
+        "Connection to Railway PostgreSQL still works with SSL enforced",
+        "Typecheck passes"
+      ],
+      "priority": 8
+    },
+    {
+      "id": "US-009",
+      "title": "Add global request body size limit",
+      "description": "As a security engineer, I need a global request body size limit to prevent oversized payloads. Only document upload has a 50MB check; all other endpoints (chat, workflows, etc.) have no limit.",
+      "acceptanceCriteria": [
+        "Add middleware or uvicorn configuration in orchestrator/main.py to limit request body to 10MB by default",
+        "Document upload endpoints explicitly override to allow up to 50MB",
+        "Requests exceeding the limit receive 413 Payload Too Large",
+        "Typecheck passes"
+      ],
+      "priority": 9
+    },
+    {
+      "id": "US-010",
+      "title": "Fix remaining SQL f-string patterns",
+      "description": "As a security engineer, I need the remaining f-string SQL patterns converted to parameterized queries. The SET LOCAL statement_timeout in database_knowledge.py line 574 uses f-string interpolation. While currently safe due to int coercion, it should use proper parameterization.",
+      "acceptanceCriteria": [
+        "Convert orchestrator/api/database_knowledge.py line 574 SET LOCAL statement_timeout from f-string to parameterized form",
+        "Audit orchestrator/api/channels.py line 145 dynamic SQL UPDATE — ensure column names are validated against allowlist",
+        "Grep confirms zero f-string patterns within text() or execute() calls across orchestrator/",
+        "Typecheck passes"
+      ],
+      "priority": 10
+    },
+    {
+      "id": "US-011",
+      "title": "Run dev Docker stage as non-root user",
+      "description": "As a security engineer, I need the development Docker stage to run as a non-root user. The production stage correctly creates and uses the automatos user, but the development target in docker-compose.yml runs as root.",
+      "acceptanceCriteria": [
+        "Add non-root user creation to the development stage in orchestrator/Dockerfile (or Dockerfile.backend)",
+        "docker-compose.yml development target runs as the non-root user",
+        "All file permissions work correctly for the development workflow",
+        "Typecheck passes"
+      ],
+      "priority": 11
+    },
+    {
+      "id": "US-012",
+      "title": "Enable TypeScript strict build checking",
+      "description": "As a developer, I need TypeScript build errors caught during build. If ignoreBuildErrors is set to true in next.config.js, type-safety issues can reach production.",
+      "acceptanceCriteria": [
+        "Check frontend/next.config.js for ignoreBuildErrors setting",
+        "If ignoreBuildErrors is true, set it to false",
+        "Fix any TypeScript errors that surface from the change",
+        "Build completes successfully with next build",
+        "Typecheck passes"
+      ],
+      "priority": 12
+    },
+    {
+      "id": "US-013",
+      "title": "Extract user_id from auth context instead of query params",
+      "description": "As a security engineer, I need user_id sourced from the authenticated context, not from client-provided query parameters. Accepting user_id from the client allows impersonation.",
+      "acceptanceCriteria": [
+        "Audit all endpoints accepting user_id as query parameter or request body field",
+        "Replace client-provided user_id with ctx.user.id from RequestContext in credentials and permissions endpoints",
+        "Ensure no endpoint trusts client-supplied user_id for authorization decisions",
+        "Typecheck passes"
+      ],
+      "priority": 13
+    },
+    {
+      "id": "US-014",
+      "title": "Remove hardcoded Docker Compose credential defaults",
+      "description": "As a platform operator, I need docker-compose to require explicit credentials rather than falling back to hardcoded defaults that could reach production.",
+      "acceptanceCriteria": [
+        "Remove default values from POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY in docker-compose.yml",
+        "Add or update .env.example with placeholder values and setup instructions",
+        "Docker compose fails with clear error if required vars are not set",
+        "Typecheck passes"
+      ],
+      "priority": 14
+    }
+  ]
+}
