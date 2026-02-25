@@ -5,6 +5,7 @@ import { Menu, Bell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ProfileMenu } from '@/components/auth/profile-menu'
+import { WorkspaceSelector } from '@/components/workspace/WorkspaceSelector'
 
 interface HeaderProps {
   onMenuClick: () => void
@@ -37,6 +38,12 @@ export function Header({ onMenuClick }: HeaderProps) {
             <span className="hidden sm:inline ml-3 text-lg font-semibold tracking-wide text-foreground dark:text-white">
               AUTOMATOS A.I.
             </span>
+          </div>
+
+          {/* Workspace selector — separator + dropdown */}
+          <div className="hidden sm:flex items-center gap-2 ml-2">
+            <div className="h-5 w-px bg-border/50" />
+            <WorkspaceSelector />
           </div>
         </div>
 

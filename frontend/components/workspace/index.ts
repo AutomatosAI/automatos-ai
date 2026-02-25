@@ -17,3 +17,8 @@ import '@/components/widgets/FileWidget'
 
 export { Canvas } from './Canvas'
 export { WidgetTray } from './WidgetTray'
+export { WorkspaceSaveDialog } from './WorkspaceSaveDialog'
+export { LayoutPresets } from './LayoutPresets'
+export { WorkspaceManager } from './WorkspaceManager'
+export { WorkspaceShareDialog } from './WorkspaceShareDialog'
+export { WorkspaceSelector } from './WorkspaceSelector'

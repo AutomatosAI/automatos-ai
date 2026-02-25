@@ -43,7 +43,7 @@ export function MemoryList({
 
   return (
     <ScrollArea className={cn('flex-1', className)}>
-      <div className="group">
+      <div>
         {memories.map((memory) => (
           <MemoryItem
             key={memory.id}

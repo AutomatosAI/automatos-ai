@@ -6,12 +6,13 @@ Handles:
 - Formatting SSE chunks for legacy format
 - Formatting AI SDK Data Stream format
 - Chunking text for smooth streaming
+- Widget-related SSE events (memory, workflow)
 """
 
 import json
 import logging
 import uuid
-from typing import Dict, Any, AsyncGenerator, Optional
+from typing import Dict, Any, AsyncGenerator, List, Optional
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,85 @@ class StreamingHandler:
         """Format error event for AI SDK."""
         return f'e:{json.dumps({"message": error})}\n'
     
+    # ==========================================================================
+    # WIDGET SSE EVENTS (US-015)
+    # ==========================================================================
+
+    def format_aisdk_memory_injected(
+        self,
+        memories: List[Dict[str, Any]],
+        total_matched: int,
+    ) -> str:
+        """
+        Format memory-injected event for AI SDK Data Stream.
+
+        Emitted when memories are retrieved and injected into the LLM context
+        so the frontend can display them in a memory widget.
+
+        Args:
+            memories: List of memory objects that were injected.
+            total_matched: Total number of memories matched before truncation.
+        """
+        return self.format_aisdk_data(
+            "memory-injected",
+            {
+                "memories": memories,
+                "totalMatched": total_matched,
+            },
+        )
+
+    def format_aisdk_memory_stored(
+        self,
+        memory: Dict[str, Any],
+        reason: str,
+    ) -> str:
+        """
+        Format memory-stored event for AI SDK Data Stream.
+
+        Emitted after a conversation exchange is persisted to memory
+        so the frontend can update a memory widget in real time.
+
+        Args:
+            memory: The memory object that was stored.
+            reason: Why this memory was stored (e.g. "conversation", "user-fact").
+        """
+        return self.format_aisdk_data(
+            "memory-stored",
+            {
+                "memory": memory,
+                "reason": reason,
+            },
+        )
+
+    def format_aisdk_workflow_update(
+        self,
+        workflow_id: str,
+        status: str,
+        current_step: Optional[str] = None,
+        progress: Optional[float] = None,
+    ) -> str:
+        """
+        Format workflow-update event for AI SDK Data Stream.
+
+        Emitted when a workflow execution changes state so the frontend
+        can render a live workflow progress widget.
+
+        Args:
+            workflow_id: The workflow execution or definition ID.
+            status: Current status (e.g. "running", "completed", "failed").
+            current_step: Name/description of the step currently executing.
+            progress: Completion ratio 0.0 - 1.0 (optional).
+        """
+        payload: Dict[str, Any] = {
+            "workflowId": workflow_id,
+            "status": status,
+        }
+        if current_step is not None:
+            payload["currentStep"] = current_step
+        if progress is not None:
+            payload["progress"] = progress
+        return self.format_aisdk_data("workflow-update", payload)
+
     async def stream_text_aisdk(
         self,
         text: str,

@@ -1,0 +1,264 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/38-5-widget-marketplace",
+  "description": "PRD-38.5: Widget Marketplace - Browse, install, rate, and review widgets. Developer dashboard for publishers. Leverages existing plugin marketplace infra. Visual builder and Stripe monetization deferred.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create marketplace_widgets table via migration",
+      "description": "As a developer, I need a table for marketplace widget listings.",
+      "acceptanceCriteria": [
+        "Create Alembic migration for marketplace_widgets: id UUID PK, name VARCHAR(100) UNIQUE, display_name VARCHAR(200), description TEXT, long_description TEXT",
+        "Add developer_id UUID FK users, developer_name VARCHAR(200), version VARCHAR(20), changelog TEXT",
+        "Add pricing_type VARCHAR(20) CHECK IN ('free','one_time','subscription'), price_cents INTEGER, currency VARCHAR(3) DEFAULT 'USD'",
+        "Add icon_url TEXT, screenshots JSONB DEFAULT '[]', readme TEXT, keywords TEXT[], categories TEXT[]",
+        "Add bundle_url TEXT, bundle_size INTEGER, permissions TEXT[], min_plan VARCHAR(50)",
+        "Add install_count INTEGER DEFAULT 0, rating_average DECIMAL(3,2) DEFAULT 0, rating_count INTEGER DEFAULT 0",
+        "Add status VARCHAR(20) DEFAULT 'draft' CHECK IN ('draft','review','published','suspended'), published_at TIMESTAMP",
+        "Add created_at, updated_at timestamps",
+        "Add indexes on developer_id, status WHERE published",
+        "Migration runs successfully",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Created 20260225_create_marketplace_widgets.py with 27 columns, CHECK constraints on pricing_type and status, partial index on published status. Chains from 20260225_sdk_api_keys."
+    },
+    {
+      "id": "US-002",
+      "title": "Create widget_installations and widget_reviews tables",
+      "description": "As a developer, I need tables for tracking installs and reviews.",
+      "acceptanceCriteria": [
+        "Create widget_installations: id UUID PK, widget_id FK, workspace_id UUID, user_id FK, last_used_at, use_count DEFAULT 0, installed_at, uninstalled_at nullable",
+        "Add indexes on widget_id, workspace_id, user_id",
+        "Create widget_reviews: id UUID PK, widget_id FK, user_id FK, rating INTEGER CHECK 1-5, title VARCHAR(200), body TEXT",
+        "Add is_verified_purchase BOOLEAN DEFAULT FALSE, status VARCHAR(20) DEFAULT 'published'",
+        "Add UNIQUE(widget_id, user_id), created_at, updated_at",
+        "Migration runs successfully",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Created 20260225_create_widget_installs_reviews.py with both tables, all FKs with CASCADE/SET NULL, CHECK on rating 1-5, UNIQUE on (widget_id, user_id)."
+    },
+    {
+      "id": "US-003",
+      "title": "Create SQLAlchemy models for marketplace entities",
+      "description": "As a developer, I need ORM models for widgets, installations, and reviews.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/models/marketplace_widget.py with MarketplaceWidget model",
+        "Create orchestrator/core/models/widget_installation.py with WidgetInstallation model",
+        "Create orchestrator/core/models/widget_review.py with WidgetReview model",
+        "Add relationships: widget has many installations and reviews",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Created all 3 models with relationships and cascade delete. Registered in __init__.py. UniqueConstraint on reviews."
+    },
+    {
+      "id": "US-004",
+      "title": "Create marketplace browsing API endpoints",
+      "description": "As a user, I need endpoints to browse, search, and filter marketplace widgets.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/widget_marketplace.py with prefix /api/widget-marketplace",
+        "GET /widgets returns paginated published widgets with search (?q=), category filter, pricing filter, sort (popular/newest/rating), pagination",
+        "GET /widgets/:id returns full detail with readme, screenshots, changelog",
+        "GET /categories returns categories with counts",
+        "GET /featured returns featured widgets",
+        "Register router in main.py",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Created widget_marketplace.py with 18 total endpoints covering browse, install, review, and publish. Search uses ILIKE, categories use unnest(). Registered in main.py."
+    },
+    {
+      "id": "US-005",
+      "title": "Create widget installation API endpoints",
+      "description": "As a user, I need endpoints to install, uninstall, and list installed widgets.",
+      "acceptanceCriteria": [
+        "POST /api/widget-marketplace/widgets/:id/install creates installation, increments install_count",
+        "DELETE /api/widget-marketplace/widgets/:id/install sets uninstalled_at, decrements count",
+        "GET /api/widget-marketplace/installed returns user's installed widgets",
+        "Prevents duplicate installs (same widget + workspace)",
+        "Requires authentication",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Install/uninstall/list endpoints in widget_marketplace.py. Duplicate prevention returns 409. Install count maintained atomically."
+    },
+    {
+      "id": "US-006",
+      "title": "Create widget review API endpoints",
+      "description": "As a user, I need endpoints to create, read, update, and delete reviews.",
+      "acceptanceCriteria": [
+        "GET /widgets/:id/reviews returns paginated reviews sorted newest first",
+        "POST /widgets/:id/reviews creates review with rating (1-5), title, body",
+        "Sets is_verified_purchase if user has active install",
+        "PUT /reviews/:id updates own review",
+        "DELETE /reviews/:id deletes own review",
+        "Recalculates rating_average and rating_count after changes",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "CRUD review endpoints with ownership validation. _recalculate_rating() helper runs after every mutation. Verified purchase auto-detected from active installations."
+    },
+    {
+      "id": "US-007",
+      "title": "Create widget publishing API endpoints",
+      "description": "As a developer, I need endpoints to submit, update, and manage my widgets.",
+      "acceptanceCriteria": [
+        "POST /widgets creates widget in draft status with current user as developer",
+        "PUT /widgets/:id updates (validates ownership, only in draft/published)",
+        "POST /widgets/:id/submit moves draft to review (validates required fields)",
+        "GET /developer/widgets returns user's widgets with status and stats",
+        "GET /developer/analytics returns aggregate: total installs, reviews, avg rating",
+        "Admin: PUT /widgets/:id/approve and /suspend",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Full developer lifecycle in widget_marketplace.py. Draft creation, ownership-validated updates, submit validation, developer analytics, admin approve/suspend with role check."
+    },
+    {
+      "id": "US-008",
+      "title": "Seed marketplace with internal widgets",
+      "description": "As a user, I want pre-populated widgets so the marketplace isn't empty.",
+      "acceptanceCriteria": [
+        "Create seed script inserting 8+ internal widgets as published",
+        "Widgets: Chat Assistant, Data Explorer, Document Viewer, Code Inspector, Email Manager, Terminal, Workflow Monitor, Memory Inspector",
+        "Each has icon_url, description, categories, permissions, pricing_type=free, readme",
+        "Developer name set to Automatos AI",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Created scripts/seed_marketplace_widgets.py with 8 widgets, all free, published, with markdown readmes. Idempotent via ON CONFLICT DO NOTHING. Realistic install counts and ratings."
+    },
+    {
+      "id": "US-009",
+      "title": "Build marketplace home page",
+      "description": "As a user, I want a marketplace page to discover widgets with search and categories.",
+      "acceptanceCriteria": [
+        "Create frontend/app/marketplace/widgets/page.tsx",
+        "Search bar at top",
+        "Featured widgets horizontal scroll from /featured",
+        "Category filter chips",
+        "Widget grid with sort dropdown (Popular, Newest, Highest Rated)",
+        "Pagination or infinite scroll",
+        "Loading skeletons",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Created 455-line page with debounced search, horizontal featured scroll with nav buttons, category chips from API, sort dropdown, WidgetGrid, pagination, and skeleton loading states."
+    },
+    {
+      "id": "US-010",
+      "title": "Build WidgetCard and WidgetGrid components",
+      "description": "As a frontend developer, I need reusable marketplace card and grid components.",
+      "acceptanceCriteria": [
+        "Create frontend/components/marketplace/WidgetCard.tsx: icon, name, developer, description (2 lines), rating stars, install count, price badge",
+        "Card links to detail page on click",
+        "Create WidgetGrid.tsx: responsive grid (3 cols desktop, 2 tablet, 1 mobile)",
+        "Empty state: No widgets found",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "WidgetCard matches existing MarketplaceCard pattern with glass-card styling. RatingStars component, formatted install count, price badge. WidgetGrid with responsive 1/2/3 column grid and empty state."
+    },
+    {
+      "id": "US-011",
+      "title": "Build widget detail page",
+      "description": "As a user, I want a detail page with full info, screenshots, reviews, and install button.",
+      "acceptanceCriteria": [
+        "Create frontend/app/marketplace/widgets/[id]/page.tsx",
+        "Header: icon, name, developer, rating, install count",
+        "Install / Uninstall button",
+        "Tabs: Overview (markdown), Screenshots, Reviews, Changelog",
+        "Sidebar: developer, categories, version, size, published date",
+        "Fetches from GET /widgets/:id",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Created 493-line detail page with header, install toggle, 4 tabs (overview with sanitized HTML, screenshot gallery, reviews with inline form, changelog), and info sidebar."
+    },
+    {
+      "id": "US-012",
+      "title": "Build review components",
+      "description": "As a user, I want to read and write reviews for widgets.",
+      "acceptanceCriteria": [
+        "Create ReviewList.tsx: paginated reviews with avatar, stars, title, body, date, verified badge",
+        "Create ReviewForm.tsx: star selector, title, body, submit",
+        "Form shows only if installed and not yet reviewed",
+        "Edit form if review exists",
+        "Star average as filled/empty stars",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "ReviewList with glass-card reviews, verified badge, pagination. ReviewForm with interactive star selector, hover preview, validation. Conditional rendering based on isInstalled and existingReview."
+    },
+    {
+      "id": "US-013",
+      "title": "Build developer dashboard page",
+      "description": "As a widget developer, I want a dashboard showing my widgets and metrics.",
+      "acceptanceCriteria": [
+        "Create frontend/app/marketplace/developer/page.tsx",
+        "Stats cards: Published Widgets, Total Installs, Average Rating, Total Reviews",
+        "My Widgets table: name, version, status badge, installs, rating, actions",
+        "Recent Reviews section",
+        "Create Widget button linking to publish",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Created developer page with 4 stats cards, widgets table with color-coded status badges, edit/view actions, empty state CTA, and Create Widget button in header."
+    },
+    {
+      "id": "US-014",
+      "title": "Build widget publish wizard",
+      "description": "As a developer, I want a multi-step form to submit my widget.",
+      "acceptanceCriteria": [
+        "Create frontend/app/marketplace/publish/page.tsx with steps",
+        "Step 1: name, display_name, description, categories",
+        "Step 2: bundle_url, permissions, min_plan",
+        "Step 3: icon, screenshots, readme",
+        "Step 4: pricing_type, price if paid",
+        "Step 5: review all fields, Submit for Review button",
+        "Auto-saves draft between steps",
+        "Validation per step before advancing",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "5-step wizard with progress indicator, per-step validation, auto-save draft after step 1, PUT updates on subsequent steps. Submit for review button on step 5. Success confirmation."
+    },
+    {
+      "id": "US-015",
+      "title": "Add Widget Marketplace link to main navigation",
+      "description": "As a user, I want marketplace access from the sidebar.",
+      "acceptanceCriteria": [
+        "Add Widget Marketplace link to sidebar with store icon from lucide-react",
+        "Links to /marketplace/widgets",
+        "Active state on marketplace pages",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Added Puzzle icon import and Widget Marketplace nav entry to sidebar.tsx after Community Marketplace. Links to /marketplace/widgets with info color."
+    }
+  ]
+}

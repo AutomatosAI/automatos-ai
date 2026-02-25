@@ -100,7 +100,7 @@ export function MemoryItem({
   return (
     <div
       className={cn(
-        'px-3 py-2.5 hover:bg-muted/30 transition-colors',
+        'group px-3 py-2.5 hover:bg-muted/30 transition-colors',
         'border-b border-border/30 last:border-0',
         className
       )}

@@ -167,6 +167,9 @@ class SmartChatOrchestrator:
         else:
             self.state.messages_since_memory_fetch += 1
 
+        # US-015: Store last memory result so callers can emit SSE events
+        self._last_memory_result = memory_result
+
         # 3. Route Tools (if needed)
         tool_result = None
         if intent_result.requires_tools and available_tools:

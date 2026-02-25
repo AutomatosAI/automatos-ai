@@ -20,6 +20,15 @@ import type {
 } from '../types'
 import { toast } from 'sonner'
 
+/**
+ * Strip ANSI escape codes from a string for plain-text clipboard copy.
+ */
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?(?:\x07|\x1b\\)/g
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_RE, '')
+}
+
 export function TerminalWidget({
   id,
   title,
@@ -34,10 +43,10 @@ export function TerminalWidget({
 }: WidgetBaseProps<TerminalWidgetData>) {
   const [copied, setCopied] = useState(false)
 
-  // Copy output to clipboard
+  // Copy output to clipboard (ANSI codes stripped for plain text)
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(data.output)
+      await navigator.clipboard.writeText(stripAnsi(data.output))
       setCopied(true)
       toast.success('Output copied to clipboard')
       setTimeout(() => setCopied(false), 2000)
@@ -87,7 +96,7 @@ export function TerminalWidget({
         },
       ]}
     >
-      <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-lg overflow-hidden">
+      <div className="flex flex-col h-full bg-gray-900 rounded-b-lg overflow-hidden">
         {/* Command header */}
         <TerminalHeader
           command={data.command}
@@ -105,7 +114,7 @@ export function TerminalWidget({
         />
 
         {/* Footer with stats */}
-        <div className="flex items-center justify-between px-3 py-1.5 border-t border-[#333] bg-[#252525] text-xs text-gray-400">
+        <div className="flex items-center justify-between px-3 py-1.5 border-t border-gray-700 bg-gray-800 text-xs text-gray-400">
           <span>{lineCount} lines</span>
           <div className="flex items-center gap-2">
             <span className="font-mono">Ctrl+F to search</span>

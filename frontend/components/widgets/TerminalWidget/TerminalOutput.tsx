@@ -92,7 +92,7 @@ export function TerminalOutput({
         className={cn(
           'flex items-center justify-center h-full',
           'text-gray-500 text-sm font-mono',
-          'bg-[#1a1a1a]',
+          'bg-gray-900',
           className
         )}
       >
@@ -102,10 +102,10 @@ export function TerminalOutput({
   }
 
   return (
-    <div className={cn('flex flex-col h-full bg-[#1a1a1a]', className)}>
+    <div className={cn('flex flex-col h-full bg-gray-900', className)}>
       {/* Search bar */}
       {showSearch && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333]">
+        <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 border-b border-gray-700">
           <Search className="h-4 w-4 text-gray-400" />
           <Input
             type="text"
@@ -115,7 +115,7 @@ export function TerminalOutput({
               setSearchQuery(e.target.value)
               setSearchIndex(0)
             }}
-            className="h-7 bg-[#1a1a1a] border-[#333] text-sm font-mono"
+            className="h-7 bg-gray-900 border-gray-700 text-sm font-mono"
             autoFocus
           />
           {searchQuery && searchMatches.length > 0 && (
@@ -158,7 +158,7 @@ export function TerminalOutput({
       {/* Output area */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto p-3 font-mono text-sm leading-5"
+        className="flex-1 overflow-y-auto overflow-x-auto p-3 font-mono text-sm leading-5 text-gray-100"
       >
         <Ansi>{output}</Ansi>
 

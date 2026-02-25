@@ -16,14 +16,11 @@ import {
   Search,
   Paperclip,
   Circle,
-  Filter,
   RefreshCw,
   Inbox,
-  Star,
-  CheckCircle2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { formatDistanceToNow, isToday, isYesterday, format } from 'date-fns'
+import { isToday, isYesterday, format } from 'date-fns'
 import type { EmailSummary } from '../types'
 
 interface EmailListProps {
@@ -71,17 +68,23 @@ export function EmailList({
     [emails]
   )
 
-  // Format date for display - smart formatting
+  // Format date for display - relative for recent, smart for older
   const formatDate = (dateStr: string) => {
     try {
       const date = new Date(dateStr)
+      const now = new Date()
 
       if (isToday(date)) {
-        return format(date, 'h:mm a')
+        // Show relative time for today: "2h ago", "5m ago"
+        const diffMs = now.getTime() - date.getTime()
+        const diffMin = Math.floor(diffMs / 60_000)
+        if (diffMin < 1) return 'Just now'
+        if (diffMin < 60) return `${diffMin}m ago`
+        const diffHr = Math.floor(diffMin / 60)
+        return `${diffHr}h ago`
       } else if (isYesterday(date)) {
         return 'Yesterday'
       } else {
-        const now = new Date()
         const diffDays = Math.floor(
           (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
         )

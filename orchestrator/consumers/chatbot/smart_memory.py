@@ -403,6 +403,8 @@ class SmartMemoryManager:
             # TWO-TIER MEMORY STORAGE
             # Classify where this memory should be stored
             tier = self._classify_memory_tier(user_message, assistant_response)
+            # US-015: Store last tier so callers can emit SSE events
+            self._last_tier = tier
             logger.info(f"[SmartMemory] Memory classified as: {tier}")
 
             messages = [

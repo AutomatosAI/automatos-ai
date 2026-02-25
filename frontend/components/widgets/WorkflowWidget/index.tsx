@@ -6,7 +6,7 @@
  * Displays workflow execution status, steps, and provides control actions
  */
 
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useState } from 'react'
 import { Workflow, FileJson } from 'lucide-react'
 import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
@@ -19,6 +19,8 @@ import type {
 } from '../types'
 import { toast } from 'sonner'
 
+export type WorkflowActionType = 'pause' | 'resume' | 'cancel'
+
 export function WorkflowWidget({
   id,
   title,
@@ -30,26 +32,52 @@ export function WorkflowWidget({
   onClose,
   onMaximize,
   onRefresh,
+  onAction,
 }: WidgetBaseProps<WorkflowWidgetData>) {
+  const [actionInProgress, setActionInProgress] = useState<WorkflowActionType | null>(null)
+
   // Find current running step
   const currentStepIndex = useMemo(() => {
     return data.steps.findIndex((step) => step.status === 'running')
   }, [data.steps])
 
-  // Control handlers (would integrate with backend)
+  // Dispatch a workflow control action through the onAction callback
+  const dispatchAction = useCallback(
+    async (actionType: WorkflowActionType) => {
+      if (actionInProgress) return
+      setActionInProgress(actionType)
+      try {
+        if (onAction) {
+          const action = {
+            id: `workflow-${actionType}`,
+            label: actionType.charAt(0).toUpperCase() + actionType.slice(1),
+            handler: async () => {},
+          }
+          await onAction(action)
+        }
+      } catch {
+        toast.error(`Failed to ${actionType} workflow`)
+      } finally {
+        setActionInProgress(null)
+      }
+    },
+    [actionInProgress, onAction]
+  )
+
+  // Control handlers
   const handlePause = useCallback(() => {
-    toast.info('Pause functionality requires backend integration')
-  }, [])
+    dispatchAction('pause')
+  }, [dispatchAction])
 
   const handleResume = useCallback(() => {
-    toast.info('Resume functionality requires backend integration')
-  }, [])
+    dispatchAction('resume')
+  }, [dispatchAction])
 
   const handleCancel = useCallback(() => {
     if (confirm('Are you sure you want to cancel this workflow?')) {
-      toast.info('Cancel functionality requires backend integration')
+      dispatchAction('cancel')
     }
-  }, [])
+  }, [dispatchAction])
 
   // Calculate completion percentage
   const completionPercent = useMemo(() => {
@@ -108,6 +136,7 @@ export function WorkflowWidget({
               ? handleCancel
               : undefined
           }
+          actionInProgress={actionInProgress}
         />
 
         {/* Error display */}

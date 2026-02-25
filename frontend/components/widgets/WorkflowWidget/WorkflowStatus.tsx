@@ -13,8 +13,8 @@ import {
   Pause,
   Square,
   Clock,
-  CheckCircle2,
-  XCircle,
+  Check,
+  X,
   AlertCircle,
   Loader2,
   Timer,
@@ -31,6 +31,7 @@ interface WorkflowStatusProps {
   onPause?: () => void
   onResume?: () => void
   onCancel?: () => void
+  actionInProgress?: 'pause' | 'resume' | 'cancel' | null
   className?: string
 }
 
@@ -63,14 +64,14 @@ function getStatusConfig(status: WorkflowStatusType) {
       }
     case 'completed':
       return {
-        icon: CheckCircle2,
+        icon: Check,
         label: 'Completed',
         variant: 'default' as const,
         className: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
       }
     case 'failed':
       return {
-        icon: XCircle,
+        icon: X,
         label: 'Failed',
         variant: 'destructive' as const,
         className: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
@@ -121,6 +122,7 @@ export function WorkflowStatus({
   onPause,
   onResume,
   onCancel,
+  actionInProgress,
   className,
 }: WorkflowStatusProps) {
   const config = getStatusConfig(status)
@@ -131,6 +133,7 @@ export function WorkflowStatus({
   const canPause = isRunning && onPause
   const canResume = isPaused && onResume
   const canCancel = (isRunning || isPaused) && onCancel
+  const isBusy = !!actionInProgress
 
   return (
     <div
@@ -164,42 +167,57 @@ export function WorkflowStatus({
 
       {/* Control buttons */}
       <div className="flex items-center gap-1">
-        {/* Pause button */}
+        {/* Pause button — visible when running */}
         {canPause && (
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7"
+            disabled={isBusy}
             onClick={onPause}
             title="Pause workflow"
           >
-            <Pause className="h-4 w-4" />
+            {actionInProgress === 'pause' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Pause className="h-4 w-4" />
+            )}
           </Button>
         )}
 
-        {/* Resume button */}
+        {/* Resume button — visible when paused */}
         {canResume && (
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7"
+            disabled={isBusy}
             onClick={onResume}
             title="Resume workflow"
           >
-            <Play className="h-4 w-4" />
+            {actionInProgress === 'resume' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
           </Button>
         )}
 
-        {/* Cancel button */}
+        {/* Cancel button — visible when running or paused */}
         {canCancel && (
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7 hover:text-destructive"
+            disabled={isBusy}
             onClick={onCancel}
             title="Cancel workflow"
           >
-            <Square className="h-4 w-4" />
+            {actionInProgress === 'cancel' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Square className="h-4 w-4" />
+            )}
           </Button>
         )}
       </div>

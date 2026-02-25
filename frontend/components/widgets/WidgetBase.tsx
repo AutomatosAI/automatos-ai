@@ -7,7 +7,7 @@
  * All widget types use this as their wrapper for consistent look and behavior.
  */
 
-import { ReactNode } from 'react'
+import { ReactNode, useState } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,6 +19,7 @@ import {
   Download,
   MoreVertical,
   GripVertical,
+  Settings,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -28,7 +29,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import type { WidgetMetadata } from './types'
+import type { WidgetMetadata, WidgetType, WidgetConfig } from './types'
+import { WidgetConfigDialog } from '@/components/workspace/WidgetConfigDialog'
 
 interface CustomAction {
   label: string
@@ -65,6 +67,11 @@ interface WidgetBaseProps {
   // Custom actions
   customActions?: CustomAction[]
 
+  // US-011: Per-widget config dialog
+  widgetId?: string
+  widgetType?: WidgetType
+  currentConfig?: WidgetConfig
+
   className?: string
   contentClassName?: string
   headerClassName?: string
@@ -90,10 +97,15 @@ export function WidgetBase({
   canMaximize = true,
   showDragHandle = true,
   customActions,
+  widgetId,
+  widgetType,
+  currentConfig,
   className,
   contentClassName,
   headerClassName,
 }: WidgetBaseProps) {
+  const [configOpen, setConfigOpen] = useState(false)
+
   const hasDropdownActions = (customActions && customActions.length > 0) ||
     (canCopy && onCopy) ||
     (canDownload && onDownload)
@@ -144,6 +156,19 @@ export function WidgetBase({
 
         {/* Actions */}
         <div className="flex items-center gap-0.5 ml-2">
+          {/* Settings gear (US-011) */}
+          {widgetId && widgetType && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setConfigOpen(true)}
+              title="Widget settings"
+            >
+              <Settings className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
           {/* Refresh button */}
           {canRefresh && onRefresh && (
             <Button
@@ -267,6 +292,17 @@ export function WidgetBase({
           children
         )}
       </CardContent>
+
+      {/* US-011: Config dialog */}
+      {widgetId && widgetType && (
+        <WidgetConfigDialog
+          open={configOpen}
+          onOpenChange={setConfigOpen}
+          widgetId={widgetId}
+          widgetType={widgetType}
+          currentConfig={currentConfig}
+        />
+      )}
     </Card>
   )
 }

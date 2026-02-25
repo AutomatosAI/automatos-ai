@@ -38,7 +38,7 @@ export function TerminalHeader({
   }
 
   return (
-    <div className="flex flex-col gap-1 px-3 py-2 bg-[#1a1a1a] border-b border-[#333] text-sm">
+    <div className="flex flex-col gap-1 px-3 py-2 bg-gray-900 border-b border-gray-700 text-sm">
       {/* Command line */}
       <div className="flex items-center gap-2">
         <span className="text-green-400 font-mono">$</span>
@@ -59,13 +59,13 @@ export function TerminalHeader({
           </div>
         )}
 
-        {/* Exit code */}
+        {/* Exit code badge */}
         {exitCode !== undefined && (
-          <div
+          <span
             className={cn(
-              'flex items-center gap-1',
-              isSuccess && 'text-green-400',
-              isError && 'text-red-400'
+              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+              isSuccess && 'bg-green-900/60 text-green-300',
+              isError && 'bg-red-900/60 text-red-300'
             )}
           >
             {isSuccess ? (
@@ -73,8 +73,8 @@ export function TerminalHeader({
             ) : (
               <XCircle className="h-3 w-3" />
             )}
-            <span>Exit: {exitCode}</span>
-          </div>
+            exit {exitCode}
+          </span>
         )}
 
         {/* Streaming indicator */}
