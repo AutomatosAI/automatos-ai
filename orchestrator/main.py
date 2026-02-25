@@ -546,12 +546,15 @@ UPLOAD_PATHS = ("/api/documents/upload", "/api/admin/plugins/upload", "/api/docu
 
 @app.middleware("http")
 async def limit_request_body(request, call_next):
+    from starlette.responses import JSONResponse
     content_length = request.headers.get("content-length")
+    limit = MAX_UPLOAD_SIZE if any(request.url.path.startswith(p) for p in UPLOAD_PATHS) else MAX_BODY_SIZE
     if content_length:
-        limit = MAX_UPLOAD_SIZE if any(request.url.path.startswith(p) for p in UPLOAD_PATHS) else MAX_BODY_SIZE
-        if int(content_length) > limit:
-            from starlette.responses import JSONResponse
-            return JSONResponse(status_code=413, content={"detail": "Payload too large"})
+        try:
+            if int(content_length) > limit:
+                return JSONResponse(status_code=413, content={"detail": "Payload too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
     return await call_next(request)
 
 # Security headers middleware

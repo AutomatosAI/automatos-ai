@@ -71,9 +71,13 @@ DATABASE_URL = get_database_url()
 # Enforce SSL in production
 _environment = os.getenv("ENVIRONMENT", "development").lower()
 _connect_args = {}
-if _environment == "production" and "sslmode" not in DATABASE_URL:
-    _separator = "&" if "?" in DATABASE_URL else "?"
-    DATABASE_URL = f"{DATABASE_URL}{_separator}sslmode=require"
+if _environment == "production":
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    _parsed = urlparse(DATABASE_URL)
+    _params = parse_qs(_parsed.query)
+    if "sslmode" not in _params:
+        _params["sslmode"] = ["require"]
+        DATABASE_URL = urlunparse(_parsed._replace(query=urlencode(_params, doseq=True)))
 
 # Create PostgreSQL engine with connection pooling
 engine = create_engine(

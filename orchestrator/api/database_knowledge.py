@@ -24,14 +24,11 @@ from modules.tools.services.database_tool_integration import get_database_tool_i
 from core.credentials.resolver import get_credential_resolver
 
 import logging
-logger = logging.getLogger(__name__)
 
 # NEW imports for introspection wiring
-from core.models.database_knowledge import DatabaseKnowledgeSource
+from core.models.database_knowledge import DatabaseKnowledgeSource, DatabaseQueryAudit
 from core.credentials.service import CredentialStore
 from modules.nl2sql import DatabaseIntrospectionService
-# NEW import for auditing
-from core.models.database_knowledge import DatabaseQueryAudit
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 
@@ -524,7 +521,7 @@ async def execute_validated_sql(
             row_count=0,
             bytes_processed=None,
             success=False,
-            error_message=f"Credential error: {e}",
+            error_message="Credential resolution failed",
             validation_errors=None,
             was_cached=False,
             cache_key=None,

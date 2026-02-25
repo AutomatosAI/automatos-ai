@@ -61,7 +61,8 @@ Started: 2026-02-25T00:00:00Z
 ---
 
 ## 2026-02-25 - US-007
-- **What was implemented:** Full AuditService implementation replacing 199-byte stub
+- **Status:** Partial — AuditService implemented; router wiring pending
+- **What was implemented:** AuditService implementation replacing 199-byte stub
 - **Files changed:** orchestrator/core/services/audit_service.py, orchestrator/core/services/__init__.py
 - **Learnings for future iterations:**
   - Uses dedicated "audit" logger name for independent routing

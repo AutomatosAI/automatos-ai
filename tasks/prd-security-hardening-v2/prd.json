@@ -111,8 +111,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Full AuditService implementation with AuditEventType enum, structured JSON logging via dedicated 'audit' logger, 5 convenience helpers (log_auth_failure, log_permission_change, log_credential_access, log_admin_action, log_setting_change). Wiring into routers deferred to separate step."
+      "passes": false,
+      "notes": "Partial — AuditService implemented with AuditEventType enum, structured JSON logging, 5 convenience helpers. Router wiring (admin_prompts, system_settings, credentials, permissions) remains outstanding."
     },
     {
       "id": "US-008",

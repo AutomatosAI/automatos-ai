@@ -115,7 +115,7 @@ class AuditService:
             The assembled audit record (useful for testing / chaining).
         """
 
-        details = details or {}
+        details = dict(details) if details else {}
 
         # Build the canonical audit record.
         record: Dict[str, Any] = {
@@ -241,12 +241,18 @@ class AuditService:
         *,
         old_value: Optional[str] = None,
         new_value: Optional[str] = None,
+        is_sensitive: bool = False,
     ) -> Dict[str, Any]:
         details: Dict[str, Any] = {"action": "update"}
-        if old_value is not None:
-            details["old_value"] = old_value
-        if new_value is not None:
-            details["new_value"] = new_value
+        if is_sensitive:
+            # Never log raw secret values — record only that a change occurred
+            details["old_value_present"] = old_value is not None
+            details["new_value_present"] = new_value is not None
+        else:
+            if old_value is not None:
+                details["old_value"] = old_value
+            if new_value is not None:
+                details["new_value"] = new_value
         return await self.log_event(
             event_type=AuditEventType.SETTING_CHANGE,
             actor_id=actor_id,

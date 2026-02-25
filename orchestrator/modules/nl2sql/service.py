@@ -145,6 +145,8 @@ class DatabaseKnowledgeService:
         
         # Resolve workspace_id (prefer new param, fall back to legacy tenant_id)
         ws_id = workspace_id or tenant_id
+        if not ws_id:
+            raise ValueError("workspace_id is required to add a database source")
 
         db_session = SessionLocal()
         try:

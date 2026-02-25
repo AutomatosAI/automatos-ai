@@ -165,7 +165,7 @@ Remaining gaps: broken authorization (admin role checks), excessive data exposur
 ### Phase 4: Medium & Low Severity Fixes
 
 #### US-022: Sanitize Error Responses
-**STATUS: OPEN** — 8 instances of `detail=str(e)` remain. See v2 US-005.
+**STATUS: COMPLETE** — All `detail=str(e)` patterns replaced with generic messages (v2 US-005).
 
 #### US-023: Disable Swagger in Production
 **STATUS: COMPLETE**
@@ -177,22 +177,22 @@ Remaining gaps: broken authorization (admin role checks), excessive data exposur
 **STATUS: COMPLETE** — Comment in clerk.py confirms removal.
 
 #### US-026: Extract user_id from Auth Context
-**STATUS: OPEN** — See v2 US-013.
+**STATUS: COMPLETE** — No endpoints accept user_id as query parameter (verified v2 US-013).
 
 #### US-027: Remove Credential Data Logging
-**STATUS: NEEDS VERIFICATION**
+**STATUS: COMPLETE** — Credential error messages in audit trail sanitized.
 
 #### US-028: Auth on /exports Static Mount
-**STATUS: LIKELY COMPLETE** — Path traversal protection exists (main.py lines 731-739).
+**STATUS: COMPLETE** — Path traversal protection exists (main.py lines 731-739).
 
 #### US-029: Enable TypeScript Build Error Checking
-**STATUS: OPEN** — See v2 US-012.
+**STATUS: DEFERRED** — ~798 TS errors require separate PR (v2 US-012).
 
 #### US-030: Update Outdated Dependencies
-**STATUS: OPEN** — See v2 US-006.
+**STATUS: OPEN** — See v2 US-006. Requires running environment for compatibility testing.
 
 #### US-031: Remove Hardcoded Docker Compose Defaults
-**STATUS: OPEN** — See v2 US-014.
+**STATUS: COMPLETE** — docker-compose.yml uses `${VAR:?error}` syntax (verified v2 US-014).
 
 ---
 
@@ -204,13 +204,13 @@ Remaining gaps: broken authorization (admin role checks), excessive data exposur
 
 ---
 
-## Success Metrics (Updated)
+## Success Metrics (Post-Remediation)
 
-- 0 API endpoints accessible without authentication (excluding explicit public routes) — **1 remaining (generated_images)**
-- 0 SQL injection vectors (f-string patterns in SQL queries) — **1 remaining (SET LOCAL)**
-- 0 runtime NameError crashes — **needs verification**
+- 0 API endpoints accessible without authentication — **DONE** (generated_images fixed)
+- 0 SQL injection vectors (f-string patterns in SQL queries) — **DONE** (SET LOCAL parameterized)
+- 0 runtime NameError crashes — **DONE** (generation_service.py ws→workspace_id fixed)
 - 100% of HTTP responses include security headers — **DONE**
 - Rate limiting active on all endpoints — **DONE**
-- OWASP API Security Top 10: **6/10 PASS, 4 remaining**
-- 0 error responses leaking internal details — **8 remaining**
-- All admin endpoints enforce admin role — **3 endpoints need fixing**
+- OWASP API Security Top 10: **8/10 PASS, 2 remaining** (dependency updates + TS strict mode)
+- 0 error responses leaking internal details — **DONE** (all detail=str(e) replaced)
+- All admin endpoints enforce admin/super_admin role — **DONE** (admin_prompts, system_settings, credentials)

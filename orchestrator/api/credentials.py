@@ -341,7 +341,7 @@ async def get_credential(
     set_request_id(str(uuid.uuid4()))
 
     # Restrict decrypted credential access to admin or API key auth
-    if ctx.auth_type not in ("api_key",) and getattr(ctx.user, "system_role", "user") != "admin":
+    if ctx.auth_type not in ("api_key",) and getattr(ctx.user, "system_role", "user") not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
 
     try:
@@ -553,7 +553,7 @@ async def resolve_credential(
 
     try:
         # Restrict to admin or API key auth
-        if ctx.auth_type not in ("api_key",) and getattr(ctx.user, "system_role", "user") != "admin":
+        if ctx.auth_type not in ("api_key",) and getattr(ctx.user, "system_role", "user") not in ("admin", "super_admin"):
             raise HTTPException(status_code=403, detail="Admin access required to resolve credentials")
 
         ip_address = get_client_ip(request)

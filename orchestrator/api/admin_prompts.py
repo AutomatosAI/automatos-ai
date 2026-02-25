@@ -50,7 +50,7 @@ def _assert_admin(ctx: RequestContext) -> None:
     """Require admin role for Clerk users; allow API key auth (service-to-service)."""
     if ctx.auth_type == "api_key":
         return  # Service-to-service trust
-    if ctx.user and getattr(ctx.user, "system_role", "user") == "admin":
+    if ctx.user and getattr(ctx.user, "system_role", "user") in ("admin", "super_admin"):
         return
     raise HTTPException(status_code=403, detail="Admin access required")
 

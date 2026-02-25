@@ -96,7 +96,7 @@ class PlatformActionExecutor:
                 self.db.rollback()
             except Exception:
                 pass
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"Action '{action_name}' failed"}
 
     # ── Agent Handlers ──────────────────────────────────────────────
 

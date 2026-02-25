@@ -24,9 +24,9 @@ async def get_generated_image(
     image_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Fetch a generated image by its UUID."""
+    """Fetch a generated image by its UUID, scoped to caller's workspace."""
     store = get_image_store()
-    result = await store.get_image(image_id)
+    result = await store.get_image(image_id, workspace_id=str(ctx.workspace_id))
     if result is None:
         raise HTTPException(status_code=404, detail="Image not found")
     image_bytes, content_type = result

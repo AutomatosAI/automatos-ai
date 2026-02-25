@@ -191,7 +191,7 @@ class DocumentGenerationService:
         except Exception as e:
             raise RuntimeError(f"PDF generation failed: {e}")
 
-        return self._build_result(output_path, "pdf", title, ws)
+        return self._build_result(output_path, "pdf", title, workspace_id)
 
     # ------------------------------------------------------------------
     # DOCX Generation (python-docx-template)
@@ -239,7 +239,7 @@ class DocumentGenerationService:
         output_path = self._output_path(workspace_id, title, "docx")
         doc.save(output_path)
 
-        return self._build_result(output_path, "docx", title, ws)
+        return self._build_result(output_path, "docx", title, workspace_id)
 
     # ------------------------------------------------------------------
     # XLSX Generation (XlsxWriter)

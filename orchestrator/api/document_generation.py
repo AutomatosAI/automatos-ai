@@ -244,15 +244,16 @@ async def upload_docx_template(
     db: Session = Depends(get_db),
 ):
     """Upload a .docx template file."""
-    if not file.filename.endswith(".docx"):
+    safe_filename = os.path.basename(file.filename or "")
+    if not safe_filename.endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only .docx files are supported")
 
     from modules.documents.template_service import DocumentTemplateService
 
-    # Save file
+    # Save file (use basename to prevent path traversal)
     upload_dir = os.path.join(GENERATED_DIR, str(ctx.workspace_id), "templates")
     os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, file.filename)
+    file_path = os.path.join(upload_dir, safe_filename)
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -290,7 +291,6 @@ async def upload_docx_template(
         "name": template.name,
         "format": "docx",
         "variables_detected": variables,
-        "file_path": file_path,
     }
 
 
@@ -357,7 +357,16 @@ async def serve_generated_file(
 
     Tries local filesystem first, then falls back to S3 (containers are ephemeral).
     """
-    file_path = os.path.join(GENERATED_DIR, str(ctx.workspace_id), "generated", filename)
+    from pathlib import Path
+
+    # Validate filename to prevent path traversal
+    if os.path.basename(filename) != filename or os.path.sep in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    base_dir = Path(GENERATED_DIR) / str(ctx.workspace_id) / "generated"
+    file_path = str((base_dir / filename).resolve())
+    if not file_path.startswith(str(base_dir.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
     # Try local filesystem first
     if os.path.exists(file_path):
