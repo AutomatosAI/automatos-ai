@@ -80,8 +80,9 @@ export function TemplateManager() {
       if (filterCategory !== 'all') params.set('category', filterCategory)
       const data = await apiClient.get<DocumentTemplate[]>(`/api/documents/templates?${params}`)
       setTemplates(data)
-    } catch {
-      // silent
+    } catch (err: any) {
+      console.error('[TemplateManager] Failed to fetch templates:', err)
+      toast.error('Failed to load templates')
     } finally {
       setLoading(false)
     }
