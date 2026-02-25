@@ -107,18 +107,7 @@ class OpenAIProvider(BaseLLMProvider):
                 }
                 # PRD-17: Add tools if provided
                 if tools:
-                    # Auto-Fix: Wrap legacy function definitions in "type": "function" structure
-                    formatted_tools = []
-                    for t in tools:
-                        # If tool is just the function definition (missing 'type' wrapper)
-                        if "type" not in t:
-                             formatted_tools.append({
-                                 "type": "function",
-                                 "function": t
-                             })
-                        else:
-                             formatted_tools.append(t)
-                    
+                    formatted_tools = self._sanitize_tools(tools, keep_strict=True)
                     kwargs["tools"] = formatted_tools
 
                     # Check if tool results already exist in conversation
@@ -163,13 +152,7 @@ class OpenAIProvider(BaseLLMProvider):
                             "max_tokens": 512,
                         }
                         if tools:
-                            formatted_tools = []
-                            for t in tools:
-                                if "type" not in t:
-                                    formatted_tools.append({"type": "function", "function": t})
-                                else:
-                                    formatted_tools.append(t)
-                            kwargs["tools"] = formatted_tools
+                            kwargs["tools"] = self._sanitize_tools(tools, keep_strict=True)
                             # Check if tool results already exist
                             has_tool_results = any(
                                 m.get("role") == "tool" for m in (messages or [])

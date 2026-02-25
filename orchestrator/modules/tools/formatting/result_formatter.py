@@ -67,9 +67,103 @@ class ToolResultFormatter:
         return excerpt
     
     @staticmethod
+    def _download_text_from_s3(s3_uri: str) -> str:
+        """Download a text file from S3 given an s3:// URI."""
+        try:
+            import boto3
+            parts = s3_uri.replace("s3://", "").split("/", 1)
+            bucket = parts[0]
+            key = parts[1] if len(parts) > 1 else ""
+            if not key:
+                return ""
+
+            s3_client = boto3.client(
+                's3',
+                region_name=os.getenv('AWS_REGION', 'us-east-1'),
+                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            )
+            response = s3_client.get_object(Bucket=bucket, Key=key)
+            content = response['Body'].read().decode('utf-8')
+            logger.info(f"[FullContent] ✅ Downloaded original from S3 ({len(content)} chars): {key}")
+            return content
+        except Exception as e:
+            logger.warning(f"[FullContent] S3 download failed for {s3_uri}: {e}")
+            return ""
+
+    # File types that can be read as plain text from S3
+    _TEXT_EXTENSIONS = frozenset({
+        '.md', '.txt', '.json', '.csv', '.yaml', '.yml',
+        '.xml', '.html', '.htm', '.py', '.js', '.ts', '.tsx',
+        '.jsx', '.go', '.rs', '.java', '.rb', '.sh', '.toml',
+    })
+
+    @staticmethod
+    def _fetch_document_content_from_db(document_id: int) -> str:
+        """
+        Fetch full document content:
+        1. Try downloading the original file from S3 (perfect formatting)
+        2. Fall back to reassembling chunks from document_chunks table
+        """
+        logger.info(f"[FullContent] Fetching full document for document_id={document_id}")
+        try:
+            from sqlalchemy import create_engine, text
+            from config import config as app_config
+            db_url = getattr(app_config, "DATABASE_URL", None)
+            if not db_url:
+                db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                logger.warning("[FullContent] No DATABASE_URL — cannot fetch document content")
+                return ""
+
+            engine = create_engine(db_url)
+
+            # Step 1: Try to get original file from S3
+            with engine.connect() as conn:
+                doc_row = conn.execute(
+                    text("SELECT file_path, filename FROM documents WHERE id = :doc_id"),
+                    {"doc_id": document_id},
+                ).fetchone()
+
+            if doc_row and doc_row[0] and str(doc_row[0]).startswith("s3://"):
+                file_path = str(doc_row[0])
+                filename = str(doc_row[1] or "").lower()
+
+                # Only download text-based files (not PDFs, DOCX, etc.)
+                ext = Path(filename).suffix.lower() if filename else ""
+                if ext in ToolResultFormatter._TEXT_EXTENSIONS:
+                    s3_content = ToolResultFormatter._download_text_from_s3(file_path)
+                    if s3_content:
+                        return s3_content
+                    logger.info(f"[FullContent] S3 download failed, falling back to chunk reassembly")
+                else:
+                    logger.info(f"[FullContent] Non-text file ({ext}), using chunk reassembly")
+
+            # Step 2: Fall back to chunk reassembly
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text("""
+                        SELECT content FROM document_chunks
+                        WHERE document_id = :doc_id
+                        ORDER BY (metadata->>'chunk_index')::int NULLS LAST, id
+                    """),
+                    {"doc_id": document_id},
+                ).fetchall()
+
+            if rows:
+                full_content = "\n\n".join(row[0] for row in rows if row[0])
+                logger.info(f"[FullContent] ✅ Assembled {len(rows)} chunks ({len(full_content)} chars) for doc {document_id}")
+                return full_content
+            logger.warning(f"[FullContent] No content found for document_id={document_id}")
+            return ""
+        except Exception as e:
+            logger.warning(f"[FullContent] Failed for doc {document_id}: {e}", exc_info=True)
+            return ""
+
+    @staticmethod
     def _fetch_document_content(file_path: str, max_size_kb: int = 500) -> str:
         """
-        Fetch full document content from file system.
+        Fetch full document content from file system (legacy fallback).
         
         Args:
             file_path: Full path to document file
@@ -272,6 +366,8 @@ class ToolResultFormatter:
                 'source': clean_name,
                 'content': content,  # Full content for LLM
                 'title': clean_name,  # Alias for consistency
+                'document_id': r.get('document_id'),
+                'metadata': r.get('metadata', {}),
             })
         
         return formatted
@@ -442,62 +538,73 @@ class ToolResultFormatter:
         frontend_data = {}
         
         if tool_name in ['search_knowledge', 'search_documents', 'semantic_search']:
-            # Group documents by source file
-            docs_by_source = {}
+            # Group chunks by document_id (not filename — filenames from S3 Vectors can be temp names)
+            docs_by_id = {}
             for doc in standardized['results']:
                 source = doc.get('filename', doc.get('source', 'Unknown'))
                 content = doc.get('content', '')
                 excerpt = doc.get('excerpt', '')
                 similarity = doc.get('similarity', 0.0)
-                
-                # Use the source (filename) directly - this is the actual file on disk
-                resolved = ToolResultFormatter._resolve_document_path(source)
-                file_path = str(resolved) if resolved else f"/var/automatos/documents/{source}"
-                
-                if source not in docs_by_source:
-                    docs_by_source[source] = {
+                document_id = doc.get('document_id')
+                logger.info(f"[FrontendData] Chunk: source={source}, document_id={document_id}")
+
+                # Group by document_id when available, fall back to filename
+                group_key = document_id if document_id else source
+
+                if group_key not in docs_by_id:
+                    docs_by_id[group_key] = {
                         'source': source,
-                        'file_path': file_path,
+                        'document_id': document_id,
                         'chunks': [],
                         'max_similarity': 0.0,
                         'title': source.replace('.md', '').replace('.pdf', '').replace('-', ' ').replace('_', ' ').title()
                     }
-                
-                docs_by_source[source]['chunks'].append({
+
+                docs_by_id[group_key]['chunks'].append({
                     'content': content,
-                    'excerpt': excerpt
+                    'excerpt': excerpt,
+                    'similarity': similarity,
                 })
-                docs_by_source[source]['max_similarity'] = max(
-                    docs_by_source[source]['max_similarity'],
+                docs_by_id[group_key]['max_similarity'] = max(
+                    docs_by_id[group_key]['max_similarity'],
                     similarity
                 )
-            
+
             # Sort by relevance and convert to list
             grouped_docs = sorted(
-                docs_by_source.values(),
+                docs_by_id.values(),
                 key=lambda d: d['max_similarity'],
                 reverse=True
             )
-            
-            # Format for frontend display
-            frontend_data['documents'] = [
-                {
+
+            # Fetch full document content from document_chunks table (not local filesystem)
+            frontend_data['documents'] = []
+            for doc in grouped_docs:
+                document_id = doc.get('document_id')
+                full_content = ""
+
+                # Reconstruct full document from all chunks in DB
+                if document_id:
+                    full_content = ToolResultFormatter._fetch_document_content_from_db(document_id)
+
+                # Fall back to concatenating matched chunks if DB fetch fails
+                if not full_content:
+                    full_content = "\n\n".join(c['content'] for c in doc['chunks'])
+
+                frontend_data['documents'].append({
                     'filename': doc['source'],
                     'title': doc['title'],
-                    'file_path': doc['file_path'],
+                    'document_id': document_id,
                     'relevance': int(doc['max_similarity'] * 100),
                     'chunk_count': len(doc['chunks']),
-                    'preview': doc['chunks'][0]['excerpt'] if doc['chunks'] else '',
-                    'download_url': f"/api/documents/download?path={doc['file_path']}",
-                    # Fetch FULL document content from file system for artifact viewer
-                    'full_content': ToolResultFormatter._fetch_document_content(doc['file_path']),
-                    'has_full_content': True,  # Flag for frontend to know full content is loaded
+                    'preview': doc['chunks'][0].get('excerpt') or doc['chunks'][0].get('content', '')[:200] if doc['chunks'] else '',
+                    'download_url': f"/api/documents/{document_id}/download" if document_id else None,
+                    'full_content': full_content,
+                    'content': full_content,
+                    'has_full_content': bool(document_id and full_content),
                     'content_type': ToolResultFormatter._detect_content_type(doc['source']),
-                    # Provide chunk list for RAG chunk inspector UI
                     'chunks': doc['chunks'],
-                }
-                for doc in grouped_docs
-            ]
+                })
         
         elif tool_name in ['search_codebase', 'search_code']:
             frontend_data['code_snippets'] = standardized['results']
@@ -602,21 +709,49 @@ class ToolResultFormatter:
             frontend_data["api_results"] = standardized["results"]
             frontend_data["api_metadata"] = standardized.get("metadata", {})
             frontend_data["detected_type"] = widget_type  # Let frontend know what was detected
-        
+
+        elif tool_name == "generate_document":
+            # PRD-63: Document Generation — provide download widget data
+            # Raw result is {"success": True, "results": [{"filename": ..., "download_url": ..., "size_kb": ...}]}
+            doc_result = (result.get('results') or [{}])[0] if isinstance(result.get('results'), list) else result
+            frontend_data['generated_document'] = {
+                'filename': doc_result.get('filename', 'document'),
+                'format': doc_result.get('format', 'pdf'),
+                'download_url': doc_result.get('download_url', ''),
+                'preview_url': doc_result.get('preview_url'),
+                'size_kb': doc_result.get('size_kb', 0),
+                'title': doc_result.get('title', doc_result.get('filename', 'Document')),
+                'content': doc_result.get('content', ''),
+            }
+            logger.info(f"[FrontendData] generate_document: {frontend_data['generated_document']['filename']}")
+
         return frontend_data
     
     @staticmethod
     def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 4500) -> str:
         """
         Format tool result for LLM context (truncated summary).
-        
+
         Full data goes to frontend, summary goes to LLM.
         """
+        # Platform tools return data under custom keys (agents, recipes, etc.)
+        # Bypass standardizer which only looks for "results"/"result" keys.
+        if tool_name.startswith("platform_"):
+            if not result.get("success"):
+                return f"Tool {tool_name} failed: {result.get('error', 'Unknown error')}"
+            platform_data = {k: v for k, v in result.items() if k != "success"}
+            try:
+                platform_json = json.dumps(platform_data, default=str, indent=2)
+            except Exception:
+                platform_json = str(platform_data)
+            llm_text = f"Tool: {tool_name}\nStatus: success\n\n{platform_json}"
+            return llm_text[:max_chars]
+
         standardized = ToolResultFormatter.standardize_result(result, tool_name)
-        
+
         if not standardized['success']:
             return f"Tool {tool_name} failed: {standardized.get('error', 'Unknown error')}"
-        
+
         summary_parts = [f"Tool: {tool_name}"]
         summary_parts.append(f"Status: {standardized['status']}")
         summary_parts.append(f"Results: {standardized['metadata']['count']} items")
@@ -676,7 +811,17 @@ class ToolResultFormatter:
             else:
                 logger.warning("[LLM-Context] Composio returned 0 items - LLM will hallucinate!")
                 summary_parts.append("\nAPI returned 0 items for this query.")
-        
+
+        elif tool_name == "generate_document":
+            doc_result = (result.get('results') or [{}])[0] if isinstance(result.get('results'), list) else result
+            filename = doc_result.get('filename', 'document')
+            fmt = doc_result.get('format', 'pdf')
+            size_kb = doc_result.get('size_kb', 0)
+            download_url = doc_result.get('download_url', '')
+            summary_parts.append(f"\nGenerated {fmt.upper()} document: {filename} ({size_kb} KB)")
+            summary_parts.append(f"Download URL: {download_url}")
+            summary_parts.append("IMPORTANT: Show the download link to the user using the exact URL above. Do NOT invent document:// links.")
+
         full_summary = "\n".join(summary_parts)
         
         # Truncate if too long

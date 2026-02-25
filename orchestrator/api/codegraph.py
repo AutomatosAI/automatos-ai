@@ -135,17 +135,99 @@ async def index_github_repository(
     - Stores in database for search
     """
     try:
-        result = await service.index_github_project(
-            project_name=request.project_name,
-            github_url=request.github_url,
-            branch=request.branch,
-            auth_token=request.auth_token,
-            exclude_patterns=request.exclude_patterns,
-            workspace_id=ctx.workspace_id
-        )
-        
-        return IndexResponse(**result)
-        
+        # Create or update project record immediately so UI can track status
+        from core.database.database import SessionLocal
+        existing = service.db.execute(
+            text("SELECT id, status FROM codegraph_projects WHERE name = :name AND workspace_id = :ws LIMIT 1"),
+            {"name": request.project_name, "ws": str(ctx.workspace_id)}
+        ).fetchone()
+
+        # Guard: reject if already indexing (prevents duplicate background tasks)
+        if existing and existing.status == 'indexing':
+            return {
+                "project_id": existing.id,
+                "project_name": request.project_name,
+                "total_files": 0,
+                "total_symbols": 0,
+                "duration_seconds": 0.0,
+                "status": "indexing",
+            }
+
+        if existing:
+            project_id = existing.id
+            service.db.execute(
+                text("UPDATE codegraph_projects SET status = 'indexing', source_url = :url, branch = :branch, updated_at = NOW() WHERE id = :id"),
+                {"id": project_id, "url": request.github_url, "branch": request.branch}
+            )
+        else:
+            row = service.db.execute(
+                text("""
+                    INSERT INTO codegraph_projects (name, source_type, source_url, branch, status, workspace_id, created_at, updated_at)
+                    VALUES (:name, 'github', :url, :branch, 'indexing', :ws, NOW(), NOW())
+                    RETURNING id
+                """),
+                {"name": request.project_name, "url": request.github_url, "branch": request.branch, "ws": str(ctx.workspace_id)}
+            ).fetchone()
+            project_id = row[0] if row else 0
+        service.db.commit()
+
+        # Capture request params for background task
+        req_project_name = request.project_name
+        req_github_url = request.github_url
+        req_branch = request.branch
+        req_auth_token = request.auth_token
+        req_exclude_patterns = request.exclude_patterns
+        req_workspace_id = ctx.workspace_id
+
+        # Store background tasks to prevent garbage collection
+        background_tasks: set = getattr(router, '_background_tasks', set())
+        if not hasattr(router, '_background_tasks'):
+            router._background_tasks = background_tasks
+
+        async def run_indexing():
+            logger.info(f"[CodeGraph] Background indexing started for {req_project_name}")
+            db = SessionLocal()
+            try:
+                bg_service = CodeGraphService(db)
+                result = await bg_service.index_github_project(
+                    project_name=req_project_name,
+                    github_url=req_github_url,
+                    branch=req_branch,
+                    auth_token=req_auth_token,
+                    exclude_patterns=req_exclude_patterns,
+                    workspace_id=req_workspace_id,
+                )
+                logger.info(
+                    f"[CodeGraph] Indexing complete: {req_project_name} — "
+                    f"{result.get('total_files', 0)} files, {result.get('total_symbols', 0)} symbols"
+                )
+            except Exception as e:
+                logger.exception(f"[CodeGraph] Background indexing FAILED for {req_project_name}: {e}")
+                try:
+                    db.execute(
+                        text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
+                        {"id": project_id}
+                    )
+                    db.commit()
+                except Exception:
+                    pass
+            finally:
+                db.close()
+                background_tasks.discard(task)
+
+        task = asyncio.create_task(run_indexing())
+        background_tasks.add(task)
+
+        # Return immediately — indexing runs in background
+        return {
+            "project_id": project_id,
+            "project_name": request.project_name,
+            "total_files": 0,
+            "total_symbols": 0,
+            "duration_seconds": 0.0,
+            "status": "indexing",
+        }
+
     except ValueError as e:
         logger.error(f"Validation error indexing GitHub repository: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Invalid repository indexing parameters")
@@ -349,12 +431,27 @@ async def reindex_project(
         github_url = project["source_url"]
         branch = project["branch"] or "main"
         
-        # Update status to indexing immediately
+        # Clear existing data so re-index does a full re-parse
+        # (incremental indexing skips unchanged files, which means new parser
+        # features like relationship extraction never get applied to old data)
+        service.db.execute(
+            text("DELETE FROM codegraph_relationships WHERE project_id = :pid"),
+            {"pid": project_id}
+        )
+        service.db.execute(
+            text("DELETE FROM codegraph_symbols WHERE project_id = :pid"),
+            {"pid": project_id}
+        )
+        service.db.execute(
+            text("DELETE FROM codegraph_files WHERE project_id = :pid"),
+            {"pid": project_id}
+        )
         service.db.execute(
             text("UPDATE codegraph_projects SET status = 'indexing', updated_at = NOW() WHERE id = :id"),
             {"id": project_id}
         )
         service.db.commit()
+        logger.info(f"[CodeGraph] Cleared existing data for project {project_id}, starting full re-index")
         
         # Store background tasks to prevent garbage collection
         background_tasks: set = getattr(router, '_background_tasks', set())

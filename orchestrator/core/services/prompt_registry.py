@@ -166,10 +166,14 @@ _HARDCODED_DEFAULTS: Dict[str, str] = {
         "Use precise terminology and include code examples."
     ),
     "routing-classifier": (
-        "Classify the following user message into one of the available processing routes.\n"
-        "Available routes:\n{available_routes}\n"
-        "User message: {message}\n"
-        'Return JSON: {"route": "...", "confidence": 0.0-1.0, "reasoning": "..."}'
+        "You are a request router. Select the best agent for the user's request.\n"
+        "Available agents:\n{available_routes}\n"
+        "User message: {message}\n\n"
+        "Rules:\n"
+        "- Pick a specialized agent when its tools/description clearly match.\n"
+        '- Pick "Auto" (ID 0) for platform queries, general questions, greetings, or when unsure.\n'
+        "- Prefer Auto over a poor-fit specialized agent.\n\n"
+        'Return ONLY JSON: {"agent_id": <int>, "confidence": <float 0-1>}'
     ),
     "task-decomposer": (
         "Break this task into executable sub-tasks.\n"

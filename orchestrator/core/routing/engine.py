@@ -4,13 +4,13 @@ Universal Router Engine (PRD-50: US-003, US-004).
 Core routing engine that resolves a RequestEnvelope to a RoutingDecision
 using a tiered strategy:
 
-  Tier 0 — User override (agent_id or workflow_id explicitly set)
-  Tier 1 — Cache lookup (RoutingCache hit)
-  Tier 2 — Rule-based matching:
-    2a: routing_rules table (workspace + source pattern)
-    2b: TriggerSubscription (for jira_trigger source)
-    2c: IntentClassifier keyword matching against routing rules
-  Tier 3 — LLM classification (fallback when tiers 0-2 produce no match)
+  Tier 0   — User override (agent_id or workflow_id explicitly set)
+  Tier 1   — Cache lookup (RoutingCache hit)
+  Tier 2a  — routing_rules table (workspace + explicit source pattern)
+  Tier 2b  — TriggerSubscription (for jira_trigger source)
+  Tier 2.5 — Semantic similarity (PRD-64: cosine sim on agent embeddings)
+  Tier 2c  — IntentClassifier keyword matching against routing rules
+  Tier 3   — LLM classification (fallback, uses semantic candidates if available)
 
 Returns None only when all tiers (including LLM) fail to route.
 """
@@ -70,6 +70,8 @@ class UniversalRouter:
         self._db = db
         self._cache = cache
         self._intent_classifier = IntentClassifier()
+        # PRD-64: Semantic candidates from Tier 2.5 (used to narrow Tier 3)
+        self._semantic_candidates: list = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -82,6 +84,9 @@ class UniversalRouter:
         or ``None`` when no tier can resolve the request (the caller
         should fall back to LLM classification or default agent).
         """
+
+        # PRD-64: Reset semantic candidates each routing pass
+        self._semantic_candidates = []
 
         env_hash = _envelope_hash(envelope)
         logger.info(
@@ -119,12 +124,28 @@ class UniversalRouter:
             self._log_decision(envelope, decision, env_hash)
             return decision
 
-        # Tier 2c — IntentClassifier keyword matching against routing rules
-        decision = self._tier2c_intent_classifier(envelope)
+        # Tier 2.5 — Semantic similarity (PRD-64)
+        # Runs BEFORE Tier 2c (intent keywords) because semantic matching
+        # understands agent capabilities, while keyword matching is coarse
+        # and easily hijacked by overly broad rules.
+        decision = await self._tier2_5_semantic(envelope)
         if decision is not None:
-            logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
+            logger.info(
+                "[router] Tier 2.5 hit (semantic): agent_id=%s confidence=%.2f",
+                decision.agent_id, decision.confidence,
+            )
             self._log_decision(envelope, decision, env_hash)
             return decision
+
+        # Tier 2c — IntentClassifier keyword matching against routing rules
+        # Skip if Tier 2.5 already found semantic candidates — those go
+        # straight to Tier 3 (LLM) which is smarter than keyword matching.
+        if not self._semantic_candidates:
+            decision = self._tier2c_intent_classifier(envelope)
+            if decision is not None:
+                logger.info("[router] Tier 2c hit (intent): %s", decision.reasoning)
+                self._log_decision(envelope, decision, env_hash)
+                return decision
 
         # Tier 3 — LLM classification (fallback)
         decision = await self._classify_with_llm(envelope)
@@ -180,20 +201,31 @@ class UniversalRouter:
     # ------------------------------------------------------------------
 
     def _tier2a_rules(self, envelope: RequestEnvelope) -> Optional[RoutingDecision]:
-        """Match against routing_rules for the workspace + source."""
+        """Match against routing_rules that have an explicit source_pattern.
+
+        Rules with ``source_pattern=None`` are NOT matched here — they are
+        catch-all rules that should only fire via Tier 2c (intent keywords).
+        This prevents a single rule from hijacking ALL requests regardless of
+        content (the bug that routed everything to Document Generation).
+        """
         rules = (
             self._db.query(RoutingRule)
             .filter(
                 RoutingRule.workspace_id == envelope.workspace_id,
                 RoutingRule.is_active.is_(True),
+                RoutingRule.source_pattern.isnot(None),
             )
             .order_by(RoutingRule.priority.desc())
             .all()
         )
 
+        logger.debug(
+            "[router] Tier 2a: %d rules with source_pattern for workspace %s",
+            len(rules), envelope.workspace_id,
+        )
+
         for rule in rules:
-            # Source pattern match (None / empty means "match any")
-            if rule.source_pattern and rule.source_pattern != envelope.source.value:
+            if rule.source_pattern != envelope.source.value:
                 continue
 
             # Build decision from matching rule
@@ -326,6 +358,94 @@ class UniversalRouter:
         return None
 
     # ------------------------------------------------------------------
+    # Tier 2.5 — Semantic similarity (PRD-64)
+    # ------------------------------------------------------------------
+
+    async def _tier2_5_semantic(
+        self, envelope: RequestEnvelope
+    ) -> Optional[RoutingDecision]:
+        """Use pre-computed agent embeddings to find the best match via cosine
+        similarity.  High-confidence match routes directly; ambiguous results
+        are stored as candidates for Tier 3 (narrowed LLM prompt)."""
+        try:
+            from core.routing.semantic_indexer import (
+                find_similar_agents,
+                SIMILARITY_DIRECT_ROUTE,
+                MAX_LLM_CANDIDATES,
+            )
+
+            scored = await find_similar_agents(
+                envelope.content, envelope.workspace_id, self._db
+            )
+
+            if not scored:
+                # Check why — are there agents but none with embeddings?
+                agent_count = (
+                    self._db.query(Agent)
+                    .filter(
+                        Agent.workspace_id == envelope.workspace_id,
+                        Agent.status == "active",
+                    )
+                    .count()
+                )
+                embedded_count = (
+                    self._db.query(Agent)
+                    .filter(
+                        Agent.workspace_id == envelope.workspace_id,
+                        Agent.status == "active",
+                        Agent.semantic_embedding.isnot(None),
+                    )
+                    .count()
+                )
+                logger.warning(
+                    "[router] Tier 2.5: no scored agents — "
+                    "%d active agents, %d with embeddings in workspace %s",
+                    agent_count, embedded_count, envelope.workspace_id,
+                )
+                return None
+
+            # Log top scores for visibility
+            top_3 = scored[:3]
+            for agent, score in top_3:
+                logger.info(
+                    "[router] Tier 2.5 candidate: '%s' (id=%d) score=%.3f",
+                    agent.name, agent.id, score,
+                )
+
+            top_agent, top_score = scored[0]
+
+            if top_score >= SIMILARITY_DIRECT_ROUTE:
+                decision = RoutingDecision(
+                    route_type="agent",
+                    agent_id=top_agent.id,
+                    confidence=top_score,
+                    reasoning=f"Semantic match '{top_agent.name}' (score={top_score:.2f})",
+                )
+                if self._cache is not None:
+                    self._cache.put(
+                        envelope.workspace_id,
+                        envelope.content,
+                        envelope.source,
+                        decision,
+                    )
+                return decision
+
+            # Below direct threshold — store top candidates for Tier 3
+            self._semantic_candidates = [
+                agent for agent, _score in scored[:MAX_LLM_CANDIDATES]
+            ]
+            logger.info(
+                "[router] Tier 2.5: no direct match (top=%.2f), "
+                "passing %d candidates to Tier 3",
+                top_score, len(self._semantic_candidates),
+            )
+            return None
+
+        except Exception:
+            logger.exception("[router] Tier 2.5 failed — falling through")
+            return None
+
+    # ------------------------------------------------------------------
     # Tier 3 — LLM classification
     # ------------------------------------------------------------------
 
@@ -341,7 +461,9 @@ class UniversalRouter:
         low-confidence results) or None on failure.
         """
         try:
-            # Query active agents in the workspace
+            # Always give the LLM ALL active agents — it's smart enough to
+            # pick the right one from 14 agents.  Semantic pre-filtering was
+            # removing correct agents before the LLM could see them.
             agents: List[Agent] = (
                 self._db.query(Agent)
                 .filter(
@@ -350,6 +472,11 @@ class UniversalRouter:
                 )
                 .all()
             )
+            if self._semantic_candidates:
+                logger.info(
+                    "[router] Tier 3: %d agents (semantic shortlisted %d)",
+                    len(agents), len(self._semantic_candidates),
+                )
 
             if not agents:
                 logger.warning(
@@ -361,9 +488,20 @@ class UniversalRouter:
             # Build agent descriptions including assigned app names
             agent_descriptions = self._build_agent_descriptions(agents)
 
-            # Build the classification prompt
+            # Log what the LLM will see
+            for desc in agent_descriptions:
+                apps_str = ", ".join(desc["apps"]) if desc["apps"] else "none"
+                logger.info(
+                    "[router] Tier 3 agent: id=%s name='%s' apps=[%s] desc='%s'",
+                    desc["agent_id"], desc["name"], apps_str,
+                    (desc["description"] or "")[:100],
+                )
+
+            # Build the classification prompt (pass semantic candidates as hints)
             prompt = self._build_classification_prompt(
-                envelope.content, agent_descriptions
+                envelope.content,
+                agent_descriptions,
+                semantic_candidates=self._semantic_candidates or None,
             )
 
             # Call the LLM
@@ -375,9 +513,9 @@ class UniversalRouter:
                 logger.warning("[router] Tier 3: empty LLM response")
                 return None
 
-            logger.debug(
-                "[router] Tier 3: raw LLM response (first 500 chars): %s",
-                response.content[:500],
+            logger.info(
+                "[router] Tier 3: LLM response: %s",
+                response.content[:300],
             )
 
             # Parse the response
@@ -391,6 +529,27 @@ class UniversalRouter:
                     response.content[:300],
                 )
                 return None
+
+            # Auto sentinel (id=0) → orchestrate with the LLM's own confidence
+            if agent_id == 0:
+                logger.info(
+                    "[router] Tier 3: LLM selected Auto (orchestrate) confidence=%.2f",
+                    confidence,
+                )
+                decision = RoutingDecision(
+                    route_type="orchestrate",
+                    agent_id=None,
+                    confidence=confidence,
+                    reasoning=f"LLM selected Auto - orchestrate (confidence={confidence:.2f})",
+                )
+                if self._cache is not None:
+                    self._cache.put(
+                        envelope.workspace_id,
+                        envelope.content,
+                        envelope.source,
+                        decision,
+                    )
+                return decision
 
             # Low confidence → orchestrate (full decomposition needed)
             if confidence < _LLM_CONFIDENCE_THRESHOLD:
@@ -446,7 +605,11 @@ class UniversalRouter:
             return None
 
     def _build_agent_descriptions(self, agents: List[Agent]) -> List[Dict]:
-        """Build a list of agent info dicts for the LLM prompt."""
+        """Build a list of agent info dicts for the LLM prompt.
+
+        Includes a synthetic "Auto" entry (id=0) so the LLM can explicitly
+        route back to the orchestrator when no specialized agent fits.
+        """
         descriptions: List[Dict] = []
         for agent in agents:
             # Look up assigned app names
@@ -466,23 +629,64 @@ class UniversalRouter:
                     "name": agent.name,
                     "description": agent.description or "",
                     "apps": app_names,
+                    "tags": agent.tags or [],
                 }
             )
+
+        # Synthetic "Auto" route — the orchestrator itself.
+        # NOTE: By the time we reach Tier 3, AutoBrain has already filtered
+        # greetings, platform queries, and memory recalls.  Auto should only
+        # be selected here when genuinely NO specialized agent fits.
+        descriptions.append(
+            {
+                "agent_id": 0,
+                "name": "Auto",
+                "description": (
+                    "Fallback orchestrator. Only use when NO specialized agent "
+                    "above is a reasonable match for the request."
+                ),
+                "apps": [],
+                "tags": [],
+            }
+        )
+
         return descriptions
 
     @staticmethod
     def _build_classification_prompt(
-        content: str, agent_descriptions: List[Dict]
+        content: str,
+        agent_descriptions: List[Dict],
+        semantic_candidates: Optional[List] = None,
     ) -> str:
-        """Build a lightweight routing prompt for the LLM."""
+        """Build the routing prompt for the LLM.
+
+        The prompt is biased toward specialized agents because AutoBrain
+        already filtered greetings, platform queries, and memory recalls.
+        Everything reaching Tier 3 is a real task that likely needs an agent.
+        """
         agent_lines = []
         for desc in agent_descriptions:
             apps_str = ", ".join(desc["apps"]) if desc["apps"] else "none"
+            tags_str = ", ".join(str(t) for t in desc.get("tags", []))
+            tags_part = f", Tags: [{tags_str}]" if tags_str else ""
             agent_lines.append(
                 f"  - ID: {desc['agent_id']}, Name: {desc['name']}, "
-                f"Description: {desc['description']}, Apps: {apps_str}"
+                f"Description: {desc['description']}, Apps: [{apps_str}]{tags_part}"
             )
         agents_block = "\n".join(agent_lines)
+
+        # Semantic hints — give the LLM a head start from Tier 2.5
+        semantic_hint = ""
+        if semantic_candidates:
+            names = [
+                f"'{c.name}' (ID {c.id})"
+                for c in semantic_candidates[:3]
+            ]
+            semantic_hint = (
+                f"\nSemantic analysis suggests: {', '.join(names)}. "
+                "Consider these first, but use your judgment based on the "
+                "full agent list.\n"
+            )
 
         # PRD-58: Try PromptRegistry (admin-editable), fallback to hardcoded
         try:
@@ -497,12 +701,21 @@ class UniversalRouter:
             pass
 
         return (
-            "You are a request router. Given the user's request, select the best agent "
-            "to handle it from the list below.\n\n"
-            f"User request: {content}\n\n"
-            f"Available agents:\n{agents_block}\n\n"
+            "You are a request router for an AI platform. The user's message "
+            "has already been screened — it is NOT a greeting, platform query, "
+            "or trivial message. It needs a specialized agent.\n\n"
+            f"User request: \"{content}\"\n\n"
+            f"Available agents:\n{agents_block}\n"
+            f"{semantic_hint}\n"
+            "Rules:\n"
+            "- Match the request to the agent whose description, tools, tags, "
+            "or apps are most relevant.\n"
+            "- Prefer a specialized agent. Only pick \"Auto\" (ID 0) if "
+            "genuinely NO specialized agent fits.\n"
+            "- High confidence (0.8-1.0) when description/tools clearly match.\n"
+            "- Medium confidence (0.5-0.8) when it's a reasonable but imperfect fit.\n\n"
             "Respond with ONLY a JSON object (no markdown, no explanation):\n"
-            '{"agent_id": <int>, "confidence": <float between 0 and 1>}\n'
+            '{"agent_id": <int>, "confidence": <float 0-1>}\n'
         )
 
     @staticmethod
@@ -558,24 +771,28 @@ class UniversalRouter:
                 )
                 if isinstance(raw_name, str) and raw_name.strip():
                     name_lower = raw_name.strip().lower()
-                    for a in agents:
-                        if (a.name or "").lower() == name_lower:
-                            raw_id = a.id
-                            logger.info(
-                                "[router] Resolved agent name '%s' → id=%d",
-                                raw_name, a.id,
-                            )
-                            break
+                    # Handle "Auto" virtual route by name
+                    if name_lower == "auto":
+                        raw_id = 0
                     else:
-                        # Fuzzy: check if the name is contained in agent name
                         for a in agents:
-                            if name_lower in (a.name or "").lower():
+                            if (a.name or "").lower() == name_lower:
                                 raw_id = a.id
                                 logger.info(
-                                    "[router] Fuzzy-resolved agent name '%s' → '%s' id=%d",
-                                    raw_name, a.name, a.id,
+                                    "[router] Resolved agent name '%s' → id=%d",
+                                    raw_name, a.id,
                                 )
                                 break
+                        else:
+                            # Fuzzy: check if the name is contained in agent name
+                            for a in agents:
+                                if name_lower in (a.name or "").lower():
+                                    raw_id = a.id
+                                    logger.info(
+                                        "[router] Fuzzy-resolved agent name '%s' → '%s' id=%d",
+                                        raw_name, a.name, a.id,
+                                    )
+                                    break
 
             if raw_id is None:
                 return None, 0.0
@@ -586,6 +803,10 @@ class UniversalRouter:
                 or parsed.get("score")
                 or 0.7  # default if model omits confidence
             )
+
+            # Auto sentinel (id=0) — valid, skip workspace validation
+            if agent_id == 0:
+                return 0, confidence
 
             # Validate agent_id is in the workspace agent list
             valid_ids = {a.id for a in agents}

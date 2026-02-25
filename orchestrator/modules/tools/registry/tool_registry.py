@@ -1138,9 +1138,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                     name="data",
                     type="object",
                     description=(
-                        "Data to populate the document. Structure depends on template. "
-                        "For reports: {\"sections\": [{\"heading\": \"...\", \"body\": \"...\"}]}. "
-                        "For tables/xlsx: {\"rows\": [{\"col1\": \"val1\", ...}]}."
+                        "Data to populate the document. "
+                        "For reports: {\"sections\": [{\"title\": \"Section Name\", \"content\": \"Full paragraph text...\"}], "
+                        "\"author\": \"...\", \"date\": \"...\"}. "
+                        "Each section MUST have 'title' and 'content' keys with substantial text in content. "
+                        "For tables/xlsx: {\"columns\": [\"col1\", \"col2\"], \"rows\": [[\"val1\", \"val2\"]]}."
                     ),
                     required=True
                 ),
@@ -1160,7 +1162,7 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                     "params": {
                         "title": "Weekly Status Report",
                         "format": "pdf",
-                        "data": {"sections": [{"heading": "Summary", "body": "All tasks completed on time."}]},
+                        "data": {"sections": [{"title": "Summary", "content": "All tasks completed on time. The team delivered 5 features and resolved 12 bugs."}]},
                     },
                 },
                 {

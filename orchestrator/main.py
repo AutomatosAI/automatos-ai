@@ -221,8 +221,87 @@ async def lifespan(app: FastAPI):
                 seed_system_prompts(db)
         except Exception as e:
             logger.warning(f"PRD-58 table/seed init: {e}")
+
+        # PRD-63: Ensure document_templates table exists + seed starter templates
+        try:
+            import core.models.core  # noqa: F811 — registers DocumentTemplate with Base
+            from core.database.database import create_tables as _ct, get_db_session as _gdb
+            _ct()  # idempotent — creates any missing tables
+            from modules.documents.seed_templates import seed_starter_templates
+            from core.models.workspaces import Workspace
+            with _gdb() as db:
+                workspace_ids = [w.id for w in db.query(Workspace.id).all()]
+                for ws_id in workspace_ids:
+                    seed_starter_templates(db, ws_id)
+            logger.info(f"PRD-63: Document templates seeded for {len(workspace_ids)} workspace(s)")
+        except Exception as e:
+            logger.warning(f"PRD-63 template seed init: {e}")
+        # PRD-64: Ensure semantic routing columns exist on agents table
+        try:
+            from sqlalchemy import text as _t64
+            from core.database.database import engine as _engine64
+            with _engine64.connect() as conn:
+                conn.execute(_t64(
+                    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
+                    "semantic_embedding JSONB"
+                ))
+                conn.execute(_t64(
+                    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
+                    "semantic_text_hash VARCHAR(64)"
+                ))
+                conn.commit()
+        except Exception as col_err:
+            logger.debug(f"PRD-64 column migration check: {col_err}")
+
+        # PRD-64: Seed semantic embeddings for agents (non-blocking fire-and-forget)
+        try:
+            import asyncio as _asyncio
+            from core.routing.semantic_indexer import embed_workspace_agents as _embed_ws
+            from core.models.workspaces import Workspace as _Workspace
+
+            async def _embed_all_agents_on_startup():
+                """Background task: embed agents in all workspaces."""
+                try:
+                    from core.database.database import SessionLocal as _SL
+                    from core.llm.embedding_manager import get_embedding_manager
+                    from core.models.core import Agent as _Agent
+
+                    _db = _SL()
+                    try:
+                        # Log provider info for debugging
+                        emgr = get_embedding_manager()
+                        emgr._ensure_provider()
+                        logger.info(f"PRD-64: Embedding provider: {emgr.get_provider_info()}")
+
+                        ws_ids = [w.id for w in _db.query(_Workspace.id).all()]
+                        total = 0
+                        for ws_id in ws_ids:
+                            try:
+                                total += await _embed_ws(ws_id, _db)
+                            except Exception:
+                                logger.warning("PRD-64: Failed to embed workspace %s", ws_id, exc_info=True)
+
+                        # Report embedding coverage
+                        all_agents = _db.query(_Agent).filter(_Agent.status == "active").count()
+                        with_embeddings = _db.query(_Agent).filter(
+                            _Agent.status == "active",
+                            _Agent.semantic_embedding.isnot(None),
+                        ).count()
+                        logger.info(
+                            f"PRD-64: Semantic embeddings seeded — "
+                            f"{total} new, {with_embeddings}/{all_agents} agents have embeddings"
+                        )
+                    finally:
+                        _db.close()
+                except Exception as e:
+                    logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}", exc_info=True)
+
+            _asyncio.create_task(_embed_all_agents_on_startup())
+        except Exception as e:
+            logger.warning(f"PRD-64: Could not schedule startup embedding (non-fatal): {e}")
+
         logger.info("Database ready")
-        
+
         # NOTE: Redis client uses lazy initialization via get_redis_client()
         # Services will auto-initialize on first use from environment variables
         logger.info("Redis client will lazy-initialize on first use")
@@ -543,8 +622,8 @@ app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
 app.include_router(recipe_webhook_router)  # Recipe webhook triggers (no auth)
 app.include_router(general_webhooks_router)  # General workspace webhooks (no auth)
 app.include_router(marketplace_router)  # Community Marketplace
+app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
-app.include_router(document_generation_router)  # PRD-63: Document Generation
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(context_engineering_router)

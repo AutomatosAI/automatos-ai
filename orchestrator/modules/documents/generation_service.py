@@ -3,9 +3,15 @@ Document Generation Service (PRD-63).
 
 Generates PDF (WeasyPrint), DOCX (python-docx-template), and XLSX (XlsxWriter)
 documents from templates + data.
+
+Files are generated locally then uploaded to S3 for persistent storage.
+On Railway (ephemeral containers) the local file vanishes after the request,
+so S3 is the source of truth for downloads.
 """
 
+import asyncio
 import logging
+import mimetypes
 import os
 import re
 from datetime import datetime
@@ -16,6 +22,14 @@ import jinja2
 import jsonschema
 from sqlalchemy.orm import Session
 
+try:
+    import boto3
+    from botocore.config import Config as BotoConfig
+    from botocore.exceptions import ClientError
+except ImportError:
+    boto3 = None
+
+from config import config
 from core.models.core import DocumentTemplate
 from modules.documents.models import GeneratedDocument
 from modules.documents.template_service import DocumentTemplateService
@@ -24,6 +38,47 @@ logger = logging.getLogger(__name__)
 
 # Base directory for generated documents
 GENERATED_DIR = os.environ.get("DOCUMENT_STORAGE_DIR", "documents")
+
+# Inline fallback template used when no DB template is available
+_FALLBACK_PDF_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: #1a1a2e; line-height: 1.6; }
+  .header { border-bottom: 3px solid #ff6b35; padding-bottom: 1rem; margin-bottom: 2rem; }
+  .header h1 { margin: 0 0 0.5rem 0; font-size: 28pt; color: #1a1a2e; }
+  .header .meta { color: #666; font-size: 10pt; }
+  h2 { color: #1a1a2e; border-bottom: 1px solid #eee; padding-bottom: 0.5rem; margin-top: 2rem; }
+  .metrics { display: flex; gap: 1rem; margin: 1.5rem 0; flex-wrap: wrap; }
+  .metric-card { flex: 1; min-width: 120px; background: #f8f9fa; border-radius: 8px; padding: 1rem; border-left: 4px solid #ff6b35; text-align: center; }
+  .metric-card .label { font-size: 9pt; color: #666; text-transform: uppercase; }
+  .metric-card .value { font-size: 20pt; font-weight: 700; color: #1a1a2e; }
+  .section-content { margin-bottom: 1.5rem; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>{{ title | default('Report') }}</h1>
+    <div class="meta">Generated: {{ date | default('') }} | Author: {{ author | default('Automatos AI') }}</div>
+  </div>
+  {% if metrics %}
+  <div class="metrics">
+    {% for key, value in metrics.items() %}
+    <div class="metric-card"><div class="label">{{ key }}</div><div class="value">{{ value }}</div></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if sections %}
+    {% for section in sections %}
+    <h2>{{ section.title }}</h2>
+    <div class="section-content">{{ section.content }}</div>
+    {% endfor %}
+  {% elif content %}
+    <div class="section-content">{{ content }}</div>
+  {% endif %}
+</body>
+</html>"""
 
 
 class DocumentGenerationService:
@@ -64,14 +119,30 @@ class DocumentGenerationService:
         if not template and format == "pdf":
             template = self.template_service.get_template_by_name(ws, "Basic Report")
 
+        # Inject top-level title into data so templates can reference {{ title }}.
+        # The tool schema separates title from data, but templates expect it inside data.
+        if "title" not in data:
+            data["title"] = title
+
+        # Normalize section keys: LLMs may use heading/body instead of title/content.
+        # Templates and _data_to_markdown() expect title/content.
+        self._normalize_sections(data)
+
+        logger.info(f"[DocGen] Data keys from LLM: {list(data.keys())}")
+
+        # Generate the format-specific file
         if format == "pdf":
-            return await self.generate_pdf(template, data, ws, title)
+            result = await self.generate_pdf(template, data, ws, title)
         elif format == "docx":
-            return await self.generate_docx(template, data, ws, title)
+            result = await self.generate_docx(template, data, ws, title)
         elif format == "xlsx":
-            return await self.generate_xlsx(data, ws, title=title, template=template)
+            result = await self.generate_xlsx(data, ws, title=title, template=template)
         else:
             raise ValueError(f"Unsupported format: {format}. Use pdf, docx, or xlsx.")
+
+        # Attach markdown content for live widget display
+        result.content = self._data_to_markdown(data, title)
+        return result
 
     # ------------------------------------------------------------------
     # PDF Generation (Jinja2 + WeasyPrint)
@@ -94,14 +165,18 @@ class DocumentGenerationService:
             )
 
         if not template or not template.template_content:
-            raise ValueError("PDF generation requires a template with HTML content.")
+            logger.info("No template found — using inline fallback for PDF generation")
+            template_html = _FALLBACK_PDF_TEMPLATE
+        else:
+            template_html = template.template_content
 
-        # Validate data against schema
-        self._validate_data(data, template.data_schema)
+        # Validate data against schema (skip if using fallback — no schema)
+        if template and hasattr(template, 'data_schema'):
+            self._validate_and_backfill(data, template.data_schema)
 
         # Render Jinja2
         try:
-            jinja_template = self._jinja_env.from_string(template.template_content)
+            jinja_template = self._jinja_env.from_string(template_html)
             rendered_html = jinja_template.render(**data)
         except jinja2.TemplateError as e:
             raise ValueError(f"Template rendering error: {e}")
@@ -236,14 +311,76 @@ class DocumentGenerationService:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _validate_data(self, data: dict, schema: dict) -> None:
-        """Validate data against the template's JSON Schema."""
+    @staticmethod
+    def _normalize_sections(data: dict) -> None:
+        """Normalize section keys so templates always get title/content.
+
+        LLMs sometimes use heading/body, header/text, name/description, etc.
+        This maps common variants to the canonical title/content keys.
+        """
+        sections = data.get("sections")
+        if not isinstance(sections, list):
+            return
+
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+
+            # Normalize title
+            if "title" not in section:
+                for alt in ("heading", "header", "name", "section_title", "label"):
+                    if alt in section:
+                        section["title"] = section.pop(alt)
+                        break
+
+            # Normalize content
+            if "content" not in section:
+                for alt in ("body", "text", "description", "section_content", "detail", "details", "paragraph"):
+                    if alt in section:
+                        section["content"] = section.pop(alt)
+                        break
+
+            # Warn on empty content (helps debug LLM output)
+            if not section.get("content"):
+                logger.warning(
+                    "[DocGen] Section '%s' has empty content. Keys present: %s",
+                    section.get("title", "?"), list(section.keys()),
+                )
+
+    def _validate_and_backfill(self, data: dict, schema: dict) -> None:
+        """Validate data against the template's JSON Schema.
+
+        Non-fatal: missing required fields are backfilled with sensible
+        defaults so Jinja2 rendering doesn't crash on {% for %} loops.
+        """
         if not schema:
             return
+
+        # Backfill missing required fields with type-appropriate defaults
+        # so templates render gracefully even with partial LLM output.
+        props = schema.get("properties", {})
+        for field in schema.get("required", []):
+            if field not in data:
+                field_type = props.get(field, {}).get("type", "string")
+                default = {
+                    "string": "",
+                    "array": [],
+                    "object": {},
+                    "number": 0,
+                    "integer": 0,
+                    "boolean": False,
+                }.get(field_type, "")
+                data[field] = default
+                logger.warning(
+                    f"[DocGen] Backfilled missing required field '{field}' "
+                    f"with default {type(default).__name__}"
+                )
+
         try:
             jsonschema.validate(instance=data, schema=schema)
         except jsonschema.ValidationError as e:
-            raise ValueError(f"Data validation failed: {e.message}")
+            # Log but don't raise — let Jinja2 try rendering.
+            logger.warning(f"[DocGen] Schema validation warning: {e.message}")
 
     def _embed_charts(self, html: str, data: dict) -> str:
         """Replace {{ chart:field_name }} tags with base64 PNG images."""
@@ -257,6 +394,115 @@ class DocumentGenerationService:
                 )
         return html
 
+    @staticmethod
+    def _data_to_markdown(data: dict, title: str) -> str:
+        """Convert structured template data to markdown for widget display."""
+        lines: list[str] = [f"# {title}", ""]
+
+        # Author / date metadata
+        meta_parts = []
+        if data.get("author"):
+            meta_parts.append(f"**Author:** {data['author']}")
+        if data.get("date"):
+            meta_parts.append(f"**Date:** {data['date']}")
+        if meta_parts:
+            lines.append(" | ".join(meta_parts))
+            lines.append("")
+
+        # Sections (most common structure)
+        for section in data.get("sections", []):
+            if isinstance(section, dict):
+                lines.append(f"## {section.get('title', 'Section')}")
+                lines.append("")
+                lines.append(str(section.get("content", "")))
+                lines.append("")
+            elif isinstance(section, str):
+                lines.append(section)
+                lines.append("")
+
+        # Metrics block
+        metrics = data.get("metrics", {})
+        if metrics and isinstance(metrics, dict):
+            lines.append("## Key Metrics")
+            lines.append("")
+            lines.append("| Metric | Value |")
+            lines.append("|--------|-------|")
+            for k, v in metrics.items():
+                lines.append(f"| {k} | {v} |")
+            lines.append("")
+
+        # Highlights (executive summary style)
+        highlights = data.get("highlights", [])
+        if highlights:
+            lines.append("## Highlights")
+            lines.append("")
+            for h in highlights:
+                lines.append(f"- {h}")
+            lines.append("")
+
+        # Recommendations
+        recs = data.get("recommendations", [])
+        if recs:
+            lines.append("## Recommendations")
+            lines.append("")
+            for r in recs:
+                lines.append(f"- {r}")
+            lines.append("")
+
+        # Tabular data (xlsx-style)
+        columns = data.get("columns", [])
+        rows = data.get("rows", [])
+        if columns and rows:
+            lines.append("| " + " | ".join(str(c) for c in columns) + " |")
+            lines.append("| " + " | ".join("---" for _ in columns) + " |")
+            for row in rows[:50]:  # Cap at 50 rows for widget display
+                lines.append("| " + " | ".join(str(v) for v in row) + " |")
+            if len(rows) > 50:
+                lines.append(f"\n*... and {len(rows) - 50} more rows*")
+            lines.append("")
+
+        # Fallback: render any remaining fields the LLM included
+        shown = {"title", "author", "date", "sections", "metrics",
+                 "highlights", "recommendations", "columns", "rows", "_charts"}
+        for key, val in data.items():
+            if key in shown or key.startswith("_") or not val:
+                continue
+            heading = key.replace("_", " ").title()
+            if isinstance(val, str):
+                lines.append(f"## {heading}")
+                lines.append("")
+                lines.append(val)
+                lines.append("")
+            elif isinstance(val, list):
+                lines.append(f"## {heading}")
+                lines.append("")
+                for item in val:
+                    if isinstance(item, dict):
+                        # List of objects — render each with sub-heading if it has a title/name
+                        sub_title = item.get("title") or item.get("name") or item.get("heading") or ""
+                        if sub_title:
+                            lines.append(f"### {sub_title}")
+                            lines.append("")
+                        for k, v in item.items():
+                            if k in ("title", "name", "heading"):
+                                continue
+                            lines.append(str(v))
+                            lines.append("")
+                    else:
+                        lines.append(f"- {item}")
+                lines.append("")
+            elif isinstance(val, dict):
+                lines.append(f"## {heading}")
+                lines.append("")
+                # Render dict as key-value pairs or a table
+                lines.append("| Key | Value |")
+                lines.append("|-----|-------|")
+                for k, v in val.items():
+                    lines.append(f"| {k} | {v} |")
+                lines.append("")
+
+        return "\n".join(lines)
+
     def _output_path(self, workspace_id: UUID, title: str, ext: str) -> str:
         """Build output file path, creating directories as needed."""
         safe_title = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_")[:80]
@@ -266,14 +512,80 @@ class DocumentGenerationService:
         return os.path.join(directory, f"{timestamp}_{safe_title}.{ext}")
 
     def _build_result(self, path: str, fmt: str, title: str) -> GeneratedDocument:
-        """Build a GeneratedDocument from a file on disk."""
+        """Build a GeneratedDocument from a file on disk, uploading to S3 for persistence."""
         filename = os.path.basename(path)
         size = os.path.getsize(path)
+
+        # Upload to S3 for persistent storage (containers are ephemeral)
+        download_url = f"/api/documents/generated/{filename}"
+        s3_url = self._upload_to_s3(path, filename)
+        if s3_url:
+            download_url = s3_url
+
         return GeneratedDocument(
             path=path,
             format=fmt,
             filename=filename,
             size=size,
-            download_url=f"/api/documents/generated/{filename}",
-            preview_url=f"/api/documents/generated/{filename}" if fmt == "pdf" else None,
+            download_url=download_url,
+            preview_url=download_url if fmt == "pdf" else None,
         )
+
+    def _upload_to_s3(self, local_path: str, filename: str) -> Optional[str]:
+        """Upload generated document to S3 and return a presigned download URL.
+
+        Returns None if S3 is not configured (falls back to local serving).
+        """
+        if not boto3:
+            logger.debug("[DocGen] boto3 not available, skipping S3 upload")
+            return None
+
+        if not config.AWS_ACCESS_KEY_ID or not config.AWS_SECRET_ACCESS_KEY:
+            logger.debug("[DocGen] AWS credentials not configured, skipping S3 upload")
+            return None
+
+        bucket = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
+        s3_key = f"workspaces/{self.workspace_id}/generated-documents/{filename}"
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+        try:
+            boto_cfg = BotoConfig(
+                region_name=config.AWS_REGION or "us-east-1",
+                signature_version="v4",
+                retries={"max_attempts": 3, "mode": "adaptive"},
+            )
+            client = boto3.client(
+                "s3",
+                aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
+                config=boto_cfg,
+            )
+
+            with open(local_path, "rb") as f:
+                client.put_object(
+                    Bucket=bucket,
+                    Key=s3_key,
+                    Body=f,
+                    ContentType=content_type,
+                )
+
+            # Generate presigned URL (1 hour expiry)
+            presigned_url = client.generate_presigned_url(
+                "get_object",
+                Params={
+                    "Bucket": bucket,
+                    "Key": s3_key,
+                    "ResponseContentDisposition": f'attachment; filename="{filename}"',
+                },
+                ExpiresIn=3600,
+            )
+
+            logger.info(
+                "[DocGen] Uploaded to S3: s3://%s/%s (%d bytes)",
+                bucket, s3_key, os.path.getsize(local_path),
+            )
+            return presigned_url
+
+        except Exception:
+            logger.exception("[DocGen] S3 upload failed, falling back to local serving")
+            return None

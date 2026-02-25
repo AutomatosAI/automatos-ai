@@ -106,60 +106,19 @@ class S3VectorsBackend:
         self._setup_complete = True
 
     def _verify_or_recreate_index(self) -> None:
-        """Check existing index dimension and recreate if it doesn't match config."""
+        """Log existing index info. Never delete — that destroys stored vectors."""
         try:
             response = self.client.get_index(
                 vectorBucketName=self.bucket_name,
                 indexName=self.index_name,
             )
             existing_dim = response.get("dimension", 0)
-
-            if existing_dim == self.index_dimension:
-                logger.debug(
-                    f"S3 vector index already exists with correct dimension {existing_dim}"
-                )
-                return
-
-            logger.warning(
-                f"S3 vector index dimension mismatch: index has {existing_dim}, "
-                f"config expects {self.index_dimension}. Recreating index..."
-            )
-
-            # Delete the old index
-            self.client.delete_index(
-                vectorBucketName=self.bucket_name,
-                indexName=self.index_name,
-            )
-            logger.info(f"Deleted stale S3 vector index (dimension={existing_dim})")
-
-            # Create with the correct dimension
-            self.client.create_index(
-                vectorBucketName=self.bucket_name,
-                indexName=self.index_name,
-                dimension=self.index_dimension,
-                dataType="float32",
-                distanceMetric=self.distance_metric,
-            )
             logger.info(
-                f"Recreated S3 vector index: {self.index_name} "
-                f"(dimension={self.index_dimension})"
+                f"S3 vector index exists: {self.index_name} "
+                f"(reported dimension={existing_dim}, config={self.index_dimension})"
             )
-
         except ClientError as e:
-            code = e.response["Error"]["Code"]
-            if code in ("NotFoundException", "ResourceNotFoundException"):
-                # Index was deleted between check and recreate — just create it
-                self.client.create_index(
-                    vectorBucketName=self.bucket_name,
-                    indexName=self.index_name,
-                    dimension=self.index_dimension,
-                    dataType="float32",
-                    distanceMetric=self.distance_metric,
-                )
-                logger.info(f"Created S3 vector index: {self.index_name}")
-            else:
-                logger.error(f"Failed to verify/recreate S3 vector index: {e}")
-                raise
+            logger.warning(f"Could not verify S3 vector index: {e}")
 
     def search(
         self,
@@ -179,9 +138,10 @@ class S3VectorsBackend:
             response = self.client.query_vectors(
                 vectorBucketName=self.bucket_name,
                 indexName=self.index_name,
-                queryVector=query_embedding,
-                queryVectorDataType="float32",
+                queryVector={"float32": query_embedding},
                 topK=limit,
+                returnMetadata=True,
+                returnDistance=True,
             )
 
             results = []
@@ -208,7 +168,10 @@ class S3VectorsBackend:
             return results
 
         except ClientError as e:
-            logger.error(f"S3 Vectors search failed: {e}")
+            logger.error(f"S3 Vectors search failed: {e}", exc_info=True)
+            return []
+        except Exception as e:
+            logger.error(f"S3 Vectors search unexpected error: {e}", exc_info=True)
             return []
 
     def add_documents(

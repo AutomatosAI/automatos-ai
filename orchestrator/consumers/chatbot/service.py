@@ -550,51 +550,10 @@ class StreamingChatService:
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
             supports_native_tools = provider in ['openai', 'anthropic', 'grok', 'openrouter', 'google'] if provider else False
             
-            # --- TOOL FILTERING (PRD Refinement) ---
-            # To prevent context overload (600+ tools), we filter to the top N relevant tools.
-            use_tools = None
-            if not is_simple and tools and supports_native_tools:
-                # 1. Identify Core Tools (always included)
-                core_tool_names = {
-                    "search_knowledge", "semantic_search", "search_codebase",
-                    "query_database", "smart_query_database",
-                    "read_file", "write_file", "switch_context",
-                    "search_tables", "search_images", "search_formulas", "search_multimodal",
-                    "generate_document", "composio_execute",
-                }
-                
-                # 2. Get relevant tools via ranking
-                ranked_candidates = self.prompt_analyzer.rank_tools_for_query(
-                    latest_text, 
-                    tools, 
-                    max_tools=25
-                )
-                
-                # 3. Build final allowed list
-                filtered_tools = []
-                included_names = set()
-                
-                # Add core tools first
-                for tool in tools:
-                    t_name = tool.get("function", {}).get("name")
-                    if t_name in core_tool_names:
-                        filtered_tools.append(tool)
-                        included_names.add(t_name)
-                
-                # Add top ranked tools
-                for candidate in ranked_candidates:
-                    c_name = candidate.get("name")
-                    if c_name not in included_names:
-                        # Find the full tool definition
-                        full_tool = next((t for t in tools if t.get("function", {}).get("name") == c_name), None)
-                        if full_tool:
-                            filtered_tools.append(full_tool)
-                            included_names.add(c_name)
-                
-                use_tools = filtered_tools
-                logger.info(f"Filtering tools: {len(tools)} -> {len(use_tools)} relevant tools")
-            
-            # Use filtered tools (if applicable) for LLM context generation
+            # --- TOOL FILTERING (DEPRECATED path) ---
+            # This deprecated method passes all tools through without ranking.
+            # Active chat uses SmartChatOrchestrator + SmartToolRouter for semantic ranking.
+            use_tools = tools if (not is_simple and tools and supports_native_tools) else None
             context_tools = use_tools if use_tools is not None else tools
 
             # Convert messages to LLM format (include tool names for stronger tool routing)
@@ -622,30 +581,6 @@ class StreamingChatService:
                 if memory_context:
                     logger.info(f"[Memory] Injecting {len(memory_context)} chars")
                     llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
-
-            # Add dynamic tool candidates (hint) - only suggest, don't force
-            # NOTE: Removed "Tool candidates for this request" phrasing which was triggering
-            # force_tool_choice=required in OpenAI client. Tools should be optional.
-            if context_tools and latest_text:
-                candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, context_tools)
-                # Only hint at tools if there's a high-confidence match (score > 2)
-                high_confidence_candidates = [c for c in candidates if c.get("score", 0) > 2]
-                if high_confidence_candidates:
-                    candidate_names = ", ".join([c["name"] for c in high_confidence_candidates[:3] if c.get("name")])
-                    if candidate_names:
-                        insert_at = 2 if memory_context else 1
-                        llm_messages.insert(
-                            insert_at,
-                            {
-                                "role": "system",
-                                "content": (
-                                    f"Available tools: {candidate_names}. "
-                                    "When the user asks you to perform an action (fetch data, send messages, "
-                                    "list items, etc.), call the appropriate tool immediately. "
-                                    "For pure conversation or memory questions, respond naturally."
-                                )
-                            }
-                        )
 
             # Composio per-action tools (primary) or hint fallback
             _composio_result = None
@@ -796,21 +731,6 @@ class StreamingChatService:
 
                     return
             
-            # Pre-trigger tools for models without native tool calling
-            if not is_simple and not supports_native_tools:
-                detected_tools = self.prompt_analyzer.detect_explicit_tool_requests(latest_text)
-                if detected_tools:
-                    logger.info(f"Pre-triggering tools: {detected_tools}")
-                    async for chunk in self._execute_pretriggered_tools(
-                        detected_tools,
-                        latest_text,
-                        llm_messages,
-                        tool_data,
-                        agent_id
-                    ):
-                        yield chunk
-                        await asyncio.sleep(0)
-            
             # Generate response via shared.llm
             response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
             
@@ -826,7 +746,7 @@ class StreamingChatService:
                 # Emit tool lifecycle events + stream tool-data incrementally
                 import time
 
-                max_iterations = 5
+                max_iterations = 10
                 iteration = 0
                 current_response = response
                 sent_tool_data = False
@@ -1303,6 +1223,24 @@ class StreamingChatService:
                 except Exception:
                     pass  # Never block chat for eval
 
+            # Persist task counter to DB for the active agent
+            if agent_id:
+                try:
+                    from core.models import Agent as AgentModel
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row:
+                        metrics = dict(agent_row.performance_metrics or {})
+                        metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
+                        metrics["tasks_completed"] = metrics["total_tasks_executed"]
+                        agent_row.performance_metrics = metrics
+                        self.db.commit()
+                except Exception as metric_err:
+                    logger.warning(f"Failed to persist agent task counter: {metric_err}")
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass
+
         except Exception as e:
             logger.error(f"Error streaming response: {e}")
             import traceback
@@ -1495,6 +1433,25 @@ class StreamingChatService:
             except Exception as exc:
                 logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
 
+            # PRD-64: Inject platform tool scope message so LLM knows to call them
+            if use_tools:
+                platform_tool_names = [
+                    t.get("function", {}).get("name")
+                    for t in use_tools
+                    if isinstance(t, dict) and t.get("function", {}).get("name", "").startswith("platform_")
+                ]
+                if platform_tool_names:
+                    llm_messages.insert(2, {
+                        "role": "system",
+                        "content": (
+                            "You have platform introspection tools available. "
+                            "When the user asks about their agents, recipes, workflows, documents, "
+                            "workspace, usage, costs, integrations, or memory — ALWAYS call the "
+                            "appropriate platform_* tool to get real data. Never guess or say you "
+                            "can't — use the tools."
+                        ),
+                    })
+
             # Context Window Guard — auto-compact if approaching context limit
             from core.context_guard import ContextGuard
             _guard = ContextGuard()
@@ -1647,14 +1604,29 @@ class StreamingChatService:
                 except Exception:
                     pass  # Never block chat for eval
 
-            # Update agent metrics
+            # Update agent metrics (in-memory + persist to DB)
             if hasattr(agent_runtime, 'update_metrics'):
                 tokens_used = response.usage.get('total_tokens', 0) if response.usage else 0
                 agent_runtime.update_metrics(
-                    execution_time=1.0,  # TODO: Track actual time
+                    execution_time=1.0,
                     tokens_used=tokens_used,
                     success=True
                 )
+            # Persist task counter to DB so dashboard shows it
+            try:
+                agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                if agent_row:
+                    metrics = dict(agent_row.performance_metrics or {})
+                    metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
+                    metrics["tasks_completed"] = metrics["total_tasks_executed"]
+                    agent_row.performance_metrics = metrics
+                    self.db.commit()
+            except Exception as metric_err:
+                logger.warning(f"Failed to persist agent task counter: {metric_err}")
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
             
         except Exception as e:
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
@@ -1708,7 +1680,7 @@ class StreamingChatService:
                     
                     for tool_call in response.tool_calls:
                         tool_name = tool_call.get('function', {}).get('name')
-                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
+                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
                         tool_id = tool_call.get('id')
                         
                         result = await self.tool_router.execute_and_format(
@@ -1908,7 +1880,7 @@ class StreamingChatService:
         import asyncio
         import time
         
-        max_iterations = 5
+        max_iterations = 10
         iteration = 0
         current_response = response
         # Allow ONE recovery attempt when the model picks an unmapped action name.
@@ -1922,7 +1894,7 @@ class StreamingChatService:
         last_tool_name: Optional[str] = None
         empty_same_tool_streak = 0
         # Stop "rephrase and retry" loops: for most internal tools, we only allow one attempt
-        # per user request (multi-step exceptions: composio_execute and file tools).
+        # per user request (multi-step exceptions: composio_execute, file tools, and generation tools).
         tool_attempts: dict[str, int] = {}
         
         while current_response.tool_calls and iteration < max_iterations:
@@ -1955,9 +1927,9 @@ class StreamingChatService:
             executed_call_key_repeat = False
             for tool_id, tool_name, tool_call in tool_calls_prepared:
                 try:
-                    # Parse arguments
+                    # Parse arguments (handle empty string from LLM)
                     args_str = tool_call.get('function', {}).get('arguments', '{}')
-                    tool_args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    tool_args = json.loads(args_str or '{}') if isinstance(args_str, str) else (args_str or {})
 
                     # Loop detection key (same tool + same args)
                     try:
@@ -2092,11 +2064,13 @@ class StreamingChatService:
                     except Exception:
                         pass
 
-                    # Extract LLM context from result and truncate to prevent context overflow
+                    # Extract LLM context from result.
+                    # format_for_llm() already produces a concise summary (max ~4500 chars).
+                    # We allow up to 6000 chars so the LLM has enough research context to
+                    # populate report sections when calling generate_document.
                     llm_context = result.get('llm_context', str(result.get('raw_result', '')))
-                    # Truncate to max 1000 chars to keep context manageable
-                    if len(llm_context) > 1000:
-                        llm_context = llm_context[:1000] + f"\n... (truncated {len(llm_context) - 1000} chars)"
+                    if len(llm_context) > 6000:
+                        llm_context = llm_context[:6000] + f"\n... (truncated {len(llm_context) - 6000} chars)"
                     
                     # Store result
                     tool_results.append({
@@ -2108,6 +2082,7 @@ class StreamingChatService:
                     # CRITICAL: Yield tool-data for frontend widgets (documents, code, etc.)
                     # This was missing for selected agents - widgets only worked with default agent
                     frontend_data = result.get("frontend_data", {})
+                    logger.info(f"[TOOL-DATA-DEBUG] tool={tool_name} success={result.get('success')} frontend_data_keys={list(frontend_data.keys()) if frontend_data else 'EMPTY'}")
                     if result.get("success") and frontend_data:
                         tool_data.update(frontend_data)
                         logger.info(f"[TOOL-DATA] Yielding tool-data for {tool_name}: keys={list(frontend_data.keys())}")
@@ -2311,18 +2286,22 @@ class StreamingChatService:
 
                     # --- Hard stop conditions to prevent looping for single requests ---
                     #
-                    # 1) Search tools: stop after FIRST empty result.
-                    if empty_same_tool_streak >= 1 and (
+                    # 1) Search tools: after 2+ consecutive empty results from the SAME
+                    #    search tool, tell the LLM to stop searching and proceed.
+                    #    We do NOT return/kill the loop — the agent may still need to
+                    #    call other tools (e.g. generate_document after research).
+                    if empty_same_tool_streak >= 2 and (
                         tool_name.startswith("search_") or tool_name in {"semantic_search"}
                     ):
-                        from types import SimpleNamespace
-                        message = (
-                            "I couldn't find any matching results and will stop retrying to avoid looping. "
-                            "If you expected results, it likely means the underlying knowledge/code index isn't ingested "
-                            "or the query is targeting the wrong index/type."
-                        )
-                        yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
-                        return
+                        llm_messages.append({
+                            "role": "system",
+                            "content": (
+                                f"The tool `{tool_name}` returned no results after multiple attempts. "
+                                "STOP calling search tools. Use the information you already have "
+                                "and proceed to fulfill the user's request with your other available tools."
+                            ),
+                        })
+                        logger.info(f"[tool-loop] Search spiral detected for {tool_name} — injecting proceed instruction")
 
                     # 2) Database tools: stop after FIRST successful result (avoid paraphrase loops).
                     if tool_name in {"query_database", "smart_query_database"} and result.get("success"):
@@ -2340,19 +2319,28 @@ class StreamingChatService:
                         yield {"_final_response": SimpleNamespace(content=final_response.content or "", tool_calls=None, usage=getattr(final_response, "usage", None))}
                         return
 
-                    # 3) Generic: for most non-Composio tools, don't allow multiple attempts in one request.
+                    # 3) Generic: for most non-Composio tools, don’t allow multiple attempts in one request.
                     # This prevents the model from re-issuing the same tool with slightly different phrasing.
-                    if tool_name not in {"composio_execute"} and not tool_name.startswith("composio_"):
-                        # Allow file operations to be multi-step for report saving.
-                        if tool_name not in {"read_file", "write_file", "list_directory", "create_directory", "delete_file"}:
-                            if tool_attempts.get(tool_name, 0) >= 2:
-                                from types import SimpleNamespace
-                                message = (
-                                    f"I already tried `{tool_name}` and won’t retry again in the same request "
-                                    "to avoid looping. If you want me to try a different approach, tell me what to change."
-                                )
-                                yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
-                                return
+                    # IMPORTANT: Do NOT `return` here — that kills the entire loop and prevents
+                    # the agent from calling other tools (e.g. generate_document after research).
+                    # Instead, inject a system message telling the LLM to stop using THAT tool.
+                    _MULTI_STEP_TOOLS = {
+                        "composio_execute",
+                        "read_file", "write_file", "list_directory", "create_directory", "delete_file",
+                        "generate_document",  # PRD-63: doc gen is a creation step, not a retry
+                    }
+                    if tool_name not in _MULTI_STEP_TOOLS and not tool_name.startswith("composio_"):
+                        if tool_attempts.get(tool_name, 0) >= 2:
+                            llm_messages.append({
+                                "role": "system",
+                                "content": (
+                                    f"You have already called `{tool_name}` multiple times. "
+                                    f"Do NOT call `{tool_name}` again. "
+                                    "Use the results you already have and proceed to fulfill the user's request "
+                                    "with your other available tools."
+                                ),
+                            })
+                            logger.info(f"[tool-loop] Tool {tool_name} hit retry limit — injecting proceed instruction")
                     
                 except Exception as e:
                     logger.error(f"Tool {tool_name} failed: {e}")
@@ -2518,7 +2506,7 @@ class StreamingChatService:
         llm_messages: List[Dict],
         tool_data: Dict,
         tools: Optional[List[Any]] = None,
-        max_iterations: int = 5
+        max_iterations: int = 10
     ) -> tuple:
         """
         Handle tool calls from LLM response with multi-turn support.
@@ -2542,7 +2530,7 @@ class StreamingChatService:
             # Execute tools in parallel when possible
             async def execute_single_tool(tool_call):
                 tool_name = tool_call.get('function', {}).get('name')
-                tool_args = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
+                tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
                 tool_id = tool_call.get('id')
                 
                 logger.info(f"Executing tool: {tool_name}")

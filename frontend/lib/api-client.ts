@@ -1507,6 +1507,30 @@ class ApiClient {
     })
   }
 
+  /** Ask a natural language question about code */
+  async codegraphAskQuestion(projectId: number, question: string) {
+    return this.request(`/api/code-graph/projects/${projectId}/ask`, {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    })
+  }
+
+  /** Get call graph for a symbol */
+  async codegraphGetCallGraph(params: { project: string; symbol: string; depth?: number; direction?: string }) {
+    const searchParams = new URLSearchParams({
+      project: params.project,
+      symbol: params.symbol,
+      ...(params.depth && { depth: params.depth.toString() }),
+      ...(params.direction && { direction: params.direction }),
+    })
+    return this.request(`/api/code-graph/call-graph?${searchParams}`)
+  }
+
+  /** Get architecture analysis for a project */
+  async codegraphGetArchitecture(projectId: number) {
+    return this.request(`/api/code-graph/projects/${projectId}/architecture`)
+  }
+
   /** Health check */
   async codegraphHealth() {
     return this.request('/api/code-graph/health')
@@ -1631,6 +1655,14 @@ class ApiClient {
     return this.request(`/api/documents/search?${params}`, {
       method: 'POST'
     })
+  }
+
+  async ragRetrieve(params: { query: string; max_chunks?: number; max_tokens?: number; diversity?: number }) {
+    const searchParams = new URLSearchParams({ query: params.query })
+    if (params.max_chunks != null) searchParams.set('max_chunks', String(params.max_chunks))
+    if (params.max_tokens != null) searchParams.set('max_tokens', String(params.max_tokens))
+    if (params.diversity != null) searchParams.set('diversity', String(params.diversity))
+    return this.request(`/api/documents/rag/retrieve?${searchParams}`, { method: 'POST' })
   }
 
   // ===== SKILLS ENDPOINTS =====

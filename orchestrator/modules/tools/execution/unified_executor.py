@@ -307,6 +307,13 @@ class UnifiedToolExecutor:
             )
             logger.info(f"[tool-trace {trace}] Parameters keys={list(parameters.keys()) if isinstance(parameters, dict) else type(parameters).__name__}")
             
+            # PRD-64: Route platform_* actions to PlatformActionExecutor
+            if tool_name.startswith("platform_"):
+                logger.info(f"[tool-trace {trace}] Routing to PlatformActionExecutor: {tool_name}")
+                return await self._execute_platform_action(
+                    tool_name, parameters, workspace_id=workspace_id, trace_id=trace
+                )
+
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
             if not tool_spec:
@@ -1593,6 +1600,45 @@ class UnifiedToolExecutor:
 
         return result
     
+    # ------------------------------------------------------------------
+    # PRD-64: Platform Action Execution
+    # ------------------------------------------------------------------
+
+    @property
+    def _platform_executor(self):
+        """Lazy-load PlatformActionExecutor."""
+        if not hasattr(self, '_platform_executor_instance'):
+            self._platform_executor_instance = None
+        return self._platform_executor_instance
+
+    async def _execute_platform_action(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute a platform action via PlatformActionExecutor."""
+        if not workspace_id:
+            return {
+                "success": False,
+                "error": "workspace_id required for platform actions",
+                "tool": tool_name,
+            }
+
+        try:
+            from modules.tools.discovery.platform_executor import PlatformActionExecutor
+            executor = PlatformActionExecutor(db=self.db, workspace_id=workspace_id)
+            result = await executor.execute(tool_name, parameters)
+            logger.info(
+                f"[tool-trace {trace_id or 'no-trace'}] Platform action {tool_name} "
+                f"success={result.get('success')}"
+            )
+            return result
+        except Exception as e:
+            logger.error(f"[tool-trace {trace_id or 'no-trace'}] Platform action error: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "tool": tool_name}
+
     def get_available_tools(self, categories: Optional[list] = None) -> list:
         """
         Get list of available tools, optionally filtered by category.

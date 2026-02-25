@@ -22,27 +22,6 @@ SIMPLE_PATTERNS = [
     'what model', 'who are you', 'what are you'
 ]
 
-# Tool intent indicators
-TOOL_INDICATORS = {
-    'search_knowledge': [
-        'document', 'doc', 'guide', 'how to', 'tutorial', 'architecture',
-        'design', 'readme', 'help'
-    ],
-    'query_database': [
-        'database', 'data', 'count', 'how many', 'statistics', 'workflow',
-        'agent', 'execution', 'list', 'show', 'query'
-    ],
-    'search_multimodal': [
-        'image', 'diagram', 'table', 'chart', 'formula', 'picture', 'screenshot'
-    ]
-}
-
-# Explicit tool request patterns (for models without native tool calling)
-EXPLICIT_TOOL_PATTERNS = {
-    'search_knowledge': ['search doc', 'find doc', 'show me doc', 'in the doc'],
-    'query_database': ['query database', 'from database', 'sql', 'how many']
-}
-
 # Explicit tool call syntax (e.g., "Use tool foo with params {...}")
 EXPLICIT_TOOL_CALL_RE = re.compile(
     r"^\s*use\s+tool\s+([a-zA-Z0-9_\-\.]+)\s*(?:with\s+params|params|with\s+arguments|arguments)?\s*(\{.*\})\s*$",
@@ -58,8 +37,6 @@ class PromptAnalyzer:
     
     def __init__(self):
         self.simple_patterns = SIMPLE_PATTERNS
-        self.tool_indicators = TOOL_INDICATORS
-        self.explicit_patterns = EXPLICIT_TOOL_PATTERNS
     
     def is_simple_message(self, text: str) -> bool:
         """Check if message is a simple greeting/acknowledgment."""
@@ -107,34 +84,6 @@ class PromptAnalyzer:
             "forget earlier"
         ]
         return any(p in text_lower for p in patterns)
-    
-    def detect_tool_intent(self, query: str) -> List[str]:
-        """
-        Detect which tools should be triggered based on user query.
-        Returns list of tool names to execute (can be multiple).
-        """
-        query_lower = query.lower()
-        tools_to_trigger = []
-        
-        for tool_name, indicators in self.tool_indicators.items():
-            if any(ind in query_lower for ind in indicators):
-                tools_to_trigger.append(tool_name)
-        
-        return tools_to_trigger
-    
-    def detect_explicit_tool_requests(self, query: str) -> List[str]:
-        """
-        Detect EXPLICIT tool requests for models without native tool calling.
-        More restrictive than detect_tool_intent - only triggers on clear requests.
-        """
-        query_lower = query.lower()
-        tools_to_trigger = []
-        
-        for tool_name, patterns in self.explicit_patterns.items():
-            if any(pattern in query_lower for pattern in patterns):
-                tools_to_trigger.append(tool_name)
-        
-        return tools_to_trigger
     
     def extract_search_terms(self, query: str) -> str:
         """
@@ -233,106 +182,6 @@ class PromptAnalyzer:
             "parse_error": None
         }
 
-    def rank_tools_for_query(
-        self,
-        query: str,
-        available_tools: Optional[List[Dict[str, Any]]] = None,
-        max_tools: int = 12
-    ) -> List[Dict[str, Any]]:
-        """
-        Rank tools for a query using simple token overlap scoring.
-        Avoids hardcoded app mapping; uses tool name/description only.
-        """
-        if not query or not available_tools:
-            return []
-
-        # Stopwords to prevent accidental matches like "from" → delete_file, etc.
-        # NOTE: include generic words like "new" because they over-match file tools
-        # (e.g., "create a new repo" should not match "create_directory" by default).
-        stopwords = {
-            "the", "and", "for", "with", "from", "into", "onto", "over", "under",
-            "this", "that", "these", "those", "here", "there",
-            "today", "tomorrow", "yesterday", "now", "latest", "recent",
-            "please", "can", "could", "would", "should", "just",
-            "my", "your", "our", "their",
-            "new",
-        }
-
-        def tokenize(text: str) -> set[str]:
-            tokens = re.split(r"[^a-z0-9]+", (text or "").lower())
-            return {t for t in tokens if len(t) > 2 and t not in stopwords}
-
-        query_tokens = tokenize(query)
-        if not query_tokens:
-            return []
-
-        # Small synonym expansion to improve matching without hardcoding app/action maps.
-        # This helps common shorthand like "repo" match "repository" in tool descriptions.
-        expansions = {
-            "repo": {"repository"},
-            "repos": {"repository", "repositories"},
-            "repository": {"repo"},
-            "repositories": {"repo"},
-            "pr": {"pull", "pullrequest", "pull_request"},
-            "pullrequest": {"pr"},
-            # Improve routing for code queries (avoid narrowing to only multimodal)
-            "code": {"codebase", "source", "implementation", "snippet", "snippets"},
-            "example": {"examples", "snippet", "snippets"},
-            "examples": {"example", "snippet", "snippets"},
-        }
-        expanded_query_tokens = set(query_tokens)
-        for t in list(query_tokens):
-            expanded_query_tokens |= expansions.get(t, set())
-
-        # Heuristic guard: if the user talks about a *remote code repo* (GitHub/GitLab/repository)
-        # and does NOT mention local filesystem language, de-rank file tools that would otherwise
-        # match purely on verbs like "create".
-        repo_like = {"repo", "repos", "repository", "repositories", "github", "gitlab"}
-        filesystem_like = {"file", "files", "folder", "folders", "directory", "directories", "dir", "path", "local", "filesystem", "workspace"}
-        query_is_repo_intent = bool(expanded_query_tokens & repo_like) and not bool(expanded_query_tokens & filesystem_like)
-        file_tool_names = {"read_file", "write_file", "delete_file", "list_directory", "create_directory"}
-
-        scored = []
-        for tool in available_tools:
-            if not isinstance(tool, dict):
-                continue
-            fn = tool.get("function", {}) if isinstance(tool.get("function", {}), dict) else {}
-            name = fn.get("name") or ""
-            desc = fn.get("description") or ""
-            tool_text = f"{name} {desc}"
-            tool_tokens = tokenize(tool_text)
-            score = len(expanded_query_tokens & tool_tokens)
-
-            # Lightweight boost for direct name match
-            if name and name.lower() in (query or "").lower():
-                score += 3
-
-            # Safety bias: avoid suggesting destructive tools unless explicitly requested.
-            if name in {"delete_file", "execute_command"}:
-                destructive_tokens = {"delete", "remove", "destroy", "erase", "rm", "wipe", "exec", "run", "command"}
-                if not (expanded_query_tokens & destructive_tokens):
-                    score -= 2
-
-            # De-rank file ops for "repo/repository" intents unless the user explicitly
-            # references local filesystem concepts.
-            if query_is_repo_intent and name in file_tool_names:
-                score -= 2
-
-            if score > 0:
-                scored.append({
-                    "name": name,
-                    "description": desc,
-                    "score": score
-                })
-
-        scored.sort(key=lambda x: (-x["score"], x["name"]))
-        
-        # Debug logging for ranking
-        top_debug = [f"{t['name']} ({t['score']})" for t in scored[:10]]
-        logger.info(f"🔍 Query: '{query}' | Top ranked tools: {top_debug}")
-        
-        return scored[:max_tools]
-    
     def convert_to_llm_messages(
         self,
         messages: List[Dict[str, Any]],

@@ -8,10 +8,11 @@ Intelligent tool routing that decides:
 - HOW to prioritize tool selection
 
 Works with the Intent Classifier to route appropriately.
+Supports embedding-based semantic ranking (PRD-64) with fallback to keyword matching.
 """
 
+import asyncio
 import logging
-import re
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 
@@ -39,6 +40,9 @@ class SmartToolRouter:
     - Match tools to intent, not just keywords
     - Prefer internal tools for internal data
     - Use Composio for external app actions
+
+    PRD-64: Supports embedding-based semantic ranking when SEMANTIC_TOOL_ROUTING=true.
+    Falls back to keyword-based category matching if embeddings are unavailable.
     """
 
     # Core tools that are almost always useful
@@ -80,7 +84,105 @@ class SmartToolRouter:
     def __init__(self):
         self.classifier = get_intent_classifier()
 
-    def route(
+        # Embedding-based semantic ranking state (PRD-64)
+        self._embedding_manager = None
+        self._tool_embeddings: Dict[str, List[float]] = {}  # tool_name -> embedding
+        self._embeddings_initialized = False
+        self._embeddings_init_lock = asyncio.Lock()
+
+    async def _ensure_embeddings(self, available_tools: List[Dict[str, Any]]) -> bool:
+        """
+        Lazy-initialize tool embeddings on first route() call.
+        Returns True if semantic ranking is available.
+        """
+        from config import config
+        if not config.SEMANTIC_TOOL_ROUTING:
+            return False
+
+        async with self._embeddings_init_lock:
+            # Collect tool names that need embedding
+            tools_needing_embed = []
+            for tool in available_tools:
+                fn = tool.get("function", {})
+                name = fn.get("name", "")
+                if name and name not in self._tool_embeddings:
+                    desc = fn.get("description", "")
+                    tools_needing_embed.append((name, f"{name}: {desc}"))
+
+            if not tools_needing_embed and self._embeddings_initialized:
+                return True
+
+            try:
+                if self._embedding_manager is None:
+                    from core.llm.embedding_manager import get_embedding_manager
+                    self._embedding_manager = get_embedding_manager()
+
+                if tools_needing_embed:
+                    texts = [t[1] for t in tools_needing_embed]
+                    embeddings = await self._embedding_manager.generate_embeddings_batch(texts)
+                    for (name, _), embedding in zip(tools_needing_embed, embeddings):
+                        self._tool_embeddings[name] = embedding
+
+                    logger.info(
+                        f"[ToolRouter] Embedded {len(tools_needing_embed)} new tools "
+                        f"(total cached: {len(self._tool_embeddings)})"
+                    )
+
+                self._embeddings_initialized = True
+                return True
+
+            except Exception as e:
+                logger.warning(f"[ToolRouter] Embedding init failed, falling back to keyword matching: {e}")
+                return False
+
+    async def _rank_tools_by_similarity(
+        self,
+        query: str,
+        available_tools: List[Dict[str, Any]],
+        intent_result: IntentResult,
+        max_tools: int = 15,
+    ) -> List[Dict[str, Any]]:
+        """
+        Rank tools by cosine similarity between query embedding and tool embeddings.
+        Applies intent boost and core tool boost.
+        """
+        from core.math.vector_operations import VectorOperations
+
+        # Generate query embedding
+        query_embedding = await self._embedding_manager.generate_embedding(query)
+
+        # Score each tool
+        scored: List[Tuple[float, Dict[str, Any]]] = []
+        for tool in available_tools:
+            fn = tool.get("function", {})
+            name = fn.get("name", "")
+
+            tool_emb = self._tool_embeddings.get(name)
+            if not tool_emb:
+                continue
+
+            score = float(VectorOperations.cosine_similarity(query_embedding, tool_emb))
+
+            # Boost for intent-suggested tools
+            if name in (intent_result.suggested_tools or []):
+                score += 0.15
+
+            # Slight boost for core tools
+            if name in self.CORE_TOOLS:
+                score += 0.05
+
+            scored.append((score, tool))
+
+        # Sort by score descending
+        scored.sort(key=lambda x: -x[0])
+
+        # Log top 5 for debugging
+        top_debug = [(t.get("function", {}).get("name", "?"), f"{s:.3f}") for s, t in scored[:5]]
+        logger.info(f"[ToolRouter] Semantic ranking top-5: {top_debug}")
+
+        return [tool for _, tool in scored[:max_tools]]
+
+    async def route(
         self,
         query: str,
         available_tools: List[Dict[str, Any]],
@@ -114,23 +216,40 @@ class SmartToolRouter:
                 reasoning=intent_result.reasoning
             )
 
-        # Get relevant tool categories for this intent
+        # Try semantic ranking first (PRD-64)
+        semantic_available = await self._ensure_embeddings(available_tools)
+
+        if semantic_available:
+            try:
+                filtered = await self._rank_tools_by_similarity(
+                    query, available_tools, intent_result
+                )
+                tool_choice = self._determine_tool_choice(intent_result, filtered)
+                priority = intent_result.suggested_tools or []
+
+                return ToolRoutingResult(
+                    should_include_tools=True,
+                    filtered_tools=filtered,
+                    priority_tools=priority,
+                    tool_choice=tool_choice,
+                    reasoning=f"Semantic ranking: {intent_result.reasoning}"
+                )
+            except Exception as e:
+                logger.warning(f"[ToolRouter] Semantic ranking failed, falling back: {e}")
+
+        # Fallback: keyword-based category matching
         relevant_categories = self.INTENT_TO_TOOLS.get(
             intent_result.primary_intent,
             []
         )
 
-        # Filter tools by category
         filtered = self._filter_tools_by_categories(
             available_tools,
             relevant_categories,
             intent_result.suggested_tools
         )
 
-        # Determine tool_choice strategy
         tool_choice = self._determine_tool_choice(intent_result, filtered)
-
-        # Get priority tools (should be tried first)
         priority = intent_result.suggested_tools or []
 
         return ToolRoutingResult(

@@ -57,8 +57,19 @@ export function DocumentWidget({
     }, 100)
   }, [])
 
-  // Handle download - create blob from content since we have it in memory
+  // Handle download - use downloadUrl for generated files, blob fallback for RAG docs
   const handleDownload = useCallback(() => {
+    if (data.downloadUrl) {
+      const a = document.createElement('a')
+      a.href = data.downloadUrl
+      a.download = data.filename || title || 'document'
+      a.target = '_blank'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      toast.success('Document download started')
+      return
+    }
     try {
       const blob = new Blob([data.content], { type: 'text/markdown' })
       const url = URL.createObjectURL(blob)
@@ -73,7 +84,7 @@ export function DocumentWidget({
     } catch (error) {
       toast.error('Failed to download document')
     }
-  }, [data.content, data.filename, title])
+  }, [data.content, data.filename, data.downloadUrl, title])
 
   // Copy content to clipboard
   const handleCopyContent = useCallback(async () => {
@@ -248,9 +259,9 @@ export function DocumentWidget({
       error={error}
       onClose={onClose}
       onMaximize={onMaximize}
-      onDownload={data.content ? handleDownload : undefined}
+      onDownload={data.content || data.downloadUrl ? handleDownload : undefined}
       onCopy={handleCopyContent}
-      canDownload={!!data.content}
+      canDownload={!!(data.content || data.downloadUrl)}
       canCopy
     >
       <div className="flex flex-col h-full">
@@ -307,7 +318,7 @@ export function DocumentWidget({
                       <code>{formattedContent}</code>
                     </pre>
                   ) : (
-                    <article className="prose prose-sm prose-invert max-w-none">
+                    <article className="prose prose-sm prose-invert max-w-none break-words [overflow-wrap:anywhere]">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={markdownComponents}
@@ -345,7 +356,7 @@ export function DocumentWidget({
                   <code>{formattedContent}</code>
                 </pre>
               ) : (
-                <article className="prose prose-sm prose-invert max-w-none">
+                <article className="prose prose-sm prose-invert max-w-none break-words [overflow-wrap:anywhere]">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={markdownComponents}

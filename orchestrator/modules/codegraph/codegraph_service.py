@@ -222,17 +222,21 @@ class CodeGraphService:
             
             # Merge exclude patterns
             all_excludes = self.default_excludes + (exclude_patterns or [])
-            
-            # Discover and parse files
+
+            # Discover files first so we can log the count
+            discovered_files = self._discover_files(repo_path, all_excludes)
+            logger.info(f"[CodeGraph] Discovered {len(discovered_files)} code files to parse in {project_name}")
+
+            # Parse files
             symbols_data = []
-            relationships_data = []  # NEW: Collect relationships
+            relationships_data = []
             files_data = []
             total_files = 0
-            
+
             skipped_files = 0
             discovered_paths = set()
 
-            for file_path in self._discover_files(repo_path, all_excludes):
+            for file_path in discovered_files:
                 try:
                     rel_path = os.path.relpath(file_path, repo_path)
                     discovered_paths.add(rel_path)
@@ -304,7 +308,10 @@ class CodeGraphService:
                             })
                         
                         total_files += 1
-                        
+
+                        if total_files % 100 == 0:
+                            logger.info(f"[CodeGraph] Parsed {total_files} files, {len(symbols_data)} symbols, {len(relationships_data)} relationships so far...")
+
                 except Exception as e:
                     logger.warning(f"Failed to parse {file_path}: {e}")
                     continue
@@ -335,6 +342,8 @@ class CodeGraphService:
             if skipped_files:
                 logger.info(f"Incremental indexing: skipped {skipped_files} unchanged files, re-parsed {total_files - skipped_files} changed files")
 
+            logger.info(f"[CodeGraph] Parsing complete: {total_files} files, {len(symbols_data)} symbols, {len(relationships_data)} relationships. Storing to DB...")
+
             # Batch insert files
             if files_data:
                 for file_data in files_data:
@@ -358,8 +367,18 @@ class CodeGraphService:
             if relationships_data:
                 await self._store_relationships(project_id, relationships_data)
             
-            # Update project stats
+            # Update project stats — for incremental re-index, query actual DB counts
+            # (symbols_data only has NEW symbols, not the ones we skipped)
             duration = time.time() - start_time
+            actual_symbols = self.db.execute(
+                text("SELECT COUNT(*) FROM codegraph_symbols WHERE project_id = :pid"),
+                {"pid": project_id}
+            ).scalar() or len(symbols_data)
+            actual_relationships = self.db.execute(
+                text("SELECT COUNT(*) FROM codegraph_relationships WHERE project_id = :pid"),
+                {"pid": project_id}
+            ).scalar() or len(relationships_data)
+
             self.db.execute(
                 text("""
                     UPDATE codegraph_projects
@@ -375,23 +394,23 @@ class CodeGraphService:
                 {
                     "id": project_id,
                     "total_files": total_files,
-                    "total_symbols": len(symbols_data),
-                    "total_relationships": len(relationships_data),
+                    "total_symbols": actual_symbols,
+                    "total_relationships": actual_relationships,
                     "duration": duration
                 }
             )
             self.db.commit()
-            
+
             # Cleanup temp directory
             shutil.rmtree(repo_path, ignore_errors=True)
-            
-            logger.info(f"✅ Indexed {project_name}: {total_files} files, {len(symbols_data)} symbols in {duration:.1f}s")
-            
+
+            logger.info(f"✅ Indexed {project_name}: {total_files} files, {actual_symbols} symbols, {actual_relationships} relationships in {duration:.1f}s")
+
             return {
                 "project_id": project_id,
                 "project_name": project_name,
                 "total_files": total_files,
-                "total_symbols": len(symbols_data),
+                "total_symbols": actual_symbols,
                 "duration_seconds": round(duration, 2),
                 "status": "success"
             }
@@ -411,7 +430,7 @@ class CodeGraphService:
             except Exception as update_err:
                 logger.warning(f"Could not mark project as failed: {update_err}")
 
-            logger.error(f"Failed to index {project_name}: {e}")
+            logger.error(f"Failed to index {project_name}: {e}", exc_info=True)
             raise
     
     async def _clone_github_repo(
@@ -420,28 +439,29 @@ class CodeGraphService:
         branch: str,
         auth_token: Optional[str]
     ) -> str:
-        """Clone GitHub repository to temp directory"""
+        """Clone GitHub repository to temp directory (non-blocking)"""
+        import asyncio
         from git import Repo
-        
+
         temp_dir = tempfile.mkdtemp(prefix="codegraph_")
-        
+
         try:
             # Add auth token to URL if provided
             if auth_token and 'github.com' in github_url:
-                # Convert https://github.com/user/repo.git to https://token@github.com/user/repo.git
                 github_url = github_url.replace('https://', f'https://{auth_token}@')
-            
+
             logger.info(f"Cloning {github_url} (branch: {branch}) to {temp_dir}")
-            
-            Repo.clone_from(
-                github_url,
-                temp_dir,
-                branch=branch,
-                depth=1  # Shallow clone for speed
+
+            # Run blocking git clone in thread pool to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: Repo.clone_from(github_url, temp_dir, branch=branch, depth=1)
             )
-            
+
+            logger.info(f"Clone complete: {temp_dir}")
             return temp_dir
-            
+
         except Exception as e:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise ValueError(f"Failed to clone repository: {e}")
@@ -845,8 +865,7 @@ class CodeGraphService:
                     text("ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector(" + str(current_dim) + ")")
                 )
 
-                # Recreate index — use HNSW for dims <= 4000, skip index for larger dims
-                # (pgvector 0.8.x: IVFFlat max 2000, HNSW max 4000)
+                # Recreate index — pgvector limits: IVFFlat max 2000, HNSW max 2000
                 if current_dim <= 2000:
                     try:
                         self.db.execute(text(
@@ -856,19 +875,10 @@ class CodeGraphService:
                         logger.info(f"Created IVFFlat index for {current_dim}-dim embeddings")
                     except Exception as e:
                         logger.warning(f"Could not create IVFFlat index: {e}")
-                elif current_dim <= 4000:
-                    try:
-                        self.db.execute(text(
-                            "CREATE INDEX idx_codegraph_symbols_embedding_hnsw ON codegraph_symbols "
-                            "USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)"
-                        ))
-                        logger.info(f"Created HNSW index for {current_dim}-dim embeddings")
-                    except Exception as e:
-                        logger.warning(f"Could not create HNSW index: {e}")
                 else:
                     logger.info(
-                        f"Embedding dimension {current_dim} exceeds pgvector index limits "
-                        f"(IVFFlat: 2000, HNSW: 4000). Using sequential scan — fine for code repos."
+                        f"Embedding dimension {current_dim} exceeds pgvector index limit (2000). "
+                        f"Using sequential scan — fine for code repos."
                     )
 
                 self.db.commit()
@@ -880,9 +890,13 @@ class CodeGraphService:
     
     async def _store_symbols_with_embeddings(self, symbols_data: List[Dict[str, Any]]):
         """Store symbols in database with embeddings"""
+        total_batches = (len(symbols_data) + 99) // 100
+        logger.info(f"[CodeGraph] Storing {len(symbols_data)} symbols in {total_batches} batches with embeddings...")
         # Batch generate embeddings
         for i in range(0, len(symbols_data), 100):  # Process in batches of 100
+            batch_num = i // 100 + 1
             batch = symbols_data[i:i+100]
+            logger.info(f"[CodeGraph] Embedding batch {batch_num}/{total_batches} ({len(batch)} symbols)...")
             
             # Generate embeddings for batch
             texts = []
@@ -900,50 +914,20 @@ class CodeGraphService:
                 texts.append("\n".join(text_parts))
             
             try:
-                # Generate embeddings using centralized manager
-                embeddings = []
-                
-                # Debug: Check embedding_manager type
+                # Generate embeddings using batch API (single call per batch)
                 if not self.embedding_manager:
                     raise ValueError("embedding_manager is None")
-                
-                logger.debug(f"🔍 embedding_manager type: {type(self.embedding_manager)}")
-                logger.debug(f"🔍 embedding_manager has generate_embedding: {hasattr(self.embedding_manager, 'generate_embedding')}")
-                
-                if not hasattr(self.embedding_manager, 'generate_embedding'):
-                    raise ValueError(f"embedding_manager has no generate_embedding method. Type: {type(self.embedding_manager)}")
-                
-                # Check if generate_embedding is callable
-                gen_method = getattr(self.embedding_manager, 'generate_embedding', None)
-                logger.debug(f"🔍 generate_embedding type: {type(gen_method)}, callable: {callable(gen_method)}")
-                logger.debug(f"🔍 generate_embedding value (first 200 chars): {repr(gen_method)[:200]}")
-                
-                if not callable(gen_method):
-                    raise ValueError(
-                        f"embedding_manager.generate_embedding is not callable. "
-                        f"Type: {type(gen_method)}, Value: {repr(gen_method)[:200]}"
-                    )
-                
-                logger.debug(f"🔍 About to call generate_embedding for {len(texts)} texts")
-                for idx, text_content in enumerate(texts):
-                    logger.debug(f"🔍 Calling generate_embedding for text {idx+1}/{len(texts)}")
-                    embedding = await gen_method(text_content)
-                    # Ensure embedding is a list/array, not a string
-                    if isinstance(embedding, str):
-                        raise ValueError(f"Embedding returned as string instead of array for text {idx+1}")
-                    # Convert numpy array to list if needed
-                    try:
-                        import numpy as np
-                        if isinstance(embedding, np.ndarray):
-                            embedding = embedding.tolist()
-                    except ImportError:
-                        pass  # numpy not available, assume it's already a list
-                    if not isinstance(embedding, (list, tuple)):
-                        raise ValueError(f"Embedding is not a list/array: {type(embedding)}")
-                    embeddings.append(embedding)
-                    logger.debug(f"🔍 Got embedding of length {len(embedding)}, type: {type(embedding)}")
-                
-                logger.debug(f"🔍 Successfully generated {len(embeddings)} embeddings, now storing...")
+
+                embeddings = await self.embedding_manager.generate_embeddings_batch(texts, max_concurrent=10)
+
+                # Normalize: ensure all embeddings are lists
+                import numpy as np
+                for idx in range(len(embeddings)):
+                    emb = embeddings[idx]
+                    if isinstance(emb, np.ndarray):
+                        embeddings[idx] = emb.tolist()
+                    elif isinstance(emb, str):
+                        raise ValueError(f"Embedding {idx} returned as string")
                 
                 # Store symbols with embeddings
                 for j, symbol in enumerate(batch):
@@ -1003,7 +987,7 @@ class CodeGraphService:
                 logger.debug(f"🔍 Successfully committed batch of {len(batch)} symbols")
                 
             except Exception as e:
-                logger.error(f"Failed to generate embeddings for batch: {e}")
+                logger.error(f"Failed to generate embeddings for batch: {e}", exc_info=True)
                 # Store without embeddings as fallback
                 for symbol in batch:
                     self.db.execute(
@@ -1606,7 +1590,7 @@ class CodeGraphService:
             
             visited.add(current_symbol)
             
-            # Get symbol details
+            # Get symbol details — try qualified_name first, fall back to name
             symbol_info = self.db.execute(
                 text("""
                     SELECT id, symbol_type, name, qualified_name, file_path, line_number
@@ -1616,7 +1600,19 @@ class CodeGraphService:
                 """),
                 {"project_id": project_id, "symbol": current_symbol}
             ).fetchone()
-            
+
+            if not symbol_info:
+                # Fallback: match by name (user may type just "AgentFactory" not "path::AgentFactory")
+                symbol_info = self.db.execute(
+                    text("""
+                        SELECT id, symbol_type, name, qualified_name, file_path, line_number
+                        FROM codegraph_symbols
+                        WHERE project_id = :project_id AND name = :symbol
+                        LIMIT 1
+                    """),
+                    {"project_id": project_id, "symbol": current_symbol}
+                ).fetchone()
+
             if not symbol_info:
                 continue
             

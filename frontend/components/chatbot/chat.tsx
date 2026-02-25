@@ -21,6 +21,9 @@ import { useWorkspaceStore } from '@/stores/workspace-store'
 import { Canvas } from '@/components/workspace'
 import type { CodeWidgetData, DataWidgetData, DocumentWidgetData } from '@/components/widgets/types'
 
+// Resizable panels for chat + widget split
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
+
 // PRD-40: Dynamic Tool Suggestions
 import { ToolSuggestionBar } from '@/components/suggestions/ToolSuggestionBar'
 import type { SuggestionResponse } from '@/components/suggestions/types'
@@ -108,6 +111,7 @@ export function Chat({
       // PRD-38.1: Auto-create widgets when tool-data arrives
       if (dataPart.type === 'tool-data' && dataPart.data) {
         const toolData = dataPart.data
+        console.log('[WIDGET-DEBUG] tool-data keys:', Object.keys(toolData), 'has generated_document:', !!toolData.generated_document)
 
         // Create widgets for database results
         if (toolData.database_results && Array.isArray(toolData.database_results)) {
@@ -265,6 +269,30 @@ export function Chat({
             },
             metadata: {
               source: { type: 'tool', name: 'composio_execute', provider: 'gmail' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
+
+        // PRD-63: Create widget for generated documents
+        if (toolData.generated_document) {
+          const genDoc = toolData.generated_document
+          console.log('[Widget] Creating generated document widget:', genDoc.filename)
+          addWidget({
+            type: 'document',
+            title: genDoc.title || genDoc.filename || 'Generated Document',
+            data: {
+              content: genDoc.content || `*Document generated: ${genDoc.filename}*`,
+              format: 'markdown',
+              filename: genDoc.filename,
+              downloadUrl: genDoc.download_url,
+              hasFullContent: true,
+            },
+            metadata: {
+              source: { type: 'tool', name: 'generate_document', provider: 'document_generation' },
               createdAt: new Date(),
               conversationId: id,
             },
@@ -658,75 +686,83 @@ export function Chat({
     <>
       {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
       {hasWidgets && (
-        <div className="fixed top-0 left-0 z-50 flex h-screen w-screen flex-row bg-background">
-          {/* Chat Column - LEFT 400px */}
-          <div className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background border-r border-border/50">
-            <div className="flex h-full flex-col items-center justify-between">
-              {/* Messages */}
-              <div
-                ref={messagesContainerRef}
-                className="flex-1 w-full overflow-y-scroll overscroll-contain"
-                style={{ overflowAnchor: 'none' }}
-              >
-                <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6">
-                  {messages.map((message, index) => (
-                    <Message
-                      key={message.id}
-                      chatId={id}
-                      message={message}
-                      isLoading={isTyping && index === messages.length - 1}
-                      setMessages={setMessages}
-                      regenerate={regenerate}
-                      isReadonly={isReadonly}
-                      onArtifactSelect={handleArtifactSelect}
-                      onCodeSelect={handleCodeSelect}
-                      onDocumentSelect={handleDocumentSelect}
-                      onDatabaseSelect={handleDatabaseSelect}
-                    />
-                  ))}
-                  <div ref={messagesEndRef} />
+        <div className="fixed top-0 left-0 z-50 h-screen w-screen bg-background">
+          <ResizablePanelGroup direction="horizontal" className="h-full">
+            {/* Chat Column - LEFT (resizable, default 35%, min 20%) */}
+            <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
+              <div className="relative h-full bg-muted dark:bg-background border-r border-border/50 overflow-hidden">
+                <div className="flex h-full flex-col items-center justify-between min-w-0">
+                  {/* Messages */}
+                  <div
+                    ref={messagesContainerRef}
+                    className="flex-1 w-full overflow-y-scroll overflow-x-hidden overscroll-contain"
+                    style={{ overflowAnchor: 'none' }}
+                  >
+                    <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6 break-words">
+                      {messages.map((message, index) => (
+                        <Message
+                          key={message.id}
+                          chatId={id}
+                          message={message}
+                          isLoading={isTyping && index === messages.length - 1}
+                          setMessages={setMessages}
+                          regenerate={regenerate}
+                          isReadonly={isReadonly}
+                          onArtifactSelect={handleArtifactSelect}
+                          onCodeSelect={handleCodeSelect}
+                          onDocumentSelect={handleDocumentSelect}
+                          onDatabaseSelect={handleDatabaseSelect}
+                        />
+                      ))}
+                      <div ref={messagesEndRef} />
+                    </div>
+                  </div>
+
+                  {/* Input at bottom of chat column */}
+                  {!isReadonly && (
+                    <div className="relative flex w-full flex-col gap-3 px-4 pb-4">
+                      {/* PRD-40: Tool Suggestion Bar */}
+                      <ToolSuggestionBar
+                        suggestions={toolSuggestions}
+                        activeTool={activeTool}
+                        onSuggestionClick={handleSuggestionClick}
+                        onClose={() => {
+                          setActiveTool(null)
+                          setToolSuggestions([])
+                        }}
+                        isLoading={isLoadingSuggestions}
+                        hasContext={hasContextSuggestions}
+                      />
+                      <MultimodalInput
+                        chatId={id}
+                        status={status}
+                        stop={stop}
+                        sendMessage={sendMessage}
+                        selectedModelId={currentModelId}
+                        onModelChange={setCurrentModelId}
+                        selectedAgentId={selectedAgentId}
+                        onAgentChange={handleAgentChange}
+                        selectedVisibilityType={visibilityType}
+                        usage={usage}
+                        onToolIconClick={handleToolIconClick}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
+            </ResizablePanel>
 
-              {/* Input at bottom of chat column */}
-              {!isReadonly && (
-                <div className="relative flex w-full flex-col gap-3 px-4 pb-4">
-                  {/* PRD-40: Tool Suggestion Bar */}
-                  <ToolSuggestionBar
-                    suggestions={toolSuggestions}
-                    activeTool={activeTool}
-                    onSuggestionClick={handleSuggestionClick}
-                    onClose={() => {
-                      setActiveTool(null)
-                      setToolSuggestions([])
-                    }}
-                    isLoading={isLoadingSuggestions}
-                    hasContext={hasContextSuggestions}
-                  />
-                  <MultimodalInput
-                    chatId={id}
-                    status={status}
-                    stop={stop}
-                    sendMessage={sendMessage}
-                    selectedModelId={currentModelId}
-                    onModelChange={setCurrentModelId}
-                    selectedAgentId={selectedAgentId}
-                    onAgentChange={handleAgentChange}
-                    selectedVisibilityType={visibilityType}
-                    usage={usage}
-                    onToolIconClick={handleToolIconClick}
-                  />
+            <ResizableHandle withHandle />
+
+            {/* PRD-38.1: Widget Canvas - RIGHT side (resizable) */}
+            <ResizablePanel defaultSize={65} minSize={30}>
+              <div className="relative z-10 flex h-full flex-col bg-background">
+                <div className="flex-1 overflow-hidden">
+                  <Canvas width={canvasWidth} onClose={handleCloseCanvas} />
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* PRD-38.1: Widget Canvas - RIGHT side */}
-          <div className="relative z-10 flex h-full flex-1 flex-col bg-background">
-            <div className="flex-1 overflow-hidden">
-              <Canvas width={canvasWidth} onClose={handleCloseCanvas} />
-            </div>
-          </div>
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
       )}
 
@@ -737,69 +773,77 @@ export function Chat({
             initial={{ opacity: 1 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { delay: 0.4 } }}
-            className="fixed top-0 left-0 z-50 flex h-screen w-screen flex-row bg-transparent"
+            className="fixed top-0 left-0 z-50 h-screen w-screen bg-background"
           >
-            <motion.div className="fixed h-screen bg-background w-full" />
-            <div className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background">
-              <div className="flex h-full flex-col">
-                <div className="flex-1 w-full overflow-y-scroll">
-                  <div className="flex flex-col gap-4 px-4 py-4">
-                    {messages.map((message, index) => (
-                      <Message
-                        key={message.id}
-                        chatId={id}
-                        message={message}
-                        isLoading={isTyping && index === messages.length - 1}
-                        setMessages={setMessages}
-                        regenerate={regenerate}
-                        isReadonly={isReadonly}
-                        onArtifactSelect={handleArtifactSelect}
-                        onCodeSelect={handleCodeSelect}
-                        onDocumentSelect={handleDocumentSelect}
-                        onDatabaseSelect={handleDatabaseSelect}
-                      />
-                    ))}
+            <ResizablePanelGroup direction="horizontal" className="h-full">
+              <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
+                <div className="relative h-full bg-muted dark:bg-background overflow-hidden">
+                  <div className="flex h-full flex-col min-w-0">
+                    <div className="flex-1 w-full overflow-y-scroll overflow-x-hidden">
+                      <div className="flex flex-col gap-4 px-4 py-4 min-w-0 break-words">
+                        {messages.map((message, index) => (
+                          <Message
+                            key={message.id}
+                            chatId={id}
+                            message={message}
+                            isLoading={isTyping && index === messages.length - 1}
+                            setMessages={setMessages}
+                            regenerate={regenerate}
+                            isReadonly={isReadonly}
+                            onArtifactSelect={handleArtifactSelect}
+                            onCodeSelect={handleCodeSelect}
+                            onDocumentSelect={handleDocumentSelect}
+                            onDatabaseSelect={handleDatabaseSelect}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {!isReadonly && (
+                      <div className="px-4 pb-4 space-y-3">
+                        {/* PRD-40: Tool Suggestion Bar */}
+                        <ToolSuggestionBar
+                          suggestions={toolSuggestions}
+                          activeTool={activeTool}
+                          onSuggestionClick={handleSuggestionClick}
+                          onClose={() => {
+                            setActiveTool(null)
+                            setToolSuggestions([])
+                          }}
+                          isLoading={isLoadingSuggestions}
+                        />
+                        <MultimodalInput
+                          chatId={id}
+                          status={status}
+                          stop={stop}
+                          sendMessage={sendMessage}
+                          selectedModelId={currentModelId}
+                          onModelChange={setCurrentModelId}
+                          selectedAgentId={selectedAgentId}
+                          onAgentChange={handleAgentChange}
+                          selectedVisibilityType={visibilityType}
+                          usage={usage}
+                          onToolIconClick={handleToolIconClick}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
-                {!isReadonly && (
-                  <div className="px-4 pb-4 space-y-3">
-                    {/* PRD-40: Tool Suggestion Bar */}
-                    <ToolSuggestionBar
-                      suggestions={toolSuggestions}
-                      activeTool={activeTool}
-                      onSuggestionClick={handleSuggestionClick}
-                      onClose={() => {
-                        setActiveTool(null)
-                        setToolSuggestions([])
-                      }}
-                      isLoading={isLoadingSuggestions}
-                    />
-                    <MultimodalInput
-                      chatId={id}
-                      status={status}
-                      stop={stop}
-                      sendMessage={sendMessage}
-                      selectedModelId={currentModelId}
-                      onModelChange={setCurrentModelId}
-                      selectedAgentId={selectedAgentId}
-                      onAgentChange={handleAgentChange}
-                      selectedVisibilityType={visibilityType}
-                      usage={usage}
-                      onToolIconClick={handleToolIconClick}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-scroll bg-background">
-              <ArtifactViewer
-                artifact={selectedArtifact}
-                onClose={() => {
-                  setIsArtifactViewerVisible(false)
-                  setSelectedArtifact(null)
-                }}
-              />
-            </div>
+              </ResizablePanel>
+
+              <ResizableHandle withHandle />
+
+              <ResizablePanel defaultSize={65} minSize={30}>
+                <div className="flex-1 h-full overflow-y-scroll bg-background">
+                  <ArtifactViewer
+                    artifact={selectedArtifact}
+                    onClose={() => {
+                      setIsArtifactViewerVisible(false)
+                      setSelectedArtifact(null)
+                    }}
+                  />
+                </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
           </motion.div>
         )}
       </AnimatePresence>

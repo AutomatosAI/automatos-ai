@@ -91,6 +91,12 @@ ALLOWED_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
     "text/plain": [".txt", ".md", ".csv"],
     "text/markdown": [".md"],
+    "text/html": [".md", ".html"],  # python-magic often misdetects .md with HTML tags as text/html
+    "text/x-c": [".md"],            # magic misdetects some markdown as C source
+    "text/x-c++": [".md"],          # magic misdetects some markdown as C++ source
+    "text/x-python": [".md", ".py"],# magic misdetects some markdown as Python
+    "text/x-java": [".md"],         # magic misdetects some markdown as Java
+    "text/x-script.python": [".md"],
     "text/csv": [".csv"],
     "application/json": [".json"],
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
@@ -125,6 +131,7 @@ async def handle_request(
         file_extension = Path(file.filename).suffix.lower()
 
         if detected_mime not in ALLOWED_MIME_TYPES:
+            logger.warning(f"Upload rejected: {file.filename} — detected MIME '{detected_mime}', extension '{file_extension}'")
             raise HTTPException(
                 status_code=400,
                 detail=f"File type not allowed. Detected MIME type: {detected_mime}"
@@ -133,6 +140,7 @@ async def handle_request(
         # Verify extension matches detected MIME type
         allowed_extensions = ALLOWED_MIME_TYPES[detected_mime]
         if file_extension not in allowed_extensions:
+            logger.warning(f"Upload rejected: {file.filename} — extension '{file_extension}' not in {allowed_extensions} for MIME '{detected_mime}'")
             raise HTTPException(
                 status_code=400,
                 detail=f"File extension '{file_extension}' does not match detected content type '{detected_mime}'. "
@@ -787,83 +795,72 @@ async def semantic_search(
         # Generate query embedding using centralized embedding manager
         # NOTE: import directly from module for compatibility across deployments
         from core.llm.embedding_manager import create_embedding_manager
-        import asyncio
-        
+
         embedding_manager = create_embedding_manager()
         logger.info(f"Generating embedding for query: {query[:50]}...")
         
         # Generate embedding asynchronously
         query_embedding = await embedding_manager.generate_embedding(query)
         
-        logger.info(f"Embedding generated, performing vector search...")
-        
-        # Build pgvector similarity search query
-        # Using <=> operator for cosine distance (pgvector)
-        # Similarity = 1 - distance
-        
-        doc_filter = ""
-        if document_ids:
-            doc_filter = "AND d.id = ANY(:document_ids)"
-        
-        # Format embedding as PostgreSQL array string for pgvector
-        # Pass as parameterized value to avoid SQL injection
-        embedding_str = '[' + ','.join(str(float(v)) for v in query_embedding) + ']'
+        logger.info(f"Embedding generated (dim={len(query_embedding)}), performing vector search...")
 
-        similarity_query = text("""
-            SELECT
-                dc.id as chunk_id,
-                dc.document_id,
-                dc.chunk_index,
-                dc.content,
-                dc.metadata,
-                d.filename,
-                d.file_type,
-                d.file_size,
-                d.upload_date,
-                1 - (dc.embedding <=> cast(:embedding as vector)) as similarity
-            FROM document_chunks dc
-            JOIN documents d ON dc.document_id = d.id
-            WHERE dc.embedding IS NOT NULL
-                AND d.workspace_id = :workspace_id
-                {doc_filter}
-                AND (1 - (dc.embedding <=> cast(:embedding as vector))) >= :min_similarity
-            ORDER BY dc.embedding <=> cast(:embedding as vector)
-            LIMIT :limit
-        """.format(doc_filter=doc_filter))
+        # Search via S3 Vectors (embeddings stored there, not in PostgreSQL)
+        from config import config as app_config
+        from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
 
-        params = {
-            "embedding": embedding_str,
-            "min_similarity": min_similarity,
-            "limit": limit,
-            "workspace_id": ctx.workspace_id
-        }
-        
-        if document_ids:
-            params["document_ids"] = document_ids
-        
-        result = db.execute(similarity_query, params)
-        rows = result.fetchall()
-        
-        # Group results by document so we can surface full files
+        s3_backend = S3VectorsBackend(workspace_id=str(ctx.workspace_id))
+        await s3_backend.initialize()
+
+        embedding_list = query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding)
+        s3_results = s3_backend.search(
+            query_embedding=embedding_list,
+            limit=limit * 3,  # Over-fetch to allow grouping by document
+            min_score=min_similarity,
+        )
+
+        logger.info(f"S3 Vectors returned {len(s3_results)} chunks")
+
+        # Map S3 results back to document metadata from PostgreSQL
+        # S3 stores: key, score, content (chunk_text), file_name, chunk_index, metadata
+        # We need: document_id, filename, file_type, file_size, upload_date from DB
         grouped_results: Dict[int, Dict[str, Any]] = {}
         doc_order: List[int] = []
 
-        for row in rows:
-            doc_id = row.document_id
-            similarity = float(row.similarity)
+        for s3_hit in s3_results:
+            similarity = s3_hit.get("score", 0.0)
+            file_name = s3_hit.get("file_name", "")
+            chunk_text = s3_hit.get("content", "")
+            chunk_index = s3_hit.get("chunk_index", 0)
+
+            # Look up document in PostgreSQL by filename + workspace
+            doc_row = db.execute(text("""
+                SELECT id, filename, file_type, file_size, upload_date
+                FROM documents
+                WHERE workspace_id = :workspace_id AND filename = :filename
+                LIMIT 1
+            """), {"workspace_id": ctx.workspace_id, "filename": file_name}).fetchone()
+
+            if not doc_row:
+                continue
+
+            doc_id = doc_row.id
+
+            # Optional: filter by document_ids if provided
+            if document_ids and doc_id not in document_ids:
+                continue
 
             if doc_id not in grouped_results:
                 grouped_results[doc_id] = {
                     "document_id": doc_id,
                     "best_similarity": similarity,
-                    "best_excerpt": row.content,
-                    "best_chunk_index": row.chunk_index,
-                    "metadata": row.metadata if row.metadata else {},
+                    "best_excerpt": chunk_text,
+                    "best_chunk_index": chunk_index,
+                    "metadata": {},
                     "source": {
-                        "filename": row.filename,
-                        "file_type": row.file_type,
-                        "file_size": row.file_size,
-                        "upload_date": row.upload_date.isoformat() if row.upload_date else None,
+                        "filename": doc_row.filename,
+                        "file_type": doc_row.file_type,
+                        "file_size": doc_row.file_size,
+                        "upload_date": doc_row.upload_date.isoformat() if doc_row.upload_date else None,
                     },
                 }
                 doc_order.append(doc_id)
@@ -871,8 +868,8 @@ async def semantic_search(
                 existing = grouped_results[doc_id]
                 if similarity > existing["best_similarity"]:
                     existing["best_similarity"] = similarity
-                    existing["best_excerpt"] = row.content
-                    existing["best_chunk_index"] = row.chunk_index
+                    existing["best_excerpt"] = chunk_text
+                    existing["best_chunk_index"] = chunk_index
 
         # Fetch limited previews + stats for surfaced docs
         # Collect doc_ids and calculate preview ranges upfront
@@ -1229,12 +1226,13 @@ async def rag_retrieve(
             **config_kwargs
         )
         
-        rag_service = RAGService(config)
+        rag_service = RAGService(config, workspace_id=str(ctx.workspace_id) if ctx.workspace_id else None)
         result = await rag_service.retrieve(
             query=query,
             max_chunks=max_chunks,
             max_tokens=max_tokens,  # Pass through (can be None)
-            diversity=diversity  # Pass through (can be None)
+            diversity=diversity,  # Pass through (can be None)
+            workspace_id=str(ctx.workspace_id) if ctx.workspace_id else None
         )
         
         execution_time_ms = int((time.time() - start_time) * 1000)
@@ -1560,23 +1558,117 @@ async def reprocess_all_documents(
     Runs in background - check status via /status endpoint.
     """
     try:
-        from modules.rag import get_rag_service
-        
-        # Run in background
-        async def run_reprocessing():
-            rag_service = get_rag_service()
-            result = await rag_service.reprocess_all_documents()
-            logger.info(f"Batch re-processing complete: {result}")
-        
+        workspace_id = str(ctx.workspace_id)
+
+        # Count documents to reprocess
+        doc_count = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id
+        ).count()
+
+        if doc_count == 0:
+            return {"status": "skipped", "message": "No documents found to reprocess"}
+
+        # Run in background — iterate documents and reprocess each one
         import asyncio
+
+        async def run_reprocessing():
+            """Reprocess all documents using DocumentManager."""
+            from sqlalchemy import text as sql_text
+
+            doc_manager = get_document_manager(workspace_id)
+            conn = None
+            succeeded = 0
+            failed = 0
+
+            try:
+                import psycopg2
+                conn = psycopg2.connect(**db_config)
+                cursor = conn.cursor()
+
+                # Get all documents for this workspace
+                cursor.execute(
+                    "SELECT id, file_path, filename, file_type FROM documents "
+                    "WHERE workspace_id = %s ORDER BY id",
+                    (workspace_id,)
+                )
+                docs = cursor.fetchall()
+                cursor.close()
+                conn.close()
+                conn = None
+
+                for doc_id, file_path, filename, file_type in docs:
+                    try:
+                        if not file_path:
+                            logger.warning(f"Document {doc_id} has no file_path, skipping")
+                            failed += 1
+                            continue
+
+                        # For S3-stored files, download to temp
+                        local_path = file_path
+                        tmp_path = None
+                        if file_path.startswith("s3://"):
+                            import boto3
+                            s3_client = boto3.client(
+                                's3',
+                                region_name=os.getenv('AWS_REGION', 'us-east-1'),
+                                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+                            )
+                            # Parse s3://bucket/key
+                            parts = file_path.replace("s3://", "").split("/", 1)
+                            bucket, key = parts[0], parts[1]
+                            import tempfile
+                            suffix = os.path.splitext(filename)[1] if filename else ""
+                            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                            tmp.close()
+                            tmp_path = tmp.name
+                            s3_client.download_file(bucket, key, tmp_path)
+                            local_path = tmp_path
+
+                        if not os.path.exists(local_path):
+                            logger.warning(f"Document {doc_id} file not found: {local_path}")
+                            failed += 1
+                            continue
+
+                        # Delete existing chunks (DB + S3 vectors)
+                        conn2 = psycopg2.connect(**db_config)
+                        c2 = conn2.cursor()
+                        c2.execute("DELETE FROM document_chunks WHERE document_id = %s", (doc_id,))
+                        conn2.commit()
+                        c2.close()
+                        conn2.close()
+
+                        # Reprocess
+                        from modules.rag.ingestion.manager import DocumentType
+                        ft = doc_manager.processor.detect_file_type(local_path)
+                        await doc_manager._process_document(doc_id, local_path, ft)
+                        succeeded += 1
+                        logger.info(f"Reprocessed document {doc_id}/{len(docs)}: {filename}")
+
+                        # Clean up temp file
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+
+                    except Exception as e:
+                        logger.error(f"Failed to reprocess document {doc_id}: {e}", exc_info=True)
+                        failed += 1
+
+                logger.info(
+                    f"Batch reprocessing complete: {succeeded} succeeded, "
+                    f"{failed} failed out of {len(docs)} total"
+                )
+
+            except Exception as e:
+                logger.error(f"Batch reprocessing error: {e}", exc_info=True)
+
         background_tasks.add_task(lambda: asyncio.run(run_reprocessing()))
-        
+
         return {
             "status": "started",
-            "message": "Re-processing started in background. This may take several minutes.",
-            "note": "Check document status via GET /api/documents/ to monitor progress"
+            "message": f"Re-processing {doc_count} documents in background.",
+            "note": "Check progress via GET /api/documents/reprocess-status"
         }
-        
+
     except Exception as e:
         logger.error(f"Error starting batch re-processing: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

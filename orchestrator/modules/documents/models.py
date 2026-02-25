@@ -15,3 +15,4 @@ class GeneratedDocument:
     size: int  # bytes
     download_url: Optional[str] = None
     preview_url: Optional[str] = None
+    content: Optional[str] = None  # Markdown content for live widget display

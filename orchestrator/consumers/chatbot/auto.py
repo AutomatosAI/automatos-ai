@@ -1,28 +1,31 @@
 """
-Auto Brain — The Intelligent Core of Automatos
-================================================
+Auto Brain — Thin Gate Before the Universal Router
+====================================================
 
-Auto is the central intelligence that receives every message and decides:
-1. How complex is this task? (Atom → Organism scale)
-2. Can I handle it directly, or should I delegate to a sub-agent?
-3. Which agent has the right tools for this job?
+Auto receives every message and makes ONE decision:
+  - Is this trivial (greeting, platform meta-query, memory recall)?
+    → Handle directly with the orchestrator LLM.
+  - Everything else → DELEGATE to the Universal Router.
 
-Auto runs on a premium reasoning model (the workspace's orchestrator LLM)
-and delegates 80-90% of work to cheaper sub-agents.
+The router has semantic similarity (Tier 2.5) and LLM classification (Tier 3)
+which understand agent descriptions, tags, personas, and tools far better than
+keyword maps ever could.
 
-Usage:
-    brain = AutoBrain(db, workspace_id)
-    assessment = await brain.assess(user_message)
-    # assessment.complexity -> "atom" | "molecule" | "cell" | "organ" | "organism"
-    # assessment.action -> "respond" | "delegate" | "workflow"
-    # assessment.target_agent_id -> int | None
+Previous design had hardcoded _TOOL_KEYWORDS and _INTERNAL_TOOL_KEYWORDS that
+tried to match user messages to tools via substring matching.  That approach:
+  - Missed natural language variations ("create an image" ≠ "create image")
+  - Treated any short 1-2 word message as a greeting (atom), swallowing
+    legitimate requests like "send email", "find flights", "draw this"
+  - Prevented the LLM-powered router from ever seeing most messages
+
+Now: AutoBrain is intentionally narrow.  When in doubt, DELEGATE.
 """
 
 import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -61,58 +64,64 @@ class ComplexityAssessment:
     confidence: float = 0.0
 
 
-@dataclass
-class AgentCapability:
-    """Summary of an agent's capabilities for matching."""
-    agent_id: int
-    name: str
-    description: str
-    app_names: List[str]        # e.g. ["GMAIL", "SLACK", "GITHUB"]
-    internal_tools: List[str]   # e.g. ["search_knowledge", "query_database"]
-    tags: List[str]
-
-
 # ---------------------------------------------------------------------------
-# Heuristic patterns for fast complexity classification
+# Patterns — intentionally narrow.  When in doubt, DON'T match.
 # ---------------------------------------------------------------------------
 
+# Greetings and chitchat — must be the ENTIRE message (with optional punctuation).
+# "hello" → atom.  "hello can you create an image" → NOT atom.
 _ATOM_PATTERNS = [
-    r"^(hi|hello|hey|howdy|yo|thanks|thank you|bye|goodbye|ok|okay|yes|no|sure|cool|nice|great)\b",
-    r"^(good (morning|afternoon|evening))\b",
-    r"^(what|who) (are|is) (you|automatos|auto)\b",
-    r"^(how are you|what can you do)\b",
+    r"^(hi|hello|hey|howdy|yo|sup)[\s!?.,:]*$",
+    r"^(thanks|thank you|thx|ty|cheers)[\s!?.,:]*$",
+    r"^(bye|goodbye|see ya|later|cya)[\s!?.,:]*$",
+    r"^(ok|okay|yes|no|sure|cool|nice|great|awesome|perfect|got it|alright)[\s!?.,:]*$",
+    r"^(good\s+(morning|afternoon|evening|night))[\s!?.,:]*$",
+    r"^(what|who)\s+(are|is)\s+(you|automatos|auto)[\s!?.]*$",
+    r"^how\s+are\s+you[\s!?.]*$",
+    r"^what\s+can\s+you\s+do[\s!?.]*$",
 ]
 
-_TOOL_KEYWORDS = {
-    "GMAIL": ["email", "mail", "inbox", "gmail", "send email", "read email", "compose"],
-    "SLACK": ["slack", "channel", "dm", "direct message", "post message"],
-    "GITHUB": ["github", "repo", "repository", "pull request", "pr", "issue", "commit"],
-    "GOOGLE_CALENDAR": ["calendar", "meeting", "schedule", "event", "appointment"],
-    "JIRA": ["jira", "ticket", "sprint", "backlog", "story", "epic"],
-    "GOOGLE_DRIVE": ["drive", "google doc", "spreadsheet", "google sheet"],
-    "NOTION": ["notion", "page", "database"],
-    "TELEGRAM": ["telegram"],
-    "WHATSAPP": ["whatsapp"],
-    "TAVILY": ["search the web", "web search", "look up online", "tavily"],
+# Platform self-awareness queries — meta-questions ABOUT the platform itself.
+# These are handled by Auto's internal tools, not specialized agents.
+# Patterns are intentionally specific to avoid false positives.
+_PLATFORM_KEYWORDS = {
+    "platform_list_agents": [
+        "list my agents", "what agents do i have", "show my agents",
+        "how many agents do i have", "show me my agents",
+    ],
+    "platform_list_recipes": [
+        "list my recipes", "what recipes do i have", "show my recipes",
+        "list my workflows", "show my workflows", "how many recipes",
+        "how many workflows",
+    ],
+    "platform_get_llm_usage": [
+        "token usage", "llm usage", "how much have i spent",
+        "my api cost", "my token spend", "how many tokens",
+        "show my usage", "show my spending",
+    ],
+    "platform_list_documents": [
+        "list my documents", "what documents do i have",
+        "show my documents", "how many documents do i have",
+        "what files have i uploaded", "show my uploaded files",
+    ],
+    "platform_get_workspace_info": [
+        "workspace info", "my workspace info",
+        "tell me about my workspace", "show workspace details",
+    ],
+    "platform_list_connected_apps": [
+        "what apps are connected", "show my integrations",
+        "list my connected apps", "list my integrations",
+        "what integrations do i have",
+    ],
 }
-
-# Internal tool keyword mapping
-_INTERNAL_TOOL_KEYWORDS = {
-    "search_knowledge": ["search", "find doc", "knowledge", "documentation", "guide"],
-    "query_database": ["database", "query", "sql", "how many", "count", "analytics"],
-    "smart_query_database": ["data", "metrics", "statistics", "report"],
-    "generate_document": ["create report", "generate document", "write report", "export"],
-    "search_codebase": ["code", "codebase", "implementation", "function"],
-}
-
-_MULTI_STEP_SIGNALS = [
-    r"\b(and then|after that|next|also|additionally)\b",
-    r"\b(first|second|third)\b.*\b(then|next|after)\b",
-    r"\bstep\s*\d\b",
-]
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]
-_multi_step_re = [re.compile(p, re.IGNORECASE) for p in _MULTI_STEP_SIGNALS]
+
+_MEMORY_PATTERN = re.compile(
+    r"\b(do you remember|recall when|my name is|last time we|"
+    r"previously we discussed|earlier (i|we|you) said|what did (i|we|you) (say|tell|ask))\b",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -121,16 +130,17 @@ _multi_step_re = [re.compile(p, re.IGNORECASE) for p in _MULTI_STEP_SIGNALS]
 
 class AutoBrain:
     """
-    The intelligent core of Automatos.
+    Thin gate before the Universal Router.
 
-    Assesses task complexity, selects the right agent, and decides
-    whether to respond directly or delegate.
+    Only short-circuits for messages that clearly DON'T need a specialized
+    agent: greetings, platform meta-queries, and memory recalls.
+
+    Everything else → DELEGATE → Universal Router (semantic + LLM).
     """
 
     def __init__(self, db: Session, workspace_id: str):
         self._db = db
         self._workspace_id = workspace_id
-        self._agents_cache: Optional[List[AgentCapability]] = None
 
     async def assess(
         self,
@@ -138,17 +148,10 @@ class AutoBrain:
         conversation_length: int = 0,
     ) -> ComplexityAssessment:
         """
-        Assess a user message and decide what Auto should do.
+        Decide: handle directly (RESPOND) or send to router (DELEGATE)?
 
-        Fast path: heuristic classification (~0ms).
-        Slow path: LLM classification for ambiguous cases (future).
-
-        Args:
-            message: The user's latest message text.
-            conversation_length: Number of messages in conversation so far.
-
-        Returns:
-            ComplexityAssessment with complexity, action, and target agent.
+        RESPOND = Auto handles with orchestrator LLM (greetings, platform, memory).
+        DELEGATE = Universal Router picks the best specialized agent.
         """
         if not message or not message.strip():
             return ComplexityAssessment(
@@ -160,273 +163,81 @@ class AutoBrain:
 
         msg_lower = message.lower().strip()
 
-        # --- Tier 1: Atom detection (fast, high confidence) ---
+        # --- Greetings & chitchat → Auto responds directly ---
         if self._is_atom(msg_lower):
+            logger.info("[AutoBrain] Atom detected: '%s'", msg_lower[:50])
             return ComplexityAssessment(
                 complexity=Complexity.ATOM,
                 action=Action.RESPOND,
-                reasoning="Simple greeting or conversational message",
+                reasoning="Greeting or chitchat",
                 confidence=0.95,
             )
 
-        # --- Tier 2: Tool & agent matching ---
-        matched_external = self._match_external_tools(msg_lower)
-        matched_internal = self._match_internal_tools(msg_lower)
-        all_matched = matched_external + matched_internal
-        is_multi_step = self._is_multi_step(msg_lower)
-
-        # Multi-step with multiple tool domains → Organ (workflow candidate)
-        if is_multi_step and len(set(matched_external)) >= 2:
-            best_agent = await self._find_best_agent(matched_external)
+        # --- Platform self-awareness → Auto responds directly ---
+        platform_tool = self._match_platform_query(msg_lower)
+        if platform_tool:
+            logger.info("[AutoBrain] Platform query: %s", platform_tool)
             return ComplexityAssessment(
-                complexity=Complexity.ORGAN,
-                action=Action.WORKFLOW if len(matched_external) >= 3 else Action.DELEGATE,
-                reasoning=f"Multi-step task spanning {', '.join(set(matched_external))}",
-                target_agent_id=best_agent.agent_id if best_agent else None,
-                target_agent_name=best_agent.name if best_agent else None,
-                matched_tools=list(set(matched_external)),
-                confidence=0.80,
+                complexity=Complexity.MOLECULE,
+                action=Action.RESPOND,
+                reasoning=f"Platform query ({platform_tool})",
+                matched_tools=[platform_tool],
+                confidence=0.90,
             )
 
-        # Single tool domain → Molecule (delegate to agent with that tool)
-        if matched_external:
-            best_agent = await self._find_best_agent(matched_external)
-            complexity = Complexity.CELL if is_multi_step else Complexity.MOLECULE
-            return ComplexityAssessment(
-                complexity=complexity,
-                action=Action.DELEGATE,
-                reasoning=f"Task requires {', '.join(set(matched_external))} tools",
-                target_agent_id=best_agent.agent_id if best_agent else None,
-                target_agent_name=best_agent.name if best_agent else None,
-                matched_tools=list(set(matched_external)),
-                confidence=0.85,
-            )
-
-        # Internal tools only → Molecule (agent can handle with internal tools)
-        if matched_internal:
-            complexity = Complexity.CELL if is_multi_step else Complexity.MOLECULE
-            return ComplexityAssessment(
-                complexity=complexity,
-                action=Action.DELEGATE,
-                reasoning=f"Task requires internal tools: {', '.join(set(matched_internal))}",
-                matched_tools=list(set(matched_internal)),
-                confidence=0.80,
-            )
-
-        # Long/complex query with no clear tool match → Cell (needs reasoning)
-        if len(message) > 200 or is_multi_step:
-            return ComplexityAssessment(
-                complexity=Complexity.CELL,
-                action=Action.DELEGATE,
-                reasoning="Complex query requiring reasoning and context",
-                confidence=0.70,
-            )
-
-        # Memory-related → Cell (needs context)
-        if re.search(r"\b(remember|my name|last time|previously|earlier|what did)\b", msg_lower):
+        # --- Memory recall → Auto responds directly ---
+        if self._is_memory_recall(msg_lower):
+            logger.info("[AutoBrain] Memory recall detected")
             return ComplexityAssessment(
                 complexity=Complexity.CELL,
                 action=Action.RESPOND,
-                reasoning="Memory recall — Auto handles with Mem0 context",
+                reasoning="Memory recall - Auto handles with context",
                 confidence=0.85,
             )
 
-        # Default → Atom (conversational, let Auto respond)
+        # --- Everything else → DELEGATE to Universal Router ---
+        # The router has:
+        #   Tier 2.5 — Semantic similarity (understands agent descriptions)
+        #   Tier 3   — LLM classification (sees all agents + tools + descriptions)
+        # Both are far more capable than keyword matching.
+        logger.info("[AutoBrain] Delegating to router: '%s'", msg_lower[:80])
         return ComplexityAssessment(
-            complexity=Complexity.ATOM,
-            action=Action.RESPOND,
-            reasoning="General conversation — Auto responds directly",
+            complexity=Complexity.MOLECULE,
+            action=Action.DELEGATE,
+            reasoning="Delegating to router for agent selection",
             confidence=0.70,
         )
 
     # ------------------------------------------------------------------
-    # Agent selection — find the best agent for the matched tools
+    # Pattern matchers — intentionally narrow
     # ------------------------------------------------------------------
 
-    async def _find_best_agent(
-        self, required_tools: List[str]
-    ) -> Optional[AgentCapability]:
+    @staticmethod
+    def _is_atom(msg_lower: str) -> bool:
+        """Is this a standalone greeting or chitchat that needs no agent?
+
+        Only matches complete messages like "hi", "thanks!", "ok".
+        Does NOT match "hi can you create an image" or "ok now send the email".
         """
-        Find the workspace agent with the best tool coverage for the task.
-
-        Scoring:
-        1. Primary: how many required tools does this agent have?
-        2. Tiebreaker: among equal scores, prefer the agent with MORE total
-           external apps (a "Communication" agent with GMAIL+SLACK+GCAL
-           should beat a "Research" agent that happens to also have GMAIL).
-        """
-        agents = self._get_workspace_agents()
-        if not agents:
-            return None
-
-        required_set = {t.upper() for t in required_tools}
-        best: Optional[AgentCapability] = None
-        best_score = 0
-        best_total_apps = 0
-
-        for agent in agents:
-            agent_apps = {a.upper() for a in agent.app_names}
-            overlap = required_set & agent_apps
-            score = len(overlap)
-            total_apps = len(agent_apps)
-
-            if score > best_score or (score == best_score and score > 0 and total_apps > best_total_apps):
-                best_score = score
-                best_total_apps = total_apps
-                best = agent
-
-        if best and best_score > 0:
-            logger.info(
-                "[AutoBrain] Best agent for %s: %s (id=%d, score=%d/%d, total_apps=%d)",
-                required_tools, best.name, best.agent_id,
-                best_score, len(required_set), best_total_apps,
-            )
-            return best
-
-        return None
-
-    def select_best_agent_id(self, message: str) -> Optional[int]:
-        """
-        Synchronous convenience method for quick agent selection.
-
-        Used by the chat API when UniversalRouter returns no match.
-        Finds the agent whose tools best match the user's request.
-
-        Tiebreaker: agent with more total external apps wins (more specialized).
-        """
-        msg_lower = message.lower().strip()
-        matched = self._match_external_tools(msg_lower)
-        if not matched:
-            return None
-
-        agents = self._get_workspace_agents()
-        if not agents:
-            return None
-
-        required_set = {t.upper() for t in matched}
-        best_id: Optional[int] = None
-        best_score = 0
-        best_total_apps = 0
-
-        for agent in agents:
-            agent_apps = {a.upper() for a in agent.app_names}
-            score = len(required_set & agent_apps)
-            total_apps = len(agent_apps)
-
-            if score > best_score or (score == best_score and score > 0 and total_apps > best_total_apps):
-                best_score = score
-                best_total_apps = total_apps
-                best_id = agent.agent_id
-
-        return best_id if best_score > 0 else None
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _is_atom(self, msg_lower: str) -> bool:
-        """Fast check: is this a simple Atom-level message?"""
-        # Very short messages are almost always atoms
-        if len(msg_lower) < 15:
-            for pattern in _atom_re:
-                if pattern.match(msg_lower):
-                    return True
-            # Single word/emoji
-            if len(msg_lower.split()) <= 2:
+        for pattern in _atom_re:
+            if pattern.match(msg_lower):
                 return True
         return False
 
-    def _match_external_tools(self, msg_lower: str) -> List[str]:
-        """Match user message against external tool keywords."""
-        matched = []
-        for tool_name, keywords in _TOOL_KEYWORDS.items():
-            for kw in keywords:
-                if kw in msg_lower:
-                    matched.append(tool_name)
-                    break
-        return matched
+    @staticmethod
+    def _match_platform_query(msg_lower: str) -> Optional[str]:
+        """Match platform self-awareness queries (list agents, usage, etc.).
 
-    def _match_internal_tools(self, msg_lower: str) -> List[str]:
-        """Match user message against internal tool keywords."""
-        matched = []
-        for tool_name, keywords in _INTERNAL_TOOL_KEYWORDS.items():
-            for kw in keywords:
-                if kw in msg_lower:
-                    matched.append(tool_name)
-                    break
-        return matched
+        Only matches specific phrases about the platform itself, not general
+        requests that happen to mention "agents" or "documents".
+        """
+        for tool_name, phrases in _PLATFORM_KEYWORDS.items():
+            for phrase in phrases:
+                if phrase in msg_lower:
+                    return tool_name
+        return None
 
-    def _is_multi_step(self, msg_lower: str) -> bool:
-        """Detect multi-step requests."""
-        for pattern in _multi_step_re:
-            if pattern.search(msg_lower):
-                return True
-        # Multiple action verbs
-        verbs = ["create", "find", "search", "send", "write", "read",
-                 "check", "list", "get", "post", "update", "delete",
-                 "generate", "summarize", "analyze", "compare"]
-        count = sum(1 for v in verbs if v in msg_lower)
-        return count >= 3
-
-    def _get_workspace_agents(self) -> List[AgentCapability]:
-        """Load and cache workspace agents with their tool assignments."""
-        if self._agents_cache is not None:
-            return self._agents_cache
-
-        try:
-            from core.models.core import Agent
-            from core.models.composio_cache import AgentAppAssignment
-
-            # Get active agents in this workspace
-            agents = (
-                self._db.query(Agent)
-                .filter(
-                    Agent.workspace_id == self._workspace_id,
-                    Agent.status == "active",
-                )
-                .all()
-            )
-
-            result = []
-            for agent in agents:
-                # Get app assignments
-                assignments = (
-                    self._db.query(AgentAppAssignment.app_name, AgentAppAssignment.app_type)
-                    .filter(
-                        AgentAppAssignment.agent_id == agent.id,
-                        AgentAppAssignment.is_active == True,  # noqa: E712
-                    )
-                    .all()
-                )
-
-                external_apps = [
-                    (a.app_name or "").upper()
-                    for a in assignments
-                    if a.app_type == "EXTERNAL" and a.app_name
-                ]
-                internal_tools = [
-                    (a.app_name or "").lower()
-                    for a in assignments
-                    if a.app_type == "INTERNAL" and a.app_name
-                ]
-
-                result.append(AgentCapability(
-                    agent_id=agent.id,
-                    name=agent.name,
-                    description=agent.description or "",
-                    app_names=external_apps,
-                    internal_tools=internal_tools,
-                    tags=agent.tags or [],
-                ))
-
-            self._agents_cache = result
-            logger.info(
-                "[AutoBrain] Loaded %d agents for workspace %s",
-                len(result), str(self._workspace_id)[:8],
-            )
-            return result
-
-        except Exception as exc:
-            logger.warning("[AutoBrain] Failed to load agents: %s", exc)
-            self._agents_cache = []
-            return []
+    @staticmethod
+    def _is_memory_recall(msg_lower: str) -> bool:
+        """Is this specifically asking about past conversations/memory?"""
+        return bool(_MEMORY_PATTERN.search(msg_lower))

@@ -79,8 +79,24 @@ class SmartIntentClassifier:
         r"\bhow many\b", r"\bcount\b", r"\btotal\b", r"\bstatistics\b",
         r"\bmetrics\b", r"\banalytics\b", r"\breport\b", r"\btrends?\b",
         r"\bquery\b.*\b(database|db|data)\b", r"\bsql\b",
-        r"\blist (all|the)\b", r"\bshow (me )?(all|the)\b.*\b(agent|workflow|user)\b",
-        r"\bfrom (the )?database\b", r"\bin (the )?database\b"
+        r"\blist (all|the|my)\b", r"\bshow (me )?(all|the|my)\b.*\b(agent|workflow|user|recipe)\b",
+        r"\bfrom (the )?database\b", r"\bin (the )?database\b",
+        # PRD-64: Platform self-awareness queries
+        r"\bmy agents?\b", r"\bmy recipes?\b", r"\bmy workflows?\b",
+        r"\busage\b", r"\bcosts?\b", r"\btoken (usage|costs?|spend)\b",
+        r"\bconnected apps?\b", r"\bmy documents?\b",
+        # PRD-64: Broader platform entity queries (catch "what agents do I have?" etc.)
+        r"\b(what|which|show|list|get|display|tell)\b.*\bagents?\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\brecipes?\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bworkflows?\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bdocuments?\b.*\b(uploaded|have|stored|exist)\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bworkspace\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bintegrations?\b",
+        r"\b(what|which|show|list|get|display|tell)\b.*\bconnected\b",
+        r"\bagents?\b.*\b(do i have|exist|available|set up|configured|running)\b",
+        r"\brecipes?\b.*\b(do i have|exist|available|set up|configured|running)\b",
+        r"\bmemory\b.*\b(stats?|stored|count|how many)\b",
+        r"\bhow much\b.*\b(spend|cost|spent|spending)\b",
     ]
 
     # Search patterns - need knowledge base tools
@@ -108,7 +124,10 @@ class SmartIntentClassifier:
         r"\bgenerate\b.*\b(report|analysis|summary|document|pdf|invoice)\b",
         r"\bmake\b.*\b(a|me|the)\b.*\b(report|document|pdf|spreadsheet)\b",
         r"\bexport\b.*\b(as|to)\b",
-        r"\bsave\b.*\b(as|to)\b"
+        r"\bsave\b.*\b(as|to)\b",
+        # PRD-64: Platform creation actions
+        r"\bcreate\b.*\b(agent|recipe|workflow)\b",
+        r"\bmake\b.*\b(agent|recipe|workflow)\b",
     ]
 
     # Chitchat/Opinion patterns - NO tools needed
@@ -194,18 +213,37 @@ class SmartIntentClassifier:
 
         # 4. Check for data/analytics queries
         if self._matches_patterns(query, self._data_re):
+            suggested = ["smart_query_database", "query_database"]
+            # PRD-64: Suggest platform actions for platform-specific queries
+            suggested += self._get_platform_tool_hints(query_lower)
             return IntentResult(
                 primary_intent=Intent.DATA_QUERY,
                 confidence=0.85,
                 requires_tools=True,
                 requires_memory=False,
-                suggested_tools=["smart_query_database", "query_database"],
+                suggested_tools=suggested,
                 reasoning="Data/analytics query detected",
                 is_simple=False
             )
 
-        # 5. Check for document search
-        if self._matches_patterns(query, self._search_re):
+        # 5-7. Check for compound intents BEFORE returning single intents.
+        # "Search docs and create a PDF" is MULTI_STEP, not just SEARCH.
+        is_search = self._matches_patterns(query, self._search_re)
+        is_creation = self._matches_patterns(query, self._creation_re)
+        is_external = self._matches_patterns(query, self._external_re)
+
+        if is_search and is_creation:
+            return IntentResult(
+                primary_intent=Intent.MULTI_STEP,
+                confidence=0.9,
+                requires_tools=True,
+                requires_memory=False,
+                suggested_tools=["search_knowledge", "generate_document"],
+                reasoning="Multi-step: search knowledge then generate document",
+                is_simple=False
+            )
+
+        if is_search:
             return IntentResult(
                 primary_intent=Intent.SEARCH,
                 confidence=0.85,
@@ -216,10 +254,7 @@ class SmartIntentClassifier:
                 is_simple=False
             )
 
-        # 6 & 7. Check for external actions AND creation — if BOTH match, it's multi-step
-        is_external = self._matches_patterns(query, self._external_re)
-        is_creation = self._matches_patterns(query, self._creation_re)
-
+        # External + creation combo (already have is_external, is_creation from above)
         if is_external and is_creation:
             return IntentResult(
                 primary_intent=Intent.MULTI_STEP,
@@ -243,12 +278,14 @@ class SmartIntentClassifier:
             )
 
         if is_creation:
+            suggested = ["generate_document", "write_file"]
+            suggested += self._get_platform_tool_hints(query_lower)
             return IntentResult(
                 primary_intent=Intent.CREATION,
                 confidence=0.8,
                 requires_tools=True,
                 requires_memory=False,
-                suggested_tools=["generate_document", "write_file"],
+                suggested_tools=suggested,
                 reasoning="Content creation requested",
                 is_simple=False
             )
@@ -297,6 +334,40 @@ class SmartIntentClassifier:
             if pattern.search(query):
                 return True
         return False
+
+    def _get_platform_tool_hints(self, query_lower: str) -> List[str]:
+        """PRD-64: Return platform action tool hints based on query keywords."""
+        hints = []
+
+        # Agent queries
+        if any(w in query_lower for w in ["agent", "agents"]):
+            if any(w in query_lower for w in ["create", "make", "build", "add"]):
+                hints.append("platform_create_agent")
+            else:
+                hints.append("platform_list_agents")
+
+        # Recipe/workflow queries
+        if any(w in query_lower for w in ["recipe", "recipes", "workflow", "workflows"]):
+            if any(w in query_lower for w in ["create", "make", "build"]):
+                hints.append("platform_create_recipe")
+            else:
+                hints.append("platform_list_recipes")
+
+        # Analytics/usage queries
+        if any(w in query_lower for w in ["usage", "token", "tokens", "cost", "costs", "spend"]):
+            hints.append("platform_get_llm_usage")
+            hints.append("platform_get_cost_breakdown")
+
+        # Document queries
+        if any(w in query_lower for w in ["document", "documents", "uploaded"]):
+            hints.append("platform_list_documents")
+
+        # Workspace queries
+        if any(w in query_lower for w in ["workspace", "connected app", "connected apps", "integration"]):
+            hints.append("platform_get_workspace_info")
+            hints.append("platform_list_connected_apps")
+
+        return hints
 
     def _is_complex_query(self, query: str) -> bool:
         """Detect complex multi-step queries."""

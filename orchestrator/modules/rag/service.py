@@ -151,51 +151,30 @@ class RAGService:
     def __init__(
         self,
         config: RAGConfig = None,
-        vector_backend: str = None,
         workspace_id: str = None,
     ):
         self.config = config or RAGConfig()
-
-        # Auto-detect vector backend from config when not explicitly set
-        if vector_backend is None:
-            try:
-                from config import config as app_config
-                if getattr(app_config, "S3_VECTORS_ENABLED", False):
-                    vector_backend = "s3_vectors"
-                    logger.info("[RAGService] S3_VECTORS_ENABLED=true → using s3_vectors backend")
-                else:
-                    vector_backend = "pgvector"
-            except Exception:
-                vector_backend = "pgvector"
-
-        self._vector_backend = vector_backend
         self._workspace_id = workspace_id
         self._context_optimizer = None
         self._semantic_chunker = None
         self._embedding_manager = None
         self._query_enhancer = None
-        self._vector_store = None # Initialize here for consistency
         self._initialized = False
         
     def _ensure_initialized(self):
-        """Lazy initialization of components"""
+        """Lazy initialization of components (NOT vector store — that needs workspace_id at query time)"""
         if self._initialized:
             return
-            
-        # Initialize components
-        self._context_optimizer = None
-        self._embedding_manager = None
-        self._vector_store = None  # NEW: Centralized vector store
-        
+
         # Try to use existing ContextOptimizer from modules/search
         try:
             from modules.search import ContextOptimizer, ContextItem
             self._context_optimizer = ContextOptimizer()
-            self._ContextItem = ContextItem # Keep this for ContextOptimizer usage
+            self._ContextItem = ContextItem
             logger.info("✅ Using modules.search.ContextOptimizer (Knapsack, MMR, Entropy)")
         except Exception as e:
             logger.warning(f"ContextOptimizer not available: {e}")
-        
+
         # Lazy initialization of embedding manager
         try:
             from core.llm import create_embedding_manager
@@ -203,27 +182,6 @@ class RAGService:
             logger.info(f"✅ Using {self._embedding_manager.get_provider_info()['provider']} embeddings")
         except Exception as e:
             logger.error(f"Failed to initialize embedding manager: {e}")
-        
-        # Initialize vector store via factory (supports pgvector and s3_vectors)
-        try:
-            from modules.search.vector_store import get_vector_store
-            if self._vector_backend == "s3_vectors" and self._workspace_id:
-                self._vector_store = get_vector_store(
-                    backend="s3_vectors",
-                    workspace_id=self._workspace_id,
-                )
-                logger.info("✅ Using S3VectorsBackend for cloud document search")
-            else:
-                import os
-                db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
-                self._vector_store = get_vector_store(
-                    backend="pgvector",
-                    database_url=db_url,
-                    table_name="document_chunks",
-                )
-                logger.info("✅ Using EnhancedVectorStore (pgvector) for vector search")
-        except Exception as e:
-            logger.warning(f"Vector store not available, using fallback: {e}")
             
         try:
             from modules.rag.chunking import SemanticChunker, ChunkingStrategy
@@ -488,7 +446,11 @@ class RAGService:
                 source=source,
                 context_type="documentation",
                 relevance_score=adjusted_score,  # Use quality-adjusted score
-                token_count=_count_tokens(content)
+                token_count=_count_tokens(content),
+                metadata={
+                    "document_id": c.get("document_id"),
+                    "original_metadata": c.get("metadata", {}),
+                }
             )
             context_items.append(item)
             
@@ -527,7 +489,9 @@ class RAGService:
                 "content": ctx.content,
                 "source_file": ctx.source,
                 "similarity": ctx.relevance_score,
-                "tokens": ctx.token_count
+                "tokens": ctx.token_count,
+                "document_id": ctx.metadata.get("document_id") if ctx.metadata else None,
+                "metadata": ctx.metadata.get("original_metadata", {}) if ctx.metadata else {},
             })
             total_tokens += ctx.token_count
             final_source_counts[ctx.source] = final_source_counts.get(ctx.source, 0) + 1
@@ -678,7 +642,9 @@ class RAGService:
                 "content": content,
                 "source_file": c.get("source_file", c.get("filename", "unknown")),
                 "similarity": c.get("similarity", 0),
-                "tokens": chunk_tokens
+                "tokens": chunk_tokens,
+                "document_id": c.get("document_id"),
+                "metadata": c.get("metadata", {}),
             })
             total_tokens += chunk_tokens
         
@@ -694,184 +660,78 @@ class RAGService:
     
     async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
-        Get candidate chunks from database using centralized EnhancedVectorStore.
-
-        MIGRATED: Now uses modules.search.EnhancedVectorStore for consistent vector search.
-        Old SQL-based implementation kept below for rollback if needed.
+        Get candidate chunks via S3 Vectors.
 
         Args:
-            workspace_id: Optional workspace ID for multi-tenant isolation.
+            workspace_id: Workspace ID for multi-tenant isolation.
                           Falls back to self._workspace_id if not provided.
         """
         if not self._embedding_manager:
+            logger.error("Embedding manager not initialized — cannot search")
             return []
-        
+
+        effective_workspace_id = workspace_id or self._workspace_id
+        if not effective_workspace_id:
+            logger.error("No workspace_id available — cannot search S3 Vectors")
+            return []
+
         try:
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)
-            
-            # Use centralized EnhancedVectorStore if available
-            if self._vector_store:
-                try:
-                    from modules.search import SearchMode, RankingStrategy
-                    
-                    # Initialize vector store if needed
-                    if not self._vector_store.pool:
-                        await self._vector_store.initialize()
-                    
-                    search_mode = SearchMode.HYBRID if self.config.hybrid_search_enabled else SearchMode.VECTOR_ONLY
-                    logger.info(f"🔎 Using EnhancedVectorStore: mode={search_mode.value}, min_similarity={min_similarity}, limit={limit}")
 
-                    # Build search filter with workspace isolation
-                    from modules.search import SearchFilter
-                    effective_ws = workspace_id or getattr(self, '_workspace_id', None)
-                    search_filter = SearchFilter(workspace_id=effective_ws) if effective_ws else None
+            # Create S3VectorsBackend for this workspace
+            from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
+            vector_store = S3VectorsBackend(workspace_id=effective_workspace_id)
+            await vector_store.initialize()
 
-                    # Perform search using centralized vector store
-                    search_results = await self._vector_store.search(
-                        query_embedding=query_embedding,
-                        mode=search_mode,
-                        ranking_strategy=RankingStrategy.SIMILARITY,
-                        limit=limit,
-                        search_filter=search_filter,
-                        query_text=query
-                    )
-                    
-                    # Convert SearchResult objects to RAG's expected format
-                    candidates = []
-                    source_file_counts = {}
-                    similarity_scores = []
-                    
-                    for result in search_results:
-                        doc = result.document
-                        similarity = result.similarity_score
-                        
-                        # Filter by minimum similarity
-                        if similarity < min_similarity:
-                            continue
-                        
-                        # Extract source file from metadata or source field
-                        source_file = doc.metadata.get('filename', doc.source or 'unknown')
-                        
-                        # Track source distribution
-                        source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
-                        similarity_scores.append(similarity)
-                        
-                        candidates.append({
-                            "id": doc.id,
-                            "content": doc.content,
-                            "source_file": source_file,
-                            "document_id": doc.metadata.get('document_id', doc.id),
-                            "file_type": doc.metadata.get('file_type', ''),
-                            "similarity": similarity,
-                            "metadata": doc.metadata,
-                            "parent_content": None,
-                            "headers": {}
-                        })
-                    
-                    logger.info(f"📁 Candidate sources: {source_file_counts}")
-                    if similarity_scores:
-                        logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
-                    logger.info(f"✅ Retrieved {len(candidates)} candidates using EnhancedVectorStore")
-                    
-                    return candidates
-                    
-                except Exception as e:
-                    logger.warning(f"EnhancedVectorStore search failed, falling back to SQL: {e}")
-                    # Fall through to SQL fallback below
-            
-            # FALLBACK: Original SQL-based implementation (kept for rollback)
-            logger.info("Using fallback SQL-based vector search")
-            embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+            logger.info(f"🔎 S3 Vectors search: workspace={effective_workspace_id}, min_similarity={min_similarity}, limit={limit}")
 
-            import asyncpg
-            import os
+            results = vector_store.search(
+                query_embedding=query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding),
+                limit=limit,
+                min_score=min_similarity,
+            )
 
-            db_url = os.getenv("DATABASE_URL", "")
-            if not db_url:
-                db_url = "postgresql://postgres:postgres@localhost:5432/automatos"
+            candidates = []
+            source_file_counts = {}
+            similarity_scores = []
 
-            conn = await asyncpg.connect(db_url)
+            for r in results:
+                source_file = r.get("file_name", r.get("file_path", "unknown"))
+                similarity = r.get("score", 0.0)
 
-            # Resolve workspace_id for multi-tenant isolation
-            effective_workspace_id = workspace_id or self._workspace_id
+                source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
+                similarity_scores.append(similarity)
 
-            try:
-                logger.info(f"🔎 Executing SQL vector similarity search: min_similarity={min_similarity}, limit={limit}, workspace={effective_workspace_id}")
+                # external_file_id in S3 Vectors = PostgreSQL documents.id
+                doc_id = (
+                    r.get("external_file_id")
+                    or r.get("metadata", {}).get("external_file_id")
+                    or r.get("metadata", {}).get("document_id")
+                    or 0
+                )
 
-                if effective_workspace_id:
-                    results = await conn.fetch("""
-                        SELECT
-                            dc.id,
-                            dc.content,
-                            d.filename as source_file,
-                            d.id as document_id,
-                            d.file_type,
-                            1 - (dc.embedding <=> $1::vector) as similarity,
-                            dc.metadata
-                        FROM document_chunks dc
-                        JOIN documents d ON dc.document_id = d.id
-                        WHERE 1 - (dc.embedding <=> $1::vector) >= $2
-                            AND d.workspace_id = $4
-                        ORDER BY dc.embedding <=> $1::vector
-                        LIMIT $3
-                    """, embedding_str, min_similarity, limit, effective_workspace_id)
-                else:
-                    results = await conn.fetch("""
-                        SELECT
-                            dc.id,
-                            dc.content,
-                            d.filename as source_file,
-                            d.id as document_id,
-                            d.file_type,
-                            1 - (dc.embedding <=> $1::vector) as similarity,
-                            dc.metadata
-                        FROM document_chunks dc
-                        JOIN documents d ON dc.document_id = d.id
-                        WHERE 1 - (dc.embedding <=> $1::vector) >= $2
-                        ORDER BY dc.embedding <=> $1::vector
-                        LIMIT $3
-                    """, embedding_str, min_similarity, limit)
-                
-                logger.info(f"📊 Database returned {len(results)} results")
-                
-                candidates = []
-                source_file_counts = {}
-                similarity_scores = []
-                
-                for r in results:
-                    source_file = r["source_file"]
-                    similarity = r["similarity"]
-                    
-                    source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
-                    similarity_scores.append(similarity)
-                    
-                    candidates.append({
-                        "id": r["id"],
-                        "content": r["content"],
-                        "source_file": source_file,
-                        "document_id": r["document_id"],
-                        "file_type": r["file_type"],
-                        "similarity": similarity,
-                        "metadata": json.loads(r["metadata"]) if isinstance(r["metadata"], str) else (r["metadata"] or {}),
-                        "parent_content": None,
-                        "headers": {}
-                    })
-                
-                logger.info(f"📁 Candidate sources: {source_file_counts}")
-                if similarity_scores:
-                    logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
-                logger.info(f"✅ Retrieved {len(candidates)} candidates with SQL fallback")
-                
-                return candidates
-                
-            finally:
-                await conn.close()
-            
+                candidates.append({
+                    "id": r.get("key", ""),
+                    "content": r.get("content", ""),
+                    "source_file": source_file,
+                    "document_id": doc_id,
+                    "file_type": r.get("file_path", "").rsplit(".", 1)[-1] if r.get("file_path") else "",
+                    "similarity": similarity,
+                    "metadata": r.get("metadata", {}),
+                    "parent_content": None,
+                    "headers": {}
+                })
+
+            logger.info(f"📁 Candidate sources: {source_file_counts}")
+            if similarity_scores:
+                logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
+            logger.info(f"✅ Retrieved {len(candidates)} candidates from S3 Vectors")
+
+            return candidates
+
         except Exception as e:
-            logger.error(f"Error getting candidates: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error getting candidates from S3 Vectors: {e}", exc_info=True)
             return []
     
     async def _expand_to_parent_context(
@@ -893,9 +753,15 @@ class RAGService:
 
             try:
                 for candidate in candidates:
-                    doc_id = candidate.get("document_id")
+                    raw_doc_id = candidate.get("document_id")
                     chunk_metadata = candidate.get("metadata", {})
                     chunk_index = chunk_metadata.get("chunk_index") if isinstance(chunk_metadata, dict) else None
+
+                    # Cast document_id to int (S3 Vectors stores as string)
+                    try:
+                        doc_id = int(raw_doc_id) if raw_doc_id else None
+                    except (ValueError, TypeError):
+                        doc_id = None
 
                     if doc_id is None or chunk_index is None:
                         candidate["expanded_content"] = candidate.get("content", "")

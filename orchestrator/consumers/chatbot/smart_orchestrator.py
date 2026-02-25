@@ -170,19 +170,34 @@ class SmartChatOrchestrator:
         # 3. Route Tools (if needed)
         tool_result = None
         if intent_result.requires_tools and available_tools:
-            tool_result = self.tool_router.route(
+            tool_result = await self.tool_router.route(
                 query=latest_query,
                 available_tools=available_tools,
                 conversation_context=messages
             )
         else:
-            tool_result = ToolRoutingResult(
-                should_include_tools=False,
-                filtered_tools=[],
-                priority_tools=[],
-                tool_choice="none",
-                reasoning="No tools needed for this intent"
-            )
+            # Even when intent says "no tools", always include platform_* tools
+            # so Auto can answer platform self-awareness queries (PRD-64)
+            platform_tools = [
+                t for t in (available_tools or [])
+                if t.get("function", {}).get("name", "").startswith("platform_")
+            ]
+            if platform_tools:
+                tool_result = ToolRoutingResult(
+                    should_include_tools=True,
+                    filtered_tools=platform_tools,
+                    priority_tools=[],
+                    tool_choice="auto",
+                    reasoning="Platform tools always available for self-awareness"
+                )
+            else:
+                tool_result = ToolRoutingResult(
+                    should_include_tools=False,
+                    filtered_tools=[],
+                    priority_tools=[],
+                    tool_choice="none",
+                    reasoning="No tools needed for this intent"
+                )
 
         # 4. Build System Prompt
         memory_strings = []
@@ -240,7 +255,7 @@ class SmartChatOrchestrator:
             user_name=self.state.user_name,
             intent=intent_result.primary_intent,
             intent_confidence=intent_result.confidence,
-            requires_tools=intent_result.requires_tools,
+            requires_tools=tool_result.should_include_tools or intent_result.requires_tools,
             requires_memory=intent_result.requires_memory,
             preparation_time_ms=preparation_time
         )

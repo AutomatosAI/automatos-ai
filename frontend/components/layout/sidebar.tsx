@@ -18,7 +18,6 @@ import {
   Store,
   BarChart3,
   LayoutDashboard,
-  Search
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSystemRole } from '@/contexts/role-context'
@@ -70,13 +69,6 @@ const navigationItems = [
     icon: Database,
     iconColor: 'text-[hsl(var(--success))]',
     description: 'Documents, databases & code-graph'
-  },
-  {
-    name: 'Search',
-    href: '/search',
-    icon: Search,
-    iconColor: 'text-violet-400',
-    description: 'Semantic search across documents'
   },
   {
     name: 'Team Management',

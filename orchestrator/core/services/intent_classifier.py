@@ -3,7 +3,7 @@ Intent Classifier (Phase 3)
 ============================
 
 Classifies user queries to determine:
-1. Category (EMAIL, CALENDAR, CODE, COMMUNICATION, KNOWLEDGE, DATABASE, etc.)
+1. Category (EMAIL, CALENDAR, CODE, COMMUNICATION, KNOWLEDGE, DATABASE, IMAGE, etc.)
 2. Action Type (FETCH, CREATE, UPDATE, DELETE, SEARCH)
 3. Confidence score
 
@@ -76,6 +76,13 @@ class IntentClassifier:
         "ANALYTICS": [
             r"\b(analytics|metrics|dashboard|report|chart|graph)\b",
             r"\b(visualize|analyze.*data|statistics)\b"
+        ],
+        "IMAGE": [
+            r"\b(image|picture|photo|illustration|artwork|logo|icon|banner)\b",
+            r"\b(draw|sketch|design|render|paint|visuali[sz]e)\b",
+            r"\b(generate.*image|create.*image|make.*image)\b",
+            r"\b(dall-?e|midjourney|stable.?diffusion|flux|banana|fal\.ai)\b",
+            r"\b(graphic|graphics|visual|poster|thumbnail|avatar|portrait)\b",
         ],
         "AI": [
             r"\b(generate|summarize|analyze|translate|explain)\b",
