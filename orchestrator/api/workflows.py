@@ -28,6 +28,7 @@ from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
 # websocket_manager removed - using AI SDK SSE streaming
 from core.services.workspace_manager import WorkspaceManager
 from core.auth.hybrid import get_request_context_hybrid
+from core.task_runner import get_task_runner, AgentTask, TaskType, TaskPriority
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -945,17 +946,38 @@ async def execute_workflow_advanced(
         db.add(execution)
         db.commit()
         db.refresh(execution)
-        
-        # Start execution as asyncio task for real-time WebSocket updates
-        # Using asyncio.create_task instead of BackgroundTasks to allow immediate WebSocket delivery
-        import asyncio
-        asyncio.create_task(
-            execute_workflow_with_progress(
-                execution.id,
-                execution_data.get('options', {})
+
+        # PRD-56: Dispatch through TaskRunner abstraction
+        # When TASK_RUNNER_BACKEND=queued, this enqueues to Redis for the workspace worker.
+        # When TASK_RUNNER_BACKEND=local (default), this runs in-process via asyncio.
+        runner = get_task_runner()
+
+        if runner.backend_name == "queued":
+            # Phase 2: Enqueue to workspace worker
+            task = AgentTask(
+                task_type=TaskType.WORKFLOW_SUBTASK,
+                workspace_id=ctx.workspace_id,
+                agent_id=agent_id,
+                prompt=json.dumps(execution_data.get('input_data', {})),
+                context={
+                    "execution_id": execution.id,
+                    "workflow_id": workflow_id,
+                    "options": execution_data.get('options', {}),
+                },
+                priority=TaskPriority.NORMAL,
+                timeout_seconds=600,
             )
-        )
-        
+            handle = await runner.submit_task(task)
+            logger.info(f"Workflow {workflow_id} execution {execution.id} queued (task={handle.task_id[:8]})")
+        else:
+            # Phase 1 / Local: Run in-process (existing behavior)
+            asyncio.create_task(
+                execute_workflow_with_progress(
+                    execution.id,
+                    execution_data.get('options', {})
+                )
+            )
+
         return {
             "execution_id": execution.id,
             "workflow_id": workflow_id,
@@ -1034,22 +1056,42 @@ async def execute_workflow(
         db.commit()
         db.refresh(execution)
         
-        # Start execution as asyncio task for real-time WebSocket updates
-        # Using asyncio.create_task instead of BackgroundTasks to allow immediate WebSocket delivery
-        import asyncio
-        
-        async def _run_with_error_handling():
-            try:
-                await execute_workflow_with_progress(
-                    execution.id,
-                    execution_data.get('options', {})
-                )
-            except Exception as e:
-                logger.error(f"❌ FATAL: Workflow execution task crashed: {e}", exc_info=True)
-        
-        asyncio.create_task(_run_with_error_handling())
-        
-        logger.info(f"Workflow {workflow_id} execution {execution.id} started with real-time updates")
+        # PRD-56: Dispatch through TaskRunner abstraction
+        runner = get_task_runner()
+
+        if runner.backend_name == "queued":
+            # Phase 2: Enqueue to workspace worker
+            task = AgentTask(
+                task_type=TaskType.WORKFLOW_SUBTASK,
+                workspace_id=ctx.workspace_id,
+                agent_id=agent.id,
+                prompt=json.dumps(input_data),
+                context={
+                    "execution_id": execution.id,
+                    "workflow_id": workflow_id,
+                    "options": execution_data.get('options', {}),
+                },
+                priority=TaskPriority.NORMAL,
+                timeout_seconds=600,
+            )
+            handle = await runner.submit_task(task)
+            logger.info(f"Workflow {workflow_id} execution {execution.id} queued (task={handle.task_id[:8]})")
+        else:
+            # Phase 1 / Local: Run in-process (existing behavior)
+            import asyncio
+
+            async def _run_with_error_handling():
+                try:
+                    await execute_workflow_with_progress(
+                        execution.id,
+                        execution_data.get('options', {})
+                    )
+                except Exception as e:
+                    logger.error(f"❌ FATAL: Workflow execution task crashed: {e}", exc_info=True)
+
+            asyncio.create_task(_run_with_error_handling())
+
+        logger.info(f"Workflow {workflow_id} execution {execution.id} started")
         
         return {
             "id": execution.id,
