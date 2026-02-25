@@ -648,6 +648,43 @@ async def get_cache_statistics(
 
 
 # =============================================================================
+# Audit History API
+# =============================================================================
+
+@router.get("/{source_id}/audit")
+async def list_audit_entries(
+    source_id: int,
+    limit: int = 50,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """List query audit entries for a database source."""
+    entries = (
+        db.query(DatabaseQueryAudit)
+        .filter(DatabaseQueryAudit.source_id == source_id)
+        .order_by(DatabaseQueryAudit.created_at.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+
+    return [
+        {
+            "id": e.id,
+            "natural_language_query": e.natural_language_query,
+            "generated_sql": e.generated_sql,
+            "validated_sql": e.validated_sql,
+            "execution_time_ms": e.execution_time_ms,
+            "row_count": e.row_count,
+            "success": e.success,
+            "error_message": e.error_message,
+            "confidence_score": e.confidence_score,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in entries
+    ]
+
+
+# =============================================================================
 # PRD-61: Training Examples API (US-004, US-013)
 # =============================================================================
 

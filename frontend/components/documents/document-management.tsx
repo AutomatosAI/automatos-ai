@@ -95,6 +95,226 @@ const typeIcons: Record<string, any> = {
   xml: File
 }
 
+// ── Schema Browser (inline) ──────────────────────────────────────────
+function SchemaBrowser({ sourceId, getSchemaMetadata }: { sourceId?: number; getSchemaMetadata: (id: number) => Promise<any> }) {
+  const [schema, setSchema] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [expandedTable, setExpandedTable] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!sourceId) return
+    setLoading(true)
+    setError(null)
+    getSchemaMetadata(sourceId)
+      .then((data) => setSchema(data))
+      .catch((err) => setError(err?.message || 'Failed to load schema'))
+      .finally(() => setLoading(false))
+  }, [sourceId])
+
+  if (!sourceId) {
+    return (
+      <Card className="glass-card">
+        <CardContent className="p-8 text-center text-muted-foreground">
+          <Database className="h-10 w-10 mx-auto mb-3 opacity-50" />
+          <p>Connect a database first to browse the schema.</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (loading) {
+    return (
+      <Card className="glass-card">
+        <CardContent className="p-8 text-center text-muted-foreground">
+          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+          <p>Loading schema...</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card className="glass-card">
+        <CardContent className="p-8 text-center text-red-400">
+          <p>{error}</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const tables: any[] = schema?.tables || schema?.schema?.tables || []
+
+  return (
+    <div className="space-y-3">
+      <Card className="glass-card">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Database className="h-5 w-5" />
+            Schema — {tables.length} table{tables.length !== 1 ? 's' : ''}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {tables.length === 0 && (
+            <p className="text-muted-foreground text-sm">No tables found. Try syncing the schema.</p>
+          )}
+          {tables.map((table: any) => {
+            const name = table.name || table.table_name
+            const columns: any[] = table.columns || []
+            const isExpanded = expandedTable === name
+            return (
+              <div key={name} className="border border-border/50 rounded-lg overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-3 hover:bg-secondary/30 transition-colors text-left"
+                  onClick={() => setExpandedTable(isExpanded ? null : name)}
+                >
+                  <span className="font-medium text-sm">{name}</span>
+                  <Badge variant="outline" className="text-xs">
+                    {columns.length} col{columns.length !== 1 ? 's' : ''}
+                  </Badge>
+                </button>
+                {isExpanded && columns.length > 0 && (
+                  <div className="border-t border-border/50 bg-secondary/10">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-muted-foreground">
+                          <th className="text-left p-2 pl-4">Column</th>
+                          <th className="text-left p-2">Type</th>
+                          <th className="text-left p-2">Nullable</th>
+                          <th className="text-left p-2">Key</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {columns.map((col: any) => (
+                          <tr key={col.name || col.column_name} className="border-t border-border/30">
+                            <td className="p-2 pl-4 font-mono">{col.name || col.column_name}</td>
+                            <td className="p-2 text-muted-foreground">{col.type || col.data_type}</td>
+                            <td className="p-2 text-muted-foreground">{col.nullable ? 'Yes' : 'No'}</td>
+                            <td className="p-2">
+                              {col.is_primary_key && <Badge className="text-[10px] bg-yellow-500/20 text-yellow-400 border-yellow-500/30">PK</Badge>}
+                              {col.is_foreign_key && <Badge className="text-[10px] bg-blue-500/20 text-blue-400 border-blue-500/30 ml-1">FK</Badge>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// ── Audit History (inline) ───────────────────────────────────────────
+function AuditHistory({ sourceId }: { sourceId?: number }) {
+  const [entries, setEntries] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!sourceId) return
+    setLoading(true)
+    setError(null)
+    import('@/lib/api-client').then(({ default: apiClient }) =>
+      apiClient.request(`/api/knowledge/sources/database/${sourceId}/audit`)
+    )
+      .then((data: any) => setEntries(Array.isArray(data) ? data : []))
+      .catch((err: any) => setError(err?.message || 'Failed to load audit history'))
+      .finally(() => setLoading(false))
+  }, [sourceId])
+
+  if (!sourceId) {
+    return (
+      <Card className="glass-card">
+        <CardContent className="p-8 text-center text-muted-foreground">
+          <History className="h-10 w-10 mx-auto mb-3 opacity-50" />
+          <p>Connect a database first to view query audit history.</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (loading) {
+    return (
+      <Card className="glass-card">
+        <CardContent className="p-8 text-center text-muted-foreground">
+          <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-3" />
+          <p>Loading audit history...</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card className="glass-card">
+        <CardContent className="p-8 text-center text-red-400">
+          <p>{error}</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card className="glass-card">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <History className="h-5 w-5" />
+          Query Audit History
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {entries.length === 0 ? (
+          <p className="text-muted-foreground text-sm text-center py-4">No queries recorded yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {entries.map((entry: any) => (
+              <div key={entry.id} className="border border-border/50 rounded-lg p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium truncate max-w-[70%]">
+                    {entry.natural_language_query || '(direct SQL)'}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {entry.execution_time_ms != null && (
+                      <span className="text-xs text-muted-foreground">{entry.execution_time_ms}ms</span>
+                    )}
+                    <Badge
+                      variant="outline"
+                      className={entry.success
+                        ? 'bg-green-500/10 text-green-400 border-green-500/20 text-xs'
+                        : 'bg-red-500/10 text-red-400 border-red-500/20 text-xs'}
+                    >
+                      {entry.success ? 'Success' : 'Failed'}
+                    </Badge>
+                  </div>
+                </div>
+                {entry.generated_sql && (
+                  <pre className="text-xs font-mono bg-secondary/30 rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                    {entry.generated_sql}
+                  </pre>
+                )}
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  {entry.row_count != null && <span>{entry.row_count} rows</span>}
+                  {entry.confidence_score != null && <span>Confidence: {(entry.confidence_score * 100).toFixed(0)}%</span>}
+                  {entry.created_at && <span>{new Date(entry.created_at).toLocaleString()}</span>}
+                </div>
+                {entry.error_message && (
+                  <p className="text-xs text-red-400 mt-1">{entry.error_message}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function DocumentManagement() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
@@ -130,6 +350,7 @@ export function DocumentManagement() {
     executeQuery,
     syncSchema,
     getCacheStats,
+    getSchemaMetadata,
     fetchSources: refreshDatabaseSources
   } = useDatabaseKnowledge()
 
@@ -821,10 +1042,20 @@ export function DocumentManagement() {
               </TabsContent>
               
               <TabsContent value="semantic" className="space-y-6">
-                <SemanticLayerBuilder 
-                  selectedSource={databaseSources?.[0]}
-                  sources={databaseSources || []}
-                />
+                {databaseSources && databaseSources.length > 0 ? (
+                  <SemanticLayerBuilder
+                    sourceId={String(databaseSources[0].id)}
+                    sourceName={databaseSources[0].name}
+                    dialect={databaseSources[0].dialect || 'postgresql'}
+                  />
+                ) : (
+                  <Card className="glass-card">
+                    <CardContent className="p-8 text-center text-muted-foreground">
+                      <Database className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                      <p>Connect a database first to configure the semantic layer.</p>
+                    </CardContent>
+                  </Card>
+                )}
               </TabsContent>
               
               <TabsContent value="templates" className="space-y-6">
@@ -848,139 +1079,14 @@ export function DocumentManagement() {
               </TabsContent>
 
               <TabsContent value="schema" className="space-y-6">
-                {/* Schema Browser */}
-                <Card className="glass-card">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Database className="h-5 w-5" />
-                      Database Schema Browser
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {!databaseSources || databaseSources.length === 0 ? (
-                      <p className="text-muted-foreground text-center py-8">
-                        No database sources connected. Add a database to browse its schema.
-                      </p>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="border rounded-lg p-4">
-                          <h4 className="font-semibold mb-3">Tables & Columns</h4>
-                          <div className="space-y-3">
-                            {/* Example schema structure - would be populated from API */}
-                            <div className="border-l-2 border-blue-500 pl-4">
-                              <div className="font-medium flex items-center gap-2">
-                                <Database className="h-4 w-4" />
-                                customers
-                              </div>
-                              <div className="ml-4 mt-2 space-y-1 text-sm text-muted-foreground">
-                                <div>• id (INTEGER, PK)</div>
-                                <div>• name (VARCHAR)</div>
-                                <div>• email (VARCHAR)</div>
-                                <div>• created_at (TIMESTAMP)</div>
-                              </div>
-                            </div>
-                            <div className="border-l-2 border-green-500 pl-4">
-                              <div className="font-medium flex items-center gap-2">
-                                <Database className="h-4 w-4" />
-                                orders
-                              </div>
-                              <div className="ml-4 mt-2 space-y-1 text-sm text-muted-foreground">
-                                <div>• id (INTEGER, PK)</div>
-                                <div>• customer_id (INTEGER, FK→customers.id)</div>
-                                <div>• total_amount (DECIMAL)</div>
-                                <div>• order_date (TIMESTAMP)</div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="border rounded-lg p-4">
-                          <h4 className="font-semibold mb-3">Relationships</h4>
-                          <div className="space-y-2 text-sm">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline">Many-to-One</Badge>
-                              <span>orders.customer_id → customers.id</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                <SchemaBrowser
+                  sourceId={databaseSources?.[0]?.id}
+                  getSchemaMetadata={getSchemaMetadata}
+                />
               </TabsContent>
 
               <TabsContent value="audit" className="space-y-6">
-                {/* Audit History */}
-                <Card className="glass-card">
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <History className="h-5 w-5" />
-                        Query Audit History
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => {
-                        // TODO: Export audit log
-                        console.log('Export audit log')
-                      }}>
-                        <Download className="h-4 w-4 mr-2" />
-                        Export CSV
-                      </Button>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {/* Audit entries would come from API */}
-                      <div className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
-                        <div className="flex items-start justify-between mb-2">
-                          <div>
-                            <p className="font-medium">Show top 10 customers by revenue</p>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              SELECT customer_name, SUM(order_total) as revenue...
-                            </p>
-                          </div>
-                          <Badge variant="outline" className="text-xs">
-                            247ms
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                          <span>User: admin@automatos.ai</span>
-                          <span>Rows: 10</span>
-                          <span>2 minutes ago</span>
-                          <Badge className="text-xs" variant="secondary">
-                            Success
-                          </Badge>
-                        </div>
-                      </div>
-                      
-                      <div className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
-                        <div className="flex items-start justify-between mb-2">
-                          <div>
-                            <p className="font-medium">Calculate monthly revenue trend</p>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              SELECT DATE_TRUNC('month', order_date) as month...
-                            </p>
-                          </div>
-                          <Badge variant="outline" className="text-xs">
-                            523ms
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                          <span>User: analyst@automatos.ai</span>
-                          <span>Rows: 12</span>
-                          <span>15 minutes ago</span>
-                          <Badge className="text-xs" variant="secondary">
-                            Success
-                          </Badge>
-                        </div>
-                      </div>
-
-                      <div className="text-center py-4">
-                        <Button variant="outline" size="sm">
-                          Load More
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <AuditHistory sourceId={databaseSources?.[0]?.id} />
               </TabsContent>
             </Tabs>
           </TabsContent>
