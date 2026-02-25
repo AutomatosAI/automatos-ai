@@ -50,6 +50,11 @@ class TaskEventType(str, Enum):
     TOKEN_USAGE = "token_usage"
     TOOL_CALL = "tool_call"
     ERROR = "error"
+    # PRD-66: Workspace file/shell activity events
+    FILE_READ = "file_read"
+    FILE_WRITE = "file_write"
+    STDOUT_CHUNK = "stdout_chunk"
+    GIT_OPERATION = "git_operation"
 
 
 class TaskResources(BaseModel):

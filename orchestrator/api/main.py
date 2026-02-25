@@ -91,6 +91,9 @@ from api.api_keys import router as api_keys_router
 # PRD-56: Workspace Tasks
 from api.tasks import router as tasks_router
 
+# PRD-66: Workspace File Browser (Code Viewer Widget)
+from api.workspace_files import router as workspace_files_router
+
 # PRD-60: RAG v3 Feedback
 from api.rag_feedback import router as rag_feedback_router
 
@@ -431,6 +434,7 @@ app.include_router(auth_router)
 app.include_router(workspaces_router)
 app.include_router(api_keys_router)
 app.include_router(tasks_router)  # PRD-56: Workspace task management
+app.include_router(workspace_files_router)  # PRD-66: Workspace file browser
 app.include_router(rag_feedback_router)  # PRD-60: RAG v3 Feedback
 
 # Register Dashboard Routes (PRD-06)

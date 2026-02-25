@@ -43,6 +43,7 @@
     "@floating-ui/react": "0.26.0",
     "@headlessui/react": "1.7.18",
     "@hookform/resolvers": "3.3.1",
+    "@monaco-editor/react": "^4.7.0",
     "@prisma/client": "5.3.1",
     "@radix-ui/react-accordion": "1.2.0",
     "@radix-ui/react-alert-dialog": "1.1.1",

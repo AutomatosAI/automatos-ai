@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
-import { Bot, ArrowDown, Database, GitBranch, Wrench } from 'lucide-react'
+import { Bot, ArrowDown, Database, GitBranch, Wrench, Code2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
@@ -19,7 +19,8 @@ import { useUser } from '@clerk/nextjs'
 // Widget Architecture (PRD-38.1)
 import { useWorkspaceStore } from '@/stores/workspace-store'
 import { Canvas } from '@/components/workspace'
-import type { CodeWidgetData, DataWidgetData, DocumentWidgetData } from '@/components/widgets/types'
+import type { Widget, CodeWidgetData, DataWidgetData, DocumentWidgetData, CodingCanvasWidgetData } from '@/components/widgets/types'
+import { useWorkspace } from '@/components/workspace-provider'
 
 // Resizable panels for chat + widget split
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -62,6 +63,39 @@ export function Chat({
   const dispatchMemoryInjected = useWorkspaceStore((s) => s.dispatchMemoryInjected)
   const dispatchMemoryStored = useWorkspaceStore((s) => s.dispatchMemoryStored)
   const dispatchWorkflowUpdate = useWorkspaceStore((s) => s.dispatchWorkflowUpdate)
+
+  // PRD-66: Workspace context for Code Canvas
+  const { workspace } = useWorkspace()
+
+  const handleOpenCodeCanvas = useCallback(() => {
+    if (!workspace?.id) {
+      toast.error('No workspace selected')
+      return
+    }
+
+    // Check if a coding canvas widget is already open for this workspace
+    const allWidgets = useWorkspaceStore.getState().widgets
+    const existing = Object.values(allWidgets).find(
+      (w: Widget) => w.type === 'coding_canvas' && (w.data as CodingCanvasWidgetData).workspaceId === workspace.id
+    )
+    if (existing) {
+      useWorkspaceStore.getState().setActiveWidget(existing.id)
+      return
+    }
+
+    const widgetData: CodingCanvasWidgetData = { workspaceId: workspace.id }
+    addWidget({
+      type: 'coding_canvas',
+      title: 'Code Canvas',
+      data: widgetData,
+      metadata: {
+        source: { type: 'user', name: 'code_canvas' },
+        createdAt: new Date(),
+      },
+      state: 'ready',
+      createdAt: new Date().toISOString(),
+    })
+  }, [workspace?.id, addWidget])
 
   // Handler to close canvas and reset all overlay states
   const handleCloseCanvas = useCallback(() => {
@@ -909,6 +943,23 @@ export function Chat({
                   onToolIconClick={handleToolIconClick}
                 />
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2 pt-1">
+                  {/* PRD-66: Code Canvas quick action */}
+                  <button
+                    type="button"
+                    onClick={handleOpenCodeCanvas}
+                    title="Code"
+                    className={[
+                      'inline-flex items-center justify-center rounded-full',
+                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
+                      'gap-2 text-xs font-medium',
+                      'bg-black/10 backdrop-blur text-foreground/90',
+                      'hover:bg-orange-500/10 transition-colors',
+                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
+                    ].join(' ')}
+                  >
+                    <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
+                    <span className="hidden md:inline">Code</span>
+                  </button>
                   {quickLinks.map((item) => {
                     const Icon = item.icon
                     return (
@@ -1024,6 +1075,23 @@ export function Chat({
                   onToolIconClick={handleToolIconClick}
                 />
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2">
+                  {/* PRD-66: Code Canvas quick action */}
+                  <button
+                    type="button"
+                    onClick={handleOpenCodeCanvas}
+                    title="Code"
+                    className={[
+                      'inline-flex items-center justify-center rounded-full',
+                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
+                      'gap-2 text-xs font-medium',
+                      'bg-black/10 backdrop-blur text-foreground/90',
+                      'hover:bg-orange-500/10 transition-colors',
+                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
+                    ].join(' ')}
+                  >
+                    <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
+                    <span className="hidden md:inline">Code</span>
+                  </button>
                   {quickLinks.map((item) => {
                     const Icon = item.icon
                     return (

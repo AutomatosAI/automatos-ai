@@ -117,6 +117,8 @@ services:
       - ./orchestrator:/app
       - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
       - backend_logs:/app/logs
+      # PRD-66: Read-only access to workspace files for code viewer widget
+      - workspace_data:/workspaces:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
