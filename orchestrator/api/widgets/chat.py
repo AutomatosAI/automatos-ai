@@ -176,8 +176,13 @@ async def widget_chat(
     async def _event_stream() -> AsyncGenerator[str, None]:
         """Wrap the existing streaming service output as SSE events.
 
-        The widget SDK expects standard SSE with ``event:`` lines and
-        specific field names (``content``, ``conversation_id``).
+        The streaming service yields AI-SDK formatted chunks:
+        - ``0:"text"\n``        — text content
+        - ``d:{...}\n``         — data events (tool-start, finish, etc.)
+        - ``{"_final_response": ...}`` — internal dict (skip)
+
+        The widget SDK expects standard SSE:
+        ``event: message\ndata: {"content":"text","conversation_id":"..."}\n\n``
         """
         try:
             async for chunk in streaming_service.stream_response_with_agent(
@@ -186,7 +191,41 @@ async def widget_chat(
                 agent_id=effective_agent_id,
                 user_id=user_id,
             ):
-                yield f"event: message\ndata: {json.dumps({'content': chunk, 'conversation_id': chat_id})}\n\n"
+                # Skip internal dicts (e.g. _final_response)
+                if isinstance(chunk, dict):
+                    continue
+
+                # Skip non-string chunks
+                if not isinstance(chunk, str):
+                    continue
+
+                # Parse AI-SDK text chunks: 0:"text content"\n
+                if chunk.startswith('0:'):
+                    text = chunk[2:].strip()
+                    # Remove surrounding quotes: "text" → text
+                    if text.startswith('"') and text.endswith('"'):
+                        # Unescape JSON string
+                        try:
+                            text = json.loads(text)
+                        except (json.JSONDecodeError, ValueError):
+                            text = text[1:-1]
+                    if text:
+                        yield f"event: message\ndata: {json.dumps({'content': text, 'conversation_id': chat_id})}\n\n"
+
+                # Forward tool events for SDK tool-start/tool-end support
+                elif chunk.startswith('d:'):
+                    try:
+                        data = json.loads(chunk[2:].strip())
+                        event_type = data.get("type", "")
+                        if event_type == "tool-start":
+                            yield f"event: tool-start\ndata: {json.dumps({'tool': data.get('data', {}).get('toolName', ''), 'arguments': data.get('data', {}).get('input', {})})}\n\n"
+                        elif event_type == "tool-end":
+                            yield f"event: tool-end\ndata: {json.dumps({'tool': data.get('data', {}).get('toolName', ''), 'result': data.get('data', {}).get('result')})}\n\n"
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+                # Skip other AI-SDK control chunks (e:, etc.)
+
         except Exception as exc:
             logger.exception("Widget chat streaming error for chat_id=%s", chat_id)
             yield f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n"
