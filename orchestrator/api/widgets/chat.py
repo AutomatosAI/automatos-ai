@@ -174,7 +174,11 @@ async def widget_chat(
     # Stream
     # ------------------------------------------------------------------
     async def _event_stream() -> AsyncGenerator[str, None]:
-        """Wrap the existing streaming service output as SSE events."""
+        """Wrap the existing streaming service output as SSE events.
+
+        The widget SDK expects standard SSE with ``event:`` lines and
+        specific field names (``content``, ``conversation_id``).
+        """
         try:
             async for chunk in streaming_service.stream_response_with_agent(
                 chat_id=chat_id,
@@ -182,14 +186,12 @@ async def widget_chat(
                 agent_id=effective_agent_id,
                 user_id=user_id,
             ):
-                # The streaming service yields AI-SDK formatted strings.
-                # Re-emit them as SSE for the widget client.
-                yield f"data: {json.dumps({'type': 'message', 'chat_id': chat_id, 'chunk': chunk})}\n\n"
+                yield f"event: message\ndata: {json.dumps({'content': chunk, 'conversation_id': chat_id})}\n\n"
         except Exception as exc:
             logger.exception("Widget chat streaming error for chat_id=%s", chat_id)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n"
         finally:
-            yield f"data: {json.dumps({'type': 'done', 'chat_id': chat_id})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'conversation_id': chat_id})}\n\n"
 
     return StreamingResponse(
         _event_stream(),
