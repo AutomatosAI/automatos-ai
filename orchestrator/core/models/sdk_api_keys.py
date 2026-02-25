@@ -42,7 +42,7 @@ class SdkApiKey(Base):
     )
 
     name = Column(String(200), nullable=False)
-    key_prefix = Column(String(8), nullable=False)
+    key_prefix = Column(String(16), nullable=False)
     key_hash = Column(String(64), nullable=False, unique=True, index=True)
     key_type = Column(String(20), nullable=False)  # "public" | "server"
 

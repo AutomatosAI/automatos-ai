@@ -142,7 +142,8 @@ async def widget_chat(
             )
         chat_id = body.conversation_id
     else:
-        title = body.message[:50] if body.message else "Widget Chat"
+        short_id = uuid.uuid4().hex[:8]
+        title = f"{body.message[:40] if body.message else 'Widget Chat'} [{short_id}]"
         chat = chat_service.create_chat(
             user_id=user_id,
             title=title,
