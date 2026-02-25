@@ -32,8 +32,8 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Copy, Key, Plus, Trash2, AlertTriangle, Check, Loader2 } from "lucide-react";
-import { useWorkspace } from "@/components/workspace-provider";
 import { toast } from "sonner";
+import { apiClient } from "@/lib/api-client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -148,9 +148,6 @@ function isExpired(expiresAt: string | null): boolean {
 // ---------------------------------------------------------------------------
 
 export function ApiKeyManager() {
-  const { workspace } = useWorkspace();
-  const workspaceId = workspace?.id ?? "";
-
   // Key list state
   const [keys, setKeys] = useState<SdkApiKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -175,51 +172,14 @@ export function ApiKeyManager() {
   const [revokeLoading, setRevokeLoading] = useState(false);
 
   // ---------------------------------------------------------------------------
-  // API helpers
-  // ---------------------------------------------------------------------------
-
-  const getHeaders = useCallback((): Record<string, string> => {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (workspaceId) {
-      headers["X-Workspace-ID"] = workspaceId;
-    }
-    // Clerk JWT is attached by apiClient middleware or workspace-provider fetch
-    // For direct fetch, we rely on the cookie-based session or localStorage token
-    const token =
-      typeof window !== "undefined"
-        ? localStorage.getItem("clerk-token") || ""
-        : "";
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    return headers;
-  }, [workspaceId]);
-
-  const apiBase =
-    typeof window !== "undefined"
-      ? (window as any).__NEXT_PUBLIC_API_URL__ ||
-        process.env.NEXT_PUBLIC_API_URL ||
-        ""
-      : process.env.NEXT_PUBLIC_API_URL || "";
-
-  // ---------------------------------------------------------------------------
-  // Fetch keys
+  // Fetch keys (uses apiClient which handles Clerk JWT + workspace ID)
   // ---------------------------------------------------------------------------
 
   const fetchKeys = useCallback(async () => {
-    if (!workspaceId) return;
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${apiBase}/api/api-keys`, {
-        headers: getHeaders(),
-      });
-      if (!res.ok) {
-        throw new Error(`Failed to load API keys (${res.status})`);
-      }
-      const data: SdkApiKey[] = await res.json();
+      const data = await apiClient.request<SdkApiKey[]>("/api/api-keys");
       setKeys(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load API keys";
@@ -228,7 +188,7 @@ export function ApiKeyManager() {
     } finally {
       setIsLoading(false);
     }
-  }, [workspaceId, apiBase, getHeaders]);
+  }, []);
 
   useEffect(() => {
     fetchKeys();
@@ -307,20 +267,10 @@ export function ApiKeyManager() {
         }
       }
 
-      const res = await fetch(`${apiBase}/api/api-keys`, {
+      const data = await apiClient.request<CreateKeyResponse>("/api/api-keys", {
         method: "POST",
-        headers: getHeaders(),
-        body: JSON.stringify(payload),
+        body: payload as any,
       });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(
-          body?.detail || `Failed to create API key (${res.status})`
-        );
-      }
-
-      const data: CreateKeyResponse = await res.json();
       setCreatedKey(data.key);
       setCreateOpen(false);
       resetForm();
@@ -343,13 +293,9 @@ export function ApiKeyManager() {
     if (!revokeTarget) return;
     setRevokeLoading(true);
     try {
-      const res = await fetch(`${apiBase}/api/api-keys/${revokeTarget.id}`, {
+      await apiClient.request(`/api/api-keys/${revokeTarget.id}`, {
         method: "DELETE",
-        headers: getHeaders(),
       });
-      if (!res.ok) {
-        throw new Error(`Failed to revoke key (${res.status})`);
-      }
       setRevokeTarget(null);
       await fetchKeys();
       toast.success("API key revoked");
