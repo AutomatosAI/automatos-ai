@@ -49,8 +49,10 @@ class ApiKeyService:
         Returns a dict that includes the full plaintext ``key`` — this is
         the **only** time the caller will ever see it.
         """
-        raw_key = secrets.token_hex(32)
-        key_prefix = raw_key[:8]
+        secret = secrets.token_hex(32)
+        prefix = "ak_pub_" if key_type == "public" else "ak_srv_"
+        raw_key = f"{prefix}{secret}"
+        key_prefix = raw_key[: len(prefix) + 4]  # e.g. "ak_pub_a1b2"
         key_hash = _hash_key(raw_key)
 
         record = SdkApiKey(
