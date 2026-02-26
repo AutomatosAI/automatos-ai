@@ -27,6 +27,8 @@ export type WidgetType =
   | 'chart'       // Standalone charts
   | 'form'        // Input forms
   | 'chat'        // Embedded chat (for SDK)
+  // PRD-66: Physical workspace code viewer
+  | 'coding_canvas'  // Monaco-based workspace file browser + editor
 
 /**
  * Widget position in the canvas grid
@@ -468,6 +470,53 @@ export interface FileWidgetData {
   // Preview content
   previewContent?: string
   previewType?: 'text' | 'image' | 'pdf' | 'code' | 'binary'
+}
+
+// ============================================
+// PRD-66: Coding Canvas Widget Data Types
+// ============================================
+
+/**
+ * File tree entry from workspace filesystem
+ */
+export interface WorkspaceFileEntry {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size: number
+  modified_at?: number
+  children?: WorkspaceFileEntry[]
+  isLoading?: boolean
+}
+
+/**
+ * Open file tab in the code editor
+ */
+export interface OpenFileTab {
+  path: string
+  name: string
+  language: string
+  content?: string
+  isLoading?: boolean
+  isDirty?: boolean
+}
+
+/**
+ * Coding Canvas widget data (from workspace file operations)
+ */
+export interface CodingCanvasWidgetData {
+  workspaceId: string
+  taskId?: string
+  /** Currently selected file path */
+  activeFilePath?: string
+  /** Open file tabs */
+  openFiles?: OpenFileTab[]
+  /** Last workspace event (for live updates) */
+  lastEvent?: {
+    type: 'file_read' | 'file_write' | 'stdout_chunk' | 'git_operation'
+    path?: string
+    timestamp: string
+  }
 }
 
 // ============================================

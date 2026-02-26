@@ -149,6 +149,14 @@ class Config:
     GITHUB_DEFAULT_BRANCH: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
 
     # =============================================================================
+    # TASK RUNNER (PRD-56: Infrastructure Scaling & Physical Workspaces)
+    # =============================================================================
+    TASK_RUNNER_BACKEND: str = os.getenv("TASK_RUNNER_BACKEND", "local")  # local, queued, kubernetes
+    WORKSPACE_VOLUME_PATH: str = os.getenv("WORKSPACE_VOLUME_PATH", "/workspaces")
+    WORKSPACE_DEFAULT_QUOTA_GB: int = int(os.getenv("WORKSPACE_DEFAULT_QUOTA_GB", "5"))
+    WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", "3"))
+
+    # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
