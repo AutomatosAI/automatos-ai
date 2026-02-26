@@ -73,6 +73,7 @@ class WorkspaceWorker:
         self.concurrency = int(os.environ.get("WORKER_CONCURRENCY", "3"))
         self.health_port = int(os.environ.get("WORKER_HEALTH_PORT", "8081"))
         self._redis = None
+        self._db_engine = None
         self._running = True
         self._active_tasks: Dict[str, asyncio.Task] = {}
         self._semaphore = asyncio.Semaphore(self.concurrency)
@@ -134,6 +135,9 @@ class WorkspaceWorker:
 
             if self._redis:
                 await self._redis.aclose()
+
+            if self._db_engine:
+                self._db_engine.dispose()
 
             logger.info("Worker %s shutdown complete", self._worker_id)
 
@@ -357,7 +361,7 @@ class WorkspaceWorker:
     # =========================================================================
 
     async def _update_status(self, task_id: str, status: str, error: str = None) -> None:
-        """Update task status in Redis hash."""
+        """Update task status in Redis hash AND Postgres task_executions."""
         status_key = TASK_STATUS_KEY.format(task_id=task_id)
         mapping = {"status": status, "worker_id": self._worker_id}
         if status == "running":
@@ -366,6 +370,49 @@ class WorkspaceWorker:
             mapping["error"] = error
         await self._redis.hset(status_key, mapping=mapping)
         await self._redis.expire(status_key, STATUS_TTL_SECONDS)
+
+        # Persist to Postgres in lockstep
+        await self._update_db_execution(task_id, status, error=error)
+
+    async def _update_db_execution(self, task_id: str, status: str, error: str = None) -> None:
+        """Persist task lifecycle state to Postgres task_executions table."""
+        try:
+            from sqlalchemy import create_engine, text
+
+            if self._db_engine is None:
+                db_url = os.environ.get("DATABASE_URL", "")
+                if not db_url:
+                    logger.warning("DATABASE_URL not set — skipping DB update for task %s", task_id[:8])
+                    return
+                self._db_engine = create_engine(db_url, pool_pre_ping=True)
+
+            now = datetime.now(timezone.utc)
+
+            set_clauses = ["status = :status", "worker_id = :worker_id"]
+            params: Dict[str, Any] = {
+                "task_id": task_id,
+                "status": status,
+                "worker_id": self._worker_id,
+            }
+
+            if status == "running":
+                set_clauses.append("started_at = :started_at")
+                params["started_at"] = now
+            elif status in ("completed", "failed", "timed_out", "cancelled"):
+                set_clauses.append("completed_at = :completed_at")
+                params["completed_at"] = now
+            if error:
+                set_clauses.append("error_message = :error")
+                params["error"] = error
+
+            sql = f"UPDATE task_executions SET {', '.join(set_clauses)} WHERE id = :task_id"
+
+            with self._db_engine.connect() as conn:
+                conn.execute(text(sql), params)
+                conn.commit()
+
+        except Exception as e:
+            logger.error("DB update failed for task %s (%s): %s", task_id[:8], status, e)
 
     async def _write_result(self, task_id: str, workspace_id: str, result: Dict[str, Any]) -> None:
         """Write task result to Redis (for API polling)."""

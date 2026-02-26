@@ -56,7 +56,9 @@ def _resolve_safe_path(workspace_root: Path, relative_path: str) -> Path:
     resolved = (workspace_root / relative_path).resolve()
     base_resolved = workspace_root.resolve()
 
-    if not str(resolved).startswith(str(base_resolved)):
+    try:
+        resolved.relative_to(base_resolved)
+    except ValueError:
         raise PathSecurityError("Path traversal blocked")
 
     return resolved

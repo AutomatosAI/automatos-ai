@@ -8,9 +8,29 @@ SSE connections are **not buffered**.
 """
 
 import logging
+import os
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
+
+# Explicit origin allowlist — comma-separated in env var.
+# Only these origins may make credentialed requests to widget endpoints.
+_RAW_ALLOWLIST = os.environ.get("WIDGET_ORIGIN_ALLOWLIST", "")
+WIDGET_ORIGIN_ALLOWLIST: set[str] = {
+    o.strip().rstrip("/") for o in _RAW_ALLOWLIST.split(",") if o.strip()
+}
+
+
+def _origin_allowed(origin: str) -> bool:
+    """Return True if *origin* is in the configured allowlist.
+
+    When the allowlist is empty (not configured), ALL origins are allowed
+    for backwards-compatibility during development.  In production the
+    env var should always be set.
+    """
+    if not WIDGET_ORIGIN_ALLOWLIST:
+        return True
+    return origin.rstrip("/") in WIDGET_ORIGIN_ALLOWLIST
 
 
 class WidgetCORSMiddleware:
@@ -35,11 +55,13 @@ class WidgetCORSMiddleware:
 
         # Handle OPTIONS preflight
         if scope["method"] == "OPTIONS":
-            if not origin:
+            if not origin or not _origin_allowed(origin):
                 response_headers = [
                     (b"content-type", b"text/plain"),
+                    (b"vary", b"Origin"),
                 ]
-                await send({"type": "http.response.start", "status": 400, "headers": response_headers})
+                status = 400 if not origin else 403
+                await send({"type": "http.response.start", "status": status, "headers": response_headers})
                 await send({"type": "http.response.body", "body": b""})
                 return
 
@@ -54,13 +76,16 @@ class WidgetCORSMiddleware:
             await send({"type": "http.response.body", "body": b""})
             return
 
-        # For actual requests, inject CORS headers into the response
+        # For actual requests, inject CORS headers only for allowed origins
+        allowed = _origin_allowed(origin) if origin else False
+
         async def send_with_cors(message: dict) -> None:
-            if message["type"] == "http.response.start" and origin:
+            if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
-                headers.append((b"access-control-allow-origin", origin.encode("latin-1")))
-                headers.append((b"access-control-allow-credentials", b"true"))
                 headers.append((b"vary", b"Origin"))
+                if origin and allowed:
+                    headers.append((b"access-control-allow-origin", origin.encode("latin-1")))
+                    headers.append((b"access-control-allow-credentials", b"true"))
                 message = {**message, "headers": headers}
             await send(message)
 

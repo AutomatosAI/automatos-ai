@@ -116,6 +116,50 @@ class WidgetRateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Pass through — rate-limit headers injected if possible
-        # (api_key_id is resolved inside the handler, not available here)
-        await self.app(scope, receive, send)
+        # Extract identifier: prefer API key header, fall back to client IP
+        headers = dict(scope.get("headers", []))
+        api_key = (headers.get(b"authorization") or b"").decode("latin-1").strip()
+        if api_key.lower().startswith("bearer "):
+            api_key = api_key[7:].strip()
+
+        if api_key:
+            identifier = f"key:{api_key[:32]}"
+            limit = DEFAULT_SERVER_RATE if api_key.startswith("ak_srv_") else DEFAULT_PUBLIC_RATE
+        else:
+            client = scope.get("client")
+            client_ip = client[0] if client else "unknown"
+            identifier = f"ip:{client_ip}"
+            limit = DEFAULT_PUBLIC_RATE
+
+        allowed, rl_limit, remaining, reset_seconds = self._store.check(identifier, limit)
+
+        if not allowed:
+            # 429 Too Many Requests
+            retry_after = str(reset_seconds).encode()
+            response_headers = [
+                (b"content-type", b"application/json"),
+                (b"retry-after", retry_after),
+                (b"x-ratelimit-limit", str(rl_limit).encode()),
+                (b"x-ratelimit-remaining", b"0"),
+                (b"x-ratelimit-reset", str(reset_seconds).encode()),
+            ]
+            body = json.dumps({"detail": "Rate limit exceeded", "retry_after": reset_seconds}).encode()
+            await send({"type": "http.response.start", "status": 429, "headers": response_headers})
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        # Inject rate-limit headers into downstream response
+        rl_headers = [
+            (b"x-ratelimit-limit", str(rl_limit).encode()),
+            (b"x-ratelimit-remaining", str(remaining).encode()),
+            (b"x-ratelimit-reset", str(reset_seconds).encode()),
+        ]
+
+        async def send_with_rate_limit(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend(rl_headers)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_rate_limit)
