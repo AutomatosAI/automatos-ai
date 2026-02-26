@@ -1718,6 +1718,17 @@ class UnifiedToolExecutor:
             else:
                 return {"success": False, "error": f"Unknown workspace tool: {tool_name}", "tool": tool_name}
 
+            # Worker returned an error
+            if result.get("success") is False or result.get("error"):
+                logger.warning(
+                    f"[tool-trace {trace_id or 'no-trace'}] Workspace action {tool_name} "
+                    f"error: {result.get('error', 'unknown')}"
+                )
+                result.setdefault("success", False)
+                return result
+
+            # Ensure success=True so tool_router recognizes it
+            result["success"] = True
             logger.info(
                 f"[tool-trace {trace_id or 'no-trace'}] Workspace action {tool_name} completed"
             )
