@@ -271,6 +271,10 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         created_by=agent.created_by,
         agent_model_config=getattr(agent, 'model_config', None),  # PRD-15: Include model config (field renamed to agent_model_config)
         model_usage_stats=getattr(agent, 'model_usage_stats', None),  # PRD-54: LLM usage stats
+        # PRD-67: System agent fields
+        is_system_agent=getattr(agent, 'is_system_agent', False) or False,
+        slug=getattr(agent, 'slug', None),
+        required_role=getattr(agent, 'required_role', None),
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
@@ -489,28 +493,52 @@ async def list_agents(
 ):
     """List agents with enhanced filtering and pagination"""
     try:
-        # Filter by workspace
-        query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
-        
-        # Apply filters
+        # PRD-67: Build a single unified query covering workspace agents
+        # AND visible system agents, so filters and pagination apply to all.
+        user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
+        _ROLE_HIERARCHY = {"super_admin": {"super_admin", "admin"}, "admin": {"admin"}}
+        visible_roles = _ROLE_HIERARCHY.get(user_role, set())
+
+        # Base scope: workspace agents OR visible system agents
+        workspace_predicate = Agent.workspace_id == ctx.workspace_id
+        if visible_roles:
+            system_predicate = and_(
+                Agent.is_system_agent.is_(True),
+                Agent.status == "active",
+                or_(Agent.required_role.is_(None), Agent.required_role.in_(visible_roles)),
+            )
+            scope_filter = or_(workspace_predicate, system_predicate)
+        else:
+            scope_filter = workspace_predicate
+
+        query = (
+            db.query(Agent)
+            .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
+            .filter(scope_filter)
+        )
+
+        # Apply filters uniformly to all agents (workspace + system)
         if status:
             query = query.filter(Agent.status == status.value)
-        
+
         if agent_type:
             query = query.filter(Agent.agent_type == agent_type.value)
-        
+
         if priority_level:
             query = query.filter(Agent.priority_level == priority_level.value)
-        
+
         if search:
             search_filter = or_(
                 Agent.name.ilike(f"%{search}%"),
                 Agent.description.ilike(f"%{search}%")
             )
             query = query.filter(search_filter)
-        
+
+        # Deduplicate by id (system agents with workspace_id=NULL won't overlap,
+        # but guard against edge cases) and apply pagination
+        query = query.distinct(Agent.id)
         agents = query.offset(skip).limit(limit).all()
-        
+
         return [_build_agent_response(agent, db) for agent in agents]
         
     except Exception as e:

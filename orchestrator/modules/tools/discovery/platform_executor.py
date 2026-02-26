@@ -157,6 +157,7 @@ class PlatformActionExecutor:
         except Exception:
             pass
 
+        mc = agent.model_config or {}
         config = agent.configuration or {}
         return {
             "success": True,
@@ -166,8 +167,11 @@ class PlatformActionExecutor:
                 "type": agent.agent_type,
                 "status": agent.status,
                 "description": agent.description,
-                "model": config.get("model") or config.get("llm_model"),
-                "provider": config.get("provider") or config.get("llm_provider"),
+                "model_id": mc.get("model_id") or config.get("model") or config.get("llm_model"),
+                "provider": mc.get("provider") or config.get("provider") or config.get("llm_provider"),
+                "temperature": mc.get("temperature"),
+                "has_system_prompt": bool(agent.custom_persona_prompt),
+                "system_prompt_preview": (agent.custom_persona_prompt or "")[:200] or None,
                 "assigned_tools": tool_count,
                 "tags": agent.tags or [],
                 "created_at": agent.created_at.isoformat() if agent.created_at else None,
@@ -498,23 +502,56 @@ class PlatformActionExecutor:
 
         agent_type = params.get("agent_type", "chatbot")
         description = params.get("description", "")
-        model = params.get("model")
+        model_id = params.get("model_id") or params.get("model")  # back-compat
+        system_prompt = params.get("system_prompt")
+        temperature = params.get("temperature")
+        tags = params.get("tags")
 
-        config = {}
-        if model:
-            config["model"] = model
+        # Build model_config (the field the chat service actually reads)
+        model_config: Dict[str, Any] = {
+            "provider": "openai",
+            "model_id": "gpt-4o",
+            "temperature": 0.7,
+            "max_tokens": 2000,
+            "top_p": 1.0,
+            "frequency_penalty": 0.0,
+            "presence_penalty": 0.0,
+            "fallback_model_id": None,
+        }
+        if model_id:
+            model_config["model_id"] = model_id
+            # Infer provider from model name
+            if "claude" in model_id.lower() or "anthropic" in model_id.lower():
+                model_config["provider"] = "anthropic"
+            elif "gemini" in model_id.lower():
+                model_config["provider"] = "google"
+            elif "llama" in model_id.lower() or "mixtral" in model_id.lower():
+                model_config["provider"] = "groq"
+        if temperature is not None:
+            model_config["temperature"] = max(0.0, min(2.0, float(temperature)))
 
         agent = Agent(
             name=name,
             agent_type=agent_type,
             description=description,
             status="active",
-            configuration=config,
+            configuration={},
+            model_config=model_config,
             workspace_id=self.workspace_id,
             created_by="platform",
             owner_type="workspace",
             owner_id=str(self.workspace_id),
         )
+
+        # System prompt → custom_persona_prompt
+        if system_prompt:
+            agent.custom_persona_prompt = system_prompt
+            agent.use_custom_persona = True
+
+        # Tags
+        if tags:
+            agent.tags = tags
+
         self.db.add(agent)
         self.db.flush()  # Get the ID without committing (caller commits)
 
@@ -528,6 +565,11 @@ class PlatformActionExecutor:
                 "type": agent.agent_type,
                 "status": agent.status,
                 "description": agent.description,
+                "model_id": model_config["model_id"],
+                "provider": model_config["provider"],
+                "temperature": model_config["temperature"],
+                "has_system_prompt": bool(system_prompt),
+                "tags": agent.tags or [],
             },
             "message": f"Agent '{name}' created successfully with ID {agent.id}.",
         }
@@ -551,6 +593,8 @@ class PlatformActionExecutor:
             return {"success": False, "error": "Agent not found"}
 
         changes = []
+
+        # Basic fields
         if params.get("new_name"):
             agent.name = params["new_name"]
             changes.append(f"name → '{params['new_name']}'")
@@ -560,6 +604,41 @@ class PlatformActionExecutor:
         if params.get("status"):
             agent.status = params["status"]
             changes.append(f"status → '{params['status']}'")
+
+        # Model configuration
+        model_id = params.get("model_id")
+        temperature = params.get("temperature")
+        if model_id or temperature is not None:
+            mc = dict(agent.model_config or {})
+            if model_id:
+                mc["model_id"] = model_id
+                # Infer provider
+                if "claude" in model_id.lower() or "anthropic" in model_id.lower():
+                    mc["provider"] = "anthropic"
+                elif "gemini" in model_id.lower():
+                    mc["provider"] = "google"
+                elif "llama" in model_id.lower() or "mixtral" in model_id.lower():
+                    mc["provider"] = "groq"
+                else:
+                    mc["provider"] = "openai"
+                changes.append(f"model → '{model_id}'")
+            if temperature is not None:
+                mc["temperature"] = max(0.0, min(2.0, float(temperature)))
+                changes.append(f"temperature → {mc['temperature']}")
+            agent.model_config = mc
+
+        # System prompt
+        system_prompt = params.get("system_prompt")
+        if system_prompt is not None:
+            agent.custom_persona_prompt = system_prompt
+            agent.use_custom_persona = True
+            changes.append("system prompt updated")
+
+        # Tags
+        tags = params.get("tags")
+        if tags is not None:
+            agent.tags = tags
+            changes.append(f"tags → {tags}")
 
         if not changes:
             return {"success": True, "message": "No changes specified", "agent_id": agent.id}

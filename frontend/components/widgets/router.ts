@@ -18,6 +18,7 @@ import type {
   WorkflowWidgetData,
   MemoryWidgetData,
   FileWidgetData,
+  CodingCanvasWidgetData,
   ChartData,
   DocumentChunk,
   EmailSummary,
@@ -102,6 +103,17 @@ const TOOL_WIDGET_MAP: Record<string, WidgetType> = {
   move_file: 'file',
   copy_file: 'file',
   get_file_info: 'file',
+
+  // PRD-66: Workspace Tools → Coding Canvas Widget
+  workspace_file_read: 'coding_canvas',
+  workspace_file_write: 'coding_canvas',
+  workspace_bash: 'coding_canvas',
+  workspace_shell: 'coding_canvas',
+  workspace_git_clone: 'coding_canvas',
+  workspace_git_commit: 'coding_canvas',
+  workspace_git_push: 'coding_canvas',
+  workspace_git_pull: 'coding_canvas',
+  workspace_git_status: 'coding_canvas',
 }
 
 /**
@@ -733,6 +745,9 @@ export function transformToolResultToWidget(
     case 'file':
       return transformToFileWidget(toolName, data, metadata)
 
+    case 'coding_canvas':
+      return transformToCodingCanvasWidget(toolName, data, metadata)
+
     default:
       console.warn(`[Widget Router] No transformer for widget type: ${type}`)
       return null
@@ -771,6 +786,57 @@ export function createWidgetFromToolResult(
     ...widgetData,
     id: generateWidgetId(),
   } as Widget
+}
+
+/**
+ * Transform tool result to CodingCanvas widget data (PRD-66)
+ *
+ * Convergence logic: if a widget already exists for this taskId,
+ * the caller should update it instead of creating a new one.
+ */
+function transformToCodingCanvasWidget(
+  toolName: string,
+  result: Record<string, unknown>,
+  metadata: WidgetMetadata
+): Omit<Widget<CodingCanvasWidgetData>, 'id'> {
+  const workspaceId =
+    (result.workspace_id as string) || metadata.workspaceId || ''
+  const taskId = (result.task_id as string) || (result.correlation_id as string)
+
+  const data: CodingCanvasWidgetData = {
+    workspaceId,
+    taskId,
+    activeFilePath: result.file_path as string | undefined,
+  }
+
+  // If the tool result includes a file event, attach it for live updating
+  if (result.file_path || result.path) {
+    const eventType = toolName.includes('write') ? 'file_write' as const
+      : toolName.includes('git') ? 'git_operation' as const
+      : toolName.includes('bash') || toolName.includes('shell') ? 'stdout_chunk' as const
+      : 'file_read' as const
+
+    data.lastEvent = {
+      type: eventType,
+      path: (result.file_path as string) || (result.path as string),
+      timestamp: new Date().toISOString(),
+    }
+  }
+
+  return {
+    type: 'coding_canvas',
+    title: taskId ? `Workspace` : 'Code Canvas',
+    data,
+    metadata: {
+      ...metadata,
+      source: {
+        ...metadata.source,
+        provider: 'workspace',
+      },
+    },
+    state: 'ready',
+    createdAt: new Date().toISOString(),
+  }
 }
 
 /**

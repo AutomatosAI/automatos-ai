@@ -23,6 +23,7 @@ Quick start:
 from .base import TaskRunner
 from .factory import get_task_runner, reset_task_runner
 from .local import LocalTaskRunner
+from .queued import QueuedTaskRunner
 from .models import (
     AgentTask,
     TaskEvent,
@@ -39,6 +40,7 @@ __all__ = [
     # Core interface
     "TaskRunner",
     "LocalTaskRunner",
+    "QueuedTaskRunner",
     "get_task_runner",
     "reset_task_runner",
     # Models

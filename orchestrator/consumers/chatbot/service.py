@@ -459,7 +459,7 @@ class StreamingChatService:
     Thin orchestrator consuming modules.
     """
     
-    def __init__(self, db: Session, workspace_id: Optional[str] = None):
+    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False):
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
@@ -467,6 +467,7 @@ class StreamingChatService:
         self.tool_router = get_tool_router()
         self.streaming_handler = get_streaming_handler()
         self.workspace_id = workspace_id
+        self.widget_mode = widget_mode
         
         # PRD: Unified Agent-Chat System - Initialize AgentFactory
         from modules.agents.factory.agent_factory import AgentFactory
@@ -1309,8 +1310,19 @@ class StreamingChatService:
 
             logger.info(f"Activating agent {agent_id} for chat {chat_id}")
 
+            # PRD-67: Single query for CTO detection (reused later in prompt override)
+            _cto_check_result = None
+            try:
+                from core.models import Agent as _AgentModel
+                _cto_check_result = self.db.query(
+                    _AgentModel.slug, _AgentModel.is_system_agent,
+                    _AgentModel.custom_persona_prompt, _AgentModel.configuration,
+                ).filter(_AgentModel.id == agent_id).first()
+            except Exception:
+                pass
+
             # Send agent info to frontend
-            yield self.streaming_handler.format_aisdk_data({
+            _agent_info = {
                 "type": "agent-info",
                 "agent": {
                     "id": agent_runtime.agent_id,
@@ -1318,7 +1330,11 @@ class StreamingChatService:
                     "type": agent_runtime.metadata.agent_type,
                     "skills": agent_runtime.metadata.skills
                 }
-            })
+            }
+            if _cto_check_result and _cto_check_result.is_system_agent and _cto_check_result.slug == "auto-cto":
+                _agent_info["agent"]["is_cto"] = True
+                _agent_info["agent"]["name"] = "Auto CTO"
+            yield self.streaming_handler.format_aisdk_data(_agent_info)
             await asyncio.sleep(0)
 
             # ── SmartChatIntegration (personality + memory + tool filtering) ──
@@ -1326,7 +1342,8 @@ class StreamingChatService:
             smart_chat = SmartChatIntegration(
                 workspace_id=str(self.workspace_id) if self.workspace_id else self.workspace_id,
                 agent_id=agent_id,
-                agent_name=agent_runtime.metadata.name
+                agent_name=agent_runtime.metadata.name,
+                widget_mode=self.widget_mode
             )
 
             # Load agent context: persona, description, skill tools
@@ -1357,6 +1374,53 @@ class StreamingChatService:
                 f"prep={orchestrated.preparation_time_ms:.0f}ms"
             )
 
+            # ── PRD-67: CTO Agent system prompt override ──
+            # Reuse _cto_check_result from the agent-info query above (no extra DB hit)
+            _is_cto_agent = bool(
+                _cto_check_result
+                and _cto_check_result.is_system_agent
+                and _cto_check_result.slug == "auto-cto"
+            )
+
+            if _is_cto_agent:
+                from consumers.chatbot.cto_prompt_builder import CtoPromptBuilder
+
+                # Extract memories from orchestration result
+                _cto_memories = []
+                _mem_result = getattr(smart_chat.orchestrator, '_last_memory_result', None)
+                if _mem_result:
+                    _cto_memories = [m.get("memory", "") for m in _mem_result.memories if m.get("memory")]
+
+                # Build platform state snapshot
+                _platform_state = CtoPromptBuilder.get_platform_state_snapshot(self.db)
+
+                # Get soul + architecture from the pre-fetched query result
+                _soul = _cto_check_result.custom_persona_prompt or ""
+                _config = _cto_check_result.configuration
+                _arch_ctx = ""
+                if _config and isinstance(_config, dict):
+                    _arch_ctx = _config.get("extra_context", "")
+
+                _cto_prompt = CtoPromptBuilder.build(
+                    soul_document=_soul,
+                    architecture_context=_arch_ctx,
+                    user_name=None,  # Memory system handles this
+                    msg_count=len(messages),
+                    memories=_cto_memories,
+                    tool_names=[t.get("function", {}).get("name", "") for t in (use_tools or []) if isinstance(t, dict)],
+                    platform_state=_platform_state,
+                )
+
+                # Replace the system prompt (always llm_messages[0])
+                if llm_messages and llm_messages[0].get("role") == "system":
+                    llm_messages[0]["content"] = _cto_prompt
+                else:
+                    llm_messages.insert(0, {"role": "system", "content": _cto_prompt})
+
+                # CTO prompt already includes persona/description — skip agent identity injection
+                logger.info(f"[CTO] System prompt replaced for CTO Agent (agent_id={agent_id})")
+            # ── End PRD-67 CTO override ──
+
             # US-015: Emit memory-injected SSE event when memories were retrieved
             if orchestrated.memory_context:
                 _mem_result = getattr(smart_chat.orchestrator, '_last_memory_result', None)
@@ -1374,13 +1438,15 @@ class StreamingChatService:
                 await asyncio.sleep(0)
 
             # Inject agent persona + description (after orchestrator system prompt)
+            # PRD-67: Skip for CTO Agent — soul document already includes persona
             agent_identity_parts = []
-            if agent_ctx.get("description"):
-                agent_identity_parts.append(agent_ctx["description"])
-            if agent_ctx.get("persona"):
-                agent_identity_parts.append(f"## Persona & Communication Style\n{agent_ctx['persona']}")
-            if agent_ctx.get("extra_context"):
-                agent_identity_parts.append(agent_ctx["extra_context"])
+            if not _is_cto_agent:
+                if agent_ctx.get("description"):
+                    agent_identity_parts.append(agent_ctx["description"])
+                if agent_ctx.get("persona"):
+                    agent_identity_parts.append(f"## Persona & Communication Style\n{agent_ctx['persona']}")
+                if agent_ctx.get("extra_context"):
+                    agent_identity_parts.append(agent_ctx["extra_context"])
             if agent_identity_parts:
                 llm_messages.insert(1, {
                     "role": "system",

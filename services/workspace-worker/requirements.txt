@@ -1,0 +1,12 @@
+# Workspace Worker Dependencies
+# PRD-56 Phase 2
+
+# Redis (async)
+redis[hiredis]>=5.0.0
+
+# HTTP server for health check
+aiohttp>=3.9.0
+
+# Shared with orchestrator (already in main requirements)
+pydantic>=2.0.0
+python-dotenv>=1.0.0

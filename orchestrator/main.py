@@ -120,6 +120,12 @@ try:
 except ImportError:
     widget_marketplace_router = None
 
+# PRD-56: Workspace Tasks
+from api.tasks import router as tasks_router
+
+# PRD-66: Workspace File Browser (Code Viewer Widget)
+from api.workspace_files import router as workspace_files_router
+
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
 from api.analytics_api import router as analytics_api_router
@@ -725,6 +731,8 @@ if workspaces_router is not None:
     app.include_router(workspaces_router)  # PRD-37: Workspace context
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
+app.include_router(tasks_router)  # PRD-56: Workspace task management
+app.include_router(workspace_files_router)  # PRD-66: Workspace file browser
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace

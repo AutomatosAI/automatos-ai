@@ -117,6 +117,8 @@ services:
       - ./orchestrator:/app
       - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
       - backend_logs:/app/logs
+      # PRD-66: Read-only access to workspace files for code viewer widget
+      - workspace_data:/workspaces:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -155,6 +157,53 @@ services:
       # Prevent overwriting node_modules and build artifacts
       - /app/node_modules
       - /app/.next
+    networks:
+      - automatos
+
+  # ===========================================================================
+  # Workspace Worker (PRD-56 Phase 2: Physical Workspaces)
+  # ===========================================================================
+  # Agent task execution in isolated workspace directories.
+  # Enable with: --profile workers
+  # ===========================================================================
+  workspace-worker:
+    build:
+      context: ./services/workspace-worker
+      dockerfile: Dockerfile
+    container_name: automatos_workspace_worker
+    restart: unless-stopped
+    profiles: ["workers"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Workspace config
+      WORKSPACE_VOLUME_PATH: /workspaces
+      WORKSPACE_DEFAULT_QUOTA_GB: ${WORKSPACE_DEFAULT_QUOTA_GB:-5}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
+      WORKER_HEALTH_PORT: 8081
+      # Environment
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - workspace_data:/workspaces
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
       - automatos
 
@@ -207,6 +256,9 @@ volumes:
   backend_logs:
     driver: local
     name: automatos_backend_logs
+  workspace_data:
+    driver: local
+    name: automatos_workspace_data
 
 # =============================================================================
 # Networks

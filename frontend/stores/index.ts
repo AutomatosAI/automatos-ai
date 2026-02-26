@@ -16,16 +16,4 @@ export {
   useWidget,
   useWidgetPosition,
   useWidgetSize,
-  // US-006: Workspace persistence selectors
-  useCurrentWorkspaceId,
-  useSavedWorkspaces,
-  useIsWorkspaceLoading,
-  useIsWorkspaceSaving,
-  useHasUnsavedChanges,
-  useLastSaved,
-} from './workspace-store'
-
-export type {
-  SavedWorkspaceSummary,
-  SavedWorkspaceDetail,
 } from './workspace-store'
