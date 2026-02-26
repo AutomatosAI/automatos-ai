@@ -96,7 +96,7 @@ async def list_github_repos(
 
     result = await asyncio.to_thread(
         client.execute_action,
-        action="GITHUB_LIST_REPOS",
+        action="GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
         params={"per_page": per_page, "page": page},
         entity_id=entity_id,
     )
