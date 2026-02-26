@@ -242,7 +242,9 @@ class WorkspaceManager:
         resolved = (self.root / relative_path).resolve()
         base_resolved = self.root.resolve()
 
-        if not str(resolved).startswith(str(base_resolved)):
+        try:
+            resolved.relative_to(base_resolved)
+        except ValueError:
             raise SecurityError(
                 f"Path traversal blocked: '{relative_path}' resolves outside "
                 f"workspace {self.workspace_id[:8]}"

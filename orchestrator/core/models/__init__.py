@@ -4,7 +4,6 @@ from .core import *  # noqa: includes LLMModel, WorkspaceModel, UserApiKey, LLMU
 
 # PRD-37: Workspace model (required for FK resolution)
 from .workspaces import *
-from .workspace_shares import *  # US-003: Workspace sharing
 
 # Also import specialized models from submodules
 # Note: Import order matters - tools.py extends ToolUsageLog from core.py
@@ -22,10 +21,12 @@ from .channels import *  # PRD-55: Channel Connections (US-019)
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
 from .personas import *  # PRD-42: Agent Personas
 from .system_prompts import *  # PRD-58: System Prompt Management
-from .sdk_api_keys import *  # PRD-38.4: SDK API Keys
-from .marketplace_widget import *  # PRD-38.5: Widget Marketplace
-from .widget_installation import *  # PRD-38.5: Widget Installations
-from .widget_review import *  # PRD-38.5: Widget Reviews
+
+# PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
+try:
+    from .sdk_api_keys import *
+except ImportError:
+    pass
 
 try:
     from .channels import *  # PRD-55: Channel Connections

@@ -80,6 +80,12 @@ BLOCKED_PATTERNS: list[str] = [
     r"\buserdel\b",             # user deletion
     r"\bmount\b",               # filesystem mounting
     r"\bumount\b",              # filesystem unmounting
+    # Shell metacharacters / expansion tokens
+    r"`",                        # backtick execution
+    r"\$\(",                     # $() subshell expansion
+    r"\$\[",                     # $[] arithmetic expansion
+    r"\$\{",                     # ${} variable expansion
+    r"\n",                       # embedded newlines
 ]
 
 # Compiled blocked patterns for performance
@@ -149,8 +155,10 @@ class WorkspaceToolExecutor:
         start = time.monotonic()
 
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
+            # Use subprocess_exec with shlex.split for safe argument handling
+            argv = shlex.split(command)
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
                 cwd=str(work_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -436,8 +444,15 @@ class WorkspaceToolExecutor:
             if binary is None:
                 continue
 
-            # Strip path prefix (e.g., /usr/bin/python → python)
-            binary_name = os.path.basename(binary)
+            # Reject binaries specified with path separators or relative paths
+            # (e.g., /usr/bin/python, ./malicious, ../escape)
+            if "/" in binary or "\\" in binary or binary.startswith("."):
+                return (
+                    f"Path-based binary '{binary}' not allowed. "
+                    f"Use plain binary names only (e.g., 'python', not '/usr/bin/python')."
+                )
+
+            binary_name = binary
 
             if binary_name not in ALLOWED_COMMANDS:
                 return (

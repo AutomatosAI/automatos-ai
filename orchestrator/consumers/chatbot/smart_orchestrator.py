@@ -88,7 +88,8 @@ class SmartChatOrchestrator:
         self,
         workspace_id: str,
         agent_id: Optional[int] = None,
-        agent_name: Optional[str] = None
+        agent_name: Optional[str] = None,
+        widget_mode: bool = False
     ):
         """
         Initialize the orchestrator.
@@ -97,10 +98,12 @@ class SmartChatOrchestrator:
             workspace_id: Workspace ID for memory scoping
             agent_id: Agent ID for memory scoping
             agent_name: Agent name for personalization
+            widget_mode: When True, restrict memory to agent-only (no global workspace memories)
         """
         self.workspace_id = workspace_id
         self.agent_id = agent_id
         self.agent_name = agent_name or "Automatos"
+        self.widget_mode = widget_mode
 
         # Components
         self.classifier = get_intent_classifier()
@@ -156,7 +159,8 @@ class SmartChatOrchestrator:
             memory_result = await self.memory_manager.retrieve_memories(
                 workspace_id=self.workspace_id,
                 agent_id=self.agent_id,
-                query=latest_query
+                query=latest_query,
+                widget_mode=self.widget_mode
             )
             self.state.messages_since_memory_fetch = 0
             self.state.memory_fetched_at = time.time()
@@ -353,7 +357,8 @@ class SmartChatOrchestrator:
             agent_id=self.agent_id,
             user_message=user_message,
             assistant_response=assistant_response,
-            chat_id=chat_id
+            chat_id=chat_id,
+            widget_mode=self.widget_mode
         )
 
     def get_user_name(self) -> Optional[str]:

@@ -42,7 +42,7 @@ class SdkApiKey(Base):
     )
 
     name = Column(String(200), nullable=False)
-    key_prefix = Column(String(8), nullable=False)
+    key_prefix = Column(String(16), nullable=False)
     key_hash = Column(String(64), nullable=False, unique=True, index=True)
     key_type = Column(String(20), nullable=False)  # "public" | "server"
 
@@ -50,6 +50,9 @@ class SdkApiKey(Base):
     permissions = Column(ARRAY(String), nullable=True)
     rate_limit_requests = Column(Integer, nullable=True)
     rate_limit_tokens = Column(Integer, nullable=True)
+
+    # Agent lock — force all widget chats to use this agent
+    default_agent_id = Column(Integer, nullable=True)
 
     # Access restrictions
     allowed_domains = Column(ARRAY(String), nullable=True)

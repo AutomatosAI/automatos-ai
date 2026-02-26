@@ -81,7 +81,8 @@ class MemoryInjector:
         chat_id: str,
         query: str,
         workspace_id: Optional[str] = None,
-        agent_id: Optional[int] = None
+        agent_id: Optional[int] = None,
+        widget_mode: bool = False
     ) -> Optional[str]:
         """
         Retrieve relevant memories from Mem0 for injection into LLM context.
@@ -112,7 +113,8 @@ class MemoryInjector:
                 workspace_id=str(workspace_id) if workspace_id else "default",
                 agent_id=agent_id,
                 query=query,
-                limit=10
+                limit=10,
+                widget_mode=widget_mode
             )
 
             if not result or not result.memories:
@@ -150,7 +152,8 @@ class MemoryInjector:
         user_message: str,
         assistant_response: str,
         workspace_id: Optional[str] = None,
-        agent_id: Optional[int] = None
+        agent_id: Optional[int] = None,
+        widget_mode: bool = False
     ):
         """
         Store conversation as memory in Mem0.
@@ -172,7 +175,8 @@ class MemoryInjector:
                 agent_id=agent_id,
                 user_message=user_message,
                 assistant_response=assistant_response,
-                chat_id=chat_id
+                chat_id=chat_id,
+                widget_mode=widget_mode
             )
 
             if success:

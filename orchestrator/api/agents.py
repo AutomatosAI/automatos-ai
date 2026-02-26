@@ -493,10 +493,31 @@ async def list_agents(
 ):
     """List agents with enhanced filtering and pagination"""
     try:
-        # Filter by workspace
-        query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
+        # PRD-67: Build a single unified query covering workspace agents
+        # AND visible system agents, so filters and pagination apply to all.
+        user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
+        _ROLE_HIERARCHY = {"super_admin": {"super_admin", "admin"}, "admin": {"admin"}}
+        visible_roles = _ROLE_HIERARCHY.get(user_role, set())
 
-        # Apply filters
+        # Base scope: workspace agents OR visible system agents
+        workspace_predicate = Agent.workspace_id == ctx.workspace_id
+        if visible_roles:
+            system_predicate = and_(
+                Agent.is_system_agent.is_(True),
+                Agent.status == "active",
+                or_(Agent.required_role.is_(None), Agent.required_role.in_(visible_roles)),
+            )
+            scope_filter = or_(workspace_predicate, system_predicate)
+        else:
+            scope_filter = workspace_predicate
+
+        query = (
+            db.query(Agent)
+            .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
+            .filter(scope_filter)
+        )
+
+        # Apply filters uniformly to all agents (workspace + system)
         if status:
             query = query.filter(Agent.status == status.value)
 
@@ -513,27 +534,10 @@ async def list_agents(
             )
             query = query.filter(search_filter)
 
+        # Deduplicate by id (system agents with workspace_id=NULL won't overlap,
+        # but guard against edge cases) and apply pagination
+        query = query.distinct(Agent.id)
         agents = query.offset(skip).limit(limit).all()
-
-        # PRD-67: Include system agents visible to this user's role
-        user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
-        # Role hierarchy: super_admin sees everything admin sees
-        _ROLE_HIERARCHY = {"super_admin": {"super_admin", "admin"}, "admin": {"admin"}}
-        visible_roles = _ROLE_HIERARCHY.get(user_role, set())
-        if visible_roles:
-            system_agents = (
-                db.query(Agent)
-                .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
-                .filter(
-                    Agent.is_system_agent.is_(True),
-                    Agent.status == "active",
-                    or_(Agent.required_role.is_(None), Agent.required_role.in_(visible_roles)),
-                )
-                .all()
-            )
-            # Deduplicate (system agents have workspace_id=NULL, so no overlap)
-            existing_ids = {a.id for a in agents}
-            agents = list(agents) + [a for a in system_agents if a.id not in existing_ids]
 
         return [_build_agent_response(agent, db) for agent in agents]
         

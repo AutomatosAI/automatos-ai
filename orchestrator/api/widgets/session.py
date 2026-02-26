@@ -132,6 +132,9 @@ async def exchange_session_token(
     if request.user_id is not None:
         payload["user_id"] = request.user_id
 
+    if api_key_record.default_agent_id is not None:
+        payload["default_agent_id"] = api_key_record.default_agent_id
+
     session_token = jwt.encode(
         payload,
         WIDGET_TOKEN_SECRET,

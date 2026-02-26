@@ -98,36 +98,11 @@ async def submit_task(
         "created_at": now.isoformat(),
     }
 
-    # Enqueue directly to Redis (same queue format as QueuedTaskRunner)
-    redis = await runner._get_redis()
-
-    # Write initial status
-    status_key = f"workspace:task:{task_id}:status"
-    await redis.hset(status_key, mapping={
-        "status": "queued",
-        "workspace_id": workspace_id,
-        "submitted_at": now.isoformat(),
-        "priority": body.priority,
-        "task_type": "background_job",
-    })
-    await redis.expire(status_key, 7200)
-
-    # Track active tasks
-    ws_active_key = f"workspace:ws:{workspace_id}:active_tasks"
-    await redis.sadd(ws_active_key, task_id)
-
-    # Push to priority queue
-    queue_map = {
-        "critical": "workspace:tasks:critical",
-        "high": "workspace:tasks:high",
-        "normal": "workspace:tasks:normal",
-        "low": "workspace:tasks:low",
-    }
-    queue_name = queue_map.get(body.priority, queue_map["normal"])
-    await redis.lpush(queue_name, json.dumps(payload))
-
-    # Insert record into task_executions for history
+    # --- Atomic submission: DB first, then Redis ---
+    # Insert DB row BEFORE pushing to Redis so a worker never picks up a
+    # task that has no corresponding task_executions row.
     from sqlalchemy import text
+
     db.execute(text("""
         INSERT INTO task_executions (
             id, workspace_id, task_type, status, priority,
@@ -147,6 +122,42 @@ async def submit_task(
         "submitted_at": now,
     })
     db.commit()
+
+    # Now enqueue to Redis — if this fails, mark the DB row as failed
+    queue_map = {
+        "critical": "workspace:tasks:critical",
+        "high": "workspace:tasks:high",
+        "normal": "workspace:tasks:normal",
+        "low": "workspace:tasks:low",
+    }
+    queue_name = queue_map.get(body.priority, queue_map["normal"])
+
+    try:
+        redis = await runner._get_redis()
+
+        status_key = f"workspace:task:{task_id}:status"
+        await redis.hset(status_key, mapping={
+            "status": "queued",
+            "workspace_id": workspace_id,
+            "submitted_at": now.isoformat(),
+            "priority": body.priority,
+            "task_type": "background_job",
+        })
+        await redis.expire(status_key, 7200)
+
+        ws_active_key = f"workspace:ws:{workspace_id}:active_tasks"
+        await redis.sadd(ws_active_key, task_id)
+
+        await redis.lpush(queue_name, json.dumps(payload))
+    except Exception as redis_err:
+        logger.error("Redis enqueue failed for task %s: %s", task_id[:8], redis_err)
+        db.execute(text("""
+            UPDATE task_executions
+            SET status = 'failed', error_message = :error
+            WHERE id = :id
+        """), {"id": task_id, "error": f"Redis enqueue failed: {redis_err}"})
+        db.commit()
+        raise HTTPException(status_code=503, detail="Task queue unavailable")
 
     logger.info(
         "Task %s submitted (workspace=%s, steps=%d, priority=%s)",
