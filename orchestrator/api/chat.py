@@ -11,7 +11,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
+from sqlalchemy import text, func, or_
 from pydantic import BaseModel
 
 from core.database.database import get_db
@@ -25,6 +25,39 @@ from core.routing.ingestors.chatbot import ChatbotIngestor
 from core.session_queue import get_session_queue
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# PRD-67: CTO Agent lookup (cached in-process)
+# ---------------------------------------------------------------------------
+_CTO_CACHE_SENTINEL = object()
+_cto_agent_id_cache: dict = {}  # {"id": int|None|SENTINEL, "ts": float}
+_CTO_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cto_agent_id(db: Session) -> Optional[int]:
+    """Get the CTO Agent's ID (cached). Returns None if not seeded."""
+    import time
+
+    cached = _cto_agent_id_cache.get("id", _CTO_CACHE_SENTINEL)
+    ts = _cto_agent_id_cache.get("ts", 0)
+    if cached is not _CTO_CACHE_SENTINEL and (time.time() - ts) < _CTO_CACHE_TTL:
+        return cached  # may be None — means CTO not seeded yet, respect TTL
+
+    try:
+        from core.models.core import Agent
+        row = db.query(Agent.id).filter(
+            Agent.slug == "auto-cto",
+            Agent.is_system_agent.is_(True),
+            Agent.status == "active",
+        ).first()
+        agent_id = row[0] if row else None
+        _cto_agent_id_cache["id"] = agent_id
+        _cto_agent_id_cache["ts"] = time.time()
+        return agent_id
+    except Exception:
+        logger.debug("CTO Agent lookup failed", exc_info=True)
+        return None
 
 
 router = APIRouter(prefix="/api/chat", tags=["💬 Chat"])
@@ -253,10 +286,19 @@ async def stream_chat(
     use_system_llm = False  # True = use orchestrator LLM settings, not agent's model
     complexity_assessment = None
 
+    # PRD-67: Detect admin → default to CTO Agent
+    _user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
+    _is_admin = _user_role in ("admin", "super_admin")
+
     if request.agentId:
         # User explicitly selected an agent — skip Auto, use directly
         effective_agent_id = request.agentId
         logger.info(f"[chat] Direct mode: agent_id={effective_agent_id}")
+    elif _is_admin and (cto_id := _get_cto_agent_id(db)):
+        # PRD-67: Admin without explicit agent → CTO Agent
+        effective_agent_id = cto_id
+        use_system_llm = True
+        logger.info(f"[Auto] CTO mode: admin detected, agent_id={cto_id}")
     else:
         # --- Auto mode: the brain decides ---
         auto_brain = AutoBrain(db, str(ctx.workspace_id))
@@ -586,9 +628,19 @@ async def switch_agent(
     if chat.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    new_agent = db.query(Agent).filter(Agent.id == request.newAgentId, Agent.workspace_id == ctx.workspace_id).first()
+    # PRD-67: Allow switching to system agents (CTO) if user has the required role
+    new_agent = db.query(Agent).filter(
+        Agent.id == request.newAgentId,
+        or_(Agent.workspace_id == ctx.workspace_id, Agent.is_system_agent.is_(True)),
+    ).first()
     if not new_agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    # Verify role access for system agents
+    if new_agent.is_system_agent and new_agent.required_role:
+        _switch_user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
+        _switch_hierarchy = {"super_admin": {"super_admin", "admin"}, "admin": {"admin"}}
+        if new_agent.required_role not in _switch_hierarchy.get(_switch_user_role, set()):
+            raise HTTPException(status_code=403, detail="Insufficient role for this agent")
     
     old_agent_id = getattr(chat, 'current_agent_id', None) or 1
     

@@ -211,6 +211,11 @@ class Agent(Base):
     custom_persona_prompt = Column(Text, nullable=True)
     use_custom_persona = Column(Boolean, default=False, server_default='false')
 
+    # PRD-67: CTO Agent / System agents
+    is_system_agent = Column(Boolean, default=False, server_default='false')  # Global, platform-seeded
+    required_role = Column(String(50), nullable=True)  # If set, only visible to users with this system_role
+    slug = Column(String(100), nullable=True, unique=True)  # Stable ID for system agents (idempotent seeding)
+
     # PRD-64: Semantic routing embedding
     semantic_embedding = Column(JSONB, nullable=True)       # 2048-float vector for cosine similarity
     semantic_text_hash = Column(String(64), nullable=True)  # SHA-256 for staleness detection
@@ -639,6 +644,10 @@ class AgentResponse(BaseModel):
     plugins: List[Dict[str, Any]] = []  # Assigned marketplace plugins
     agent_model_config: Optional[Dict[str, Any]] = None  # PRD-15: Model configuration (renamed from model_config - Pydantic reserved)
     model_usage_stats: Optional[Dict[str, Any]] = None  # PRD-54: LLM usage stats
+    # PRD-67: System agent fields
+    is_system_agent: bool = False
+    slug: Optional[str] = None
+    required_role: Optional[str] = None
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
