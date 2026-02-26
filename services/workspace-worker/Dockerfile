@@ -56,8 +56,8 @@ RUN useradd -m -u 1000 worker \
 
 USER worker
 
-# Volume mount point for persistent workspaces
-VOLUME /workspaces
+# Workspace directory — attach a Railway Volume mounted at /workspaces
+# (VOLUME instruction removed — Railway manages volumes externally)
 
 # Environment defaults
 ENV WORKSPACE_VOLUME_PATH=/workspaces
