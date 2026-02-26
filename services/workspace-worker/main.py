@@ -222,8 +222,8 @@ class WorkspaceWorker:
 
     async def _execute_task(self, payload: Dict[str, Any]) -> None:
         """Execute a single workspace task."""
-        from .workspace_manager import WorkspaceManager
-        from .executor import WorkspaceToolExecutor
+        from workspace_manager import WorkspaceManager
+        from executor import WorkspaceToolExecutor
 
         task_id = payload["task_id"]
         workspace_id = payload["workspace_id"]

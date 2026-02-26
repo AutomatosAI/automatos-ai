@@ -24,7 +24,7 @@ import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .workspace_manager import SecurityError, WorkspaceManager
+from workspace_manager import SecurityError, WorkspaceManager
 
 logger = logging.getLogger(__name__)
 
