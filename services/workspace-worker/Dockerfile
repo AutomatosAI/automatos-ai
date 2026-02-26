@@ -4,8 +4,8 @@
 # Consumes tasks from Redis queues, executes in isolated workspace directories.
 # Pre-installs DevOps toolchain so agents don't need to pip/npm install basics.
 #
-# Build: docker build -f services/workspace-worker/Dockerfile -t automatos-workspace-worker .
-# Run:   docker run -v workspace-data:/workspaces automatos-workspace-worker
+# Railway: root directory = services/workspace-worker
+#          All COPY paths relative to that directory (same as other services).
 # =============================================================================
 
 FROM python:3.12-slim AS base
@@ -40,14 +40,11 @@ RUN pip install --no-cache-dir \
 
 # Worker application dependencies
 WORKDIR /app
-COPY services/workspace-worker/requirements.txt /app/worker-requirements.txt
-RUN pip install --no-cache-dir -r worker-requirements.txt
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy orchestrator (shared models, config, etc.)
-COPY orchestrator/ /app/orchestrator/
-
-# Copy worker service
-COPY services/workspace-worker/ /app/worker/
+# Copy worker service code (context = services/workspace-worker/)
+COPY . /app/worker/
 
 # Non-root user
 RUN useradd -m -u 1000 worker \
@@ -55,9 +52,6 @@ RUN useradd -m -u 1000 worker \
     && chown -R worker:worker /app /workspaces
 
 USER worker
-
-# Workspace directory — attach a Railway Volume mounted at /workspaces
-# (VOLUME instruction removed — Railway manages volumes externally)
 
 # Environment defaults
 ENV WORKSPACE_VOLUME_PATH=/workspaces
@@ -73,5 +67,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 EXPOSE 8081
 
-# Entry point
 CMD ["python", "-m", "worker.main"]

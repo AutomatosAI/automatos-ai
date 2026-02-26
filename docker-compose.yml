@@ -168,8 +168,8 @@ services:
   # ===========================================================================
   workspace-worker:
     build:
-      context: .
-      dockerfile: services/workspace-worker/Dockerfile
+      context: ./services/workspace-worker
+      dockerfile: Dockerfile
     container_name: automatos_workspace_worker
     restart: unless-stopped
     profiles: ["workers"]
