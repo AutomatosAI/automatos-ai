@@ -412,8 +412,31 @@ class WorkspaceWorker:
             await asyncio.sleep(30)
 
     async def _health_server(self) -> None:
-        """Simple HTTP health check endpoint."""
+        """HTTP server for health checks and file browsing endpoints."""
         from aiohttp import web
+        from workspace_manager import WorkspaceManager, SecurityError
+
+        volume_path = os.environ.get("WORKSPACE_VOLUME_PATH", "/workspaces")
+        max_file_size = 2 * 1024 * 1024  # 2 MB
+        max_dir_entries = 500
+
+        # Language detection map (Monaco-compatible)
+        _lang_map = {
+            ".py": "python", ".js": "javascript", ".jsx": "javascript",
+            ".ts": "typescript", ".tsx": "typescript", ".json": "json",
+            ".yaml": "yaml", ".yml": "yaml", ".md": "markdown",
+            ".html": "html", ".htm": "html", ".css": "css", ".scss": "scss",
+            ".sql": "sql", ".sh": "shell", ".bash": "shell", ".zsh": "shell",
+            ".rs": "rust", ".go": "go", ".java": "java", ".c": "c",
+            ".cpp": "cpp", ".h": "c", ".hpp": "cpp", ".rb": "ruby",
+            ".php": "php", ".xml": "xml", ".toml": "toml", ".ini": "ini",
+            ".cfg": "ini", ".env": "dotenv", ".dockerfile": "dockerfile",
+            ".r": "r", ".swift": "swift", ".kt": "kotlin", ".lua": "lua",
+        }
+
+        def _guess_language(filename: str) -> str:
+            from pathlib import Path as P
+            return _lang_map.get(P(filename).suffix.lower(), "plaintext")
 
         app = web.Application()
 
@@ -423,10 +446,114 @@ class WorkspaceWorker:
                 "worker_id": self._worker_id,
                 "active_tasks": len(self._active_tasks),
                 "concurrency": self.concurrency,
-                "volume_path": os.environ.get("WORKSPACE_VOLUME_PATH", "/workspaces"),
+                "volume_path": volume_path,
+            })
+
+        async def list_files_handler(request):
+            """GET /workspaces/{workspace_id}/files?path=. — directory listing."""
+            from pathlib import Path as P
+            import mimetypes
+
+            workspace_id = request.match_info["workspace_id"]
+            rel_path = request.query.get("path", ".")
+
+            ws_manager = WorkspaceManager(workspace_id, volume_path)
+            ws_dir = P(volume_path) / workspace_id
+
+            if not ws_dir.is_dir():
+                return web.json_response(
+                    {"error": "Workspace directory not found"}, status=404
+                )
+
+            try:
+                target = ws_manager.resolve_safe_path(rel_path)
+            except SecurityError as exc:
+                return web.json_response({"error": str(exc)}, status=403)
+
+            if not target.exists():
+                return web.json_response({"error": "Path not found"}, status=404)
+            if not target.is_dir():
+                return web.json_response({"error": "Path is not a directory"}, status=400)
+
+            entries = []
+            try:
+                for i, item in enumerate(
+                    sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+                ):
+                    if i >= max_dir_entries:
+                        break
+                    stat = item.stat()
+                    rel = str(item.relative_to(ws_dir))
+                    entries.append({
+                        "name": item.name,
+                        "path": rel,
+                        "type": "directory" if item.is_dir() else "file",
+                        "size": stat.st_size if item.is_file() else 0,
+                        "modified_at": stat.st_mtime,
+                    })
+            except PermissionError:
+                return web.json_response({"error": "Permission denied"}, status=403)
+
+            return web.json_response({
+                "path": rel_path,
+                "entries": entries,
+                "truncated": len(entries) >= max_dir_entries,
+            })
+
+        async def file_content_handler(request):
+            """GET /workspaces/{workspace_id}/files/content?path=file.py — file content."""
+            from pathlib import Path as P
+            import mimetypes
+
+            workspace_id = request.match_info["workspace_id"]
+            rel_path = request.query.get("path")
+            if not rel_path:
+                return web.json_response({"error": "path query param required"}, status=400)
+
+            ws_manager = WorkspaceManager(workspace_id, volume_path)
+            ws_dir = P(volume_path) / workspace_id
+
+            if not ws_dir.is_dir():
+                return web.json_response(
+                    {"error": "Workspace directory not found"}, status=404
+                )
+
+            try:
+                target = ws_manager.resolve_safe_path(rel_path)
+            except SecurityError as exc:
+                return web.json_response({"error": str(exc)}, status=403)
+
+            if not target.exists():
+                return web.json_response({"error": "File not found"}, status=404)
+            if not target.is_file():
+                return web.json_response({"error": "Path is not a file"}, status=400)
+
+            file_size = target.stat().st_size
+            if file_size > max_file_size:
+                return web.json_response(
+                    {"error": f"File too large ({file_size} bytes, max {max_file_size})"},
+                    status=413,
+                )
+
+            try:
+                content = target.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return web.json_response({"error": "Unable to read file as text"}, status=422)
+
+            mime_type, _ = mimetypes.guess_type(target.name)
+
+            return web.json_response({
+                "path": rel_path,
+                "name": target.name,
+                "content": content,
+                "size": file_size,
+                "language": _guess_language(target.name),
+                "mime_type": mime_type or "text/plain",
             })
 
         app.router.add_get("/health", health_handler)
+        app.router.add_get("/workspaces/{workspace_id}/files", list_files_handler)
+        app.router.add_get("/workspaces/{workspace_id}/files/content", file_content_handler)
 
         runner = web.AppRunner(app)
         await runner.setup()

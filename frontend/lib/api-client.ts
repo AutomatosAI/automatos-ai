@@ -2418,6 +2418,17 @@ class ApiClient {
     return this.request(`/api/workspaces/${workspaceId}/files/content?path=${encodeURIComponent(path)}`)
   }
 
+  async listGithubRepos(workspaceId: string, page = 1, perPage = 30) {
+    return this.request(`/api/workspaces/${workspaceId}/github/repos?page=${page}&per_page=${perPage}`)
+  }
+
+  async cloneGithubRepo(workspaceId: string, repoUrl: string, branch?: string) {
+    return this.request(`/api/workspaces/${workspaceId}/github/clone`, {
+      method: 'POST',
+      body: JSON.stringify({ repo_url: repoUrl, ...(branch ? { branch } : {}) }),
+    })
+  }
+
   // ===== ORCHESTRATOR ENDPOINTS (Working ✅) =====
   async submitTask(data: { task_description: string, priority?: string, context?: any }) {
     return this.request('/api/orchestrator/task/submit', {
