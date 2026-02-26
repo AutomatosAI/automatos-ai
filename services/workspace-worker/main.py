@@ -87,7 +87,24 @@ class WorkspaceWorker:
         )
 
         import redis.asyncio as aioredis
-        self._redis = aioredis.from_url(self.redis_url, decode_responses=True)
+        import redis.exceptions
+        self._redis = aioredis.from_url(
+            self.redis_url,
+            decode_responses=True,
+            retry_on_error=[redis.exceptions.BusyLoadingError],
+        )
+
+        # Wait for Redis to be ready (handles BusyLoadingError on startup)
+        for attempt in range(1, 16):
+            try:
+                await self._redis.ping()
+                logger.info("Redis connection established")
+                break
+            except (redis.exceptions.BusyLoadingError, ConnectionError, OSError) as e:
+                logger.warning("Redis not ready (attempt %d/15): %s", attempt, e)
+                if attempt == 15:
+                    raise RuntimeError("Redis not available after 15 attempts") from e
+                await asyncio.sleep(2)
 
         # Register signal handlers
         loop = asyncio.get_running_loop()
@@ -116,7 +133,7 @@ class WorkspaceWorker:
             heartbeat_task.cancel()
 
             if self._redis:
-                await self._redis.close()
+                await self._redis.aclose()
 
             logger.info("Worker %s shutdown complete", self._worker_id)
 
@@ -161,21 +178,24 @@ class WorkspaceWorker:
         """Pop the highest-priority task from Redis queues.
 
         Checks queues in order: critical → high → normal → low.
-        Returns None if all queues are empty.
+        Returns None if all queues are empty or Redis is temporarily unavailable.
         """
-        for queue_name in QUEUE_NAMES:
-            result = await self._redis.rpop(queue_name)
-            if result:
-                try:
-                    payload = json.loads(result)
-                    logger.info(
-                        "Dequeued task %s from %s (workspace=%s)",
-                        payload["task_id"][:8], queue_name, payload["workspace_id"][:8],
-                    )
-                    return payload
-                except (json.JSONDecodeError, KeyError) as e:
-                    logger.error("Invalid task payload from %s: %s", queue_name, e)
-                    continue
+        try:
+            for queue_name in QUEUE_NAMES:
+                result = await self._redis.rpop(queue_name)
+                if result:
+                    try:
+                        payload = json.loads(result)
+                        logger.info(
+                            "Dequeued task %s from %s (workspace=%s)",
+                            payload["task_id"][:8], queue_name, payload["workspace_id"][:8],
+                        )
+                        return payload
+                    except (json.JSONDecodeError, KeyError) as e:
+                        logger.error("Invalid task payload from %s: %s", queue_name, e)
+                        continue
+        except Exception as e:
+            logger.warning("Redis dequeue error (will retry): %s", e)
         return None
 
     async def _execute_task_wrapper(self, payload: Dict[str, Any]) -> None:
