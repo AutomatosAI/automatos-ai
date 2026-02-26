@@ -139,6 +139,17 @@ async def list_github_repos(
             for dk, dv in data_val.items():
                 _dvpreview = str(dv)[:300] if not isinstance(dv, (list, dict)) else f"{type(dv).__name__}(len={len(dv)})"
                 logger.info("    data[%s] = %s", dk, _dvpreview)
+            # Go one more level: result.data.data
+            inner = data_val.get("data")
+            if isinstance(inner, dict):
+                logger.info("    data['data'] keys = %s", list(inner.keys()))
+                for ik, iv in inner.items():
+                    _ivp = str(iv)[:500] if not isinstance(iv, (list, dict)) else f"{type(iv).__name__}(len={len(iv)})"
+                    logger.info("      data.data[%s] = %s", ik, _ivp)
+                    if isinstance(iv, list) and iv:
+                        logger.info("      data.data[%s][0] = %s", ik, str(iv[0])[:500])
+            elif isinstance(inner, list):
+                logger.info("    data['data'] is list, len=%d, first=%s", len(inner), str(inner[0])[:500] if inner else "empty")
         elif isinstance(data_val, list):
             logger.info("  result['data'] is list, len=%d, first=%s", len(data_val), str(data_val[0])[:300] if data_val else "empty")
 
