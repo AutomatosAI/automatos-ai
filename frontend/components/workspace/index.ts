@@ -14,6 +14,8 @@ import '@/components/widgets/TerminalWidget'
 import '@/components/widgets/WorkflowWidget'
 import '@/components/widgets/MemoryWidget'
 import '@/components/widgets/FileWidget'
+// PRD-66: Coding Canvas Widget (workspace file browser + Monaco editor)
+import '@/components/widgets/CodingCanvasWidget'
 
 export { Canvas } from './Canvas'
 export { WidgetTray } from './WidgetTray'
