@@ -107,7 +107,7 @@ def seed_cto_agent(db: Session) -> None:
                 "temperature": 0.7,
             },
             tags=["cto", "platform-builder", "admin-only", "system"],
-            owner_type="platform",
+            owner_type="workspace",  # constraint only allows 'workspace'|'marketplace'
         )
         db.add(agent)
 

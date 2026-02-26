@@ -289,6 +289,7 @@ async def stream_chat(
     # PRD-67: Detect admin → default to CTO Agent
     _user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
     _is_admin = _user_role in ("admin", "super_admin")
+    logger.info(f"[PRD-67] user_role={_user_role!r}, is_admin={_is_admin}, user_id={getattr(ctx.user, 'id', '?')}")
 
     if request.agentId:
         # User explicitly selected an agent — skip Auto, use directly
