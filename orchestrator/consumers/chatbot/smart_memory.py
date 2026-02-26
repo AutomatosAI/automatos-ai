@@ -184,7 +184,8 @@ class SmartMemoryManager:
         workspace_id: str,
         agent_id: Optional[int],
         query: str,
-        limit: int = 8
+        limit: int = 8,
+        widget_mode: bool = False
     ) -> MemoryResult:
         """
         Retrieve relevant memories for a query.
@@ -216,30 +217,39 @@ class SmartMemoryManager:
                 # 1. Global memories (user facts shared across all agents)
                 # 2. Agent-specific memories (tool preferences, workflow patterns)
 
-                global_user_id = self._get_global_user_id(workspace_id)
                 agent_user_id = self._get_agent_user_id(workspace_id, agent_id)
-
-                logger.info(f"[SmartMemory] Two-tier search: global={global_user_id}, agent={agent_user_id}")
 
                 loop = asyncio.get_event_loop()
 
-                # Fetch both tiers in parallel
-                global_task = loop.run_in_executor(
-                    None,
-                    lambda: self.mem0_client.search(query=query, user_id=global_user_id, limit=limit)
-                )
-                agent_task = loop.run_in_executor(
-                    None,
-                    lambda: self.mem0_client.search(query=query, user_id=agent_user_id, limit=limit)
-                )
+                if widget_mode:
+                    # Widget mode: agent-only retrieval — never leak global workspace memories
+                    logger.info(f"[SmartMemory] Widget mode: agent-only retrieval (agent={agent_user_id})")
+                    agent_memories = await loop.run_in_executor(
+                        None,
+                        lambda: self.mem0_client.search(query=query, user_id=agent_user_id, limit=limit)
+                    )
+                    global_memories = []
+                else:
+                    global_user_id = self._get_global_user_id(workspace_id)
+                    logger.info(f"[SmartMemory] Two-tier search: global={global_user_id}, agent={agent_user_id}")
 
-                global_memories, agent_memories = await asyncio.gather(global_task, agent_task)
+                    # Fetch both tiers in parallel
+                    global_task = loop.run_in_executor(
+                        None,
+                        lambda: self.mem0_client.search(query=query, user_id=global_user_id, limit=limit)
+                    )
+                    agent_task = loop.run_in_executor(
+                        None,
+                        lambda: self.mem0_client.search(query=query, user_id=agent_user_id, limit=limit)
+                    )
+
+                    global_memories, agent_memories = await asyncio.gather(global_task, agent_task)
 
                 # Merge: global first (who the user is), then agent-specific (how they use this agent)
                 global_memories = global_memories or []
                 agent_memories = agent_memories or []
 
-                logger.info(f"[SmartMemory] ✅ Found {len(global_memories)} global + {len(agent_memories)} agent-specific memories")
+                logger.info(f"[SmartMemory] Found {len(global_memories)} global + {len(agent_memories)} agent-specific memories")
 
                 # Combine with global first, agent-specific second
                 # Mark agent-specific memories so we can format them differently
@@ -370,7 +380,8 @@ class SmartMemoryManager:
         agent_id: Optional[int],
         user_message: str,
         assistant_response: str,
-        chat_id: Optional[str] = None
+        chat_id: Optional[str] = None,
+        widget_mode: bool = False
     ) -> bool:
         """
         Store a conversation exchange in memory.
@@ -403,6 +414,11 @@ class SmartMemoryManager:
             # TWO-TIER MEMORY STORAGE
             # Classify where this memory should be stored
             tier = self._classify_memory_tier(user_message, assistant_response)
+
+            # Widget mode: force agent-only storage — never pollute global with widget customer data
+            if widget_mode:
+                logger.info("[SmartMemory] Widget mode: forcing agent-only storage")
+                tier = "agent"
             # US-015: Store last tier so callers can emit SSE events
             self._last_tier = tier
             logger.info(f"[SmartMemory] Memory classified as: {tier}")

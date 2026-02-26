@@ -111,7 +111,7 @@ async def widget_chat(
     user_id = _get_widget_user_id(db)
 
     chat_service = ChatService(db)
-    streaming_service = StreamingChatService(db, workspace_id=workspace_id)
+    streaming_service = StreamingChatService(db, workspace_id=workspace_id, widget_mode=True)
 
     # ------------------------------------------------------------------
     # Resolve or create conversation

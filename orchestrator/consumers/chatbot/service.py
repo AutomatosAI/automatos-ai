@@ -459,7 +459,7 @@ class StreamingChatService:
     Thin orchestrator consuming modules.
     """
     
-    def __init__(self, db: Session, workspace_id: Optional[str] = None):
+    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False):
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
@@ -467,6 +467,7 @@ class StreamingChatService:
         self.tool_router = get_tool_router()
         self.streaming_handler = get_streaming_handler()
         self.workspace_id = workspace_id
+        self.widget_mode = widget_mode
         
         # PRD: Unified Agent-Chat System - Initialize AgentFactory
         from modules.agents.factory.agent_factory import AgentFactory
@@ -1326,7 +1327,8 @@ class StreamingChatService:
             smart_chat = SmartChatIntegration(
                 workspace_id=str(self.workspace_id) if self.workspace_id else self.workspace_id,
                 agent_id=agent_id,
-                agent_name=agent_runtime.metadata.name
+                agent_name=agent_runtime.metadata.name,
+                widget_mode=self.widget_mode
             )
 
             # Load agent context: persona, description, skill tools
