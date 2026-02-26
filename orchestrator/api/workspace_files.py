@@ -75,6 +75,11 @@ async def list_files(
     except httpx.TimeoutException as err:
         raise HTTPException(status_code=504, detail="Workspace worker request timed out") from err
 
+    # 404 from worker means workspace dir doesn't exist yet (no repos cloned).
+    # Return an empty listing so the frontend shows "Connect Repo" instead of an error.
+    if resp.status_code == 404:
+        return {"path": path, "entries": [], "truncated": False}
+
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail=_parse_worker_error(resp))
 
