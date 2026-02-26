@@ -6,7 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget openssh-client ca-certificates \
     build-essential \
-    jq tree \
+    jq tree gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js LTS (v20.x)
@@ -29,11 +29,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Worker code
 COPY . .
 
-# Non-root user
+# Non-root user (created at build time; entrypoint drops to this user)
 RUN useradd -m -u 1000 worker \
     && mkdir -p /workspaces \
     && chown -R worker:worker /app /workspaces
-USER worker
+
+# Entrypoint fixes volume ownership then drops to worker user
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Environment defaults
 ENV WORKSPACE_VOLUME_PATH=/workspaces
@@ -48,4 +51,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 EXPOSE 8081
 
-CMD ["python", "-m", "main"]
+ENTRYPOINT ["entrypoint.sh"]
+CMD []
