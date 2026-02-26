@@ -79,11 +79,11 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
         `/api/workspaces/${workspaceId}/exec`,
         {
           method: 'POST',
-          body: JSON.stringify({
+          body: {
             command,
             cwd: cwd === '.' ? undefined : cwd,
             timeout: 120,
-          }),
+          } as any,
         }
       ) as ExecResult
 
@@ -107,7 +107,7 @@ export function InteractiveTerminal({ workspaceId, className }: InteractiveTermi
               `/api/workspaces/${workspaceId}/exec`,
               {
                 method: 'POST',
-                body: JSON.stringify({ command: 'pwd', cwd: newDir }),
+                body: { command: 'pwd', cwd: newDir } as any,
               }
             ) as ExecResult
             if (pwdResult.exit_code === 0 && pwdResult.stdout) {
