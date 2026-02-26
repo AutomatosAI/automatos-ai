@@ -108,3 +108,6 @@ frontend/.env.local
 .credential_key
 *.credential_key
 **/.credential_key
+
+# Nightly test reports (generated JSON)
+tests/api/reports/*.json
