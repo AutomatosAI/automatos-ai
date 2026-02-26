@@ -114,7 +114,12 @@ async def clone_github_repo(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Clone a GitHub repo into the workspace via task submission."""
+    """Clone a GitHub repo into the workspace via task submission.
+
+    Attempts to retrieve the GitHub OAuth token from Composio to
+    authenticate the clone (required for private repos). Falls back
+    to unauthenticated HTTPS clone for public repos.
+    """
     if str(ctx.workspace_id) != workspace_id:
         raise HTTPException(status_code=403, detail="Workspace access denied")
 
@@ -128,13 +133,30 @@ async def clone_github_repo(
                    f"Current backend: {runner.backend_name}",
         )
 
+    # Try to get GitHub token from Composio for authenticated clone
+    clone_url = body.repo_url
+    try:
+        from core.composio.client import get_composio_client
+        client = get_composio_client()
+        token = client.get_app_access_token(str(ctx.workspace_id), "GITHUB")
+        if token:
+            # Inject token into HTTPS URL: https://x-access-token:{token}@github.com/...
+            if clone_url.startswith("https://github.com"):
+                clone_url = clone_url.replace(
+                    "https://github.com",
+                    f"https://x-access-token:{token}@github.com",
+                )
+                logger.info("Injected GitHub token for authenticated clone")
+    except Exception as e:
+        logger.warning("Could not retrieve GitHub token (public clone only): %s", e)
+
     task_id = str(uuid4())
     now = datetime.now(timezone.utc)
 
     # Build a git_clone step
     step = {
         "action": "git_clone",
-        "repo": body.repo_url,
+        "repo": clone_url,
         "description": f"Clone {body.repo_url}",
     }
     if body.branch:

@@ -319,7 +319,62 @@ class ComposioClient:
         except Exception as e:
             logger.error(f"Failed to get connection status: {e}")
             return None
-    
+
+    def get_app_access_token(self, entity_id: str, app: str) -> Optional[str]:
+        """
+        Retrieve the OAuth access token for a connected app.
+
+        Inspects the connected account object for token attributes.
+        Returns None if unavailable (token not exposed or not connected).
+        """
+        if not self.composio:
+            return None
+
+        try:
+            auth_config_id = self._resolve_auth_config_id(app)
+            if not auth_config_id:
+                return None
+
+            response = self.composio.connected_accounts.list(
+                user_ids=[entity_id],
+                auth_config_ids=[auth_config_id]
+            )
+            connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
+
+            for conn in connections:
+                if conn.status not in ('ACTIVE', 'INITIATED'):
+                    continue
+
+                # Try common token attributes on the connection object
+                for attr in ('access_token', 'token', 'connectionParams'):
+                    val = getattr(conn, attr, None)
+                    if val and isinstance(val, str):
+                        return val
+                    # connectionParams may be a dict with nested token
+                    if val and isinstance(val, dict):
+                        token = val.get('access_token') or val.get('token')
+                        if token:
+                            return token
+
+                # Try .get() if the SDK supports it (returns full details)
+                try:
+                    detail = self.composio.connected_accounts.get(nanoid=conn.id)
+                    for attr in ('access_token', 'token', 'connectionParams'):
+                        val = getattr(detail, attr, None)
+                        if val and isinstance(val, str):
+                            return val
+                        if val and isinstance(val, dict):
+                            token = val.get('access_token') or val.get('token')
+                            if token:
+                                return token
+                except Exception:
+                    pass
+
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get access token for {app}: {e}")
+            return None
+
     def disconnect_app(self, entity_id: str, app: str) -> bool:
         """
         Disconnect an app from an entity.
