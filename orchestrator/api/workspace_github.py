@@ -121,12 +121,33 @@ async def list_github_repos(
         entity_id=entity_id,
     )
 
-    if not result.get("success"):
+    # Debug: log the raw Composio response structure to diagnose parsing
+    _result_type = type(result).__name__
+    _top_keys = list(result.keys()) if isinstance(result, dict) else "not-a-dict"
+    logger.info(
+        "Composio list_repos response: type=%s, keys=%s, success=%s",
+        _result_type, _top_keys, result.get("success") if isinstance(result, dict) else "N/A",
+    )
+    if isinstance(result, dict):
+        for k, v in result.items():
+            _vtype = type(v).__name__
+            _vpreview = str(v)[:200] if not isinstance(v, (list, dict)) else f"{_vtype}(len={len(v)})"
+            logger.info("  result[%s] = %s", k, _vpreview)
+        data_val = result.get("data")
+        if isinstance(data_val, dict):
+            logger.info("  result['data'] keys = %s", list(data_val.keys()))
+            for dk, dv in data_val.items():
+                _dvpreview = str(dv)[:300] if not isinstance(dv, (list, dict)) else f"{type(dv).__name__}(len={len(dv)})"
+                logger.info("    data[%s] = %s", dk, _dvpreview)
+        elif isinstance(data_val, list):
+            logger.info("  result['data'] is list, len=%d, first=%s", len(data_val), str(data_val[0])[:300] if data_val else "empty")
+
+    if isinstance(result, dict) and not result.get("success", result.get("successful", True)):
         error_msg = result.get("error", "Failed to list GitHub repos")
         raise HTTPException(status_code=502, detail=f"GitHub API error: {error_msg}")
 
     # Extract repo list from Composio response
-    raw_data = result.get("data", {})
+    raw_data = result.get("data", {}) if isinstance(result, dict) else result
 
     # Composio wraps results — navigate to the actual list
     repos_raw = raw_data
