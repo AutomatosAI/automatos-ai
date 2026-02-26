@@ -130,6 +130,38 @@ class SmartIntentClassifier:
         r"\bmake\b.*\b(agent|recipe|workflow)\b",
     ]
 
+    # Workspace code patterns - need workspace file/exec/git tools
+    WORKSPACE_PATTERNS = [
+        # File operations
+        r"\bread\b.*\b(file|code|source|script|config)\b",
+        r"\bshow\b.*\b(file|code|source|content|line)\b",
+        r"\bopen\b.*\b(file|code)\b",
+        r"\bcat\b.*\.\w{1,5}\b",  # cat main.py, cat config.yml
+        r"\bview\b.*\b(file|code|source)\b",
+        # Edit/fix operations
+        r"\b(fix|edit|update|change|modify|patch|refactor)\b.*\b(file|code|bug|error|typo|line|function|class|method)\b",
+        r"\b(bug|error|typo|issue)\b.*\b(in|on|at)\b.*\.\w{1,5}\b",  # bug in main.py
+        r"\bwrite\b.*\b(code|function|class|method|test)\b",
+        # Search/grep operations
+        r"\b(search|grep|find)\b.*\b(code|function|class|def |import|variable|string|pattern|error|todo)\b",
+        r"\bwhere\b.*\b(defined|declared|imported|used|called)\b",
+        r"\bfind\b.*\b(in the|in my|across)\b.*\b(repo|code|project|codebase)\b",
+        # Execution
+        r"\b(run|execute)\b.*\b(test|tests|pytest|jest|npm|script|command|build|lint)\b",
+        r"\bpytest\b", r"\bnpm test\b", r"\bnpm run\b",
+        # Git operations
+        r"\b(commit|push|pull|diff|blame|stash)\b",
+        r"\bgit\b.*\b(status|log|add|commit|push|pull|diff|branch|checkout)\b",
+        # File references (explicit paths)
+        r"\b\w+\.(py|js|ts|jsx|tsx|json|yaml|yml|md|html|css|sql|go|rs|rb|java|sh)\b",
+        # General workspace/repo context
+        r"\b(codebase|source code|repository|repo)\b",
+        r"\bfiles?\b.*\b(in the|in my)\b.*\b(workspace|repo|project)\b",
+        r"\bwhat files\b",
+        r"\bproject structure\b",
+        r"\blist\b.*\b(files|directory|folder)\b",
+    ]
+
     # Chitchat/Opinion patterns - NO tools needed
     CHITCHAT_PATTERNS = [
         r"\bwhat do you think\b", r"\byour opinion\b",
@@ -148,6 +180,7 @@ class SmartIntentClassifier:
         self._external_re = [re.compile(p, re.IGNORECASE) for p in self.EXTERNAL_PATTERNS]
         self._creation_re = [re.compile(p, re.IGNORECASE) for p in self.CREATION_PATTERNS]
         self._chitchat_re = [re.compile(p, re.IGNORECASE) for p in self.CHITCHAT_PATTERNS]
+        self._workspace_re = [re.compile(p, re.IGNORECASE) for p in self.WORKSPACE_PATTERNS]
 
     def classify(self, query: str, conversation_context: Optional[List[Dict]] = None) -> IntentResult:
         """
@@ -187,7 +220,20 @@ class SmartIntentClassifier:
                 is_simple=True
             )
 
-        # 2. Check for chitchat/opinion (no tools needed)
+        # 2. Check for workspace/code operations (needs workspace tools)
+        if self._matches_patterns(query, self._workspace_re):
+            suggested = self._get_workspace_tool_hints(query_lower)
+            return IntentResult(
+                primary_intent=Intent.MULTI_STEP,
+                confidence=0.85,
+                requires_tools=True,
+                requires_memory=False,
+                suggested_tools=suggested or ["workspace_list_dir", "workspace_read_file"],
+                reasoning="Workspace code operation detected",
+                is_simple=False
+            )
+
+        # 3. Check for chitchat/opinion (no tools needed)
         if self._matches_patterns(query, self._chitchat_re):
             return IntentResult(
                 primary_intent=Intent.CHITCHAT,
@@ -366,6 +412,37 @@ class SmartIntentClassifier:
         if any(w in query_lower for w in ["workspace", "connected app", "connected apps", "integration"]):
             hints.append("platform_get_workspace_info")
             hints.append("platform_list_connected_apps")
+
+        return hints
+
+    def _get_workspace_tool_hints(self, query_lower: str) -> List[str]:
+        """Return workspace tool hints based on query keywords."""
+        hints = []
+
+        # File read/view
+        if any(w in query_lower for w in ["read", "show", "open", "view", "cat", "content"]):
+            hints.append("workspace_read_file")
+
+        # File edit/write/fix
+        if any(w in query_lower for w in ["fix", "edit", "update", "change", "modify", "patch", "write", "refactor"]):
+            hints.append("workspace_read_file")
+            hints.append("workspace_write_file")
+
+        # Search/grep
+        if any(w in query_lower for w in ["search", "grep", "find", "where"]):
+            hints.append("workspace_grep")
+
+        # Execution
+        if any(w in query_lower for w in ["run", "execute", "test", "pytest", "npm", "build", "lint"]):
+            hints.append("workspace_exec")
+
+        # Git
+        if any(w in query_lower for w in ["commit", "push", "pull", "diff", "blame", "stash", "git"]):
+            hints.append("workspace_git")
+
+        # Directory listing
+        if any(w in query_lower for w in ["files", "directory", "folder", "structure", "list"]):
+            hints.append("workspace_list_dir")
 
         return hints
 
