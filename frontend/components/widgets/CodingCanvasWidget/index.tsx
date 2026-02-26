@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { Code2 } from 'lucide-react'
+import { Code2, GitBranch } from 'lucide-react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 
 import { WidgetBase } from '../WidgetBase'
@@ -25,6 +25,7 @@ import { FileExplorer } from './FileExplorer'
 import { CodeEditor } from './CodeEditor'
 import { EditorTabs } from './EditorTabs'
 import { useWorkspaceFiles } from './useWorkspaceFiles'
+import { RepoSelector } from './RepoSelector'
 
 // ---------------------------------------------------------------------------
 // Component
@@ -58,6 +59,9 @@ export function CodingCanvasWidget({
   const [activeTabPath, setActiveTabPath] = useState<string | null>(
     data.activeFilePath ?? null
   )
+
+  // Repo selector dialog
+  const [repoSelectorOpen, setRepoSelectorOpen] = useState(false)
 
   // Fetch root directory on mount
   useEffect(() => {
@@ -142,8 +146,22 @@ export function CodingCanvasWidget({
     fetchDirectory('.')
   }, [invalidateCache, fetchDirectory])
 
+  const handleCloneStarted = useCallback(
+    (_taskId: string) => {
+      // Refresh the file tree after a short delay to allow clone to start
+      setTimeout(() => {
+        invalidateCache()
+        fetchDirectory('.')
+      }, 3000)
+    },
+    [invalidateCache, fetchDirectory]
+  )
+
   // Active file for the editor
   const activeFile = openTabs.find((t) => t.path === activeTabPath) ?? null
+
+  // Determine if workspace is empty (no files/dirs loaded, no error, not loading)
+  const isWorkspaceEmpty = !isLoadingTree && !treeError && tree.length === 0
 
   return (
     <WidgetBase
@@ -170,17 +188,38 @@ export function CodingCanvasWidget({
               Explorer
             </div>
             <div className="flex-1 overflow-y-auto">
-              <FileExplorer
-                entries={tree}
-                isLoading={isLoadingTree}
-                error={treeError}
-                onFileSelect={handleFileSelect}
-                onDirectoryToggle={handleDirectoryToggle}
-                selectedPath={activeTabPath}
-              />
+              {isWorkspaceEmpty ? (
+                <div className="flex flex-col items-center justify-center h-full gap-3 p-4 text-center">
+                  <GitBranch className="h-8 w-8 text-muted-foreground/50" />
+                  <p className="text-xs text-muted-foreground">No files in workspace</p>
+                  <button
+                    onClick={() => setRepoSelectorOpen(true)}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    Connect Repo
+                  </button>
+                </div>
+              ) : (
+                <FileExplorer
+                  entries={tree}
+                  isLoading={isLoadingTree}
+                  error={treeError}
+                  onFileSelect={handleFileSelect}
+                  onDirectoryToggle={handleDirectoryToggle}
+                  selectedPath={activeTabPath}
+                />
+              )}
             </div>
           </div>
         </Panel>
+
+        {/* Repo Selector Dialog */}
+        <RepoSelector
+          workspaceId={workspaceId}
+          open={repoSelectorOpen}
+          onOpenChange={setRepoSelectorOpen}
+          onCloneStarted={handleCloneStarted}
+        />
 
         {/* Resize Handle */}
         <PanelResizeHandle className="w-[3px] bg-border/30 hover:bg-primary/40 transition-colors cursor-col-resize" />

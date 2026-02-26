@@ -125,6 +125,12 @@ from api.tasks import router as tasks_router
 
 # PRD-66: Workspace File Browser (Code Viewer Widget)
 from api.workspace_files import router as workspace_files_router
+# PRD-66: Workspace GitHub Integration (repo listing + cloning)
+try:
+    from api.workspace_github import router as workspace_github_router
+except ImportError:
+    logging.getLogger(__name__).warning("workspace_github router unavailable", exc_info=True)
+    workspace_github_router = None
 
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
@@ -733,6 +739,8 @@ app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(tasks_router)  # PRD-56: Workspace task management
 app.include_router(workspace_files_router)  # PRD-66: Workspace file browser
+if workspace_github_router is not None:
+    app.include_router(workspace_github_router)  # PRD-66: Workspace GitHub integration
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace

@@ -3,120 +3,54 @@ Workspace File Browser API
 ============================
 PRD-66 Phase 1: Code Viewer Widget
 
-Read-only filesystem access to physical workspace directories.
-The backend container mounts workspace_data:/workspaces:ro.
+Proxies file-browsing requests to the workspace worker's HTTP server,
+which has the persistent volume mounted. The backend keeps auth/ownership
+checks; the worker does the actual filesystem I/O.
 
   GET /api/workspaces/{workspace_id}/files          — directory listing
   GET /api/workspaces/{workspace_id}/files/content   — file content
 """
 
 import logging
-import mimetypes
-import os
-from pathlib import Path
-from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from config import config
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
-
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_VOLUME_PATH", "/workspaces"))
-
-# Safety limits
-MAX_FILE_SIZE = 2 * 1024 * 1024  # 2 MB for content endpoint
-MAX_DIR_ENTRIES = 500
 
 router = APIRouter(
     prefix="/api/workspaces/{workspace_id}/files",
     tags=["workspace-files"],
 )
 
-
-# ---------------------------------------------------------------------------
-# Path security — inline from WorkspaceManager.resolve_safe_path()
-# ---------------------------------------------------------------------------
-
-class PathSecurityError(Exception):
-    """Raised when a path escapes the workspace sandbox."""
+# Shared httpx client (reused across requests for connection pooling)
+_http_client: httpx.AsyncClient | None = None
 
 
-def _resolve_safe_path(workspace_root: Path, relative_path: str) -> Path:
-    """Resolve *relative_path* inside *workspace_root*, blocking escapes.
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        headers = {}
+        if config.WORKER_INTERNAL_TOKEN:
+            headers["X-Internal-Token"] = config.WORKER_INTERNAL_TOKEN
+        _http_client = httpx.AsyncClient(timeout=15.0, headers=headers)
+    return _http_client
 
-    Blocks: ../../ traversal, symlink escape, absolute paths, null bytes.
-    """
-    if "\x00" in relative_path:
-        raise PathSecurityError("Null byte in path")
 
-    if relative_path.startswith("/"):
-        raise PathSecurityError("Absolute path not allowed")
-
-    resolved = (workspace_root / relative_path).resolve()
-    base_resolved = workspace_root.resolve()
-
+def _parse_worker_error(resp: httpx.Response) -> str:
+    """Safely extract error detail from a worker response."""
     try:
-        resolved.relative_to(base_resolved)
-    except ValueError:
-        raise PathSecurityError("Path traversal blocked")
-
-    return resolved
-
-
-def _workspace_dir(workspace_id: str) -> Path:
-    """Return the root directory for a given workspace, verifying it exists."""
-    ws_dir = WORKSPACE_ROOT / workspace_id
-    if not ws_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Workspace directory not found")
-    return ws_dir
-
-
-def _guess_language(filename: str) -> str:
-    """Map file extension to a Monaco-compatible language id."""
-    ext = Path(filename).suffix.lower()
-    return {
-        ".py": "python",
-        ".js": "javascript",
-        ".jsx": "javascript",
-        ".ts": "typescript",
-        ".tsx": "typescript",
-        ".json": "json",
-        ".yaml": "yaml",
-        ".yml": "yaml",
-        ".md": "markdown",
-        ".html": "html",
-        ".htm": "html",
-        ".css": "css",
-        ".scss": "scss",
-        ".sql": "sql",
-        ".sh": "shell",
-        ".bash": "shell",
-        ".zsh": "shell",
-        ".rs": "rust",
-        ".go": "go",
-        ".java": "java",
-        ".c": "c",
-        ".cpp": "cpp",
-        ".h": "c",
-        ".hpp": "cpp",
-        ".rb": "ruby",
-        ".php": "php",
-        ".xml": "xml",
-        ".toml": "toml",
-        ".ini": "ini",
-        ".cfg": "ini",
-        ".env": "dotenv",
-        ".dockerfile": "dockerfile",
-        ".r": "r",
-        ".swift": "swift",
-        ".kt": "kotlin",
-        ".lua": "lua",
-    }.get(ext, "plaintext")
+        data = resp.json()
+        return data.get("error", "Worker error")
+    except (ValueError, KeyError):
+        return resp.text or "Worker error"
 
 
 # ---------------------------------------------------------------------------
-# GET /api/workspaces/{workspace_id}/files — directory listing
+# GET /api/workspaces/{workspace_id}/files — directory listing (proxied)
 # ---------------------------------------------------------------------------
 @router.get("")
 async def list_files(
@@ -125,52 +59,30 @@ async def list_files(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """List files and directories at *path* inside the workspace."""
-    # Verify workspace ownership
     if str(ctx.workspace_id) != workspace_id:
         raise HTTPException(status_code=403, detail="Workspace access denied")
 
-    ws_dir = _workspace_dir(workspace_id)
+    worker_url = f"{config.WORKER_INTERNAL_URL}/workspaces/{workspace_id}/files"
+    client = _get_http_client()
 
     try:
-        target = _resolve_safe_path(ws_dir, path)
-    except PathSecurityError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        resp = await client.get(worker_url, params={"path": path})
+    except httpx.ConnectError as err:
+        raise HTTPException(
+            status_code=503,
+            detail="Workspace worker is unreachable. Files are only available when the worker service is running.",
+        ) from err
+    except httpx.TimeoutException as err:
+        raise HTTPException(status_code=504, detail="Workspace worker request timed out") from err
 
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Path not found")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=_parse_worker_error(resp))
 
-    if not target.is_dir():
-        raise HTTPException(status_code=400, detail="Path is not a directory")
-
-    entries = []
-    try:
-        for i, item in enumerate(sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))):
-            if i >= MAX_DIR_ENTRIES:
-                break
-
-            # Skip hidden files starting with . (optional — keep for now)
-            stat = item.stat()
-            rel = str(item.relative_to(ws_dir))
-
-            entries.append({
-                "name": item.name,
-                "path": rel,
-                "type": "directory" if item.is_dir() else "file",
-                "size": stat.st_size if item.is_file() else 0,
-                "modified_at": stat.st_mtime,
-            })
-    except PermissionError:
-        raise HTTPException(status_code=403, detail="Permission denied reading directory")
-
-    return {
-        "path": path,
-        "entries": entries,
-        "truncated": len(entries) >= MAX_DIR_ENTRIES,
-    }
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
-# GET /api/workspaces/{workspace_id}/files/content — file content
+# GET /api/workspaces/{workspace_id}/files/content — file content (proxied)
 # ---------------------------------------------------------------------------
 @router.get("/content")
 async def get_file_content(
@@ -179,45 +91,23 @@ async def get_file_content(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """Return the text content of a file for the code viewer."""
-    # Verify workspace ownership
     if str(ctx.workspace_id) != workspace_id:
         raise HTTPException(status_code=403, detail="Workspace access denied")
 
-    ws_dir = _workspace_dir(workspace_id)
+    worker_url = f"{config.WORKER_INTERNAL_URL}/workspaces/{workspace_id}/files/content"
+    client = _get_http_client()
 
     try:
-        target = _resolve_safe_path(ws_dir, path)
-    except PathSecurityError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
-
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    if not target.is_file():
-        raise HTTPException(status_code=400, detail="Path is not a file")
-
-    # Size guard
-    file_size = target.stat().st_size
-    if file_size > MAX_FILE_SIZE:
+        resp = await client.get(worker_url, params={"path": path})
+    except httpx.ConnectError as err:
         raise HTTPException(
-            status_code=413,
-            detail=f"File too large ({file_size} bytes, max {MAX_FILE_SIZE})",
-        )
+            status_code=503,
+            detail="Workspace worker is unreachable. Files are only available when the worker service is running.",
+        ) from err
+    except httpx.TimeoutException as err:
+        raise HTTPException(status_code=504, detail="Workspace worker request timed out") from err
 
-    # Read as text — binary files will fail gracefully
-    try:
-        content = target.read_text(encoding="utf-8", errors="replace")
-    except Exception as exc:
-        logger.warning("Failed to read %s: %s", target, exc)
-        raise HTTPException(status_code=422, detail="Unable to read file as text")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=_parse_worker_error(resp))
 
-    mime_type, _ = mimetypes.guess_type(target.name)
-
-    return {
-        "path": path,
-        "name": target.name,
-        "content": content,
-        "size": file_size,
-        "language": _guess_language(target.name),
-        "mime_type": mime_type or "text/plain",
-    }
+    return resp.json()

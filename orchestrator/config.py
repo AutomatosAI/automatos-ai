@@ -155,6 +155,8 @@ class Config:
     WORKSPACE_VOLUME_PATH: str = os.getenv("WORKSPACE_VOLUME_PATH", "/workspaces")
     WORKSPACE_DEFAULT_QUOTA_GB: int = int(os.getenv("WORKSPACE_DEFAULT_QUOTA_GB", "5"))
     WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", "3"))
+    WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
+    WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
 
     # =============================================================================
     # FEATURE FLAGS
