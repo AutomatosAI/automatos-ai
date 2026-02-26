@@ -17,7 +17,7 @@ from core.workspace_client import WorkspaceClient
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api/workspaces/{workspace_id}",
+    prefix="/api/workspaces/{workspace_id}/exec",
     tags=["workspace-exec"],
 )
 
@@ -28,7 +28,7 @@ class ExecRequest(BaseModel):
     timeout: int = Field(default=120, ge=1, le=300)
 
 
-@router.post("/exec")
+@router.post("")
 async def exec_command(
     workspace_id: str,
     body: ExecRequest,
