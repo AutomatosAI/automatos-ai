@@ -37,6 +37,10 @@ export interface Agent {
     name: string
     icon?: string
   }>
+  // PRD-67: System agent fields
+  is_system_agent?: boolean
+  slug?: string
+  required_role?: string
 }
 
 export interface AgentSelectorProps {
@@ -87,6 +91,10 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId)
 
+  // PRD-67: Separate CTO/system agents from workspace agents
+  const ctoAgent = agents.find(a => a.slug === 'auto-cto' && a.is_system_agent)
+  const workspaceAgents = agents.filter(a => !a.is_system_agent)
+
   // Bubble up selected agent data
   useEffect(() => {
     if (onAgentData) {
@@ -110,7 +118,14 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
             <Loader2 className="w-3 h-3 animate-spin" />
           ) : (
             <>
-              {selectedAgent ? (
+              {selectedAgent?.slug === 'auto-cto' ? (
+                <>
+                  <Bot className="w-3 h-3 text-emerald-400" />
+                  <span className="truncate max-w-[120px] font-medium text-emerald-400">
+                    Auto CTO
+                  </span>
+                </>
+              ) : selectedAgent ? (
                 <>
                   <Bot className="w-3 h-3 text-orange-400" />
                   <span className="truncate max-w-[120px] font-medium">
@@ -151,9 +166,45 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
             )}
           </div>
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
+        {/* PRD-67: CTO Agent pinned at top for admins */}
+        {ctoAgent && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] text-muted-foreground/60 uppercase tracking-wider px-2">
+              Platform Builder
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={() => onAgentChange(ctoAgent.id)}
+              className="text-foreground hover:bg-emerald-500/10 cursor-pointer rounded-lg py-2"
+            >
+              <div className="flex items-start justify-between w-full">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="font-medium text-sm text-emerald-400">{ctoAgent.name}</div>
+                    <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                      CTO
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {ctoAgent.description}
+                  </div>
+                </div>
+                {selectedAgentId === ctoAgent.id && (
+                  <Check className="w-4 h-4 text-emerald-400 ml-2 flex-shrink-0" />
+                )}
+              </div>
+            </DropdownMenuItem>
+          </>
+        )}
 
-        {agents.map((agent) => {
+        <DropdownMenuSeparator />
+        {workspaceAgents.length > 0 && (
+          <DropdownMenuLabel className="text-[10px] text-muted-foreground/60 uppercase tracking-wider px-2">
+            Workspace Agents
+          </DropdownMenuLabel>
+        )}
+
+        {workspaceAgents.map((agent) => {
           const isSelected = selectedAgentId === agent.id
 
           return (
