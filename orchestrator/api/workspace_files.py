@@ -7,17 +7,19 @@ Proxies file-browsing requests to the workspace worker's HTTP server,
 which has the persistent volume mounted. The backend keeps auth/ownership
 checks; the worker does the actual filesystem I/O.
 
+Uses the shared WorkspaceClient (core/workspace_client.py) to avoid
+duplicating httpx connection logic.
+
   GET /api/workspaces/{workspace_id}/files          — directory listing
   GET /api/workspaces/{workspace_id}/files/content   — file content
 """
 
 import logging
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from config import config
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.workspace_client import WorkspaceClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,28 +27,6 @@ router = APIRouter(
     prefix="/api/workspaces/{workspace_id}/files",
     tags=["workspace-files"],
 )
-
-# Shared httpx client (reused across requests for connection pooling)
-_http_client: httpx.AsyncClient | None = None
-
-
-def _get_http_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        headers = {}
-        if config.WORKER_INTERNAL_TOKEN:
-            headers["X-Internal-Token"] = config.WORKER_INTERNAL_TOKEN
-        _http_client = httpx.AsyncClient(timeout=15.0, headers=headers)
-    return _http_client
-
-
-def _parse_worker_error(resp: httpx.Response) -> str:
-    """Safely extract error detail from a worker response."""
-    try:
-        data = resp.json()
-        return data.get("error", "Worker error")
-    except (ValueError, KeyError):
-        return resp.text or "Worker error"
 
 
 # ---------------------------------------------------------------------------
@@ -62,28 +42,14 @@ async def list_files(
     if str(ctx.workspace_id) != workspace_id:
         raise HTTPException(status_code=403, detail="Workspace access denied")
 
-    worker_url = f"{config.WORKER_INTERNAL_URL}/workspaces/{workspace_id}/files"
-    client = _get_http_client()
+    client = WorkspaceClient(workspace_id)
+    result = await client.list_dir(path)
 
-    try:
-        resp = await client.get(worker_url, params={"path": path})
-    except httpx.ConnectError as err:
-        raise HTTPException(
-            status_code=503,
-            detail="Workspace worker is unreachable. Files are only available when the worker service is running.",
-        ) from err
-    except httpx.TimeoutException as err:
-        raise HTTPException(status_code=504, detail="Workspace worker request timed out") from err
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
 
-    # 404 from worker means workspace dir doesn't exist yet (no repos cloned).
-    # Return an empty listing so the frontend shows "Connect Repo" instead of an error.
-    if resp.status_code == 404:
-        return {"path": path, "entries": [], "truncated": False}
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=_parse_worker_error(resp))
-
-    return resp.json()
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -99,20 +65,11 @@ async def get_file_content(
     if str(ctx.workspace_id) != workspace_id:
         raise HTTPException(status_code=403, detail="Workspace access denied")
 
-    worker_url = f"{config.WORKER_INTERNAL_URL}/workspaces/{workspace_id}/files/content"
-    client = _get_http_client()
+    client = WorkspaceClient(workspace_id)
+    result = await client.read_file(path)
 
-    try:
-        resp = await client.get(worker_url, params={"path": path})
-    except httpx.ConnectError as err:
-        raise HTTPException(
-            status_code=503,
-            detail="Workspace worker is unreachable. Files are only available when the worker service is running.",
-        ) from err
-    except httpx.TimeoutException as err:
-        raise HTTPException(status_code=504, detail="Workspace worker request timed out") from err
+    if result.get("success") is False:
+        status = result.get("status_code", 503)
+        raise HTTPException(status_code=status, detail=result["error"])
 
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=_parse_worker_error(resp))
-
-    return resp.json()
+    return result

@@ -638,9 +638,170 @@ class WorkspaceWorker:
                 "mime_type": mime_type or "text/plain",
             })
 
+        # ── New endpoints for agent workspace tools ────────────────────
+
+        async def exec_handler(request):
+            """POST /workspaces/{workspace_id}/exec — run a sandboxed command."""
+            from executor import WorkspaceToolExecutor
+            from pathlib import Path as P
+
+            workspace_id = request.match_info["workspace_id"]
+            ws_dir = P(volume_path) / workspace_id
+            if not ws_dir.is_dir():
+                return web.json_response({"error": "Workspace not found"}, status=404)
+
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+            command = body.get("command", "").strip()
+            if not command:
+                return web.json_response({"error": "command is required"}, status=400)
+
+            cwd = body.get("cwd")
+            timeout = min(int(body.get("timeout", 120)), 300)
+
+            ws_manager = WorkspaceManager(workspace_id, volume_path)
+            executor = WorkspaceToolExecutor(ws_manager)
+            result = await executor.execute_command(command, timeout=timeout, cwd=cwd)
+            return web.json_response(result)
+
+        async def write_file_handler(request):
+            """POST /workspaces/{workspace_id}/files/write — write a file."""
+            from executor import WorkspaceToolExecutor
+            from pathlib import Path as P
+
+            workspace_id = request.match_info["workspace_id"]
+            ws_dir = P(volume_path) / workspace_id
+            if not ws_dir.is_dir():
+                return web.json_response({"error": "Workspace not found"}, status=404)
+
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+            path = body.get("path", "").strip()
+            content = body.get("content")
+            if not path:
+                return web.json_response({"error": "path is required"}, status=400)
+            if content is None:
+                return web.json_response({"error": "content is required"}, status=400)
+
+            ws_manager = WorkspaceManager(workspace_id, volume_path)
+            executor = WorkspaceToolExecutor(ws_manager)
+            result = await executor.write_file(path, content)
+            if result.get("error"):
+                return web.json_response(result, status=400)
+            return web.json_response(result)
+
+        async def grep_handler(request):
+            """GET /workspaces/{workspace_id}/files/grep — search file contents."""
+            from executor import WorkspaceToolExecutor
+            from pathlib import Path as P
+
+            workspace_id = request.match_info["workspace_id"]
+            ws_dir = P(volume_path) / workspace_id
+            if not ws_dir.is_dir():
+                return web.json_response({"error": "Workspace not found"}, status=404)
+
+            pattern = request.query.get("pattern", "").strip()
+            if not pattern:
+                return web.json_response({"error": "pattern query param required"}, status=400)
+
+            search_path = request.query.get("path", ".")
+            include = request.query.get("include", "")
+            max_results = min(int(request.query.get("max_results", "50")), 200)
+
+            ws_manager = WorkspaceManager(workspace_id, volume_path)
+            executor = WorkspaceToolExecutor(ws_manager)
+
+            # Build grep command
+            cmd_parts = ["grep", "-rn"]
+            if include:
+                cmd_parts.extend(["--include", include])
+            cmd_parts.append("--")
+            cmd_parts.append(pattern)
+            cmd_parts.append(".")
+
+            import shlex
+            cmd = " ".join(shlex.quote(p) for p in cmd_parts)
+
+            try:
+                safe_cwd = str(ws_manager.resolve_safe_path(search_path))
+            except SecurityError:
+                return web.json_response({"error": "Invalid search path"}, status=403)
+
+            result = await executor.execute_command(cmd, timeout=30, cwd=search_path)
+
+            # Parse grep output into structured matches
+            matches = []
+            if result.get("stdout"):
+                for line in result["stdout"].splitlines():
+                    if len(matches) >= max_results:
+                        break
+                    # grep -rn output: file:line:content
+                    parts = line.split(":", 2)
+                    if len(parts) >= 3:
+                        matches.append({
+                            "file": parts[0],
+                            "line": int(parts[1]) if parts[1].isdigit() else 0,
+                            "content": parts[2],
+                        })
+
+            total = len(result.get("stdout", "").splitlines()) if result.get("stdout") else 0
+            return web.json_response({
+                "matches": matches,
+                "total": total,
+                "truncated": total > max_results,
+                "pattern": pattern,
+            })
+
+        async def git_handler(request):
+            """POST /workspaces/{workspace_id}/git — execute a git operation."""
+            from executor import WorkspaceToolExecutor
+            from pathlib import Path as P
+
+            workspace_id = request.match_info["workspace_id"]
+            ws_dir = P(volume_path) / workspace_id
+            if not ws_dir.is_dir():
+                return web.json_response({"error": "Workspace not found"}, status=404)
+
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+            operation = body.get("operation", "").strip()
+            allowed_ops = {
+                "status", "diff", "add", "commit", "push", "pull",
+                "log", "branch", "checkout", "stash", "show", "blame", "fetch",
+            }
+            if not operation:
+                return web.json_response({"error": "operation is required"}, status=400)
+            if operation not in allowed_ops:
+                return web.json_response(
+                    {"error": f"Operation '{operation}' not allowed. Allowed: {', '.join(sorted(allowed_ops))}"},
+                    status=400,
+                )
+
+            cwd = body.get("cwd")
+            args = body.get("args", "")
+            command = f"git {operation} {args}".strip()
+
+            ws_manager = WorkspaceManager(workspace_id, volume_path)
+            executor = WorkspaceToolExecutor(ws_manager)
+            result = await executor.execute_command(command, timeout=120, cwd=cwd)
+            return web.json_response(result)
+
         app.router.add_get("/health", health_handler)
         app.router.add_get("/workspaces/{workspace_id}/files", list_files_handler)
         app.router.add_get("/workspaces/{workspace_id}/files/content", file_content_handler)
+        app.router.add_post("/workspaces/{workspace_id}/exec", exec_handler)
+        app.router.add_post("/workspaces/{workspace_id}/files/write", write_file_handler)
+        app.router.add_get("/workspaces/{workspace_id}/files/grep", grep_handler)
+        app.router.add_post("/workspaces/{workspace_id}/git", git_handler)
 
         runner = web.AppRunner(app)
         await runner.setup()
