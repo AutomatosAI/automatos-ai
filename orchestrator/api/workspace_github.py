@@ -7,14 +7,17 @@ PRD-66 Phase 2: GitHub repo browsing + cloning via Composio
   POST /api/workspaces/{workspace_id}/github/clone  — clone a repo into workspace
 """
 
+import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from config import config
@@ -29,6 +32,12 @@ router = APIRouter(
     tags=["workspace-github"],
 )
 
+# Allowed hosts for clone URLs
+_ALLOWED_CLONE_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
+
+# Safe branch name pattern (git ref chars, no .., @{, leading/trailing whitespace)
+_BRANCH_RE = re.compile(r"^[A-Za-z0-9._/\-]+$")
+
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -37,6 +46,30 @@ router = APIRouter(
 class CloneRequest(BaseModel):
     repo_url: str = Field(..., description="Git clone URL (HTTPS)")
     branch: Optional[str] = Field(None, description="Branch to clone (default: repo default)")
+
+    @field_validator("repo_url")
+    @classmethod
+    def validate_repo_url(cls, v: str) -> str:
+        parsed = urlparse(v)
+        if parsed.scheme != "https":
+            raise ValueError("Only HTTPS clone URLs are allowed")
+        if parsed.hostname not in _ALLOWED_CLONE_HOSTS:
+            raise ValueError(f"Host not allowed: {parsed.hostname}")
+        if parsed.username or parsed.password:
+            raise ValueError("Clone URL must not contain embedded credentials")
+        return v
+
+    @field_validator("branch")
+    @classmethod
+    def validate_branch(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        if ".." in v or "@{" in v or not _BRANCH_RE.match(v):
+            raise ValueError("Invalid branch name")
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -55,13 +88,14 @@ async def list_github_repos(
 
     try:
         from core.composio.client import get_composio_client
-    except ImportError:
-        raise HTTPException(status_code=501, detail="Composio SDK not installed")
+    except ImportError as err:
+        raise HTTPException(status_code=501, detail="Composio SDK not installed") from err
 
     client = get_composio_client()
     entity_id = str(ctx.workspace_id)
 
-    result = client.execute_action(
+    result = await asyncio.to_thread(
+        client.execute_action,
         action="GITHUB_LIST_REPOS_FOR_AUTHENTICATED_USER",
         params={"per_page": per_page, "page": page},
         entity_id=entity_id,
@@ -138,7 +172,9 @@ async def clone_github_repo(
     try:
         from core.composio.client import get_composio_client
         client = get_composio_client()
-        token = client.get_app_access_token(str(ctx.workspace_id), "GITHUB")
+        token = await asyncio.to_thread(
+            client.get_app_access_token, str(ctx.workspace_id), "GITHUB"
+        )
         if token:
             # Inject token into HTTPS URL: https://x-access-token:{token}@github.com/...
             if clone_url.startswith("https://github.com"):
@@ -173,27 +209,7 @@ async def clone_github_repo(
         "created_at": now.isoformat(),
     }
 
-    redis = await runner._get_redis()
-
-    # Write initial status
-    status_key = f"workspace:task:{task_id}:status"
-    await redis.hset(status_key, mapping={
-        "status": "queued",
-        "workspace_id": workspace_id,
-        "submitted_at": now.isoformat(),
-        "priority": "normal",
-        "task_type": "background_job",
-    })
-    await redis.expire(status_key, 7200)
-
-    # Track active tasks
-    ws_active_key = f"workspace:ws:{workspace_id}:active_tasks"
-    await redis.sadd(ws_active_key, task_id)
-
-    # Push to normal queue
-    await redis.lpush("workspace:tasks:normal", json.dumps(payload))
-
-    # DB record
+    # Insert DB record first (before enqueue) for atomicity
     from sqlalchemy import text
     db.execute(text("""
         INSERT INTO task_executions (
@@ -214,6 +230,32 @@ async def clone_github_repo(
         "submitted_at": now,
     })
     db.commit()
+
+    # Enqueue to Redis (after DB commit succeeds)
+    redis = await runner._get_redis()
+    try:
+        status_key = f"workspace:task:{task_id}:status"
+        await redis.hset(status_key, mapping={
+            "status": "queued",
+            "workspace_id": workspace_id,
+            "submitted_at": now.isoformat(),
+            "priority": "normal",
+            "task_type": "background_job",
+        })
+        await redis.expire(status_key, 7200)
+
+        ws_active_key = f"workspace:ws:{workspace_id}:active_tasks"
+        await redis.sadd(ws_active_key, task_id)
+
+        await redis.lpush("workspace:tasks:normal", json.dumps(payload))
+    except Exception as enqueue_err:
+        # Redis enqueue failed after DB commit — mark DB row as failed
+        logger.error("Redis enqueue failed for task %s: %s", task_id[:8], enqueue_err)
+        db.execute(text(
+            "UPDATE task_executions SET status = 'failed', error_message = :err WHERE id = :id"
+        ), {"id": task_id, "err": f"Enqueue failed: {enqueue_err}"})
+        db.commit()
+        raise HTTPException(status_code=503, detail="Failed to enqueue task to worker") from enqueue_err
 
     logger.info(
         "Clone task %s submitted (workspace=%s, repo=%s)",

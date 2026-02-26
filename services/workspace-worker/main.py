@@ -466,6 +466,19 @@ class WorkspaceWorker:
         volume_path = os.environ.get("WORKSPACE_VOLUME_PATH", "/workspaces")
         max_file_size = 2 * 1024 * 1024  # 2 MB
         max_dir_entries = 500
+        internal_token = os.environ.get("WORKER_INTERNAL_TOKEN", "")
+        bind_host = os.environ.get("WORKER_BIND_HOST", "0.0.0.0")
+
+        # Sensitive paths that must never be exposed via file browsing
+        _SENSITIVE_NAMES = {".ssh", ".gitconfig", ".aws", ".gcp", ".workspace_meta.json"}
+
+        def _is_sensitive(name: str) -> bool:
+            """Check if a file/dir name is sensitive and should be hidden."""
+            if name in _SENSITIVE_NAMES:
+                return True
+            if name.startswith(".task_env_"):
+                return True
+            return False
 
         # Language detection map (Monaco-compatible)
         _lang_map = {
@@ -485,7 +498,20 @@ class WorkspaceWorker:
             from pathlib import Path as P
             return _lang_map.get(P(filename).suffix.lower(), "plaintext")
 
-        app = web.Application()
+        # Auth middleware — reject requests without valid internal token
+        @web.middleware
+        async def internal_auth_middleware(request, handler):
+            # Health endpoint is always public
+            if request.path == "/health":
+                return await handler(request)
+            # If token is configured, enforce it
+            if internal_token:
+                req_token = request.headers.get("X-Internal-Token", "")
+                if req_token != internal_token:
+                    return web.json_response({"error": "Unauthorized"}, status=401)
+            return await handler(request)
+
+        app = web.Application(middlewares=[internal_auth_middleware])
 
         async def health_handler(request):
             return web.json_response({
@@ -499,7 +525,6 @@ class WorkspaceWorker:
         async def list_files_handler(request):
             """GET /workspaces/{workspace_id}/files?path=. — directory listing."""
             from pathlib import Path as P
-            import mimetypes
 
             workspace_id = request.match_info["workspace_id"]
             rel_path = request.query.get("path", ".")
@@ -517,17 +542,27 @@ class WorkspaceWorker:
             except SecurityError as exc:
                 return web.json_response({"error": str(exc)}, status=403)
 
+            # Block access to sensitive paths
+            for part in target.relative_to(ws_dir.resolve()).parts:
+                if _is_sensitive(part):
+                    return web.json_response({"error": "Access denied"}, status=403)
+
             if not target.exists():
                 return web.json_response({"error": "Path not found"}, status=404)
             if not target.is_dir():
                 return web.json_response({"error": "Path is not a directory"}, status=400)
 
             entries = []
+            truncated = False
             try:
                 for i, item in enumerate(
                     sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
                 ):
+                    # Skip sensitive entries
+                    if _is_sensitive(item.name):
+                        continue
                     if i >= max_dir_entries:
+                        truncated = True
                         break
                     stat = item.stat()
                     rel = str(item.relative_to(ws_dir))
@@ -544,7 +579,7 @@ class WorkspaceWorker:
             return web.json_response({
                 "path": rel_path,
                 "entries": entries,
-                "truncated": len(entries) >= max_dir_entries,
+                "truncated": truncated,
             })
 
         async def file_content_handler(request):
@@ -570,6 +605,11 @@ class WorkspaceWorker:
             except SecurityError as exc:
                 return web.json_response({"error": str(exc)}, status=403)
 
+            # Block access to sensitive paths
+            for part in target.relative_to(ws_dir.resolve()).parts:
+                if _is_sensitive(part):
+                    return web.json_response({"error": "Access denied"}, status=403)
+
             if not target.exists():
                 return web.json_response({"error": "File not found"}, status=404)
             if not target.is_file():
@@ -584,7 +624,7 @@ class WorkspaceWorker:
 
             try:
                 content = target.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 return web.json_response({"error": "Unable to read file as text"}, status=422)
 
             mime_type, _ = mimetypes.guess_type(target.name)
@@ -604,7 +644,7 @@ class WorkspaceWorker:
 
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", self.health_port)
+        site = web.TCPSite(runner, bind_host, self.health_port)
 
         try:
             await site.start()

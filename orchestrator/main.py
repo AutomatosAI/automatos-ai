@@ -129,6 +129,7 @@ from api.workspace_files import router as workspace_files_router
 try:
     from api.workspace_github import router as workspace_github_router
 except ImportError:
+    logging.getLogger(__name__).warning("workspace_github router unavailable", exc_info=True)
     workspace_github_router = None
 
 # Import MISSING API routers

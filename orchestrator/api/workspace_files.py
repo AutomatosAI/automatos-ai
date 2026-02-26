@@ -33,8 +33,20 @@ _http_client: httpx.AsyncClient | None = None
 def _get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(timeout=15.0)
+        headers = {}
+        if config.WORKER_INTERNAL_TOKEN:
+            headers["X-Internal-Token"] = config.WORKER_INTERNAL_TOKEN
+        _http_client = httpx.AsyncClient(timeout=15.0, headers=headers)
     return _http_client
+
+
+def _parse_worker_error(resp: httpx.Response) -> str:
+    """Safely extract error detail from a worker response."""
+    try:
+        data = resp.json()
+        return data.get("error", "Worker error")
+    except (ValueError, KeyError):
+        return resp.text or "Worker error"
 
 
 # ---------------------------------------------------------------------------
@@ -55,17 +67,16 @@ async def list_files(
 
     try:
         resp = await client.get(worker_url, params={"path": path})
-    except httpx.ConnectError:
+    except httpx.ConnectError as err:
         raise HTTPException(
             status_code=503,
             detail="Workspace worker is unreachable. Files are only available when the worker service is running.",
-        )
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Workspace worker request timed out")
+        ) from err
+    except httpx.TimeoutException as err:
+        raise HTTPException(status_code=504, detail="Workspace worker request timed out") from err
 
     if resp.status_code != 200:
-        data = resp.json()
-        raise HTTPException(status_code=resp.status_code, detail=data.get("error", "Worker error"))
+        raise HTTPException(status_code=resp.status_code, detail=_parse_worker_error(resp))
 
     return resp.json()
 
@@ -88,16 +99,15 @@ async def get_file_content(
 
     try:
         resp = await client.get(worker_url, params={"path": path})
-    except httpx.ConnectError:
+    except httpx.ConnectError as err:
         raise HTTPException(
             status_code=503,
             detail="Workspace worker is unreachable. Files are only available when the worker service is running.",
-        )
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Workspace worker request timed out")
+        ) from err
+    except httpx.TimeoutException as err:
+        raise HTTPException(status_code=504, detail="Workspace worker request timed out") from err
 
     if resp.status_code != 200:
-        data = resp.json()
-        raise HTTPException(status_code=resp.status_code, detail=data.get("error", "Worker error"))
+        raise HTTPException(status_code=resp.status_code, detail=_parse_worker_error(resp))
 
     return resp.json()
