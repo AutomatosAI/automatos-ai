@@ -4,6 +4,7 @@ Workspace Task API Endpoints
 PRD-56: Infrastructure Scaling & Physical Workspaces
 
 Exposes task lifecycle over REST:
+  POST /api/tasks/submit    — submit a workspace task (direct steps)
   GET  /api/tasks           — list recent tasks for workspace
   GET  /api/tasks/{id}      — get task status + result
   POST /api/tasks/{id}/cancel — cancel a queued/running task
@@ -12,10 +13,13 @@ Exposes task lifecycle over REST:
 
 import json
 import logging
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -27,6 +31,135 @@ from core.task_runner.models import TaskHandle, TaskStatusEnum
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
+class TaskStep(BaseModel):
+    """A single step for the workspace worker to execute."""
+    action: str = Field(..., description="Action type: execute_command, git_clone, read_file, write_file, list_directory, create_directory")
+    command: Optional[str] = Field(None, description="Shell command (for execute_command/shell)")
+    repo: Optional[str] = Field(None, description="Git repo URL (for git_clone)")
+    branch: Optional[str] = None
+    path: Optional[str] = None
+    content: Optional[str] = None
+    cwd: Optional[str] = None
+    timeout: Optional[int] = None
+    description: Optional[str] = None
+
+
+class SubmitTaskRequest(BaseModel):
+    """Direct workspace task submission — bypasses agent/LLM, runs steps immediately."""
+    steps: List[TaskStep] = Field(..., min_length=1, description="Steps to execute in order")
+    priority: str = Field("normal", description="Priority: low, normal, high, critical")
+    timeout_seconds: int = Field(300, ge=10, le=3600)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tasks/submit — Submit a workspace task with direct steps
+# ---------------------------------------------------------------------------
+@router.post("/submit")
+async def submit_task(
+    body: SubmitTaskRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Submit a task with explicit steps for the workspace worker.
+
+    Unlike workflow execution (which goes through an LLM agent), this endpoint
+    accepts concrete steps (shell commands, file ops, git ops) and enqueues them
+    directly to the workspace worker via Redis.
+
+    Requires the queued task runner backend (TASK_RUNNER_BACKEND=queued).
+    """
+    runner = get_task_runner()
+
+    if runner.backend_name != "queued":
+        raise HTTPException(
+            status_code=400,
+            detail="Direct task submission requires TASK_RUNNER_BACKEND=queued. "
+                   f"Current backend: {runner.backend_name}",
+        )
+
+    task_id = str(uuid4())
+    workspace_id = str(ctx.workspace_id)
+    now = datetime.now(timezone.utc)
+
+    # Build payload matching what the worker expects
+    payload = {
+        "task_id": task_id,
+        "task_type": "background_job",
+        "workspace_id": workspace_id,
+        "agent_id": None,
+        "priority": body.priority,
+        "timeout_seconds": body.timeout_seconds,
+        "steps": [step.model_dump(exclude_none=True) for step in body.steps],
+        "created_at": now.isoformat(),
+    }
+
+    # Enqueue directly to Redis (same queue format as QueuedTaskRunner)
+    redis = await runner._get_redis()
+
+    # Write initial status
+    status_key = f"workspace:task:{task_id}:status"
+    await redis.hset(status_key, mapping={
+        "status": "queued",
+        "workspace_id": workspace_id,
+        "submitted_at": now.isoformat(),
+        "priority": body.priority,
+        "task_type": "background_job",
+    })
+    await redis.expire(status_key, 7200)
+
+    # Track active tasks
+    ws_active_key = f"workspace:ws:{workspace_id}:active_tasks"
+    await redis.sadd(ws_active_key, task_id)
+
+    # Push to priority queue
+    queue_map = {
+        "critical": "workspace:tasks:critical",
+        "high": "workspace:tasks:high",
+        "normal": "workspace:tasks:normal",
+        "low": "workspace:tasks:low",
+    }
+    queue_name = queue_map.get(body.priority, queue_map["normal"])
+    await redis.lpush(queue_name, json.dumps(payload))
+
+    # Insert record into task_executions for history
+    from sqlalchemy import text
+    db.execute(text("""
+        INSERT INTO task_executions (
+            id, workspace_id, task_type, status, priority,
+            runner_backend, configuration, submitted_at
+        ) VALUES (
+            :id, :workspace_id, :task_type, :status, :priority,
+            :runner_backend, :configuration, :submitted_at
+        )
+    """), {
+        "id": task_id,
+        "workspace_id": workspace_id,
+        "task_type": "background_job",
+        "status": "queued",
+        "priority": body.priority,
+        "runner_backend": "queued",
+        "configuration": json.dumps({"steps": payload["steps"]}),
+        "submitted_at": now,
+    })
+    db.commit()
+
+    logger.info(
+        "Task %s submitted (workspace=%s, steps=%d, priority=%s)",
+        task_id[:8], workspace_id[:8], len(body.steps), body.priority,
+    )
+
+    return {
+        "task_id": task_id,
+        "status": "queued",
+        "queue": queue_name,
+        "steps": len(body.steps),
+        "events_url": f"/api/tasks/{task_id}/events",
+    }
 
 
 # ---------------------------------------------------------------------------
