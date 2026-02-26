@@ -30,7 +30,7 @@ def upgrade() -> None:
         sa.Column("long_description", sa.Text, nullable=True),
         sa.Column(
             "developer_id",
-            postgresql.UUID(as_uuid=True),
+            sa.Integer,
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),

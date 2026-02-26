@@ -21,8 +21,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('agents', sa.Column('semantic_embedding', postgresql.JSONB(), nullable=True))
-    op.add_column('agents', sa.Column('semantic_text_hash', sa.String(64), nullable=True))
+    conn = op.get_bind()
+    conn.execute(sa.text("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'agents' AND column_name = 'semantic_embedding'
+            ) THEN
+                ALTER TABLE agents ADD COLUMN semantic_embedding JSONB;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'agents' AND column_name = 'semantic_text_hash'
+            ) THEN
+                ALTER TABLE agents ADD COLUMN semantic_text_hash VARCHAR(64);
+            END IF;
+        END
+        $$;
+    """))
 
 
 def downgrade() -> None:
