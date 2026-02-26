@@ -121,53 +121,24 @@ async def list_github_repos(
         entity_id=entity_id,
     )
 
-    # Debug: log the raw Composio response structure to diagnose parsing
-    _result_type = type(result).__name__
-    _top_keys = list(result.keys()) if isinstance(result, dict) else "not-a-dict"
-    logger.info(
-        "Composio list_repos response: type=%s, keys=%s, success=%s",
-        _result_type, _top_keys, result.get("success") if isinstance(result, dict) else "N/A",
-    )
-    if isinstance(result, dict):
-        for k, v in result.items():
-            _vtype = type(v).__name__
-            _vpreview = str(v)[:200] if not isinstance(v, (list, dict)) else f"{_vtype}(len={len(v)})"
-            logger.info("  result[%s] = %s", k, _vpreview)
-        data_val = result.get("data")
-        if isinstance(data_val, dict):
-            logger.info("  result['data'] keys = %s", list(data_val.keys()))
-            for dk, dv in data_val.items():
-                _dvpreview = str(dv)[:300] if not isinstance(dv, (list, dict)) else f"{type(dv).__name__}(len={len(dv)})"
-                logger.info("    data[%s] = %s", dk, _dvpreview)
-            # Go one more level: result.data.data
-            inner = data_val.get("data")
-            if isinstance(inner, dict):
-                logger.info("    data['data'] keys = %s", list(inner.keys()))
-                for ik, iv in inner.items():
-                    _ivp = str(iv)[:500] if not isinstance(iv, (list, dict)) else f"{type(iv).__name__}(len={len(iv)})"
-                    logger.info("      data.data[%s] = %s", ik, _ivp)
-                    if isinstance(iv, list) and iv:
-                        logger.info("      data.data[%s][0] = %s", ik, str(iv[0])[:500])
-            elif isinstance(inner, list):
-                logger.info("    data['data'] is list, len=%d, first=%s", len(inner), str(inner[0])[:500] if inner else "empty")
-        elif isinstance(data_val, list):
-            logger.info("  result['data'] is list, len=%d, first=%s", len(data_val), str(data_val[0])[:300] if data_val else "empty")
-
     if isinstance(result, dict) and not result.get("success", result.get("successful", True)):
         error_msg = result.get("error", "Failed to list GitHub repos")
         raise HTTPException(status_code=502, detail=f"GitHub API error: {error_msg}")
 
     # Extract repo list from Composio response
+    # Structure: result.data.data.repositories (list)
     raw_data = result.get("data", {}) if isinstance(result, dict) else result
 
-    # Composio wraps results — navigate to the actual list
-    repos_raw = raw_data
+    repos_raw = []
     if isinstance(raw_data, dict):
-        repos_raw = raw_data.get("data", raw_data.get("response_data", raw_data))
-
-    # If still a dict (single-level Composio wrapper), try deeper
-    if isinstance(repos_raw, dict):
-        repos_raw = repos_raw.get("data", repos_raw.get("items", []))
+        inner = raw_data.get("data", raw_data)
+        if isinstance(inner, dict):
+            # Composio wraps GitHub response: inner["repositories"] is the list
+            repos_raw = inner.get("repositories", inner.get("items", inner.get("data", [])))
+        elif isinstance(inner, list):
+            repos_raw = inner
+    elif isinstance(raw_data, list):
+        repos_raw = raw_data
 
     if not isinstance(repos_raw, list):
         repos_raw = []
