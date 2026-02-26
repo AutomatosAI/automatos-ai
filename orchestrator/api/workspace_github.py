@@ -24,6 +24,7 @@ from config import config
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.database.database import get_db
+from core.composio.entity_manager import EntityManager
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,24 @@ _ALLOWED_CLONE_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
 
 # Safe branch name pattern (git ref chars, no .., @{, leading/trailing whitespace)
 _BRANCH_RE = re.compile(r"^[A-Za-z0-9._/\-]+$")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _get_entity_id(db: Session, workspace_id) -> str:
+    """Resolve the Composio entity_id for a workspace, or raise 404."""
+    from uuid import UUID
+    ws_uuid = UUID(str(workspace_id)) if not isinstance(workspace_id, UUID) else workspace_id
+    manager = EntityManager(db)
+    entity = manager.get_entity_by_workspace(ws_uuid)
+    if not entity or not entity.get("composio_entity_id"):
+        raise HTTPException(
+            status_code=404,
+            detail="No Composio entity found for this workspace. Connect GitHub first.",
+        )
+    return entity["composio_entity_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +100,7 @@ async def list_github_repos(
     page: int = Query(1, ge=1),
     per_page: int = Query(30, ge=1, le=100),
     ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
 ):
     """List GitHub repos accessible to the user via Composio."""
     if str(ctx.workspace_id) != workspace_id:
@@ -92,7 +112,7 @@ async def list_github_repos(
         raise HTTPException(status_code=501, detail="Composio SDK not installed") from err
 
     client = get_composio_client()
-    entity_id = str(ctx.workspace_id)
+    entity_id = _get_entity_id(db, ctx.workspace_id)
 
     result = await asyncio.to_thread(
         client.execute_action,
@@ -172,8 +192,9 @@ async def clone_github_repo(
     try:
         from core.composio.client import get_composio_client
         client = get_composio_client()
+        entity_id = _get_entity_id(db, ctx.workspace_id)
         token = await asyncio.to_thread(
-            client.get_app_access_token, str(ctx.workspace_id), "GITHUB"
+            client.get_app_access_token, entity_id, "GITHUB"
         )
         if token:
             # Inject token into HTTPS URL: https://x-access-token:{token}@github.com/...
