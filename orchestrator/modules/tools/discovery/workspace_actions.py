@@ -29,8 +29,12 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
                 "path": {
                     "type": "string",
                     "description": (
-                        "Relative path to the file inside the workspace "
-                        "(e.g. 'repos/my-app/src/main.py')."
+                        "Relative path to the file inside the workspace. "
+                        "All paths are relative to the workspace root. "
+                        "Repo files live under repos/ (e.g. 'repos/my-app/src/main.py'). "
+                        "Artifacts and other workspace files use their direct path "
+                        "(e.g. 'artifacts/results/test-summary.json'). "
+                        "Do NOT prepend 'repos/' to paths that are already workspace-root-relative."
                     ),
                 },
             },
@@ -59,8 +63,12 @@ def register_workspace_actions(registry: ActionRegistry) -> None:
                 "path": {
                     "type": "string",
                     "description": (
-                        "Relative path for the file inside the workspace "
-                        "(e.g. 'repos/my-app/src/utils.py')."
+                        "Relative path for the file inside the workspace. "
+                        "All paths are relative to the workspace root. "
+                        "Repo files live under repos/ (e.g. 'repos/my-app/src/utils.py'). "
+                        "Other workspace paths use their direct path "
+                        "(e.g. 'artifacts/data.json'). "
+                        "Do NOT prepend 'repos/' to paths that are already workspace-root-relative."
                     ),
                 },
                 "content": {
