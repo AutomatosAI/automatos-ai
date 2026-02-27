@@ -37,9 +37,10 @@ load_dotenv(TESTS_DIR / ".env", override=True)
 # ---------------------------------------------------------------------------
 COMPOSIO_API_KEY = os.environ.get("COMPOSIO_API_KEY", "")
 COMPOSIO_ENTITY_ID = os.environ.get("COMPOSIO_ENTITY_ID", "")
-COMPOSIO_BASE = "https://backend.composio.dev/api/v2"
-JIRA_PROJECT_KEY = os.environ.get("JIRA_PROJECT_KEY", "AUTO")
+COMPOSIO_BASE = os.environ.get("COMPOSIO_BASE_URL", "https://backend.composio.dev/api/v2")
+JIRA_PROJECT_KEY = os.environ.get("JIRA_PROJECT_KEY", "")
 REPORT_EMAIL_TO = os.environ.get("REPORT_EMAIL_TO", "")
+SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "")
 
 
 def run_pytest() -> int:
@@ -96,12 +97,14 @@ def _composio_headers() -> dict:
     }
 
 
-def _composio_post(action: str, params: dict) -> dict | None:
+def _composio_post(action: str, params: dict, app_name: str = "") -> dict | None:
     """Execute a Composio action via REST. Returns response JSON or None."""
     import httpx
 
     url = f"{COMPOSIO_BASE}/actions/{action}/execute"
     body = {"entityId": COMPOSIO_ENTITY_ID, "input": params}
+    if app_name:
+        body["appName"] = app_name
     try:
         r = httpx.post(url, headers=_composio_headers(), json=body, timeout=30)
         r.raise_for_status()
@@ -129,7 +132,7 @@ def file_jira_ticket(failure: dict) -> str | None:
         "description": description,
         "issue_type": "Bug",
         "labels": ["nightly-test"],
-    })
+    }, app_name="JIRA")
     if result and result.get("data"):
         key = result["data"].get("key") or result["data"].get("id")
         print(f"[runner] Jira ticket created: {key}")
@@ -181,8 +184,45 @@ def send_email_summary(report: dict, failures: list[dict], jira_keys: list[str])
         "recipient_email": REPORT_EMAIL_TO,
         "subject": subject,
         "body": body,
-    })
+    }, app_name="GMAIL")
     print(f"[runner] Email sent to {REPORT_EMAIL_TO}")
+
+
+def send_slack_summary(report: dict, failures: list[dict], jira_keys: list[str]):
+    """Post a summary to Slack via Composio SLACK_SEND_MESSAGE."""
+    if not COMPOSIO_API_KEY or not SLACK_CHANNEL:
+        print("[runner] Skipping Slack (COMPOSIO_API_KEY or SLACK_CHANNEL not set)")
+        return
+
+    summary = report.get("summary", {})
+    total = summary.get("total", 0)
+    passed = summary.get("passed", 0)
+    failed = summary.get("failed", 0)
+    duration = round(report.get("duration", 0), 1)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    verdict = "PASS" if failed == 0 else "FAIL"
+    icon = ":white_check_mark:" if failed == 0 else ":x:"
+
+    lines = [
+        f"{icon} *Nightly Test Report — {now}*",
+        f"Tests: *{passed}/{total}* passed ({round(passed / total * 100) if total else 0}%) | Duration: {duration}s",
+        f"Verdict: *{verdict}*",
+    ]
+
+    if failures:
+        lines.append("")
+        lines.append("*Failures:*")
+        for f in failures:
+            name = f["nodeid"].split("::")[-1]
+            lines.append(f"  • `{name}` ({f['duration']}s)")
+        if jira_keys:
+            lines.append(f"\nJira tickets: {', '.join(k for k in jira_keys if k)}")
+
+    _composio_post("SLACK_SEND_MESSAGE", {
+        "channel": SLACK_CHANNEL,
+        "text": "\n".join(lines),
+    }, app_name="SLACK")
+    print(f"[runner] Slack message sent to {SLACK_CHANNEL}")
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +257,9 @@ def main():
 
     # 5. Send email summary
     send_email_summary(report, failures, jira_keys)
+
+    # 6. Send Slack summary
+    send_slack_summary(report, failures, jira_keys)
 
     print(f"[runner] Done — exit code {exit_code}")
     sys.exit(exit_code)
