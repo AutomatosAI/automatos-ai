@@ -46,6 +46,9 @@ class PlatformActionExecutor:
             "platform_create_recipe": self._create_recipe,
             "platform_store_memory": self._store_memory,
             "platform_delete_agent": self._delete_agent,
+            # Infrastructure / observability
+            "platform_get_logs": self._get_logs,
+            "platform_list_services": self._list_services,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -759,3 +762,76 @@ class PlatformActionExecutor:
             "deleted_agent": agent_info,
             "message": f"Agent '{agent_info['name']}' (ID {agent_info['id']}) has been deleted.",
         }
+
+    # ── Infrastructure / Observability ─────────────────────────────────
+
+    async def _get_logs(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Fetch deployment logs from a Railway service."""
+        from core.railway_client import RailwayClient
+
+        client = RailwayClient()
+        if not client.is_configured:
+            return {
+                "success": False,
+                "error": "Railway API not configured. Set RAILWAY_API_TOKEN and RAILWAY_PROJECT_ID env vars.",
+            }
+
+        service_name = params.get("service", "")
+        if not service_name:
+            return {"success": False, "error": "service parameter is required"}
+
+        # Special case: "list" returns available services
+        if service_name.lower() == "list":
+            return await self._list_services(params)
+
+        lines = min(params.get("lines", 200), 1000)
+        filter_text = params.get("filter")
+
+        result = await client.fetch_service_logs(
+            service_name=service_name,
+            lines=lines,
+            filter_text=filter_text,
+        )
+
+        if not result.get("success"):
+            return result
+
+        # Format logs for LLM consumption — compact text format
+        logs = result.get("logs", [])
+        log_lines = []
+        for entry in logs:
+            ts = entry.get("timestamp", "")
+            sev = entry.get("severity", "")
+            msg = entry.get("message", "")
+            prefix = f"[{sev}]" if sev else ""
+            log_lines.append(f"{ts} {prefix} {msg}".strip())
+
+        result["formatted_logs"] = "\n".join(log_lines)
+        # Truncate formatted output for LLM context (keep under 8K chars)
+        if len(result["formatted_logs"]) > 8000:
+            result["formatted_logs"] = result["formatted_logs"][:8000] + "\n... (truncated)"
+            result["truncated"] = True
+
+        return result
+
+    async def _list_services(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """List all Railway services in the project."""
+        from core.railway_client import RailwayClient
+
+        client = RailwayClient()
+        if not client.is_configured:
+            return {
+                "success": False,
+                "error": "Railway API not configured. Set RAILWAY_API_TOKEN and RAILWAY_PROJECT_ID env vars.",
+            }
+
+        try:
+            services = await client.list_services()
+            return {
+                "success": True,
+                "services": services,
+                "count": len(services),
+            }
+        except Exception as exc:
+            logger.error("[PlatformExecutor] list_services failed: %s", exc, exc_info=True)
+            return {"success": False, "error": f"Failed to list services: {exc}"}
