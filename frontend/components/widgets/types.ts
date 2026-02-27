@@ -361,6 +361,10 @@ export interface TerminalWidgetData {
   workingDirectory?: string
   environment?: Record<string, string>
   isStreaming?: boolean
+  /** When set, terminal becomes interactive against this workspace */
+  workspaceId?: string
+  /** Enable interactive mode (command input + history) */
+  interactive?: boolean
 }
 
 /**

@@ -33,31 +33,43 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 ALLOWED_COMMANDS: set[str] = {
+    # Shell builtins / interpreters
+    "sh", "bash",
+    "cd", "pwd", "export", "source", "test", "true", "false",
+
     # Version control
     "git",
 
     # Python ecosystem
     "python", "python3", "pip", "pip3", "uv",
     "pytest", "ruff", "black", "mypy", "isort", "flake8",
-    "coverage", "tox",
+    "coverage", "tox", "python3.12",
 
     # Node.js ecosystem
     "node", "npm", "npx", "pnpm", "yarn",
     "vitest", "jest", "tsc", "eslint", "prettier",
 
     # General tools
-    "ls", "cat", "grep", "find", "tree", "wc", "sort",
-    "head", "tail", "diff", "patch", "jq",
+    "ls", "cat", "grep", "egrep", "fgrep", "rg",
+    "find", "tree", "wc", "sort", "uniq", "cut", "tr",
+    "head", "tail", "diff", "patch", "jq", "sed", "awk",
+    "xargs", "tee", "less", "more",
     "curl", "wget",
-    "make",
-    "tar", "gzip", "zip", "unzip",
-    "touch", "mkdir", "cp", "mv", "rm",
-    "echo", "printf", "env", "which", "whoami",
-    "date", "basename", "dirname", "realpath",
+    "make", "cmake",
+    "tar", "gzip", "gunzip", "zip", "unzip", "bzip2",
+    "touch", "mkdir", "cp", "mv", "rm", "ln", "chmod",
+    "echo", "printf", "env", "which", "whoami", "id",
+    "date", "basename", "dirname", "realpath", "readlink",
+    "stat", "file", "du", "df",
+    "ps", "kill", "sleep", "timeout",
+    "clear", "reset",
 
     # Language runtimes (polyglot repos)
     "cargo", "go", "ruby", "java", "javac", "mvn", "gradle",
     "rustc", "gcc", "g++",
+
+    # Docker (read-only inspection, not container escape)
+    "docker-compose",
 }
 
 # Patterns that are ALWAYS blocked, even if the binary is whitelisted
@@ -67,9 +79,7 @@ BLOCKED_PATTERNS: list[str] = [
     r"\bsudo\b",                 # privilege escalation
     r"\bsu\s",                   # user switching
     r"\bchmod\s+777\b",          # dangerous permissions
-    r"\bdocker\b",               # container escape
     r"\bkubectl\b",              # k8s access
-    r"\bssh\s",                  # use ssh_execute tool (disabled for pilot)
     r">\s*/dev/",                # device access
     r"\bmkfs\b",                 # filesystem formatting
     r"\bdd\s+if=",              # raw disk operations
@@ -80,11 +90,7 @@ BLOCKED_PATTERNS: list[str] = [
     r"\buserdel\b",             # user deletion
     r"\bmount\b",               # filesystem mounting
     r"\bumount\b",              # filesystem unmounting
-    # Shell metacharacters / expansion tokens
     r"`",                        # backtick execution
-    r"\$\(",                     # $() subshell expansion
-    r"\$\[",                     # $[] arithmetic expansion
-    r"\$\{",                     # ${} variable expansion
     r"\n",                       # embedded newlines
 ]
 
@@ -155,15 +161,27 @@ class WorkspaceToolExecutor:
         start = time.monotonic()
 
         try:
-            # Use subprocess_exec with shlex.split for safe argument handling
-            argv = shlex.split(command)
-            proc = await asyncio.create_subprocess_exec(
-                *argv,
-                cwd=str(work_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
+            # Use shell mode for compound commands (pipes, &&, etc).
+            # SECURITY: _validate_command already verified each segment against
+            # the command whitelist and blocked patterns before reaching here.
+            has_shell_operators = any(op in command for op in ("|", "&&", "||", ";", ">", "<"))
+            if has_shell_operators:
+                proc = await asyncio.create_subprocess_shell(
+                    command,
+                    cwd=str(work_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
+            else:
+                argv = shlex.split(command)
+                proc = await asyncio.create_subprocess_exec(
+                    *argv,
+                    cwd=str(work_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
 
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(

@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Nightly API Test Runner
+
+Runs pytest with JSON reporting. Produces two output files:
+  - test-report.json  — Full pytest-json-report (for archival)
+  - test-summary.json — Compact summary for recipe agents (~2KB)
+
+Output location (in priority order):
+  1. AUTOMATOS_RESULTS_DIR env var (absolute path)
+  2. {workspace_root}/artifacts/results  (workspace-relative)
+  3. tests/api/reports/                   (fallback, in-repo)
+
+The summary file is what recipe agents should read. It contains:
+  totals, duration, pass rate, and a failures array with nodeids +
+  truncated error messages. Small enough for an LLM to parse reliably.
+
+Usage:
+    python3 tests/run_nightly.py
+
+Exit codes match pytest: 0=pass, 1=failures, 2=runner error.
+"""
+
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+TESTS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TESTS_DIR.parent
+API_TESTS = TESTS_DIR / "api"
+
+
+def _resolve_results_dir() -> Path:
+    """Resolve results directory — outside the repo when in a workspace."""
+    # Explicit override
+    env_dir = os.environ.get("AUTOMATOS_RESULTS_DIR")
+    if env_dir:
+        return Path(env_dir)
+
+    # Workspace layout: /workspaces/{id}/repos/automatos-ai/tests/
+    # Results go to:    /workspaces/{id}/artifacts/results/
+    workspace_root = REPO_ROOT.parent.parent  # up from repos/automatos-ai
+    artifacts_dir = workspace_root / "artifacts" / "results"
+    if workspace_root.name != REPO_ROOT.name and (workspace_root / "artifacts").exists():
+        return artifacts_dir
+
+    # Fallback: in-repo (local dev)
+    return API_TESTS / "reports"
+
+
+REPORT_DIR = _resolve_results_dir()
+REPORT_FILE = REPORT_DIR / "test-report.json"
+SUMMARY_FILE = REPORT_DIR / "test-summary.json"
+
+# Load tests/.env for API_URL, API_KEY, WORKSPACE_ID
+load_dotenv(TESTS_DIR / ".env", override=True)
+
+
+def run_pytest() -> int:
+    """Run pytest and return the exit code."""
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable, "-m", "pytest",
+        str(API_TESTS),
+        "--json-report",
+        f"--json-report-file={REPORT_FILE}",
+        "-v",
+        "--tb=short",
+    ]
+    print(f"[runner] {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT))
+    return result.returncode
+
+
+def load_report() -> dict | None:
+    """Load the JSON report file."""
+    if not REPORT_FILE.exists():
+        print("[runner] WARNING: report file not found")
+        return None
+    with open(REPORT_FILE) as f:
+        return json.load(f)
+
+
+def build_summary(report: dict) -> dict:
+    """Build a compact summary dict from the full pytest report.
+
+    This is the file recipe agents should read — small, structured,
+    and easy for an LLM to parse without garbling.
+    """
+    summary = report.get("summary", {})
+    total = summary.get("total", 0)
+    passed = summary.get("passed", 0)
+    failed = summary.get("failed", 0)
+    skipped = summary.get("skipped", 0)
+    duration = round(report.get("duration", 0), 2)
+
+    failures = []
+    for test in report.get("tests", []):
+        if test.get("outcome") == "failed":
+            nodeid = test.get("nodeid", "unknown")
+            dur = round(test.get("duration", 0), 3)
+            # Extract error message — first 500 chars of longrepr
+            call = test.get("call", {})
+            error_msg = ""
+            if isinstance(call, dict) and call.get("longrepr"):
+                error_msg = call["longrepr"][:500]
+            failures.append({
+                "nodeid": nodeid,
+                "duration_seconds": dur,
+                "error": error_msg,
+            })
+
+    return {
+        "run_date": datetime.now(timezone.utc).isoformat(),
+        "total_tests": total,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "duration_seconds": duration,
+        "pass_rate": round(passed / total * 100, 1) if total > 0 else 0,
+        "status": "PASS" if failed == 0 else "FAIL",
+        "failures": failures,
+    }
+
+
+def print_summary(compact: dict):
+    """Print a human-readable summary to stdout."""
+    print(
+        f"[runner] Results: {compact['total_tests']} total, "
+        f"{compact['passed']} passed, {compact['failed']} failed, "
+        f"{compact['skipped']} skipped ({compact['duration_seconds']}s)"
+    )
+
+    if compact["failures"]:
+        print("[runner] Failures:")
+        for f in compact["failures"]:
+            print(f"  FAIL  {f['nodeid']}  ({f['duration_seconds']}s)")
+            if f["error"]:
+                for line in f["error"].split("\n")[:3]:
+                    print(f"        {line}")
+
+
+def main():
+    print(f"[runner] Nightly API test run — {datetime.now(timezone.utc).isoformat()}")
+    print(f"[runner] Results dir: {REPORT_DIR}")
+
+    exit_code = run_pytest()
+
+    report = load_report()
+    if report:
+        compact = build_summary(report)
+        print_summary(compact)
+
+        # Write compact summary for recipe agents
+        with open(SUMMARY_FILE, "w") as f:
+            json.dump(compact, f, indent=2)
+        print(f"[runner] Summary written to {SUMMARY_FILE}")
+    else:
+        print("[runner] No report to process")
+
+    print(f"[runner] Done — exit code {exit_code}")
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()

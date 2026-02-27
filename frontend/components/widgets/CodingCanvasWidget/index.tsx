@@ -9,8 +9,9 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { Code2, GitBranch } from 'lucide-react'
+import { Code2, GitBranch, Terminal } from 'lucide-react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { Button } from '@/components/ui/button'
 
 import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
@@ -26,6 +27,7 @@ import { CodeEditor } from './CodeEditor'
 import { EditorTabs } from './EditorTabs'
 import { useWorkspaceFiles } from './useWorkspaceFiles'
 import { RepoSelector } from './RepoSelector'
+import { InteractiveTerminal } from '../TerminalWidget/InteractiveTerminal'
 
 // ---------------------------------------------------------------------------
 // Component
@@ -62,6 +64,21 @@ export function CodingCanvasWidget({
 
   // Repo selector dialog
   const [repoSelectorOpen, setRepoSelectorOpen] = useState(false)
+
+  // Terminal panel
+  const [showTerminal, setShowTerminal] = useState(false)
+
+  // Ctrl+` to toggle terminal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault()
+        setShowTerminal(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // Fetch root directory on mount
   useEffect(() => {
@@ -224,22 +241,50 @@ export function CodingCanvasWidget({
         {/* Resize Handle */}
         <PanelResizeHandle className="w-[3px] bg-border/30 hover:bg-primary/40 transition-colors cursor-col-resize" />
 
-        {/* Editor Panel */}
+        {/* Editor + Terminal Panel */}
         <Panel defaultSize={75} minSize={40}>
-          <div className="h-full flex flex-col overflow-hidden">
-            {/* Tab bar */}
-            <EditorTabs
-              tabs={openTabs}
-              activeTabPath={activeTabPath}
-              onSelectTab={setActiveTabPath}
-              onCloseTab={handleCloseTab}
-            />
+          <PanelGroup direction="vertical" className="h-full">
+            {/* Editor section */}
+            <Panel defaultSize={showTerminal ? 70 : 100} minSize={30}>
+              <div className="h-full flex flex-col overflow-hidden">
+                {/* Tab bar with terminal toggle */}
+                <div className="flex items-center">
+                  <div className="flex-1 min-w-0">
+                    <EditorTabs
+                      tabs={openTabs}
+                      activeTabPath={activeTabPath}
+                      onSelectTab={setActiveTabPath}
+                      onCloseTab={handleCloseTab}
+                    />
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0 mr-1"
+                    onClick={() => setShowTerminal(prev => !prev)}
+                    title={`${showTerminal ? 'Hide' : 'Show'} Terminal (Ctrl+\`)`}
+                  >
+                    <Terminal className={`h-3.5 w-3.5 ${showTerminal ? 'text-primary' : 'text-muted-foreground'}`} />
+                  </Button>
+                </div>
 
-            {/* Monaco editor */}
-            <div className="flex-1 min-h-0">
-              <CodeEditor file={activeFile} />
-            </div>
-          </div>
+                {/* Monaco editor */}
+                <div className="flex-1 min-h-0">
+                  <CodeEditor file={activeFile} />
+                </div>
+              </div>
+            </Panel>
+
+            {/* Terminal panel (conditional) */}
+            {showTerminal && (
+              <>
+                <PanelResizeHandle className="h-[3px] bg-border/30 hover:bg-primary/40 transition-colors cursor-row-resize" />
+                <Panel defaultSize={30} minSize={10}>
+                  <InteractiveTerminal workspaceId={workspaceId} className="h-full" />
+                </Panel>
+              </>
+            )}
+          </PanelGroup>
         </Panel>
       </PanelGroup>
     </WidgetBase>

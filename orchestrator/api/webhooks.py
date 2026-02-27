@@ -523,7 +523,66 @@ async def general_workspace_webhook(
             "confidence": decision.confidence,
         }
 
-    # Orchestrate / unknown route_type
+    # Orchestrate / unknown route_type — find default agent and execute
+    if decision.route_type == "orchestrate":
+        from api.chat import get_default_agent_id
+
+        default_agent_id = get_default_agent_id(db, workspace.id)
+        logger.info(
+            "[webhook/ws] orchestrate → default agent %s for workspace %s",
+            default_agent_id, workspace.id,
+        )
+        try:
+            result = await _execute_agent_sync(
+                agent_id=default_agent_id,
+                content=envelope.content,
+                metadata=envelope.metadata,
+                workspace_id=workspace.id,
+            )
+
+            if platform and integrations:
+                reply_text = _extract_response_text(result)
+                task = asyncio.create_task(
+                    _deliver_reply(reply_text, reply_ctx, integrations)
+                )
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+
+            return {
+                "status": "completed",
+                "routed": True,
+                "route_type": "orchestrate",
+                "agent_id": default_agent_id,
+                "confidence": decision.confidence,
+                "platform": platform,
+                "reply_delivered": platform is not None and bool(integrations),
+                "result": result,
+            }
+        except Exception:
+            logger.exception(
+                "[webhook/ws] Orchestrate execution failed (agent=%s)", default_agent_id
+            )
+
+            if platform and integrations:
+                task = asyncio.create_task(
+                    _deliver_reply(
+                        "Sorry, I encountered an error processing your request. Please try again.",
+                        reply_ctx,
+                        integrations,
+                    )
+                )
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+
+            return {
+                "status": "error",
+                "routed": True,
+                "route_type": "orchestrate",
+                "agent_id": default_agent_id,
+                "error": "Orchestrate execution failed",
+            }
+
+    # Truly unknown route_type — acknowledge only
     return {
         "status": "received",
         "routed": True,

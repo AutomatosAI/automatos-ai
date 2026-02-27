@@ -734,6 +734,19 @@ class ToolResultFormatter:
 
         Full data goes to frontend, summary goes to LLM.
         """
+        # Workspace tools return structured data directly from the worker.
+        # Bypass standardizer (which expects "results" key) and pass data as-is.
+        if tool_name.startswith("workspace_"):
+            if not result.get("success"):
+                return f"Tool {tool_name} failed: {result.get('error', 'Unknown error')}"
+            ws_data = {k: v for k, v in result.items() if k != "success"}
+            try:
+                ws_json = json.dumps(ws_data, default=str, indent=2)
+            except Exception:
+                ws_json = str(ws_data)
+            llm_text = f"Tool: {tool_name}\nStatus: success\n\n{ws_json}"
+            return llm_text[:max_chars]
+
         # Platform tools return data under custom keys (agents, recipes, etc.)
         # Bypass standardizer which only looks for "results"/"result" keys.
         if tool_name.startswith("platform_"):

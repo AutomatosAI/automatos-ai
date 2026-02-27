@@ -314,6 +314,13 @@ class UnifiedToolExecutor:
                     tool_name, parameters, workspace_id=workspace_id, trace_id=trace
                 )
 
+            # Workspace tools: proxy to worker via WorkspaceClient
+            if tool_name.startswith("workspace_"):
+                logger.info(f"[tool-trace {trace}] Routing to WorkspaceClient: {tool_name}")
+                return await self._execute_workspace_action(
+                    tool_name, parameters, workspace_id=workspace_id, trace_id=trace
+                )
+
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
             if not tool_spec:
@@ -1637,6 +1644,98 @@ class UnifiedToolExecutor:
             return result
         except Exception as e:
             logger.error(f"[tool-trace {trace_id or 'no-trace'}] Platform action error: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "tool": tool_name}
+
+    async def _execute_workspace_action(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute a workspace tool via WorkspaceClient proxy to the worker."""
+        if not workspace_id:
+            return {
+                "success": False,
+                "error": "workspace_id required for workspace tools",
+                "tool": tool_name,
+            }
+
+        try:
+            from core.workspace_client import WorkspaceClient
+            client = WorkspaceClient(str(workspace_id))
+
+            if tool_name == "workspace_read_file":
+                path = parameters.get("path", "")
+                if not path:
+                    return {"success": False, "error": "path is required", "tool": tool_name}
+                result = await client.read_file(path)
+
+            elif tool_name == "workspace_write_file":
+                path = parameters.get("path", "")
+                content = parameters.get("content")
+                if not path:
+                    return {"success": False, "error": "path is required", "tool": tool_name}
+                if content is None:
+                    return {"success": False, "error": "content is required", "tool": tool_name}
+                result = await client.write_file(path, content)
+
+            elif tool_name == "workspace_list_dir":
+                path = parameters.get("path", ".")
+                result = await client.list_dir(path)
+
+            elif tool_name == "workspace_grep":
+                pattern = parameters.get("pattern", "")
+                if not pattern:
+                    return {"success": False, "error": "pattern is required", "tool": tool_name}
+                result = await client.grep(
+                    pattern=pattern,
+                    path=parameters.get("path", "."),
+                    include=parameters.get("include", ""),
+                    max_results=parameters.get("max_results", 50),
+                )
+
+            elif tool_name == "workspace_exec":
+                command = parameters.get("command", "")
+                if not command:
+                    return {"success": False, "error": "command is required", "tool": tool_name}
+                result = await client.exec_command(
+                    command=command,
+                    cwd=parameters.get("cwd"),
+                    timeout=parameters.get("timeout", 120),
+                )
+
+            elif tool_name == "workspace_git":
+                operation = parameters.get("operation", "")
+                if not operation:
+                    return {"success": False, "error": "operation is required", "tool": tool_name}
+                result = await client.git(
+                    operation=operation,
+                    cwd=parameters.get("cwd"),
+                    args=parameters.get("args", ""),
+                )
+
+            else:
+                return {"success": False, "error": f"Unknown workspace tool: {tool_name}", "tool": tool_name}
+
+            # Worker returned an error
+            if result.get("success") is False or result.get("error"):
+                logger.warning(
+                    f"[tool-trace {trace_id or 'no-trace'}] Workspace action {tool_name} "
+                    f"error: {result.get('error', 'unknown')}"
+                )
+                result.setdefault("success", False)
+                return result
+
+            # Ensure success=True so tool_router recognizes it
+            result["success"] = True
+            logger.info(
+                f"[tool-trace {trace_id or 'no-trace'}] Workspace action {tool_name} completed"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(f"[tool-trace {trace_id or 'no-trace'}] Workspace action error: {e}", exc_info=True)
             return {"success": False, "error": str(e), "tool": tool_name}
 
     def get_available_tools(self, categories: Optional[list] = None) -> list:

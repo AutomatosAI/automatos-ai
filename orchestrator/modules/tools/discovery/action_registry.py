@@ -66,9 +66,11 @@ class ActionRegistry:
         """Lazy-load platform actions on first access."""
         if not self._initialized:
             from .platform_actions import register_all_actions
+            from .workspace_actions import register_workspace_actions
             register_all_actions(self)
+            register_workspace_actions(self)
             self._initialized = True
-            logger.info(f"[ActionRegistry] Initialized with {len(self._actions)} platform actions")
+            logger.info(f"[ActionRegistry] Initialized with {len(self._actions)} actions (platform + workspace)")
 
     def register(self, action: ActionDefinition) -> None:
         """Register a platform action."""
