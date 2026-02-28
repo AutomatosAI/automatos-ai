@@ -305,23 +305,24 @@ async def create_or_get_entity(
     entity_type: str,
     canonical_name: str,
     description: Optional[str] = None,
-    embedding: Optional[List[float]] = None
+    embedding: Optional[List[float]] = None,
+    workspace_id: Optional[str] = None
 ) -> int:
     """
     Create entity if it doesn't exist, or return existing entity ID
-    
+
     Returns:
         entity_id
     """
     # Try to get existing entity
     cursor.execute("""
-        SELECT id FROM kb_entities 
+        SELECT id FROM kb_entities
         WHERE LOWER(canonical_name) = LOWER(%s)
         LIMIT 1
     """, [canonical_name])
-    
+
     result = cursor.fetchone()
-    
+
     if result:
         # Update mention count
         cursor.execute(
@@ -329,14 +330,14 @@ async def create_or_get_entity(
             [result[0]]
         )
         return result[0]
-    
+
     # Create new entity
     cursor.execute("""
-        INSERT INTO kb_entities (entity_name, entity_type, canonical_name, description, embedding, mention_count)
-        VALUES (%s, %s, %s, %s, %s, 1)
+        INSERT INTO kb_entities (entity_name, entity_type, canonical_name, description, embedding, mention_count, workspace_id)
+        VALUES (%s, %s, %s, %s, %s, 1, %s)
         RETURNING id
-    """, [entity_name, entity_type, canonical_name, description, embedding])
-    
+    """, [entity_name, entity_type, canonical_name, description, embedding, workspace_id])
+
     result = cursor.fetchone()
     return result[0]
 
@@ -366,33 +367,34 @@ async def create_entity_relationship(
     relationship_type: str,
     strength: float = 1.0,
     evidence_source_id: Optional[int] = None,
-    evidence_text: Optional[str] = None
+    evidence_text: Optional[str] = None,
+    workspace_id: Optional[str] = None
 ):
     """Create relationship between two entities"""
-    
+
     # Get entity IDs
     cursor.execute("SELECT id FROM kb_entities WHERE LOWER(canonical_name) = LOWER(%s) LIMIT 1", [from_entity_name.lower()])
     from_result = cursor.fetchone()
-    
+
     cursor.execute("SELECT id FROM kb_entities WHERE LOWER(canonical_name) = LOWER(%s) LIMIT 1", [to_entity_name.lower()])
     to_result = cursor.fetchone()
-    
+
     if not from_result or not to_result:
         logger.warning(f"Could not create relationship: entities not found ({from_entity_name} -> {to_entity_name})")
         return
-    
+
     from_entity_id = from_result[0]
     to_entity_id = to_result[0]
-    
+
     # Create relationship
     cursor.execute("""
-        INSERT INTO entity_relationships 
-        (from_entity_id, to_entity_id, relationship_type, strength, evidence_source_id, evidence_text)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        ON CONFLICT (from_entity_id, to_entity_id, relationship_type) 
-        DO UPDATE SET 
+        INSERT INTO entity_relationships
+        (from_entity_id, to_entity_id, relationship_type, strength, evidence_source_id, evidence_text, workspace_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (from_entity_id, to_entity_id, relationship_type)
+        DO UPDATE SET
             strength = GREATEST(entity_relationships.strength, EXCLUDED.strength),
             evidence_text = COALESCE(EXCLUDED.evidence_text, entity_relationships.evidence_text),
             updated_at = NOW()
-    """, [from_entity_id, to_entity_id, relationship_type, strength, evidence_source_id, evidence_text])
+    """, [from_entity_id, to_entity_id, relationship_type, strength, evidence_source_id, evidence_text, workspace_id])
 

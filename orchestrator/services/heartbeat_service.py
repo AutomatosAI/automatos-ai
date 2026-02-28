@@ -391,6 +391,19 @@ class HeartbeatService:
 
                     response = await llm.generate_response(messages)
 
+                    # Flag if fallback model was used (primary model dead)
+                    if getattr(response, "_used_fallback", False):
+                        failed_model = getattr(response, "_failed_model", "unknown")
+                        fallback_model = getattr(response, "_fallback_model", "unknown")
+                        result["findings"].append({
+                            "check": "model_fallback",
+                            "detail": (
+                                f"Primary model '{failed_model}' is unavailable. "
+                                f"Used fallback '{fallback_model}'. "
+                                f"Update model in Settings > Orchestrator."
+                            ),
+                        })
+
                     llm_text = (
                         response.content
                         if hasattr(response, "content")

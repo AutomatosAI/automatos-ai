@@ -386,7 +386,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding vector(1024),
+    embedding vector(4096),
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -447,7 +447,7 @@ CREATE TABLE IF NOT EXISTS knowledge_items (
     title VARCHAR(500),
     content TEXT NOT NULL,
     summary TEXT,
-    embedding vector(1024),
+    embedding vector(4096),
     metadata JSONB DEFAULT '{}',
     quality_score FLOAT DEFAULT 0.0,
     importance_score FLOAT DEFAULT 0.0,
@@ -651,7 +651,7 @@ CREATE TABLE IF NOT EXISTS memory_items (
     memory_type VARCHAR(100) NOT NULL,
     memory_level VARCHAR(50) DEFAULT 'working',
     importance FLOAT DEFAULT 0.5,
-    embedding vector(1024),
+    embedding vector(4096),
     access_count INTEGER DEFAULT 0,
     last_access TIMESTAMP DEFAULT NOW(),
     decay_rate FLOAT DEFAULT 0.1,
@@ -674,7 +674,7 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
     concept VARCHAR(255),
     description TEXT,
     node_type VARCHAR(50),
-    embedding vector(1024),
+    embedding vector(4096),
     importance FLOAT,
     confidence FLOAT,
     metadata JSONB,
@@ -706,7 +706,7 @@ CREATE TABLE IF NOT EXISTS kb_entities (
     entity_type VARCHAR(100) NOT NULL,
     canonical_name VARCHAR(255),
     description TEXT,
-    embedding vector(1024),
+    embedding vector(4096),
     mention_count INTEGER DEFAULT 0,
     importance_score FLOAT DEFAULT 0.0,
     metadata JSONB DEFAULT '{}',
@@ -1785,6 +1785,63 @@ CREATE INDEX idx_dqt_dialect ON database_query_templates(dialect, category);
 CREATE INDEX idx_dqt_featured ON database_query_templates(is_featured);
 
 -- ================================================================
+-- TASK EXECUTIONS (PRD-56: Infrastructure Scaling & Physical Workspaces)
+-- ================================================================
+
+CREATE TABLE IF NOT EXISTS task_executions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL REFERENCES workspaces(id),
+
+    -- Task definition
+    task_type VARCHAR(50) NOT NULL,  -- workflow_subtask, chat_agent, recipe_step, background_job
+    agent_id INTEGER REFERENCES agents(id),
+    prompt TEXT,
+    configuration JSONB DEFAULT '{}',
+
+    -- Execution metadata
+    priority VARCHAR(20) DEFAULT 'normal',
+    runner_backend VARCHAR(20) NOT NULL DEFAULT 'local',  -- local, queued, kubernetes
+
+    -- Resource tracking
+    resources_requested JSONB DEFAULT '{}',  -- {cpu, memory, disk}
+    resources_used JSONB DEFAULT '{}',       -- Actual consumption
+
+    -- Lifecycle
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+
+    -- Results
+    result JSONB,
+    error_message TEXT,
+    tokens_used INTEGER DEFAULT 0,
+    execution_time_ms INTEGER DEFAULT 0,
+
+    -- Tracing
+    parent_execution_id UUID REFERENCES task_executions(id),
+    correlation_id VARCHAR(255),
+
+    -- K8s metadata (Phase 3)
+    k8s_namespace VARCHAR(255),
+    k8s_job_name VARCHAR(255),
+    k8s_pod_name VARCHAR(255),
+
+    -- Worker metadata (Phase 2)
+    worker_id VARCHAR(255),
+    workspace_path TEXT,
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_executions_workspace ON task_executions(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_task_executions_status ON task_executions(status);
+CREATE INDEX IF NOT EXISTS idx_task_executions_correlation ON task_executions(correlation_id);
+CREATE INDEX IF NOT EXISTS idx_task_executions_submitted ON task_executions(submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_task_executions_type_status ON task_executions(task_type, status);
+
+-- ================================================================
 -- INSERT INITIAL DATA
 -- ================================================================
 
@@ -1802,13 +1859,13 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO system_configurations (config_key, config_value, description) VALUES
 ('system.max_agents', '{"value": 100}', 'Maximum number of agents allowed'),
 ('system.default_timeout', '{"value": 300}', 'Default timeout for operations (seconds)'),
-('rag.default_model', '{"value": "text-embedding-ada-002"}', 'Default embedding model'),
+('rag.default_model', '{"value": "qwen/qwen3-embedding-8b"}', 'Default embedding model'),
 ('workflow.max_concurrent', '{"value": 10}', 'Maximum concurrent workflow executions')
 ON CONFLICT (config_key) DO NOTHING;
 
 -- Insert default RAG configuration
 INSERT INTO rag_configurations (name, embedding_model, created_by) VALUES
-('default', 'text-embedding-ada-002', 'system')
+('default', 'qwen/qwen3-embedding-8b', 'system')
 ON CONFLICT DO NOTHING;
 
 -- Insert sample LLM models

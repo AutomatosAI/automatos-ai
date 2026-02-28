@@ -18,6 +18,8 @@ import {
   ChevronRight,
   Copy,
   Check,
+  ExternalLink,
+  Eye,
 } from 'lucide-react'
 import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
@@ -42,9 +44,32 @@ export function DocumentWidget({
 }: WidgetBaseProps<DocumentWidgetData>) {
   const [activeTab, setActiveTab] = useState<'content' | 'chunks'>('content')
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
+  const [highlightedChunkIndex, setHighlightedChunkIndex] = useState<number | null>(null)
 
-  // Handle download - create blob from content since we have it in memory
+  // View in Document: switch to content tab and scroll to highlighted chunk
+  const handleViewInDocument = useCallback((chunkIndex: number) => {
+    setHighlightedChunkIndex(chunkIndex)
+    setActiveTab('content')
+    // Scroll to the chunk marker after a short delay for tab switch
+    setTimeout(() => {
+      const el = document.querySelector(`[data-chunk-index="${chunkIndex}"]`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 100)
+  }, [])
+
+  // Handle download - use downloadUrl for generated files, blob fallback for RAG docs
   const handleDownload = useCallback(() => {
+    if (data.downloadUrl) {
+      const a = document.createElement('a')
+      a.href = data.downloadUrl
+      a.download = data.filename || title || 'document'
+      a.target = '_blank'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      toast.success('Document download started')
+      return
+    }
     try {
       const blob = new Blob([data.content], { type: 'text/markdown' })
       const url = URL.createObjectURL(blob)
@@ -59,7 +84,7 @@ export function DocumentWidget({
     } catch (error) {
       toast.error('Failed to download document')
     }
-  }, [data.content, data.filename, title])
+  }, [data.content, data.filename, data.downloadUrl, title])
 
   // Copy content to clipboard
   const handleCopyContent = useCallback(async () => {
@@ -234,9 +259,9 @@ export function DocumentWidget({
       error={error}
       onClose={onClose}
       onMaximize={onMaximize}
-      onDownload={data.content ? handleDownload : undefined}
+      onDownload={data.content || data.downloadUrl ? handleDownload : undefined}
       onCopy={handleCopyContent}
-      canDownload={!!data.content}
+      canDownload={!!(data.content || data.downloadUrl)}
       canCopy
     >
       <div className="flex flex-col h-full">
@@ -293,7 +318,7 @@ export function DocumentWidget({
                       <code>{formattedContent}</code>
                     </pre>
                   ) : (
-                    <article className="prose prose-sm prose-invert max-w-none">
+                    <article className="prose prose-sm prose-invert max-w-none break-words [overflow-wrap:anywhere]">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={markdownComponents}
@@ -315,6 +340,7 @@ export function DocumentWidget({
                       index={i}
                       chunk={chunk}
                       onCopy={() => handleCopyChunk(chunk.content, i)}
+                      onViewInDocument={handleViewInDocument}
                       isCopied={copiedIndex === i}
                     />
                   ))}
@@ -330,7 +356,7 @@ export function DocumentWidget({
                   <code>{formattedContent}</code>
                 </pre>
               ) : (
-                <article className="prose prose-sm prose-invert max-w-none">
+                <article className="prose prose-sm prose-invert max-w-none break-words [overflow-wrap:anywhere]">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={markdownComponents}
@@ -356,12 +382,15 @@ interface ChunkItemProps {
     content: string
     excerpt?: string
     similarity?: number
+    document_id?: number
+    page?: number
   }
   onCopy: () => void
+  onViewInDocument?: (index: number) => void
   isCopied: boolean
 }
 
-function ChunkItem({ index, chunk, onCopy, isCopied }: ChunkItemProps) {
+function ChunkItem({ index, chunk, onCopy, onViewInDocument, isCopied }: ChunkItemProps) {
   const [isExpanded, setIsExpanded] = useState(false)
 
   const excerpt = chunk.excerpt || chunk.content.slice(0, 150)
@@ -379,19 +408,37 @@ function ChunkItem({ index, chunk, onCopy, isCopied }: ChunkItemProps) {
               {Math.round(chunk.similarity * 100)}% relevant
             </span>
           )}
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-[#3a3a3a]"
-          onClick={onCopy}
-        >
-          {isCopied ? (
-            <Check className="h-3 w-3 text-green-500" />
-          ) : (
-            <Copy className="h-3 w-3" />
+          {chunk.page !== undefined && (
+            <span className="text-xs text-gray-500">
+              Page {chunk.page}
+            </span>
           )}
-        </Button>
+        </div>
+        <div className="flex items-center gap-1">
+          {onViewInDocument && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-blue-400 hover:text-blue-300 hover:bg-[#3a3a3a]"
+              onClick={() => onViewInDocument(index)}
+              title="View in Document"
+            >
+              <Eye className="h-3 w-3" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-[#3a3a3a]"
+            onClick={onCopy}
+          >
+            {isCopied ? (
+              <Check className="h-3 w-3 text-green-500" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+          </Button>
+        </div>
       </div>
 
       <div className="text-sm text-gray-300">

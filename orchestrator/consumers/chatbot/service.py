@@ -459,7 +459,7 @@ class StreamingChatService:
     Thin orchestrator consuming modules.
     """
     
-    def __init__(self, db: Session, workspace_id: Optional[str] = None):
+    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False):
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
@@ -467,6 +467,7 @@ class StreamingChatService:
         self.tool_router = get_tool_router()
         self.streaming_handler = get_streaming_handler()
         self.workspace_id = workspace_id
+        self.widget_mode = widget_mode
         
         # PRD: Unified Agent-Chat System - Initialize AgentFactory
         from modules.agents.factory.agent_factory import AgentFactory
@@ -498,10 +499,19 @@ class StreamingChatService:
         agent_id: int = 1
     ) -> AsyncGenerator[str, None]:
         """
-        Stream chat response using AI SDK Data Stream format.
-        
-        Format: 0:"text"\n for text, d:{json}\n for data, e:{json}\n for errors
+        DEPRECATED: This method is no longer called from the chat API.
+        All chat now flows through stream_response_with_agent() which uses
+        SmartChatOrchestrator for personality, memory, and tool orchestration.
+
+        Kept temporarily for backward compatibility with any direct callers.
+        Will be removed in a future cleanup pass.
         """
+        import warnings
+        warnings.warn(
+            "stream_response_aisdk is deprecated. Use stream_response_with_agent instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         # Import from core.llm
         from core.llm import create_llm_manager
         import asyncio
@@ -541,50 +551,10 @@ class StreamingChatService:
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
             supports_native_tools = provider in ['openai', 'anthropic', 'grok', 'openrouter', 'google'] if provider else False
             
-            # --- TOOL FILTERING (PRD Refinement) ---
-            # To prevent context overload (600+ tools), we filter to the top N relevant tools.
-            use_tools = None
-            if not is_simple and tools and supports_native_tools:
-                # 1. Identify Core Tools (always included)
-                core_tool_names = {
-                    "search_knowledge", "semantic_search", "search_codebase", 
-                    "query_database", "smart_query_database", 
-                    "read_file", "write_file", "switch_context",
-                    "search_tables", "search_images", "search_formulas", "search_multimodal"
-                }
-                
-                # 2. Get relevant tools via ranking
-                ranked_candidates = self.prompt_analyzer.rank_tools_for_query(
-                    latest_text, 
-                    tools, 
-                    max_tools=25
-                )
-                
-                # 3. Build final allowed list
-                filtered_tools = []
-                included_names = set()
-                
-                # Add core tools first
-                for tool in tools:
-                    t_name = tool.get("function", {}).get("name")
-                    if t_name in core_tool_names:
-                        filtered_tools.append(tool)
-                        included_names.add(t_name)
-                
-                # Add top ranked tools
-                for candidate in ranked_candidates:
-                    c_name = candidate.get("name")
-                    if c_name not in included_names:
-                        # Find the full tool definition
-                        full_tool = next((t for t in tools if t.get("function", {}).get("name") == c_name), None)
-                        if full_tool:
-                            filtered_tools.append(full_tool)
-                            included_names.add(c_name)
-                
-                use_tools = filtered_tools
-                logger.info(f"Filtering tools: {len(tools)} -> {len(use_tools)} relevant tools")
-            
-            # Use filtered tools (if applicable) for LLM context generation
+            # --- TOOL FILTERING (DEPRECATED path) ---
+            # This deprecated method passes all tools through without ranking.
+            # Active chat uses SmartChatOrchestrator + SmartToolRouter for semantic ranking.
+            use_tools = tools if (not is_simple and tools and supports_native_tools) else None
             context_tools = use_tools if use_tools is not None else tools
 
             # Convert messages to LLM format (include tool names for stronger tool routing)
@@ -613,48 +583,57 @@ class StreamingChatService:
                     logger.info(f"[Memory] Injecting {len(memory_context)} chars")
                     llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
 
-            # Add dynamic tool candidates (hint) - only suggest, don't force
-            # NOTE: Removed "Tool candidates for this request" phrasing which was triggering
-            # force_tool_choice=required in OpenAI client. Tools should be optional.
-            if context_tools and latest_text:
-                candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, context_tools)
-                # Only hint at tools if there's a high-confidence match (score > 2)
-                high_confidence_candidates = [c for c in candidates if c.get("score", 0) > 2]
-                if high_confidence_candidates:
-                    candidate_names = ", ".join([c["name"] for c in high_confidence_candidates[:3] if c.get("name")])
-                    if candidate_names:
-                        insert_at = 2 if memory_context else 1
-                        llm_messages.insert(
-                            insert_at,
-                            {
-                                "role": "system",
-                                "content": (
-                                    f"Available tools: {candidate_names}. "
-                                    "When the user asks you to perform an action (fetch data, send messages, "
-                                    "list items, etc.), call the appropriate tool immediately. "
-                                    "For pure conversation or memory questions, respond naturally."
-                                )
-                            }
-                        )
-
-            # Provide Composio app/action hints based on agent assignments (DB-backed).
-            # Delegates to unified ComposioHintService (3-tier resolution).
+            # Composio per-action tools (primary) or hint fallback
+            _composio_result = None
             try:
-                if latest_text and agent_id:
-                    from modules.tools.services.composio_hint_service import ComposioHintService
+                if latest_text and agent_id and self.workspace_id:
+                    from modules.tools.services.composio_tool_service import ComposioToolService
 
-                    hint_service = ComposioHintService(self.db)
-                    hint_result = hint_service.build_hints(
+                    _composio_svc = ComposioToolService(self.db)
+                    _composio_result = _composio_svc.get_tools_for_step(
                         agent_id=agent_id,
-                        prompt=latest_text,
                         workspace_id=self.workspace_id,
+                        task_prompt=latest_text,
                     )
-                    if hint_result.hint_lines:
-                        insert_at = 2 if memory_context else 1
-                        llm_messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
-                        logger.info(f"[Composio Hints] strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)} param_hints={hint_result.param_hint_count}")
+                    insert_at = 2 if memory_context else 1
+                    if _composio_result and _composio_result.tools:
+                        # Strip composio_execute, add per-action tools
+                        if use_tools:
+                            use_tools = [
+                                t for t in use_tools
+                                if t.get("function", {}).get("name") != "composio_execute"
+                            ] + _composio_result.tools
+                        elif context_tools:
+                            use_tools = [
+                                t for t in context_tools
+                                if t.get("function", {}).get("name") != "composio_execute"
+                            ] + _composio_result.tools
+                        else:
+                            use_tools = _composio_result.tools
+                        from api.recipe_executor import _composio_scope_message
+                        llm_messages.insert(insert_at, {
+                            "role": "system",
+                            "content": _composio_scope_message(_composio_result.app_names),
+                        })
+                        logger.info(
+                            f"[ComposioToolService] strategy={_composio_result.strategy} "
+                            f"actions={len(_composio_result.action_set)} search_ms={_composio_result.search_ms}"
+                        )
+                    else:
+                        # Fallback: ComposioHintService (composio_execute mega-tool)
+                        from modules.tools.services.composio_hint_service import ComposioHintService
+
+                        hint_service = ComposioHintService(self.db)
+                        hint_result = hint_service.build_hints(
+                            agent_id=agent_id,
+                            prompt=latest_text,
+                            workspace_id=self.workspace_id,
+                        )
+                        if hint_result.hint_lines:
+                            llm_messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
+                            logger.info(f"[Composio Hints fallback] strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}")
             except Exception as exc:
-                logger.warning(f"Composio hint injection failed: {exc}", exc_info=True)
+                logger.warning(f"Composio tool injection failed: {exc}", exc_info=True)
 
             # Explicit tool call bypass (e.g., "Use tool X with params {...}")
             explicit_call = self.prompt_analyzer.parse_explicit_tool_call(latest_text)
@@ -737,22 +716,21 @@ class StreamingChatService:
                             agent_id=agent_id
                         )
 
+                    # FutureAGI live traffic eval (fire-and-forget)
+                    if latest_text and full_response:
+                        try:
+                            from core.services.futureagi_service import futureagi_service
+                            if futureagi_service.is_available:
+                                asyncio.create_task(
+                                    futureagi_service.eval_live_traffic(
+                                        input_text=latest_text,
+                                        output_text=full_response,
+                                    )
+                                )
+                        except Exception:
+                            pass  # Never block chat for eval
+
                     return
-            
-            # Pre-trigger tools for models without native tool calling
-            if not is_simple and not supports_native_tools:
-                detected_tools = self.prompt_analyzer.detect_explicit_tool_requests(latest_text)
-                if detected_tools:
-                    logger.info(f"Pre-triggering tools: {detected_tools}")
-                    async for chunk in self._execute_pretriggered_tools(
-                        detected_tools,
-                        latest_text,
-                        llm_messages,
-                        tool_data,
-                        agent_id
-                    ):
-                        yield chunk
-                        await asyncio.sleep(0)
             
             # Generate response via shared.llm
             response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
@@ -769,7 +747,7 @@ class StreamingChatService:
                 # Emit tool lifecycle events + stream tool-data incrementally
                 import time
 
-                max_iterations = 5
+                max_iterations = 10
                 iteration = 0
                 current_response = response
                 sent_tool_data = False
@@ -873,6 +851,51 @@ class StreamingChatService:
                                         "error": "Refused destructive action for messaging intent",
                                         "silent": False
                                     }
+
+                        # Direct Composio action execution (per-action tools)
+                        _is_composio = (
+                            _composio_result and _composio_result.entity_id and (
+                                tool_name in _composio_result.action_set
+                                or any(tool_name.startswith(f"{app}_") for app in (_composio_result.app_names or []))
+                            )
+                        )
+                        if _is_composio:
+                            try:
+                                from modules.tools.services.composio_tool_service import ComposioToolService
+                                _exec_svc = ComposioToolService(self.db)
+                                exec_result = _exec_svc.execute_action(
+                                    action_name=tool_name,
+                                    params=tool_args,
+                                    entity_id=_composio_result.entity_id,
+                                )
+                                success = exec_result.get("success", False)
+                                data = exec_result.get("data")
+                                error = exec_result.get("error")
+                                if success:
+                                    content = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
+                                else:
+                                    content = f"Error executing {tool_name}: {error or 'unknown error'}"
+                                logger.info(f"[Composio direct] {tool_name}: success={success}")
+                            except Exception as exc:
+                                content = f"Error executing {tool_name}: {exc}"
+                                success = False
+                                error = str(exc)
+                                logger.error(f"[Composio direct] {tool_name} exception: {exc}", exc_info=True)
+
+                            if len(content) > 4000:
+                                content = content[:4000] + "\n... (truncated)"
+
+                            return {
+                                "tool_call_id": tool_id,
+                                "tool_name": tool_name,
+                                "tool_args": tool_args,
+                                "role": "tool",
+                                "content": content,
+                                "frontend_data": {},
+                                "success": success,
+                                "error": error if not success else None,
+                                "silent": False,
+                            }
 
                         logger.info(f"Executing tool: {tool_name}")
                         result = await self.tool_router.execute_and_format(
@@ -1157,29 +1180,13 @@ class StreamingChatService:
             async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
                 yield chunk
 
-            # Send usage data + track usage
+            # Send usage data (tracking now handled by LLMManager)
             if hasattr(response, 'usage') and response.usage:
                 yield self.streaming_handler.format_aisdk_usage(
                     response.usage.get('prompt_tokens', 0),
                     response.usage.get('completion_tokens', 0),
                     response.usage.get('total_tokens', 0)
                 )
-                # Track LLM usage for analytics (default path — platform key)
-                if self.workspace_id:
-                    try:
-                        from core.llm.usage_tracker import UsageTracker
-                        UsageTracker.track(
-                            workspace_id=self.workspace_id,
-                            model_id=model or "unknown",
-                            provider=provider or "openai",
-                            input_tokens=response.usage.get('prompt_tokens', 0),
-                            output_tokens=response.usage.get('completion_tokens', 0),
-                            agent_id=agent_id,
-                            request_type="chat",
-                            is_byok=False,
-                        )
-                    except Exception as e:
-                        logger.warning(f"Usage tracking failed: {e}")
 
             # Send finish event
             yield self.streaming_handler.format_aisdk_finish()
@@ -1202,35 +1209,70 @@ class StreamingChatService:
                     workspace_id=str(self.workspace_id) if self.workspace_id else None,
                     agent_id=agent_id
                 )
-            
+
+            # FutureAGI live traffic eval (fire-and-forget)
+            if latest_text and full_response:
+                try:
+                    from core.services.futureagi_service import futureagi_service
+                    if futureagi_service.is_available:
+                        asyncio.create_task(
+                            futureagi_service.eval_live_traffic(
+                                input_text=latest_text,
+                                output_text=full_response,
+                            )
+                        )
+                except Exception:
+                    pass  # Never block chat for eval
+
+            # Persist task counter to DB for the active agent
+            if agent_id:
+                try:
+                    from core.models import Agent as AgentModel
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row:
+                        metrics = dict(agent_row.performance_metrics or {})
+                        metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
+                        metrics["tasks_completed"] = metrics["total_tasks_executed"]
+                        agent_row.performance_metrics = metrics
+                        self.db.commit()
+                except Exception as metric_err:
+                    logger.warning(f"Failed to persist agent task counter: {metric_err}")
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass
+
         except Exception as e:
             logger.error(f"Error streaming response: {e}")
             import traceback
             traceback.print_exc()
             yield self.streaming_handler.format_aisdk_error(str(e))
-    
+
     async def stream_response_with_agent(
         self,
         chat_id: str,
         messages: List[Dict[str, Any]],
         agent_id: int,
-        user_id: int
+        user_id: int,
+        use_system_llm: bool = False,
+        skip_composio: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream chat response using a specialized agent from AgentFactory.
-        
+
         PRD: Unified Agent-Chat System
         - Activates agent from factory
         - Uses agent's LLM manager, skills, and tools
         - Builds system prompt from agent's skills
         - Uses shared user-level memory
-        
+
         Args:
             chat_id: Chat session ID
             messages: Chat messages
             agent_id: ID of agent to use
             user_id: User ID for memory
-            
+            use_system_llm: Use orchestrator LLM settings instead of agent's model
+
         Yields:
             AI SDK formatted response chunks
         """
@@ -1255,7 +1297,7 @@ class StreamingChatService:
             if fresh_start:
                 messages = [m for m in messages if m.get("role") == "user"][-1:]
 
-            agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id))
+            agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id, use_system_llm=use_system_llm))
 
             # Send chat_id to frontend
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
@@ -1268,8 +1310,19 @@ class StreamingChatService:
 
             logger.info(f"Activating agent {agent_id} for chat {chat_id}")
 
+            # PRD-67: Single query for CTO detection (reused later in prompt override)
+            _cto_check_result = None
+            try:
+                from core.models import Agent as _AgentModel
+                _cto_check_result = self.db.query(
+                    _AgentModel.slug, _AgentModel.is_system_agent,
+                    _AgentModel.custom_persona_prompt, _AgentModel.configuration,
+                ).filter(_AgentModel.id == agent_id).first()
+            except Exception:
+                pass
+
             # Send agent info to frontend
-            yield self.streaming_handler.format_aisdk_data({
+            _agent_info = {
                 "type": "agent-info",
                 "agent": {
                     "id": agent_runtime.agent_id,
@@ -1277,7 +1330,11 @@ class StreamingChatService:
                     "type": agent_runtime.metadata.agent_type,
                     "skills": agent_runtime.metadata.skills
                 }
-            })
+            }
+            if _cto_check_result and _cto_check_result.is_system_agent and _cto_check_result.slug == "auto-cto":
+                _agent_info["agent"]["is_cto"] = True
+                _agent_info["agent"]["name"] = "Auto CTO"
+            yield self.streaming_handler.format_aisdk_data(_agent_info)
             await asyncio.sleep(0)
 
             # ── SmartChatIntegration (personality + memory + tool filtering) ──
@@ -1285,20 +1342,23 @@ class StreamingChatService:
             smart_chat = SmartChatIntegration(
                 workspace_id=str(self.workspace_id) if self.workspace_id else self.workspace_id,
                 agent_id=agent_id,
-                agent_name=agent_runtime.metadata.name
+                agent_name=agent_runtime.metadata.name,
+                widget_mode=self.widget_mode
             )
 
-            # Build tools: get_chat_tools + skill_tools from agent
-            _sys_prompt_base, skill_tools = await self._build_agent_system_prompt(agent_runtime)
+            # Load agent context: persona, description, skill tools
+            agent_ctx = await self._load_agent_context(agent_runtime)
+            skill_tools = agent_ctx["skill_tools"]
             from consumers.chatbot.tool_router import get_chat_tools
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
             all_tools = None if is_simple else get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
             if not is_simple and skill_tools:
                 all_tools = (all_tools or []) + skill_tools
 
-            # Convert messages to LLM format
+            # Convert messages to LLM format (no system prompt — orchestrator builds it)
             llm_messages = self.prompt_analyzer.convert_to_llm_messages(
                 messages,
+                system_prompt="",
                 available_tools=all_tools
             )
 
@@ -1314,9 +1374,89 @@ class StreamingChatService:
                 f"prep={orchestrated.preparation_time_ms:.0f}ms"
             )
 
+            # ── PRD-67: CTO Agent system prompt override ──
+            # Reuse _cto_check_result from the agent-info query above (no extra DB hit)
+            _is_cto_agent = bool(
+                _cto_check_result
+                and _cto_check_result.is_system_agent
+                and _cto_check_result.slug == "auto-cto"
+            )
+
+            if _is_cto_agent:
+                from consumers.chatbot.cto_prompt_builder import CtoPromptBuilder
+
+                # Extract memories from orchestration result
+                _cto_memories = []
+                _mem_result = getattr(smart_chat.orchestrator, '_last_memory_result', None)
+                if _mem_result:
+                    _cto_memories = [m.get("memory", "") for m in _mem_result.memories if m.get("memory")]
+
+                # Build platform state snapshot
+                _platform_state = CtoPromptBuilder.get_platform_state_snapshot(self.db)
+
+                # Get soul + architecture from the pre-fetched query result
+                _soul = _cto_check_result.custom_persona_prompt or ""
+                _config = _cto_check_result.configuration
+                _arch_ctx = ""
+                if _config and isinstance(_config, dict):
+                    _arch_ctx = _config.get("extra_context", "")
+
+                _cto_prompt = CtoPromptBuilder.build(
+                    soul_document=_soul,
+                    architecture_context=_arch_ctx,
+                    user_name=None,  # Memory system handles this
+                    msg_count=len(messages),
+                    memories=_cto_memories,
+                    tool_names=[t.get("function", {}).get("name", "") for t in (use_tools or []) if isinstance(t, dict)],
+                    platform_state=_platform_state,
+                )
+
+                # Replace the system prompt (always llm_messages[0])
+                if llm_messages and llm_messages[0].get("role") == "system":
+                    llm_messages[0]["content"] = _cto_prompt
+                else:
+                    llm_messages.insert(0, {"role": "system", "content": _cto_prompt})
+
+                # CTO prompt already includes persona/description — skip agent identity injection
+                logger.info(f"[CTO] System prompt replaced for CTO Agent (agent_id={agent_id})")
+            # ── End PRD-67 CTO override ──
+
+            # US-015: Emit memory-injected SSE event when memories were retrieved
+            if orchestrated.memory_context:
+                _mem_result = getattr(smart_chat.orchestrator, '_last_memory_result', None)
+                _memories_list = _mem_result.memories if _mem_result else []
+                _total_matched = len(_memories_list)
+                # Build lightweight summaries for the frontend
+                _mem_summaries = [
+                    {"id": m.get("id", ""), "memory": m.get("memory", ""), "tier": m.get("_tier", "global")}
+                    for m in _memories_list[:10]
+                ]
+                yield self.streaming_handler.format_aisdk_memory_injected(
+                    memories=_mem_summaries,
+                    total_matched=_total_matched,
+                )
+                await asyncio.sleep(0)
+
+            # Inject agent persona + description (after orchestrator system prompt)
+            # PRD-67: Skip for CTO Agent — soul document already includes persona
+            agent_identity_parts = []
+            if not _is_cto_agent:
+                if agent_ctx.get("description"):
+                    agent_identity_parts.append(agent_ctx["description"])
+                if agent_ctx.get("persona"):
+                    agent_identity_parts.append(f"## Persona & Communication Style\n{agent_ctx['persona']}")
+                if agent_ctx.get("extra_context"):
+                    agent_identity_parts.append(agent_ctx["extra_context"])
+            if agent_identity_parts:
+                llm_messages.insert(1, {
+                    "role": "system",
+                    "content": "\n\n".join(agent_identity_parts),
+                })
+
             # Multi-step execution policy
+            insert_pos = 2 if agent_identity_parts else 1
             llm_messages.insert(
-                1,
+                insert_pos,
                 {
                     "role": "system",
                     "content": (
@@ -1328,35 +1468,123 @@ class StreamingChatService:
                 },
             )
 
-            # Provide Composio app/action hints based on agent assignments.
+            # Composio per-action tools (primary) or hint fallback
+            _composio_result = None
             try:
-                if latest_text and agent_id:
-                    from modules.tools.services.composio_hint_service import ComposioHintService
+                if latest_text and agent_id and self.workspace_id and not skip_composio:
+                    from modules.tools.services.composio_tool_service import ComposioToolService
 
-                    hint_service = ComposioHintService(self.db)
-                    hint_result = hint_service.build_hints(
+                    _composio_svc = ComposioToolService(self.db)
+                    _composio_result = _composio_svc.get_tools_for_step(
                         agent_id=agent_id,
-                        prompt=latest_text,
                         workspace_id=self.workspace_id,
+                        task_prompt=latest_text,
                     )
-                    if hint_result.hint_lines:
-                        llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
-                        logger.info(f"[Composio Hints] Agent {agent_id}: strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)} param_hints={hint_result.param_hint_count}")
+                    if _composio_result and _composio_result.tools:
+                        # Strip composio_execute mega-tool, add per-action tools
+                        if use_tools:
+                            use_tools = [
+                                t for t in use_tools
+                                if t.get("function", {}).get("name") != "composio_execute"
+                            ] + _composio_result.tools
+                        else:
+                            use_tools = _composio_result.tools
+                        # Inject scope message so LLM knows to call actions directly
+                        from api.recipe_executor import _composio_scope_message
+                        llm_messages.insert(2, {
+                            "role": "system",
+                            "content": _composio_scope_message(_composio_result.app_names),
+                        })
+                        logger.info(
+                            f"[ComposioToolService] Agent {agent_id}: strategy={_composio_result.strategy} "
+                            f"actions={len(_composio_result.action_set)} search_ms={_composio_result.search_ms}"
+                        )
+                    else:
+                        # Fallback: ComposioHintService (composio_execute mega-tool)
+                        from modules.tools.services.composio_hint_service import ComposioHintService
+
+                        hint_service = ComposioHintService(self.db)
+                        hint_result = hint_service.build_hints(
+                            agent_id=agent_id,
+                            prompt=latest_text,
+                            workspace_id=self.workspace_id,
+                        )
+                        if hint_result.hint_lines:
+                            llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
+                            logger.info(f"[Composio Hints fallback] Agent {agent_id}: strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}")
             except Exception as exc:
-                logger.warning(f"Composio hint injection failed for agent {agent_id}: {exc}")
-            
+                logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
+
+            # PRD-64: Inject platform tool scope message so LLM knows to call them
+            if use_tools:
+                platform_tool_names = [
+                    t.get("function", {}).get("name")
+                    for t in use_tools
+                    if isinstance(t, dict) and t.get("function", {}).get("name", "").startswith("platform_")
+                ]
+                if platform_tool_names:
+                    llm_messages.insert(2, {
+                        "role": "system",
+                        "content": (
+                            "You have platform introspection tools available. "
+                            "When the user asks about their agents, recipes, workflows, documents, "
+                            "workspace, usage, costs, integrations, or memory — ALWAYS call the "
+                            "appropriate platform_* tool to get real data. Never guess or say you "
+                            "can't — use the tools."
+                        ),
+                    })
+
+            # Context Window Guard — auto-compact if approaching context limit
+            from core.context_guard import ContextGuard
+            _guard = ContextGuard()
+            _model_name = getattr(agent_runtime.llm_manager, 'config', None)
+            _model_name = getattr(_model_name, 'model', 'gpt-4') if _model_name else 'gpt-4'
+            llm_messages, _was_compacted = await _guard.check_and_compact(
+                messages=llm_messages,
+                model_name=_model_name,
+                llm_manager=agent_runtime.llm_manager,
+                workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                agent_id=agent_id,
+                db_session=self.db,
+            )
+            if _was_compacted:
+                logger.info("[ContextGuard] Messages compacted before LLM call")
+
             # Generate response using agent's LLM manager
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
-            logger.info(f"🔍 Agent tools - count: {len(use_tools) if use_tools else 0}, is_simple: {is_simple}")
+            logger.info(f"Agent tools - count: {len(use_tools) if use_tools else 0}, is_simple: {is_simple}")
             if use_tools:
                 tool_names = [t.get("function", {}).get("name") for t in use_tools if isinstance(t, dict)]
-                logger.info(f"🔍 Available tools: {tool_names}")
-            
+                logger.info(f"Available tools: {tool_names}")
+
             response = await agent_runtime.llm_manager.generate_response(
                 messages=llm_messages,
                 tools=use_tools
             )
-            
+
+            # Emit warning if LLM fell back to a different model (dead primary)
+            if getattr(response, '_used_fallback', False):
+                failed_model = getattr(response, '_failed_model', 'unknown')
+                fallback_model = getattr(response, '_fallback_model', 'unknown')
+                logger.warning(
+                    "Chat response used fallback model '%s' (primary '%s' is dead). "
+                    "User should update Settings > Orchestrator.",
+                    fallback_model, failed_model,
+                )
+                yield self.streaming_handler.format_aisdk_data(
+                    "model-warning",
+                    {
+                        "message": (
+                            f"Your configured model ({failed_model}) is unavailable. "
+                            f"Using {fallback_model} as fallback. "
+                            f"Please update your model in Settings > Orchestrator."
+                        ),
+                        "failedModel": failed_model,
+                        "fallbackModel": fallback_model,
+                    },
+                )
+                await asyncio.sleep(0)
+
             # DEBUG: Log LLM response to understand why tools aren't being called
             logger.info(f"🔍 Agent LLM Response - has_tool_calls: {bool(response.tool_calls)}, content_length: {len(response.content or '')}, finish_reason: {getattr(response, 'finish_reason', 'unknown')}")
             if response.tool_calls:
@@ -1373,7 +1601,7 @@ class StreamingChatService:
             if response.tool_calls:
                 logger.info(f"Agent requested {len(response.tool_calls)} tool calls")
                 final_response = None
-                async for chunk in self._handle_tool_calls_aisdk(response, llm_messages, agent_runtime, tool_data, use_tools):
+                async for chunk in self._handle_tool_calls_aisdk(response, llm_messages, agent_runtime, tool_data, use_tools, _composio_result=_composio_result):
                     # Check if this is the final response
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']
@@ -1416,32 +1644,13 @@ class StreamingChatService:
             async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
                 yield chunk
 
-            # Send usage data + track usage with BYOK metadata
+            # Send usage data (tracking now handled by LLMManager)
             if hasattr(response, 'usage') and response.usage:
                 yield self.streaming_handler.format_aisdk_usage(
                     response.usage.get('prompt_tokens', 0),
                     response.usage.get('completion_tokens', 0),
                     response.usage.get('total_tokens', 0)
                 )
-                # Track LLM usage for analytics (agent path — BYOK-aware)
-                _ws_id = getattr(agent_runtime, 'workspace_id', None) or self.workspace_id
-                if _ws_id:
-                    try:
-                        from core.llm.usage_tracker import UsageTracker
-                        _model_id = agent_runtime.llm_manager.config.model if agent_runtime.llm_manager else "unknown"
-                        _provider = agent_runtime.resolved_provider or (agent_runtime.llm_manager.config.provider.value if agent_runtime.llm_manager else "unknown")
-                        UsageTracker.track(
-                            workspace_id=_ws_id,
-                            model_id=_model_id,
-                            provider=_provider,
-                            input_tokens=response.usage.get('prompt_tokens', 0),
-                            output_tokens=response.usage.get('completion_tokens', 0),
-                            agent_id=agent_id,
-                            request_type="agent_chat",
-                            is_byok=getattr(agent_runtime, 'is_byok', False),
-                        )
-                    except Exception as e:
-                        logger.warning(f"Usage tracking failed: {e}")
 
             # Send finish event
             yield self.streaming_handler.format_aisdk_finish()
@@ -1458,18 +1667,60 @@ class StreamingChatService:
             # Store memory via SmartChatIntegration (two-tier Mem0)
             if latest_text and full_response:
                 try:
-                    await smart_chat.store(latest_text, full_response, chat_id)
+                    _stored = await smart_chat.store(latest_text, full_response, chat_id)
+                    # US-015: Emit memory-stored SSE event on success
+                    if _stored:
+                        _tier = getattr(smart_chat.orchestrator.memory_manager, '_last_tier', 'conversation')
+                        yield self.streaming_handler.format_aisdk_memory_stored(
+                            memory={
+                                "userMessage": latest_text[:200],
+                                "assistantResponse": full_response[:200],
+                                "chatId": chat_id,
+                            },
+                            reason=_tier if isinstance(_tier, str) else "conversation",
+                        )
+                        await asyncio.sleep(0)
                 except Exception as mem_err:
                     logger.warning(f"Failed to store memory exchange: {mem_err}")
 
-            # Update agent metrics
+            # FutureAGI live traffic eval (fire-and-forget, scores ALL enabled prompts)
+            if latest_text and full_response:
+                try:
+                    from core.services.futureagi_service import futureagi_service
+                    if futureagi_service.is_available:
+                        asyncio.create_task(
+                            futureagi_service.eval_live_traffic(
+                                input_text=latest_text,
+                                output_text=full_response,
+                                context_text=orchestrated.system_prompt,
+                            )
+                        )
+                except Exception:
+                    pass  # Never block chat for eval
+
+            # Update agent metrics (in-memory + persist to DB)
             if hasattr(agent_runtime, 'update_metrics'):
                 tokens_used = response.usage.get('total_tokens', 0) if response.usage else 0
                 agent_runtime.update_metrics(
-                    execution_time=1.0,  # TODO: Track actual time
+                    execution_time=1.0,
                     tokens_used=tokens_used,
                     success=True
                 )
+            # Persist task counter to DB so dashboard shows it
+            try:
+                agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                if agent_row:
+                    metrics = dict(agent_row.performance_metrics or {})
+                    metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
+                    metrics["tasks_completed"] = metrics["total_tasks_executed"]
+                    agent_row.performance_metrics = metrics
+                    self.db.commit()
+            except Exception as metric_err:
+                logger.warning(f"Failed to persist agent task counter: {metric_err}")
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
             
         except Exception as e:
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
@@ -1523,7 +1774,7 @@ class StreamingChatService:
                     
                     for tool_call in response.tool_calls:
                         tool_name = tool_call.get('function', {}).get('name')
-                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
+                        tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
                         tool_id = tool_call.get('id')
                         
                         result = await self.tool_router.execute_and_format(
@@ -1608,86 +1859,44 @@ class StreamingChatService:
             provider = None
 
         return provider, model
-    
-    async def _build_agent_system_prompt(self, agent_runtime) -> tuple[str, list]:
+    async def _load_agent_context(self, agent_runtime) -> dict:
         """
-        Build system prompt from agent's skills.
-        
-        Combines:
-        1. Base chatbot prompt
-        2. Agent-specific prompt (from description/type)
-        3. Skills (prompt templates from database)
-        
-        Args:
-            agent_runtime: AgentRuntime from factory
-            
-        Returns:
-            Tuple of (system_prompt, tool_schemas)
+        Load agent-specific context: persona, description, plugins/skills, tool schemas.
+
+        Returns a dict with keys:
+            - persona: str (agent's persona/communication style prompt)
+            - description: str (agent name + type + description)
+            - skill_tools: list (tool schemas from skills)
         """
         from core.models import Skill
-        
-        # Base chatbot system prompt
-        base_prompt = """You are a helpful AI assistant with access to various tools and knowledge.
 
-CRITICAL INSTRUCTIONS:
-- When asked to CREATE, WRITE, GENERATE, POST, SEND, or MESSAGE something, you MUST use your tools to actually do it
-- DO NOT explain how to do something - ACTUALLY DO IT using function calls
-- If you have a write_file or create_document tool, USE IT to create files
-- If you have database query tools, USE THEM to get real data
-- If you need external apps (Gmail/Slack/etc.), use `composio_execute` with an exact mapped action name from `composio_actions_cache`
-- EXECUTE first, explain later (if needed)
-
-Examples:
-- "Create a report" → Call write_file tool with the report content
-- "Query the database" → Call smart_query_database tool
-- "Search for code" → Call search_codebase tool
-- "Post a message to Slack" → Call composio_execute with a mapped Slack send-message action from the cache and params {channel, text}
-- "Summarize my emails" → Call composio_execute with a mapped Gmail fetch/list action from the cache and params (query/date filters), then summarize
-- If an action is not mapped, retry using one of the suggested safe mapped actions returned by the tool
-
-COMMUNICATION TOOLS:
-- composio_execute: Use this to call external app actions (Gmail, Slack, GitHub, etc.)
-  - The `action` MUST be an exact mapped action name from `composio_actions_cache` (we will provide examples in-system).
-  - Use `params` (or `parameters`) for the action inputs.
-
-Always be clear, concise, and ACTION-ORIENTED in your responses. When tools are available, USE THEM instead of explaining what you would do."""
-        
-        # PRD-42: Load persona from agent's DB record
-        persona_prompt = ""
+        # Load persona from agent's DB record
+        persona = ""
         try:
             from core.models import Agent as AgentModel
             db_agent = self.db.query(AgentModel).filter(AgentModel.id == agent_runtime.agent_id).first()
             if db_agent:
-                if db_agent.use_custom_persona and db_agent.custom_persona_prompt:
-                    persona_prompt = db_agent.custom_persona_prompt
+                if getattr(db_agent, "use_custom_persona", False) and getattr(db_agent, "custom_persona_prompt", None):
+                    persona = db_agent.custom_persona_prompt
                     logger.info(f"Loaded custom persona for agent {agent_runtime.agent_id}")
-                elif db_agent.persona_id and db_agent.persona:
-                    persona_prompt = db_agent.persona.system_prompt or ""
+                elif getattr(db_agent, "persona_id", None) and getattr(db_agent, "persona", None):
+                    persona = db_agent.persona.system_prompt or ""
                     logger.info(f"Loaded persona '{db_agent.persona.name}' for agent {agent_runtime.agent_id}")
         except Exception as e:
             logger.warning(f"Failed to load persona for agent {agent_runtime.agent_id}: {e}")
 
-        # Add agent-specific context
-        agent_context = f"""
+        # Agent description
+        description = (
+            f"You are {agent_runtime.metadata.name}, "
+            f"a specialized {agent_runtime.metadata.agent_type} agent.\n"
+            f"{agent_runtime.metadata.description or ''}"
+        )
 
-You are {agent_runtime.metadata.name}, a specialized {agent_runtime.metadata.agent_type} agent.
-
-AGENT DESCRIPTION:
-{agent_runtime.metadata.description or f"Specialized {agent_runtime.metadata.agent_type} with expertise in specific domains."}
-"""
-        # Inject persona before skills
-        if persona_prompt:
-            agent_context += f"""
-## Persona & Communication Style
-{persona_prompt}
-"""
-
-        # PRD-42: Load plugins — if present, skip skills entirely
-        plugin_context = ""
+        # Load plugins OR skills for additional context
+        extra_context = ""
         has_plugins = False
         try:
             from core.services.plugin_context_service import PluginContextService
-
             plugin_svc = PluginContextService(self.db)
             plugin_rows = plugin_svc.get_assigned_plugins(agent_runtime.agent_id)
             if plugin_rows:
@@ -1697,7 +1906,7 @@ AGENT DESCRIPTION:
                     plugin_rows,
                     task_context=agent_runtime.metadata.description,
                 )
-                plugin_context = f"\n{tier1}\n{tier2}" if tier2 else f"\n{tier1}"
+                extra_context = f"\n{tier1}\n{tier2}" if tier2 else f"\n{tier1}"
                 logger.info(
                     "Loaded plugin context for agent %s (%d plugins)",
                     agent_runtime.agent_id, len(plugin_rows),
@@ -1705,48 +1914,39 @@ AGENT DESCRIPTION:
         except Exception as e:
             logger.warning(f"Failed to load plugins for agent {agent_runtime.agent_id}: {e}")
 
-        if has_plugins:
-            # Plugins replace skills
-            agent_context += plugin_context
-        else:
-            agent_context += """
-YOUR SPECIALIZED SKILLS:
-"""
-            # Load and inject skills from database
-            skills_text = ""
-            if agent_runtime.metadata.skills:
-                # Query database for skill details
-                skills = self.db.query(Skill).filter(
-                    Skill.name.in_(agent_runtime.metadata.skills),
-                    Skill.is_active.is_(True)
-                ).all()
+        if not has_plugins and agent_runtime.metadata.skills:
+            skills = self.db.query(Skill).filter(
+                Skill.name.in_(agent_runtime.metadata.skills),
+                Skill.is_active.is_(True),
+            ).all()
+            parts = []
+            for skill in skills:
+                if skill.prompt_template:
+                    parts.append(skill.prompt_template)
+                elif skill.description:
+                    parts.append(f"- {skill.name}: {skill.description}")
+            if parts:
+                extra_context = "\n".join(parts)
 
-                for skill in skills:
-                    if skill.prompt_template:
-                        skills_text += f"\n{skill.prompt_template}\n"
-                    elif skill.description:
-                        skills_text += f"\n- {skill.name}: {skill.description}\n"
-            agent_context += skills_text
-
-        # Build complete prompt
-        complete_prompt = f"{base_prompt}\n\n{agent_context}"
-
-        # Extract tool schemas from skills for function calling
+        # Extract tool schemas from skills
         tool_schemas = []
         if not has_plugins and agent_runtime.metadata.skills:
             skills = self.db.query(Skill).filter(
                 Skill.name.in_(agent_runtime.metadata.skills),
-                Skill.is_active == True
+                Skill.is_active == True,  # noqa: E712
             ).all()
-
             for skill in skills:
                 if skill.content and isinstance(skill.content, dict):
-                    tools_schema = skill.content.get('tools_schema', [])
-                    if tools_schema:
-                        logger.info(f"Extracted {len(tools_schema)} tools from skill '{skill.name}'")
-                        tool_schemas.extend(tools_schema)
+                    schemas = skill.content.get("tools_schema", [])
+                    if schemas:
+                        tool_schemas.extend(schemas)
 
-        return (complete_prompt, tool_schemas)
+        return {
+            "persona": persona,
+            "description": description,
+            "extra_context": extra_context,
+            "skill_tools": tool_schemas,
+        }
     
     async def _handle_tool_calls_aisdk(
         self,
@@ -1754,17 +1954,19 @@ YOUR SPECIALIZED SKILLS:
         llm_messages: List[Dict],
         agent_runtime,
         tool_data: Dict,
-        use_tools: List = None
+        use_tools: List = None,
+        _composio_result=None,
     ) -> AsyncGenerator[str, None]:
         """
         Handle tool calls from agent's LLM response.
-        
+
         Args:
             response: LLM response with tool_calls
             llm_messages: Current message history
             agent_runtime: Agent runtime with tools
             tool_data: Dict to store tool results
             use_tools: Tools to pass to LLM for next iteration
+            _composio_result: ComposioToolResult for per-action tool execution
             
         Yields:
             AI SDK formatted tool execution chunks
@@ -1772,7 +1974,7 @@ YOUR SPECIALIZED SKILLS:
         import asyncio
         import time
         
-        max_iterations = 5
+        max_iterations = 10
         iteration = 0
         current_response = response
         # Allow ONE recovery attempt when the model picks an unmapped action name.
@@ -1786,7 +1988,7 @@ YOUR SPECIALIZED SKILLS:
         last_tool_name: Optional[str] = None
         empty_same_tool_streak = 0
         # Stop "rephrase and retry" loops: for most internal tools, we only allow one attempt
-        # per user request (multi-step exceptions: composio_execute and file tools).
+        # per user request (multi-step exceptions: composio_execute, file tools, and generation tools).
         tool_attempts: dict[str, int] = {}
         
         while current_response.tool_calls and iteration < max_iterations:
@@ -1819,9 +2021,9 @@ YOUR SPECIALIZED SKILLS:
             executed_call_key_repeat = False
             for tool_id, tool_name, tool_call in tool_calls_prepared:
                 try:
-                    # Parse arguments
+                    # Parse arguments (handle empty string from LLM)
                     args_str = tool_call.get('function', {}).get('arguments', '{}')
-                    tool_args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    tool_args = json.loads(args_str or '{}') if isinstance(args_str, str) else (args_str or {})
 
                     # Loop detection key (same tool + same args)
                     try:
@@ -1865,6 +2067,59 @@ YOUR SPECIALIZED SKILLS:
                             user_text = m.get("content") or ""
                             break
 
+                    # Direct Composio action execution (per-action tools from ComposioToolService).
+                    # If the tool name is in the resolved action set (or matches a connected app prefix),
+                    # execute via ComposioToolService.execute_action() instead of tool_router.
+                    _is_composio_action = (
+                        _composio_result and _composio_result.entity_id and (
+                            tool_name in _composio_result.action_set
+                            or any(tool_name.startswith(f"{app}_") for app in _composio_result.app_names)
+                        )
+                    )
+                    if _is_composio_action:
+                        try:
+                            from modules.tools.services.composio_tool_service import ComposioToolService
+                            _exec_svc = ComposioToolService(self.db)
+                            exec_result = _exec_svc.execute_action(
+                                action_name=tool_name,
+                                params=tool_args,
+                                entity_id=_composio_result.entity_id,
+                            )
+                            success = exec_result.get("success", False)
+                            data = exec_result.get("data")
+                            error = exec_result.get("error")
+                            if success:
+                                llm_context = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
+                            else:
+                                llm_context = f"Error executing {tool_name}: {error or 'unknown error'}"
+                            logger.info(f"[Composio direct] {tool_name}: success={success}")
+                        except Exception as exc:
+                            llm_context = f"Error executing {tool_name}: {exc}"
+                            logger.error(f"[Composio direct] {tool_name} exception: {exc}", exc_info=True)
+
+                        if len(llm_context) > 4000:
+                            llm_context = llm_context[:4000] + f"\n... (truncated)"
+
+                        tool_results.append({
+                            'tool_call_id': tool_id,
+                            'role': 'tool',
+                            'name': tool_name,
+                            'content': llm_context,
+                        })
+
+                        yield self.streaming_handler.format_aisdk_tool_end(
+                            tool_call_id=tool_id,
+                            tool_name=tool_name,
+                            success=True,
+                            duration_ms=int((time.time() - start_times.get(tool_id, time.time())) * 1000),
+                        )
+                        yield self.streaming_handler.format_aisdk_data(
+                            "tool-result",
+                            {"toolCallId": tool_id, "toolName": tool_name, "result": llm_context[:500]},
+                        )
+                        await asyncio.sleep(0)
+                        continue
+
                     result = await self.tool_router.execute_and_format(
                         tool_name=tool_name,
                         tool_args=tool_args,
@@ -1903,11 +2158,13 @@ YOUR SPECIALIZED SKILLS:
                     except Exception:
                         pass
 
-                    # Extract LLM context from result and truncate to prevent context overflow
+                    # Extract LLM context from result.
+                    # format_for_llm() already produces a concise summary (max ~4500 chars).
+                    # We allow up to 6000 chars so the LLM has enough research context to
+                    # populate report sections when calling generate_document.
                     llm_context = result.get('llm_context', str(result.get('raw_result', '')))
-                    # Truncate to max 1000 chars to keep context manageable
-                    if len(llm_context) > 1000:
-                        llm_context = llm_context[:1000] + f"\n... (truncated {len(llm_context) - 1000} chars)"
+                    if len(llm_context) > 6000:
+                        llm_context = llm_context[:6000] + f"\n... (truncated {len(llm_context) - 6000} chars)"
                     
                     # Store result
                     tool_results.append({
@@ -1919,10 +2176,24 @@ YOUR SPECIALIZED SKILLS:
                     # CRITICAL: Yield tool-data for frontend widgets (documents, code, etc.)
                     # This was missing for selected agents - widgets only worked with default agent
                     frontend_data = result.get("frontend_data", {})
+                    logger.info(f"[TOOL-DATA-DEBUG] tool={tool_name} success={result.get('success')} frontend_data_keys={list(frontend_data.keys()) if frontend_data else 'EMPTY'}")
                     if result.get("success") and frontend_data:
                         tool_data.update(frontend_data)
                         logger.info(f"[TOOL-DATA] Yielding tool-data for {tool_name}: keys={list(frontend_data.keys())}")
                         yield self.streaming_handler.format_aisdk_tool_data(frontend_data)
+                        await asyncio.sleep(0)
+
+                    # US-015: Emit workflow-update when workflow/recipe tools execute
+                    _WORKFLOW_TOOL_PREFIXES = ("platform_list_recipes", "platform_create_recipe", "platform_execute_recipe")
+                    if tool_name.startswith(_WORKFLOW_TOOL_PREFIXES) or "workflow" in tool_name.lower():
+                        _raw = result.get("raw_result") or {}
+                        _wf_id = str(_raw.get("id") or _raw.get("workflow_id") or _raw.get("recipe_id") or tool_id)
+                        _wf_status = "completed" if result.get("success") else "failed"
+                        yield self.streaming_handler.format_aisdk_workflow_update(
+                            workflow_id=_wf_id,
+                            status=_wf_status,
+                            current_step=tool_name,
+                        )
                         await asyncio.sleep(0)
 
                     # Stop immediately on deterministic "unavailable" errors (no point retrying),
@@ -2122,18 +2393,22 @@ YOUR SPECIALIZED SKILLS:
 
                     # --- Hard stop conditions to prevent looping for single requests ---
                     #
-                    # 1) Search tools: stop after FIRST empty result.
-                    if empty_same_tool_streak >= 1 and (
+                    # 1) Search tools: after 2+ consecutive empty results from the SAME
+                    #    search tool, tell the LLM to stop searching and proceed.
+                    #    We do NOT return/kill the loop — the agent may still need to
+                    #    call other tools (e.g. generate_document after research).
+                    if empty_same_tool_streak >= 2 and (
                         tool_name.startswith("search_") or tool_name in {"semantic_search"}
                     ):
-                        from types import SimpleNamespace
-                        message = (
-                            "I couldn't find any matching results and will stop retrying to avoid looping. "
-                            "If you expected results, it likely means the underlying knowledge/code index isn't ingested "
-                            "or the query is targeting the wrong index/type."
-                        )
-                        yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
-                        return
+                        llm_messages.append({
+                            "role": "system",
+                            "content": (
+                                f"The tool `{tool_name}` returned no results after multiple attempts. "
+                                "STOP calling search tools. Use the information you already have "
+                                "and proceed to fulfill the user's request with your other available tools."
+                            ),
+                        })
+                        logger.info(f"[tool-loop] Search spiral detected for {tool_name} — injecting proceed instruction")
 
                     # 2) Database tools: stop after FIRST successful result (avoid paraphrase loops).
                     if tool_name in {"query_database", "smart_query_database"} and result.get("success"):
@@ -2151,19 +2426,28 @@ YOUR SPECIALIZED SKILLS:
                         yield {"_final_response": SimpleNamespace(content=final_response.content or "", tool_calls=None, usage=getattr(final_response, "usage", None))}
                         return
 
-                    # 3) Generic: for most non-Composio tools, don't allow multiple attempts in one request.
+                    # 3) Generic: for most non-Composio tools, don’t allow multiple attempts in one request.
                     # This prevents the model from re-issuing the same tool with slightly different phrasing.
-                    if tool_name not in {"composio_execute"} and not tool_name.startswith("composio_"):
-                        # Allow file operations to be multi-step for report saving.
-                        if tool_name not in {"read_file", "write_file", "list_directory", "create_directory", "delete_file"}:
-                            if tool_attempts.get(tool_name, 0) >= 2:
-                                from types import SimpleNamespace
-                                message = (
-                                    f"I already tried `{tool_name}` and won’t retry again in the same request "
-                                    "to avoid looping. If you want me to try a different approach, tell me what to change."
-                                )
-                                yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
-                                return
+                    # IMPORTANT: Do NOT `return` here — that kills the entire loop and prevents
+                    # the agent from calling other tools (e.g. generate_document after research).
+                    # Instead, inject a system message telling the LLM to stop using THAT tool.
+                    _MULTI_STEP_TOOLS = {
+                        "composio_execute",
+                        "read_file", "write_file", "list_directory", "create_directory", "delete_file",
+                        "generate_document",  # PRD-63: doc gen is a creation step, not a retry
+                    }
+                    if tool_name not in _MULTI_STEP_TOOLS and not tool_name.startswith("composio_"):
+                        if tool_attempts.get(tool_name, 0) >= 2:
+                            llm_messages.append({
+                                "role": "system",
+                                "content": (
+                                    f"You have already called `{tool_name}` multiple times. "
+                                    f"Do NOT call `{tool_name}` again. "
+                                    "Use the results you already have and proceed to fulfill the user's request "
+                                    "with your other available tools."
+                                ),
+                            })
+                            logger.info(f"[tool-loop] Tool {tool_name} hit retry limit — injecting proceed instruction")
                     
                 except Exception as e:
                     logger.error(f"Tool {tool_name} failed: {e}")
@@ -2329,7 +2613,7 @@ YOUR SPECIALIZED SKILLS:
         llm_messages: List[Dict],
         tool_data: Dict,
         tools: Optional[List[Any]] = None,
-        max_iterations: int = 5
+        max_iterations: int = 10
     ) -> tuple:
         """
         Handle tool calls from LLM response with multi-turn support.
@@ -2353,7 +2637,7 @@ YOUR SPECIALIZED SKILLS:
             # Execute tools in parallel when possible
             async def execute_single_tool(tool_call):
                 tool_name = tool_call.get('function', {}).get('name')
-                tool_args = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
+                tool_args = json.loads(tool_call.get('function', {}).get('arguments', '') or '{}')
                 tool_id = tool_call.get('id')
                 
                 logger.info(f"Executing tool: {tool_name}")

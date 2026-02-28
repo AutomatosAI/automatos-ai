@@ -3,7 +3,8 @@
 /**
  * FileList Component for PRD-38.2 Extended Widgets
  *
- * Directory listing with file/folder icons and sorting
+ * Directory listing with file/folder icons, name, size, and date per item.
+ * Supports sorting by name, size, or modified date.
  */
 
 import { useState, useMemo } from 'react'
@@ -11,12 +12,12 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import {
   Folder,
-  FolderOpen,
   ChevronUp,
   ArrowUpDown,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { getFileIcon, formatSize } from './FileInfo'
+import { cn, formatFileSize } from '@/lib/utils'
+import { getFileIcon } from './FileInfo'
+import { format } from 'date-fns'
 import type { FileInfo } from '../types'
 
 interface FileListProps {
@@ -29,6 +30,18 @@ interface FileListProps {
 
 type SortField = 'name' | 'size' | 'modifiedAt'
 type SortOrder = 'asc' | 'desc'
+
+/**
+ * Format date for compact listing display
+ */
+function formatListDate(dateStr?: string): string {
+  if (!dateStr) return '-'
+  try {
+    return format(new Date(dateStr), 'MMM d, yyyy')
+  } catch {
+    return '-'
+  }
+}
 
 export function FileList({
   files,
@@ -56,11 +69,12 @@ export function FileList({
         case 'size':
           comparison = a.size - b.size
           break
-        case 'modifiedAt':
+        case 'modifiedAt': {
           const aDate = a.modifiedAt ? new Date(a.modifiedAt).getTime() : 0
           const bDate = b.modifiedAt ? new Date(b.modifiedAt).getTime() : 0
           comparison = aDate - bDate
           break
+        }
       }
 
       return sortOrder === 'asc' ? comparison : -comparison
@@ -135,6 +149,15 @@ export function FileList({
             <ArrowUpDown className="h-3 w-3" />
           )}
         </button>
+        <button
+          className="flex items-center gap-1 hover:text-foreground w-28 justify-end"
+          onClick={() => toggleSort('modifiedAt')}
+        >
+          Date
+          {sortField === 'modifiedAt' && (
+            <ArrowUpDown className="h-3 w-3" />
+          )}
+        </button>
       </div>
 
       {/* File list */}
@@ -173,8 +196,11 @@ export function FileList({
                   >
                     {file.name}
                   </span>
-                  <span className="text-xs text-muted-foreground w-20 text-right">
-                    {isDirectory ? '-' : formatSize(file.size)}
+                  <span className="text-xs text-muted-foreground w-20 text-right flex-shrink-0">
+                    {isDirectory ? '-' : formatFileSize(file.size)}
+                  </span>
+                  <span className="text-xs text-muted-foreground w-28 text-right flex-shrink-0">
+                    {formatListDate(file.modifiedAt)}
                   </span>
                 </button>
               )

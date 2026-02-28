@@ -11,12 +11,14 @@ from typing import Dict, Any
 import logging
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/database/analytics", tags=["Database Analytics"])
 
 @router.get("/stats")
-async def get_database_query_stats(db: Session = Depends(get_db)):
+async def get_database_query_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get real-time database query statistics"""
     try:
         # Query the database_query_audit table for real stats
@@ -67,7 +69,7 @@ async def get_database_query_stats(db: Session = Depends(get_db)):
         }
 
 @router.get("/performance")
-async def get_database_performance(db: Session = Depends(get_db)):
+async def get_database_performance(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get database query performance over time"""
     try:
         result = db.execute(text("""
@@ -99,7 +101,7 @@ async def get_database_performance(db: Session = Depends(get_db)):
         return []
 
 @router.get("/top-queries")
-async def get_top_queries(limit: int = 10, db: Session = Depends(get_db)):
+async def get_top_queries(limit: int = 10, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get most frequently executed queries"""
     try:
         result = db.execute(text("""

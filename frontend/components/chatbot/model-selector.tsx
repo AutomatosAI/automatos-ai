@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu'
-import { useModels } from '@/hooks/use-model-api'
+import { useWorkspaceModels } from '@/hooks/use-model-api'
 import { useWorkspace } from '@/components/workspace-provider'
 import { chatModels, getModelById } from '@/lib/ai/models'
 
@@ -20,9 +20,9 @@ export interface ModelSelectorProps {
 }
 
 export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorProps) {
-  // Load models from API (same as System LLM Settings)
+  // Load workspace-installed models (same catalog agents use)
   const { isLoading: isWorkspaceLoading } = useWorkspace()
-  const { data: apiModels = [], isLoading } = useModels(undefined, 'active', { enabled: !isWorkspaceLoading })
+  const { data: apiModels = [], isLoading } = useWorkspaceModels({ enabled: !isWorkspaceLoading })
 
   // Use API models if available, fallback to hardcoded for offline
   const models = apiModels.length > 0 ? apiModels : chatModels

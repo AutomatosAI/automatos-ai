@@ -61,6 +61,23 @@ def _get_rag_setting_int(key: str, default: int) -> int:
     return default
 
 
+def _get_rag_setting_str(key: str, default: str) -> str:
+    """Get RAG setting string from system_settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+            if setting and setting.value is not None:
+                return setting.value
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return default
+
+
 def _get_rag_setting_float(key: str, default: float) -> float:
     """Get RAG setting from system_settings"""
     try:
@@ -93,6 +110,13 @@ class RAGConfig:
     enable_rrf_fusion: bool = True
     enable_reranking: bool = False
     rrf_k: int = 60
+
+    # Hybrid search settings
+    hybrid_search_enabled: bool = True
+    hybrid_vector_weight: float = 0.7
+    hybrid_keyword_weight: float = 0.3
+    parent_child_expansion: bool = True
+    expansion_window: int = 1
     
     def __post_init__(self):
         """Load from system_settings if not provided"""
@@ -109,7 +133,10 @@ class RAGConfig:
         if self.min_similarity is None:
             self.min_similarity = _get_rag_setting_float("min_similarity", 0.5)
         
-        logger.info(f"RAGConfig loaded: max_tokens={self.max_tokens}, diversity={self.diversity}, min_similarity={self.min_similarity}")
+        # Load reranking toggle from system_settings
+        self.enable_reranking = _get_rag_setting_str("rag_rerank_enabled", "false") == "true"
+
+        logger.info(f"RAGConfig loaded: max_tokens={self.max_tokens}, diversity={self.diversity}, min_similarity={self.min_similarity}, reranking={self.enable_reranking}")
 
 
 class RAGService:
@@ -124,38 +151,30 @@ class RAGService:
     def __init__(
         self,
         config: RAGConfig = None,
-        vector_backend: str = "pgvector",
         workspace_id: str = None,
     ):
         self.config = config or RAGConfig()
-        self._vector_backend = vector_backend
         self._workspace_id = workspace_id
         self._context_optimizer = None
         self._semantic_chunker = None
         self._embedding_manager = None
         self._query_enhancer = None
-        self._vector_store = None # Initialize here for consistency
         self._initialized = False
         
     def _ensure_initialized(self):
-        """Lazy initialization of components"""
+        """Lazy initialization of components (NOT vector store — that needs workspace_id at query time)"""
         if self._initialized:
             return
-            
-        # Initialize components
-        self._context_optimizer = None
-        self._embedding_manager = None
-        self._vector_store = None  # NEW: Centralized vector store
-        
+
         # Try to use existing ContextOptimizer from modules/search
         try:
             from modules.search import ContextOptimizer, ContextItem
             self._context_optimizer = ContextOptimizer()
-            self._ContextItem = ContextItem # Keep this for ContextOptimizer usage
+            self._ContextItem = ContextItem
             logger.info("✅ Using modules.search.ContextOptimizer (Knapsack, MMR, Entropy)")
         except Exception as e:
             logger.warning(f"ContextOptimizer not available: {e}")
-        
+
         # Lazy initialization of embedding manager
         try:
             from core.llm import create_embedding_manager
@@ -163,27 +182,6 @@ class RAGService:
             logger.info(f"✅ Using {self._embedding_manager.get_provider_info()['provider']} embeddings")
         except Exception as e:
             logger.error(f"Failed to initialize embedding manager: {e}")
-        
-        # Initialize vector store via factory (supports pgvector and s3_vectors)
-        try:
-            from modules.search.vector_store import get_vector_store
-            if self._vector_backend == "s3_vectors" and self._workspace_id:
-                self._vector_store = get_vector_store(
-                    backend="s3_vectors",
-                    workspace_id=self._workspace_id,
-                )
-                logger.info("✅ Using S3VectorsBackend for cloud document search")
-            else:
-                import os
-                db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
-                self._vector_store = get_vector_store(
-                    backend="pgvector",
-                    database_url=db_url,
-                    table_name="document_chunks",
-                )
-                logger.info("✅ Using EnhancedVectorStore (pgvector) for vector search")
-        except Exception as e:
-            logger.warning(f"Vector store not available, using fallback: {e}")
             
         try:
             from modules.rag.chunking import SemanticChunker, ChunkingStrategy
@@ -198,13 +196,6 @@ class RAGService:
             logger.warning(f"SemanticChunker not available: {e}")
             self._semantic_chunker = None
             
-        # Use centralized embedding manager
-        try:
-            from core.llm import create_embedding_manager
-            self._embedding_manager = create_embedding_manager()
-        except Exception as e:
-            logger.warning(f"Embedding manager not available: {e}")
-        
         # Query enhancer for HyDE and decomposition
         try:
             from modules.rag.query_enhancer import create_query_enhancer
@@ -222,7 +213,8 @@ class RAGService:
         max_chunks: int = 8,
         max_tokens: int = None,
         diversity: float = None,
-        context_type: str = "chatbot"
+        context_type: str = "chatbot",
+        workspace_id: str = None
     ) -> RAGResult:
         """
         Retrieve optimized RAG context using existing ContextOptimizer.
@@ -264,14 +256,16 @@ class RAGService:
             candidates = await self._multi_query_retrieval_with_rrf(
                 queries_to_search,
                 limit_per_query=max_chunks * 2,
-                min_similarity=self.config.min_similarity
+                min_similarity=self.config.min_similarity,
+                workspace_id=workspace_id
             )
         else:
             # Single query retrieval
             candidates = await self._get_candidates(
-                query, 
+                query,
                 limit=max_chunks * 3,
-                min_similarity=self.config.min_similarity
+                min_similarity=self.config.min_similarity,
+                workspace_id=workspace_id
             )
         
         if not candidates:
@@ -285,8 +279,11 @@ class RAGService:
         
         # Optional: Cross-encoder re-ranking for higher precision
         if self.config.enable_reranking:
-            candidates = await self._rerank_with_cross_encoder(query, candidates)
-        
+            candidates = await self._rerank_candidates(query, candidates)
+
+        # Parent-child context expansion
+        candidates = await self._expand_to_parent_context(candidates, self.config.expansion_window)
+
         # Use existing ContextOptimizer if available
         if self._context_optimizer:
             return await self._optimize_with_context_optimizer(
@@ -300,7 +297,8 @@ class RAGService:
         self,
         queries: List[str],
         limit_per_query: int = 20,
-        min_similarity: float = 0.5
+        min_similarity: float = 0.5,
+        workspace_id: str = None
     ) -> List[Dict]:
         """
         Perform multi-query retrieval with Reciprocal Rank Fusion.
@@ -318,7 +316,8 @@ class RAGService:
                 results = await self._get_candidates(
                     query,
                     limit=limit_per_query,
-                    min_similarity=min_similarity
+                    min_similarity=min_similarity,
+                    workspace_id=workspace_id
                 )
                 
                 for rank, doc in enumerate(results):
@@ -348,40 +347,40 @@ class RAGService:
         logger.info(f"RRF fusion: {len(rrf_scored)} unique docs from {len(queries)} queries")
         return rrf_scored
     
-    async def _rerank_with_cross_encoder(
+    async def _rerank_candidates(
         self,
         query: str,
         candidates: List[Dict],
         top_k: int = 10
     ) -> List[Dict]:
         """
-        Re-rank candidates using cross-encoder for higher precision.
-        
-        Cross-encoders are more accurate than bi-encoders but slower.
-        Only use for final re-ranking of top candidates.
+        Re-rank candidates using Cohere Rerank API for higher precision.
+
+        Falls back to original order if Cohere API key is not configured.
         """
         try:
-            # Try to use sentence-transformers cross-encoder
-            from sentence_transformers import CrossEncoder
-            
-            model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-            
-            # Score each candidate
-            pairs = [(query, c.get("content", "")[:512]) for c in candidates[:20]]
-            scores = model.predict(pairs)
-            
-            # Add scores and re-sort
-            for i, score in enumerate(scores):
-                candidates[i]["rerank_score"] = float(score)
-            
-            candidates.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
-            logger.info("Cross-encoder re-ranking applied")
-            
-            return candidates[:top_k]
-            
-        except ImportError:
-            logger.debug("Cross-encoder not available, skipping re-ranking")
-            return candidates
+            from core.llm.rerank_manager import get_rerank_manager
+
+            manager = get_rerank_manager()
+            if not manager.is_available():
+                logger.debug("Reranking unavailable (no Cohere API key), skipping")
+                return candidates
+
+            # Cap at 20 candidates, truncate content to Cohere's limit
+            capped = candidates[:20]
+            documents = [c.get("content", "")[:4096] for c in capped]
+            results = await manager.rerank(query, documents, top_n=top_k)
+
+            # Apply rerank scores and re-sort
+            reranked = []
+            for result in results:
+                if result.index < len(capped):
+                    candidate = capped[result.index].copy()
+                    candidate["rerank_score"] = result.relevance_score
+                    reranked.append(candidate)
+
+            return reranked if reranked else candidates[:top_k]
+
         except Exception as e:
             logger.warning(f"Re-ranking failed: {e}")
             return candidates
@@ -393,7 +392,8 @@ class RAGService:
         top_k: int = 8,
         max_chunks: int = None,
         max_tokens: int = 2000,
-        min_similarity: float = 0.5
+        min_similarity: float = 0.5,
+        workspace_id: str = None
     ) -> RAGResult:
         """Backward-compatible alias for retrieve()."""
         chunks = max_chunks if max_chunks is not None else top_k
@@ -401,7 +401,8 @@ class RAGService:
             query=query,
             max_chunks=chunks,
             max_tokens=max_tokens,
-            diversity=0.3
+            diversity=0.3,
+            workspace_id=workspace_id
         )
     
     
@@ -445,7 +446,11 @@ class RAGService:
                 source=source,
                 context_type="documentation",
                 relevance_score=adjusted_score,  # Use quality-adjusted score
-                token_count=_count_tokens(content)
+                token_count=_count_tokens(content),
+                metadata={
+                    "document_id": c.get("document_id"),
+                    "original_metadata": c.get("metadata", {}),
+                }
             )
             context_items.append(item)
             
@@ -484,7 +489,9 @@ class RAGService:
                 "content": ctx.content,
                 "source_file": ctx.source,
                 "similarity": ctx.relevance_score,
-                "tokens": ctx.token_count
+                "tokens": ctx.token_count,
+                "document_id": ctx.metadata.get("document_id") if ctx.metadata else None,
+                "metadata": ctx.metadata.get("original_metadata", {}) if ctx.metadata else {},
             })
             total_tokens += ctx.token_count
             final_source_counts[ctx.source] = final_source_counts.get(ctx.source, 0) + 1
@@ -513,38 +520,37 @@ class RAGService:
     
     def _calculate_content_quality(self, text: str) -> float:
         """
-        Calculate content quality score (0.0 - 1.0)
-        Penalizes ASCII art and prefers actual prose
+        Calculate content quality score (0.0 - 1.0).
+        Penalizes ASCII art but treats short valid content (code, definitions,
+        config values) fairly.
         """
-        if not text or len(text) < 20:
-            return 0.3  # Too short
-        
+        if not text or len(text.strip()) == 0:
+            return 0.1
+
         # Detect ASCII art characters
         ascii_art_chars = '│─┌└┐┘├┤┬┴┼▼▲►◄║═╔╗╚╝╠╣╦╩╬'
         special_char_count = sum(1 for c in text if c in ascii_art_chars)
         ascii_art_ratio = special_char_count / len(text)
-        
+
         # Heavy penalty for ASCII art
-        if ascii_art_ratio > 0.15:  # More than 15% special chars
-            logger.debug(f"  ⚠️ High ASCII art ratio: {ascii_art_ratio:.2%}")
-            return 0.2  # Very low quality
-        elif ascii_art_ratio > 0.05:  # More than 5%
-            return 0.5  # Medium quality
-        
-        # Check for actual prose content
+        if ascii_art_ratio > 0.15:
+            logger.debug(f"  High ASCII art ratio: {ascii_art_ratio:.2%}")
+            return 0.2
+        elif ascii_art_ratio > 0.05:
+            return 0.5
+
         words = text.split()
         word_count = len(words)
-        
-        if word_count < 10:
-            return 0.4  # Too few words
-        
-        # Prefer longer, more substantive content
-        if word_count > 50:
-            return 1.0  # Good quality prose
-        elif word_count > 20:
-            return 0.8  # Decent quality
+
+        # Short content is still valid (code snippets, definitions, config)
+        if word_count < 5:
+            return 0.5
+        elif word_count < 20:
+            return 0.7
+        elif word_count < 50:
+            return 0.85
         else:
-            return 0.6  # Minimal quality
+            return 1.0
     
     
     def _knapsack_dp(
@@ -636,7 +642,9 @@ class RAGService:
                 "content": content,
                 "source_file": c.get("source_file", c.get("filename", "unknown")),
                 "similarity": c.get("similarity", 0),
-                "tokens": chunk_tokens
+                "tokens": chunk_tokens,
+                "document_id": c.get("document_id"),
+                "metadata": c.get("metadata", {}),
             })
             total_tokens += chunk_tokens
         
@@ -650,155 +658,137 @@ class RAGService:
             query=query
         )
     
-    async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5) -> List[Dict]:
+    async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
-        Get candidate chunks from database using centralized EnhancedVectorStore.
-        
-        MIGRATED: Now uses modules.search.EnhancedVectorStore for consistent vector search.
-        Old SQL-based implementation kept below for rollback if needed.
+        Get candidate chunks via S3 Vectors.
+
+        Args:
+            workspace_id: Workspace ID for multi-tenant isolation.
+                          Falls back to self._workspace_id if not provided.
         """
         if not self._embedding_manager:
+            logger.error("Embedding manager not initialized — cannot search")
             return []
-        
+
+        effective_workspace_id = workspace_id or self._workspace_id
+        if not effective_workspace_id:
+            logger.error("No workspace_id available — cannot search S3 Vectors")
+            return []
+
         try:
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)
-            
-            # Use centralized EnhancedVectorStore if available
-            if self._vector_store:
-                try:
-                    from modules.search import SearchMode, RankingStrategy
-                    
-                    # Initialize vector store if needed
-                    if not self._vector_store.pool:
-                        await self._vector_store.initialize()
-                    
-                    logger.info(f"🔎 Using EnhancedVectorStore: min_similarity={min_similarity}, limit={limit}")
-                    
-                    # Perform search using centralized vector store
-                    search_results = await self._vector_store.search(
-                        query_embedding=query_embedding,
-                        mode=SearchMode.VECTOR_ONLY,  # Pure vector search for RAG
-                        ranking_strategy=RankingStrategy.SIMILARITY,
-                        limit=limit,
-                        query_text=query
-                    )
-                    
-                    # Convert SearchResult objects to RAG's expected format
-                    candidates = []
-                    source_file_counts = {}
-                    similarity_scores = []
-                    
-                    for result in search_results:
-                        doc = result.document
-                        similarity = result.similarity_score
-                        
-                        # Filter by minimum similarity
-                        if similarity < min_similarity:
-                            continue
-                        
-                        # Extract source file from metadata or source field
-                        source_file = doc.metadata.get('filename', doc.source or 'unknown')
-                        
-                        # Track source distribution
-                        source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
-                        similarity_scores.append(similarity)
-                        
-                        candidates.append({
-                            "id": doc.id,
-                            "content": doc.content,
-                            "source_file": source_file,
-                            "document_id": doc.metadata.get('document_id', doc.id),
-                            "file_type": doc.metadata.get('file_type', ''),
-                            "similarity": similarity,
-                            "metadata": doc.metadata,
-                            "parent_content": None,
-                            "headers": {}
-                        })
-                    
-                    logger.info(f"📁 Candidate sources: {source_file_counts}")
-                    if similarity_scores:
-                        logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
-                    logger.info(f"✅ Retrieved {len(candidates)} candidates using EnhancedVectorStore")
-                    
-                    return candidates
-                    
-                except Exception as e:
-                    logger.warning(f"EnhancedVectorStore search failed, falling back to SQL: {e}")
-                    # Fall through to SQL fallback below
-            
-            # FALLBACK: Original SQL-based implementation (kept for rollback)
-            logger.info("Using fallback SQL-based vector search")
-            embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
-            
-            import asyncpg
-            import os
-            
-            db_url = os.getenv("DATABASE_URL", "")
-            if not db_url:
-                db_url = "postgresql://postgres:postgres@localhost:5432/automatos"
-            
-            conn = await asyncpg.connect(db_url)
-            
-            try:
-                logger.info(f"🔎 Executing SQL vector similarity search: min_similarity={min_similarity}, limit={limit}")
-                results = await conn.fetch("""
-                    SELECT 
-                        dc.id,
-                        dc.content,
-                        d.filename as source_file,
-                        d.id as document_id,
-                        d.file_type,
-                        1 - (dc.embedding <=> $1::vector) as similarity,
-                        dc.metadata
-                    FROM document_chunks dc
-                    JOIN documents d ON dc.document_id = d.id
-                    WHERE 1 - (dc.embedding <=> $1::vector) >= $2
-                    ORDER BY dc.embedding <=> $1::vector
-                    LIMIT $3
-                """, embedding_str, min_similarity, limit)
-                
-                logger.info(f"📊 Database returned {len(results)} results")
-                
-                candidates = []
-                source_file_counts = {}
-                similarity_scores = []
-                
-                for r in results:
-                    source_file = r["source_file"]
-                    similarity = r["similarity"]
-                    
-                    source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
-                    similarity_scores.append(similarity)
-                    
-                    candidates.append({
-                        "id": r["id"],
-                        "content": r["content"],
-                        "source_file": source_file,
-                        "document_id": r["document_id"],
-                        "file_type": r["file_type"],
-                        "similarity": similarity,
-                        "metadata": json.loads(r["metadata"]) if isinstance(r["metadata"], str) else (r["metadata"] or {}),
-                        "parent_content": None,
-                        "headers": {}
-                    })
-                
-                logger.info(f"📁 Candidate sources: {source_file_counts}")
-                if similarity_scores:
-                    logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
-                logger.info(f"✅ Retrieved {len(candidates)} candidates with SQL fallback")
-                
-                return candidates
-                
-            finally:
-                await conn.close()
-            
+
+            # Create S3VectorsBackend for this workspace
+            from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
+            vector_store = S3VectorsBackend(workspace_id=effective_workspace_id)
+            await vector_store.initialize()
+
+            logger.info(f"🔎 S3 Vectors search: workspace={effective_workspace_id}, min_similarity={min_similarity}, limit={limit}")
+
+            results = vector_store.search(
+                query_embedding=query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding),
+                limit=limit,
+                min_score=min_similarity,
+            )
+
+            candidates = []
+            source_file_counts = {}
+            similarity_scores = []
+
+            for r in results:
+                source_file = r.get("file_name", r.get("file_path", "unknown"))
+                similarity = r.get("score", 0.0)
+
+                source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
+                similarity_scores.append(similarity)
+
+                # external_file_id in S3 Vectors = PostgreSQL documents.id
+                doc_id = (
+                    r.get("external_file_id")
+                    or r.get("metadata", {}).get("external_file_id")
+                    or r.get("metadata", {}).get("document_id")
+                    or 0
+                )
+
+                candidates.append({
+                    "id": r.get("key", ""),
+                    "content": r.get("content", ""),
+                    "source_file": source_file,
+                    "document_id": doc_id,
+                    "file_type": r.get("file_path", "").rsplit(".", 1)[-1] if r.get("file_path") else "",
+                    "similarity": similarity,
+                    "metadata": r.get("metadata", {}),
+                    "parent_content": None,
+                    "headers": {}
+                })
+
+            logger.info(f"📁 Candidate sources: {source_file_counts}")
+            if similarity_scores:
+                logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
+            logger.info(f"✅ Retrieved {len(candidates)} candidates from S3 Vectors")
+
+            return candidates
+
         except Exception as e:
-            logger.error(f"Error getting candidates: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error getting candidates from S3 Vectors: {e}", exc_info=True)
             return []
     
+    async def _expand_to_parent_context(
+        self,
+        candidates: List[Dict],
+        expand_window: int = 1
+    ) -> List[Dict]:
+        """
+        For each retrieved chunk, fetch surrounding chunks from the same document.
+        Uses chunk_index from metadata to find neighbors.
+        """
+        if not candidates or not self.config.parent_child_expansion:
+            return candidates
+
+        try:
+            import asyncpg
+            db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
+            conn = await asyncpg.connect(db_url)
+
+            try:
+                for candidate in candidates:
+                    raw_doc_id = candidate.get("document_id")
+                    chunk_metadata = candidate.get("metadata", {})
+                    chunk_index = chunk_metadata.get("chunk_index") if isinstance(chunk_metadata, dict) else None
+
+                    # Cast document_id to int (S3 Vectors stores as string)
+                    try:
+                        doc_id = int(raw_doc_id) if raw_doc_id else None
+                    except (ValueError, TypeError):
+                        doc_id = None
+
+                    if doc_id is None or chunk_index is None:
+                        candidate["expanded_content"] = candidate.get("content", "")
+                        continue
+
+                    window = expand_window or self.config.expansion_window
+                    surrounding = await conn.fetch("""
+                        SELECT content, metadata
+                        FROM document_chunks
+                        WHERE document_id = $1
+                          AND chunk_index BETWEEN $2 AND $3
+                        ORDER BY chunk_index
+                    """, doc_id, max(0, chunk_index - window), chunk_index + window)
+
+                    if surrounding:
+                        candidate["expanded_content"] = "\n\n".join(r["content"] for r in surrounding)
+                    else:
+                        candidate["expanded_content"] = candidate.get("content", "")
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.warning(f"Parent-child expansion failed, using original content: {e}")
+            for candidate in candidates:
+                candidate["expanded_content"] = candidate.get("content", "")
+
+        return candidates
+
     def _format_context(self, chunks: List[Dict], query: str) -> str:
         """Format chunks into context string"""
         
@@ -902,27 +892,44 @@ class RAGService:
             
             # Count total RAG queries from documents table
             result = db.execute(text("""
-                SELECT 
+                SELECT
                     COUNT(*) as total_docs,
                     SUM(chunk_count) as total_chunks,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs
                 FROM documents
             """)).fetchone()
-            
+
             total_docs = result.total_docs or 0
             total_chunks = result.total_chunks or 0
             completed_docs = result.completed_docs or 0
-            
+
             # Calculate success rate
             success_rate = (completed_docs / total_docs * 100) if total_docs > 0 else 0
-            
+
+            # Get actual avg response time from document_usage tracking
+            avg_response_time = 0
+            last_query_time = None
+            try:
+                usage_result = db.execute(text("""
+                    SELECT
+                        COALESCE(AVG(execution_time_ms), 0) as avg_time,
+                        MAX(timestamp) as last_query
+                    FROM document_usage
+                    WHERE event_type IN ('document_searched', 'rag_query')
+                """)).fetchone()
+                if usage_result:
+                    avg_response_time = round(usage_result.avg_time or 0, 1)
+                    last_query_time = usage_result.last_query.isoformat() if usage_result.last_query else None
+            except Exception:
+                pass  # Table may not exist yet
+
             return {
                 'total_queries': total_docs,
                 'success_rate': round(success_rate, 1),
-                'avg_response_time': 150,  # TODO: Track actual response times
+                'avg_response_time': avg_response_time,
                 'vector_embeddings': total_chunks,
                 'system_status': 'operational' if total_chunks > 0 else 'no_data',
-                'last_query_time': None
+                'last_query_time': last_query_time
             }
             
         except Exception as e:

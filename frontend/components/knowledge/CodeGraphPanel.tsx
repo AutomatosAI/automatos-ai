@@ -70,10 +70,32 @@ export function CodeGraphPanel() {
   const [searching, setSearching] = useState(false)
   const [searchTime, setSearchTime] = useState<number>(0)
 
+  // PRD-62: Natural language code question state
+  const [nlQuestion, setNlQuestion] = useState('')
+  const [nlAnswer, setNlAnswer] = useState<{ answer: string; query_type: string; results: any[] } | null>(null)
+  const [nlLoading, setNlLoading] = useState(false)
+
   // Load projects on mount
   useEffect(() => {
     loadProjects()
   }, [])
+
+  // Poll for indexing progress — reload projects every 5s while any project is indexing
+  useEffect(() => {
+    const hasIndexing = projects.some(p => p.status === 'indexing')
+    if (!hasIndexing) return
+
+    const interval = setInterval(async () => {
+      try {
+        const data = await apiClient.codegraphListProjects()
+        if (data) setProjects(data)
+      } catch {
+        // Silently ignore polling errors
+      }
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [projects])
 
   const loadProjects = async () => {
     try {
@@ -174,6 +196,24 @@ export function CodeGraphPanel() {
     }
   }
 
+  // PRD-62: Ask about code (natural language query)
+  const handleAskCode = async () => {
+    if (!nlQuestion.trim() || !selectedProject) return
+    const proj = projects.find(p => p.name === selectedProject)
+    if (!proj) return
+
+    setNlLoading(true)
+    setNlAnswer(null)
+    try {
+      const data = await apiClient.codegraphAskQuestion(proj.id, nlQuestion)
+      setNlAnswer(data)
+    } catch (e: any) {
+      setError(e?.message || 'Code question failed')
+    } finally {
+      setNlLoading(false)
+    }
+  }
+
   const handleDeleteProject = async (projectId: number) => {
     if (!confirm('Are you sure you want to delete this project? This action cannot be undone.')) {
       return
@@ -194,15 +234,15 @@ export function CodeGraphPanel() {
 
   const handleReindex = async (projectId: number) => {
     try {
-      setLoading(true)
       setError(null)
+      // Optimistically show indexing status immediately
+      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, status: 'indexing' } : p))
       await apiClient.codegraphReindexProject(projectId)
-      await loadProjects()
+      // Polling useEffect will auto-refresh while status === 'indexing'
     } catch (e: any) {
       setError(e?.message || 'Failed to re-index project')
       console.error('Error re-indexing:', e)
-    } finally {
-      setLoading(false)
+      await loadProjects() // Reload to get real status on error
     }
   }
 
@@ -358,7 +398,8 @@ export function CodeGraphPanel() {
                         <span>{project.branch || 'main'}</span>
                       </div>
                     </div>
-                    <Badge variant={project.status === 'active' ? 'default' : 'secondary'}>
+                    <Badge variant={project.status === 'active' ? 'default' : project.status === 'indexing' ? 'outline' : 'secondary'} className={project.status === 'indexing' ? 'animate-pulse border-blue-500 text-blue-400' : ''}>
+                      {project.status === 'indexing' && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
                       {project.status}
                     </Badge>
                   </div>
@@ -504,6 +545,47 @@ export function CodeGraphPanel() {
                   Found {searchResults.length} results in {searchTime.toFixed(0)}ms
                 </div>
               )}
+
+              {/* PRD-62: Ask about code (US-016) */}
+              <div className="border-t pt-4 mt-4">
+                <div className="text-sm font-medium mb-2 text-muted-foreground">Ask about your code</div>
+                <div className="flex space-x-2">
+                  <Input
+                    className="flex-1"
+                    placeholder="e.g., What functions call authenticate? What depends on UserService?"
+                    value={nlQuestion}
+                    onChange={(e) => setNlQuestion(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleAskCode()}
+                  />
+                  <Button onClick={handleAskCode} disabled={nlLoading || !selectedProject || !nlQuestion.trim()} variant="secondary">
+                    {nlLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      'Ask'
+                    )}
+                  </Button>
+                </div>
+
+                {nlAnswer && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{nlAnswer.query_type}</Badge>
+                    </div>
+                    <div className="p-3 rounded-lg bg-muted/50 text-sm">
+                      {nlAnswer.answer}
+                    </div>
+                    {nlAnswer.results && nlAnswer.results.length > 0 && (
+                      <div className="space-y-1">
+                        {nlAnswer.results.slice(0, 5).map((r: any, i: number) => (
+                          <div key={i} className="text-xs text-muted-foreground font-mono p-1 bg-muted/30 rounded">
+                            {r.symbol || r.name} {r.file && `— ${r.file}`}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -563,7 +645,7 @@ export function CodeGraphPanel() {
         {/* Analytics Tab */}
         <TabsContent value="visualization" className="space-y-4">
           {selectedProject ? (
-            <CodeGraphVisualization project={selectedProject} />
+            <CodeGraphVisualization project={selectedProject} projectId={projects.find(p => p.name === selectedProject)?.id} />
           ) : (
             <Card className="glass-card">
               <CardContent className="py-12">

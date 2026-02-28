@@ -66,6 +66,8 @@ class DocumentType(Enum):
     TEXT = "txt"
     PYTHON = "py"
     JSON = "json"
+    XLSX = "xlsx"
+    CSV = "csv"
 
 @dataclass
 class DocumentMetadata:
@@ -142,6 +144,10 @@ class DocumentProcessor:
                 return DocumentType.PYTHON
             elif extension == '.json':
                 return DocumentType.JSON
+            elif mime_type in ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'] or extension == '.xlsx':
+                return DocumentType.XLSX
+            elif mime_type in ['text/csv'] or extension == '.csv':
+                return DocumentType.CSV
             else:
                 return DocumentType.TEXT
         except Exception as e:
@@ -198,15 +204,72 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"Error extracting text from DOCX {file_path}: {e}")
             raise
-    
+
+    def _extract_spreadsheet_xlsx(self, file_path: str) -> str:
+        """Extract XLSX spreadsheet data as Markdown tables for LLM consumption."""
+        try:
+            import openpyxl
+        except ImportError:
+            logger.warning("openpyxl not installed, cannot extract spreadsheet")
+            return ""
+
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        parts = []
+
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                continue
+
+            parts.append(f"## Sheet: {sheet_name}\n")
+
+            headers = rows[0]
+            md = "| " + " | ".join(str(h or "") for h in headers) + " |\n"
+            md += "| " + " | ".join("---" for _ in headers) + " |\n"
+            for row in rows[1:]:
+                md += "| " + " | ".join(str(cell or "") for cell in row) + " |\n"
+
+            parts.append(md)
+
+        return "\n\n".join(parts)
+
+    def _extract_spreadsheet_csv(self, file_path: str) -> str:
+        """Extract CSV data as a Markdown table for LLM consumption."""
+        import csv
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+        except UnicodeDecodeError:
+            with open(file_path, 'r', encoding='latin-1') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+
+        if not rows:
+            return ""
+
+        headers = rows[0]
+        md = "| " + " | ".join(str(h or "") for h in headers) + " |\n"
+        md += "| " + " | ".join("---" for _ in headers) + " |\n"
+        for row in rows[1:]:
+            md += "| " + " | ".join(str(cell or "") for cell in row) + " |\n"
+
+        return md
+
     def extract_text_from_file(self, file_path: str) -> str:
         """Extract text from any supported file type"""
         file_type = self.detect_file_type(file_path)
-        
+
         if file_type == DocumentType.PDF:
             text = self.extract_text_from_pdf(file_path)
         elif file_type == DocumentType.DOCX:
             text = self.extract_text_from_docx(file_path)
+        elif file_type == DocumentType.XLSX:
+            text = self._extract_spreadsheet_xlsx(file_path)
+        elif file_type == DocumentType.CSV:
+            text = self._extract_spreadsheet_csv(file_path)
         else:
             # For text-based files (MD, TXT, PY, JSON)
             try:
@@ -241,15 +304,17 @@ class DocumentProcessor:
         # USE EXISTING SEMANTIC CHUNKER (NOT A DUPLICATE!)
         if SEMANTIC_CHUNKER_AVAILABLE:
             try:
-                # Use ADAPTIVE strategy for best results
+                # Use TOPIC_COHERENCE — fast keyword-based chunking (no local model)
+                # ADAPTIVE runs 3 strategies with embedding calls = ~18s/batch on CPU
                 semantic_chunker = SemanticChunker(
-                    strategy=ChunkingStrategy.ADAPTIVE,
+                    strategy=ChunkingStrategy.TOPIC_COHERENCE,
                     target_chunk_size=500,
                     min_chunk_size=100,
                     max_chunk_size=1500,
                     overlap_ratio=0.1,
                     similarity_threshold=0.7
                 )
+                semantic_chunker._use_embeddings = False  # Skip local model loading
                 
                 doc_id = metadata.get('document_id') if metadata else None
                 semantic_chunks = semantic_chunker.chunk_text(text, document_id=str(doc_id) if doc_id else None)
@@ -275,7 +340,7 @@ class DocumentProcessor:
                         headers={}
                     ))
                 
-                logger.info(f"SemanticChunker (ADAPTIVE) created {len(chunks)} chunks with entropy/coherence metrics")
+                logger.info(f"SemanticChunker (TOPIC_COHERENCE) created {len(chunks)} chunks with entropy/coherence metrics")
                 return chunks
                 
             except Exception as e:
@@ -410,6 +475,71 @@ class DocumentManager:
             else:
                 logger.error(f"❌ S3 bucket check failed: {e}")
                 raise
+
+    def _extract_pdf_with_tables(self, file_path: str) -> tuple:
+        """
+        Extract text AND tables from PDF.
+        Tables are converted to Markdown format for better LLM comprehension.
+        Returns: (full_text, tables_list)
+        """
+        import pdfplumber
+
+        text_parts = []
+        tables = []
+
+        with pdfplumber.open(file_path) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                # Extract regular text
+                page_text = page.extract_text() or ""
+                text_parts.append(f"[Page {page_num}]\n{page_text}")
+
+                # Extract tables
+                page_tables = page.extract_tables()
+                for table_idx, table in enumerate(page_tables):
+                    if table and len(table) > 1:
+                        headers = table[0]
+                        md_table = "| " + " | ".join(str(h or "") for h in headers) + " |\n"
+                        md_table += "| " + " | ".join("---" for _ in headers) + " |\n"
+                        for row in table[1:]:
+                            md_table += "| " + " | ".join(str(cell or "") for cell in row) + " |\n"
+
+                        text_parts.append(f"\n[Table {table_idx + 1}, Page {page_num}]\n{md_table}")
+                        tables.append({
+                            "page": page_num,
+                            "index": table_idx,
+                            "markdown": md_table,
+                        })
+
+        return "\n\n".join(text_parts), tables
+
+    def _extract_spreadsheet(self, file_path: str) -> str:
+        """Extract spreadsheet data as Markdown tables for LLM consumption."""
+        try:
+            import openpyxl
+        except ImportError:
+            logger.warning("openpyxl not installed, cannot extract spreadsheet")
+            return ""
+
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        parts = []
+
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                continue
+
+            parts.append(f"## Sheet: {sheet_name}\n")
+
+            headers = rows[0]
+            md = "| " + " | ".join(str(h or "") for h in headers) + " |\n"
+            md += "| " + " | ".join("---" for _ in headers) + " |\n"
+            for row in rows[1:]:
+                md += "| " + " | ".join(str(cell or "") for cell in row) + " |\n"
+
+            parts.append(md)
+
+        return "\n\n".join(parts)
 
     def _ensure_database_initialized(self, max_retries: int = 5, retry_delay: float = 2.0):
         """Ensure database is initialized with retry logic"""
@@ -635,7 +765,7 @@ class DocumentManager:
             conn.commit()
 
             # Process document (it will read from local temp file)
-            await self._process_document(document_id, file_path, file_type, s3_key)
+            await self._process_document(document_id, file_path, file_type, s3_key, filename=filename)
             
             cursor.close()
             conn.close()
@@ -647,7 +777,7 @@ class DocumentManager:
             logger.error(f"Error uploading document: {e}")
             raise
     
-    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None):
+    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None, filename: str = None):
         """
         Process document: extract text, chunk, and generate embeddings.
 
@@ -656,6 +786,7 @@ class DocumentManager:
             file_path: Local temp file path for processing
             file_type: Document type
             s3_key: S3 key where document is stored (for reference)
+            filename: Real document filename (not the temp path basename)
         """
         self._ensure_database_initialized()
         try:
@@ -670,32 +801,50 @@ class DocumentManager:
             workspace_id = doc_row[0] if doc_row else None
             logger.info(f"Processing document {document_id} for workspace {workspace_id}")
 
-            # Extract text
-            text = self.processor.extract_text_from_file(file_path)
+            # Extract text (with enhanced extraction for PDFs and spreadsheets)
+            pdf_tables = []
+            if file_type == DocumentType.PDF:
+                try:
+                    text, pdf_tables = self._extract_pdf_with_tables(file_path)
+                    logger.info(f"Extracted {len(text)} characters and {len(pdf_tables)} tables from PDF document {document_id}")
+                except Exception as e:
+                    logger.warning(f"Enhanced PDF extraction failed, falling back to basic: {e}")
+                    text = self.processor.extract_text_from_file(file_path)
+            elif file_type == DocumentType.XLSX:
+                try:
+                    text = self._extract_spreadsheet(file_path)
+                    logger.info(f"Extracted {len(text)} characters from XLSX document {document_id}")
+                except Exception as e:
+                    logger.warning(f"XLSX extraction failed: {e}")
+                    text = self.processor.extract_text_from_file(file_path)
+            else:
+                text = self.processor.extract_text_from_file(file_path)
             logger.info(f"Extracted {len(text)} characters from document {document_id}")
             
             # Multimodal processing (tables, formulas, images)
             try:
                 from modules.rag.ingestion.multimodal import TableProcessor, FormulaProcessor, ImageProcessor
-                from modules.knowledge import EntityExtractor, create_or_get_entity, create_entity_mention, create_entity_relationship
+                from modules.search.services.entity_extractor import EntityExtractor, create_or_get_entity, create_entity_mention, create_entity_relationship
                 
                 logger.info(f"Starting multimodal processing for document {document_id}")
                 
                 # Create knowledge_items entry for this document (if not exists)
                 cursor.execute("""
-                    INSERT INTO knowledge_items (id, kb_type_id, title, content, metadata, quality_score)
-                    SELECT %s, 
+                    INSERT INTO knowledge_items (id, kb_type_id, title, content, metadata, quality_score, workspace_id)
+                    SELECT %s,
                            (SELECT id FROM kb_types WHERE type_name = 'document' LIMIT 1),
                            %s,
                            %s,
                            %s,
-                           0.8
+                           0.8,
+                           %s
                     WHERE NOT EXISTS (SELECT 1 FROM knowledge_items WHERE id = %s)
                 """, (
                     document_id,
                     os.path.basename(file_path),
                     text[:1000] if text else '',  # First 1000 chars as preview
                     json.dumps({'source': 'document_upload', 'file_type': str(file_type)}),
+                    workspace_id,
                     document_id
                 ))
                 conn.commit()
@@ -792,13 +941,14 @@ class DocumentManager:
                             
                             cursor.execute("""
                                 INSERT INTO kb_formulas (
-                                    knowledge_item_id, latex, mathml, ascii_math
-                                ) VALUES (%s, %s, %s, %s)
+                                    knowledge_item_id, latex, mathml, ascii_math, workspace_id
+                                ) VALUES (%s, %s, %s, %s, %s)
                             """, (
                                 document_id,
                                 latex_content,
                                 mathml_content or '',
-                                formula_data.ascii_math if hasattr(formula_data, 'ascii_math') else ''
+                                formula_data.ascii_math if hasattr(formula_data, 'ascii_math') else '',
+                                workspace_id
                             ))
                         
                         conn.commit()
@@ -824,7 +974,8 @@ class DocumentManager:
                             entity.entity_name,
                             entity.entity_type,
                             entity.canonical_name,
-                            entity.description
+                            entity.description,
+                            workspace_id=workspace_id
                         )
                         entity_ids.append(entity_id)
                         
@@ -854,7 +1005,8 @@ class DocumentManager:
                                 rel.relationship_type,
                                 rel.strength,
                                 document_id,
-                                rel.evidence
+                                rel.evidence,
+                                workspace_id=workspace_id
                             )
                         
                         conn.commit()
@@ -871,18 +1023,62 @@ class DocumentManager:
                 logger.warning(f"Multimodal processing encountered errors for document {document_id}: {e}")
                 # Continue processing even if multimodal extraction fails
             
+            # Optional multimodal processing for PDFs: extract tables/images as additional chunks
+            additional_chunks = []
+            if file_type == DocumentType.PDF and getattr(self, 'enable_multimodal', False):
+                try:
+                    from modules.rag.ingestion.multimodal.processors import create_multimodal_processor
+                    mm_processor = create_multimodal_processor(openai_key=getattr(self, 'openai_key', None))
+                    multimodal_results = mm_processor.process_pdf_multimodal(file_path)
+
+                    for table in multimodal_results.get('tables', []):
+                        markdown = table.markdown if hasattr(table, 'markdown') else table.get('markdown', '')
+                        page = table.page_number if hasattr(table, 'page_number') else table.get('page')
+                        if markdown:
+                            additional_chunks.append({
+                                "content": markdown,
+                                "metadata": {"type": "table", "page": page, "source": "multimodal"}
+                            })
+
+                    for image in multimodal_results.get('images', []):
+                        description = image.description if hasattr(image, 'description') else image.get('description')
+                        page = image.page_number if hasattr(image, 'page_number') else image.get('page')
+                        if description:
+                            additional_chunks.append({
+                                "content": f"[Image: {description}]",
+                                "metadata": {"type": "image", "page": page, "source": "multimodal"}
+                            })
+                except Exception as e:
+                    logger.warning(f"Multimodal processing failed (non-fatal): {e}")
+
             # Create chunks with file_path metadata
             chunks = self.processor.chunk_document(text, file_type, {
                 'document_id': document_id,
                 'source_file': os.path.basename(file_path),
                 'file_path': file_path  # NEW: Add full path for downloads
             })
-            
+
+            # Append multimodal chunks to the regular chunks
+            for mc in additional_chunks:
+                chunks.append(DocumentChunk(
+                    document_id=document_id,
+                    chunk_index=len(chunks),
+                    content=mc["content"],
+                    metadata={
+                        'document_id': document_id,
+                        'source_file': os.path.basename(file_path),
+                        'file_path': file_path,
+                        **mc["metadata"]
+                    }
+                ))
+
             # Generate embeddings and save chunks
             valid_chunks = []
             embeddings_for_s3 = []
             documents_for_s3 = []
 
+            # Phase 1: Filter and enrich chunks (no I/O)
+            filtered_chunks = []
             for chunk in chunks:
                 chunk.document_id = document_id
 
@@ -896,9 +1092,51 @@ class DocumentManager:
                 if len(stripped) < 10:
                     continue
 
-                # Generate embedding
-                embedding = await self._generate_embedding(chunk.content)
-                chunk.embedding = embedding
+                # Enrich chunk metadata with page numbers from [Page N] markers (PDF)
+                if file_type == DocumentType.PDF:
+                    import re
+                    page_markers = re.findall(r'\[Page (\d+)\]', chunk.content)
+                    if page_markers:
+                        page_numbers = sorted(set(int(p) for p in page_markers))
+                        if chunk.metadata is None:
+                            chunk.metadata = {}
+                        chunk.metadata['page_numbers'] = page_numbers
+                        chunk.metadata['page_start'] = page_numbers[0]
+                        chunk.metadata['page_end'] = page_numbers[-1]
+
+                    # Check for table markers too
+                    table_markers = re.findall(r'\[Table (\d+), Page (\d+)\]', chunk.content)
+                    if table_markers:
+                        if chunk.metadata is None:
+                            chunk.metadata = {}
+                        chunk.metadata['contains_tables'] = True
+                        chunk.metadata['table_refs'] = [
+                            {"table": int(t), "page": int(p)} for t, p in table_markers
+                        ]
+
+                filtered_chunks.append(chunk)
+
+            # Phase 2: Batch embed all chunks with parallel processing
+            if filtered_chunks:
+                chunk_texts = [c.content for c in filtered_chunks]
+                logger.info(f"Generating embeddings for {len(chunk_texts)} chunks (parallel batch)")
+
+                try:
+                    # Use batch embedding (parallel API calls)
+                    all_embeddings = await self._generate_embeddings_batch(chunk_texts)
+                except Exception as e:
+                    logger.warning(f"Batch embedding failed ({e}), falling back to sequential")
+                    all_embeddings = []
+                    for text in chunk_texts:
+                        emb = await self._generate_embedding(text)
+                        all_embeddings.append(emb)
+
+                for chunk, embedding in zip(filtered_chunks, all_embeddings):
+                    chunk.embedding = embedding
+
+            # Phase 3: Store chunks in database
+            for chunk in filtered_chunks:
+                embedding = chunk.embedding
 
                 if self.use_s3_vectors and self._s3_backend:
                     # Store metadata in postgres WITHOUT embedding (S3 vectors mode)
@@ -915,16 +1153,17 @@ class DocumentManager:
 
                     # Collect for S3 batch insert
                     embeddings_for_s3.append(embedding)
+                    real_name = filename or os.path.basename(file_path)
                     documents_for_s3.append({
-                        "external_file_id": str(document_id),  # Use document_id as external_file_id
-                        "document_id": str(document_id),  # Keep for backwards compatibility
+                        "external_file_id": str(document_id),  # = PostgreSQL documents.id
+                        "document_id": str(document_id),
                         "chunk_index": chunk.chunk_index,
-                        "chunk_text": chunk.content[:500],  # Preview
-                        "file_name": os.path.basename(file_path),  # Match expected field name
-                        "source_file": os.path.basename(file_path),  # Keep for backwards compatibility
+                        "chunk_text": chunk.content[:500],
+                        "file_name": real_name,
+                        "source_file": real_name,
                         "file_path": file_path,
                         "file_type": file_type.value if hasattr(file_type, 'value') else str(file_type),
-                        "app_name": "document_sync",  # Add app_name field
+                        "app_name": "document_sync",
                         "workspace_id": workspace_id
                     })
                 else:
@@ -988,17 +1227,43 @@ class DocumentManager:
             
             raise
     
+    def _get_target_dimension(self) -> int:
+        """Get the configured embedding dimension for validation."""
+        try:
+            return self.embedding_manager.get_dimension()
+        except Exception:
+            return int(os.getenv("S3_VECTORS_DIMENSION", "2048"))
+
+    def _ensure_embedding_dimension(self, embedding: List[float]) -> List[float]:
+        """Truncate embedding to target dimension if needed (Matryoshka support)."""
+        target = self._get_target_dimension()
+        if len(embedding) > target:
+            return embedding[:target]
+        return embedding
+
     async def _generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for text with caching"""
         try:
             # Try cache first (massive cost savings!)
             from core.cache import get_cache_service
             cache = get_cache_service()
+            target_dim = self._get_target_dimension()
 
             cached_embedding = cache.get_embedding(text)
             if cached_embedding is not None:
-                logger.debug(f"✅ Using cached embedding (saved API call)")
-                return cached_embedding
+                # Validate dimension — stale cache may have wrong size
+                if len(cached_embedding) == target_dim:
+                    logger.debug(f"✅ Using cached embedding (saved API call)")
+                    return cached_embedding
+                elif len(cached_embedding) > target_dim:
+                    # Matryoshka: truncate and re-cache
+                    truncated = cached_embedding[:target_dim]
+                    cache.set_embedding(text, truncated)
+                    logger.debug(f"✅ Truncated cached embedding {len(cached_embedding)}→{target_dim}")
+                    return truncated
+                else:
+                    # Dimension too small — discard, regenerate
+                    logger.warning(f"Cached embedding dim {len(cached_embedding)} < {target_dim}, regenerating")
 
             # Cache miss - generate new embedding
             embedding = await self.embedding_manager.generate_embedding(text)
@@ -1011,6 +1276,83 @@ class DocumentManager:
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
             raise
+
+    async def _generate_embeddings_batch(self, texts: List[str], max_concurrent: int = 5) -> List[List[float]]:
+        """
+        Generate embeddings for multiple texts with caching and parallel processing.
+
+        Checks cache first, then batch-embeds only the cache misses.
+        Uses parallel API calls for providers that support it (OpenRouter).
+        """
+        try:
+            from core.cache import get_cache_service
+            cache = get_cache_service()
+
+            # Check cache for all texts
+            cached = cache.get_embeddings_batch(texts)
+
+            # Separate hits from misses (with dimension validation)
+            miss_indices = []
+            miss_texts = []
+            results = [None] * len(texts)
+            target_dim = self._get_target_dimension()
+            stale_count = 0
+            recache_entries = {}
+
+            for i, text in enumerate(texts):
+                emb = cached.get(text)
+                if emb is not None:
+                    if len(emb) == target_dim:
+                        results[i] = emb
+                    elif len(emb) > target_dim:
+                        # Matryoshka: truncate stale cache entry
+                        truncated = emb[:target_dim]
+                        results[i] = truncated
+                        recache_entries[text] = truncated
+                        stale_count += 1
+                    else:
+                        # Too small — treat as miss
+                        miss_indices.append(i)
+                        miss_texts.append(text)
+                        stale_count += 1
+                else:
+                    miss_indices.append(i)
+                    miss_texts.append(text)
+
+            cache_hits = len(texts) - len(miss_texts)
+            if stale_count > 0:
+                logger.warning(f"Embedding cache: {stale_count} stale entries (dim != {target_dim}), truncating/regenerating")
+            if cache_hits > 0:
+                logger.info(f"Embedding cache: {cache_hits}/{len(texts)} hits, {len(miss_texts)} misses")
+
+            # Re-cache truncated entries
+            if recache_entries:
+                cache.set_embeddings_batch(recache_entries)
+                logger.info(f"Re-cached {len(recache_entries)} truncated embeddings")
+
+            if not miss_texts:
+                return results
+
+            # Batch embed the misses
+            new_embeddings = await self.embedding_manager.generate_embeddings_batch(
+                miss_texts, max_concurrent=max_concurrent
+            )
+
+            # Fill results and cache the new embeddings
+            new_cache_entries = {}
+            for idx, emb in zip(miss_indices, new_embeddings):
+                results[idx] = emb
+                new_cache_entries[texts[idx]] = emb
+
+            if new_cache_entries:
+                cache.set_embeddings_batch(new_cache_entries)
+                logger.info(f"Cached {len(new_cache_entries)} new embeddings")
+
+            return results
+
+        except Exception as e:
+            logger.warning(f"Batch embedding with cache failed ({e}), falling back to sequential")
+            return [await self._generate_embedding(t) for t in texts]
     
     def list_documents(self, status: Optional[DocumentStatus] = None, 
                       file_type: Optional[DocumentType] = None,

@@ -77,6 +77,19 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
   'demo': true,              // 🧪 Always use mocks for demos
 }
 
+// ─── Admin workspace override ────────────────────────────────────────
+// Module-level override that takes priority over localStorage.
+// Set by AdminWorkspaceSwitcher; reset on unmount.
+let _adminWorkspaceOverride: string | null = null
+
+export function setAdminWorkspaceOverride(wsId: string | null) {
+  _adminWorkspaceOverride = wsId
+}
+
+export function getAdminWorkspaceOverride(): string | null {
+  return _adminWorkspaceOverride
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -108,12 +121,13 @@ class ApiClient {
       'Content-Type': 'application/json',
     }
 
-    // Initialize mock config
-    this.mockConfig = this.loadMockConfig()
-    this.mockData = this.initializeMockData()
+    // Initialize mock config (dev only)
+    const isDev = process.env.NODE_ENV !== 'production'
+    this.mockConfig = isDev ? this.loadMockConfig() : { enabled: false, endpoints: {}, logMockUsage: false }
+    this.mockData = isDev ? this.initializeMockData() : {}
 
-    // Expose mock control to window for easy debugging
-    if (typeof window !== 'undefined') {
+    // Expose mock control to window for easy debugging (dev only)
+    if (isDev && typeof window !== 'undefined') {
       (window as any).automatos = {
         ...(window as any).automatos,
         mocks: {
@@ -126,14 +140,16 @@ class ApiClient {
       }
     }
 
-    console.log('🚀 API Client initialized')
-    console.log(`📍 Base URL: ${this.baseUrl || 'relative URLs (Next.js)'}`)
-    console.log(`📍 NEXT_PUBLIC_API_URL env: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
-    console.log('🔐 Auth: Clerk JWT (workspace-aware)')
-    if (this.mockConfig.enabled) {
-      console.warn('⚠️  Mock mode is ENABLED - Disable for production!')
-    } else {
-      console.log('✅ Real API mode enabled')
+    if (isDev) {
+      console.log('🚀 API Client initialized')
+      console.log(`📍 Base URL: ${this.baseUrl || 'relative URLs (Next.js)'}`)
+      console.log(`📍 NEXT_PUBLIC_API_URL env: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
+      console.log('🔐 Auth: Clerk JWT (workspace-aware)')
+      if (this.mockConfig.enabled) {
+        console.warn('⚠️  Mock mode is ENABLED - Disable for production!')
+      } else {
+        console.log('✅ Real API mode enabled')
+      }
     }
   }
 
@@ -143,7 +159,7 @@ class ApiClient {
    */
   public setClerkTokenGetter(getter: () => Promise<string | null>) {
     this.getClerkToken = getter
-    console.log('✅ Clerk token getter configured')
+    if (process.env.NODE_ENV !== 'production') console.log('✅ Clerk token getter configured')
   }
 
   // Load mock config from localStorage or use defaults
@@ -221,6 +237,9 @@ class ApiClient {
 
   // Check if mock should be used for endpoint
   private shouldUseMock(endpoint: string): boolean {
+    // Never use mocks in production
+    if (process.env.NODE_ENV === 'production') return false
+
     // 1. CHECK PAGE-LEVEL CONFIG FIRST (highest priority)
     if (this.currentPage && this.currentPage in PAGE_MOCK_CONFIG) {
       // Page config overrides everything - return it directly
@@ -257,8 +276,10 @@ class ApiClient {
    */
   public setCurrentPage(pageName: string) {
     this.currentPage = pageName.toLowerCase()
-    const mockStatus = PAGE_MOCK_CONFIG[this.currentPage] ? 'MOCKS ON' : 'REAL APIs'
-    console.log(`📄 Page: ${pageName} → ${mockStatus}`)
+    if (process.env.NODE_ENV !== 'production') {
+      const mockStatus = PAGE_MOCK_CONFIG[this.currentPage] ? 'MOCKS ON' : 'REAL APIs'
+      console.log(`📄 Page: ${pageName} → ${mockStatus}`)
+    }
   }
 
   /**
@@ -274,7 +295,7 @@ class ApiClient {
    */
   public setPageMockOverride(pageName: string, useMocks: boolean) {
     PAGE_MOCK_CONFIG[pageName.toLowerCase()] = useMocks
-    console.log(`🔧 Mock override for ${pageName}: ${useMocks ? 'ENABLED' : 'DISABLED'}`)
+    if (process.env.NODE_ENV !== 'production') console.log(`🔧 Mock override for ${pageName}: ${useMocks ? 'ENABLED' : 'DISABLED'}`)
   }
 
 
@@ -830,12 +851,13 @@ class ApiClient {
       ...(options.headers as Record<string, string>),
     }
 
-    // [FIX] Inject Workspace ID from LocalStorage to ensure correct backend context
+    // Inject Workspace ID: admin override takes priority over localStorage
     if (typeof window !== 'undefined') {
-      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      const workspaceId = _adminWorkspaceOverride
+        || localStorage.getItem('last_active_workspace')
+        || localStorage.getItem('last_active_org')
       if (workspaceId) {
         headers['X-Workspace-ID'] = workspaceId
-        // console.log('🏢 injected workspace context:', workspaceId)
       }
     }
 
@@ -881,7 +903,7 @@ class ApiClient {
       }
 
       const data = await response.json()
-      console.log('✅ API Success:', endpoint, 'Data type:', Array.isArray(data) ? `array[${data.length}]` : typeof data)
+      if (process.env.NODE_ENV !== 'production') console.log('✅ API Success:', endpoint, 'Data type:', Array.isArray(data) ? `array[${data.length}]` : typeof data)
 
       return data
     } catch (error: any) {
@@ -911,7 +933,7 @@ class ApiClient {
       }
 
       // If mocks are disabled, throw the original error
-      console.error('🚨 API Failed:', endpoint, error.message)
+      if (process.env.NODE_ENV !== 'production') console.error('🚨 API Failed:', endpoint, error.message)
       throw error
     }
   }
@@ -1485,6 +1507,30 @@ class ApiClient {
     })
   }
 
+  /** Ask a natural language question about code */
+  async codegraphAskQuestion(projectId: number, question: string) {
+    return this.request(`/api/code-graph/projects/${projectId}/ask`, {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    })
+  }
+
+  /** Get call graph for a symbol */
+  async codegraphGetCallGraph(params: { project: string; symbol: string; depth?: number; direction?: string }) {
+    const searchParams = new URLSearchParams({
+      project: params.project,
+      symbol: params.symbol,
+      ...(params.depth && { depth: params.depth.toString() }),
+      ...(params.direction && { direction: params.direction }),
+    })
+    return this.request(`/api/code-graph/call-graph?${searchParams}`)
+  }
+
+  /** Get architecture analysis for a project */
+  async codegraphGetArchitecture(projectId: number) {
+    return this.request(`/api/code-graph/projects/${projectId}/architecture`)
+  }
+
   /** Health check */
   async codegraphHealth() {
     return this.request('/api/code-graph/health')
@@ -1609,6 +1655,14 @@ class ApiClient {
     return this.request(`/api/documents/search?${params}`, {
       method: 'POST'
     })
+  }
+
+  async ragRetrieve(params: { query: string; max_chunks?: number; max_tokens?: number; diversity?: number }) {
+    const searchParams = new URLSearchParams({ query: params.query })
+    if (params.max_chunks != null) searchParams.set('max_chunks', String(params.max_chunks))
+    if (params.max_tokens != null) searchParams.set('max_tokens', String(params.max_tokens))
+    if (params.diversity != null) searchParams.set('diversity', String(params.diversity))
+    return this.request(`/api/documents/rag/retrieve?${searchParams}`, { method: 'POST' })
   }
 
   // ===== SKILLS ENDPOINTS =====
@@ -2313,6 +2367,65 @@ class ApiClient {
     return this.request('/api/context/initialize', {
       method: 'POST',
       body: JSON.stringify(data || {})
+    })
+  }
+
+  // ===== WORKSPACE TASK ENDPOINTS (PRD-56 Phase 2) =====
+  async submitWorkspaceTask(data: {
+    steps: Array<{
+      action: string
+      command?: string
+      repo?: string
+      branch?: string
+      path?: string
+      content?: string
+      cwd?: string
+      timeout?: number
+      description?: string
+    }>
+    priority?: string
+    timeout_seconds?: number
+  }) {
+    return this.request('/api/tasks/submit', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async listWorkspaceTasks(params?: { status?: string; limit?: number; offset?: number }) {
+    const qs = new URLSearchParams()
+    if (params?.status) qs.set('status', params.status)
+    if (params?.limit) qs.set('limit', String(params.limit))
+    if (params?.offset) qs.set('offset', String(params.offset))
+    const query = qs.toString()
+    return this.request(`/api/tasks${query ? '?' + query : ''}`)
+  }
+
+  async getWorkspaceTask(taskId: string) {
+    return this.request(`/api/tasks/${taskId}`)
+  }
+
+  async cancelWorkspaceTask(taskId: string) {
+    return this.request(`/api/tasks/${taskId}/cancel`, { method: 'POST' })
+  }
+
+  async getWorkspaceFiles(workspaceId: string, path?: string) {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : ''
+    return this.request(`/api/workspaces/${workspaceId}/files${qs}`)
+  }
+
+  async getWorkspaceFileContent(workspaceId: string, path: string) {
+    return this.request(`/api/workspaces/${workspaceId}/files/content?path=${encodeURIComponent(path)}`)
+  }
+
+  async listGithubRepos(workspaceId: string, page = 1, perPage = 30) {
+    return this.request(`/api/workspaces/${workspaceId}/github/repos?page=${page}&per_page=${perPage}`)
+  }
+
+  async cloneGithubRepo(workspaceId: string, repoUrl: string, branch?: string) {
+    return this.request(`/api/workspaces/${workspaceId}/github/clone`, {
+      method: 'POST',
+      body: JSON.stringify({ repo_url: repoUrl, ...(branch ? { branch } : {}) }),
     })
   }
 

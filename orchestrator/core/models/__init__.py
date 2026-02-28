@@ -22,6 +22,12 @@ from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
 from .personas import *  # PRD-42: Agent Personas
 from .system_prompts import *  # PRD-58: System Prompt Management
 
+# PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
+try:
+    from .sdk_api_keys import *
+except ImportError:
+    pass
+
 try:
     from .channels import *  # PRD-55: Channel Connections
 except ImportError:

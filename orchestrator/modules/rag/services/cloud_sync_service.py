@@ -8,6 +8,7 @@ Orchestrates cloud document syncing:
 - Track sync state in cloud_documents and cloud_sync_jobs tables
 """
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -287,7 +288,12 @@ class CloudSyncService:
             # Supported file extensions for RAG processing
             SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.txt', '.md', '.py', '.js', '.ts', '.java', '.json', '.csv'}
 
-            for cf in cloud_files:
+            # --- Parallel sync: download + process files concurrently ---
+            MAX_CONCURRENT = 3  # Limit parallel downloads/processing
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+
+            async def _process_one_file(cf):
+                """Download and process a single cloud file (runs under semaphore)."""
                 ext_id = cf["external_file_id"]
                 file_name = cf.get("name", "unknown")
                 modified_at = cf.get("modified_at")
@@ -296,8 +302,7 @@ class CloudSyncService:
                 file_ext = os.path.splitext(file_name)[1].lower()
                 if file_ext not in SUPPORTED_EXTENSIONS:
                     logger.info(f"⏭️  Skipping unsupported file type: {file_name} ({file_ext})")
-                    files_skipped += 1
-                    continue
+                    return ("skipped", file_name, None, 0)
 
                 # Check existing cloud_documents record
                 existing = (
@@ -313,107 +318,118 @@ class CloudSyncService:
                 if existing and existing.sync_status == "synced":
                     if modified_at and existing.cloud_modified_at:
                         if modified_at <= existing.cloud_modified_at.isoformat():
-                            files_skipped += 1
-                            continue
+                            return ("skipped", file_name, None, 0)
 
-                # Download + ingest using DocumentManager (full multimodal processing)
-                try:
-                    from modules.rag.services.cloud_file_downloader import CloudFileDownloader
+                async with semaphore:
+                    try:
+                        from modules.rag.services.cloud_file_downloader import CloudFileDownloader
 
-                    downloader = CloudFileDownloader(self.db)
-                    tmp_path = await downloader.download_file(
-                        app_name=app_name,
-                        external_file_id=ext_id,
-                        workspace_id=workspace_id,
-                        file_name=file_name
-                    )
-                    logger.info(f"✅ Downloaded {file_name} to {tmp_path}")
+                        downloader = CloudFileDownloader(self.db)
+                        tmp_path = await downloader.download_file(
+                            app_name=app_name,
+                            external_file_id=ext_id,
+                            workspace_id=workspace_id,
+                            file_name=file_name
+                        )
+                        logger.info(f"✅ Downloaded {file_name} to {tmp_path}")
 
-                    # Use DocumentManager for full processing (multimodal + S3 vectors)
-                    logger.info(f"🔄 Starting upload_document() for {file_name}")
-                    document_id = await doc_manager.upload_document(
-                        file_path=tmp_path,
-                        filename=file_name,
-                        tags=["cloud_sync", app_name],
-                        description=f"Synced from {app_name}: {cf.get('path', '')}",
-                        created_by=f"cloud_sync_{app_name}"
-                    )
-                    logger.info(f"✅ upload_document() returned document_id={document_id} for {file_name}")
+                        # Use DocumentManager for full processing (multimodal + S3 vectors)
+                        logger.info(f"🔄 Starting upload_document() for {file_name}")
+                        document_id = await doc_manager.upload_document(
+                            file_path=tmp_path,
+                            filename=file_name,
+                            tags=["cloud_sync", app_name],
+                            description=f"Synced from {app_name}: {cf.get('path', '')}",
+                            created_by=f"cloud_sync_{app_name}"
+                        )
+                        logger.info(f"✅ upload_document() returned document_id={document_id} for {file_name}")
 
-                    # Clean up temp file
-                    if os.path.exists(tmp_path):
-                        os.unlink(tmp_path)
+                        # Clean up temp file
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
 
-                    if document_id:
-                        # Get chunk count and status from documents table
-                        from core.models import Document
-                        doc = self.db.query(Document).get(document_id)
-                        chunk_count = doc.chunk_count if doc else 0
-                        doc_status = doc.status if doc else "failed"
-                        logger.info(f"📊 Checking document {document_id} status: {doc_status}, chunks: {chunk_count}")
+                        if document_id:
+                            from core.models import Document
+                            doc = self.db.query(Document).get(document_id)
+                            chunk_count = doc.chunk_count if doc else 0
+                            doc_status = doc.status if doc else "failed"
+                            logger.info(f"📊 Checking document {document_id} status: {doc_status}, chunks: {chunk_count}")
 
-                        # Only mark as synced if processing completed successfully
-                        if doc_status != "completed":
-                            logger.error(f"Document {document_id} processing failed with status: {doc_status}")
+                            if doc_status != "completed":
+                                logger.error(f"Document {document_id} processing failed with status: {doc_status}")
+                                if existing:
+                                    existing.sync_status = "error"
+                                    existing.sync_error = f"Document processing failed: {doc_status}"
+                                    self.db.commit()
+                                return ("error", file_name, None, 0)
+
+                            # Upsert cloud_documents record for tracking
                             if existing:
-                                existing.sync_status = "error"
-                                existing.sync_error = f"Document processing failed: {doc_status}"
-                                self.db.commit()
-                            files_errored += 1
-                            continue
-
-                        # Upsert cloud_documents record for tracking
-                        if existing:
-                            existing.document_id = document_id
-                            existing.sync_status = "synced"
-                            existing.last_synced_at = datetime.now(timezone.utc)
-                            logger.info(f"✅ Marked cloud_document as 'synced' for {file_name} (doc_id={document_id})")
-                            existing.cloud_modified_at = (
-                                datetime.fromisoformat(modified_at)
-                                if modified_at else None
-                            )
-                            existing.chunk_count = chunk_count
-                            existing.sync_error = None
-                        else:
-                            new_doc = CloudDocument(
-                                workspace_id=workspace_id,
-                                connection_id=connection_id,
-                                app_name=app_name,
-                                external_file_id=ext_id,
-                                document_id=document_id,
-                                file_name=file_name,
-                                file_path=cf.get("path", ""),
-                                mime_type=cf.get("mime_type"),
-                                file_size=cf.get("size"),
-                                s3_vector_bucket=f"automatos-vectors-{workspace_id}",
-                                chunk_count=chunk_count,
-                                cloud_modified_at=(
+                                existing.document_id = document_id
+                                existing.sync_status = "synced"
+                                existing.last_synced_at = datetime.now(timezone.utc)
+                                logger.info(f"✅ Marked cloud_document as 'synced' for {file_name} (doc_id={document_id})")
+                                existing.cloud_modified_at = (
                                     datetime.fromisoformat(modified_at)
                                     if modified_at else None
-                                ),
-                                last_synced_at=datetime.now(timezone.utc),
-                                sync_status="synced",
-                            )
-                            self.db.add(new_doc)
+                                )
+                                existing.chunk_count = chunk_count
+                                existing.sync_error = None
+                            else:
+                                new_doc = CloudDocument(
+                                    workspace_id=workspace_id,
+                                    connection_id=connection_id,
+                                    app_name=app_name,
+                                    external_file_id=ext_id,
+                                    document_id=document_id,
+                                    file_name=file_name,
+                                    file_path=cf.get("path", ""),
+                                    mime_type=cf.get("mime_type"),
+                                    file_size=cf.get("size"),
+                                    s3_vector_bucket=f"automatos-vectors-{workspace_id}",
+                                    chunk_count=chunk_count,
+                                    cloud_modified_at=(
+                                        datetime.fromisoformat(modified_at)
+                                        if modified_at else None
+                                    ),
+                                    last_synced_at=datetime.now(timezone.utc),
+                                    sync_status="synced",
+                                )
+                                self.db.add(new_doc)
 
-                        files_synced += 1
-                        total_chunks += chunk_count
-                        self.db.commit()
-                    else:
-                        # Upload failed
+                            self.db.commit()
+                            return ("synced", file_name, document_id, chunk_count)
+                        else:
+                            if existing:
+                                existing.sync_status = "error"
+                                existing.sync_error = "Document upload failed"
+                                self.db.commit()
+                            return ("error", file_name, None, 0)
+
+                    except Exception as e:
+                        logger.error(f"Sync failed for {file_name}: {e}", exc_info=True)
                         if existing:
                             existing.sync_status = "error"
-                            existing.sync_error = "Document upload failed"
+                            existing.sync_error = str(e)
                             self.db.commit()
-                        files_errored += 1
+                        return ("error", file_name, None, 0)
 
-                except Exception as e:
-                    logger.error(f"Sync failed for {file_name}: {e}", exc_info=True)
+            # Launch all files in parallel (bounded by semaphore)
+            tasks = [_process_one_file(cf) for cf in cloud_files]
+            logger.info(f"🚀 Processing {len(tasks)} files with concurrency={MAX_CONCURRENT}")
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, BaseException):
+                    logger.error(f"Unexpected sync error: {result}")
                     files_errored += 1
-                    if existing:
-                        existing.sync_status = "error"
-                        existing.sync_error = str(e)
-                        self.db.commit()
+                elif result[0] == "synced":
+                    files_synced += 1
+                    total_chunks += result[3]
+                elif result[0] == "skipped":
+                    files_skipped += 1
+                else:
+                    files_errored += 1
 
             # Update job
             job.status = "completed"
@@ -537,8 +553,13 @@ class CloudSyncService:
             )
             if is_folder:
                 continue
+            # Dropbox READ_FILE needs path, not id; Google Drive needs id
+            if app_name == "DROPBOX":
+                ext_id = item.get("path_display") or item.get("id") or ""
+            else:
+                ext_id = item.get("id") or item.get("path_display") or ""
             files.append({
-                "external_file_id": item.get("id") or item.get("path_display") or "",
+                "external_file_id": ext_id,
                 "name": item.get("name") or item.get("title") or "",
                 "path": item.get("path_display") or item.get("path") or "",
                 "mime_type": item.get("mimeType") or item.get("mime_type") or "",

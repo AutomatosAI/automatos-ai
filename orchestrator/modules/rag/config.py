@@ -26,7 +26,7 @@ def _get_system_dimension() -> int:
             db.close()
     except Exception:
         pass
-    return 1024  # Fallback if DB unavailable
+    return 2048  # Fallback if DB unavailable
 
 
 def _get_system_setting_int(key: str, default: int) -> int:

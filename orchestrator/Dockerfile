@@ -19,10 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     curl \
+    git \
     postgresql-client \
     libmagic1 \
     tesseract-ocr \
     ghostscript \
+    # WeasyPrint system deps (PRD-63: Document Generation)
+    libpango-1.0-0 \
+    libcairo2 \
+    libgdk-pixbuf-2.0-0 \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -30,7 +36,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 # Install Python dependencies (clean cache after)
+# futureagi is installed separately with --no-deps because it pins exact
+# versions of common packages (requests==2.32.3, pandas==2.2.2, etc.)
+# that conflict with our stack. Its code works fine with our versions.
 RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir --no-deps futureagi==0.6.0 && \
     pip cache purge && \
     rm -rf /root/.cache/pip
 
@@ -54,8 +64,12 @@ RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh 
 # Copy application code (Dockerfile is in orchestrator/, so copy from current dir)
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
+# Create necessary directories and non-root user (matches production stage)
+RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports && \
+    useradd -m -u 1000 automatos && \
+    chown -R automatos:automatos /app
+
+USER automatos
 
 # Expose port
 EXPOSE 8000

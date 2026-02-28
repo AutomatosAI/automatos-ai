@@ -32,7 +32,7 @@ import {
   bulkUpdateSettings,
   resetSettingsToDefaults,
 } from '@/lib/api/system-settings'
-import { useModels } from '@/hooks/use-model-api'
+import { useWorkspaceModels } from '@/hooks/use-model-api'
 import { apiClient } from '@/lib/api-client'
 
 interface SystemLLMSettingsTabProps {
@@ -135,15 +135,22 @@ export default function SystemLLMSettingsTab({
   const [heartbeatOpen, setHeartbeatOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
 
-  // Load models from API
-  const { data: allModels = [], isLoading: modelsLoading } = useModels(undefined, 'active')
+  // Load workspace-installed models (same catalog agents use)
+  const { data: allModels = [], isLoading: modelsLoading } = useWorkspaceModels()
 
   const selectedProvider = formData.llm_provider || ''
 
   const availableModels = useMemo(() => {
     if (!Array.isArray(allModels)) return []
     if (!selectedProvider) return allModels
-    return allModels.filter((model: { provider: string }) => model.provider === selectedProvider)
+    // For aggregator providers (openrouter), also include aggregator-tier models
+    // whose underlying provider differs (e.g. Claude Opus 4.6 via OpenRouter has
+    // provider="anthropic" but tier="aggregator")
+    const isAggregator = selectedProvider === 'openrouter'
+    return allModels.filter((model: any) =>
+      model.provider === selectedProvider ||
+      (isAggregator && model.tier === 'aggregator')
+    )
   }, [allModels, selectedProvider])
 
   // Self-load settings when in standalone mode
@@ -384,7 +391,15 @@ export default function SystemLLMSettingsTab({
                   <Label htmlFor="llm_model">LLM Model</Label>
                   <Select
                     value={formData.llm_model || ''}
-                    onValueChange={(value) => handleInputChange('llm_model', value)}
+                    onValueChange={(value) => {
+                      handleInputChange('llm_model', value)
+                      // If user picks an aggregator model, auto-switch provider to openrouter
+                      // (aggregator models use OpenRouter paths like "anthropic/claude-opus-4.6")
+                      const picked = allModels.find((m: any) => m.model_id === value)
+                      if (picked && (picked as any).tier === 'aggregator' && formData.llm_provider !== 'openrouter') {
+                        handleInputChange('llm_provider', 'openrouter')
+                      }
+                    }}
                     disabled={modelsLoading || !selectedProvider}
                   >
                     <SelectTrigger>

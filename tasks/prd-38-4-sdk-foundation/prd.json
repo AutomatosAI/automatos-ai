@@ -1,0 +1,228 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/38-4-sdk-foundation",
+  "description": "PRD-38.4: SDK Foundation (Backend Scope) - Backend Widget API endpoints, API key management, session token exchange, CORS, and rate limiting to power the embeddable SDK. npm packages require separate repo.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create api_keys table via migration",
+      "description": "As a developer, I need a database table for managing API keys that authenticate SDK widget requests.",
+      "acceptanceCriteria": [
+        "Create Alembic migration for sdk_api_keys table: id UUID PK, workspace_id UUID FK workspaces, name VARCHAR(200), key_prefix VARCHAR(8), key_hash VARCHAR(64)",
+        "Add key_type VARCHAR(20) CHECK IN ('public','server')",
+        "Add permissions TEXT[] for permission list",
+        "Add rate_limit_requests INTEGER, rate_limit_tokens INTEGER",
+        "Add allowed_domains TEXT[], allowed_ips TEXT[]",
+        "Add is_active BOOLEAN DEFAULT TRUE",
+        "Add created_at, expires_at (nullable), last_used_at (nullable) timestamps",
+        "Add index on key_hash, index on workspace_id",
+        "Migration runs successfully",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Created 20260225_create_sdk_api_keys.py with all columns, CHECK constraint on key_type, unique index on key_hash, index on workspace_id. Chains from 20260225_ws_shares."
+    },
+    {
+      "id": "US-002",
+      "title": "Create ApiKey SQLAlchemy model",
+      "description": "As a developer, I need an ORM model for the sdk_api_keys table.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/models/sdk_api_keys.py with SdkApiKey model",
+        "All columns from migration mapped",
+        "Relationship to Workspace model",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Created SdkApiKey model with all columns, workspace relationship via backref. Registered in __init__.py."
+    },
+    {
+      "id": "US-003",
+      "title": "Create API key management service",
+      "description": "As a developer, I need a service for creating, validating, and revoking API keys with SHA-256 hashing.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/services/api_key_service.py with ApiKeyService",
+        "create_api_key() generates 32-byte hex key, stores SHA-256 hash, returns full key once",
+        "validate_api_key(key) looks up by hash, checks is_active and expires_at, updates last_used_at",
+        "revoke_api_key(key_id, workspace_id) sets is_active=False",
+        "list_api_keys(workspace_id) returns keys with masked prefix",
+        "check_domain(api_key, origin) validates against allowed_domains with wildcard support",
+        "check_permissions(api_key, permission) validates key has required permission",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Created ApiKeyService with all 6 static methods. Uses hashlib SHA-256, secrets.token_hex(32), fnmatch for wildcard domain matching."
+    },
+    {
+      "id": "US-004",
+      "title": "Create API key management endpoints",
+      "description": "As a workspace admin, I need REST endpoints to create, list, and revoke API keys.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/api_keys.py with prefix /api/api-keys",
+        "POST /api/api-keys creates key, returns full key string once",
+        "GET /api/api-keys lists workspace keys (masked, prefix only)",
+        "DELETE /api/api-keys/:id revokes key",
+        "Requires workspace admin auth",
+        "Validates public keys require non-empty allowed_domains",
+        "Validates permissions against allowed set",
+        "Register router in main.py",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Replaced stub with full CRUD. Pydantic field_validator on permissions. Public key domain requirement enforced. Already registered in main.py."
+    },
+    {
+      "id": "US-005",
+      "title": "Create widget auth middleware",
+      "description": "As a developer, I need auth middleware that validates API keys for Widget API requests.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/widgets/__init__.py and orchestrator/api/widgets/auth.py",
+        "widget_auth dependency extracts Bearer token from Authorization header",
+        "Extracts workspace from X-Workspace-ID header",
+        "Validates via ApiKeyService.validate_api_key()",
+        "Checks origin against allowed_domains",
+        "Sets request.state.workspace_id, api_key_id, permissions",
+        "Returns 401 for invalid keys, 403 for domain mismatch",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Created widgets/ package with auth.py. JWT session token path first, raw API key fallback. WidgetAuthContext dataclass. require_permission() dependency factory."
+    },
+    {
+      "id": "US-006",
+      "title": "Create session token exchange endpoint",
+      "description": "As an SDK integrator, I need to exchange API keys for short-lived session tokens.",
+      "acceptanceCriteria": [
+        "Create POST /api/widgets/auth in orchestrator/api/widgets/session.py",
+        "Request: {api_key, user_id (optional), permissions (optional subset), expires_in (default 3600, max 86400)}",
+        "Validates API key server-side",
+        "Generates signed JWT with workspace_id, api_key_id, permissions, expires_at",
+        "Signs with WIDGET_TOKEN_SECRET env var",
+        "Returns {session_token, expires_at, permissions}",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Created session.py with POST /auth. Server-type keys only. Permission subsetting validated. expires_in clamped to [60, 86400]. 500 if WIDGET_TOKEN_SECRET not configured."
+    },
+    {
+      "id": "US-007",
+      "title": "Create Widget Chat API endpoint",
+      "description": "As an SDK user, I need a chat endpoint with streaming responses.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/widgets/chat.py",
+        "POST /api/widgets/chat accepts {message, conversation_id, agent_id, model_id}",
+        "Uses widget_auth, requires chat permission",
+        "Returns SSE stream: message, tool-start, tool-end, tool-data, done events",
+        "GET /api/widgets/chat/:conversation_id returns history",
+        "Scoped to workspace from API key",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Created chat.py reusing ChatService/StreamingChatService from consumers.chatbot. SSE streaming with workspace isolation. History endpoint queries messages table. 503 fallback if chat consumer unavailable."
+    },
+    {
+      "id": "US-008",
+      "title": "Create Widget Documents API endpoint",
+      "description": "As an SDK user, I need endpoints to search knowledge base and get documents.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/widgets/documents.py",
+        "POST /api/widgets/documents/search accepts {query, limit (max 20)}",
+        "GET /api/widgets/documents/:id returns full document",
+        "Uses widget_auth, requires documents:read permission",
+        "Scoped to workspace",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Created documents.py with ILIKE search and full document retrieval. Workspace-scoped. Snippet truncation to 200 chars."
+    },
+    {
+      "id": "US-009",
+      "title": "Create Widget Data Query API endpoint",
+      "description": "As an SDK user, I need endpoints for NL queries and SQL execution.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/widgets/data.py",
+        "POST /api/widgets/data/query accepts {question}, runs NL2SQL, returns {sql, columns, rows, summary}",
+        "POST /api/widgets/data/execute accepts {sql}, read-only execution",
+        "Uses widget_auth, requires data:query permission",
+        "Scoped to workspace database connections",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Created data.py with NL2SQL query (503 if service unavailable) and read-only SQL execute. Validates against 12 mutation keywords via regex. Returns structured columns/rows."
+    },
+    {
+      "id": "US-010",
+      "title": "Create CORS middleware for Widget API",
+      "description": "As a developer, I need dynamic CORS that validates origins per API key.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/widgets/cors.py",
+        "On OPTIONS: extract API key, validate origin against allowed_domains",
+        "Set Allow-Origin to matching origin, Allow-Headers, Allow-Methods, Max-Age 86400",
+        "Return 403 if origin does not match",
+        "Apply only to /api/widgets/* routes",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Created WidgetCORSMiddleware extending BaseHTTPMiddleware. Scoped to /api/widgets. Permissive preflight, CORS headers on actual requests. Registered in main.py."
+    },
+    {
+      "id": "US-011",
+      "title": "Create rate limiting for Widget API",
+      "description": "As a developer, I need per-key rate limiting to prevent abuse.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/widgets/rate_limit.py",
+        "Track request counts per API key (in-memory or Redis)",
+        "Enforce rate_limit_requests per minute (sliding window)",
+        "Return 429 with Retry-After when exceeded",
+        "Include X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset headers",
+        "Public defaults: 30 req/min; Server defaults: 1000 req/min",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Created RateLimitStore (thread-safe sliding window) and WidgetRateLimitMiddleware. Per-key override via request.state.rate_limit. 429 with Retry-After and X-RateLimit headers. Registered in main.py."
+    },
+    {
+      "id": "US-012",
+      "title": "Mount Widget API router with middleware",
+      "description": "As a developer, I need all widget endpoints under /api/widgets with CORS and rate limiting.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/widgets/router.py mounting sub-routers: /auth, /chat, /documents, /data",
+        "Apply CORS and rate limiting middleware to widget router",
+        "GET /api/widgets/health returns {status: ok, version: 1.0}",
+        "Register widget router in main.py",
+        "All endpoints accessible and authenticated",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Created router.py mounting 4 sub-routers with try/except. Health endpoint at /api/widgets/health. Registered widget_api_router, WidgetCORSMiddleware, WidgetRateLimitMiddleware in main.py."
+    },
+    {
+      "id": "US-013",
+      "title": "Add API key management UI to settings",
+      "description": "As a workspace admin, I want to manage API keys from the settings page.",
+      "acceptanceCriteria": [
+        "Create frontend/components/settings/ApiKeyManager.tsx",
+        "Lists keys: name, prefix (masked), type badge, permissions, created, last used, status",
+        "Create Key dialog: name, type, permission checkboxes, allowed domains, rate limits, expiry",
+        "Shows full key ONCE after creation with copy button and warning",
+        "Revoke button with confirmation",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Created 875-line ApiKeyManager.tsx with key list table, create dialog (9 permission checkboxes, domain textarea, rate limit, expiry), key-shown-once dialog with copy, and revoke confirmation. Uses useWorkspace hook and glass-card styling."
+    }
+  ]
+}

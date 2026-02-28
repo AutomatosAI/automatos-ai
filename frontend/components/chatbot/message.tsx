@@ -145,7 +145,7 @@ export function Message({
     img: () => null,
   }), [])
 
-  const proseClass = "prose prose-sm md:prose-base max-w-none space-y-3 dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-orange-500 dark:prose-a:text-orange-300"
+  const proseClass = "prose prose-sm md:prose-base max-w-none space-y-3 break-words [overflow-wrap:anywhere] dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-orange-500 dark:prose-a:text-orange-300"
 
   const renderMarkdownWithImages = (text: string, keyPrefix = '') => {
     const { text: cleanText, images } = extractImages(text)
@@ -312,7 +312,7 @@ export function Message({
       data-testid={isUser ? 'msg-user' : 'msg-assistant'}
       className={`group/msg flex ${isUser ? 'justify-end' : 'justify-start'}`}
     >
-      <div className={`flex items-start space-x-3 max-w-[85%] ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}>
+      <div className={`flex items-start space-x-3 max-w-[85%] min-w-0 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}>
         {/* Avatar */}
         <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
           isUser
@@ -332,7 +332,7 @@ export function Message({
         </div>
 
         {/* Message Content */}
-        <div className="flex-1 space-y-3">
+        <div className="flex-1 min-w-0 space-y-3">
           {/* Message bubble */}
           <div className={`rounded-2xl px-4 py-3 space-y-2 ${
             isUser

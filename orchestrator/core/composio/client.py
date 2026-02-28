@@ -178,36 +178,54 @@ class ComposioClient:
             logger.error(f"Error resolving auth config for {app_slug}: {e}")
             return None
 
+    def _get_auth_schemes(self, app_slug: str) -> List[str]:
+        """Get auth schemes for an app from Composio's toolkit metadata."""
+        try:
+            toolkits = self.composio.toolkits.get()
+            app_info = next(
+                (t for t in toolkits if getattr(t, 'slug', '').lower() == app_slug.lower()),
+                None,
+            )
+            if app_info:
+                return getattr(app_info, 'auth_schemes', []) or []
+        except Exception as e:
+            logger.warning(f"Failed to inspect auth schemes for {app_slug}: {e}")
+        return []
+
+    def is_no_auth_app(self, app_slug: str) -> bool:
+        """Check if an app requires no authentication (e.g. composio_search)."""
+        schemes = self._get_auth_schemes(app_slug)
+        return schemes == ["NO_AUTH"] or (len(schemes) == 1 and "NO_AUTH" in schemes)
+
     def _ensure_auth_config_id(self, app_slug: str) -> str:
         """
         Get existing Auth Config ID or create a new one with correct scheme.
+
+        Raises ValueError for NO_AUTH apps — they don't need auth configs.
         """
         existing_id = self._resolve_auth_config_id(app_slug)
         if existing_id:
             return existing_id
-            
+
+        # Check auth schemes
+        schemes = self._get_auth_schemes(app_slug)
+        logger.info(f"Detected auth schemes for {app_slug}: {schemes}")
+
+        # NO_AUTH apps don't need auth configs — can't create one
+        if "NO_AUTH" in schemes:
+            raise ValueError(
+                f"{app_slug} does not require authentication. "
+                f"It can be used directly without a connected account."
+            )
+
         try:
             # Default options
             options = {"type": "use_composio_managed_auth"}
-            
-            # Inspect tool to determine correct auth scheme
-            try:
-                # We need to find the app to see its auth_schemes
-                # Note: This might be slow if there are many tools, but it's a one-time setup per app
-                toolkits = self.composio.toolkits.get()
-                app_info = next((t for t in toolkits if getattr(t, 'slug', '').lower() == app_slug.lower()), None)
-                
-                if app_info:
-                    schemes = getattr(app_info, 'auth_schemes', []) or []
-                    logger.info(f"Detected auth schemes for {app_slug}: {schemes}")
-                    
-                    if "API_KEY" in schemes:
-                        options = {"type": "use_custom_auth", "authScheme": "API_KEY"}
-                    elif "BASIC" in schemes:
-                        options = {"type": "use_custom_auth", "authScheme": "BASIC"}
-                    # If OAUTH2, we stick to default managed auth for now, or could check properties
-            except Exception as e:
-                logger.warning(f"Failed to inspect auth schemes for {app_slug}: {e}")
+
+            if "API_KEY" in schemes:
+                options = {"type": "use_custom_auth", "authScheme": "API_KEY"}
+            elif "BASIC" in schemes:
+                options = {"type": "use_custom_auth", "authScheme": "BASIC"}
 
             # Create new auth config
             logger.info(f"Creating new Auth Config for {app_slug} with options={options}")
@@ -289,8 +307,9 @@ class ComposioClient:
             connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
             
             for conn in connections:
-                # Check for active or initiated status
-                if conn.status == 'ACTIVE':
+                # ACTIVE = fully connected, INITIATED = OAuth completed but
+                # Composio is still provisioning. Treat both as connected.
+                if conn.status in ('ACTIVE', 'INITIATED'):
                     return {
                         "id": conn.id,
                         "status": conn.status,
@@ -300,7 +319,62 @@ class ComposioClient:
         except Exception as e:
             logger.error(f"Failed to get connection status: {e}")
             return None
-    
+
+    def get_app_access_token(self, entity_id: str, app: str) -> Optional[str]:
+        """
+        Retrieve the OAuth access token for a connected app.
+
+        Inspects the connected account object for token attributes.
+        Returns None if unavailable (token not exposed or not connected).
+        """
+        if not self.composio:
+            return None
+
+        try:
+            auth_config_id = self._resolve_auth_config_id(app)
+            if not auth_config_id:
+                return None
+
+            response = self.composio.connected_accounts.list(
+                user_ids=[entity_id],
+                auth_config_ids=[auth_config_id]
+            )
+            connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
+
+            for conn in connections:
+                if conn.status not in ('ACTIVE', 'INITIATED'):
+                    continue
+
+                # Try common token attributes on the connection object
+                for attr in ('access_token', 'token', 'connectionParams'):
+                    val = getattr(conn, attr, None)
+                    if val and isinstance(val, str):
+                        return val
+                    # connectionParams may be a dict with nested token
+                    if val and isinstance(val, dict):
+                        token = val.get('access_token') or val.get('token')
+                        if token:
+                            return token
+
+                # Try .get() if the SDK supports it (returns full details)
+                try:
+                    detail = self.composio.connected_accounts.get(nanoid=conn.id)
+                    for attr in ('access_token', 'token', 'connectionParams'):
+                        val = getattr(detail, attr, None)
+                        if val and isinstance(val, str):
+                            return val
+                        if val and isinstance(val, dict):
+                            token = val.get('access_token') or val.get('token')
+                            if token:
+                                return token
+                except Exception:
+                    pass
+
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get access token for {app}: {e}")
+            return None
+
     def disconnect_app(self, entity_id: str, app: str) -> bool:
         """
         Disconnect an app from an entity.
@@ -915,6 +989,48 @@ class ComposioClient:
                 "[ComposioClient] Schema cache failed for app=%s: %s",
                 app_upper, e, exc_info=True,
             )
+
+    def get_all_schemas_for_apps(
+        self,
+        app_names: List[str],
+        entity_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get ALL OpenAI function-calling schemas for the given apps.
+
+        Populates the per-app schema cache (via SDK ``toolset.tools.get``),
+        then returns every cached action schema.  The LLM decides which
+        action to call — no semantic search, no query rewriting.
+
+        Returns:
+            List of dicts with ``action_name`` and ``schema`` keys.
+        """
+        if not self.toolset:
+            logger.warning("[ComposioClient] Toolset not initialized")
+            return []
+
+        import time as _time
+        now = _time.monotonic()
+
+        results: List[Dict[str, Any]] = []
+        seen: set = set()
+
+        for app in app_names:
+            app_upper = app.upper()
+            cache_age = now - self._schema_cache_ts.get(app_upper, 0)
+            if app_upper not in self._schema_cache or cache_age > self._schema_cache_ttl:
+                self._populate_schema_cache(app, entity_id)
+
+            for action_name, schema in self._schema_cache.get(app_upper, {}).items():
+                if action_name not in seen:
+                    results.append({"action_name": action_name, "schema": schema})
+                    seen.add(action_name)
+
+        logger.info(
+            "[ComposioClient] get_all_schemas_for_apps: apps=%s → %d actions",
+            [a.upper() for a in app_names], len(results),
+        )
+        return results
 
     def search_actions_for_step(
         self,

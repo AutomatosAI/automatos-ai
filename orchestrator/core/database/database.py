@@ -68,6 +68,17 @@ def get_database_url() -> str:
 
 DATABASE_URL = get_database_url()
 
+# Enforce SSL in production
+_environment = os.getenv("ENVIRONMENT", "development").lower()
+_connect_args = {}
+if _environment == "production":
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    _parsed = urlparse(DATABASE_URL)
+    _params = parse_qs(_parsed.query)
+    if "sslmode" not in _params:
+        _params["sslmode"] = ["require"]
+        DATABASE_URL = urlunparse(_parsed._replace(query=urlencode(_params, doseq=True)))
+
 # Create PostgreSQL engine with connection pooling
 engine = create_engine(
     DATABASE_URL,
@@ -133,8 +144,8 @@ def init_database():
                 },
                 {
                     "config_key": "rag.default_model",
-                    "config_value": {"value": "sentence-transformers/all-MiniLM-L6-v2"},
-                    "description": "Default embedding model for RAG system"
+                    "config_value": {"value": ""},
+                    "description": "Default embedding model for RAG (reads from system_settings.embedding_model at runtime)"
                 },
                 {
                     "config_key": "workflow.max_concurrent",
@@ -160,7 +171,7 @@ def init_database():
             if not existing_rag:
                 default_rag = RAGConfiguration(
                     name="default",
-                    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+                    embedding_model=None,  # Resolved from system_settings at runtime
                     chunk_size=1000,
                     chunk_overlap=200,
                     retrieval_strategy="similarity",

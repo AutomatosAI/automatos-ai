@@ -13,6 +13,7 @@ Enforces capability checks at EXECUTION time (defense in depth).
 
 import logging
 import os
+from pathlib import Path as _Path
 from typing import Dict, Any, Optional, Tuple
 from uuid import UUID
 from sqlalchemy.orm import Session
@@ -112,9 +113,18 @@ class UnifiedToolExecutor:
             # Shell commands
             'execute_command': self._execute_shell,
 
+            # HTTP requests (internal API testing)
+            'http_request': self._execute_http_request,
+
+            # SSH remote execution
+            'ssh_execute': self._execute_ssh,
+
             # Composio (external apps via DB cache + Composio OAuth)
             'composio_execute': self._execute_composio_execute,
             
+            # PRD-63: Document generation (template-based)
+            'generate_document': self._execute_generate_document,
+
             # PRD-22: Document creation tools (skill-based)
             'create_pdf': self._execute_document_tool,
             'create_docx': self._execute_document_tool,
@@ -297,6 +307,20 @@ class UnifiedToolExecutor:
             )
             logger.info(f"[tool-trace {trace}] Parameters keys={list(parameters.keys()) if isinstance(parameters, dict) else type(parameters).__name__}")
             
+            # PRD-64: Route platform_* actions to PlatformActionExecutor
+            if tool_name.startswith("platform_"):
+                logger.info(f"[tool-trace {trace}] Routing to PlatformActionExecutor: {tool_name}")
+                return await self._execute_platform_action(
+                    tool_name, parameters, workspace_id=workspace_id, trace_id=trace
+                )
+
+            # Workspace tools: proxy to worker via WorkspaceClient
+            if tool_name.startswith("workspace_"):
+                logger.info(f"[tool-trace {trace}] Routing to WorkspaceClient: {tool_name}")
+                return await self._execute_workspace_action(
+                    tool_name, parameters, workspace_id=workspace_id, trace_id=trace
+                )
+
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
             if not tool_spec:
@@ -826,6 +850,330 @@ class UnifiedToolExecutor:
             "result": output
         }
     
+    # ------------------------------------------------------------------
+    # HTTP Request Tool
+    # ------------------------------------------------------------------
+
+    _ALLOWED_HTTP_DOMAINS = {
+        "automatos-ai.railway.internal",
+        "automatos-ai-frontend.railway.internal",
+        "api.automatos.app",
+        "ui.automatos.app",
+        "localhost",
+        "127.0.0.1",
+    }
+
+    async def _execute_http_request(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int,
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute an HTTP request to a whitelisted domain.
+
+        Used by agents to test API endpoints, check health, and verify responses.
+        Domain-restricted to prevent SSRF.
+        """
+        import httpx
+        import time
+        from urllib.parse import urlparse
+
+        url = (parameters.get("url") or "").strip()
+        method = (parameters.get("method") or "GET").upper()
+        headers = parameters.get("headers") or {}
+        body = parameters.get("body") or {}
+        timeout = min(parameters.get("timeout", 30), 120)
+
+        if not url:
+            return {"success": False, "error": "Missing required parameter: url", "tool": tool_name}
+
+        # Validate domain against whitelist
+        try:
+            parsed = urlparse(url)
+            hostname = (parsed.hostname or "").lower()
+            if not hostname:
+                return {"success": False, "error": "Invalid URL: no hostname", "tool": tool_name}
+
+            if hostname not in self._ALLOWED_HTTP_DOMAINS:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Domain '{hostname}' is not whitelisted. "
+                        f"Allowed: {', '.join(sorted(self._ALLOWED_HTTP_DOMAINS))}"
+                    ),
+                    "tool": tool_name,
+                }
+        except Exception as e:
+            return {"success": False, "error": f"Invalid URL: {e}", "tool": tool_name}
+
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+            return {"success": False, "error": f"Invalid HTTP method: {method}", "tool": tool_name}
+
+        logger.info(
+            f"[http_request] {method} {url} agent={agent_id} "
+            f"workspace={workspace_id} headers_keys={list(headers.keys())}"
+        )
+
+        t0 = time.time()
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(timeout),
+                follow_redirects=True,
+                verify=False,  # Internal Railway URLs use self-signed certs
+            ) as client:
+                # Build request kwargs
+                kwargs: Dict[str, Any] = {"headers": headers}
+                if method in {"POST", "PUT", "PATCH"} and body:
+                    kwargs["json"] = body
+
+                resp = await client.request(method, url, **kwargs)
+
+            duration_ms = int((time.time() - t0) * 1000)
+
+            # Parse response body (try JSON first, fall back to text)
+            resp_body: Any
+            content_type = resp.headers.get("content-type", "")
+            if "application/json" in content_type:
+                try:
+                    resp_body = resp.json()
+                except Exception:
+                    resp_body = resp.text[:50_000]
+            else:
+                resp_body = resp.text[:50_000]
+
+            result = {
+                "success": True,
+                "tool": tool_name,
+                "status_code": resp.status_code,
+                "response_headers": dict(resp.headers),
+                "body": resp_body,
+                "duration_ms": duration_ms,
+                "url": url,
+                "method": method,
+            }
+
+            logger.info(
+                f"[http_request] {method} {url} → {resp.status_code} "
+                f"in {duration_ms}ms (body_len={len(str(resp_body))})"
+            )
+            return result
+
+        except httpx.TimeoutException:
+            return {
+                "success": False,
+                "error": f"Request timed out after {timeout}s",
+                "tool": tool_name,
+                "url": url,
+                "duration_ms": int((time.time() - t0) * 1000),
+            }
+        except httpx.ConnectError as e:
+            return {
+                "success": False,
+                "error": f"Connection failed: {e}",
+                "tool": tool_name,
+                "url": url,
+                "duration_ms": int((time.time() - t0) * 1000),
+            }
+        except Exception as e:
+            logger.error(f"[http_request] Error: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "tool": tool_name,
+                "url": url,
+                "duration_ms": int((time.time() - t0) * 1000),
+            }
+
+    # ------------------------------------------------------------------
+    # SSH Execution Tool
+    # ------------------------------------------------------------------
+
+    async def _execute_ssh(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int,
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute a command on a remote server via SSH using paramiko.
+
+        Supports password auth, private key auth, and stored credential lookup.
+        """
+        import io
+        import time
+
+        host = (parameters.get("host") or "").strip()
+        command = (parameters.get("command") or "").strip()
+        username = parameters.get("username", "automatos")
+        port = int(parameters.get("port", 22))
+        password = parameters.get("password")
+        private_key = parameters.get("private_key")
+        credential_id = parameters.get("credential_id")
+        timeout = min(int(parameters.get("timeout", 60)), 300)
+
+        if not host:
+            return {"success": False, "error": "Missing required parameter: host", "tool": tool_name}
+        if not command:
+            return {"success": False, "error": "Missing required parameter: command", "tool": tool_name}
+
+        # Resolve stored credential if provided
+        if credential_id and not password and not private_key:
+            try:
+                from core.models.credentials import StoredCredential
+                cred = self.db.query(StoredCredential).filter(
+                    StoredCredential.id == credential_id,
+                    StoredCredential.workspace_id == workspace_id,
+                ).first()
+                if cred and cred.decrypted_data:
+                    cred_data = cred.decrypted_data
+                    password = cred_data.get("password")
+                    private_key = cred_data.get("private_key")
+                    username = cred_data.get("username", username)
+                    host = cred_data.get("host", host)
+                    port = int(cred_data.get("port", port))
+                    logger.info(f"[ssh_execute] Using stored credential {credential_id}")
+                else:
+                    return {"success": False, "error": f"Credential {credential_id} not found", "tool": tool_name}
+            except Exception as e:
+                logger.warning(f"[ssh_execute] Credential lookup failed: {e}")
+                return {"success": False, "error": f"Credential lookup failed: {e}", "tool": tool_name}
+
+        if not password and not private_key:
+            return {
+                "success": False,
+                "error": "SSH authentication required: provide password, private_key, or credential_id",
+                "tool": tool_name,
+            }
+
+        logger.info(
+            f"[ssh_execute] {username}@{host}:{port} command='{command[:80]}...' "
+            f"agent={agent_id} timeout={timeout}s"
+        )
+
+        t0 = time.time()
+        try:
+            import paramiko
+
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            connect_kwargs = {
+                "hostname": host,
+                "port": port,
+                "username": username,
+                "timeout": min(timeout, 30),  # Connection timeout
+            }
+
+            if private_key:
+                # Parse PEM key
+                key_file = io.StringIO(private_key)
+                try:
+                    pkey = paramiko.RSAKey.from_private_key(key_file)
+                except paramiko.ssh_exception.SSHException:
+                    key_file.seek(0)
+                    pkey = paramiko.Ed25519Key.from_private_key(key_file)
+                connect_kwargs["pkey"] = pkey
+            elif password:
+                connect_kwargs["password"] = password
+
+            ssh.connect(**connect_kwargs)
+
+            # Execute command
+            _stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
+
+            exit_code = stdout.channel.recv_exit_status()
+            stdout_text = stdout.read().decode("utf-8", errors="replace")
+            stderr_text = stderr.read().decode("utf-8", errors="replace")
+
+            ssh.close()
+
+            duration_ms = int((time.time() - t0) * 1000)
+
+            # Truncate large outputs
+            max_output = 500_000
+            if len(stdout_text) > max_output:
+                stdout_text = stdout_text[:max_output] + "\n... (truncated)"
+            if len(stderr_text) > max_output:
+                stderr_text = stderr_text[:max_output] + "\n... (truncated)"
+
+            result = {
+                "success": exit_code == 0,
+                "tool": tool_name,
+                "exit_code": exit_code,
+                "stdout": stdout_text,
+                "stderr": stderr_text,
+                "host": host,
+                "command": command,
+                "duration_ms": duration_ms,
+            }
+
+            logger.info(
+                f"[ssh_execute] {username}@{host} exit_code={exit_code} "
+                f"in {duration_ms}ms stdout_len={len(stdout_text)} stderr_len={len(stderr_text)}"
+            )
+            return result
+
+        except ImportError:
+            return {"success": False, "error": "paramiko package not installed", "tool": tool_name}
+        except paramiko.AuthenticationException:
+            return {
+                "success": False,
+                "error": "SSH authentication failed — check username/password/key",
+                "tool": tool_name,
+                "host": host,
+                "duration_ms": int((time.time() - t0) * 1000),
+            }
+        except paramiko.SSHException as e:
+            return {
+                "success": False,
+                "error": f"SSH error: {e}",
+                "tool": tool_name,
+                "host": host,
+                "duration_ms": int((time.time() - t0) * 1000),
+            }
+        except TimeoutError:
+            return {
+                "success": False,
+                "error": f"SSH command timed out after {timeout}s",
+                "tool": tool_name,
+                "host": host,
+                "duration_ms": int((time.time() - t0) * 1000),
+            }
+        except Exception as e:
+            logger.error(f"[ssh_execute] Error: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "tool": tool_name,
+                "host": host,
+                "duration_ms": int((time.time() - t0) * 1000),
+            }
+
+    async def _execute_generate_document(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int,
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        PRD-63: Generate a polished document via DocumentGenerationService.
+
+        Routes to AgentPlatformTools.execute_tool which handles workspace
+        resolution, template selection, and file generation.
+        """
+        return await self.platform_tools.execute_tool(
+            tool_name="generate_document",
+            parameters=parameters,
+            agent_id=agent_id,
+        )
+
     async def _execute_document_tool(
         self,
         tool_name: str,
@@ -842,19 +1190,27 @@ class UnifiedToolExecutor:
         source_file = parameters.get('source_file')
         output_file = parameters.get('output_file')
         title = parameters.get('title', 'Document')
-        
+
         if not source_file or not output_file:
             return {
                 "success": False,
                 "error": "Missing required parameters: source_file and output_file",
                 "tool": tool_name
             }
-        
-        # Ensure absolute paths
-        if not os.path.isabs(source_file):
-            source_file = os.path.join(self.workspace_dir, source_file)
-        if not os.path.isabs(output_file):
-            output_file = os.path.join(self.workspace_dir, output_file)
+
+        # Resolve paths within workspace (prevent path traversal)
+        workspace = _Path(self.workspace_dir).resolve()
+        resolved_source = (workspace / source_file).resolve()
+        resolved_output = (workspace / output_file).resolve()
+        source_file = str(resolved_source)
+        output_file = str(resolved_output)
+
+        if not resolved_source.is_relative_to(workspace) or not resolved_output.is_relative_to(workspace):
+            return {
+                "success": False,
+                "error": "File paths must be within the workspace directory",
+                "tool": tool_name
+            }
         
         try:
             if tool_name == 'create_pdf':
@@ -1251,6 +1607,137 @@ class UnifiedToolExecutor:
 
         return result
     
+    # ------------------------------------------------------------------
+    # PRD-64: Platform Action Execution
+    # ------------------------------------------------------------------
+
+    @property
+    def _platform_executor(self):
+        """Lazy-load PlatformActionExecutor."""
+        if not hasattr(self, '_platform_executor_instance'):
+            self._platform_executor_instance = None
+        return self._platform_executor_instance
+
+    async def _execute_platform_action(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute a platform action via PlatformActionExecutor."""
+        if not workspace_id:
+            return {
+                "success": False,
+                "error": "workspace_id required for platform actions",
+                "tool": tool_name,
+            }
+
+        try:
+            from modules.tools.discovery.platform_executor import PlatformActionExecutor
+            executor = PlatformActionExecutor(db=self.db, workspace_id=workspace_id)
+            result = await executor.execute(tool_name, parameters)
+            logger.info(
+                f"[tool-trace {trace_id or 'no-trace'}] Platform action {tool_name} "
+                f"success={result.get('success')}"
+            )
+            return result
+        except Exception as e:
+            logger.error(f"[tool-trace {trace_id or 'no-trace'}] Platform action error: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "tool": tool_name}
+
+    async def _execute_workspace_action(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute a workspace tool via WorkspaceClient proxy to the worker."""
+        if not workspace_id:
+            return {
+                "success": False,
+                "error": "workspace_id required for workspace tools",
+                "tool": tool_name,
+            }
+
+        try:
+            from core.workspace_client import WorkspaceClient
+            client = WorkspaceClient(str(workspace_id))
+
+            if tool_name == "workspace_read_file":
+                path = parameters.get("path", "")
+                if not path:
+                    return {"success": False, "error": "path is required", "tool": tool_name}
+                result = await client.read_file(path)
+
+            elif tool_name == "workspace_write_file":
+                path = parameters.get("path", "")
+                content = parameters.get("content")
+                if not path:
+                    return {"success": False, "error": "path is required", "tool": tool_name}
+                if content is None:
+                    return {"success": False, "error": "content is required", "tool": tool_name}
+                result = await client.write_file(path, content)
+
+            elif tool_name == "workspace_list_dir":
+                path = parameters.get("path", ".")
+                result = await client.list_dir(path)
+
+            elif tool_name == "workspace_grep":
+                pattern = parameters.get("pattern", "")
+                if not pattern:
+                    return {"success": False, "error": "pattern is required", "tool": tool_name}
+                result = await client.grep(
+                    pattern=pattern,
+                    path=parameters.get("path", "."),
+                    include=parameters.get("include", ""),
+                    max_results=parameters.get("max_results", 50),
+                )
+
+            elif tool_name == "workspace_exec":
+                command = parameters.get("command", "")
+                if not command:
+                    return {"success": False, "error": "command is required", "tool": tool_name}
+                result = await client.exec_command(
+                    command=command,
+                    cwd=parameters.get("cwd"),
+                    timeout=parameters.get("timeout", 120),
+                )
+
+            elif tool_name == "workspace_git":
+                operation = parameters.get("operation", "")
+                if not operation:
+                    return {"success": False, "error": "operation is required", "tool": tool_name}
+                result = await client.git(
+                    operation=operation,
+                    cwd=parameters.get("cwd"),
+                    args=parameters.get("args", ""),
+                )
+
+            else:
+                return {"success": False, "error": f"Unknown workspace tool: {tool_name}", "tool": tool_name}
+
+            # Worker returned an error
+            if result.get("success") is False or result.get("error"):
+                logger.warning(
+                    f"[tool-trace {trace_id or 'no-trace'}] Workspace action {tool_name} "
+                    f"error: {result.get('error', 'unknown')}"
+                )
+                result.setdefault("success", False)
+                return result
+
+            # Ensure success=True so tool_router recognizes it
+            result["success"] = True
+            logger.info(
+                f"[tool-trace {trace_id or 'no-trace'}] Workspace action {tool_name} completed"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(f"[tool-trace {trace_id or 'no-trace'}] Workspace action error: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "tool": tool_name}
+
     def get_available_tools(self, categories: Optional[list] = None) -> list:
         """
         Get list of available tools, optionally filtered by category.
@@ -1316,10 +1803,15 @@ class UnifiedToolExecutor:
                 "tool": tool_name
             }
         
-        # Ensure absolute path
+        # Ensure absolute path within workspace
         if not os.path.isabs(output_file):
             output_file = os.path.join(self.workspace_dir, output_file)
-        
+        # Validate path stays within workspace
+        workspace = _Path(self.workspace_dir).resolve()
+        resolved_output = _Path(output_file).resolve()
+        if not resolved_output.is_relative_to(workspace):
+            return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
         try:
             # Generate implementation plan content
             plan_content = f"""# Implementation Plan
@@ -1395,10 +1887,13 @@ class UnifiedToolExecutor:
             if not topic:
                 return {"success": False, "error": "Missing required parameter: topic", "tool": tool_name}
             
-            # Ensure absolute path
+            # Ensure absolute path within workspace
             if not os.path.isabs(output_file):
                 output_file = os.path.join(self.workspace_dir, output_file)
-            
+            workspace = _Path(self.workspace_dir).resolve()
+            if not _Path(output_file).resolve().is_relative_to(workspace):
+                return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
             # Generate content based on type
             content = f"""# {topic}
 
@@ -1444,12 +1939,15 @@ This {content_type} covers the topic of {topic}.
             if not input_file or not output_file:
                 return {"success": False, "error": "Missing required parameters: input_file and output_file", "tool": tool_name}
             
-            # Ensure absolute paths
+            # Ensure absolute paths within workspace
             if not os.path.isabs(input_file):
                 input_file = os.path.join(self.workspace_dir, input_file)
             if not os.path.isabs(output_file):
                 output_file = os.path.join(self.workspace_dir, output_file)
-            
+            workspace = _Path(self.workspace_dir).resolve()
+            if not _Path(input_file).resolve().is_relative_to(workspace) or not _Path(output_file).resolve().is_relative_to(workspace):
+                return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
             try:
                 with open(input_file, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -1485,10 +1983,13 @@ This {content_type} covers the topic of {topic}.
             if not title:
                 return {"success": False, "error": "Missing required parameter: title", "tool": tool_name}
             
-            # Ensure absolute path
+            # Ensure absolute path within workspace
             if not os.path.isabs(output_file):
                 output_file = os.path.join(self.workspace_dir, output_file)
-            
+            workspace = _Path(self.workspace_dir).resolve()
+            if not _Path(output_file).resolve().is_relative_to(workspace):
+                return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
             content = f"""# {title}
 
 **Document Type**: {document_type.capitalize()}  
@@ -1534,11 +2035,14 @@ Summary and recommendations.
         Creates analysis reports in the workspace.
         """
         output_file = parameters.get('output_file', f'{tool_name}_report.md')
-        
-        # Ensure absolute path
+
+        # Ensure absolute path within workspace
         if not os.path.isabs(output_file):
             output_file = os.path.join(self.workspace_dir, output_file)
-        
+        workspace = _Path(self.workspace_dir).resolve()
+        if not _Path(output_file).resolve().is_relative_to(workspace):
+            return {"success": False, "error": "File paths must be within the workspace directory", "tool": tool_name}
+
         try:
             if tool_name == 'review_code':
                 target_path = parameters.get('target_path', '')

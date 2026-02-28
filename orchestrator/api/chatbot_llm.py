@@ -18,6 +18,8 @@ from pydantic import BaseModel
 import httpx
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from core.llm import create_llm_manager
 from modules.tools.services.pandas_ai_service import get_pandasai_service
 from config import config
@@ -46,10 +48,7 @@ def get_llm_manager():
             _llm_manager = create_llm_manager(service_name="orchestrator")
         except Exception as e:
             logger.error(f"Failed to initialize LLM manager: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"LLM service not configured: {str(e)}. Check Settings > Orchestrator LLM."
-            )
+            raise HTTPException(status_code=500, detail="Internal server error")
     return _llm_manager
 
 # Legacy function for backward compatibility (if needed)
@@ -253,7 +252,8 @@ TOOLS = get_chatbot_tools()
 @router.get("/models")
 async def list_available_models(
     provider: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     List available LLM models for chatbot selection.
@@ -320,7 +320,8 @@ async def list_available_models(
 @router.post("/query")
 async def process_chatbot_query(
     chat_query: ChatQuery,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Process chatbot query using LLM service with function calling.
@@ -553,4 +554,4 @@ Then provide a helpful, technical response based on the search results."""
         
     except Exception as e:
         logger.error(f"Chatbot query failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

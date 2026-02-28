@@ -88,14 +88,16 @@ PROMPT_MANIFEST: List[Dict[str, Any]] = [
         "description": "Classifies incoming messages to the correct processing pipeline",
         "variables": {"message": "str", "available_routes": "str"},
         "content": (
-            "Classify the following user message into one of the available processing routes.\n\n"
-            "Available routes:\n{available_routes}\n\n"
+            "You are a request router. Select the best agent for the user's request.\n\n"
+            "Available agents:\n{available_routes}\n\n"
             "User message: {message}\n\n"
-            "Respond with a JSON object containing:\n"
-            '- "route": the best matching route name\n'
-            '- "confidence": a number 0.0-1.0\n'
-            '- "reasoning": brief explanation\n\n'
-            "Return ONLY valid JSON, no other text."
+            "Rules:\n"
+            "- Pick a specialized agent when its tools/description clearly match.\n"
+            '- Pick "Auto" (ID 0) for platform queries (list agents, token usage, '
+            "workspace info), general questions, greetings, or when unsure.\n"
+            "- Prefer Auto over a poor-fit specialized agent.\n\n"
+            "Respond with ONLY a JSON object (no markdown, no explanation):\n"
+            '{"agent_id": <int>, "confidence": <float 0-1>}'
         ),
     },
     {

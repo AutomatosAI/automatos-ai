@@ -9,6 +9,7 @@ External memory augmentation using vector stores, knowledge graphs, and semantic
 import asyncio
 import json
 import logging
+import os
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict
@@ -20,20 +21,10 @@ from ..types.memory_types import MemoryItem, MemoryType
 
 logger = logging.getLogger(__name__)
 
-# Optional imports for advanced features
-try:
-    import faiss
-    FAISS_AVAILABLE = True
-except ImportError:
-    FAISS_AVAILABLE = False
-    logger.warning("FAISS not available, vector store augmentation disabled")
-
-try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-    logger.warning("SentenceTransformers not available, using basic text similarity")
+# Local vector/embedding libraries removed — embeddings are API-based via OpenRouter.
+# VectorStoreAugmenter falls through to semantic search (keyword-based) path.
+FAISS_AVAILABLE = False
+SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 class AugmentationStrategy(Enum):
     """Strategies for memory augmentation"""
@@ -59,49 +50,22 @@ class VectorStoreAugmenter:
     
     def __init__(
         self,
-        model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = None,
         index_type: str = "flat",
         max_external_items: int = 10000,
         similarity_threshold: float = 0.7
     ):
-        self.model_name = model_name
+        self.model_name = model_name or os.environ.get("EMBEDDING_MODEL", "")
         self.similarity_threshold = similarity_threshold
         self.max_external_items = max_external_items
         
-        # Initialize sentence transformer if available
-        if SENTENCE_TRANSFORMERS_AVAILABLE:
-            try:
-                self.encoder = SentenceTransformer(model_name)
-                self.embedding_dim = self.encoder.get_sentence_embedding_dimension()
-                self.embeddings_enabled = True
-            except Exception as e:
-                logger.warning(f"Failed to initialize SentenceTransformer: {e}")
-                self.embeddings_enabled = False
-                self.encoder = None
-                self.embedding_dim = self._get_default_dimension()
-        else:
-            self.embeddings_enabled = False
-            self.encoder = None
-            self.embedding_dim = self._get_default_dimension()
-        
-        # Initialize FAISS index if available
-        if FAISS_AVAILABLE and self.embeddings_enabled:
-            try:
-                if index_type == "flat":
-                    self.index = faiss.IndexFlatL2(self.embedding_dim)
-                elif index_type == "ivf":
-                    quantizer = faiss.IndexFlatL2(self.embedding_dim)
-                    self.index = faiss.IndexIVFFlat(quantizer, self.embedding_dim, 100)
-                else:
-                    self.index = faiss.IndexFlatL2(self.embedding_dim)
-                self.vector_search_enabled = True
-            except Exception as e:
-                logger.warning(f"Failed to initialize FAISS index: {e}")
-                self.vector_search_enabled = False
-                self.index = None
-        else:
-            self.vector_search_enabled = False
-            self.index = None
+        # Embeddings are API-based (OpenRouter) — local models removed.
+        # Vector similarity paths fall through to semantic search.
+        self.embeddings_enabled = False
+        self.encoder = None
+        self.embedding_dim = self._get_default_dimension()
+        self.vector_search_enabled = False
+        self.index = None
         
         # Store external knowledge
         self.external_memories: Dict[int, Dict[str, Any]] = {}
@@ -116,7 +80,7 @@ class VectorStoreAugmenter:
             from modules.memory import get_embedding_dimension
             return get_embedding_dimension()
         except Exception:
-            return 1024  # Fallback
+            return 2048  # Fallback
     
     async def add_external_knowledge(
         self,

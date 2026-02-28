@@ -113,8 +113,9 @@ class DatabaseKnowledgeService:
         self,
         name: str,
         credential_id: str,
-        tenant_id: str,
-        description: Optional[str] = None
+        workspace_id=None,
+        description: Optional[str] = None,
+        tenant_id: str = None,  # deprecated, use workspace_id
     ) -> Dict[str, Any]:
         """
         Add a new database as a knowledge source.
@@ -142,22 +143,27 @@ class DatabaseKnowledgeService:
         from core.database.database import SessionLocal
         from sqlalchemy.exc import IntegrityError
         
+        # Resolve workspace_id (prefer new param, fall back to legacy tenant_id)
+        ws_id = workspace_id or tenant_id
+        if not ws_id:
+            raise ValueError("workspace_id is required to add a database source")
+
         db_session = SessionLocal()
         try:
             # Check if source already exists (trim whitespace for comparison)
             name_trimmed = name.strip()
             existing = db_session.query(DatabaseKnowledgeSource).filter(
-                DatabaseKnowledgeSource.tenant_id == tenant_id,
+                DatabaseKnowledgeSource.workspace_id == ws_id,
                 DatabaseKnowledgeSource.name == name_trimmed
             ).first()
-            
+
             # Also check for name with trailing/leading spaces (case-insensitive)
             if not existing:
                 existing = db_session.query(DatabaseKnowledgeSource).filter(
-                    DatabaseKnowledgeSource.tenant_id == tenant_id,
+                    DatabaseKnowledgeSource.workspace_id == ws_id,
                     DatabaseKnowledgeSource.name.ilike(name_trimmed)
                 ).first()
-            
+
             if existing:
                 # Update existing source instead of creating duplicate
                 existing.name = name_trimmed  # Normalize name (remove trailing spaces)
@@ -168,27 +174,28 @@ class DatabaseKnowledgeService:
                 db_session.refresh(existing)
                 logger.info(f"Updated existing database source '{name_trimmed}' (ID: {existing.id})")
                 return existing
-            
+
             db_source = DatabaseKnowledgeSource(
-                tenant_id=tenant_id,
+                workspace_id=ws_id,
+                tenant_id=1,  # legacy column, kept for schema compat
                 name=name_trimmed,  # Use trimmed name
                 description=description,
-                credential_id=credential_id,  # Use credential_id (as per current schema)
+                credential_id=credential_id,
                 dialect='postgresql',  # TODO: detect from credentials
                 schema_metadata={},  # Will be populated during introspection
                 is_active=True
             )
-            
+
             db_session.add(db_source)
             db_session.commit()
             db_session.refresh(db_source)
-            
+
             result = db_source
         except IntegrityError as e:
             db_session.rollback()
             # Check again in case of race condition (with trimmed name)
             existing = db_session.query(DatabaseKnowledgeSource).filter(
-                DatabaseKnowledgeSource.tenant_id == tenant_id,
+                DatabaseKnowledgeSource.workspace_id == ws_id,
                 DatabaseKnowledgeSource.name.ilike(name_trimmed)
             ).first()
             if existing:
@@ -204,7 +211,7 @@ class DatabaseKnowledgeService:
             raise
         finally:
             db_session.close()
-        
+
         return result
     
     async def query_database(
@@ -212,23 +219,32 @@ class DatabaseKnowledgeService:
         source_id: str,
         natural_language_query: str,
         user_id: str,
-        agent_id: Optional[str] = None
+        agent_id: Optional[str] = None,
+        auto_correct: bool = True,
+        max_retries: int = 2,
+        auto_train: bool = True
     ) -> Dict[str, Any]:
         """
         Execute a natural language query against a database source.
-        REAL IMPLEMENTATION - No mock data.
+
+        PRD-61: Enhanced with error self-correction loop, few-shot examples
+        from training store, and confidence scoring.
+
+        Args:
+            auto_correct: If True, retry with error context on failure
+            max_retries: Number of correction attempts
+            auto_train: If True, auto-save successful queries as training examples
         """
         from sqlalchemy import create_engine, text
         from core.credentials.service import CredentialStore
         from core.database.database import SessionLocal
         from core.credentials.encryption import EncryptionService
-        import json
-        
+
         start_time = datetime.utcnow()
-        
+
         # Step 1: Get source
         source = await self._get_source(source_id)
-        
+
         # Step 2: Get and decrypt credentials
         db_session = SessionLocal()
         try:
@@ -236,12 +252,12 @@ class DatabaseKnowledgeService:
             credential = cred_store.get_credential(source.credential_id)
             if not credential:
                 raise ValueError(f"Credential {source.credential_id} not found")
-            
+
             encryption = EncryptionService()
             credentials = encryption.decrypt_dict(credential.encrypted_data)
         finally:
             db_session.close()
-        
+
         # Step 3: Get schema metadata
         schema_metadata = source.schema_metadata or {}
         if not schema_metadata or not schema_metadata.get('tables'):
@@ -252,73 +268,170 @@ class DatabaseKnowledgeService:
                 "data": [],
                 "row_count": 0
             }
-        
-        # Step 4: Generate SQL using NL-to-SQL service
-        nl2sql = NaturalLanguageToSQLService(llm_provider=self.llm_provider)
-        sql, explanation, metadata = nl2sql.generate_sql(
-            question=natural_language_query,
-            schema_metadata=schema_metadata,
-            dialect=source.dialect
-        )
-        
-        sql_result = {
-            'sql': sql,
-            'explanation': explanation,
-            'metadata': metadata
+
+        # PRD-61: Get few-shot examples from training store
+        few_shot_examples = []
+        example_store = self._get_example_store()
+        if example_store:
+            try:
+                workspace_id = str(getattr(source, 'workspace_id', ''))
+                few_shot_examples = await example_store.get_similar_examples(
+                    question=natural_language_query,
+                    database_source_id=str(source_id),
+                    workspace_id=workspace_id,
+                    limit=5
+                )
+            except Exception as e:
+                logger.warning(f"Failed to get few-shot examples: {e}")
+
+        # PRD-61 US-005: Error self-correction loop
+        last_error = None
+        attempted_sqls = []
+        retries = max_retries if auto_correct else 0
+
+        for attempt in range(retries + 1):
+            # Step 4: Generate SQL
+            nl2sql = NaturalLanguageToSQLService(llm_provider=self.llm_provider)
+            sql, explanation, metadata = nl2sql.generate_sql(
+                question=natural_language_query,
+                schema_metadata=schema_metadata,
+                dialect=source.dialect,
+                examples=few_shot_examples if few_shot_examples else None,
+                error_context=last_error,
+                previous_attempts=attempted_sqls if attempted_sqls else None
+            )
+
+            generated_sql = sql
+
+            # Step 5: Validate SQL
+            validator = SQLValidator()
+            try:
+                validated_sql, warnings = validator.validate_and_rewrite(
+                    sql=generated_sql,
+                    schema_metadata=schema_metadata
+                )
+            except Exception as ve:
+                last_error = f"Validation failed: {str(ve)}"
+                attempted_sqls.append({"sql": generated_sql, "error": last_error})
+                if attempt < retries:
+                    logger.info(f"SQL validation failed (attempt {attempt + 1}), retrying: {ve}")
+                    continue
+                return {
+                    "success": False,
+                    "error": last_error,
+                    "sql": generated_sql,
+                    "data": [],
+                    "row_count": 0,
+                    "attempts": attempt + 1,
+                    "corrections": attempted_sqls
+                }
+
+            # Step 6: Execute
+            try:
+                host = credentials.get("host")
+                port = credentials.get("port")
+                database = credentials.get("database")
+                user = credentials.get("user") or credentials.get("username")
+                password = credentials.get("password")
+
+                if source.dialect.lower().startswith('postgres'):
+                    conn_str = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+                elif source.dialect.lower().startswith('mysql'):
+                    conn_str = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+                else:
+                    raise ValueError(f"Unsupported dialect: {source.dialect}")
+
+                engine = create_engine(conn_str, pool_pre_ping=True)
+                with engine.connect() as conn:
+                    result = conn.execute(text(validated_sql))
+                    columns = list(result.keys())
+                    rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+                execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+                # PRD-61: Auto-train on first-try success
+                if auto_train and attempt == 0 and example_store:
+                    try:
+                        workspace_id = str(getattr(source, 'workspace_id', ''))
+                        await example_store.add_example(
+                            question=natural_language_query,
+                            sql=validated_sql,
+                            database_source_id=str(source_id),
+                            workspace_id=workspace_id,
+                            is_verified=False,
+                            verification_source='auto'
+                        )
+                    except Exception as e:
+                        logger.warning(f"Auto-train failed: {e}")
+
+                # PRD-61 US-014: Confidence scoring
+                confidence_data = self._calculate_confidence(
+                    few_shot_examples, validated_sql, warnings
+                )
+
+                return {
+                    "success": True,
+                    "sql": validated_sql,
+                    "data": rows,
+                    "columns": columns,
+                    "row_count": len(rows),
+                    "execution_time_ms": round(execution_time, 2),
+                    "explanation": explanation,
+                    "attempts": attempt + 1,
+                    "corrections": attempted_sqls,
+                    "confidence": confidence_data,
+                }
+
+            except Exception as e:
+                last_error = f"Execution error: {str(e)}"
+                attempted_sqls.append({"sql": validated_sql, "error": last_error})
+                if attempt < retries:
+                    logger.info(f"SQL execution failed (attempt {attempt + 1}), retrying: {e}")
+                    continue
+
+        return {
+            "success": False,
+            "error": last_error,
+            "sql": attempted_sqls[-1]["sql"] if attempted_sqls else None,
+            "data": [],
+            "row_count": 0,
+            "attempts": retries + 1,
+            "corrections": attempted_sqls
         }
-        
-        generated_sql = sql_result.get('sql', '')
-        
-        # Step 5: Validate SQL
-        validator = SQLValidator()
-        validated_sql, warnings = validator.validate_and_rewrite(
-            sql=generated_sql,
-            schema_metadata=schema_metadata
-        )
-        
-        # Step 6: Create database connection and execute
+
+    def _get_example_store(self):
+        """Lazy-load the SQL example store."""
         try:
-            # Build connection string
-            host = credentials.get("host")
-            port = credentials.get("port")
-            database = credentials.get("database")
-            user = credentials.get("user") or credentials.get("username")
-            password = credentials.get("password")
-            
-            if source.dialect.lower().startswith('postgres'):
-                conn_str = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-            elif source.dialect.lower().startswith('mysql'):
-                conn_str = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-            else:
-                raise ValueError(f"Unsupported dialect: {source.dialect}")
-            
-            # Execute query
-            engine = create_engine(conn_str, pool_pre_ping=True)
-            with engine.connect() as conn:
-                result = conn.execute(text(validated_sql))
-                columns = list(result.keys())
-                rows = [dict(zip(columns, row)) for row in result.fetchall()]
-            
-            execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
-            
+            from .training.example_store import SQLExampleStore
+            return SQLExampleStore()
+        except Exception:
+            return None
+
+    def _calculate_confidence(
+        self,
+        similar_examples: list,
+        sql: str,
+        validation_warnings: list
+    ) -> Dict[str, Any]:
+        """Calculate confidence score for the generated query."""
+        try:
+            from .query.confidence import QueryConfidenceScorer, ScoringContext
+            scorer = QueryConfidenceScorer()
+            context = ScoringContext(
+                similar_examples=similar_examples,
+                sql=sql,
+                validation_clean=len(validation_warnings) == 0
+            )
+            result = scorer.score(context)
             return {
-                "success": True,
-                "sql": validated_sql,
-                "data": rows,
-                "columns": columns,
-                "row_count": len(rows),
-                "execution_time_ms": round(execution_time, 2),
-                "explanation": sql_result.get('explanation', '')
+                "score": result.score,
+                "level": result.level,
+                "factors": result.factors,
+                "recommendation": result.recommendation,
             }
-            
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Query execution failed: {str(e)}",
-                "sql": validated_sql,
-                "data": [],
-                "row_count": 0
-            }
+            logger.warning(f"Confidence scoring failed: {e}")
+            return {"score": 0, "level": "unknown", "factors": {}, "recommendation": "review_sql"}
     
     async def update_semantic_layer(
         self,

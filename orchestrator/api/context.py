@@ -24,7 +24,7 @@ from core.auth.dependencies import RequestContext
 # Request models
 class RAGConfigCreate(BaseModel):
     name: str
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model: Optional[str] = None  # Resolved from system_settings at runtime
     chunk_size: int = 1000
     chunk_overlap: int = 200
     retrieval_strategy: str = "similarity"
@@ -79,7 +79,7 @@ async def add_to_context(request: ContextAddRequest):
         
     except Exception as e:
         logger.error(f"Error adding to context: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats")
 async def get_context_stats(
@@ -102,7 +102,7 @@ async def get_context_stats(
         
     except Exception as e:
         logger.error(f"Error getting context stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting context stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/performance")
 async def get_rag_performance_data(
@@ -117,7 +117,7 @@ async def get_rag_performance_data(
         
     except Exception as e:
         logger.error(f"Error getting performance data: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting performance data: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/sources")
 async def get_context_sources(
@@ -130,7 +130,7 @@ async def get_context_sources(
         
     except Exception as e:
         logger.error(f"Error getting context sources: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting context sources: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/queries/recent")
 async def get_recent_queries(
@@ -144,7 +144,7 @@ async def get_recent_queries(
         
     except Exception as e:
         logger.error(f"Error getting recent queries: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting recent queries: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/patterns")
 async def get_context_patterns(
@@ -157,7 +157,7 @@ async def get_context_patterns(
         
     except Exception as e:
         logger.error(f"Error getting context patterns: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting context patterns: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/rag/{config_id}/test")
 async def test_rag_configuration(
@@ -172,12 +172,14 @@ async def test_rag_configuration(
         return result
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"RAG config {config_id} test not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="RAG configuration not found")
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"RAG config {config_id} test runtime error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
-        logger.error(f"Error testing RAG config {config_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error testing RAG config: {str(e)}")
+        logger.error(f"Error testing RAG config {config_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/system/health")
 async def get_context_system_health(
@@ -207,7 +209,7 @@ async def get_context_system_health(
         
     except Exception as e:
         logger.error(f"Error getting system health: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting system health: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/initialize")
 async def initialize_context_system(
@@ -229,7 +231,7 @@ async def initialize_context_system(
             
     except Exception as e:
         logger.error(f"Error initializing context system: {e}")
-        raise HTTPException(status_code=500, detail=f"Error initializing context system: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/optimize")
 async def get_optimization_recommendations(
@@ -349,7 +351,7 @@ async def get_optimization_recommendations(
         
     except Exception as e:
         logger.error(f"Error getting optimization recommendations: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting optimization recommendations: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ===== RAG CONFIGURATION CRUD ENDPOINTS =====
 
@@ -400,7 +402,7 @@ async def create_rag_configuration(
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating RAG configuration: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag/config")
 async def list_rag_configurations(
@@ -426,7 +428,7 @@ async def list_rag_configurations(
         
     except Exception as e:
         logger.error(f"Error listing RAG configurations: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing configurations: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag/config/{config_id}")
 async def get_rag_configuration(
@@ -460,7 +462,7 @@ async def get_rag_configuration(
         raise
     except Exception as e:
         logger.error(f"Error getting RAG configuration: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/rag/config/{config_id}")
 async def update_rag_configuration(
@@ -507,7 +509,7 @@ async def update_rag_configuration(
     except Exception as e:
         db.rollback()
         logger.error(f"Error updating RAG configuration: {e}")
-        raise HTTPException(status_code=500, detail=f"Error updating configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/rag/config/{config_id}")
 async def delete_rag_configuration(
@@ -538,4 +540,4 @@ async def delete_rag_configuration(
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting RAG configuration: {e}")
-        raise HTTPException(status_code=500, detail=f"Error deleting configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

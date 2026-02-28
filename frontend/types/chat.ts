@@ -5,7 +5,7 @@ import type { UIMessage } from '@ai-sdk/react'
 /**
  * Artifact types supported by the system
  */
-export type ArtifactKind = 'code' | 'text' | 'image' | 'sheet'
+export type ArtifactKind = 'code' | 'text' | 'image' | 'sheet' | 'document'
 
 /**
  * Artifact data structure
@@ -259,6 +259,52 @@ export interface ChatResponse {
 export interface StreamData {
   type: 'text-delta' | 'code-delta' | 'artifact' | 'usage' | 'tool-result'
   data: any
+}
+
+// ---------------------------------------------------------------------------
+// US-015: SSE Widget Events
+// ---------------------------------------------------------------------------
+
+/**
+ * A memory record surfaced from the backend memory system.
+ */
+export interface MemorySummary {
+  id: string
+  memory: string
+  tier: 'global' | 'agent' | string
+}
+
+/**
+ * Payload of the `memory-injected` SSE data event.
+ * Emitted when relevant memories are retrieved and injected into the LLM context.
+ */
+export interface MemoryInjectedEvent {
+  memories: MemorySummary[]
+  totalMatched: number
+}
+
+/**
+ * Payload of the `memory-stored` SSE data event.
+ * Emitted after a conversation exchange is persisted to memory.
+ */
+export interface MemoryStoredEvent {
+  memory: {
+    userMessage: string
+    assistantResponse: string
+    chatId?: string
+  }
+  reason: string
+}
+
+/**
+ * Payload of the `workflow-update` SSE data event.
+ * Emitted when a workflow execution changes state.
+ */
+export interface WorkflowUpdateEvent {
+  workflowId: string
+  status: string
+  currentStep?: string
+  progress?: number
 }
 
 /**

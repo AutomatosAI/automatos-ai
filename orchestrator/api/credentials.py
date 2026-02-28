@@ -62,6 +62,12 @@ def get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _check_credential_workspace(cred, ctx: RequestContext) -> None:
+    """Verify credential belongs to the caller's workspace (BOLA protection)."""
+    if hasattr(cred, 'workspace_id') and cred.workspace_id and str(cred.workspace_id) != str(ctx.workspace_id):
+        raise HTTPException(status_code=404, detail="Credential not found")
+
+
 # ============================================================================
 # Credential Type Endpoints
 # ============================================================================
@@ -70,6 +76,7 @@ def get_client_ip(request: Request) -> str:
 async def list_credential_types(
     category: Optional[str] = Query(None, description="Filter by category"),
     active_only: bool = Query(True, description="Only active types"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """
@@ -84,11 +91,12 @@ async def list_credential_types(
     
     except Exception as e:
         logger.error(f"Failed to list credential types: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/types/categories", response_model=List[str])
 async def list_credential_categories(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """Get list of all credential categories"""
@@ -100,12 +108,13 @@ async def list_credential_categories(
     
     except Exception as e:
         logger.error(f"Failed to list categories: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/types/{type_id}", response_model=CredentialTypeResponse)
 async def get_credential_type(
     type_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """Get a specific credential type with full schema definition"""
@@ -122,12 +131,13 @@ async def get_credential_type(
         raise
     except Exception as e:
         logger.error(f"Failed to get credential type {type_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/types/by-name/{type_name}", response_model=CredentialTypeResponse)
 async def get_credential_type_by_name(
     type_name: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """Get credential type by name (e.g., 'openai_api', 'postgres_credentials')"""
@@ -144,7 +154,7 @@ async def get_credential_type_by_name(
         raise
     except Exception as e:
         logger.error(f"Failed to get credential type '{type_name}': {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -156,7 +166,6 @@ async def handle_request(
     credential: CredentialCreate,
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
-    user_id: Optional[str] = Query(None, description="User ID"),
     store: CredentialStore = Depends(get_credential_store),
     db: Session = Depends(get_db)
 ):
@@ -165,18 +174,18 @@ async def handle_request(
     Credential values are immediately encrypted and never stored in plaintext.
     """
     set_request_id(str(uuid.uuid4()))
-    
+
     try:
-        # Debug logging
-        logger.info(f"Received credential: type={type(credential)}, credential_type_id={credential.credential_type_id}")
-        logger.info(f"credential_data type: {type(credential.credential_data)}, value: {credential.credential_data}")
-        
+        logger.info(f"Creating credential: credential_type_id={credential.credential_type_id}")
+
         ip_address = get_client_ip(request)
-        
+        user_id = getattr(ctx.user, "id", None)
+
         created_cred = store.create_credential(
             credential_data=credential,
             user_id=user_id,
-            ip_address=ip_address
+            ip_address=ip_address,
+            workspace_id=ctx.workspace_id,
         )
         
         # Build response (without decrypted values)
@@ -210,14 +219,14 @@ async def handle_request(
         return response
     
     except CredentialValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Credential validation error during creation: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Credential validation failed")
     except EncryptionKeyError as e:
-        raise HTTPException(status_code=500, detail=f"Encryption error: {e}")
+        logger.error(f"Encryption error during credential creation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Encryption error")
     except Exception as e:
-        import traceback
-        logger.error(f"Failed to create credential: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to create credential: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create credential")
 
 
 @router.get("/")
@@ -319,31 +328,38 @@ async def get_item(
     
     except Exception as e:
         logger.error(f"Failed to list credentials: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to list credentials")
 
 
 @router.get("/{credential_id}", response_model=CredentialResponse)
 async def get_credential(
     credential_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """Get credential with decrypted values for editing"""
     set_request_id(str(uuid.uuid4()))
-    
+
+    # Restrict decrypted credential access to admin or API key auth
+    if ctx.auth_type not in ("api_key",) and getattr(ctx.user, "system_role", "user") not in ("admin", "super_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     try:
         cred = store.get_credential(credential_id)
         if not cred:
             raise HTTPException(status_code=404, detail="Credential not found")
-        
+
+        _check_credential_workspace(cred, ctx)
+
         cred_type = store.get_credential_type(cred.credential_type_id)
-        
+
         try:
             decrypted = store.encryption_service.decrypt_dict(cred.encrypted_data)
             field_names = list(decrypted.keys())
         except:
             field_names = []
             decrypted = {}
-        
+
         return CredentialResponse(
             id=cred.id,
             name=cred.name,
@@ -363,14 +379,14 @@ async def get_credential(
             updated_at=cred.updated_at,
             has_credentials=True,
             field_names=field_names,
-            credential_data=decrypted  # Add the decrypted data
+            credential_data=decrypted
         )
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get credential {credential_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/{credential_id}", response_model=CredentialResponse)
@@ -378,15 +394,22 @@ async def update_credential(
     credential_id: int,
     update_data: CredentialUpdate,
     request: Request,
-    user_id: Optional[str] = Query(None),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """Update an existing credential"""
     set_request_id(str(uuid.uuid4()))
-    
+
     try:
+        # Workspace isolation
+        existing = store.get_credential(credential_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Credential not found")
+        _check_credential_workspace(existing, ctx)
+
         ip_address = get_client_ip(request)
-        
+        user_id = getattr(ctx.user, "id", None)
+
         updated_cred = store.update_credential(
             credential_id=credential_id,
             update_data=update_data,
@@ -424,19 +447,21 @@ async def update_credential(
         )
     
     except CredentialNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Credential {credential_id} not found during update: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Credential not found")
     except CredentialValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Credential validation error during update of {credential_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Credential validation failed")
     except Exception as e:
-        logger.error(f"Failed to update credential {credential_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to update credential {credential_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/{credential_id}")
 async def delete_credential(
     credential_id: int,
     request: Request,
-    user_id: Optional[str] = Query(None),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store),
     db: Session = Depends(get_db)
 ):
@@ -444,11 +469,17 @@ async def delete_credential(
     Securely delete a credential
     """
     set_request_id(str(uuid.uuid4()))
-    
+
     try:
+        # Workspace isolation
+        existing = store.get_credential(credential_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Credential not found")
+        _check_credential_workspace(existing, ctx)
+
         ip_address = get_client_ip(request)
-        
-        # Delete the credential
+        user_id = getattr(ctx.user, "id", None)
+
         store.delete_credential(
             credential_id=credential_id,
             user_id=user_id,
@@ -458,10 +489,11 @@ async def delete_credential(
         return {"message": "Credential deleted successfully", "credential_id": credential_id}
     
     except CredentialNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Credential {credential_id} not found during deletion: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Credential not found")
     except Exception as e:
-        logger.error(f"Failed to delete credential {credential_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to delete credential {credential_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -471,7 +503,7 @@ async def delete_credential(
 @router.post("/{credential_id}/test", response_model=CredentialTestResponse)
 async def test_credential(
     credential_id: int,
-    user_id: Optional[str] = Query(None),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """
@@ -479,16 +511,24 @@ async def test_credential(
     Tests database connections, API calls, etc. based on credential type.
     """
     set_request_id(str(uuid.uuid4()))
-    
+
     try:
+        # Workspace isolation
+        existing = store.get_credential(credential_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Credential not found")
+        _check_credential_workspace(existing, ctx)
+
+        user_id = getattr(ctx.user, "id", None)
         result = await store.test_credential(credential_id=credential_id, user_id=user_id)
         return result
     
     except CredentialNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Credential {credential_id} not found during test: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Credential not found")
     except Exception as e:
-        logger.error(f"Failed to test credential {credential_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to test credential {credential_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -499,18 +539,23 @@ async def test_credential(
 async def resolve_credential(
     resolve_request: CredentialResolveRequest,
     request: Request,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """
     Resolve and decrypt a credential for service use.
-    
+
     ⚠️ SECURITY WARNING: Returns decrypted credential values!
-    This endpoint should only be used by internal services.
+    Restricted to admin users and API key authentication only.
     All access is audited.
     """
     set_request_id(str(uuid.uuid4()))
-    
+
     try:
+        # Restrict to admin or API key auth
+        if ctx.auth_type not in ("api_key",) and getattr(ctx.user, "system_role", "user") not in ("admin", "super_admin"):
+            raise HTTPException(status_code=403, detail="Admin access required to resolve credentials")
+
         ip_address = get_client_ip(request)
         
         # Get credential by ID or name
@@ -518,7 +563,7 @@ async def resolve_credential(
             credential = store.get_credential(resolve_request.credential_id)
             if not credential:
                 raise HTTPException(status_code=404, detail="Credential not found")
-        
+
         elif resolve_request.credential_name:
             credential = store.get_credential_by_name(
                 resolve_request.credential_name,
@@ -531,6 +576,10 @@ async def resolve_credential(
                 )
         else:
             raise HTTPException(status_code=400, detail="Must provide credential_id or credential_name")
+
+        # SECURITY: verify resolved credential belongs to the caller's workspace
+        # (OWASP A01:2021 Broken Access Control / BOLA protection)
+        _check_credential_workspace(credential, ctx)
         
         # Decrypt credential data
         decrypted_data = store.get_decrypted_credential(
@@ -554,12 +603,14 @@ async def resolve_credential(
     except HTTPException:
         raise
     except CredentialValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Credential validation error during resolution: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Credential validation failed")
     except EncryptionKeyError as e:
-        raise HTTPException(status_code=500, detail=f"Decryption failed: {e}")
+        logger.error(f"Decryption failed during credential resolution: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Decryption failed")
     except Exception as e:
-        logger.error(f"Failed to resolve credential: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to resolve credential: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to resolve credential")
 
 
 # ============================================================================
@@ -570,14 +621,15 @@ async def resolve_credential(
 async def get_audit_logs(
     credential_id: Optional[int] = Query(None),
     action: Optional[str] = Query(None),
-    user_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """Get credential audit logs with filtering"""
     set_request_id(str(uuid.uuid4()))
-    
+
     try:
+        user_id = ctx.user.id
         logs = store.get_audit_logs(
             credential_id=credential_id,
             action=action,
@@ -606,7 +658,7 @@ async def get_audit_logs(
     
     except Exception as e:
         logger.error(f"Failed to get audit logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -614,35 +666,34 @@ async def get_audit_logs(
 # ============================================================================
 
 @router.get("/health")
-async def credentials_health():
+async def credentials_health(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Health check for credentials service"""
     from core.credentials.encryption import get_encryption_service
-    
+
     try:
         encryption_service = get_encryption_service()
         key_info = encryption_service.get_key_info()
-        
+
         return {
             "status": "healthy",
             "service": "credentials",
             "encryption": {
                 "status": "active",
-                "algorithm": key_info["algorithm"],
-                "key_source": key_info["source"]
             },
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
+        logger.error(f"Credentials health check failed: {e}")
         return {
             "status": "unhealthy",
-            "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
 
 
 @router.post("/cache/clear")
 async def clear_credential_cache(
-    credential_name: Optional[str] = Query(None, description="Specific credential to clear")
+    credential_name: Optional[str] = Query(None, description="Specific credential to clear"),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Clear credential cache (useful after updates)"""
     set_request_id(str(uuid.uuid4()))
@@ -658,11 +709,12 @@ async def clear_credential_cache(
         }
     except Exception as e:
         logger.error(f"Failed to clear cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats")
 async def get_credential_stats(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get credential system statistics"""
@@ -676,20 +728,27 @@ async def get_credential_stats(
             CredentialType.is_active == True
         ).scalar()
         
-        total_creds = db.query(func.count(Credential.id)).scalar()
-        active_creds = db.query(func.count(Credential.id)).filter(
-            Credential.is_active == True
+        total_creds = db.query(func.count(Credential.id)).filter(
+            Credential.workspace_id == ctx.workspace_id
         ).scalar()
-        
+        active_creds = db.query(func.count(Credential.id)).filter(
+            Credential.is_active == True,
+            Credential.workspace_id == ctx.workspace_id
+        ).scalar()
+
         by_env = db.query(
             Credential.environment,
             func.count(Credential.id)
+        ).filter(
+            Credential.workspace_id == ctx.workspace_id
         ).group_by(Credential.environment).all()
-        
+
         by_type = db.query(
             CredentialType.display_name,
             func.count(Credential.id)
-        ).join(Credential).group_by(CredentialType.display_name).all()
+        ).join(Credential).filter(
+            Credential.workspace_id == ctx.workspace_id
+        ).group_by(CredentialType.display_name).all()
         
         return {
             "credential_types": {
@@ -707,5 +766,5 @@ async def get_credential_stats(
     
     except Exception as e:
         logger.error(f"Failed to get credential stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 

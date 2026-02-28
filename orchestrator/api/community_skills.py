@@ -9,6 +9,7 @@ Admin-only endpoints for browsing the skills.sh marketplace.
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,6 +24,24 @@ from core.auth.dependencies import RequestContext
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/skills/community", tags=["community-skills"])
+
+# Security: regex for safe skill names — alphanumeric, hyphens, underscores only.
+# Prevents path traversal via .., /, \, and other special characters.
+_SAFE_SKILL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$')
+
+
+def _validate_skill_name(name: str) -> str:
+    """Validate skill_name against path traversal attacks (OWASP A01:2021 Broken Access Control).
+
+    Only allows alphanumeric characters, hyphens and underscores. Rejects empty
+    names and names containing path separators (.., /, \\, etc.).
+    """
+    if not name or not _SAFE_SKILL_NAME_RE.match(name):
+        raise HTTPException(
+            400,
+            "Invalid skill name: only alphanumeric characters, hyphens, and underscores are allowed",
+        )
+    return name
 
 # skills.sh API base URL
 SKILLS_SH_API = "https://api.skills.sh/v1"
@@ -88,6 +107,8 @@ async def install_skill(
     force = payload.get("force", False)
     if not skill_name:
         raise HTTPException(400, "skill_name is required")
+    # SECURITY: reject path traversal characters in skill_name
+    _validate_skill_name(skill_name)
 
     import requests
 
@@ -100,7 +121,8 @@ async def install_skill(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(502, f"Failed to fetch from skills.sh: {str(e)}")
+        logger.error("Failed to fetch from skills.sh: %s", e)
+        raise HTTPException(502, "Failed to fetch from skills.sh")
 
     skill_content = skill_data.get("content", skill_data.get("skill_md", ""))
     if not skill_content:
@@ -208,6 +230,9 @@ async def uninstall_skill(
     """Uninstall a workspace skill."""
     if ctx.user.role not in ("admin", "owner"):
         raise HTTPException(403, "Only admin users can uninstall skills")
+
+    # SECURITY: reject path traversal characters in skill_name
+    _validate_skill_name(skill_name)
 
     workspace_dir = Path(os.path.expanduser("~/.automatos/skills")) / str(ctx.workspace_id)
     skill_dir = workspace_dir / skill_name

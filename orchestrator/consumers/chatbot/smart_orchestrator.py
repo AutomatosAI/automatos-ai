@@ -88,7 +88,8 @@ class SmartChatOrchestrator:
         self,
         workspace_id: str,
         agent_id: Optional[int] = None,
-        agent_name: Optional[str] = None
+        agent_name: Optional[str] = None,
+        widget_mode: bool = False
     ):
         """
         Initialize the orchestrator.
@@ -97,10 +98,12 @@ class SmartChatOrchestrator:
             workspace_id: Workspace ID for memory scoping
             agent_id: Agent ID for memory scoping
             agent_name: Agent name for personalization
+            widget_mode: When True, restrict memory to agent-only (no global workspace memories)
         """
         self.workspace_id = workspace_id
         self.agent_id = agent_id
         self.agent_name = agent_name or "Automatos"
+        self.widget_mode = widget_mode
 
         # Components
         self.classifier = get_intent_classifier()
@@ -156,7 +159,8 @@ class SmartChatOrchestrator:
             memory_result = await self.memory_manager.retrieve_memories(
                 workspace_id=self.workspace_id,
                 agent_id=self.agent_id,
-                query=latest_query
+                query=latest_query,
+                widget_mode=self.widget_mode
             )
             self.state.messages_since_memory_fetch = 0
             self.state.memory_fetched_at = time.time()
@@ -167,22 +171,40 @@ class SmartChatOrchestrator:
         else:
             self.state.messages_since_memory_fetch += 1
 
+        # US-015: Store last memory result so callers can emit SSE events
+        self._last_memory_result = memory_result
+
         # 3. Route Tools (if needed)
         tool_result = None
         if intent_result.requires_tools and available_tools:
-            tool_result = self.tool_router.route(
+            tool_result = await self.tool_router.route(
                 query=latest_query,
                 available_tools=available_tools,
                 conversation_context=messages
             )
         else:
-            tool_result = ToolRoutingResult(
-                should_include_tools=False,
-                filtered_tools=[],
-                priority_tools=[],
-                tool_choice="none",
-                reasoning="No tools needed for this intent"
-            )
+            # Even when intent says "no tools", always include platform_* tools
+            # so Auto can answer platform self-awareness queries (PRD-64)
+            platform_tools = [
+                t for t in (available_tools or [])
+                if t.get("function", {}).get("name", "").startswith("platform_")
+            ]
+            if platform_tools:
+                tool_result = ToolRoutingResult(
+                    should_include_tools=True,
+                    filtered_tools=platform_tools,
+                    priority_tools=[],
+                    tool_choice="auto",
+                    reasoning="Platform tools always available for self-awareness"
+                )
+            else:
+                tool_result = ToolRoutingResult(
+                    should_include_tools=False,
+                    filtered_tools=[],
+                    priority_tools=[],
+                    tool_choice="none",
+                    reasoning="No tools needed for this intent"
+                )
 
         # 4. Build System Prompt
         memory_strings = []
@@ -240,7 +262,7 @@ class SmartChatOrchestrator:
             user_name=self.state.user_name,
             intent=intent_result.primary_intent,
             intent_confidence=intent_result.confidence,
-            requires_tools=intent_result.requires_tools,
+            requires_tools=tool_result.should_include_tools or intent_result.requires_tools,
             requires_memory=intent_result.requires_memory,
             preparation_time_ms=preparation_time
         )
@@ -280,11 +302,20 @@ class SmartChatOrchestrator:
         return ""
 
     def _convert_messages(self, messages: List[Dict]) -> List[Dict[str, str]]:
-        """Convert messages to simple role/content format for LLM."""
+        """Convert messages to simple role/content format for LLM.
+
+        Filters out system-role messages since the orchestrator builds
+        its own system prompt via personality.py.
+        """
         converted = []
 
         for msg in messages:
             role = msg.get("role", "user")
+
+            # Skip system messages — we build our own system prompt
+            if role == "system":
+                continue
+
             content = ""
 
             # Handle parts format
@@ -326,7 +357,8 @@ class SmartChatOrchestrator:
             agent_id=self.agent_id,
             user_message=user_message,
             assistant_response=assistant_response,
-            chat_id=chat_id
+            chat_id=chat_id,
+            widget_mode=self.widget_mode
         )
 
     def get_user_name(self) -> Optional[str]:

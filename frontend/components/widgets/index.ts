@@ -48,6 +48,9 @@ export { WorkflowWidget, WorkflowWidgetDef } from './WorkflowWidget'
 export { MemoryWidget, MemoryWidgetDef } from './MemoryWidget'
 export { FileWidget, FileWidgetDef } from './FileWidget'
 
+// PRD-66: Coding Canvas Widget (workspace file browser + Monaco editor)
+export { CodingCanvasWidget, CodingCanvasWidgetDef } from './CodingCanvasWidget'
+
 // Re-export store selectors for convenience
 export {
   useWorkspaceStore,

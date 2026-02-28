@@ -75,7 +75,7 @@ class Config:
     # Set CORS_ALLOW_ORIGINS in Railway to include your frontend domain
     # For Railway: https://automotas-ai-frontend-production.up.railway.app
     # For custom domain: https://ui.automatos.app
-    _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,https://automotas-ai-frontend-production.up.railway.app")
+    _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
     CORS_ALLOW_ORIGINS: str = ",".join([origin.strip() for origin in _cors_origins.split(",") if origin.strip()])
     
     # =============================================================================
@@ -149,11 +149,29 @@ class Config:
     GITHUB_DEFAULT_BRANCH: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
 
     # =============================================================================
+    # TASK RUNNER (PRD-56: Infrastructure Scaling & Physical Workspaces)
+    # =============================================================================
+    TASK_RUNNER_BACKEND: str = os.getenv("TASK_RUNNER_BACKEND", "local")  # local, queued, kubernetes
+    WORKSPACE_VOLUME_PATH: str = os.getenv("WORKSPACE_VOLUME_PATH", "/workspaces")
+    WORKSPACE_DEFAULT_QUOTA_GB: int = int(os.getenv("WORKSPACE_DEFAULT_QUOTA_GB", "5"))
+    WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", "3"))
+    WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
+    WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
+
+    # =============================================================================
+    # RAILWAY API (Log retrieval for agents)
+    # =============================================================================
+    RAILWAY_API_TOKEN: str = os.getenv("RAILWAY_API_TOKEN", "")
+    RAILWAY_PROJECT_ID: str = os.getenv("RAILWAY_PROJECT_ID", "")
+    RAILWAY_ENVIRONMENT_ID: str = os.getenv("RAILWAY_ENVIRONMENT_ID", "")
+
+    # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
     HEARTBEAT_ENABLED: bool = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
+    SEMANTIC_TOOL_ROUTING: bool = os.getenv("SEMANTIC_TOOL_ROUTING", "true").lower() == "true"
 
     # =============================================================================
     # AWS S3 VECTORS (PRD-42: Cloud Document Sync)
@@ -166,7 +184,7 @@ class Config:
     S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
     S3_VECTORS_BUCKET: str = os.getenv("S3_VECTORS_BUCKET")  # e.g., "automatos-ai" or "automatos-vectors-{workspace_id}"
     S3_VECTORS_INDEX_NAME: str = os.getenv("S3_VECTORS_INDEX_NAME", "documents-index")
-    S3_VECTORS_DIMENSION: int = int(os.getenv("S3_VECTORS_DIMENSION", "1024"))
+    S3_VECTORS_DIMENSION: int = int(os.getenv("S3_VECTORS_DIMENSION", "2048"))
     S3_VECTORS_METRIC: str = os.getenv("S3_VECTORS_METRIC", "cosine")
     
     # =============================================================================

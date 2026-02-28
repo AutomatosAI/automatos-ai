@@ -3,39 +3,62 @@ Chat API
 ========
 PRD-27: Chat endpoints for streaming conversations, history, and voting.
 
-Follows standard API pattern with require_api_key dependency.
+Secured with hybrid auth (Clerk JWT + API key).
 """
 
-import os
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
+from sqlalchemy import text, func, or_
 from pydantic import BaseModel
 
 from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService
+from consumers.chatbot.auto import AutoBrain, Action
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.chatbot import ChatbotIngestor
+from core.session_queue import get_session_queue
 
 logger = logging.getLogger(__name__)
 
-# Standard API key auth (matches all other APIs)
-# For chat endpoint, API key is optional if not set in env (user-facing feature)
-def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    # If API_KEY is not set in env, allow requests (for user-facing chat)
-    if not required:
-        return True
-    # If API_KEY is set, require it
-    if x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
+
+# ---------------------------------------------------------------------------
+# PRD-67: CTO Agent lookup (cached in-process)
+# ---------------------------------------------------------------------------
+_CTO_CACHE_SENTINEL = object()
+_cto_agent_id_cache: dict = {}  # {"id": int|None|SENTINEL, "ts": float}
+_CTO_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cto_agent_id(db: Session) -> Optional[int]:
+    """Get the CTO Agent's ID (cached). Returns None if not seeded."""
+    import time
+
+    cached = _cto_agent_id_cache.get("id", _CTO_CACHE_SENTINEL)
+    ts = _cto_agent_id_cache.get("ts", 0)
+    if cached is not _CTO_CACHE_SENTINEL and (time.time() - ts) < _CTO_CACHE_TTL:
+        return cached  # may be None — means CTO not seeded yet, respect TTL
+
+    try:
+        from core.models.core import Agent
+        row = db.query(Agent.id).filter(
+            Agent.slug == "auto-cto",
+            Agent.is_system_agent.is_(True),
+            Agent.status == "active",
+        ).first()
+        agent_id = row[0] if row else None
+        _cto_agent_id_cache["id"] = agent_id
+        _cto_agent_id_cache["ts"] = time.time()
+        return agent_id
+    except Exception:
+        logger.debug("CTO Agent lookup failed", exc_info=True)
+        return None
+
 
 router = APIRouter(prefix="/api/chat", tags=["💬 Chat"])
 
@@ -153,7 +176,6 @@ def get_default_agent_id(db: Session, workspace_id) -> int:
 @router.post("")
 async def stream_chat(
     request: ChatRequest,
-    _x_api_key: bool = Depends(require_api_key),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -261,38 +283,83 @@ async def stream_chat(
 
     routing_decision = None
     routing_request_id = None
+    use_system_llm = False  # True = use orchestrator LLM settings, not agent's model
+    complexity_assessment = None
+
+    # PRD-67: Detect admin → default to CTO Agent
+    _user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
+    _is_admin = _user_role in ("admin", "super_admin")
+    logger.info(f"[PRD-67] user_role={_user_role!r}, is_admin={_is_admin}, user_id={getattr(ctx.user, 'id', '?')}")
 
     if request.agentId:
-        # User explicitly selected an agent — skip routing, use directly
+        # User explicitly selected an agent — skip Auto, use directly
         effective_agent_id = request.agentId
-        logger.info(f"[chat] User override: agent_id={effective_agent_id}")
+        logger.info(f"[chat] Direct mode: agent_id={effective_agent_id}")
+    elif _is_admin and (cto_id := _get_cto_agent_id(db)):
+        # PRD-67: Admin without explicit agent → CTO Agent
+        effective_agent_id = cto_id
+        use_system_llm = True
+        logger.info(f"[Auto] CTO mode: admin detected, agent_id={cto_id}")
     else:
-        # No agent selected — use universal router to auto-select
-        try:
-            ingestor = ChatbotIngestor()
-            envelope = ingestor.ingest(
-                message=message_text,
-                agent_id=None,  # no override — let router decide
-                session_id=chat_id,
-                request_context=ctx,
-            )
-            routing_request_id = str(envelope.id)
-            universal_router = UniversalRouter(db, cache=get_routing_cache())
-            routing_decision = await universal_router.route(envelope)
-        except Exception:
-            logger.exception("[chat] Router failed — falling back to default agent")
-            routing_decision = None
+        # --- Auto mode: the brain decides ---
+        auto_brain = AutoBrain(db, str(ctx.workspace_id))
+        complexity_assessment = await auto_brain.assess(message_text, len(message_history))
+        logger.info(
+            f"[Auto] Complexity={complexity_assessment.complexity.value} "
+            f"action={complexity_assessment.action.value} "
+            f"tools={complexity_assessment.matched_tools} "
+            f"reasoning={complexity_assessment.reasoning}"
+        )
 
-        if routing_decision is not None and routing_decision.route_type == "agent" and routing_decision.agent_id is not None:
-            effective_agent_id = routing_decision.agent_id
+        if complexity_assessment.action == Action.RESPOND:
+            # Auto handles directly — no routing, no delegation.
+            # Simple greetings, conversational messages, memory recalls.
+            effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+            use_system_llm = True
             logger.info(
-                f"[chat] Router selected agent_id={effective_agent_id} "
-                f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
+                f"[Auto] Direct response (complexity={complexity_assessment.complexity.value}): "
+                f"agent_id={effective_agent_id} with orchestrator LLM"
             )
         else:
-            # Router returned None or non-agent route — fall back to default
-            effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
-            logger.info(f"[chat] Router returned no agent route; using default agent_id={effective_agent_id} for workspace={ctx.workspace_id}")
+            # DELEGATE — Universal Router picks the right specialized agent.
+            # AutoBrain already filtered greetings/platform/memory → RESPOND.
+            # Everything reaching here needs a specialized agent.
+            try:
+                ingestor = ChatbotIngestor()
+                envelope = ingestor.ingest(
+                    message=message_text,
+                    agent_id=None,  # no override — let router decide
+                    session_id=chat_id,
+                    request_context=ctx,
+                )
+                routing_request_id = str(envelope.id)
+                universal_router = UniversalRouter(db, cache=get_routing_cache())
+                routing_decision = await universal_router.route(envelope)
+            except Exception:
+                logger.exception("[chat] Router failed — falling back to default agent")
+                routing_decision = None
+
+            if routing_decision is not None and routing_decision.route_type == "agent" and routing_decision.agent_id is not None:
+                effective_agent_id = routing_decision.agent_id
+                logger.info(
+                    f"[Auto] Router → agent_id={effective_agent_id} "
+                    f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
+                )
+            elif routing_decision is not None and routing_decision.route_type == "orchestrate":
+                # LLM explicitly chose Auto / orchestrate — use default agent with system LLM
+                effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+                use_system_llm = True
+                logger.info(
+                    f"[Auto] Router → orchestrate "
+                    f"(confidence={routing_decision.confidence:.2f}, "
+                    f"reasoning={routing_decision.reasoning}): "
+                    f"agent_id={effective_agent_id} with orchestrator LLM"
+                )
+            else:
+                # Router couldn't decide — fall back to default agent
+                effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+                use_system_llm = True
+                logger.info(f"[Auto] Router returned no match — default agent_id={effective_agent_id}")
 
     # Build response headers (include routing metadata when available)
     response_headers = {
@@ -305,20 +372,42 @@ async def stream_chat(
         response_headers["x-routing-agent-id"] = str(routing_decision.agent_id or "")
         response_headers["x-routing-confidence"] = f"{routing_decision.confidence:.2f}"
         response_headers["x-routing-type"] = routing_decision.route_type
-        response_headers["x-routing-reasoning"] = routing_decision.reasoning[:200]
+        response_headers["x-routing-reasoning"] = routing_decision.reasoning[:200].encode("ascii", "replace").decode("ascii")
         if routing_request_id:
             response_headers["x-routing-request-id"] = routing_request_id
+    if complexity_assessment is not None:
+        response_headers["x-auto-complexity"] = complexity_assessment.complexity.value
+        response_headers["x-auto-action"] = complexity_assessment.action.value
+        response_headers["x-auto-confidence"] = f"{complexity_assessment.confidence:.2f}"
 
     # PRD: Unified Agent-Chat System
     # Use agent-based streaming for all resolved agents
     logger.info(f"Using agent-based streaming with agent_id={effective_agent_id}")
+
+    # Session-scoped queue: serialize concurrent requests for the same chat
+    session_key = f"{ctx.workspace_id}:{chat_id}"
+    session_queue = get_session_queue()
+
+    # Skip Composio tool loading for simple conversational messages (RESPOND)
+    _skip_composio = (
+        complexity_assessment is not None
+        and complexity_assessment.action == Action.RESPOND
+    )
+
+    async def _guarded_stream():
+        async with session_queue.acquire(session_key):
+            async for chunk in streaming_service.stream_response_with_agent(
+                chat_id=chat_id,
+                messages=message_history,
+                agent_id=effective_agent_id,
+                user_id=user_id,
+                use_system_llm=use_system_llm,
+                skip_composio=_skip_composio,
+            ):
+                yield chunk
+
     return StreamingResponse(
-        streaming_service.stream_response_with_agent(
-            chat_id=chat_id,
-            messages=message_history,
-            agent_id=effective_agent_id,
-            user_id=user_id
-        ),
+        _guarded_stream(),
         media_type="text/plain; charset=utf-8",
         headers=response_headers,
     )
@@ -327,6 +416,7 @@ async def stream_chat(
 @router.get("/history")
 async def get_chat_history(
     limit: int = 20,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get chat history for the current user"""
@@ -352,6 +442,7 @@ async def get_chat_history(
 @router.get("/{chat_id}")
 async def get_chat(
     chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get a specific chat"""
@@ -379,6 +470,7 @@ async def get_chat(
 @router.get("/{chat_id}/messages")
 async def get_chat_messages(
     chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get all messages for a chat"""
@@ -410,6 +502,7 @@ async def get_chat_messages(
 @router.delete("/{chat_id}")
 async def delete_chat(
     chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Delete a chat"""
@@ -432,6 +525,7 @@ async def delete_chat(
 async def update_chat(
     chat_id: str,
     request: UpdateTitleRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Update chat title"""
@@ -453,6 +547,7 @@ async def update_chat(
 @router.patch("/vote")
 async def vote_message(
     request: VoteRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Vote on a message"""
@@ -480,12 +575,13 @@ async def vote_message(
 @router.get("/agents")
 async def get_available_agents(
     status: str = "active",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get list of available agents for chat selection."""
     from core.models import Agent
     
-    query = db.query(Agent).filter(Agent.status == status)
+    query = db.query(Agent).filter(Agent.status == status, Agent.workspace_id == ctx.workspace_id)
     agents = query.all()
     
     return {
@@ -515,6 +611,7 @@ class SwitchAgentRequest(BaseModel):
 async def switch_agent(
     chat_id: str,
     request: SwitchAgentRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Switch to a different agent mid-conversation."""
@@ -532,9 +629,19 @@ async def switch_agent(
     if chat.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    new_agent = db.query(Agent).filter(Agent.id == request.newAgentId).first()
+    # PRD-67: Allow switching to system agents (CTO) if user has the required role
+    new_agent = db.query(Agent).filter(
+        Agent.id == request.newAgentId,
+        or_(Agent.workspace_id == ctx.workspace_id, Agent.is_system_agent.is_(True)),
+    ).first()
     if not new_agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    # Verify role access for system agents
+    if new_agent.is_system_agent and new_agent.required_role:
+        _switch_user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
+        _switch_hierarchy = {"super_admin": {"super_admin", "admin"}, "admin": {"admin"}}
+        if new_agent.required_role not in _switch_hierarchy.get(_switch_user_role, set()):
+            raise HTTPException(status_code=403, detail="Insufficient role for this agent")
     
     old_agent_id = getattr(chat, 'current_agent_id', None) or 1
     

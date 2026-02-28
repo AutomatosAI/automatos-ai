@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Plus, Trash2, Zap, CheckCircle2, XCircle, MessageSquare } from 'lucide-react'
+import { apiClient } from '@/lib/api-client'
 
 interface ChannelConnection {
   id: string
@@ -142,10 +143,12 @@ export function ChannelsSettingsTab() {
   const loadChannels = async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/channels')
-      const data = await res.json()
-      setChannels(data.channels || data || [])
-    } catch {} finally {
+      const data = await apiClient.request<ChannelConnection[] | { channels: ChannelConnection[] }>('/api/channels')
+      const list = Array.isArray(data) ? data : (data as any).channels || []
+      setChannels(list)
+    } catch {
+      setChannels([])
+    } finally {
       setLoading(false)
     }
   }
@@ -157,15 +160,15 @@ export function ChannelsSettingsTab() {
     if (firstField && !config[firstField]) return
     setConnecting(platform)
     try {
-      const res = await fetch('/api/channels', {
+      await apiClient.request('/api/channels', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform, config })
+        body: { platform, config } as any,
       })
-      if (res.ok) {
-        await loadChannels()
-        setNewConfigs(prev => ({ ...prev, [platform]: {} }))
-      }
+      await loadChannels()
+      setNewConfigs(prev => ({ ...prev, [platform]: {} }))
+    } catch (err) {
+      console.error('[Channels] connect error:', err)
+      alert(err instanceof Error ? err.message : 'Failed to connect channel')
     } finally {
       setConnecting(null)
     }
@@ -173,16 +176,19 @@ export function ChannelsSettingsTab() {
 
   const disconnectChannel = async (channelId: string) => {
     if (!confirm('Disconnect this channel?')) return
-    await fetch(`/api/channels/${channelId}`, { method: 'DELETE' })
+    try {
+      await apiClient.request(`/api/channels/${channelId}`, { method: 'DELETE' })
+    } catch {}
     await loadChannels()
   }
 
   const testChannel = async (channelId: string) => {
     setTesting(channelId)
     try {
-      const res = await fetch(`/api/channels/${channelId}/test`, { method: 'POST' })
-      const data = await res.json()
+      const data = await apiClient.request<{ status: string; error?: string }>(`/api/channels/${channelId}/test`, { method: 'POST' })
       alert(data.status === 'ok' ? 'Connection successful!' : `Test failed: ${data.error || 'Unknown error'}`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Test failed')
     } finally {
       setTesting(null)
     }

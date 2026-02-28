@@ -37,7 +37,7 @@ from openai import OpenAI  # For sync LLM calls only (not embeddings)
 from core.math import InformationTheory, VectorOperations, OptimizationAlgorithms
 
 # Use centralized embedding manager
-from core.llm.embedding_manager import EmbeddingManager
+
 
 
 def _get_system_dimension() -> int:
@@ -56,7 +56,7 @@ def _get_system_dimension() -> int:
             db.close()
     except Exception:
         pass
-    return 1024  # Fallback if DB unavailable
+    return 2048  # Fallback if DB unavailable
 
 # PromptType and PromptTemplate defined locally (only consumer)
 from enum import Enum
@@ -85,30 +85,6 @@ class PromptTemplate:
     required_context_types: List[str] = None
     success_rate: float = 0.0
     usage_count: int = 0
-
-# Backward compatibility aliases
-class EmbeddingConfig:
-    """DEPRECATED: Use EmbeddingManager from core.llm"""
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", model_type: str = "sentence_transformer", 
-                 dimension: Optional[int] = None, batch_size: int = 32, normalize: bool = True, cache_embeddings: bool = True):
-        self.model_name = model_name
-        self.model_type = model_type
-        self.dimension = dimension or _get_system_dimension()
-        self.batch_size = batch_size
-        self.normalize = normalize
-        self.cache_embeddings = cache_embeddings
-
-class EmbeddingGenerator:
-    """DEPRECATED: Use EmbeddingManager from core.llm instead"""
-    def __init__(self, config: EmbeddingConfig = None):
-        self.manager = EmbeddingManager()
-        self.config = config or EmbeddingConfig()
-    
-    def generate_embedding(self, text: str) -> List[float]:
-        return self.manager.generate_embedding(text)
-    
-    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        return [self.manager.generate_embedding(t) for t in texts]
 
 logger = logging.getLogger(__name__)
 

@@ -279,6 +279,18 @@ export function useChat({
                   })
                   if (onData) onData({ type: 'data-usage', data: data.data })
                 }
+                // PRD-67: Forward agent-info (including CTO mode) to onData
+                else if (data.type === 'agent-info' && data.agent) {
+                  if (onData) onData({ type: 'agent-info', data: data.agent })
+                }
+                // US-015: Widget SSE events — forward to onData for workspace store
+                else if (data.type === 'memory-injected' && data.data) {
+                  if (onData) onData({ type: 'memory-injected', data: data.data })
+                } else if (data.type === 'memory-stored' && data.data) {
+                  if (onData) onData({ type: 'memory-stored', data: data.data })
+                } else if (data.type === 'workflow-update' && data.data) {
+                  if (onData) onData({ type: 'workflow-update', data: data.data })
+                }
               } catch (e) {
                 // Skip parse errors
               }

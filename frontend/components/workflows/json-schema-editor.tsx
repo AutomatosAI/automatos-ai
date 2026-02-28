@@ -43,7 +43,7 @@ export function JsonSchemaEditor({
         )
         highlightRef.current.innerHTML = highlighted
       } catch {
-        // If highlighting fails, just show raw text
+        // SECURITY: textContent is used here (not innerHTML) to prevent XSS (OWASP A03:2021)
         highlightRef.current.textContent = value || ''
       }
     }

@@ -80,7 +80,7 @@ COPY . .
 RUN npm run build
 
 # =============================================================================
-# Production Stage - Optimized
+# Production Stage - Optimized (Next.js standalone)
 # =============================================================================
 FROM node:20-alpine as production
 
@@ -89,20 +89,14 @@ WORKDIR /app
 # Install curl for healthcheck
 RUN apk add --no-cache curl
 
-# Copy package files and install production dependencies only
-COPY package*.json ./
-RUN npm ci --legacy-peer-deps --only=production && npm cache clean --force
-
-# Copy built application from builder
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/next.config.js ./next.config.js
-COPY --from=builder /app/package.json ./package.json
-
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001 && \
-    chown -R nextjs:nodejs /app
+    adduser -S nextjs -u 1001
+
+# Copy standalone build (includes only traced dependencies — no full node_modules)
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
 
@@ -113,7 +107,9 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:3000 || exit 1
 
-# Production server
+# Standalone server uses server.js directly — no npm needed
 ENV NODE_ENV=production
-CMD ["npm", "start"]
+ENV HOSTNAME="0.0.0.0"
+ENV PORT=3000
+CMD ["node", "server.js"]
 

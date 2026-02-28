@@ -33,6 +33,23 @@ export default function GeneralSettingsTab({
   const [formData, setFormData] = useState<Record<string, string>>({})
 
   const MODEL_DIMENSIONS: Record<string, Record<string, number>> = {
+    openrouter: {
+      'qwen/qwen3-embedding-8b': 4096,
+      'qwen/qwen3-embedding-4b': 2560,
+      'google/gemini-embedding-001': 3072,
+      'openai/text-embedding-3-large': 3072,
+      'openai/text-embedding-3-small': 1536,
+      'openai/text-embedding-ada-002': 1536,
+      'mistralai/mistral-embed-2312': 1024,
+      'mistralai/codestral-embed-2505': 1024,
+      'baai/bge-m3': 1024,
+      'baai/bge-large-en-v1.5': 1024,
+      'intfloat/e5-large-v2': 1024,
+      'intfloat/multilingual-e5-large': 1024,
+      'sentence-transformers/all-mpnet-base-v2': 768,
+      'sentence-transformers/all-minilm-l6-v2': 384,
+      'thenlper/gte-large': 1024,
+    },
     openai: {
       'text-embedding-3-small': 1536,
       'text-embedding-3-large': 3072,
@@ -199,16 +216,19 @@ export default function GeneralSettingsTab({
                   <SelectValue placeholder="Select embedding provider" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="openrouter">OpenRouter (20+ Models, Parallel Batch)</SelectItem>
+                  <SelectItem value="openai">OpenAI (Direct)</SelectItem>
                   <SelectItem value="google">Google</SelectItem>
                   <SelectItem value="cohere">Cohere</SelectItem>
-                  <SelectItem value="huggingface_local">HuggingFace Local (FREE) ⭐</SelectItem>
+                  <SelectItem value="huggingface_local">HuggingFace Local (FREE, Slow CPU)</SelectItem>
                   <SelectItem value="huggingface_api">HuggingFace API</SelectItem>
                   <SelectItem value="disabled">Disabled (Deterministic Fallback)</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Choose your embedding provider. HuggingFace Local runs models on your server (no API costs).
+                {formData.embedding_provider === 'openrouter'
+                  ? 'OpenRouter: 20+ models via single API key. Parallel batch processing. Uses your OPENROUTER_API_KEY.'
+                  : 'Choose your embedding provider. OpenRouter recommended for speed + quality.'}
               </p>
             </div>
 
@@ -232,6 +252,25 @@ export default function GeneralSettingsTab({
                   } />
                 </SelectTrigger>
                 <SelectContent>
+                  {formData.embedding_provider === 'openrouter' && (
+                    <>
+                      <SelectItem value="qwen/qwen3-embedding-8b">Qwen3 8B (4096d, 32K ctx, $0.01/M) — Best Value</SelectItem>
+                      <SelectItem value="qwen/qwen3-embedding-4b">Qwen3 4B (2560d, 32K ctx, $0.02/M) — Lighter</SelectItem>
+                      <SelectItem value="google/gemini-embedding-001">Gemini Embedding (3072d, 20K ctx, $0.15/M) — #1 MTEB</SelectItem>
+                      <SelectItem value="openai/text-embedding-3-large">OpenAI Large (3072d, 8K ctx, $0.13/M)</SelectItem>
+                      <SelectItem value="openai/text-embedding-3-small">OpenAI Small (1536d, 8K ctx, $0.02/M)</SelectItem>
+                      <SelectItem value="mistralai/mistral-embed-2312">Mistral Embed (1024d, 8K ctx, $0.10/M)</SelectItem>
+                      <SelectItem value="mistralai/codestral-embed-2505">Codestral Embed (1024d, 8K ctx, $0.15/M) — Code</SelectItem>
+                      <SelectItem value="baai/bge-m3">BGE-M3 (1024d, 8K ctx, $0.01/M) — Multilingual</SelectItem>
+                      <SelectItem value="baai/bge-large-en-v1.5">BGE-Large (1024d, 512 ctx, $0.01/M)</SelectItem>
+                      <SelectItem value="intfloat/e5-large-v2">E5-Large (1024d, 512 ctx, $0.01/M)</SelectItem>
+                      <SelectItem value="intfloat/multilingual-e5-large">E5-Large Multilingual (1024d, 512 ctx, $0.01/M)</SelectItem>
+                      <SelectItem value="sentence-transformers/all-mpnet-base-v2">MPNet-Base (768d, 512 ctx, $0.005/M)</SelectItem>
+                      <SelectItem value="sentence-transformers/all-minilm-l6-v2">MiniLM-L6 (384d, 512 ctx, $0.005/M) — Fastest</SelectItem>
+                      <SelectItem value="thenlper/gte-large">GTE-Large (1024d, 512 ctx, $0.01/M)</SelectItem>
+                      <SelectItem value="openai/text-embedding-ada-002">Ada 002 (1536d, 8K ctx, $0.10/M) — Legacy</SelectItem>
+                    </>
+                  )}
                   {formData.embedding_provider === 'openai' && (
                     <>
                       <SelectItem value="text-embedding-3-small">text-embedding-3-small (384 dims, fast)</SelectItem>
@@ -381,6 +420,56 @@ export default function GeneralSettingsTab({
                 onChange={(e) => handleInputChange('max_context_length', e.target.value)}
                 placeholder="4000"
               />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Reranking Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Zap className="h-5 w-5" />
+            Reranking (Cohere)
+          </CardTitle>
+          <CardDescription>
+            Cross-encoder reranking after vector search — improves retrieval precision 15-30%
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="rag_rerank_enabled">Enable Reranking</Label>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  checked={formData.rag_rerank_enabled === 'true'}
+                  onCheckedChange={(checked) => handleInputChange('rag_rerank_enabled', checked.toString())}
+                />
+                <Label className="text-sm text-muted-foreground">
+                  {formData.rag_rerank_enabled === 'true' ? 'Enabled' : 'Disabled'}
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Requires a Cohere API key in Backend API Keys. ~$0.002/query.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="rag_rerank_model">Rerank Model</Label>
+              <Select
+                value={formData.rag_rerank_model || 'rerank-v3.5'}
+                onValueChange={(value) => handleInputChange('rag_rerank_model', value)}
+                disabled={formData.rag_rerank_enabled !== 'true'}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select rerank model" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="rerank-v3.5">rerank-v3.5 (Latest, Best Quality)</SelectItem>
+                  <SelectItem value="rerank-english-v3.0">rerank-english-v3.0 (English Only)</SelectItem>
+                  <SelectItem value="rerank-multilingual-v3.0">rerank-multilingual-v3.0 (Multilingual)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardContent>

@@ -15,6 +15,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Hea
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from core.auth.hybrid import get_request_context_hybrid
 import uvicorn
 import uuid
 import time
@@ -29,7 +30,7 @@ load_dotenv(env_path)
 from config import config
 
 # Import database and models
-from core.database.database import init_database, get_db
+from core.database.database import init_database, get_db, SessionLocal
 from core.models import Base
 
 # Import API routers
@@ -44,6 +45,7 @@ from api.cache import router as cache_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
+from api.widget_memory import router as widget_memory_router  # US-013: Widget memory panel
 from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
 from api.benchmarking import router as benchmarking_router
@@ -73,7 +75,6 @@ from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
-from api.templates import router as templates_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 from api.team import router as team_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
@@ -92,6 +93,44 @@ try:
     from api.bug_reports import router as bug_reports_router
 except ImportError:
     bug_reports_router = None
+# US-012: Widget Email operations (optional — Composio dependency)
+try:
+    from api.widget_email import router as widget_email_router
+except ImportError:
+    widget_email_router = None
+# PRD-37: SaaS Foundation stubs (optional — may not exist in all branches)
+try:
+    from api.auth import router as auth_router
+except ImportError:
+    auth_router = None
+try:
+    from api.api_keys import router as api_keys_router
+except ImportError:
+    api_keys_router = None
+try:
+    from api.evaluation import router as evaluation_router
+except ImportError:
+    evaluation_router = None
+try:
+    from api.widgets.router import router as widget_api_router
+except ImportError:
+    widget_api_router = None
+try:
+    from api.widget_marketplace import router as widget_marketplace_router
+except ImportError:
+    widget_marketplace_router = None
+
+# PRD-56: Workspace Tasks
+from api.tasks import router as tasks_router
+
+# PRD-66: Workspace File Browser (Code Viewer Widget)
+from api.workspace_files import router as workspace_files_router
+# PRD-66: Workspace GitHub Integration (repo listing + cloning)
+try:
+    from api.workspace_github import router as workspace_github_router
+except ImportError:
+    logging.getLogger(__name__).warning("workspace_github router unavailable", exc_info=True)
+    workspace_github_router = None
 
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
@@ -128,6 +167,8 @@ from api.user_api_keys import router as user_api_keys_router  # PRD-54: BYOK API
 from api.execution_history import router as execution_history_router  # Enhanced execution history
 from api.database_knowledge import router as database_knowledge_router  # PRD-21: Database Knowledge
 from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
+from api.document_generation import router as document_generation_router  # PRD-63: Document Generation
+from api.widget_workflows import router as widget_workflows_router  # US-014: Widget Workflow Control
 
 # PRD-55: Autonomous Assistant Platform (optional modules)
 try:
@@ -184,11 +225,110 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Automotas AI API Server...")
     try:
-        # NOTE: Database initialization is handled by docker-compose on first install
-        # Only run init_database() manually if you need to recreate tables/seed data
-        # init_database()
-        logger.info("Database ready (tables already exist from docker-compose init)")
-        
+        # NOTE: Most tables are created by docker-compose on first install.
+        # PRD-58: Ensure system_prompts tables exist + seed on every startup (idempotent).
+        try:
+            import core.models.system_prompts  # register models with Base.metadata
+            from core.database.database import create_tables, get_db_session
+            create_tables()
+            # PRD-58 Phase 1B: Add futureagi_eval_enabled column if missing
+            try:
+                from sqlalchemy import text
+                from core.database.database import engine
+                with engine.connect() as conn:
+                    conn.execute(text(
+                        "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
+                        "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                    conn.commit()
+            except Exception as col_err:
+                logger.debug(f"Column migration check: {col_err}")
+            from core.seeds.seed_system_prompts import seed_system_prompts
+            with get_db_session() as db:
+                seed_system_prompts(db)
+        except Exception as e:
+            logger.warning(f"PRD-58 table/seed init: {e}")
+
+        # PRD-63: Ensure document_templates table exists + seed starter templates
+        try:
+            import core.models.core  # noqa: F811 — registers DocumentTemplate with Base
+            from core.database.database import create_tables as _ct, get_db_session as _gdb
+            _ct()  # idempotent — creates any missing tables
+            from modules.documents.seed_templates import seed_starter_templates
+            from core.models.workspaces import Workspace
+            with _gdb() as db:
+                workspace_ids = [w.id for w in db.query(Workspace.id).all()]
+                for ws_id in workspace_ids:
+                    seed_starter_templates(db, ws_id)
+            logger.info(f"PRD-63: Document templates seeded for {len(workspace_ids)} workspace(s)")
+        except Exception as e:
+            logger.warning(f"PRD-63 template seed init: {e}")
+        # PRD-64: Ensure semantic routing columns exist on agents table
+        try:
+            from sqlalchemy import text as _t64
+            from core.database.database import engine as _engine64
+            with _engine64.connect() as conn:
+                conn.execute(_t64(
+                    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
+                    "semantic_embedding JSONB"
+                ))
+                conn.execute(_t64(
+                    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
+                    "semantic_text_hash VARCHAR(64)"
+                ))
+                conn.commit()
+        except Exception as col_err:
+            logger.debug(f"PRD-64 column migration check: {col_err}")
+
+        # PRD-64: Seed semantic embeddings for agents (non-blocking fire-and-forget)
+        try:
+            import asyncio as _asyncio
+            from core.routing.semantic_indexer import embed_workspace_agents as _embed_ws
+            from core.models.workspaces import Workspace as _Workspace
+
+            async def _embed_all_agents_on_startup():
+                """Background task: embed agents in all workspaces."""
+                try:
+                    from core.database.database import SessionLocal as _SL
+                    from core.llm.embedding_manager import get_embedding_manager
+                    from core.models.core import Agent as _Agent
+
+                    _db = _SL()
+                    try:
+                        # Log provider info for debugging
+                        emgr = get_embedding_manager()
+                        emgr._ensure_provider()
+                        logger.info(f"PRD-64: Embedding provider: {emgr.get_provider_info()}")
+
+                        ws_ids = [w.id for w in _db.query(_Workspace.id).all()]
+                        total = 0
+                        for ws_id in ws_ids:
+                            try:
+                                total += await _embed_ws(ws_id, _db)
+                            except Exception:
+                                logger.warning("PRD-64: Failed to embed workspace %s", ws_id, exc_info=True)
+
+                        # Report embedding coverage
+                        all_agents = _db.query(_Agent).filter(_Agent.status == "active").count()
+                        with_embeddings = _db.query(_Agent).filter(
+                            _Agent.status == "active",
+                            _Agent.semantic_embedding.isnot(None),
+                        ).count()
+                        logger.info(
+                            f"PRD-64: Semantic embeddings seeded — "
+                            f"{total} new, {with_embeddings}/{all_agents} agents have embeddings"
+                        )
+                    finally:
+                        _db.close()
+                except Exception as e:
+                    logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}", exc_info=True)
+
+            _asyncio.create_task(_embed_all_agents_on_startup())
+        except Exception as e:
+            logger.warning(f"PRD-64: Could not schedule startup embedding (non-fatal): {e}")
+
+        logger.info("Database ready")
+
         # NOTE: Redis client uses lazy initialization via get_redis_client()
         # Services will auto-initialize on first use from environment variables
         logger.info("Redis client will lazy-initialize on first use")
@@ -374,9 +514,9 @@ app = FastAPI(
         }
     ],
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc", 
-    openapi_url="/openapi.json",
+    docs_url="/docs" if os.getenv("ENVIRONMENT", "development") != "production" else None,
+    redoc_url="/redoc" if os.getenv("ENVIRONMENT", "development") != "production" else None,
+    openapi_url="/openapi.json" if os.getenv("ENVIRONMENT", "development") != "production" else None,
     swagger_ui_parameters={
         "deepLinking": True,
         "displayRequestDuration": True,
@@ -405,9 +545,70 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID", "X-Request-ID"],
+    expose_headers=["X-Request-ID", "X-Routing-Agent-ID", "X-Routing-Confidence", "X-Routing-Type", "X-Routing-Reasoning", "X-Routing-Request-ID"],
 )
+
+# PRD-38.4: Widget SDK middleware
+try:
+    from api.widgets.cors import WidgetCORSMiddleware
+    app.add_middleware(WidgetCORSMiddleware)
+except ImportError:
+    pass
+
+try:
+    from api.widgets.rate_limit import WidgetRateLimitMiddleware
+    app.add_middleware(WidgetRateLimitMiddleware)
+except ImportError:
+    pass
+
+# Rate limiting (US-017)
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+def _get_real_client_ip(request) -> str:
+    """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return get_remote_address(request)
+
+limiter = Limiter(key_func=_get_real_client_ip, default_limits=["60/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Request body size limit middleware (10MB default, 50MB for uploads)
+MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
+UPLOAD_PATHS = ("/api/documents/upload", "/api/admin/plugins/upload", "/api/documents/templates/upload")
+
+@app.middleware("http")
+async def limit_request_body(request, call_next):
+    from starlette.responses import JSONResponse
+    content_length = request.headers.get("content-length")
+    limit = MAX_UPLOAD_SIZE if any(request.url.path.startswith(p) for p in UPLOAD_PATHS) else MAX_BODY_SIZE
+    if content_length:
+        try:
+            if int(content_length) > limit:
+                return JSONResponse(status_code=413, content={"detail": "Payload too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
+    return await call_next(request)
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    if os.getenv("ENVIRONMENT", "development") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
 
 # Install logging context filter and add request-id middleware
 install_request_context_logging()
@@ -443,48 +644,50 @@ async def api_tracking_middleware(request, call_next):
     finally:
         # Calculate response time
         response_time = (time.time() - start_time) * 1000  # in ms
-        endpoint = f"{request.method} {request.url.path}"
-        
-        # Update stats
-        stats = api_call_stats[endpoint]
-        stats["call_count"] += 1
-        stats["total_time"] += response_time
-        stats["avg_time"] = stats["total_time"] / stats["call_count"]
-        stats["min_time"] = min(stats["min_time"], response_time)
-        stats["max_time"] = max(stats["max_time"], response_time)
-        stats["recent_times"].append(response_time)
-        stats["last_called"] = datetime.now().isoformat()
-        stats["status_codes"][status_code] += 1
-        
-        if status_code >= 400:
-            stats["error_count"] += 1
+        # Use route template (e.g. /api/agents/{agent_id}) instead of raw path
+        # to avoid unbounded memory growth from path parameters
+        try:
+            route = request.scope.get("route")
+            route_path = getattr(route, "path", None) if route else None
+            endpoint = f"{request.method} {route_path or request.url.path}"
 
-# Simple API key auth dependency - use centralized config
-# Note: OPTIONS requests (CORS preflight) are handled by CORS middleware before this
-def require_api_key(x_api_key: str = Header(None)):
-    # Skip API key check if not required
-    if not config.REQUIRE_API_KEY:
-        return True
-    # Allow if API key matches
-    if x_api_key == config.API_KEY:
-        return True
-    # Reject if API key is required but missing/invalid
-    raise HTTPException(status_code=401, detail="Invalid or missing API key")
+            # Cap stats dict size to prevent unbounded memory growth
+            if endpoint not in api_call_stats and len(api_call_stats) > 500:
+                pass  # Skip tracking but don't suppress the response
+            else:
+                stats = api_call_stats[endpoint]
+                stats["call_count"] += 1
+                stats["total_time"] += response_time
+                stats["avg_time"] = stats["total_time"] / stats["call_count"]
+                stats["min_time"] = min(stats["min_time"], response_time)
+                stats["max_time"] = max(stats["max_time"], response_time)
+                stats["recent_times"].append(response_time)
+                stats["last_called"] = datetime.now().isoformat()
+                stats["status_codes"][status_code] += 1
+
+                if status_code >= 400:
+                    stats["error_count"] += 1
+        except Exception:
+            pass  # Never let stats tracking break the response
+
 
 # Include API routers
 app.include_router(agents_router)
 app.include_router(models_router)  # PRD-15: Model management
+app.include_router(widget_workflows_router)  # US-014: Widget workflow control (pause/resume/cancel) — must be before workflows_router to avoid /{id} catch-all
 app.include_router(workflows_router)
 app.include_router(workflow_templates_router)  # Legacy - backward compatibility
 app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
 app.include_router(recipe_webhook_router)  # Recipe webhook triggers (no auth)
 app.include_router(general_webhooks_router)  # General workspace webhooks (no auth)
 app.include_router(marketplace_router)  # Community Marketplace
+app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(context_engineering_router)
 app.include_router(memory_router)
+app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/memory)
 app.include_router(memory_stats_router)  # Real memory stats from database
 app.include_router(analytics_router)
 app.include_router(workflow_history_router)
@@ -534,6 +737,10 @@ if workspaces_router is not None:
     app.include_router(workspaces_router)  # PRD-37: Workspace context
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
+app.include_router(tasks_router)  # PRD-56: Workspace task management
+app.include_router(workspace_files_router)  # PRD-66: Workspace file browser
+if workspace_github_router is not None:
+    app.include_router(workspace_github_router)  # PRD-66: Workspace GitHub integration
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
@@ -553,6 +760,18 @@ app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
+if widget_email_router is not None:
+    app.include_router(widget_email_router)  # US-012: Widget Email operations
+if auth_router is not None:
+    app.include_router(auth_router)  # PRD-37: Auth endpoints
+if api_keys_router is not None:
+    app.include_router(api_keys_router)  # PRD-37: API key management
+if widget_api_router is not None:
+    app.include_router(widget_api_router)  # PRD-38.4: Widget SDK API
+if widget_marketplace_router is not None:
+    app.include_router(widget_marketplace_router)  # PRD-38.5: Widget Marketplace
+if evaluation_router is not None:
+    app.include_router(evaluation_router)  # Evaluation methodologies
 
 # PRD-55: Autonomous Assistant Platform
 if heartbeat_router is not None:
@@ -572,8 +791,22 @@ try:
 except Exception as e:
     logger.warning(f"Could not mount legacy routes: {e}")
 
-# Mount exports directory for static file serving (charts, etc.)
-app.mount("/exports", StaticFiles(directory="exports"), name="exports")
+# Exports directory served through authenticated endpoint instead of open StaticFiles mount.
+# See api/exports.py (or serve via pre-signed URLs in production).
+from fastapi.responses import FileResponse
+
+@app.get("/exports/{file_path:path}", tags=["Exports"])
+async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)):
+    """Serve exported files (charts, etc.) with authentication."""
+    from pathlib import Path as _Path
+    safe_base = _Path("exports").resolve()
+    requested = (safe_base / file_path).resolve()
+    # Prevent path traversal
+    if not str(requested).startswith(str(safe_base)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not requested.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(requested)
 
 # WebSocket endpoint removed - using AI SDK SSE streaming instead
 # See consumers/workflows/streaming.py and consumers/chatbot/streaming.py
@@ -586,90 +819,63 @@ app.mount("/exports", StaticFiles(directory="exports"), name="exports")
          response_description="Detailed system health information")
 async def health_check():
     """
-    ## 🏥 Comprehensive System Health Check
-    
-    Returns detailed health information for all system components:
-    - API server status
-    - Database connectivity  
-    - WebSocket connections
-    - Service component health
-    - Performance metrics
-    
+    System health check with real probes for database, config, and resources.
+
     **Status Values:**
     - `healthy`: All systems operational
     - `degraded`: Some issues but functional
     - `unhealthy`: Critical issues detected
     """
+    import psutil
+    from sqlalchemy import text as _text
+
+    components = {"api_server": "healthy"}
+
+    # Database probe
     try:
-        # Check system components
-        # Note: WebSocket manager removed - using AI SDK SSE streaming instead
-        components = {
-            "api_server": "healthy",
-            "streaming": "healthy (AI SDK SSE)",
-            "multi_agent_systems": "healthy",
-            "field_theory": "healthy",
-            "context_engineering": "healthy",
-            "workflow_engine": "healthy",
-            "document_processor": "healthy",
-            "memory_systems": "healthy"
-        }
-        
-        # Overall status
-        overall_status = "healthy" if all(status == "healthy" for status in components.values()) else "degraded"
-        
-        return {
-            "status": overall_status,
-            "service": "automatos-ai-api",
-            "version": "1.0.0",
-            "timestamp": datetime.utcnow().isoformat(),
-            
-            "🔧 components": components,
-            
-            "📊 metrics": {
-                "streaming_connections": "SSE-based",
-                "uptime": "operational",
-                "memory_usage": "optimal",
-                "cpu_usage": "normal",
-                "response_time": "< 100ms"
-            },
-            
-            "🎯 endpoints": {
-                "total_endpoints": 50,
-                "healthy_endpoints": 50,
-                "deprecated_endpoints": 0
-            },
-            
-            "🔌 connectivity": {
-                "streaming": "✅ Active (AI SDK SSE)",
-                "http": "✅ Active",
-                "cors": "✅ Enabled"
-            },
-            
-            "📈 performance": {
-                "average_response_time": "50ms",
-                "requests_per_second": "stable",
-                "error_rate": "< 0.1%",
-                "success_rate": "> 99.9%"
-            },
-            
-            "🛡️ security": {
-                "cors_enabled": True,
-                "rate_limiting": "configured", 
-                "input_validation": "active",
-                "error_handling": "comprehensive"
-            }
-        }
-        
+        db = SessionLocal()
+        try:
+            db.execute(_text("SELECT 1"))
+            components["database"] = "healthy"
+        finally:
+            db.close()
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return {
-            "status": "unhealthy",
-            "service": "automotas-ai-api",
-            "version": "1.0.0",
-            "timestamp": datetime.utcnow().isoformat(),
-            "error": str(e),
-            "message": "System experiencing issues. Check logs for details."
+        logger.error(f"Health: database check failed: {e}")
+        components["database"] = "unhealthy"
+
+    # Critical config check
+    has_db_url = bool(os.getenv("DATABASE_URL") or config.DATABASE_URL)
+    components["config"] = "healthy" if has_db_url else "degraded"
+
+    # Real system metrics via psutil
+    try:
+        cpu_pct = psutil.cpu_percent(interval=0.1)
+        mem = psutil.virtual_memory()
+        metrics = {
+            "cpu_percent": round(cpu_pct, 1),
+            "memory_used_percent": round(mem.percent, 1),
+            "memory_available_mb": round(mem.available / (1024 * 1024), 0),
         }
+    except Exception:
+        metrics = {}
+
+    # Derive overall status
+    statuses = list(components.values())
+    if "unhealthy" in statuses:
+        overall_status = "unhealthy"
+    elif "degraded" in statuses:
+        overall_status = "degraded"
+    else:
+        overall_status = "healthy"
+
+    return {
+        "status": overall_status,
+        "service": "automatos-ai-api",
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+        "components": components,
+        "metrics": metrics,
+    }
 
 @app.get("/api/health/endpoints",
          summary="📡 API Endpoint Health",
@@ -751,7 +957,7 @@ async def api_endpoint_health():
         return {
             "status": "error",
             "timestamp": datetime.now().isoformat(),
-            "error": str(e),
+            "error": "Service check failed",
             "message": "Failed to retrieve API health statistics"
         }
 
@@ -886,6 +1092,6 @@ if __name__ == "__main__":
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=config.IS_DEVELOPMENT,
         log_level="info"
     )

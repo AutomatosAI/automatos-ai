@@ -82,71 +82,54 @@ export function WidgetWrapper({ widget, isActive }: WidgetWrapperProps) {
 
   const WidgetComponent = definition.component
 
-  // Fullscreen modal
-  if (isFullscreen) {
-    return (
-      <>
-        {/* Fullscreen overlay */}
-        <div className="fixed inset-0 z-[100] bg-background flex flex-col">
-          {/* Fullscreen header */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
-            <h2 className="text-sm font-medium">{widget.title}</h2>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleMinimize}
-                title="Exit fullscreen"
-              >
-                <Minimize2 className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
-                onClick={handleClose}
-                title="Close"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
-          {/* Fullscreen content */}
-          <div className="flex-1 overflow-hidden">
-            <WidgetComponent
-              id={widget.id}
-              type={widget.type}
-              title={widget.title}
-              data={widget.data}
-              metadata={widget.metadata}
-              isActive={true}
-              isLoading={widget.state === 'loading'}
-              error={widget.state === 'error' ? widget.error : null}
-              onClose={handleClose}
-              onMaximize={handleMinimize}
-            />
+  // Single render path — CSS-based fullscreen so the component never unmounts
+  return (
+    <div
+      onClick={!isFullscreen ? handleClick : undefined}
+      className={cn(
+        "h-full",
+        isFullscreen && "fixed inset-0 z-[100] bg-background flex flex-col"
+      )}
+    >
+      {isFullscreen && (
+        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+          <h2 className="text-sm font-medium">{widget.title}</h2>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleMinimize}
+              title="Exit fullscreen"
+            >
+              <Minimize2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+              onClick={handleClose}
+              title="Close"
+            >
+              <X className="h-4 w-4" />
+            </Button>
           </div>
         </div>
-      </>
-    )
-  }
-
-  return (
-    <div onClick={handleClick} className="h-full">
-      <WidgetComponent
-        id={widget.id}
-        type={widget.type}
-        title={widget.title}
-        data={widget.data}
-        metadata={widget.metadata}
-        isActive={isActive}
-        isLoading={widget.state === 'loading'}
-        error={widget.state === 'error' ? widget.error : null}
-        onClose={handleClose}
-        onMaximize={handleMaximize}
-      />
+      )}
+      <div className={cn(isFullscreen ? "flex-1 overflow-hidden" : "h-full")}>
+        <WidgetComponent
+          id={widget.id}
+          type={widget.type}
+          title={widget.title}
+          data={widget.data}
+          metadata={widget.metadata}
+          isActive={isFullscreen || isActive}
+          isLoading={widget.state === 'loading'}
+          error={widget.state === 'error' ? widget.error : null}
+          onClose={handleClose}
+          onMaximize={isFullscreen ? handleMinimize : handleMaximize}
+        />
+      </div>
     </div>
   )
 }

@@ -3,7 +3,8 @@
 /**
  * FileInfo Component for PRD-38.2 Extended Widgets
  *
- * File metadata display with formatted size and dates
+ * Displays file metadata: name, path, human-readable size, mime type,
+ * modified date, and file type icon.
  */
 
 import {
@@ -20,7 +21,7 @@ import {
   FileSpreadsheet,
   Lock,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatFileSize } from '@/lib/utils'
 import { format } from 'date-fns'
 import type { FileInfo as FileInfoType } from '../types'
 
@@ -30,7 +31,9 @@ interface FileInfoProps {
 }
 
 /**
- * Get file icon based on mime type or extension
+ * Get file icon based on mime type or extension.
+ * Maps common mime types and file extensions to lucide-react icons:
+ * File, FileText, FileImage, FileCode, Folder, FileArchive, etc.
  */
 function getFileIcon(file: FileInfoType) {
   if (file.type === 'directory') {
@@ -97,18 +100,7 @@ function getFileIcon(file: FileInfoType) {
 }
 
 /**
- * Format file size
- */
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  const size = bytes / Math.pow(1024, i)
-  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`
-}
-
-/**
- * Format date
+ * Format date string to human-readable format
  */
 function formatDate(dateStr: string): string {
   try {
@@ -140,10 +132,10 @@ export function FileInfo({ file, className }: FileInfoProps) {
         <div className="flex items-center gap-2">
           <HardDrive className="h-4 w-4 text-muted-foreground" />
           <span className="text-muted-foreground">Size:</span>
-          <span>{formatSize(file.size)}</span>
+          <span>{formatFileSize(file.size)}</span>
         </div>
 
-        {/* Type */}
+        {/* Mime Type */}
         <div className="flex items-center gap-2">
           <File className="h-4 w-4 text-muted-foreground" />
           <span className="text-muted-foreground">Type:</span>
@@ -181,4 +173,4 @@ export function FileInfo({ file, className }: FileInfoProps) {
   )
 }
 
-export { getFileIcon, formatSize }
+export { getFileIcon, formatFileSize as formatSize }

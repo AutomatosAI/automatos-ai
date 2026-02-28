@@ -57,6 +57,8 @@ class UsageTracker:
 
                 total_cost = input_cost + output_cost
 
+                total_tokens = input_tokens + output_tokens
+
                 row = LLMUsage(
                     workspace_id=workspace_id,
                     model_id=model_id,
@@ -67,7 +69,7 @@ class UsageTracker:
                     request_type=request_type,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
-                    total_tokens=input_tokens + output_tokens,
+                    total_tokens=total_tokens,
                     input_cost=round(input_cost, 8),
                     output_cost=round(output_cost, 8),
                     total_cost=round(total_cost, 8),
@@ -77,6 +79,33 @@ class UsageTracker:
                     error_message=error_message,
                 )
                 db.add(row)
+
+                # Also update Agent.model_usage_stats so the agents API
+                # returns cumulative token/cost data without a separate query.
+                if agent_id and status == "success":
+                    try:
+                        from core.models.core import Agent
+                        from sqlalchemy.orm.attributes import flag_modified
+
+                        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+                        if agent:
+                            stats = agent.model_usage_stats or {
+                                "total_tokens": 0, "total_cost": 0.0,
+                                "total_requests": 0, "avg_tokens_per_request": 0,
+                                "last_used_at": None,
+                            }
+                            stats["total_tokens"] = stats.get("total_tokens", 0) + total_tokens
+                            stats["total_cost"] = round(stats.get("total_cost", 0.0) + total_cost, 6)
+                            stats["total_requests"] = stats.get("total_requests", 0) + 1
+                            stats["avg_tokens_per_request"] = int(
+                                stats["total_tokens"] / stats["total_requests"]
+                            ) if stats["total_requests"] > 0 else 0
+                            stats["last_used_at"] = datetime.utcnow().isoformat()
+                            agent.model_usage_stats = stats
+                            flag_modified(agent, "model_usage_stats")
+                    except Exception as agent_err:
+                        logger.debug(f"Agent stats update skipped: {agent_err}")
+
                 db.commit()
             finally:
                 db.close()

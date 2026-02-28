@@ -198,14 +198,16 @@ async def _execute_step(
     if scratchpad:
         tools = list(tools) + [SCRATCHPAD_WRITE_TOOL_DEF]
 
-    # 6. LLM — agent's own LLM manager
+    # 6. LLM — agent's own LLM manager (with tracking context for recipe)
     llm = agent_runtime.llm_manager
+    if hasattr(llm, '_tracking_ctx'):
+        llm._tracking_ctx["request_type"] = "recipe"
 
     # 7. Generate + tool loop
     tool_router = get_tool_router()
     all_tool_calls = []
     _composio_call_cache: Dict[str, str] = {}  # dedup: "ACTION|args_hash" → cached result
-    max_iterations = 6
+    max_iterations = 10
     response = None
 
     for iteration in range(max_iterations):
@@ -713,6 +715,148 @@ async def execute_recipe_direct(
                 if context_block_parts:
                     clean_step_prompt = "\n\n".join(context_block_parts) + f"\n\n## Your Task\n{clean_step_prompt}"
 
+            # Check for generate_document step type (PRD-63)
+            step_type = step.get("type", "agent")
+            if step_type == "generate_document":
+                try:
+                    from modules.documents.generation_service import DocumentGenerationService
+                    gen_config = step.get("config", step)
+                    gen_title = gen_config.get("title", "Document")
+                    gen_format = gen_config.get("format", "pdf")
+                    gen_data = gen_config.get("data", {})
+                    gen_template_name = gen_config.get("template_name")
+
+                    # Resolve {{step_N.field}} variables in data from scratchpad
+                    if scratchpad and isinstance(gen_data, dict):
+                        gen_data = _resolve_doc_step_variables(gen_data, scratchpad)
+
+                    gen_service = DocumentGenerationService(db, workspace_id)
+                    gen_result = await gen_service.generate(
+                        title=gen_title,
+                        format=gen_format,
+                        data=gen_data,
+                        workspace_id=workspace_id,
+                        template_name=gen_template_name,
+                    )
+
+                    step_result["status"] = "completed"
+                    step_result["output"] = json.dumps({
+                        "document_url": gen_result.download_url,
+                        "filename": gen_result.filename,
+                        "format": gen_result.format,
+                        "size_kb": gen_result.size // 1024,
+                    })
+                    step_result["duration_ms"] = int((time.time() - step_start) * 1000)
+                    step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+                    if scratchpad:
+                        scratchpad.write_step_results(
+                            step_order=step_order,
+                            tool_calls=[],
+                            agent_output=step_result["output"],
+                            agent_exports={},
+                        )
+
+                    logger.info(f"[recipe_direct] Step {step_order} (generate_document) completed: {gen_result.filename}")
+                    compact = _build_compact_step_result(step_result)
+                    step_results.append(compact)
+                    _persist_step_results(db, execution, step_results)
+                    continue
+
+                except Exception as e:
+                    step_result["status"] = "failed"
+                    step_result["error"] = str(e)
+                    step_result["duration_ms"] = int((time.time() - step_start) * 1000)
+                    step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+                    logger.error(f"[recipe_direct] generate_document step failed: {e}", exc_info=True)
+
+                    if error_handling == "stop":
+                        step_results.append(_build_compact_step_result(step_result))
+                        _persist_step_results(db, execution, step_results)
+                        await _fail_execution(db, recipe_execution_id, f"Document generation step failed: {e}", step_results=step_results)
+                        return
+                    elif error_handling == "skip":
+                        step_results.append(_build_compact_step_result(step_result))
+                        _persist_step_results(db, execution, step_results)
+                        continue
+
+            # Pre-exec: run deterministic workspace command before the LLM loop.
+            # The output is appended to the prompt so the LLM only does analysis.
+            pre_exec_cmd = step.get("pre_exec")
+            pre_exec_cwd = step.get("pre_exec_cwd")
+            pre_exec_timeout = step.get("pre_exec_timeout", 300)
+            if pre_exec_cmd and workspace_id:
+                logger.info(f"[recipe_direct] Step {step_order} pre_exec: {pre_exec_cmd[:200]}")
+                try:
+                    from core.workspace_client import WorkspaceClient
+                    ws_client = WorkspaceClient(str(workspace_id))
+                    pre_result = await ws_client.exec_command(
+                        command=pre_exec_cmd,
+                        cwd=pre_exec_cwd,
+                        timeout=pre_exec_timeout,
+                    )
+                    pre_exit = pre_result.get("exit_code", -1)
+                    pre_stdout = pre_result.get("stdout", "")
+                    pre_stderr = pre_result.get("stderr", "")
+                    pre_duration = pre_result.get("duration_ms", 0)
+
+                    # Log the pre_exec as a tool call for visibility
+                    step_result["tool_calls"].append({
+                        "action": "pre_exec",
+                        "params": {"command": pre_exec_cmd, "cwd": pre_exec_cwd},
+                        "result": f"exit_code={pre_exit} duration={pre_duration}ms",
+                    })
+
+                    # Append output to the prompt
+                    pre_exec_block = (
+                        f"\n\n## Pre-Exec Output (automated)\n"
+                        f"Command: `{pre_exec_cmd}`\n"
+                        f"Exit code: {pre_exit}\n"
+                        f"Duration: {pre_duration}ms\n"
+                    )
+                    if pre_stdout:
+                        # Cap at 6000 chars to leave room for LLM context
+                        stdout_text = pre_stdout[:6000]
+                        if len(pre_stdout) > 6000:
+                            stdout_text += "\n... (truncated)"
+                        pre_exec_block += f"\n### stdout\n```\n{stdout_text}\n```\n"
+                    if pre_stderr and pre_exit != 0:
+                        pre_exec_block += f"\n### stderr\n```\n{pre_stderr[:2000]}\n```\n"
+
+                    clean_step_prompt += pre_exec_block
+
+                    # If pre_exec failed and error_handling is stop, abort
+                    if pre_exit != 0 and error_handling == 'stop':
+                        logger.warning(f"[recipe_direct] Step {step_order} pre_exec failed (exit={pre_exit})")
+                        step_result["status"] = "failed"
+                        step_result["error"] = f"pre_exec failed with exit code {pre_exit}: {pre_stderr[:500]}"
+                        step_result["duration_ms"] = int((time.time() - step_start) * 1000)
+                        step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+                        step_results.append(_build_compact_step_result(step_result))
+                        _persist_step_results(db, execution, step_results)
+                        await _fail_execution(
+                            db, recipe_execution_id,
+                            f"Step {step_order} pre_exec failed: {pre_stderr[:200]}",
+                            step_results=step_results,
+                        )
+                        return
+
+                    logger.info(
+                        f"[recipe_direct] Step {step_order} pre_exec completed: "
+                        f"exit={pre_exit} duration={pre_duration}ms stdout={len(pre_stdout)} chars"
+                    )
+                except Exception as pre_exc:
+                    logger.error(f"[recipe_direct] Step {step_order} pre_exec error: {pre_exc}", exc_info=True)
+                    if error_handling == 'stop':
+                        step_result["status"] = "failed"
+                        step_result["error"] = f"pre_exec error: {pre_exc}"
+                        step_result["duration_ms"] = int((time.time() - step_start) * 1000)
+                        step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+                        step_results.append(_build_compact_step_result(step_result))
+                        _persist_step_results(db, execution, step_results)
+                        await _fail_execution(db, recipe_execution_id, f"Step {step_order} pre_exec error: {pre_exc}", step_results=step_results)
+                        return
+
             # Execute with retries
             attempt = 0
             success = False
@@ -998,6 +1142,29 @@ def _resolve_prompt(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _resolve_doc_step_variables(data: Any, scratchpad) -> Any:
+    """
+    Resolve {{ step_N.field }} placeholders in document step data from scratchpad.
+    Works recursively on dicts, lists, and strings.
+    """
+    import re
+
+    if isinstance(data, str):
+        # Replace {{ step_N.field }} or {{ step_N.output }}
+        def _replace(match):
+            step_num = int(match.group(1))
+            field = match.group(2)
+            ctx = scratchpad.format_context_for_step(step_num + 1)  # get results UP TO step_num
+            return ctx if ctx else match.group(0)
+
+        return re.sub(r"\{\{\s*step_(\d+)\.(\w+)\s*\}\}", _replace, data)
+    elif isinstance(data, dict):
+        return {k: _resolve_doc_step_variables(v, scratchpad) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_resolve_doc_step_variables(item, scratchpad) for item in data]
+    return data
+
 
 def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
     """Normalize tool call data from agent execution result."""

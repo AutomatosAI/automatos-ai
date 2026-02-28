@@ -92,7 +92,7 @@ async def list_workflow_templates(
         
     except Exception as e:
         logger.error(f"Error listing workflow templates: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing templates: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/{template_id}")
@@ -115,7 +115,7 @@ async def get_workflow_template(
         raise
     except Exception as e:
         logger.error(f"Error getting template {template_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting template: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("")
@@ -191,7 +191,7 @@ async def create_workflow_template(
     except Exception as e:
         logger.error(f"Error creating workflow template: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error creating template: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.put("/{template_id}")
@@ -246,7 +246,7 @@ async def update_workflow_template(
     except Exception as e:
         logger.error(f"Error updating template {template_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error updating template: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/{template_id}")
@@ -287,7 +287,7 @@ async def delete_workflow_template(
     except Exception as e:
         logger.error(f"Error deleting template {template_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting template: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/{template_id}/use")
@@ -322,7 +322,7 @@ async def record_template_usage(
     except Exception as e:
         logger.error(f"Error recording template usage for {template_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error recording usage: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/categories/list")
@@ -349,7 +349,7 @@ async def list_template_categories(db: Session = Depends(get_db)):
 
     except Exception as e:
         logger.error(f"Error listing template categories: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing categories: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/featured/list")
@@ -375,5 +375,5 @@ async def list_featured_templates(
         
     except Exception as e:
         logger.error(f"Error listing featured templates: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing featured templates: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 

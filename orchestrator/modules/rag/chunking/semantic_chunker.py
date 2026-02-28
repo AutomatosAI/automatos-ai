@@ -76,7 +76,8 @@ class SemanticChunker:
         # Embedding manager for REAL semantic similarity
         self._embedding_manager = None
         self._embedding_cache: Dict[str, List[float]] = {}
-        self._use_embeddings = True  # Can be disabled for performance
+        self._embedding_cache_max_size: int = 1000  # Prevent unbounded memory growth
+        self._use_embeddings = False  # Disabled: keyword similarity is fast; embeddings belong in search not chunking
         
         # Patterns for sentence boundaries
         self.sentence_patterns = [
@@ -368,6 +369,15 @@ class SemanticChunker:
             else:
                 embedding = loop.run_until_complete(manager.generate_embedding(text))
             
+            # Evict oldest entries if cache exceeds max size
+            if len(self._embedding_cache) >= self._embedding_cache_max_size:
+                # Remove first 10% of entries (FIFO eviction)
+                evict_count = max(1, self._embedding_cache_max_size // 10)
+                keys_to_remove = list(self._embedding_cache.keys())[:evict_count]
+                for k in keys_to_remove:
+                    del self._embedding_cache[k]
+                logger.debug(f"Evicted {evict_count} entries from embedding cache")
+
             self._embedding_cache[cache_key] = embedding
             return embedding
         except Exception as e:

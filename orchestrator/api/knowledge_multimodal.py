@@ -176,7 +176,7 @@ async def get_knowledge_types(
         
     except Exception as e:
         logger.error(f"Error fetching knowledge types: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/items", response_model=KnowledgeItemResponse)
@@ -247,7 +247,7 @@ async def create_knowledge_item(
     except Exception as e:
         logger.error(f"Error creating knowledge item: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
@@ -280,12 +280,25 @@ async def upload_document_multimodal(
             raise HTTPException(status_code=400, detail="No file provided")
         
         file_extension = Path(file.filename).suffix.lower()
-        allowed_extensions = {'.pdf', '.docx', '.doc', '.txt', '.md'}
-        
-        if file_extension not in allowed_extensions:
+        allowed_types = {
+            '.pdf': {'application/pdf'},
+            '.docx': {'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/octet-stream'},
+            '.doc': {'application/msword', 'application/octet-stream'},
+            '.txt': {'text/plain', 'application/octet-stream'},
+            '.md': {'text/markdown', 'text/plain', 'application/octet-stream'},
+        }
+
+        if file_extension not in allowed_types:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type: {file_extension}. Allowed: {', '.join(allowed_extensions)}"
+                detail=f"Unsupported file type: {file_extension}. Allowed: {', '.join(allowed_types.keys())}"
+            )
+
+        # Validate MIME type matches extension
+        if file.content_type and file.content_type not in allowed_types[file_extension]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"MIME type mismatch: {file.content_type} not valid for {file_extension}"
             )
         
         # Save file temporarily
@@ -530,7 +543,95 @@ async def upload_document_multimodal(
                 knowledge_items_created += 1
             
             db.commit()
-            
+
+            # Generate embeddings for all created knowledge items
+            try:
+                from core.llm.embedding_manager import create_embedding_manager
+                embedding_manager = create_embedding_manager()
+
+                # Collect all item IDs and their content for embedding
+                items_to_embed = []
+
+                # Main document
+                if document_id and results['text']:
+                    items_to_embed.append((document_id, results['text'][:8000]))
+
+                # Tables - fetch IDs from recently inserted items
+                for table in results['tables']:
+                    table_content = table.markdown
+                    if table_content:
+                        # Get the knowledge_item for this table by querying recent inserts
+                        item_query = text("""
+                            SELECT id, content FROM knowledge_items
+                            WHERE parent_id = :parent_id AND kb_type_id = :kb_type_id AND workspace_id = :workspace_id
+                            ORDER BY created_at DESC
+                        """)
+                        table_items = db.execute(item_query, {
+                            "parent_id": document_id,
+                            "kb_type_id": type_map.get('table'),
+                            "workspace_id": ctx.workspace_id
+                        }).fetchall()
+                        for ti in table_items:
+                            items_to_embed.append((ti.id, ti.content[:8000] if ti.content else ''))
+
+                # Images
+                for image in results['images']:
+                    if image.description:
+                        image_query = text("""
+                            SELECT id, content FROM knowledge_items
+                            WHERE parent_id = :parent_id AND kb_type_id = :kb_type_id AND workspace_id = :workspace_id
+                            ORDER BY created_at DESC
+                        """)
+                        image_items = db.execute(image_query, {
+                            "parent_id": document_id,
+                            "kb_type_id": type_map.get('image'),
+                            "workspace_id": ctx.workspace_id
+                        }).fetchall()
+                        for ii in image_items:
+                            items_to_embed.append((ii.id, ii.content[:8000] if ii.content else ''))
+
+                # Formulas
+                for formula in results['formulas']:
+                    formula_query = text("""
+                        SELECT id, content FROM knowledge_items
+                        WHERE parent_id = :parent_id AND kb_type_id = :kb_type_id AND workspace_id = :workspace_id
+                        ORDER BY created_at DESC
+                    """)
+                    formula_items = db.execute(formula_query, {
+                        "parent_id": document_id,
+                        "kb_type_id": type_map.get('formula'),
+                        "workspace_id": ctx.workspace_id
+                    }).fetchall()
+                    for fi in formula_items:
+                        items_to_embed.append((fi.id, fi.content[:8000] if fi.content else ''))
+
+                # Deduplicate by item ID
+                seen_ids = set()
+                unique_items = []
+                for item_id, content in items_to_embed:
+                    if item_id not in seen_ids and content:
+                        seen_ids.add(item_id)
+                        unique_items.append((item_id, content))
+
+                # Generate and store embeddings
+                for item_id, content in unique_items:
+                    try:
+                        embedding = await embedding_manager.generate_embedding(content)
+                        embedding_str = '[' + ','.join(str(v) for v in embedding) + ']'
+                        update_query = text("""
+                            UPDATE knowledge_items SET embedding = :embedding::vector
+                            WHERE id = :item_id
+                        """)
+                        db.execute(update_query, {"embedding": embedding_str, "item_id": item_id})
+                    except Exception as embed_err:
+                        logger.warning(f"Failed to generate embedding for item {item_id}: {embed_err}")
+
+                db.commit()
+                logger.info(f"Generated embeddings for {len(unique_items)} knowledge items")
+
+            except Exception as e:
+                logger.warning(f"Embedding generation failed (non-fatal): {e}")
+
             # Calculate processing time
             processing_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
             
@@ -554,7 +655,7 @@ async def upload_document_multimodal(
     except Exception as e:
         logger.error(f"Error uploading document: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/search", response_model=List[KnowledgeSearchResult])
@@ -671,7 +772,7 @@ async def search_knowledge(
         
     except Exception as e:
         logger.error(f"Error searching knowledge: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/items/{item_id}")
@@ -795,7 +896,7 @@ async def get_knowledge_item(
         raise
     except Exception as e:
         logger.error(f"Error fetching knowledge item {item_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats")
@@ -855,5 +956,5 @@ async def get_knowledge_stats(
         
     except Exception as e:
         logger.error(f"Error getting knowledge stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 

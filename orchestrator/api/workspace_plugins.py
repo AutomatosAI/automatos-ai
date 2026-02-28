@@ -118,7 +118,7 @@ async def list_workspace_plugins(
         raise
     except Exception as e:
         logger.error("Error listing workspace plugins for %s: %s", workspace_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to list workspace plugins: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/{workspace_id}/plugins", status_code=201)
@@ -196,7 +196,7 @@ async def enable_plugin(
     except Exception as e:
         logger.error("Error enabling plugin for workspace %s: %s", workspace_id, e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to enable plugin: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/{workspace_id}/plugins/{plugin_id}")
@@ -268,4 +268,4 @@ async def disable_plugin(
     except Exception as e:
         logger.error("Error disabling plugin %s for workspace %s: %s", plugin_id, workspace_id, e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to disable plugin: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")

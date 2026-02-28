@@ -7,6 +7,8 @@ Supports per-service configuration via system settings.
 """
 
 import os
+import re
+import time
 import logging
 from typing import Dict, Any, List, Optional
 from functools import lru_cache
@@ -363,18 +365,35 @@ class LLMManager:
         config: LLMConfig = None,
         service_name: str = "orchestrator",
         provider: Optional[str] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        workspace_id=None,
+        agent_id: Optional[int] = None,
+        execution_id: Optional[str] = None,
+        request_type: Optional[str] = None,
+        is_byok: bool = False,
     ):
         """
         Initialize LLM Manager.
-        
+
         Args:
             config: Optional LLMConfig (if None, loads from settings/env)
             service_name: Service name for per-service configuration ('orchestrator', 'codegraph', etc.)
             provider: Optional provider override
             model: Optional model override
+            workspace_id: Workspace ID for usage tracking
+            agent_id: Agent ID for usage tracking
+            execution_id: Execution ID for usage tracking
+            request_type: Request type label (chat, recipe, orchestrator, etc.)
+            is_byok: Whether this uses a BYOK key
         """
         self.service_name = service_name
+        self._tracking_ctx: Dict[str, Any] = {
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+            "execution_id": execution_id,
+            "request_type": request_type or service_name,
+            "is_byok": is_byok,
+        }
         
         if config is None:
             config = self._load_config_from_settings(service_name, provider, model)
@@ -553,41 +572,214 @@ class LLMManager:
             secret_key=secret_key if provider == LLMProvider.AWS_BEDROCK else None
         )
     
+    # Patterns that indicate the configured model is dead/removed, not a transient error
+    _DEAD_MODEL_PATTERNS = [
+        re.compile(r"no endpoints found", re.IGNORECASE),
+        re.compile(r"model not found", re.IGNORECASE),
+        re.compile(r"does not exist", re.IGNORECASE),
+        re.compile(r"model .+ is not available", re.IGNORECASE),
+        re.compile(r"invalid model", re.IGNORECASE),
+    ]
+
+    # Provider-specific fallback models (cheap & reliable)
+    _DEFAULT_FALLBACK_MODELS = {
+        LLMProvider.OPENROUTER: "meta-llama/llama-3.1-70b-instruct",
+        LLMProvider.OPENAI: "gpt-4o-mini",
+        LLMProvider.ANTHROPIC: "claude-3-5-haiku-20241022",
+        LLMProvider.GOOGLE: "gemini-2.0-flash",
+        LLMProvider.AZURE: "gpt-4o-mini",
+        LLMProvider.GROK: "grok-2-latest",
+        LLMProvider.HUGGINGFACE: "mistralai/Mistral-7B-Instruct-v0.2",
+    }
+
     def _ensure_provider_initialized(self):
         """Ensure provider is initialized (lazy loading)"""
         if self.provider is None:
-            self.provider = self._create_provider()
-    
-    def _create_provider(self):
-        """Create the appropriate provider instance"""
-        if self.config.provider == LLMProvider.OPENAI:
-            return OpenAIProvider(self.config)
-        elif self.config.provider == LLMProvider.ANTHROPIC:
-            return AnthropicProvider(self.config)
-        elif self.config.provider == LLMProvider.GOOGLE:
-            return GoogleProvider(self.config)
-        elif self.config.provider == LLMProvider.AZURE:
-            return AzureProvider(self.config)
-        elif self.config.provider == LLMProvider.HUGGINGFACE:
-            return HuggingFaceProvider(self.config)
-        elif self.config.provider == LLMProvider.AWS_BEDROCK:
-            return BedrockProvider(self.config)
-        elif self.config.provider == LLMProvider.GROK:
-            return GrokProvider(self.config)
-        elif self.config.provider == LLMProvider.OPENROUTER:
-            return OpenRouterProvider(self.config)
+            self.provider = self._create_provider(self.config)
+
+    @staticmethod
+    def _create_provider(config: LLMConfig):
+        """Create the appropriate provider instance from a config."""
+        if config.provider == LLMProvider.OPENAI:
+            return OpenAIProvider(config)
+        elif config.provider == LLMProvider.ANTHROPIC:
+            return AnthropicProvider(config)
+        elif config.provider == LLMProvider.GOOGLE:
+            return GoogleProvider(config)
+        elif config.provider == LLMProvider.AZURE:
+            return AzureProvider(config)
+        elif config.provider == LLMProvider.HUGGINGFACE:
+            return HuggingFaceProvider(config)
+        elif config.provider == LLMProvider.AWS_BEDROCK:
+            return BedrockProvider(config)
+        elif config.provider == LLMProvider.GROK:
+            return GrokProvider(config)
+        elif config.provider == LLMProvider.OPENROUTER:
+            return OpenRouterProvider(config)
         else:
-            raise ValueError(f"Unsupported provider: {self.config.provider}")
-    
+            raise ValueError(f"Unsupported provider: {config.provider}")
+
+    def _is_retriable_model_error(self, exc: Exception) -> bool:
+        """Return True if the exception indicates a dead/removed model (not transient)."""
+        error_text = str(exc)
+        # Also check for 404 status codes embedded in exception messages
+        if "404" in error_text:
+            return True
+        return any(p.search(error_text) for p in self._DEAD_MODEL_PATTERNS)
+
+    def _get_fallback_model(self) -> Optional[str]:
+        """Get fallback model: user setting > provider default > None."""
+        # Check for user-configured fallback
+        category_map = {
+            "orchestrator": "orchestrator_llm",
+            "codegraph": "codegraph",
+            "chatbot": "chatbot",
+            "heartbeat": "orchestrator_llm",
+        }
+        category = category_map.get(self.service_name, "orchestrator_llm")
+        user_fallback = get_system_setting(category, "fallback_model")
+        if user_fallback:
+            return user_fallback
+        return self._DEFAULT_FALLBACK_MODELS.get(self.config.provider)
+
+    def _build_fallback_config(self, fallback_model: str) -> LLMConfig:
+        """Build an LLMConfig that reuses primary credentials but swaps the model."""
+        return LLMConfig(
+            provider=self.config.provider,
+            model=fallback_model,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+            api_key=self.config.api_key,
+            base_url=self.config.base_url,
+            organization_id=self.config.organization_id,
+            secret_key=self.config.secret_key,
+        )
+
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> Any:
-        """Generate response using the configured provider"""
+        """Generate response using the configured provider, with automatic usage tracking.
+
+        If the primary model returns a dead-model error (404 / "no endpoints found"),
+        retries once with a fallback model on the same provider and tags the
+        response with ``_used_fallback = True``.
+        """
         self._ensure_provider_initialized()
-        return await self.provider.generate_response(messages, tools)
-    
+        start = time.monotonic()
+        try:
+            response = await self.provider.generate_response(messages, tools)
+            self._track_usage(response, start)
+            return response
+        except Exception as exc:
+            if not self._is_retriable_model_error(exc):
+                self._track_usage(None, start, status="error")
+                raise
+
+            # Dead-model path — attempt fallback
+            fallback_model = self._get_fallback_model()
+            if not fallback_model or fallback_model == self.config.model:
+                self._track_usage(None, start, status="error")
+                raise
+
+            logger.warning(
+                "LLM_MODEL_FAILED: Primary model '%s' on provider '%s' is unavailable (%s). "
+                "Retrying with fallback model '%s'. "
+                "ACTION REQUIRED: Update your model in Settings > Orchestrator.",
+                self.config.model, self.config.provider.value, exc,
+                fallback_model,
+            )
+
+            try:
+                fb_config = self._build_fallback_config(fallback_model)
+                fb_provider = self._create_provider(fb_config)
+                response = await fb_provider.generate_response(messages, tools)
+                # Tag so callers know this came from fallback
+                response._used_fallback = True
+                response._failed_model = self.config.model
+                response._fallback_model = fallback_model
+                self._track_usage(response, start, status="fallback")
+                return response
+            except Exception as fb_exc:
+                logger.error(
+                    "LLM_FALLBACK_FAILED: Fallback model '%s' also failed: %s",
+                    fallback_model, fb_exc,
+                )
+                self._track_usage(None, start, status="error")
+                raise fb_exc from exc
+
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> Any:
-        """Generate response using the configured provider (synchronous)"""
+        """Generate response using the configured provider (synchronous), with automatic usage tracking.
+
+        Same fallback logic as ``generate_response``.
+        """
         self._ensure_provider_initialized()
-        return self.provider.generate_response_sync(messages)
+        start = time.monotonic()
+        try:
+            response = self.provider.generate_response_sync(messages)
+            self._track_usage(response, start)
+            return response
+        except Exception as exc:
+            if not self._is_retriable_model_error(exc):
+                self._track_usage(None, start, status="error")
+                raise
+
+            fallback_model = self._get_fallback_model()
+            if not fallback_model or fallback_model == self.config.model:
+                self._track_usage(None, start, status="error")
+                raise
+
+            logger.warning(
+                "LLM_MODEL_FAILED: Primary model '%s' on provider '%s' is unavailable (%s). "
+                "Retrying with fallback model '%s'. "
+                "ACTION REQUIRED: Update your model in Settings > Orchestrator.",
+                self.config.model, self.config.provider.value, exc,
+                fallback_model,
+            )
+
+            try:
+                fb_config = self._build_fallback_config(fallback_model)
+                fb_provider = self._create_provider(fb_config)
+                response = fb_provider.generate_response_sync(messages)
+                response._used_fallback = True
+                response._failed_model = self.config.model
+                response._fallback_model = fallback_model
+                self._track_usage(response, start, status="fallback")
+                return response
+            except Exception as fb_exc:
+                logger.error(
+                    "LLM_FALLBACK_FAILED: Fallback model '%s' also failed: %s",
+                    fallback_model, fb_exc,
+                )
+                self._track_usage(None, start, status="error")
+                raise fb_exc from exc
+
+    def _track_usage(self, response: Any, start: float, status: str = "success") -> None:
+        """Track LLM usage via UsageTracker if workspace_id is set."""
+        ws = self._tracking_ctx.get("workspace_id")
+        if not ws:
+            return
+        try:
+            from .usage_tracker import UsageTracker
+
+            latency_ms = int((time.monotonic() - start) * 1000)
+
+            usage = getattr(response, "usage", None) or {}
+            input_tokens = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+
+            UsageTracker.track(
+                workspace_id=ws,
+                model_id=self.config.model or "unknown",
+                provider=self.config.provider.value if self.config.provider else "unknown",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                agent_id=self._tracking_ctx.get("agent_id"),
+                execution_id=self._tracking_ctx.get("execution_id"),
+                request_type=self._tracking_ctx.get("request_type", self.service_name),
+                latency_ms=latency_ms,
+                status=status,
+                is_byok=self._tracking_ctx.get("is_byok", False),
+            )
+        except Exception as e:
+            logger.debug(f"Usage tracking failed: {e}")
     
     def get_provider_info(self) -> Dict[str, Any]:
         """Get information about the current provider configuration"""

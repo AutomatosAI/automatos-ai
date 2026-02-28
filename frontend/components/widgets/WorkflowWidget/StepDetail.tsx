@@ -15,11 +15,11 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
-  CheckCircle2,
-  XCircle,
+  Check,
+  X,
   Clock,
   Loader2,
-  MinusCircle,
+  SkipForward,
   Timer,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -50,19 +50,19 @@ function getStepStatusConfig(status: WorkflowStep['status']) {
       }
     case 'completed':
       return {
-        icon: CheckCircle2,
+        icon: Check,
         className: 'text-green-500',
         label: 'Completed',
       }
     case 'failed':
       return {
-        icon: XCircle,
+        icon: X,
         className: 'text-red-500',
         label: 'Failed',
       }
     case 'skipped':
       return {
-        icon: MinusCircle,
+        icon: SkipForward,
         className: 'text-gray-400',
         label: 'Skipped',
       }
@@ -76,14 +76,26 @@ function getStepStatusConfig(status: WorkflowStep['status']) {
 }
 
 /**
- * Format duration
+ * Format duration in ms to human-readable string
  */
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(2)}s`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
   const mins = Math.floor(ms / 60000)
-  const secs = ((ms % 60000) / 1000).toFixed(1)
-  return `${mins}m ${secs}s`
+  const secs = Math.floor((ms % 60000) / 1000)
+  if (mins < 60) return `${mins}m ${secs}s`
+  const hours = Math.floor(mins / 60)
+  const remainingMins = mins % 60
+  return `${hours}h ${remainingMins}m`
+}
+
+/**
+ * Compute elapsed ms from startedAt to completedAt or now
+ */
+function computeElapsed(startedAt: string, completedAt?: string): number {
+  const start = new Date(startedAt).getTime()
+  const end = completedAt ? new Date(completedAt).getTime() : Date.now()
+  return Math.max(0, end - start)
 }
 
 export function StepDetail({ step, open, onOpenChange }: StepDetailProps) {
@@ -113,10 +125,12 @@ export function StepDetail({ step, open, onOpenChange }: StepDetailProps) {
             )}>
               {config.label}
             </Badge>
-            {step.duration !== undefined && (
+            {(step.duration !== undefined || step.startedAt) && (
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Timer className="h-3.5 w-3.5" />
-                {formatDuration(step.duration)}
+                {step.duration !== undefined
+                  ? formatDuration(step.duration)
+                  : formatDuration(computeElapsed(step.startedAt!, step.completedAt))}
               </div>
             )}
           </div>
@@ -180,11 +194,15 @@ export function StepDetail({ step, open, onOpenChange }: StepDetailProps) {
                     >
                       <ChildIcon className={cn('h-4 w-4', childConfig.className)} />
                       <span>{child.name}</span>
-                      {child.duration !== undefined && (
+                      {child.duration !== undefined ? (
                         <span className="text-xs text-muted-foreground">
                           {formatDuration(child.duration)}
                         </span>
-                      )}
+                      ) : child.startedAt ? (
+                        <span className="text-xs text-muted-foreground">
+                          {formatDuration(computeElapsed(child.startedAt, child.completedAt))}
+                        </span>
+                      ) : null}
                     </div>
                   )
                 })}

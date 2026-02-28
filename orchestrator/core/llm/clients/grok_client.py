@@ -66,7 +66,7 @@ class GrokProvider(BaseLLMProvider):
                     "max_tokens": self.config.max_tokens
                 }
                 if tools:
-                    kwargs["tools"] = tools
+                    kwargs["tools"] = self._sanitize_tools(tools)
                     kwargs["tool_choice"] = "auto"
                 return self.client.chat.completions.create(**kwargs)
             

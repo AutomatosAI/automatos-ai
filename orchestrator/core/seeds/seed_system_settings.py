@@ -67,12 +67,20 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.GENERAL.value,
             "key": "embedding_model",
-            "default_value": "openai",
+            "default_value": "qwen/qwen3-embedding-8b",
             "value_type": "string",
-            "description": "Default embedding model type (openai, sentence_transformer, disabled)",
+            "description": "Embedding model name (used by the selected embedding_provider)",
+            "is_required": False
+        },
+        {
+            "category": SettingCategory.GENERAL.value,
+            "key": "embedding_provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": "Embedding provider (openrouter, openai, google, cohere, huggingface_local, huggingface_api, disabled)",
             "is_required": False,
             "validation_rules": {
-                "options": ["openai", "sentence_transformer", "disabled", "local"]
+                "options": ["openrouter", "openai", "google", "cohere", "huggingface_local", "huggingface_api", "disabled"]
             }
         },
         {
@@ -98,15 +106,16 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.GENERAL.value,
             "key": "openai_embedding_model",
-            "default_value": "text-embedding-ada-002",
+            "default_value": "qwen/qwen3-embedding-8b",
             "value_type": "string",
-            "description": "OpenAI embedding model name",
+            "description": "Embedding model name (via configured provider)",
             "is_required": False,
             "validation_rules": {
                 "options": [
-                    "text-embedding-ada-002",
+                    "qwen/qwen3-embedding-8b",
                     "text-embedding-3-small",
-                    "text-embedding-3-large"
+                    "text-embedding-3-large",
+                    "text-embedding-ada-002"
                 ]
             }
         },
@@ -124,9 +133,9 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.GENERAL.value,
             "key": "vector_store_dimensions",
-            "default_value": "1024",
+            "default_value": "2048",
             "value_type": "number",
-            "description": "Vector dimensions",
+            "description": "Vector embedding dimensions (Qwen3-8B Matryoshka truncated to 2048)",
             "is_required": False,
             "validation_rules": {
                 "min": 128,
@@ -170,6 +179,30 @@ def seed_system_settings(db: Session):
             }
         },
         
+        # Reranking Configuration
+        {
+            "category": SettingCategory.GENERAL.value,
+            "key": "rag_rerank_enabled",
+            "default_value": "false",
+            "value_type": "boolean",
+            "description": "Enable Cohere reranking after vector search (improves precision 15-30%)",
+            "is_required": False,
+            "validation_rules": {
+                "options": ["true", "false"]
+            }
+        },
+        {
+            "category": SettingCategory.GENERAL.value,
+            "key": "rag_rerank_model",
+            "default_value": "rerank-v3.5",
+            "value_type": "string",
+            "description": "Cohere rerank model",
+            "is_required": False,
+            "validation_rules": {
+                "options": ["rerank-v3.5", "rerank-english-v3.0", "rerank-multilingual-v3.0"]
+            }
+        },
+
         # Deployment Configuration (if deployment service exists)
         {
             "category": SettingCategory.GENERAL.value,
@@ -579,21 +612,19 @@ def seed_system_settings(db: Session):
             }
         },
         
-        # Embedding Model Configuration
+        # Embedding Model Configuration (inherits from general settings by default)
         {
             "category": SettingCategory.CODEGRAPH.value,
             "key": "embedding_model",
-            "default_value": "text-embedding-ada-002",
+            "default_value": "qwen/qwen3-embedding-8b",
             "value_type": "string",
             "description": "Embedding model for CodeGraph semantic search",
             "is_required": False,
             "validation_rules": {
                 "options": [
-                    "text-embedding-ada-002",
+                    "qwen/qwen3-embedding-8b",
                     "text-embedding-3-small",
-                    "text-embedding-3-large",
-                    "sentence-transformers/all-MiniLM-L6-v2",
-                    "sentence-transformers/all-mpnet-base-v2"
+                    "text-embedding-3-large"
                 ]
             }
         },
@@ -1075,6 +1106,15 @@ def seed_system_settings(db: Session):
         # BACKEND API KEYS SETTINGS
         # ========================================
         
+        {
+            "category": SettingCategory.BACKEND_API_KEYS.value,
+            "key": "cohere_api_key",
+            "default_value": "",
+            "value_type": "string",
+            "description": "Cohere API key for reranking (rerank-v3.5). Get one at dashboard.cohere.com",
+            "is_required": False,
+            "is_sensitive": True
+        },
         {
             "category": SettingCategory.BACKEND_API_KEYS.value,
             "key": "api_key",

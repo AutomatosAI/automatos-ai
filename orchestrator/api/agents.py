@@ -28,7 +28,41 @@ from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/agents", tags=["agents"]) 
+router = APIRouter(prefix="/api/agents", tags=["agents"])
+
+
+# ------------------------------------------------------------------
+# PRD-64: Semantic embedding helper (fire-and-forget)
+# ------------------------------------------------------------------
+
+def _reindex_agent_embedding(agent: Agent, db: Session) -> None:
+    """Trigger semantic re-embedding for a single agent in background.
+
+    Creates its own DB session to avoid lifecycle issues with the request session.
+    Non-blocking: failures are logged but never bubble up to the API caller.
+    """
+    import asyncio
+
+    agent_id = agent.id  # Capture before session closes
+
+    async def _do_embed():
+        from core.database.database import SessionLocal
+        _db = SessionLocal()
+        try:
+            from core.routing.semantic_indexer import embed_agent
+            _agent = _db.query(Agent).get(agent_id)
+            if _agent:
+                await embed_agent(_agent, _db)
+        except Exception:
+            logger.warning("[semantic] Background embed failed for agent %d", agent_id, exc_info=True)
+        finally:
+            _db.close()
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_do_embed())
+    except RuntimeError:
+        pass
 
 
 def _stable_tool_id(name: str) -> int:
@@ -236,6 +270,11 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         performance_metrics=agent.performance_metrics or {},
         created_by=agent.created_by,
         agent_model_config=getattr(agent, 'model_config', None),  # PRD-15: Include model config (field renamed to agent_model_config)
+        model_usage_stats=getattr(agent, 'model_usage_stats', None),  # PRD-54: LLM usage stats
+        # PRD-67: System agent fields
+        is_system_agent=getattr(agent, 'is_system_agent', False) or False,
+        slug=getattr(agent, 'slug', None),
+        required_role=getattr(agent, 'required_role', None),
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
@@ -293,7 +332,7 @@ async def get_agent_stats(ctx: RequestContext = Depends(get_request_context_hybr
         }
     except Exception as e:
         logger.error(f"Error getting agent stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/bulk", response_model=List[AgentResponse])
 async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -341,14 +380,16 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
             created_agents.append(agent)
         
         db.commit()
-        
+
         # Refresh and build responses
         result = []
         for agent in created_agents:
             db.refresh(agent)
+            # PRD-64: Trigger semantic embedding (non-blocking)
+            _reindex_agent_embedding(agent, db)
             agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
             result.append(_build_agent_response(agent_with_skills, db))
-        
+
         return result
         
     except HTTPException:
@@ -356,7 +397,7 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating bulk agents: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating bulk agents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/", response_model=AgentResponse)
 async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -421,20 +462,23 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         
         db.commit()
         db.refresh(agent)
-        
+
+        # PRD-64: Trigger semantic embedding (non-blocking)
+        _reindex_agent_embedding(agent, db)
+
         # Load skills and tools for response
         agent_with_skills_and_tools = db.query(Agent).options(
             joinedload(Agent.skills),
         ).filter(Agent.id == agent.id).first()
-        
+
         return _build_agent_response(agent_with_skills_and_tools, db)
-        
+
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating agent: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating agent: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/", response_model=List[AgentResponse])
 async def list_agents(
@@ -449,33 +493,57 @@ async def list_agents(
 ):
     """List agents with enhanced filtering and pagination"""
     try:
-        # Filter by workspace
-        query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
-        
-        # Apply filters
+        # PRD-67: Build a single unified query covering workspace agents
+        # AND visible system agents, so filters and pagination apply to all.
+        user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
+        _ROLE_HIERARCHY = {"super_admin": {"super_admin", "admin"}, "admin": {"admin"}}
+        visible_roles = _ROLE_HIERARCHY.get(user_role, set())
+
+        # Base scope: workspace agents OR visible system agents
+        workspace_predicate = Agent.workspace_id == ctx.workspace_id
+        if visible_roles:
+            system_predicate = and_(
+                Agent.is_system_agent.is_(True),
+                Agent.status == "active",
+                or_(Agent.required_role.is_(None), Agent.required_role.in_(visible_roles)),
+            )
+            scope_filter = or_(workspace_predicate, system_predicate)
+        else:
+            scope_filter = workspace_predicate
+
+        query = (
+            db.query(Agent)
+            .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
+            .filter(scope_filter)
+        )
+
+        # Apply filters uniformly to all agents (workspace + system)
         if status:
             query = query.filter(Agent.status == status.value)
-        
+
         if agent_type:
             query = query.filter(Agent.agent_type == agent_type.value)
-        
+
         if priority_level:
             query = query.filter(Agent.priority_level == priority_level.value)
-        
+
         if search:
             search_filter = or_(
                 Agent.name.ilike(f"%{search}%"),
                 Agent.description.ilike(f"%{search}%")
             )
             query = query.filter(search_filter)
-        
+
+        # Deduplicate by id (system agents with workspace_id=NULL won't overlap,
+        # but guard against edge cases) and apply pagination
+        query = query.distinct(Agent.id)
         agents = query.offset(skip).limit(limit).all()
-        
+
         return [_build_agent_response(agent, db) for agent in agents]
         
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{agent_id}/status")
 async def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -501,7 +569,7 @@ async def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_requ
         raise
     except Exception as e:
         logger.error(f"Error getting agent status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{agent_id}/execute")
 async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -531,7 +599,7 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestCo
         raise  
     except Exception as e:
         logger.error(f"Error executing agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -551,7 +619,7 @@ async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_con
         raise
     except Exception as e:
         logger.error(f"Error getting agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{agent_id}/skills")
 async def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -577,7 +645,7 @@ async def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_requ
         raise
     except Exception as e:
         logger.error(f"Error getting agent skills: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{agent_id}/skills")
 async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -595,14 +663,17 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestCont
         
         agent.skills.extend(skills)
         db.commit()
-        
+
+        # PRD-64: Trigger semantic embedding (non-blocking)
+        _reindex_agent_embedding(agent, db)
+
         return {"data": {"message": "Skills added successfully", "agent_id": agent_id, "skill_ids": skill_ids}}
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error adding agent skills: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/{agent_id}", response_model=AgentResponse)
 async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -683,18 +754,21 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
         
         db.commit()
         db.refresh(agent)
-        
+
+        # PRD-64: Trigger semantic embedding (non-blocking)
+        _reindex_agent_embedding(agent, db)
+
         # Load with skills for response
         agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
-        
+
         return _build_agent_response(agent_with_skills, db)
-        
+
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error updating agent: {e}")
-        raise HTTPException(status_code=500, detail=f"Error updating agent: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{agent_id}")
 async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -724,7 +798,7 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
                 savepoint.rollback()  # Rollback savepoint, but keep main transaction
                 if required:
                     logger.error(f"Error deleting {table_name} for agent {agent_id}: {e}")
-                    raise HTTPException(status_code=500, detail=f"Error deleting {table_name}: {str(e)}")
+                    raise HTTPException(status_code=500, detail="Internal server error")
                 else:
                     logger.warning(f"Error deleting {table_name} for agent {agent_id}: {e}")
                     # Continue for optional tables
@@ -739,4 +813,37 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting agent: {e}")
-        raise HTTPException(status_code=500, detail=f"Error deleting agent: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ------------------------------------------------------------------
+# PRD-64: Bulk re-index semantic embeddings
+# ------------------------------------------------------------------
+
+@router.post("/reindex-embeddings")
+async def reindex_embeddings(
+    force: bool = Query(False, description="Force re-embed even if text unchanged"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Re-embed all active agents in the workspace for semantic routing.
+
+    Use ``force=true`` to regenerate even when the semantic text hash has not changed.
+    """
+    try:
+        from core.routing.semantic_indexer import embed_workspace_agents
+
+        count = await embed_workspace_agents(ctx.workspace_id, db, force=force)
+        total = db.query(Agent).filter(
+            Agent.workspace_id == ctx.workspace_id, Agent.status == "active"
+        ).count()
+
+        return {
+            "embedded": count,
+            "total_active": total,
+            "force": force,
+            "workspace_id": str(ctx.workspace_id),
+        }
+    except Exception as e:
+        logger.error(f"Error reindexing embeddings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to reindex embeddings")

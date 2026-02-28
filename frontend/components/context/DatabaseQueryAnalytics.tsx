@@ -3,12 +3,16 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Database, Clock, CheckCircle, TrendingUp, AlertCircle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Database, Clock, CheckCircle, TrendingUp, AlertCircle, Target, Play } from 'lucide-react'
+import { toast } from 'sonner'
 
 export function DatabaseQueryAnalytics() {
   const [stats, setStats] = useState<any>(null)
   const [performance, setPerformance] = useState<any[]>([])
   const [topQueries, setTopQueries] = useState<any[]>([])
+  const [benchmarks, setBenchmarks] = useState<any[]>([])
+  const [runningBenchmark, setRunningBenchmark] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -26,6 +30,18 @@ export function DatabaseQueryAnalytics() {
       if (statsRes.ok) setStats(await statsRes.json())
       if (perfRes.ok) setPerformance(await perfRes.json())
       if (queriesRes.ok) setTopQueries(await queriesRes.json())
+
+      // Fetch benchmark history (best effort - may not have sources)
+      try {
+        const sourcesRes = await fetch('/api/knowledge/sources/database')
+        if (sourcesRes.ok) {
+          const sources = await sourcesRes.json()
+          if (sources.length > 0) {
+            const benchRes = await fetch(`/api/knowledge/sources/database/${sources[0].id}/benchmark/history?limit=10`)
+            if (benchRes.ok) setBenchmarks(await benchRes.json())
+          }
+        }
+      } catch { /* no benchmarks available */ }
     } catch (error) {
       console.error('Failed to fetch database analytics:', error)
     } finally {
@@ -160,6 +176,79 @@ export function DatabaseQueryAnalytics() {
           </CardContent>
         </Card>
       )}
+
+      {/* NL2SQL Benchmark Accuracy */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Target className="h-5 w-5 text-purple-400" />
+              NL2SQL Benchmark Accuracy
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={runningBenchmark}
+              onClick={async () => {
+                setRunningBenchmark(true)
+                try {
+                  const sourcesRes = await fetch('/api/knowledge/sources/database')
+                  if (!sourcesRes.ok) throw new Error('No sources')
+                  const sources = await sourcesRes.json()
+                  if (sources.length === 0) { toast.error('No database sources to benchmark'); return }
+                  const res = await fetch(`/api/knowledge/sources/database/${sources[0].id}/benchmark/run`, { method: 'POST' })
+                  if (res.ok) {
+                    const result = await res.json()
+                    toast.success(`Benchmark complete: ${(result.exact_match_rate * 100).toFixed(1)}% exact match`)
+                    setBenchmarks(prev => [result, ...prev].slice(0, 10))
+                  } else {
+                    const err = await res.json()
+                    toast.error(err.detail || 'Benchmark failed')
+                  }
+                } catch { toast.error('Could not run benchmark') }
+                finally { setRunningBenchmark(false) }
+              }}
+            >
+              <Play className="h-4 w-4 mr-1" />
+              {runningBenchmark ? 'Running...' : 'Run Benchmark'}
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {benchmarks.length > 0 ? (
+            <div className="space-y-3">
+              {benchmarks.map((b, idx) => (
+                <div key={b.id || idx} className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg border border-border/50">
+                  <div className="flex items-center gap-3">
+                    <div className="text-center">
+                      <div className="text-lg font-bold text-purple-400">
+                        {((b.exact_match_rate || 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">Exact</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-lg font-bold text-green-400">
+                        {((b.execution_match_rate || 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">Execution</div>
+                    </div>
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground">
+                    <div>{b.total_examples || 0} examples tested</div>
+                    <div>{b.created_at ? new Date(b.created_at).toLocaleDateString() : 'Unknown'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <Target className="h-12 w-12 mx-auto mb-2 opacity-50" />
+              <p>No benchmark runs yet</p>
+              <p className="text-xs mt-1">Run a benchmark to measure NL2SQL accuracy against verified training examples</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Info Message */}
       <Card className="glass-card border-blue-500/30 bg-blue-500/5">

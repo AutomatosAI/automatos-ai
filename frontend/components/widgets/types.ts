@@ -27,6 +27,8 @@ export type WidgetType =
   | 'chart'       // Standalone charts
   | 'form'        // Input forms
   | 'chat'        // Embedded chat (for SDK)
+  // PRD-66: Physical workspace code viewer
+  | 'coding_canvas'  // Monaco-based workspace file browser + editor
 
 /**
  * Widget position in the canvas grid
@@ -107,6 +109,7 @@ export interface Widget<TData = unknown> {
   state: WidgetState
   position?: WidgetPosition
   size?: WidgetSize
+  config?: WidgetConfig
   error?: WidgetError | null
   createdAt: string
   updatedAt?: string
@@ -358,6 +361,10 @@ export interface TerminalWidgetData {
   workingDirectory?: string
   environment?: Record<string, string>
   isStreaming?: boolean
+  /** When set, terminal becomes interactive against this workspace */
+  workspaceId?: string
+  /** Enable interactive mode (command input + history) */
+  interactive?: boolean
 }
 
 /**
@@ -470,13 +477,132 @@ export interface FileWidgetData {
 }
 
 // ============================================
+// PRD-66: Coding Canvas Widget Data Types
+// ============================================
+
+/**
+ * File tree entry from workspace filesystem
+ */
+export interface WorkspaceFileEntry {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size: number
+  modified_at?: number
+  children?: WorkspaceFileEntry[]
+  isLoading?: boolean
+}
+
+/**
+ * Open file tab in the code editor
+ */
+export interface OpenFileTab {
+  path: string
+  name: string
+  language: string
+  content?: string
+  isLoading?: boolean
+  isDirty?: boolean
+}
+
+/**
+ * Coding Canvas widget data (from workspace file operations)
+ */
+export interface CodingCanvasWidgetData {
+  workspaceId: string
+  taskId?: string
+  /** Currently selected file path */
+  activeFilePath?: string
+  /** Open file tabs */
+  openFiles?: OpenFileTab[]
+  /** Last workspace event (for live updates) */
+  lastEvent?: {
+    type: 'file_read' | 'file_write' | 'stdout_chunk' | 'git_operation'
+    path?: string
+    timestamp: string
+  }
+}
+
+// ============================================
+// Widget Configuration Types (US-011)
+// ============================================
+
+/**
+ * Widget theme variants
+ */
+export type WidgetTheme = 'default' | 'minimal' | 'compact'
+
+/**
+ * Common configuration shared by all widget types
+ */
+export interface WidgetConfigCommon {
+  theme: WidgetTheme
+  showHeader: boolean
+  showBorder: boolean
+  autoRefresh: boolean
+  refreshInterval: number // seconds, 5-86400
+}
+
+/**
+ * DataWidget-specific configuration
+ */
+export interface DataWidgetConfig extends WidgetConfigCommon {
+  rowsPerPage: number   // 10-100
+  chartType: 'bar' | 'line' | 'pie'
+}
+
+/**
+ * CodeWidget-specific configuration
+ */
+export interface CodeWidgetConfig extends WidgetConfigCommon {
+  fontSize: number      // 10-24
+  lineNumbers: boolean
+  wordWrap: boolean
+}
+
+/**
+ * Union of all widget config shapes
+ */
+export type WidgetConfig = WidgetConfigCommon | DataWidgetConfig | CodeWidgetConfig
+
+/**
+ * Default common config values
+ */
+export const DEFAULT_WIDGET_CONFIG: WidgetConfigCommon = {
+  theme: 'default',
+  showHeader: true,
+  showBorder: true,
+  autoRefresh: false,
+  refreshInterval: 30,
+}
+
+/**
+ * Default DataWidget config values
+ */
+export const DEFAULT_DATA_WIDGET_CONFIG: DataWidgetConfig = {
+  ...DEFAULT_WIDGET_CONFIG,
+  rowsPerPage: 25,
+  chartType: 'bar',
+}
+
+/**
+ * Default CodeWidget config values
+ */
+export const DEFAULT_CODE_WIDGET_CONFIG: CodeWidgetConfig = {
+  ...DEFAULT_WIDGET_CONFIG,
+  fontSize: 14,
+  lineNumbers: true,
+  wordWrap: false,
+}
+
+// ============================================
 // Grid Layout Types
 // ============================================
 
 /**
  * Layout mode for the workspace canvas
  */
-export type LayoutMode = 'grid' | 'freeform' | 'split' | 'focus'
+export type LayoutMode = 'grid' | 'freeform' | 'split' | 'focus' | 'stack'
 
 /**
  * Grid configuration

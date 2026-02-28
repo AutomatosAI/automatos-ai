@@ -49,6 +49,7 @@ interface SystemPrompt {
   description: string | null
   variables: Record<string, string> | null
   is_active: boolean
+  futureagi_eval_enabled: boolean
   active_version_number: number | null
   active_content: string | null
   active_eval_scores: Record<string, any> | null
@@ -110,6 +111,7 @@ export function SystemPromptsTab() {
   const [editNote, setEditNote] = useState('')
   const [showEditor, setShowEditor] = useState(false)
   const [activeTab, setActiveTab] = useState<'content' | 'versions' | 'assessments'>('content')
+  const [assessLoading, setAssessLoading] = useState<string | null>(null)
 
   // ---------------------------------------------------------------
   // Data fetching
@@ -121,7 +123,7 @@ export function SystemPromptsTab() {
       const params = new URLSearchParams()
       if (selectedCategory) params.set('category', selectedCategory)
       if (searchQuery) params.set('search', searchQuery)
-      const data = await apiClient(`/api/admin/prompts?${params}`)
+      const data = await apiClient.request(`/api/admin/prompts?${params}`)
       setPrompts(data)
     } catch (err) {
       console.error('Failed to fetch prompts:', err)
@@ -132,7 +134,7 @@ export function SystemPromptsTab() {
 
   const fetchCategories = useCallback(async () => {
     try {
-      const data = await apiClient('/api/admin/prompts/categories')
+      const data = await apiClient.request('/api/admin/prompts/categories')
       setCategories(data)
     } catch (err) {
       console.error('Failed to fetch categories:', err)
@@ -141,7 +143,7 @@ export function SystemPromptsTab() {
 
   const fetchVersions = useCallback(async (promptId: string) => {
     try {
-      const data = await apiClient(`/api/admin/prompts/${promptId}/versions`)
+      const data = await apiClient.request(`/api/admin/prompts/${promptId}/versions`)
       setVersions(data)
     } catch (err) {
       console.error('Failed to fetch versions:', err)
@@ -150,7 +152,7 @@ export function SystemPromptsTab() {
 
   const fetchAssessmentRuns = useCallback(async (promptId: string) => {
     try {
-      const data = await apiClient(`/api/admin/prompts/${promptId}/assessment-runs`)
+      const data = await apiClient.request(`/api/admin/prompts/${promptId}/assessment-runs`)
       setAssessmentRuns(data)
     } catch (err) {
       console.error('Failed to fetch assessment runs:', err)
@@ -159,6 +161,16 @@ export function SystemPromptsTab() {
 
   useEffect(() => { fetchCategories() }, [fetchCategories])
   useEffect(() => { fetchPrompts() }, [fetchPrompts])
+
+  // Auto-poll assessment runs when any are pending/running
+  useEffect(() => {
+    const hasPending = assessmentRuns.some(r => r.status === 'pending' || r.status === 'running')
+    if (!hasPending || !selectedPrompt) return
+    const interval = setInterval(() => {
+      fetchAssessmentRuns(selectedPrompt.id)
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [assessmentRuns, selectedPrompt, fetchAssessmentRuns])
 
   // ---------------------------------------------------------------
   // Select prompt
@@ -182,7 +194,7 @@ export function SystemPromptsTab() {
     if (!selectedPrompt) return
     await fetchPrompts()
     await fetchVersions(selectedPrompt.id)
-    const updated = await apiClient(`/api/admin/prompts/${selectedPrompt.id}`)
+    const updated = await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}`)
     setSelectedPrompt(updated)
     setEditContent(updated.active_content || '')
   }
@@ -191,7 +203,7 @@ export function SystemPromptsTab() {
     if (!selectedPrompt || !editContent.trim()) return
     setSaving(true)
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/versions?activate=${activate}`, {
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/versions?activate=${activate}`, {
         method: 'POST',
         body: JSON.stringify({ content: editContent, change_note: editNote || null }),
       })
@@ -207,7 +219,7 @@ export function SystemPromptsTab() {
   const activateVersion = async (versionId: string) => {
     if (!selectedPrompt) return
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/versions/${versionId}/activate`, { method: 'POST' })
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/versions/${versionId}/activate`, { method: 'POST' })
       await refreshSelected()
     } catch (err) {
       console.error('Failed to activate version:', err)
@@ -217,7 +229,7 @@ export function SystemPromptsTab() {
   const rollback = async () => {
     if (!selectedPrompt) return
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/rollback`, { method: 'POST' })
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/rollback`, { method: 'POST' })
       await refreshSelected()
     } catch (err) {
       console.error('Failed to rollback:', err)
@@ -227,23 +239,59 @@ export function SystemPromptsTab() {
   const deleteVersion = async (versionId: string) => {
     if (!selectedPrompt) return
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/versions/${versionId}`, { method: 'DELETE' })
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/versions/${versionId}`, { method: 'DELETE' })
       await fetchVersions(selectedPrompt.id)
     } catch (err) {
       console.error('Failed to delete version:', err)
     }
   }
 
-  const triggerAssessment = async (runType: string) => {
+  const toggleFutureAGI = async () => {
     if (!selectedPrompt) return
     try {
-      await apiClient(`/api/admin/prompts/${selectedPrompt.id}/assess`, {
+      const updated = await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/futureagi-toggle`, {
+        method: 'PATCH',
+      })
+      setSelectedPrompt(updated as SystemPrompt)
+    } catch (err) {
+      console.error('Failed to toggle FutureAGI:', err)
+    }
+  }
+
+  const applyOptimizedPrompt = async (optimizedText: string) => {
+    if (!selectedPrompt || !optimizedText) return
+    setSaving(true)
+    try {
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/versions?activate=false`, {
+        method: 'POST',
+        body: JSON.stringify({
+          content: optimizedText,
+          change_note: 'Auto-generated by FutureAGI optimizer',
+        }),
+      })
+      await refreshSelected()
+      setActiveTab('versions')
+    } catch (err) {
+      console.error('Failed to apply optimized prompt:', err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const triggerAssessment = async (runType: string) => {
+    if (!selectedPrompt) return
+    setAssessLoading(runType)
+    try {
+      await apiClient.request(`/api/admin/prompts/${selectedPrompt.id}/assess`, {
         method: 'POST',
         body: JSON.stringify({ run_type: runType }),
       })
+      setActiveTab('assessments')
       await fetchAssessmentRuns(selectedPrompt.id)
     } catch (err) {
       console.error('Failed to trigger assessment:', err)
+    } finally {
+      setAssessLoading(null)
     }
   }
 
@@ -503,15 +551,38 @@ export function SystemPromptsTab() {
       {/* ASSESSMENTS */}
       {activeTab === 'assessments' && (
         <div className="space-y-4">
+          {/* Live eval toggle */}
+          <div className="flex items-center justify-between p-3 rounded-xl border border-border/50 bg-secondary/10">
+            <div>
+              <div className="text-sm font-medium">FutureAGI Live Scoring</div>
+              <div className="text-xs text-muted-foreground">Score every real chat message using this prompt</div>
+            </div>
+            <button
+              onClick={toggleFutureAGI}
+              className={cn(
+                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                selectedPrompt?.futureagi_eval_enabled ? 'bg-emerald-500' : 'bg-zinc-600'
+              )}
+            >
+              <span className={cn(
+                'inline-block h-4 w-4 rounded-full bg-white transition-transform',
+                selectedPrompt?.futureagi_eval_enabled ? 'translate-x-6' : 'translate-x-1'
+              )} />
+            </button>
+          </div>
+
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={() => triggerAssessment('assess')}>
-              <BarChart3 className="w-3.5 h-3.5 mr-1.5" />Score Quality
+            <Button size="sm" onClick={() => triggerAssessment('assess')} disabled={!!assessLoading}>
+              {assessLoading === 'assess' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <BarChart3 className="w-3.5 h-3.5 mr-1.5" />}
+              Score Quality
             </Button>
-            <Button size="sm" variant="outline" onClick={() => triggerAssessment('optimize')}>
-              <Zap className="w-3.5 h-3.5 mr-1.5" />Optimize
+            <Button size="sm" variant="outline" onClick={() => triggerAssessment('optimize')} disabled={!!assessLoading}>
+              {assessLoading === 'optimize' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 mr-1.5" />}
+              Optimize
             </Button>
-            <Button size="sm" variant="outline" onClick={() => triggerAssessment('safety')}>
-              <Shield className="w-3.5 h-3.5 mr-1.5" />Safety Scan
+            <Button size="sm" variant="outline" onClick={() => triggerAssessment('safety')} disabled={!!assessLoading}>
+              {assessLoading === 'safety' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Shield className="w-3.5 h-3.5 mr-1.5" />}
+              Safety Scan
             </Button>
           </div>
 
@@ -541,19 +612,108 @@ export function SystemPromptsTab() {
                     <span className="text-xs text-muted-foreground">{new Date(run.created_at).toLocaleString()}</span>
                   </div>
                   {run.error_message && <p className="text-xs text-destructive mt-1">{run.error_message}</p>}
-                  {run.scores && (
-                    <div className="mt-2 grid grid-cols-3 gap-2">
-                      {Object.entries(run.scores.scores || run.scores).map(([key, val]) => {
-                        if (key === 'metrics_run' || key === 'error') return null
-                        const score = typeof val === 'object' ? (val as any)?.score : val
+
+                  {/* Assess / Live results */}
+                  {run.scores && (run.run_type === 'assess' || run.run_type === 'live') && run.scores.scores && (
+                    <div className="mt-2 space-y-2">
+                      {Object.entries(run.scores.scores as Record<string, any>).map(([key, val]) => {
+                        const v = val as any
+                        const passed = v?.passed
+                        const score = v?.score
                         const pct = score != null ? Math.round(Number(score) * 100) : null
                         return (
                           <div key={key} className="text-xs">
-                            <span className="text-muted-foreground">{key.replace(/_/g, ' ')}: </span>
-                            <span className="font-medium">{pct != null ? `${pct}%` : 'N/A'}</span>
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className={cn('inline-block w-1.5 h-1.5 rounded-full', passed ? 'bg-emerald-400' : passed === false ? 'bg-amber-400' : 'bg-zinc-400')} />
+                              <span className="font-medium">{key.replace(/_/g, ' ')}</span>
+                              {pct != null && <span className="text-muted-foreground">({pct}%)</span>}
+                            </div>
+                            {v?.reason && <p className="text-muted-foreground ml-3 line-clamp-2">{v.reason}</p>}
                           </div>
                         )
                       })}
+                    </div>
+                  )}
+
+                  {/* Safety results */}
+                  {run.scores && run.run_type === 'safety' && (
+                    <div className="mt-2 space-y-1.5">
+                      {run.scores.safe != null && (
+                        <div className="flex items-center gap-1.5 text-xs font-medium">
+                          <span className={cn('inline-block w-2 h-2 rounded-full', run.scores.safe ? 'bg-emerald-400' : 'bg-red-400')} />
+                          {run.scores.safe ? 'All checks passed' : 'Issues detected'}
+                        </div>
+                      )}
+                      {run.scores.checks && Object.entries(run.scores.checks as Record<string, any>).map(([key, val]) => {
+                        const v = val as any
+                        return (
+                          <div key={key} className="text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <span className={cn('inline-block w-1.5 h-1.5 rounded-full', v?.safe ? 'bg-emerald-400' : v?.safe === false ? 'bg-red-400' : 'bg-zinc-400')} />
+                              <span className="font-medium">{key.replace(/_/g, ' ')}</span>
+                              {v?.safe != null && <span className="text-muted-foreground">({v.safe ? 'safe' : 'flagged'})</span>}
+                            </div>
+                            {v?.reason && <p className="text-muted-foreground ml-3 line-clamp-2">{v.reason}</p>}
+                            {v?.error && <p className="text-amber-400 ml-3">{v.error}</p>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Optimize results */}
+                  {run.scores && run.run_type === 'optimize' && (
+                    <div className="mt-2 text-xs space-y-2">
+                      {run.scores.error && (
+                        <p className="text-red-400">{run.scores.error}</p>
+                      )}
+                      {run.scores.status === 'completed' && run.scores.optimized_prompt && (
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-2">
+                              {run.scores.best_score != null && run.scores.best_score >= 0 ? (
+                                <>
+                                  <span className="font-medium text-emerald-400">Optimized prompt ready</span>
+                                  <span className="text-muted-foreground">
+                                    Score: {(run.scores.best_score * 100).toFixed(0)}%
+                                    {run.scores.initial_score != null && run.scores.initial_score >= 0 && (
+                                      <> (was {(run.scores.initial_score * 100).toFixed(0)}%)</>
+                                    )}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="font-medium text-amber-400">Optimization completed (scoring failed — template variables may have interfered)</span>
+                              )}
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs h-7"
+                              disabled={saving}
+                              onClick={() => applyOptimizedPrompt(run.scores!.optimized_prompt)}
+                            >
+                              {saving ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Check className="w-3 h-3 mr-1" />}
+                              Apply as Draft
+                            </Button>
+                          </div>
+                          <p className="p-2.5 rounded-lg bg-secondary/30 whitespace-pre-wrap max-h-48 overflow-y-auto border border-border/30">
+                            {run.scores.optimized_prompt}
+                          </p>
+                          {run.scores.duration && (
+                            <p className="text-muted-foreground mt-1">
+                              {run.scores.algorithm} / {run.scores.rounds} rounds / {run.scores.duration}s
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {run.scores.status === 'submitted' && (
+                        <div>
+                          <p className="text-blue-400">{run.scores.message || 'Optimization submitted to FutureAGI'}</p>
+                          {run.scores.improve_id && (
+                            <p className="text-muted-foreground">Job ID: {run.scores.improve_id}</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

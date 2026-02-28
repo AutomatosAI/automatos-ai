@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { motion } from 'framer-motion'
+import { useState, useMemo, Fragment } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bot,
+  Brain,
   CheckCircle,
   Clock,
   DollarSign,
@@ -13,12 +14,14 @@ import {
   ChevronUp,
   ArrowUpDown,
   Zap,
+  Activity,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Progress } from '@/components/ui/progress'
 import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
 import { useAgentAnalytics } from '@/hooks/use-unified-analytics'
 
@@ -33,6 +36,127 @@ function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return n.toFixed(0)
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '-'
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function AgentExpandedPanel({ agent }: { agent: any }) {
+  const memoryTypes = agent.memoryTypes || {}
+  const memoryLevels = agent.memoryLevels || {}
+  const hasMemory = agent.memoryCount > 0
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Memory Column */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Brain className="w-4 h-4 text-purple-400" />
+          Memory
+        </div>
+        {hasMemory ? (
+          <>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Total memories</span>
+              <span className="font-medium">{agent.memoryCount}</span>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Avg importance</span>
+                <span className="font-medium">{agent.avgImportance.toFixed(2)}</span>
+              </div>
+              <Progress value={agent.avgImportance * 100} className="h-1.5" />
+            </div>
+            {Object.keys(memoryTypes).length > 0 && (
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">Types</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(memoryTypes).map(([type, count]) => (
+                    <Badge key={type} variant="secondary" className="text-xs">
+                      {type.replace(/_/g, ' ').toLowerCase()} ({count as number})
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {Object.keys(memoryLevels).length > 0 && (
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">Levels</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(memoryLevels).map(([level, count]) => (
+                    <Badge key={level} variant="outline" className="text-xs">
+                      {level.replace(/_/g, ' ').toLowerCase()} ({count as number})
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground italic">No memories</p>
+        )}
+      </div>
+
+      {/* Usage Details Column */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Zap className="w-4 h-4 text-blue-400" />
+          Usage Details
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Total requests</span>
+          <span className="font-medium">{agent.totalRequests > 0 ? formatNumber(agent.totalRequests) : '-'}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Avg tokens/request</span>
+          <span className="font-medium">
+            {agent.totalRequests > 0 ? formatNumber(Math.round(agent.tokensUsed / agent.totalRequests)) : '-'}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Total tokens</span>
+          <span className="font-medium">{agent.tokensUsed > 0 ? formatNumber(agent.tokensUsed) : '-'}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Total cost</span>
+          <span className="font-medium">{agent.cost > 0 ? `$${agent.cost.toFixed(2)}` : '-'}</span>
+        </div>
+        {hasMemory && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Memory accesses</span>
+            <span className="font-medium">{agent.totalAccesses}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Activity Column */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Activity className="w-4 h-4 text-green-400" />
+          Activity
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Last used</span>
+          <span className="font-medium">{formatDate(agent.lastUsed)}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Last memory</span>
+          <span className="font-medium">{formatDate(agent.lastMemoryAt)}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Agent type</span>
+          <Badge variant="secondary" className="text-xs capitalize">{agent.agentType || 'general'}</Badge>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Model</span>
+          <Badge variant="secondary" className="text-xs font-mono">{agent.llmModel}</Badge>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function AnalyticsAgents({ days }: Props) {
@@ -147,41 +271,67 @@ export function AnalyticsAgents({ days }: Props) {
                   </td>
                 </tr>
               ) : (
-                sortedAgents.map((agent) => (
-                  <motion.tr
-                    key={agent.id}
-                    className="border-b border-border/30 hover:bg-secondary/20 cursor-pointer transition-colors"
-                    onClick={() => setExpandedAgent(expandedAgent === agent.id.toString() ? null : agent.id.toString())}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                  >
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        {expandedAgent === agent.id.toString() ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        <span className="font-medium">{agent.name}</span>
-                      </div>
-                    </td>
-                    <td className="p-4 hidden md:table-cell">
-                      <Badge variant="outline" className={agent.status === 'active' ? 'text-green-400 border-green-400/30' : 'text-gray-400'}>
-                        {agent.status}
-                      </Badge>
-                    </td>
-                    <td className="p-4">
-                      <span className={agent.successRate < 80 && agent.successRate > 0 ? 'text-red-400' : ''}>
-                        {agent.successRate > 0 ? `${agent.successRate.toFixed(0)}%` : '-'}
-                      </span>
-                    </td>
-                    <td className="p-4 hidden lg:table-cell">
-                      {agent.avgRunTime > 0 ? `${agent.avgRunTime.toFixed(1)}s` : '-'}
-                    </td>
-                    <td className="p-4">{agent.tokensUsed > 0 ? formatNumber(agent.tokensUsed) : '-'}</td>
-                    <td className="p-4">{agent.cost > 0 ? `$${agent.cost.toFixed(2)}` : '-'}</td>
-                    <td className="p-4 hidden lg:table-cell">
-                      <Badge variant="secondary" className="text-xs font-mono">{agent.llmModel}</Badge>
-                    </td>
-                    <td className="p-4 hidden xl:table-cell">{getHealthBadge(agent)}</td>
-                  </motion.tr>
-                ))
+                sortedAgents.map((agent) => {
+                  const isExpanded = expandedAgent === agent.id.toString()
+                  return (
+                    <Fragment key={agent.id}>
+                      <motion.tr
+                        className="border-b border-border/30 hover:bg-secondary/20 cursor-pointer transition-colors"
+                        onClick={() => setExpandedAgent(isExpanded ? null : agent.id.toString())}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                      >
+                        <td className="p-4">
+                          <div className="flex items-center gap-2">
+                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            <span className="font-medium">{agent.name}</span>
+                          </div>
+                        </td>
+                        <td className="p-4 hidden md:table-cell">
+                          <Badge variant="outline" className={agent.status === 'active' ? 'text-green-400 border-green-400/30' : 'text-gray-400'}>
+                            {agent.status}
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <span className={agent.successRate < 80 && agent.successRate > 0 ? 'text-red-400' : ''}>
+                            {agent.successRate > 0 ? `${agent.successRate.toFixed(0)}%` : '-'}
+                          </span>
+                        </td>
+                        <td className="p-4 hidden lg:table-cell">
+                          {agent.avgRunTime > 0 ? `${agent.avgRunTime.toFixed(1)}s` : '-'}
+                        </td>
+                        <td className="p-4">{agent.tokensUsed > 0 ? formatNumber(agent.tokensUsed) : '-'}</td>
+                        <td className="p-4">{agent.cost > 0 ? `$${agent.cost.toFixed(2)}` : '-'}</td>
+                        <td className="p-4 hidden lg:table-cell">
+                          <Badge variant="secondary" className="text-xs font-mono">{agent.llmModel}</Badge>
+                        </td>
+                        <td className="p-4 hidden xl:table-cell">{getHealthBadge(agent)}</td>
+                      </motion.tr>
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.tr
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="border-b border-border/30"
+                          >
+                            <td colSpan={8} className="p-0">
+                              <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="p-5 bg-secondary/10"
+                              >
+                                <AgentExpandedPanel agent={agent} />
+                              </motion.div>
+                            </td>
+                          </motion.tr>
+                        )}
+                      </AnimatePresence>
+                    </Fragment>
+                  )
+                })
               )}
             </tbody>
           </table>

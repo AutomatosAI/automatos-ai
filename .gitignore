@@ -103,3 +103,11 @@ logs/
 **/.env
 orchestrator/.env
 frontend/.env.local
+
+# Credential encryption keys (auto-generated)
+.credential_key
+*.credential_key
+**/.credential_key
+
+# Nightly test reports (generated JSON)
+tests/api/reports/*.json

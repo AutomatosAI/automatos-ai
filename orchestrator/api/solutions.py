@@ -1,4 +1,3 @@
-
 """
 Solutions API Endpoints
 ======================
@@ -6,24 +5,18 @@ Solutions API Endpoints
 REST API endpoints for solution synthesis, validation, and roadmap generation.
 """
 
-import os
 import logging
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Body, Header
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from datetime import datetime
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
-
-# Simple API key auth dependency
-def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    if required and x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
 
 class SolutionSynthesisRequest(BaseModel):
     """Request model for solution synthesis"""
@@ -45,9 +38,10 @@ class RoadmapRequest(BaseModel):
 # Create router
 router = APIRouter(prefix="/api/solutions", tags=["💡 Solutions"])
 
-@router.post("/synthesize", dependencies=[Depends(require_api_key)])
+@router.post("/synthesize")
 async def synthesize_solution(
     request: SolutionSynthesisRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -87,11 +81,12 @@ async def synthesize_solution(
         
     except Exception as e:
         logger.error(f"Error synthesizing solution: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to synthesize solution: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/validate", dependencies=[Depends(require_api_key)])
+@router.post("/validate")
 async def validate_solution(
     request: SolutionValidationRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -124,11 +119,12 @@ async def validate_solution(
         
     except Exception as e:
         logger.error(f"Error validating solution: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to validate solution: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/roadmap", dependencies=[Depends(require_api_key)])
+@router.post("/roadmap")
 async def generate_roadmap(
     request: RoadmapRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -184,4 +180,4 @@ async def generate_roadmap(
         
     except Exception as e:
         logger.error(f"Error generating roadmap: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate roadmap: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

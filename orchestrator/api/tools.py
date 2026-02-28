@@ -212,7 +212,29 @@ async def connected(
 
     connections = entity_manager.get_entity_connections(entity["id"])
 
-    # PERFORMANCE FIX: Removed pending sync from page loads (see marketplace endpoint comment)
+    # Lightweight pending sync: check Composio API for any pending connections
+    # and upgrade to active if OAuth completed. Only hits Composio for pending apps.
+    pending = [c for c in connections if (c.get("status") or "").lower() == "pending"]
+    if pending and entity.get("composio_entity_id"):
+        client = get_composio_client()
+        for conn in pending:
+            try:
+                composio_status = client.get_connection_status(
+                    entity_id=entity["composio_entity_id"],
+                    app=conn.get("app_name", ""),
+                )
+                if composio_status and composio_status.get("status") in ("ACTIVE", "INITIATED"):
+                    entity_manager.update_connection_status(
+                        entity_id=entity["id"],
+                        app_name=conn.get("app_name", ""),
+                        status="active",
+                        connection_id=composio_status.get("id"),
+                    )
+                    conn["status"] = "active"
+                    conn["connection_id"] = composio_status.get("id")
+                    logger.info(f"[CONNECTED_APPS] Synced {conn.get('app_name')} from pending → active")
+            except Exception as e:
+                logger.debug(f"[CONNECTED_APPS] Pending sync failed for {conn.get('app_name')}: {e}")
 
     # Include active (connected), added (in workspace, auth revoked), and pending (OAuth in progress) apps.
     # All three represent apps the user has interacted with in their workspace.
@@ -388,7 +410,7 @@ async def connect_app(
             callback_url=payload.callback_url,
         )
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Failed to initiate OAuth: {str(e)}")
+        raise HTTPException(status_code=503, detail="Failed to initiate OAuth connection")
 
     # Store pending connection in DB
     entity_manager.add_connection(entity_id=entity["id"], app_name=app_name, status="pending")
@@ -740,10 +762,10 @@ class SuggestionsOut(BaseModel):
 @router.get("/{app_name}/suggestions", response_model=SuggestionsOut)
 async def get_tool_suggestions(
     app_name: str,
-    user_id: Optional[str] = Query(None),
     session_id: Optional[str] = Query(None),
     request: Request = None,
     db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """
     Get suggestion prompts for a specific tool/app.
@@ -751,12 +773,11 @@ async def get_tool_suggestions(
     Phase 1: Returns curated suggestions if available, otherwise generates
     basic suggestions from action schemas.
 
-    Phase 2 (PRD-41): If user_id and session_id provided, merges context-aware
+    Phase 2 (PRD-41): If session_id provided, merges context-aware
     suggestions based on recent tool results from Mem0.
 
     Args:
         app_name: The Composio app name (case-insensitive)
-        user_id: Optional user/workspace ID for context retrieval
         session_id: Optional session ID for context filtering
 
     Returns:
@@ -769,8 +790,9 @@ async def get_tool_suggestions(
     context_suggestions = []
     has_context = False
 
-    # Use user_id query param as override, else derive from request headers
-    workspace_id = request.headers.get("x-workspace-id") if request else None
+    # Derive user_id from auth context, fall back to workspace-based ID
+    user_id = ctx.user.id
+    workspace_id = str(ctx.workspace_id) if ctx.workspace_id else None
     context_user_id = user_id if user_id else (f"ws_{workspace_id}" if workspace_id else None)
 
     if context_user_id and session_id:

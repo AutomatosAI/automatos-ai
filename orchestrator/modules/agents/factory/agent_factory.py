@@ -868,7 +868,13 @@ Available Shell Tools:
             f"provider={model_config.provider}, model={model_config.model_id}, source={resolved.source}"
         )
 
-        return LLMManager(config=llm_config), resolved
+        manager = LLMManager(
+            config=llm_config,
+            workspace_id=workspace_id,
+            agent_id=None,  # not known at this point
+            is_byok=resolved.is_byok if resolved else False,
+        )
+        return manager, resolved
 
     async def _resolve_api_key(self, provider_name: str, agent_name: str = "", workspace_id=None) -> Optional[ResolvedKey]:
         """
@@ -1041,14 +1047,16 @@ Available Shell Tools:
 
         return provider_str
 
-    async def activate_agent(self, agent_id: int, workspace_dir: str = "/tmp/automatos_workspace") -> Optional[AgentRuntime]:
+    async def activate_agent(self, agent_id: int, workspace_dir: str = "/tmp/automatos_workspace", use_system_llm: bool = False) -> Optional[AgentRuntime]:
         """
         Load an agent from database and activate it in runtime.
-        
+
         Args:
             agent_id: ID of agent to activate
             workspace_dir: Workspace directory for file operations
-            
+            use_system_llm: If True, ignore agent's model_config and use
+                            orchestrator system settings (used by Auto mode)
+
         Returns:
             AgentRuntime if successful, None if agent not found or activation failed
         """
@@ -1076,7 +1084,7 @@ Available Shell Tools:
                 and agent_model_config.get("provider")
             )
 
-            if agent_has_model:
+            if agent_has_model and not use_system_llm:
                 # Use agent's own model config
                 llm_config_dict = {
                     "provider": agent_model_config["provider"],
@@ -1086,7 +1094,8 @@ Available Shell Tools:
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (from agent model_config)")
             else:
-                # Fall back to system settings
+                # Fall back to system settings (orchestrator LLM config)
+                reason = "use_system_llm=True (Auto mode)" if use_system_llm else "no agent model_config"
                 system_llm_config = self._get_default_llm_config_from_settings()
                 llm_config_dict = {
                     "provider": system_llm_config.get("provider"),
@@ -1094,7 +1103,7 @@ Available Shell Tools:
                     "temperature": agent_llm_config.get("temperature", system_llm_config.get("temperature", 0.7)),
                     "max_tokens": agent_llm_config.get("max_tokens", system_llm_config.get("max_tokens", 2000)),
                 }
-                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (from system settings)")
+                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (from system settings — {reason})")
             
             # Create LLM manager with API key resolution (PRD-54)
             provider_str = llm_config_dict.get("provider", "openai")
@@ -1108,14 +1117,33 @@ Available Shell Tools:
             # Resolve API key: BYOK (if enabled) → platform credential → env vars
             resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=db_agent.workspace_id)
 
+            # Fallback: if direct provider has no credential, try OpenRouter
+            if (not resolved or not resolved.api_key) and provider_str != "openrouter":
+                self.logger.warning(
+                    f"No credential for provider '{provider_str}' — "
+                    f"falling back to OpenRouter for model '{model_id_str}'"
+                )
+                provider_str = "openrouter"
+                # OpenRouter expects slash-format model IDs (e.g. google/gemini-2.0-flash)
+                if "/" not in model_id_str:
+                    original_provider = llm_config_dict.get("provider", "").lower()
+                    model_id_str = f"{original_provider}/{model_id_str}"
+                provider = LLMProvider(provider_str)
+                resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=db_agent.workspace_id)
+
             llm_config = LLMConfig(
                 provider=provider,
-                model=llm_config_dict.get("model", "gpt-4"),
+                model=model_id_str,
                 temperature=llm_config_dict.get("temperature", 0.7),
                 max_tokens=llm_config_dict.get("max_tokens", 2000),
                 api_key=resolved.api_key if resolved else None,
             )
-            llm_manager = LLMManager(llm_config)
+            llm_manager = LLMManager(
+                config=llm_config,
+                workspace_id=db_agent.workspace_id,
+                agent_id=agent_id,
+                is_byok=resolved.is_byok if resolved else False,
+            )
 
             # Create metadata from database agent
             metadata = AgentMetadata(

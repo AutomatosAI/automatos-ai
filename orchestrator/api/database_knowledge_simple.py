@@ -2,9 +2,11 @@
 Database Knowledge API Routes - Simplified
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 router = APIRouter(prefix="/api/knowledge/sources/database", tags=["Database Knowledge"])
 
@@ -14,12 +16,12 @@ class DatabaseSourceCreate(BaseModel):
     description: Optional[str] = None
 
 @router.get("/test")
-async def test_endpoint():
+async def test_endpoint(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Test endpoint to verify routes are working"""
     return {"status": "Database Knowledge API is active", "version": "1.0"}
 
 @router.get("/templates/list")
-async def list_templates(dialect: Optional[str] = None):
+async def list_templates(dialect: Optional[str] = None, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """List query templates"""
     templates = [
         {
@@ -54,7 +56,7 @@ async def list_templates(dialect: Optional[str] = None):
     return templates
 
 @router.get("/cache/stats")
-async def get_cache_stats():
+async def get_cache_stats(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get cache statistics"""
     return {
         "schema_cache_hits": 0,
@@ -66,7 +68,7 @@ async def get_cache_stats():
     }
 
 @router.post("/")
-async def create_database_source(source: DatabaseSourceCreate):
+async def create_database_source(source: DatabaseSourceCreate, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Create a new database knowledge source"""
     return {
         "success": True,

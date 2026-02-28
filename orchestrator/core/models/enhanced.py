@@ -217,7 +217,12 @@ class AgentResponse(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
     created_by: Optional[str] = Field(None, description="Creator")
     agent_model_config: Optional[Dict[str, Any]] = Field(None, description="PRD-15: Model configuration")
-    
+    model_usage_stats: Optional[Dict[str, Any]] = Field(None, description="PRD-54: LLM usage stats")
+    # PRD-67: System agent fields
+    is_system_agent: bool = Field(False, description="Whether this is a platform system agent")
+    slug: Optional[str] = Field(None, description="Stable identifier for system agents")
+    required_role: Optional[str] = Field(None, description="Required system_role to see/use this agent")
+
     class Config:
         schema_extra = {
             "example": {

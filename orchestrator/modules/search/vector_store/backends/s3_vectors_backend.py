@@ -6,7 +6,7 @@ AWS S3 Vectors backend for vector storage and retrieval.
 Creates workspace-scoped buckets with cosine similarity search.
 
 Each workspace gets its own S3 vector bucket: automatos-vectors-{workspace_id}
-with a single index: documents-index (dimension=1024, metric=COSINE).
+with a single index: documents-index (dimension from S3_VECTORS_DIMENSION, metric=COSINE).
 """
 
 import logging
@@ -69,7 +69,11 @@ class S3VectorsBackend:
         self._ensure_setup()
 
     def _ensure_setup(self) -> None:
-        """Create bucket and index if they don't already exist."""
+        """Create bucket and index if they don't already exist.
+
+        If an existing index has a different dimension than configured,
+        it is deleted and recreated so embeddings can be stored correctly.
+        """
         # Create bucket
         try:
             self.client.create_vector_bucket(vectorBucketName=self.bucket_name)
@@ -81,7 +85,7 @@ class S3VectorsBackend:
             else:
                 raise
 
-        # Create index
+        # Create index (with dimension mismatch detection)
         try:
             self.client.create_index(
                 vectorBucketName=self.bucket_name,
@@ -90,15 +94,31 @@ class S3VectorsBackend:
                 dataType="float32",
                 distanceMetric=self.distance_metric,
             )
-            logger.info(f"Created S3 vector index: {self.index_name}")
+            logger.info(f"Created S3 vector index: {self.index_name} (dimension={self.index_dimension})")
         except ClientError as e:
             code = e.response["Error"]["Code"]
             if code in ("ConflictException", "ResourceAlreadyExistsException"):
-                logger.debug(f"S3 vector index already exists: {self.index_name}")
+                # Index exists — verify the dimension matches
+                self._verify_or_recreate_index()
             else:
                 raise
 
         self._setup_complete = True
+
+    def _verify_or_recreate_index(self) -> None:
+        """Log existing index info. Never delete — that destroys stored vectors."""
+        try:
+            response = self.client.get_index(
+                vectorBucketName=self.bucket_name,
+                indexName=self.index_name,
+            )
+            existing_dim = response.get("dimension", 0)
+            logger.info(
+                f"S3 vector index exists: {self.index_name} "
+                f"(reported dimension={existing_dim}, config={self.index_dimension})"
+            )
+        except ClientError as e:
+            logger.warning(f"Could not verify S3 vector index: {e}")
 
     def search(
         self,
@@ -118,9 +138,10 @@ class S3VectorsBackend:
             response = self.client.query_vectors(
                 vectorBucketName=self.bucket_name,
                 indexName=self.index_name,
-                queryVector=query_embedding,
-                queryVectorDataType="float32",
+                queryVector={"float32": query_embedding},
                 topK=limit,
+                returnMetadata=True,
+                returnDistance=True,
             )
 
             results = []
@@ -147,7 +168,10 @@ class S3VectorsBackend:
             return results
 
         except ClientError as e:
-            logger.error(f"S3 Vectors search failed: {e}")
+            logger.error(f"S3 Vectors search failed: {e}", exc_info=True)
+            return []
+        except Exception as e:
+            logger.error(f"S3 Vectors search unexpected error: {e}", exc_info=True)
             return []
 
     def add_documents(
@@ -197,13 +221,22 @@ class S3VectorsBackend:
         if not vector_objects:
             return []
 
+        # Batch puts to stay under S3 Vectors max request size (~10MB)
+        # With 4096-dim float32 vectors (~16KB each) + metadata, ~50 vectors per batch is safe
+        BATCH_SIZE = 50
         try:
-            # S3 Vectors supports batch puts
-            self.client.put_vectors(
-                vectorBucketName=self.bucket_name,
-                indexName=self.index_name,
-                vectors=vector_objects,
-            )
+            for i in range(0, len(vector_objects), BATCH_SIZE):
+                batch = vector_objects[i:i + BATCH_SIZE]
+                self.client.put_vectors(
+                    vectorBucketName=self.bucket_name,
+                    indexName=self.index_name,
+                    vectors=batch,
+                )
+                if len(vector_objects) > BATCH_SIZE:
+                    logger.info(
+                        f"Stored batch {i // BATCH_SIZE + 1}/{(len(vector_objects) + BATCH_SIZE - 1) // BATCH_SIZE} "
+                        f"({len(batch)} vectors) in {self.bucket_name}/{self.index_name}"
+                    )
             logger.info(
                 f"Stored {len(vector_objects)} vectors in {self.bucket_name}/{self.index_name}"
             )

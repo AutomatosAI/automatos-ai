@@ -163,7 +163,7 @@ class WorkflowStreamManager:
     ):
         """
         Broadcast a structured log event.
-        
+
         Args:
             execution_id: Workflow execution ID
             level: Log level (INFO, DEBUG, WARNING, ERROR)
@@ -179,6 +179,38 @@ class WorkflowStreamManager:
                 "details": details or {},
                 "truncated": False  # Never truncate!
             }
+        )
+
+    async def broadcast_workflow_update(
+        self,
+        execution_id: int,
+        workflow_id: str,
+        status: str,
+        current_step: Optional[str] = None,
+        progress: Optional[float] = None,
+    ):
+        """
+        Broadcast a workflow-update event (US-015).
+
+        Args:
+            execution_id: Workflow execution ID (for stream routing)
+            workflow_id: Workflow definition or execution ID string
+            status: Current status (running, completed, failed, paused)
+            current_step: Name of the currently executing step
+            progress: Completion ratio 0.0 - 1.0
+        """
+        payload: Dict[str, Any] = {
+            "workflowId": workflow_id,
+            "status": status,
+        }
+        if current_step is not None:
+            payload["currentStep"] = current_step
+        if progress is not None:
+            payload["progress"] = progress
+        await self.broadcast_event(
+            execution_id=execution_id,
+            event_type="workflow-update",
+            data=payload,
         )
 
 

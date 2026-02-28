@@ -40,8 +40,8 @@ class ToolCategory(Enum):
     FILE_OPERATIONS = "file_ops"       # read, write, delete files
     SHELL_COMMANDS = "shell"           # execute shell commands
     DATABASE_TOOLS = "database"        # SQL operations (future)
-    SSH_TOOLS = "ssh"                  # SSH operations (future)
-    API_TOOLS = "api"                  # REST API calls (future)
+    SSH_TOOLS = "ssh"                  # SSH remote command execution
+    API_TOOLS = "api"                  # REST API calls & HTTP requests
     GIT_OPERATIONS = "git"             # Git operations (future)
     COMMUNICATION = "communication"    # Slack, Email, etc.
     DEVELOPER = "developer"            # GitHub, GitLab, etc.
@@ -896,6 +896,161 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
         ))
 
         # ==========================================
+        # HTTP REQUEST (Internal API Testing)
+        # ==========================================
+
+        self.register_tool(ToolSpec(
+            name="http_request",
+            category=ToolCategory.API_TOOLS,
+            description=(
+                "Make HTTP requests to whitelisted internal and platform URLs. "
+                "Use this to test API endpoints, check health status, and verify responses. "
+                "Only allowed domains: automatos-ai.railway.internal, automatos-ai-frontend.railway.internal, "
+                "api.automatos.app, ui.automatos.app, localhost."
+            ),
+            executor_class="UnifiedToolExecutor",
+            executor_method="_execute_http_request",
+            parameters=[
+                ToolParameter(
+                    name="url",
+                    type="string",
+                    description="Full URL to request (must be a whitelisted domain)",
+                    required=True
+                ),
+                ToolParameter(
+                    name="method",
+                    type="string",
+                    description="HTTP method: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS",
+                    required=False,
+                    default="GET",
+                    enum=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+                ),
+                ToolParameter(
+                    name="headers",
+                    type="object",
+                    description="Request headers as key-value pairs (e.g. {\"Content-Type\": \"application/json\"})",
+                    required=False,
+                    default={}
+                ),
+                ToolParameter(
+                    name="body",
+                    type="object",
+                    description="Request body (JSON object, sent as application/json for POST/PUT/PATCH)",
+                    required=False,
+                    default={}
+                ),
+                ToolParameter(
+                    name="timeout",
+                    type="number",
+                    description="Request timeout in seconds (default: 30, max: 120)",
+                    required=False,
+                    default=30
+                )
+            ],
+            returns="JSON object with status_code, headers, body, and duration_ms",
+            security_level=SecurityLevel.CAUTIOUS,
+            permissions_required={"read": True, "execute": True},
+            examples=[
+                {"action": "http_request", "params": {"url": "http://automatos-ai.railway.internal/health", "method": "GET"}},
+                {"action": "http_request", "params": {"url": "http://automatos-ai.railway.internal/api/agents", "method": "GET", "headers": {"x-api-key": "your-key", "x-workspace-id": "your-ws-id"}}},
+            ],
+            metadata={
+                "allowed_domains": [
+                    "automatos-ai.railway.internal",
+                    "automatos-ai-frontend.railway.internal",
+                    "api.automatos.app",
+                    "ui.automatos.app",
+                    "localhost",
+                    "127.0.0.1",
+                ],
+                "max_response_bytes": 1_000_000,
+                "added_in": "self-test-v1",
+            }
+        ))
+
+        # ==========================================
+        # SSH EXECUTION (Remote Commands)
+        # ==========================================
+
+        self.register_tool(ToolSpec(
+            name="ssh_execute",
+            category=ToolCategory.SSH_TOOLS,
+            description=(
+                "Execute commands on a remote server via SSH. "
+                "Use this to clone repositories, run tests, check server status, etc. "
+                "Requires SSH credentials (host, username, and either password or private key). "
+                "Commands run in a non-interactive shell with configurable timeout."
+            ),
+            executor_class="UnifiedToolExecutor",
+            executor_method="_execute_ssh",
+            parameters=[
+                ToolParameter(
+                    name="host",
+                    type="string",
+                    description="SSH server hostname or IP address",
+                    required=True
+                ),
+                ToolParameter(
+                    name="command",
+                    type="string",
+                    description="Shell command to execute on the remote server",
+                    required=True
+                ),
+                ToolParameter(
+                    name="username",
+                    type="string",
+                    description="SSH username (default: 'automatos')",
+                    required=False,
+                    default="automatos"
+                ),
+                ToolParameter(
+                    name="port",
+                    type="number",
+                    description="SSH port (default: 22)",
+                    required=False,
+                    default=22
+                ),
+                ToolParameter(
+                    name="password",
+                    type="string",
+                    description="SSH password (use credential_id instead when possible)",
+                    required=False
+                ),
+                ToolParameter(
+                    name="private_key",
+                    type="string",
+                    description="SSH private key content (PEM format)",
+                    required=False
+                ),
+                ToolParameter(
+                    name="credential_id",
+                    type="string",
+                    description="ID of stored SSH credential to use (preferred over inline password/key)",
+                    required=False
+                ),
+                ToolParameter(
+                    name="timeout",
+                    type="number",
+                    description="Command timeout in seconds (default: 60, max: 300)",
+                    required=False,
+                    default=60
+                )
+            ],
+            returns="JSON object with exit_code, stdout, stderr, and duration_ms",
+            security_level=SecurityLevel.DANGEROUS,
+            permissions_required={"read": True, "write": True, "execute": True},
+            examples=[
+                {"action": "ssh_execute", "params": {"host": "build-server.railway.internal", "command": "cd /app && python -m pytest tests/ -v --tb=short", "username": "automatos", "timeout": 120}},
+                {"action": "ssh_execute", "params": {"host": "build-server.railway.internal", "command": "git clone https://github.com/AutomatosAI/automatos-ai.git /tmp/repo", "credential_id": "ssh-prod-1"}},
+            ],
+            metadata={
+                "requires_credentials": True,
+                "max_output_bytes": 500_000,
+                "added_in": "self-test-v1",
+            }
+        ))
+
+        # ==========================================
         # COMPOSIO EXECUTION (External Apps)
         # ==========================================
 
@@ -950,6 +1105,77 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                 metadata={"integration_type": "composio"},
             )
         )
+
+        # ==========================================
+        # DOCUMENT GENERATION (PRD-63)
+        # ==========================================
+
+        self.register_tool(ToolSpec(
+            name="generate_document",
+            category=ToolCategory.FILE_OPERATIONS,
+            description=(
+                "Generate a polished PDF, DOCX, or XLSX document from data. "
+                "Use when the user asks for a report, invoice, export, summary document, "
+                "or any formatted document. Returns a download URL for the generated file."
+            ),
+            executor_class="AgentPlatformTools",
+            executor_method="execute_tool",
+            parameters=[
+                ToolParameter(
+                    name="title",
+                    type="string",
+                    description="Document title (e.g., 'Monthly Sales Report', 'Invoice #1234')",
+                    required=True
+                ),
+                ToolParameter(
+                    name="format",
+                    type="string",
+                    description="Output format: pdf, docx, or xlsx",
+                    required=True,
+                    enum=["pdf", "docx", "xlsx"]
+                ),
+                ToolParameter(
+                    name="data",
+                    type="object",
+                    description=(
+                        "Data to populate the document. "
+                        "For reports: {\"sections\": [{\"title\": \"Section Name\", \"content\": \"Full paragraph text...\"}], "
+                        "\"author\": \"...\", \"date\": \"...\"}. "
+                        "Each section MUST have 'title' and 'content' keys with substantial text in content. "
+                        "For tables/xlsx: {\"columns\": [\"col1\", \"col2\"], \"rows\": [[\"val1\", \"val2\"]]}."
+                    ),
+                    required=True
+                ),
+                ToolParameter(
+                    name="template_name",
+                    type="string",
+                    description="Template to use (e.g., 'Basic Report', 'Invoice'). Omit for auto-selection.",
+                    required=False
+                ),
+            ],
+            returns="JSON with filename, format, download_url, and size_kb",
+            security_level=SecurityLevel.CAUTIOUS,
+            permissions_required={"read": True, "write": True},
+            examples=[
+                {
+                    "action": "generate_document",
+                    "params": {
+                        "title": "Weekly Status Report",
+                        "format": "pdf",
+                        "data": {"sections": [{"title": "Summary", "content": "All tasks completed on time. The team delivered 5 features and resolved 12 bugs."}]},
+                    },
+                },
+                {
+                    "action": "generate_document",
+                    "params": {
+                        "title": "User Export",
+                        "format": "xlsx",
+                        "data": {"rows": [{"name": "Alice", "email": "alice@example.com"}]},
+                    },
+                },
+            ],
+            metadata={"added_in": "PRD-63"}
+        ))
 
     def _extract_methods(self, capabilities: Dict[str, Any]) -> List[str]:
             
@@ -1057,11 +1283,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             
             # Context Map (TODO: make dynamic when tool taxonomy stabilizes)
             CONTEXT_MAP = {
-                "general": ["communication", "research", "productivity", "system", "collaboration", "developer", "api"],
-                "coding": ["developer", "github", "git", "code", "file_ops", "devtools"],
+                "general": ["communication", "research", "productivity", "system", "collaboration", "developer", "api", "file_ops", "database"],
+                "coding": ["developer", "github", "git", "code", "file_ops", "devtools", "research"],
                 "ops": ["cloud", "k8s", "aws", "infrastructure", "monitoring", "database", "shell"],
                 "communication": ["communication", "slack", "email", "chat", "collaboration"],
-                "research": ["research", "data", "search", "rag"],
+                "research": ["research", "data", "search", "rag", "database"],
             }
             
             allowed_categories = CONTEXT_MAP.get(active_context)

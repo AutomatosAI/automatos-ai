@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
@@ -47,12 +47,12 @@ router = APIRouter(prefix="/api/admin/prompts", tags=["Admin Prompts"])
 # ===================================================================
 
 def _assert_admin(ctx: RequestContext) -> None:
-    """Allow admin role, workspace owners (Clerk auth), and API key auth."""
-    if ctx.auth_type in ("clerk", "api_key"):
-        return  # Authenticated users can manage prompts
-    if ctx.user and getattr(ctx.user, "system_role", "user") == "admin":
+    """Require admin role for Clerk users; allow API key auth (service-to-service)."""
+    if ctx.auth_type == "api_key":
+        return  # Service-to-service trust
+    if ctx.user and getattr(ctx.user, "system_role", "user") in ("admin", "super_admin"):
         return
-    raise HTTPException(status_code=403, detail="Authentication required")
+    raise HTTPException(status_code=403, detail="Admin access required")
 
 
 def _prompt_to_response(prompt: SystemPrompt) -> PromptResponse:
@@ -69,6 +69,7 @@ def _prompt_to_response(prompt: SystemPrompt) -> PromptResponse:
         description=prompt.description,
         variables=prompt.variables,
         is_active=prompt.is_active,
+        futureagi_eval_enabled=prompt.futureagi_eval_enabled,
         active_version_number=active_version.version_number if active_version else None,
         active_content=active_version.content if active_version else None,
         active_eval_scores=active_version.eval_scores if active_version else None,
@@ -334,6 +335,29 @@ def delete_draft(
 
 
 # ===================================================================
+# FutureAGI toggle
+# ===================================================================
+
+@router.patch("/{prompt_id}/futureagi-toggle", response_model=PromptResponse)
+def toggle_futureagi(
+    prompt_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Toggle FutureAGI live traffic scoring on/off for a prompt."""
+    _assert_admin(ctx)
+    prompt = db.query(SystemPrompt).filter(SystemPrompt.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    prompt.futureagi_eval_enabled = not prompt.futureagi_eval_enabled
+    db.commit()
+    db.refresh(prompt)
+    state = "enabled" if prompt.futureagi_eval_enabled else "disabled"
+    logger.info(f"FutureAGI scoring {state} for {prompt.slug}")
+    return _prompt_to_response(prompt)
+
+
+# ===================================================================
 # Assessment endpoints (FutureAGI integration)
 # ===================================================================
 
@@ -372,6 +396,7 @@ def list_assessment_runs(
 def trigger_assessment(
     prompt_id: UUID,
     body: EvalRunCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -408,23 +433,19 @@ def trigger_assessment(
     db.commit()
     db.refresh(run)
 
-    # Dispatch async assessment (non-blocking)
+    # Dispatch assessment via FastAPI BackgroundTasks (works in sync endpoints)
     try:
         from core.services.futureagi_service import futureagi_service
+
         import asyncio
 
-        async def _run_assessment():
+        def _run_assessment_sync(run_id: str):
             try:
-                await futureagi_service.run_assessment(str(run.id))
+                asyncio.run(futureagi_service.run_assessment(run_id))
             except Exception as e:
-                logger.error(f"FutureAGI assessment run {run.id} failed: {e}")
+                logger.error(f"FutureAGI assessment run {run_id} failed: {e}")
 
-        # Fire and forget
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(_run_assessment())
-        else:
-            asyncio.run(_run_assessment())
+        background_tasks.add_task(_run_assessment_sync, str(run.id))
     except ImportError:
         logger.warning("FutureAGI service not available, assessment run will stay pending")
     except Exception as e:

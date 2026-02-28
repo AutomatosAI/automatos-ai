@@ -1,0 +1,296 @@
+{
+  "project": "Automatos AI Platform — RAG v3",
+  "branchName": "ralph/rag-v3-competitive-upgrade",
+  "description": "PRD-60: RAG v3 Top-10 Competitive Upgrade — Address 8 critical gaps identified from competitive analysis against Dify, RAGFlow, LlamaIndex, etc. Fix S3 migration breakage (DocumentWidget, semantic search), add document return with citations, wire hybrid search (BM25+vector), implement parent-child chunk retrieval, improve document parsing (tables, OCR, multimodal resurrection from PRD-19), add evaluation/feedback loops, create dedicated search route, and lay knowledge graph foundation.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix S3 Migration Breakage — DocumentWidget Data Pipeline",
+      "description": "As a user, I need the DocumentWidget in the chatbot to display RAG results again (Content tab + Chunks tab) after the S3 migration broke the data flow.",
+      "acceptanceCriteria": [
+        "Fix tool_router.py to populate data.content and data.chunks from current storage layer (not hardcoded local paths)",
+        "Replace hardcoded /var/automatos/documents/{source} paths with document API endpoint references using document_id",
+        "DocumentWidget Content tab displays full document content fetched from correct backend endpoint",
+        "DocumentWidget Chunks tab displays chunks with similarity scores and relevance percentages",
+        "Download handler uses API endpoint instead of in-memory blob from data.content",
+        "Typecheck passes"
+      ],
+      "priority": 1
+    },
+    {
+      "id": "US-002",
+      "title": "Fix Semantic Search Hook After S3 Migration",
+      "description": "As a user, I need semantic search to work again after the S3 migration changed backend endpoints.",
+      "acceptanceCriteria": [
+        "Verify frontend/hooks/use-semantic-search-api.ts queries correct backend endpoint",
+        "Semantic search component returns results with similarity scores",
+        "4 context modes (documents, chatbot, agent, patterns) still function correctly",
+        "Similarity slider controls threshold properly",
+        "Debounced search performs correctly",
+        "Typecheck passes"
+      ],
+      "priority": 2
+    },
+    {
+      "id": "US-003",
+      "title": "Backend: Document Content API with Chunk Highlighting",
+      "description": "As a user, I want to view full document content with specific chunks highlighted so I can see where retrieved information came from.",
+      "acceptanceCriteria": [
+        "Add GET /{document_id}/content endpoint to orchestrator/api/documents.py",
+        "Endpoint accepts optional highlight_chunk_ids query param",
+        "Returns reconstructed document content from chunks ordered by chunk_index",
+        "When highlight_chunk_ids provided, wraps matching chunk text in <mark data-chunk-id> tags",
+        "Response includes document_id, filename, file_type, content, chunk_count, and optionally chunks array",
+        "Workspace-isolated: filters by ctx.workspace_id",
+        "Auth uses get_request_context_hybrid pattern",
+        "Typecheck passes"
+      ],
+      "priority": 3
+    },
+    {
+      "id": "US-004",
+      "title": "Backend: Enhanced Search Response with Document Grouping",
+      "description": "As a user, I want search results grouped by document with full metadata so I can see which documents are most relevant.",
+      "acceptanceCriteria": [
+        "Add search_with_document_context() method to RAGService in orchestrator/modules/rag/service.py",
+        "Method calls _get_candidates() then groups results by document_id",
+        "For each document group, fetches filename/type from documents table",
+        "Returns grouped results sorted by max similarity per document",
+        "Response shape: { query, total_results, documents: [{ document_id, filename, file_type, max_similarity, chunks: [...] }], execution_time_ms }",
+        "Add GET /search endpoint to orchestrator/api/documents.py (or new search.py) with q, limit, min_similarity, file_types params",
+        "Workspace-isolated with auth",
+        "Typecheck passes"
+      ],
+      "priority": 4
+    },
+    {
+      "id": "US-005",
+      "title": "Frontend: Enhance DocumentWidget with View-in-Document",
+      "description": "As a user, I want to click a chunk in the DocumentWidget and see it highlighted in the full document context.",
+      "acceptanceCriteria": [
+        "Add 'View in Document' button to each chunk in DocumentWidget Chunks tab",
+        "Clicking opens document content view with that chunk highlighted via <mark> tags",
+        "Source document link shows file type icon",
+        "Clickable chunk scrolls to highlighted section in document content",
+        "DO NOT create new document-viewer.tsx — enhance existing DocumentWidget/index.tsx",
+        "Typecheck passes"
+      ],
+      "priority": 5
+    },
+    {
+      "id": "US-006",
+      "title": "Frontend: Enhance Semantic Search with Document Grouping",
+      "description": "As a user, I want search results grouped by document in the semantic search component.",
+      "acceptanceCriteria": [
+        "Modify existing frontend/components/documents/semantic-search.tsx (not new component)",
+        "Group results by document using accordion/collapsible per document",
+        "Show document title + max relevance score at document level",
+        "Add 'View in Document' button that opens DocumentWidget with chunk highlighted",
+        "Add document download button per group",
+        "Typecheck passes"
+      ],
+      "priority": 6
+    },
+    {
+      "id": "US-007",
+      "title": "Frontend: Citation Badges in Chat Messages",
+      "description": "As a user, I want clickable citation badges [1], [2] in chatbot responses that link to source documents.",
+      "acceptanceCriteria": [
+        "When LLM response includes document references from build_tool_context_message, render clickable citation badges inline",
+        "Citation badges styled as [1], [2] etc. inline in message text",
+        "On click, open DocumentWidget with the relevant chunk highlighted",
+        "Leverage existing artifact-viewer.tsx pattern for document display",
+        "Add to chat message component in frontend/components/chatbot/",
+        "Typecheck passes"
+      ],
+      "priority": 7
+    },
+    {
+      "id": "US-008",
+      "title": "Backend: Add tsvector Column and GIN Index for Full-Text Search",
+      "description": "As the system, I need a tsvector column on document_chunks with a GIN index and auto-update trigger to support hybrid search.",
+      "acceptanceCriteria": [
+        "Create Alembic migration adding search_vector tsvector column to document_chunks",
+        "Populate existing rows: UPDATE document_chunks SET search_vector = to_tsvector('english', content)",
+        "Create GIN index: idx_document_chunks_search_vector",
+        "Create trigger function update_search_vector() that auto-sets search_vector on INSERT/UPDATE of content",
+        "Migration is safe to run on existing data (IF NOT EXISTS, idempotent)",
+        "Typecheck passes"
+      ],
+      "priority": 8
+    },
+    {
+      "id": "US-009",
+      "title": "Backend: Wire RAG Service to Hybrid Search Mode",
+      "description": "As a user, I want search to combine both semantic vector similarity and keyword matching for better results.",
+      "acceptanceCriteria": [
+        "Change _get_candidates() in orchestrator/modules/rag/service.py from SearchMode.VECTOR_ONLY to SearchMode.HYBRID",
+        "Pass query_text to vector store search for ts_rank scoring",
+        "Verify EnhancedVectorStore HYBRID SQL uses indexed search_vector column (not computed to_tsvector on the fly)",
+        "Add hybrid_vector_weight (default 0.7) and hybrid_keyword_weight (default 0.3) to RAGConfig dataclass",
+        "Wire configurable weights through to EnhancedVectorStore.search()",
+        "Typecheck passes"
+      ],
+      "priority": 9
+    },
+    {
+      "id": "US-010",
+      "title": "Backend: Parent-Child Chunk Retrieval with Context Expansion",
+      "description": "As a user, I want the system to retrieve small chunks for precision but expand to surrounding context for the LLM.",
+      "acceptanceCriteria": [
+        "Verify chunk_index is stored reliably in metadata JSONB for every chunk in document_chunks",
+        "Store parent_chunk_index, section_title, subsection_title in metadata during Markdown header-based splitting",
+        "Add _expand_to_parent_context() method to RAGService that fetches surrounding chunks by chunk_index ± expand_window",
+        "Call expansion in retrieve() before Knapsack optimization step",
+        "Use expanded_content for context formatting, original content for token counting",
+        "Default expand_window = 1 (configurable)",
+        "Typecheck passes"
+      ],
+      "priority": 10
+    },
+    {
+      "id": "US-011",
+      "title": "Backend: PDF Table Extraction as Markdown",
+      "description": "As a user, I want tables in my PDFs to be extracted as searchable Markdown tables during ingestion.",
+      "acceptanceCriteria": [
+        "Add _extract_pdf_with_tables() method to DocumentManager in orchestrator/modules/rag/ingestion/manager.py",
+        "Use pdfplumber (already installed) to extract tables from each page",
+        "Convert tables to Markdown format (headers, separator row, data rows)",
+        "Include [Page N] markers in extracted text",
+        "Store page number(s) in chunk metadata for 'View on Page X' links",
+        "Store has_table flag in chunk metadata when chunk contains table content",
+        "Typecheck passes"
+      ],
+      "priority": 11
+    },
+    {
+      "id": "US-012",
+      "title": "Backend: XLSX/CSV Extraction as Markdown Tables",
+      "description": "As a user, I want spreadsheet files to be converted to searchable Markdown tables during ingestion.",
+      "acceptanceCriteria": [
+        "Add _extract_spreadsheet() method to DocumentManager",
+        "Use openpyxl for XLSX files, handle multiple sheets",
+        "Convert each sheet to Markdown table with ## Sheet: {name} headers",
+        "Handle empty cells gracefully (convert to empty string)",
+        "Wire into ingest_file() pipeline for xlsx/csv file types",
+        "Typecheck passes"
+      ],
+      "priority": 12
+    },
+    {
+      "id": "US-013",
+      "title": "Backend: Resurrect PRD-19 Multimodal Pipeline — Fix 5 Bugs",
+      "description": "As a developer, I need to fix 5 bugs in the existing multimodal document processing pipeline (728 lines at orchestrator/modules/rag/ingestion/multimodal/processors.py) to make it operational.",
+      "acceptanceCriteria": [
+        "Bug 1: Add workspace_id column to knowledge_items table via migration, add index",
+        "Bug 2: Fix deprecated gpt-4-vision-preview model name to gpt-4o in processors.py ImageProcessor",
+        "Bug 3: Fix create_multimodal_processor() factory to pass openai_key to MultimodalDocumentProcessor",
+        "Bug 4: After multimodal extraction, generate embeddings for extracted content and store in knowledge_items.embedding",
+        "Bug 5: Wire multimodal processors into main DocumentManager.ingest_file() pipeline for PDF files",
+        "Append extracted tables as additional chunks with metadata type=table",
+        "Append image descriptions as additional chunks with metadata type=image",
+        "All existing dependencies already installed (camelot-py, pytesseract, pdfplumber, pandas, pillow)",
+        "Typecheck passes"
+      ],
+      "priority": 13
+    },
+    {
+      "id": "US-014",
+      "title": "Backend: RAG Feedback Table and API",
+      "description": "As a user, I want to rate RAG-generated responses with thumbs up/down so the system can track answer quality.",
+      "acceptanceCriteria": [
+        "Create rag_feedback table via migration: id, query, response_text, chunk_ids (integer[]), document_ids (integer[]), rating (1-5), feedback_type, correction_text, rag_config_id, execution_time_ms, workspace_id, user_id, created_at",
+        "Create indexes on workspace_id and created_at",
+        "Add POST /feedback endpoint accepting RAGFeedbackRequest pydantic model",
+        "Add GET /feedback/stats endpoint returning avg rating, thumbs up %, common corrections, worst configs, most-cited docs",
+        "Support time_range query param (7d, 30d, 90d)",
+        "Workspace-isolated with auth",
+        "Typecheck passes"
+      ],
+      "priority": 14
+    },
+    {
+      "id": "US-015",
+      "title": "Backend: Automated Retrieval Quality Scoring",
+      "description": "As the system, I need to automatically score retrieval quality after each RAG query for trending analysis.",
+      "acceptanceCriteria": [
+        "Add _score_retrieval_quality() method to RAGService",
+        "Compute: avg_similarity, source_diversity, coverage_score, freshness_score",
+        "Log scores to document_usage table after each retrieval",
+        "Scores available for trending via feedback/stats endpoint",
+        "Typecheck passes"
+      ],
+      "priority": 15
+    },
+    {
+      "id": "US-016",
+      "title": "Frontend: RAG Feedback UI in Chat Messages",
+      "description": "As a user, I want thumbs up/down buttons on RAG-powered chatbot responses to rate answer quality.",
+      "acceptanceCriteria": [
+        "When chatbot message uses RAG (detected by document citations), show feedback controls",
+        "Thumbs up / thumbs down buttons visible on hover",
+        "Optional 1-5 star rating on expand",
+        "Optional 'Suggest correction' text area",
+        "Submit calls POST /feedback API endpoint",
+        "Create frontend/components/chat/rag-feedback.tsx component",
+        "Typecheck passes"
+      ],
+      "priority": 16
+    },
+    {
+      "id": "US-017",
+      "title": "Frontend: Dedicated Search Route with Standalone Mode",
+      "description": "As a user, I want a dedicated /search page to search my knowledge base with filters and document-grouped results.",
+      "acceptanceCriteria": [
+        "Create frontend/app/search/page.tsx wrapping existing semantic-search component with standalone={true} prop",
+        "Add standalone prop to semantic-search.tsx that enables: larger search bar, filter sidebar (file type, date range, tags), search mode toggle (Semantic/Keyword/Hybrid), sort options (Relevance/Date/Name)",
+        "DO NOT create separate knowledge-search.tsx — enhance existing semantic-search.tsx",
+        "Add 'Search' link to main sidebar navigation",
+        "Shows document-grouped results from Phase 1 enhancements",
+        "Typecheck passes"
+      ],
+      "priority": 17
+    },
+    {
+      "id": "US-018",
+      "title": "Backend: Populate document_relationships Table with Entity Extraction",
+      "description": "As the system, I need to extract entity relationships between chunks during ingestion and store them in the existing document_relationships table.",
+      "acceptanceCriteria": [
+        "Add _extract_and_store_relationships() method to ingestion pipeline",
+        "Use existing EntityExtractor from modules/search/services/entity_extractor.py",
+        "For each chunk, extract entities and find other chunks mentioning same entity",
+        "Store relationships in document_relationships table (source_id, target_id, relationship_type, strength)",
+        "ON CONFLICT DO NOTHING for deduplication",
+        "Configurable via enable_entity_extraction flag (default: false, LLM-intensive)",
+        "Typecheck passes"
+      ],
+      "priority": 18
+    },
+    {
+      "id": "US-019",
+      "title": "Backend: Implement Multi-Hop Graph Retrieval",
+      "description": "As a user, I want the system to follow entity relationships to find related chunks for multi-hop reasoning.",
+      "acceptanceCriteria": [
+        "Replace placeholder _get_related_documents() in context_retrieval_engine.py with BFS graph traversal",
+        "Follow document_relationships up to max_hops=2",
+        "Return related chunks ranked by relationship strength",
+        "Limit to 10 related chunks per hop",
+        "Track visited IDs to avoid cycles",
+        "Typecheck passes"
+      ],
+      "priority": 19
+    },
+    {
+      "id": "US-020",
+      "title": "Frontend: RAG Configuration UI Updates",
+      "description": "As a user, I want to configure hybrid search, parent-child expansion, and entity extraction in the RAG settings modal.",
+      "acceptanceCriteria": [
+        "Add to frontend/components/context/configure-rag-modal.tsx: hybrid search enable/disable toggle, vector/keyword weight slider (when hybrid enabled), parent-child expansion toggle, expansion window size (1-3), entity extraction toggle",
+        "Add metric cards to context-engineering.tsx: hybrid search hit rate, average chunk expansion ratio, feedback score trends, entity relationship count",
+        "Add system settings: hybrid_search_enabled, hybrid_vector_weight, hybrid_keyword_weight, parent_child_expansion, expansion_window, entity_extraction_enabled, ocr_enabled",
+        "Typecheck passes"
+      ],
+      "priority": 20
+    }
+  ]
+}

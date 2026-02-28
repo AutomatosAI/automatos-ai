@@ -100,19 +100,21 @@ class CredentialStore:
         self,
         credential_data: CredentialCreate,
         user_id: Optional[str] = None,
-        ip_address: Optional[str] = None
+        ip_address: Optional[str] = None,
+        workspace_id=None,
     ) -> Credential:
         """
         Create a new credential with encryption.
-        
+
         Args:
             credential_data: Credential creation data
             user_id: User creating the credential
             ip_address: IP address of requester
-            
+            workspace_id: Workspace that owns this credential (BOLA protection)
+
         Returns:
             Created credential
-            
+
         Raises:
             CredentialValidationError: If validation fails
             EncryptionKeyError: If encryption fails
@@ -125,14 +127,15 @@ class CredentialStore:
         # Validate required fields
         self._validate_credential_data(credential_data.credential_data, cred_type.schema_definition)
         
-        # Check for duplicate name in same environment
-        existing = self.db.query(Credential).filter(
-            and_(
-                Credential.name == credential_data.name,
-                Credential.environment == credential_data.environment,
-                Credential.is_active == True  # Only block duplicates for active creds
-            )
-        ).first()
+        # Check for duplicate name in same environment + workspace
+        dup_filters = [
+            Credential.name == credential_data.name,
+            Credential.environment == credential_data.environment,
+            Credential.is_active == True,  # Only block duplicates for active creds
+        ]
+        if workspace_id:
+            dup_filters.append(Credential.workspace_id == workspace_id)
+        existing = self.db.query(Credential).filter(and_(*dup_filters)).first()
         
         if existing:
             raise CredentialValidationError(
@@ -146,10 +149,11 @@ class CredentialStore:
             logger.error(f"Failed to encrypt credential data: {e}")
             raise EncryptionKeyError(f"Encryption failed: {e}")
         
-        # Create credential record
+        # Create credential record — workspace_id enforces tenant isolation
         credential = Credential(
             name=credential_data.name,
             credential_type_id=credential_data.credential_type_id,
+            workspace_id=workspace_id,
             encrypted_data=encrypted_data,
             environment=credential_data.environment,
             description=credential_data.description,

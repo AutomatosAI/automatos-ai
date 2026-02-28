@@ -9,11 +9,11 @@
 import { useState } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
-  CheckCircle2,
-  XCircle,
+  Check,
+  X,
   Clock,
   Loader2,
-  MinusCircle,
+  SkipForward,
   ChevronRight,
   GitBranch,
   Repeat,
@@ -38,11 +38,11 @@ function getStepIcon(status: WorkflowStep['status']) {
     case 'running':
       return Loader2
     case 'completed':
-      return CheckCircle2
+      return Check
     case 'failed':
-      return XCircle
+      return X
     case 'skipped':
-      return MinusCircle
+      return SkipForward
     default:
       return Clock
   }
@@ -65,14 +65,26 @@ function getTypeIcon(type: WorkflowStep['type']) {
 }
 
 /**
- * Format duration
+ * Format duration in ms to human-readable string
  */
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
   const mins = Math.floor(ms / 60000)
-  const secs = ((ms % 60000) / 1000).toFixed(0)
-  return `${mins}m ${secs}s`
+  const secs = Math.floor((ms % 60000) / 1000)
+  if (mins < 60) return `${mins}m ${secs}s`
+  const hours = Math.floor(mins / 60)
+  const remainingMins = mins % 60
+  return `${hours}h ${remainingMins}m`
+}
+
+/**
+ * Compute elapsed ms from startedAt to now (or completedAt)
+ */
+function computeElapsed(startedAt: string, completedAt?: string): number {
+  const start = new Date(startedAt).getTime()
+  const end = completedAt ? new Date(completedAt).getTime() : Date.now()
+  return Math.max(0, end - start)
 }
 
 export function WorkflowSteps({ steps, className }: WorkflowStepsProps) {
@@ -169,9 +181,11 @@ export function WorkflowSteps({ steps, className }: WorkflowStepsProps) {
 
                   {/* Duration */}
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    {step.duration !== undefined && (
+                    {step.duration !== undefined ? (
                       <span>{formatDuration(step.duration)}</span>
-                    )}
+                    ) : step.startedAt ? (
+                      <span>{formatDuration(computeElapsed(step.startedAt, step.completedAt))}</span>
+                    ) : null}
                     <ChevronRight className="h-4 w-4" />
                   </div>
                 </div>

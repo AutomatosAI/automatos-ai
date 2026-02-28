@@ -1,4 +1,3 @@
-
 """
 Query API Endpoints
 ==================
@@ -6,24 +5,18 @@ Query API Endpoints
 REST API endpoints for platform knowledge queries and help system.
 """
 
-import os
 import logging
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, Body, Header
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from datetime import datetime
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
-
-# Simple API key auth dependency
-def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    if required and x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
 
 class PlatformHelpRequest(BaseModel):
     """Request model for platform help queries"""
@@ -34,9 +27,10 @@ class PlatformHelpRequest(BaseModel):
 # Create router
 router = APIRouter(prefix="/api/query", tags=["🔍 Query"])
 
-@router.post("/platform-help", dependencies=[Depends(require_api_key)])
+@router.post("/platform-help")
 async def platform_help(
     request: PlatformHelpRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -63,4 +57,4 @@ async def platform_help(
         
     except Exception as e:
         logger.error(f"Error processing platform help query: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to process help query: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

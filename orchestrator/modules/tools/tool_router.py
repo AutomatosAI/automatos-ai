@@ -252,6 +252,17 @@ def get_tools_for_agent(
                 "function": schema
             })
 
+        # PRD-64: Append platform action tools from ActionRegistry
+        try:
+            from modules.tools.discovery import get_action_registry
+            action_registry = get_action_registry()
+            platform_tools = action_registry.to_openai_tools()
+            openai_tools.extend(platform_tools)
+            if platform_tools:
+                logger.info(f"[tool-trace {trace_id}] Added {len(platform_tools)} platform action tools")
+        except Exception as e:
+            logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
+
         elapsed_ms = int((time.time() - start_time) * 1000)
         logger.info(
             f"[tool-trace {trace_id}] Loaded {len(openai_tools)} tools "

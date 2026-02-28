@@ -18,6 +18,7 @@ from .clients.base import (
 )
 from .clients.openai_embedding import OpenAIEmbeddingProvider
 from .clients.huggingface_embedding import HuggingFaceLocalEmbeddingProvider
+from .clients.openrouter_embedding import OpenRouterEmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -56,25 +57,13 @@ def get_system_setting(key: str, default_value: Optional[str] = None) -> Optiona
 
 
 def get_credential_field(provider_type: str, field: str = "api_key") -> Optional[str]:
-    """Get credential from credential resolver"""
+    """Get credential from credential resolver using the same multi-strategy
+    lookup that LLM manager uses (settings mapping, name variations, type-based, env fallback)."""
     try:
-        from core.credentials.resolver import get_credential_resolver, CredentialNotFoundError
-        resolver = get_credential_resolver()
-        
-        # Try standard naming patterns
-        credential_names = [
-            f"development_{provider_type}_api",
-            f"development_{provider_type}",
-            f"{provider_type}_api",
-            provider_type
-        ]
-        
-        for cred_name in credential_names:
-            try:
-                return resolver.get_credential_field(cred_name, field)
-            except CredentialNotFoundError:
-                continue
-        
+        from core.llm.manager import get_credential_data
+        cred_data = get_credential_data(provider_type, service_name="embeddings")
+        if cred_data and field in cred_data:
+            return cred_data[field]
         return None
     except Exception as e:
         logger.debug(f"Failed to get credential for {provider_type}: {e}")
@@ -100,20 +89,20 @@ class EmbeddingManager:
             provider_type = get_system_setting("embedding_provider")
             model = get_system_setting("embedding_model")
             cache_dir = get_system_setting("embedding_cache_dir") or "./model_cache"
-            dimension_str = get_system_setting("vector_store_dimensions") or "1024"
-            
+            dimension_str = get_system_setting("vector_store_dimensions") or "2048"
+
             logger.debug(f"Loaded embedding settings: provider={provider_type}, model={model}, dim={dimension_str}")
-            
+
             # Fallback to environment variables if DB settings failed
             import os
             if not provider_type:
                 provider_type = os.getenv("EMBEDDING_PROVIDER")
-            
+
             if not model:
                 model = os.getenv("EMBEDDING_MODEL")
-                
-            if dimension_str == "1024": # If default was used
-                dimension_str = os.getenv("VECTOR_STORE_DIMENSIONS", "1024")
+
+            if dimension_str == "2048": # If default was used
+                dimension_str = os.getenv("VECTOR_STORE_DIMENSIONS", "2048")
                 
             dimension = int(dimension_str)
             
@@ -134,7 +123,8 @@ class EmbeddingManager:
                         "openai": "OPENAI_API_KEY",
                         "google": "GOOGLE_API_KEY",
                         "cohere": "COHERE_API_KEY",
-                        "huggingface_api": "HUGGINGFACE_API_KEY"
+                        "huggingface_api": "HUGGINGFACE_API_KEY",
+                        "openrouter": "OPENROUTER_API_KEY"
                     }
                     env_var = env_map.get(provider_type)
                     if env_var:
@@ -166,13 +156,15 @@ class EmbeddingManager:
             
         except Exception as e:
             logger.error(f"Failed to load embedding provider: {e}. Using fallback.")
-            dimension_str = get_system_setting("vector_store_dimensions") or "1024"
+            dimension_str = get_system_setting("vector_store_dimensions") or "2048"
             self.provider = DeterministicEmbeddingProvider(dimension=int(dimension_str))
     
     def _create_provider(self, config: EmbeddingConfig) -> BaseEmbeddingProvider:
         """Create embedding provider from config"""
         if config.provider == EmbeddingProvider.OPENAI:
             return OpenAIEmbeddingProvider(config)
+        elif config.provider == EmbeddingProvider.OPENROUTER:
+            return OpenRouterEmbeddingProvider(config)
         elif config.provider == EmbeddingProvider.HUGGINGFACE_LOCAL:
             return HuggingFaceLocalEmbeddingProvider(config)
         elif config.provider == EmbeddingProvider.DISABLED:
@@ -221,6 +213,49 @@ class EmbeddingManager:
         
         return self.provider.generate_embedding_sync(text)
     
+    async def generate_embeddings_batch(
+        self,
+        texts: List[str],
+        max_concurrent: int = 5
+    ) -> List[List[float]]:
+        """
+        Generate embeddings for multiple texts with parallel processing.
+
+        If the provider supports native batch (OpenRouter), uses a single API call.
+        Otherwise falls back to parallel individual calls with semaphore.
+
+        Args:
+            texts: List of texts to embed
+            max_concurrent: Max concurrent API calls
+
+        Returns:
+            List of embedding vectors in same order as input texts
+        """
+        import asyncio
+
+        self._ensure_provider()
+
+        if self.provider is None:
+            raise ValueError("Embedding provider not initialized")
+
+        # Use native batch if provider supports it (OpenRouter)
+        if hasattr(self.provider, 'generate_embeddings_batch'):
+            return await self.provider.generate_embeddings_batch(texts, max_concurrent)
+
+        # Fallback: parallel individual calls
+        semaphore = asyncio.Semaphore(max_concurrent)
+        results = [None] * len(texts)
+
+        async def embed_one(idx: int, text: str):
+            async with semaphore:
+                results[idx] = await self.provider.generate_embedding(text)
+
+        tasks = [embed_one(i, t) for i, t in enumerate(texts)]
+        await asyncio.gather(*tasks)
+
+        logger.info(f"Batch embedded {len(texts)} texts (concurrency={max_concurrent})")
+        return results
+
     def get_dimension(self) -> int:
         """Get embedding dimension from provider or system settings"""
         if self.provider is None:
@@ -228,7 +263,7 @@ class EmbeddingManager:
             dimension_str = get_system_setting("vector_store_dimensions")
             if dimension_str:
                 return int(dimension_str)
-            return 1024  # Last resort fallback
+            return 2048  # Last resort fallback
         return self.provider.get_dimension()
     
     def get_provider_info(self) -> dict:

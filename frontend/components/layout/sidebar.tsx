@@ -17,7 +17,7 @@ import {
   Database,
   Store,
   BarChart3,
-  LayoutDashboard
+  LayoutDashboard,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSystemRole } from '@/contexts/role-context'

@@ -3,7 +3,10 @@
 /**
  * FileWidget Component for PRD-38.2 Extended Widgets
  *
- * Display file information, preview content, and provide file operations
+ * Display file information, preview content, and provide file operations.
+ * Switches between single/list/preview modes based on FileWidgetData.mode.
+ * - Copy path button copies file.path to clipboard via navigator.clipboard.writeText
+ * - Download button triggers onAction callback
  */
 
 import { useState, useCallback } from 'react'
@@ -32,13 +35,14 @@ export function FileWidget({
   onClose,
   onMaximize,
   onRefresh,
+  onAction,
 }: WidgetBaseProps<FileWidgetData>) {
   const [copied, setCopied] = useState(false)
   const [selectedFile, setSelectedFile] = useState<FileInfo | undefined>(
     data.file
   )
 
-  // Copy file path to clipboard
+  // Copy file path to clipboard using navigator.clipboard.writeText
   const handleCopyPath = useCallback(async () => {
     const path = selectedFile?.path || data.file?.path || data.currentPath
     if (!path) return
@@ -48,15 +52,24 @@ export function FileWidget({
       setCopied(true)
       toast.success('Path copied to clipboard')
       setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
+    } catch {
       toast.error('Failed to copy path')
     }
   }, [selectedFile, data.file, data.currentPath])
 
-  // Download file (placeholder - requires backend)
+  // Download file — dispatches through onAction callback
   const handleDownload = useCallback(() => {
-    toast.info('Download functionality requires backend integration')
-  }, [])
+    const targetFile = selectedFile || data.file
+    if (onAction) {
+      onAction({
+        id: 'file-download',
+        label: 'Download',
+        handler: async () => {},
+      })
+    } else {
+      toast.info('Download functionality requires backend integration')
+    }
+  }, [selectedFile, data.file, onAction])
 
   // Navigate directory (placeholder - requires backend)
   const handleNavigate = useCallback((path: string) => {
@@ -68,7 +81,7 @@ export function FileWidget({
     setSelectedFile(file)
   }, [])
 
-  // Determine display mode
+  // Determine display mode from FileWidgetData.mode
   const mode = data.mode || (data.files ? 'list' : 'single')
 
   // Display title
@@ -91,6 +104,8 @@ export function FileWidget({
       onRefresh={onRefresh}
       canCopy
       onCopy={handleCopyPath}
+      canDownload
+      onDownload={handleDownload}
       customActions={[
         {
           label: copied ? 'Copied!' : 'Copy Path',
@@ -198,7 +213,7 @@ export const FileWidgetDef: WidgetDefinition<FileWidgetData> = {
   component: FileWidget,
   defaultSize: { width: 5, height: 4 },
   minSize: { width: 3, height: 3 },
-  capabilities: ['copyable', 'refreshable', 'fullscreen'],
+  capabilities: ['copyable', 'downloadable', 'refreshable', 'fullscreen'],
 }
 
 // Register the widget

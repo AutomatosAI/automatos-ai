@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
-import { Bot, ArrowDown, Database, GitBranch, Wrench } from 'lucide-react'
+import { Bot, ArrowDown, Database, GitBranch, Wrench, Code2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
@@ -19,7 +19,11 @@ import { useUser } from '@clerk/nextjs'
 // Widget Architecture (PRD-38.1)
 import { useWorkspaceStore } from '@/stores/workspace-store'
 import { Canvas } from '@/components/workspace'
-import type { CodeWidgetData, DataWidgetData, DocumentWidgetData } from '@/components/widgets/types'
+import type { Widget, CodeWidgetData, DataWidgetData, DocumentWidgetData, CodingCanvasWidgetData } from '@/components/widgets/types'
+import { useWorkspace } from '@/components/workspace-provider'
+
+// Resizable panels for chat + widget split
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 
 // PRD-40: Dynamic Tool Suggestions
 import { ToolSuggestionBar } from '@/components/suggestions/ToolSuggestionBar'
@@ -54,6 +58,44 @@ export function Chat({
   const addWidget = useWorkspaceStore((s) => s.addWidget)
   const clearWidgets = useWorkspaceStore((s) => s.clearWidgets)
   const hasWidgets = widgetIds.length > 0
+
+  // US-015: SSE event dispatchers for memory & workflow widgets
+  const dispatchMemoryInjected = useWorkspaceStore((s) => s.dispatchMemoryInjected)
+  const dispatchMemoryStored = useWorkspaceStore((s) => s.dispatchMemoryStored)
+  const dispatchWorkflowUpdate = useWorkspaceStore((s) => s.dispatchWorkflowUpdate)
+
+  // PRD-66: Workspace context for Code Canvas
+  const { workspace } = useWorkspace()
+
+  const handleOpenCodeCanvas = useCallback(() => {
+    if (!workspace?.id) {
+      toast.error('No workspace selected')
+      return
+    }
+
+    // Check if a coding canvas widget is already open for this workspace
+    const allWidgets = useWorkspaceStore.getState().widgets
+    const existing = Object.values(allWidgets).find(
+      (w: Widget) => w.type === 'coding_canvas' && (w.data as CodingCanvasWidgetData).workspaceId === workspace.id
+    )
+    if (existing) {
+      useWorkspaceStore.getState().setActiveWidget(existing.id)
+      return
+    }
+
+    const widgetData: CodingCanvasWidgetData = { workspaceId: workspace.id }
+    addWidget({
+      type: 'coding_canvas',
+      title: 'Code Canvas',
+      data: widgetData,
+      metadata: {
+        source: { type: 'user', name: 'code_canvas' },
+        createdAt: new Date(),
+      },
+      state: 'ready',
+      createdAt: new Date().toISOString(),
+    })
+  }, [workspace?.id, addWidget])
 
   // Handler to close canvas and reset all overlay states
   const handleCloseCanvas = useCallback(() => {
@@ -108,6 +150,7 @@ export function Chat({
       // PRD-38.1: Auto-create widgets when tool-data arrives
       if (dataPart.type === 'tool-data' && dataPart.data) {
         const toolData = dataPart.data
+        console.log('[WIDGET-DEBUG] tool-data keys:', Object.keys(toolData), 'has generated_document:', !!toolData.generated_document)
 
         // Create widgets for database results
         if (toolData.database_results && Array.isArray(toolData.database_results)) {
@@ -273,6 +316,30 @@ export function Chat({
           } as any)
         }
 
+        // PRD-63: Create widget for generated documents
+        if (toolData.generated_document) {
+          const genDoc = toolData.generated_document
+          console.log('[Widget] Creating generated document widget:', genDoc.filename)
+          addWidget({
+            type: 'document',
+            title: genDoc.title || genDoc.filename || 'Generated Document',
+            data: {
+              content: genDoc.content || `*Document generated: ${genDoc.filename}*`,
+              format: 'markdown',
+              filename: genDoc.filename,
+              downloadUrl: genDoc.download_url,
+              hasFullContent: true,
+            },
+            metadata: {
+              source: { type: 'tool', name: 'generate_document', provider: 'document_generation' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
+
         // Create widget for terminal/command output
         if (toolData.terminal_output) {
           const term = toolData.terminal_output
@@ -297,6 +364,17 @@ export function Chat({
             createdAt: new Date().toISOString(),
           } as any)
         }
+      }
+
+      // US-015: Dispatch memory & workflow SSE events to workspace store
+      if (dataPart.type === 'memory-injected' && dataPart.data) {
+        dispatchMemoryInjected(dataPart.data)
+      }
+      if (dataPart.type === 'memory-stored' && dataPart.data) {
+        dispatchMemoryStored(dataPart.data)
+      }
+      if (dataPart.type === 'workflow-update' && dataPart.data) {
+        dispatchWorkflowUpdate(dataPart.data)
       }
     },
     onChatIdUpdate: (newChatId) => {
@@ -658,75 +736,83 @@ export function Chat({
     <>
       {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
       {hasWidgets && (
-        <div className="fixed top-0 left-0 z-50 flex h-screen w-screen flex-row bg-background">
-          {/* Chat Column - LEFT 400px */}
-          <div className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background border-r border-border/50">
-            <div className="flex h-full flex-col items-center justify-between">
-              {/* Messages */}
-              <div
-                ref={messagesContainerRef}
-                className="flex-1 w-full overflow-y-scroll overscroll-contain"
-                style={{ overflowAnchor: 'none' }}
-              >
-                <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6">
-                  {messages.map((message, index) => (
-                    <Message
-                      key={message.id}
-                      chatId={id}
-                      message={message}
-                      isLoading={isTyping && index === messages.length - 1}
-                      setMessages={setMessages}
-                      regenerate={regenerate}
-                      isReadonly={isReadonly}
-                      onArtifactSelect={handleArtifactSelect}
-                      onCodeSelect={handleCodeSelect}
-                      onDocumentSelect={handleDocumentSelect}
-                      onDatabaseSelect={handleDatabaseSelect}
-                    />
-                  ))}
-                  <div ref={messagesEndRef} />
+        <div className="fixed top-0 left-0 z-50 h-screen w-screen bg-background">
+          <ResizablePanelGroup direction="horizontal" className="h-full">
+            {/* Chat Column - LEFT (resizable, default 35%, min 20%) */}
+            <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
+              <div className="relative h-full bg-muted dark:bg-background border-r border-border/50 overflow-hidden">
+                <div className="flex h-full flex-col items-center justify-between min-w-0">
+                  {/* Messages */}
+                  <div
+                    ref={messagesContainerRef}
+                    className="flex-1 w-full overflow-y-scroll overflow-x-hidden overscroll-contain"
+                    style={{ overflowAnchor: 'none' }}
+                  >
+                    <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6 break-words">
+                      {messages.map((message, index) => (
+                        <Message
+                          key={message.id}
+                          chatId={id}
+                          message={message}
+                          isLoading={isTyping && index === messages.length - 1}
+                          setMessages={setMessages}
+                          regenerate={regenerate}
+                          isReadonly={isReadonly}
+                          onArtifactSelect={handleArtifactSelect}
+                          onCodeSelect={handleCodeSelect}
+                          onDocumentSelect={handleDocumentSelect}
+                          onDatabaseSelect={handleDatabaseSelect}
+                        />
+                      ))}
+                      <div ref={messagesEndRef} />
+                    </div>
+                  </div>
+
+                  {/* Input at bottom of chat column */}
+                  {!isReadonly && (
+                    <div className="relative flex w-full flex-col gap-3 px-4 pb-4">
+                      {/* PRD-40: Tool Suggestion Bar */}
+                      <ToolSuggestionBar
+                        suggestions={toolSuggestions}
+                        activeTool={activeTool}
+                        onSuggestionClick={handleSuggestionClick}
+                        onClose={() => {
+                          setActiveTool(null)
+                          setToolSuggestions([])
+                        }}
+                        isLoading={isLoadingSuggestions}
+                        hasContext={hasContextSuggestions}
+                      />
+                      <MultimodalInput
+                        chatId={id}
+                        status={status}
+                        stop={stop}
+                        sendMessage={sendMessage}
+                        selectedModelId={currentModelId}
+                        onModelChange={setCurrentModelId}
+                        selectedAgentId={selectedAgentId}
+                        onAgentChange={handleAgentChange}
+                        selectedVisibilityType={visibilityType}
+                        usage={usage}
+                        onToolIconClick={handleToolIconClick}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
+            </ResizablePanel>
 
-              {/* Input at bottom of chat column */}
-              {!isReadonly && (
-                <div className="relative flex w-full flex-col gap-3 px-4 pb-4">
-                  {/* PRD-40: Tool Suggestion Bar */}
-                  <ToolSuggestionBar
-                    suggestions={toolSuggestions}
-                    activeTool={activeTool}
-                    onSuggestionClick={handleSuggestionClick}
-                    onClose={() => {
-                      setActiveTool(null)
-                      setToolSuggestions([])
-                    }}
-                    isLoading={isLoadingSuggestions}
-                    hasContext={hasContextSuggestions}
-                  />
-                  <MultimodalInput
-                    chatId={id}
-                    status={status}
-                    stop={stop}
-                    sendMessage={sendMessage}
-                    selectedModelId={currentModelId}
-                    onModelChange={setCurrentModelId}
-                    selectedAgentId={selectedAgentId}
-                    onAgentChange={handleAgentChange}
-                    selectedVisibilityType={visibilityType}
-                    usage={usage}
-                    onToolIconClick={handleToolIconClick}
-                  />
+            <ResizableHandle withHandle />
+
+            {/* PRD-38.1: Widget Canvas - RIGHT side (resizable) */}
+            <ResizablePanel defaultSize={65} minSize={30}>
+              <div className="relative z-10 flex h-full flex-col bg-background">
+                <div className="flex-1 overflow-hidden">
+                  <Canvas width={canvasWidth} onClose={handleCloseCanvas} />
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* PRD-38.1: Widget Canvas - RIGHT side */}
-          <div className="relative z-10 flex h-full flex-1 flex-col bg-background">
-            <div className="flex-1 overflow-hidden">
-              <Canvas width={canvasWidth} onClose={handleCloseCanvas} />
-            </div>
-          </div>
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
       )}
 
@@ -737,69 +823,77 @@ export function Chat({
             initial={{ opacity: 1 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { delay: 0.4 } }}
-            className="fixed top-0 left-0 z-50 flex h-screen w-screen flex-row bg-transparent"
+            className="fixed top-0 left-0 z-50 h-screen w-screen bg-background"
           >
-            <motion.div className="fixed h-screen bg-background w-full" />
-            <div className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background">
-              <div className="flex h-full flex-col">
-                <div className="flex-1 w-full overflow-y-scroll">
-                  <div className="flex flex-col gap-4 px-4 py-4">
-                    {messages.map((message, index) => (
-                      <Message
-                        key={message.id}
-                        chatId={id}
-                        message={message}
-                        isLoading={isTyping && index === messages.length - 1}
-                        setMessages={setMessages}
-                        regenerate={regenerate}
-                        isReadonly={isReadonly}
-                        onArtifactSelect={handleArtifactSelect}
-                        onCodeSelect={handleCodeSelect}
-                        onDocumentSelect={handleDocumentSelect}
-                        onDatabaseSelect={handleDatabaseSelect}
-                      />
-                    ))}
+            <ResizablePanelGroup direction="horizontal" className="h-full">
+              <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
+                <div className="relative h-full bg-muted dark:bg-background overflow-hidden">
+                  <div className="flex h-full flex-col min-w-0">
+                    <div className="flex-1 w-full overflow-y-scroll overflow-x-hidden">
+                      <div className="flex flex-col gap-4 px-4 py-4 min-w-0 break-words">
+                        {messages.map((message, index) => (
+                          <Message
+                            key={message.id}
+                            chatId={id}
+                            message={message}
+                            isLoading={isTyping && index === messages.length - 1}
+                            setMessages={setMessages}
+                            regenerate={regenerate}
+                            isReadonly={isReadonly}
+                            onArtifactSelect={handleArtifactSelect}
+                            onCodeSelect={handleCodeSelect}
+                            onDocumentSelect={handleDocumentSelect}
+                            onDatabaseSelect={handleDatabaseSelect}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {!isReadonly && (
+                      <div className="px-4 pb-4 space-y-3">
+                        {/* PRD-40: Tool Suggestion Bar */}
+                        <ToolSuggestionBar
+                          suggestions={toolSuggestions}
+                          activeTool={activeTool}
+                          onSuggestionClick={handleSuggestionClick}
+                          onClose={() => {
+                            setActiveTool(null)
+                            setToolSuggestions([])
+                          }}
+                          isLoading={isLoadingSuggestions}
+                        />
+                        <MultimodalInput
+                          chatId={id}
+                          status={status}
+                          stop={stop}
+                          sendMessage={sendMessage}
+                          selectedModelId={currentModelId}
+                          onModelChange={setCurrentModelId}
+                          selectedAgentId={selectedAgentId}
+                          onAgentChange={handleAgentChange}
+                          selectedVisibilityType={visibilityType}
+                          usage={usage}
+                          onToolIconClick={handleToolIconClick}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
-                {!isReadonly && (
-                  <div className="px-4 pb-4 space-y-3">
-                    {/* PRD-40: Tool Suggestion Bar */}
-                    <ToolSuggestionBar
-                      suggestions={toolSuggestions}
-                      activeTool={activeTool}
-                      onSuggestionClick={handleSuggestionClick}
-                      onClose={() => {
-                        setActiveTool(null)
-                        setToolSuggestions([])
-                      }}
-                      isLoading={isLoadingSuggestions}
-                    />
-                    <MultimodalInput
-                      chatId={id}
-                      status={status}
-                      stop={stop}
-                      sendMessage={sendMessage}
-                      selectedModelId={currentModelId}
-                      onModelChange={setCurrentModelId}
-                      selectedAgentId={selectedAgentId}
-                      onAgentChange={handleAgentChange}
-                      selectedVisibilityType={visibilityType}
-                      usage={usage}
-                      onToolIconClick={handleToolIconClick}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-scroll bg-background">
-              <ArtifactViewer
-                artifact={selectedArtifact}
-                onClose={() => {
-                  setIsArtifactViewerVisible(false)
-                  setSelectedArtifact(null)
-                }}
-              />
-            </div>
+              </ResizablePanel>
+
+              <ResizableHandle withHandle />
+
+              <ResizablePanel defaultSize={65} minSize={30}>
+                <div className="flex-1 h-full overflow-y-scroll bg-background">
+                  <ArtifactViewer
+                    artifact={selectedArtifact}
+                    onClose={() => {
+                      setIsArtifactViewerVisible(false)
+                      setSelectedArtifact(null)
+                    }}
+                  />
+                </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
           </motion.div>
         )}
       </AnimatePresence>
@@ -849,6 +943,23 @@ export function Chat({
                   onToolIconClick={handleToolIconClick}
                 />
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2 pt-1">
+                  {/* PRD-66: Code Canvas quick action */}
+                  <button
+                    type="button"
+                    onClick={handleOpenCodeCanvas}
+                    title="Code"
+                    className={[
+                      'inline-flex items-center justify-center rounded-full',
+                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
+                      'gap-2 text-xs font-medium',
+                      'bg-black/10 backdrop-blur text-foreground/90',
+                      'hover:bg-orange-500/10 transition-colors',
+                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
+                    ].join(' ')}
+                  >
+                    <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
+                    <span className="hidden md:inline">Code</span>
+                  </button>
                   {quickLinks.map((item) => {
                     const Icon = item.icon
                     return (
@@ -964,6 +1075,23 @@ export function Chat({
                   onToolIconClick={handleToolIconClick}
                 />
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2">
+                  {/* PRD-66: Code Canvas quick action */}
+                  <button
+                    type="button"
+                    onClick={handleOpenCodeCanvas}
+                    title="Code"
+                    className={[
+                      'inline-flex items-center justify-center rounded-full',
+                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
+                      'gap-2 text-xs font-medium',
+                      'bg-black/10 backdrop-blur text-foreground/90',
+                      'hover:bg-orange-500/10 transition-colors',
+                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
+                    ].join(' ')}
+                  >
+                    <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
+                    <span className="hidden md:inline">Code</span>
+                  </button>
                   {quickLinks.map((item) => {
                     const Icon = item.icon
                     return (

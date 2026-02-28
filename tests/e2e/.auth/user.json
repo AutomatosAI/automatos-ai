@@ -1,0 +1,133 @@
+{
+  "cookies": [
+    {
+      "name": "__cf_bm",
+      "value": "TixFUDB4.ZQzjCwrAFCRza6DwryR_PDX50Wk3tq1ycM-1771296381-1.0.1.1-ioCMjkZV7z_jEZJoC34ysogZbeYAu2RL.ltK8ZwNosG6MYXITROvSuGKZ.xX80BBaBY_70mZAJI1VOJ3s.LY1caC0mZl8kXWC.iu9V4tnCc",
+      "domain": ".saved-sculpin-75.clerk.accounts.dev",
+      "path": "/",
+      "expires": 1771298181.013297,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "_cfuvid",
+      "value": "GDzgaAxE0gM81JaoGtYuJ1fX.uSvu3hGTTF.spiJ1.U-1771296382000-0.0.1.1-604800000",
+      "domain": ".saved-sculpin-75.clerk.accounts.dev",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "__clerk_db_jwt_kn9ERdr3",
+      "value": "dvb_39mLdIvcsZnToICEPlZPrtKDXdc",
+      "domain": "ui.automatos.app",
+      "path": "/",
+      "expires": 1802832396,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "__clerk_db_jwt",
+      "value": "dvb_39mLdIvcsZnToICEPlZPrtKDXdc",
+      "domain": "ui.automatos.app",
+      "path": "/",
+      "expires": 1802832396,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "__client_uat_kn9ERdr3",
+      "value": "1771296392",
+      "domain": ".automatos.app",
+      "path": "/",
+      "expires": 1802832396,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Strict"
+    },
+    {
+      "name": "__client_uat",
+      "value": "1771296392",
+      "domain": ".automatos.app",
+      "path": "/",
+      "expires": 1802832396,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Strict"
+    },
+    {
+      "name": "clerk_active_context",
+      "value": "sess_39mLeDgy9wX6SJZJEuWI3YMEeSi:",
+      "domain": "ui.automatos.app",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "__session",
+      "value": "eyJhbGciOiJSUzI1NiIsImNhdCI6ImNsX0I3ZDRQRDExMUFBQSIsImtpZCI6Imluc18zOElsQ053bzZSSExNNXAwQzFiQ3dHTmxjWngiLCJ0eXAiOiJKV1QifQ.eyJhenAiOiJodHRwczovL3VpLmF1dG9tYXRvcy5hcHAiLCJleHAiOjE3NzEyOTY0NTUsImZ2YSI6WzAsLTFdLCJpYXQiOjE3NzEyOTYzOTUsImlzcyI6Imh0dHBzOi8vc2F2ZWQtc2N1bHBpbi03NS5jbGVyay5hY2NvdW50cy5kZXYiLCJqdGkiOiI3NjNjY2IyNTZjNzFjNGVhMTdlZCIsIm1ldGFkYXRhIjp7fSwibmJmIjoxNzcxMjk2Mzg1LCJzaWQiOiJzZXNzXzM5bUxlRGd5OXdYNlNKWkpFdVdJM1lNRWVTaSIsInN0cyI6ImFjdGl2ZSIsInN1YiI6InVzZXJfMzhaNFNQMXR0bXk5U2szd2Y3OVhnUUxTOEgxIiwidiI6Mn0.rYuYvkcGvEo0aNaK7iRy8et1r3ZKy9cAnxv4kGSsaL4POATjuoyXxg7xz5WO7_eWSLO5EHXqSIlgthMS8p0t0yrAVCQ1RxtnGPZxo7191ZwiBTTodtjHb9H-4Qw-jL4oS7get-oGqlfqNoywKSNPRjX7nh5TMps5d938nOcnl5gBh0rTPwD0Zb7i-WoahDwwPnSKBe4nPGZY5402JlJCrngmziLuHAMXq3yi-JghnWuR7mEBnUZFA7HpjtrqEe1V8m0fcfP2q24Iastdhwww6Nn9-MdPLb8MmJCaednsHb111IP3QxewbhsimlsS1F9THRVZn6sAUPpByMqNS2yVZg",
+      "domain": "ui.automatos.app",
+      "path": "/",
+      "expires": 1802832396,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "__session_kn9ERdr3",
+      "value": "eyJhbGciOiJSUzI1NiIsImNhdCI6ImNsX0I3ZDRQRDExMUFBQSIsImtpZCI6Imluc18zOElsQ053bzZSSExNNXAwQzFiQ3dHTmxjWngiLCJ0eXAiOiJKV1QifQ.eyJhenAiOiJodHRwczovL3VpLmF1dG9tYXRvcy5hcHAiLCJleHAiOjE3NzEyOTY0NTUsImZ2YSI6WzAsLTFdLCJpYXQiOjE3NzEyOTYzOTUsImlzcyI6Imh0dHBzOi8vc2F2ZWQtc2N1bHBpbi03NS5jbGVyay5hY2NvdW50cy5kZXYiLCJqdGkiOiI3NjNjY2IyNTZjNzFjNGVhMTdlZCIsIm1ldGFkYXRhIjp7fSwibmJmIjoxNzcxMjk2Mzg1LCJzaWQiOiJzZXNzXzM5bUxlRGd5OXdYNlNKWkpFdVdJM1lNRWVTaSIsInN0cyI6ImFjdGl2ZSIsInN1YiI6InVzZXJfMzhaNFNQMXR0bXk5U2szd2Y3OVhnUUxTOEgxIiwidiI6Mn0.rYuYvkcGvEo0aNaK7iRy8et1r3ZKy9cAnxv4kGSsaL4POATjuoyXxg7xz5WO7_eWSLO5EHXqSIlgthMS8p0t0yrAVCQ1RxtnGPZxo7191ZwiBTTodtjHb9H-4Qw-jL4oS7get-oGqlfqNoywKSNPRjX7nh5TMps5d938nOcnl5gBh0rTPwD0Zb7i-WoahDwwPnSKBe4nPGZY5402JlJCrngmziLuHAMXq3yi-JghnWuR7mEBnUZFA7HpjtrqEe1V8m0fcfP2q24Iastdhwww6Nn9-MdPLb8MmJCaednsHb111IP3QxewbhsimlsS1F9THRVZn6sAUPpByMqNS2yVZg",
+      "domain": "ui.automatos.app",
+      "path": "/",
+      "expires": 1802832396,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "__cf_bm",
+      "value": "RmKEDfjkLXmI5WNv4BZWHDMDTfZ3kZ7d9Ndb5TFT.Nk-1771296396-1.0.1.1-pDeDThMD5X.rgj.adO3plYYLuJbKExFr9.mUvbrPzp3LwRGor4OcRjRZcosHSCsI2KXiYB1CJXE5W9EfEhyaKLu8ou3I.SGKj5hYH3LDTLc",
+      "domain": ".img.clerk.com",
+      "path": "/",
+      "expires": 1771298196.496008,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "_cfuvid",
+      "value": "SuD45C1ANevLcz72i_FALGiF3GwnInOpButRHaqJmLA-1771296396499-0.0.1.1-604800000",
+      "domain": ".img.clerk.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://ui.automatos.app",
+      "localStorage": [
+        {
+          "name": "__clerk_environment",
+          "value": "{\"value\":{\"object\":\"environment\",\"auth_config\":{\"claimed_at\":null,\"id\":\"\",\"object\":\"auth_config\",\"reverification\":true,\"single_session_mode\":true},\"display_config\":{\"object\":\"display_config\",\"after_create_organization_url\":\"https://ui.automatos.app\",\"after_join_waitlist_url\":\"https://ui.automatos.app\",\"after_leave_organization_url\":\"https://ui.automatos.app\",\"after_sign_in_url\":\"https://ui.automatos.app\",\"after_sign_out_all_url\":\"https://saved-sculpin-75.accounts.dev/sign-in\",\"after_sign_out_one_url\":\"https://saved-sculpin-75.accounts.dev/sign-in/choose\",\"after_sign_up_url\":\"https://ui.automatos.app\",\"after_switch_session_url\":\"https://ui.automatos.app\",\"application_name\":\"Automatos AI \",\"branded\":true,\"captcha_heartbeat\":false,\"captcha_oauth_bypass\":[],\"captcha_provider\":\"turnstile\",\"captcha_public_key_invisible\":\"0x4AAAAAAAFV93qQdS0ycilX\",\"captcha_public_key\":\"0x4AAAAAAAWXJGBD7bONzLBd\",\"captcha_widget_type\":\"smart\",\"clerk_js_version\":\"5\",\"create_organization_url\":\"https://saved-sculpin-75.accounts.dev/create-organization\",\"favicon_image_url\":\"\",\"home_url\":\"https://ui.automatos.app\",\"id\":\"display_config_38IlCRtd5cKSHuUBVyC7F6lW16D\",\"instance_environment_type\":\"development\",\"logo_image_url\":\"https://img.clerk.com/eyJ0eXBlIjoicHJveHkiLCJzcmMiOiJodHRwczovL2ltYWdlcy5jbGVyay5kZXYvdXBsb2FkZWQvaW1nXzM4WjREZlpCRHNNQXE1WllHZXZESkdFQktBTyJ9\",\"organization_profile_url\":\"https://saved-sculpin-75.accounts.dev/organization\",\"preferred_sign_in_strategy\":\"password\",\"privacy_policy_url\":\"\",\"show_devmode_warning\":true,\"sign_in_url\":\"https://saved-sculpin-75.accounts.dev/sign-in\",\"sign_up_url\":\"https://saved-sculpin-75.accounts.dev/sign-up\",\"support_email\":\"gerard@automatos.app\",\"terms_url\":\"\",\"theme\":{\"buttons\":{\"font_color\":\"#ffffff\",\"font_family\":\"\\\"Source Sans Pro\\\", sans-serif\",\"font_weight\":\"600\"},\"general\":{\"color\":\"#0A051A\",\"padding\":\"1em\",\"box_shadow\":\"0 2px 8px rgba(0, 0, 0, 0.2)\",\"font_color\":\"#151515\",\"font_family\":\"\\\"Source Sans Pro\\\", sans-serif\",\"border_radius\":\"0.5em\",\"background_color\":\"#ffffff\",\"label_font_weight\":\"600\"},\"accounts\":{\"background_color\":\"#ffffff\"}},\"user_profile_url\":\"https://saved-sculpin-75.accounts.dev/user\",\"waitlist_url\":\"https://saved-sculpin-75.accounts.dev/waitlist\"},\"id\":\"\",\"maintenance_mode\":false,\"client_debug_mode\":false,\"organization_settings\":{\"actions\":{\"admin_delete\":true},\"domains\":{\"enabled\":false,\"enrollment_modes\":[],\"default_role\":\"org:member\"},\"enabled\":true,\"max_allowed_memberships\":5},\"user_settings\":{\"actions\":{\"delete_self\":true,\"create_organization\":false,\"create_organizations_limit\":null},\"attributes\":{\"email_address\":{\"enabled\":true,\"required\":true,\"used_for_first_factor\":true,\"first_factors\":[\"email_code\"],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[\"email_code\"],\"verify_at_sign_up\":false,\"name\":\"email_address\"},\"phone_number\":{\"enabled\":false,\"required\":false,\"used_for_first_factor\":false,\"first_factors\":[],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[],\"verify_at_sign_up\":false,\"name\":\"phone_number\"},\"username\":{\"enabled\":false,\"required\":false,\"used_for_first_factor\":false,\"first_factors\":[],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[],\"verify_at_sign_up\":false,\"name\":\"username\"},\"web3_wallet\":{\"enabled\":false,\"required\":false,\"used_for_first_factor\":false,\"first_factors\":[],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[],\"verify_at_sign_up\":false,\"name\":\"web3_wallet\"},\"first_name\":{\"enabled\":true,\"required\":false,\"used_for_first_factor\":false,\"first_factors\":[],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[],\"verify_at_sign_up\":false,\"name\":\"first_name\"},\"last_name\":{\"enabled\":true,\"required\":false,\"used_for_first_factor\":false,\"first_factors\":[],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[],\"verify_at_sign_up\":false,\"name\":\"last_name\"},\"password\":{\"enabled\":true,\"required\":true,\"used_for_first_factor\":false,\"first_factors\":[],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[],\"verify_at_sign_up\":false,\"name\":\"password\"},\"authenticator_app\":{\"enabled\":false,\"required\":false,\"used_for_first_factor\":false,\"first_factors\":[],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[],\"verify_at_sign_up\":false,\"name\":\"authenticator_app\"},\"ticket\":{\"enabled\":true,\"required\":false,\"used_for_first_factor\":false,\"first_factors\":[],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[],\"verify_at_sign_up\":false,\"name\":\"ticket\"},\"backup_code\":{\"enabled\":false,\"required\":false,\"used_for_first_factor\":false,\"first_factors\":[],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[],\"verify_at_sign_up\":false,\"name\":\"backup_code\"},\"passkey\":{\"enabled\":true,\"required\":false,\"used_for_first_factor\":true,\"first_factors\":[\"passkey\"],\"used_for_second_factor\":false,\"second_factors\":[],\"verifications\":[\"passkey\"],\"verify_at_sign_up\":false,\"name\":\"passkey\"}},\"passkey_settings\":{\"allow_autofill\":true,\"show_sign_in_button\":true},\"password_settings\":{\"disable_hibp\":false,\"min_length\":8,\"max_length\":72,\"require_special_char\":false,\"require_numbers\":false,\"require_uppercase\":false,\"require_lowercase\":false,\"show_zxcvbn\":false,\"min_zxcvbn_strength\":0,\"enforce_hibp_on_sign_in\":true,\"allowed_special_characters\":\"!\\\"#$%&'()*+,-./:;<=>?@[]^_`{|}~\"},\"saml\":{\"enabled\":false},\"sign_in\":{\"second_factor\":{\"required\":false}},\"sign_up\":{\"captcha_enabled\":true,\"captcha_widget_type\":\"smart\",\"custom_action_required\":false,\"progressive\":true,\"mode\":\"waitlist\",\"legal_consent_enabled\":false,\"mfa\":{\"required\":false}},\"social\":{\"oauth_github\":{\"enabled\":true,\"required\":false,\"authenticatable\":true,\"block_email_subaddresses\":false,\"strategy\":\"oauth_github\",\"not_selectable\":false,\"deprecated\":false,\"name\":\"GitHub\",\"logo_url\":\"https://img.clerk.com/static/github.png\"},\"oauth_google\":{\"enabled\":true,\"required\":false,\"authenticatable\":true,\"block_email_subaddresses\":true,\"strategy\":\"oauth_google\",\"not_selectable\":false,\"deprecated\":false,\"name\":\"Google\",\"logo_url\":\"https://img.clerk.com/static/google.png\"}}},\"commerce_settings\":{\"billing\":{\"stripe_publishable_key\":null,\"organization\":{\"enabled\":false,\"has_paid_plans\":false},\"user\":{\"enabled\":false,\"has_paid_plans\":false}}},\"api_keys_settings\":{\"user_api_keys_enabled\":false,\"orgs_api_keys_enabled\":false},\"protect_config\":{\"object\":\"protect_config\",\"id\":\"\"}},\"exp\":1771382796007}"
+        },
+        {
+          "name": "last_active_workspace",
+          "value": "ae8320bc-95e1-4de1-bbe9-396bef19cbf8"
+        },
+        {
+          "name": "automatos-workspace",
+          "value": "{\"state\":{\"layoutMode\":\"grid\",\"chatPanelWidth\":400,\"isChatCollapsed\":false,\"isWidgetTrayOpen\":true,\"gridConfig\":{\"columns\":12,\"rowHeight\":100,\"margin\":[12,12],\"containerPadding\":[12,12]}},\"version\":0}"
+        }
+      ]
+    }
+  ]
+}

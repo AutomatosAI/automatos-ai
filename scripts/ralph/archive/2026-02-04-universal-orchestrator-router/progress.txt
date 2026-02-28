@@ -1,0 +1,417 @@
+# Ralph Progress Log
+Started: Sun Feb  1 18:17:29 WET 2026
+---
+
+## Codebase Patterns
+- ORM models import Base from `core.database.base` (separate file to avoid circular imports)
+- All ORM models use `extend_existing=True` in `__table_args__` for safety
+- Enums use `(str, Enum)` pattern for automatic string serialization
+- Pydantic and SQLAlchemy models co-exist in the same module file under `core/models/`
+- Register new model modules in `core/models/__init__.py` with wildcard imports
+- Timestamps use `func.now()` from `sqlalchemy.sql` for server-side defaults
+- JSON/flexible columns use `JSONB` from `sqlalchemy.dialects.postgresql`
+- UUID columns use `PGUUID(as_uuid=True)` from `sqlalchemy.dialects.postgresql`
+- Workspace isolation: most models include `workspace_id` FK to workspaces table
+- Routing cache lives at `core/routing/cache.py` — use `RoutingCache` singleton for all routing cache operations
+- Use `model_copy()` (Pydantic v2) when storing/returning models to avoid shared mutable state
+- Routing engine lives at `core/routing/engine.py` — `UniversalRouter(db, cache)` is the single entry point for all routing
+- `TriggerSubscription` links to `ComposioEntity.id`, not workspace_id directly — resolve workspace via `ComposioEntity`
+- `IntentClassifier` categories: EMAIL, CALENDAR, CODE, COMMUNICATION, KNOWLEDGE, DATABASE, STORAGE, PROJECT_MANAGEMENT, ANALYTICS, AI, MEMORY
+- Ingestors live at `core/routing/ingestors/` — each channel gets its own file inheriting `BaseIngestor`
+- `RequestContext.user` is a `UserContext` dataclass (not a dict) — access fields via `.id`, `.email`, `.clerk_user_id`, `.role`
+- DB sessions use `Depends(get_db)` in FastAPI endpoints — yields `Session` from `sqlalchemy.orm`
+- LLM calls: use `create_llm_manager(service_name="orchestrator")` then `await manager.generate_response(messages)` — returns `LLMResponse` with `.content`, `.tool_calls`, `.usage`
+- Agent model at `core/models/core.py` — filter by `workspace_id` + `status == "active"` for workspace agents
+- Agent app assignments at `core/models/composio_cache.py` — `AgentAppAssignment` links `agent_id` to `app_name`
+- Chat endpoint uses `stream_response_with_agent(agent_id=...)` for all agent-resolved requests — legacy `stream_response_aisdk` path removed
+- Routing metadata exposed via `x-routing-*` response headers on chat streaming responses
+- Background async dispatch: use `asyncio.create_task()` for fire-and-forget execution (pattern from `api/workflows.py`)
+- `get_db_session()` is a sync `@contextmanager` — use `with`, not `async with`; auto-commits on exit
+- Webhook ingestors selected by trigger_name prefix (e.g. `JIRA_` → `JiraTriggerIngestor`)
+- Config centralization: `orchestrator/config.py` is the canonical place for `os.getenv()` — use `from config import config` in other modules
+- Management scripts: add `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` at top, use `SessionLocal()` for DB sessions (not `get_db`), use `DEFAULT_TENANT_ID` for single-tenant mode
+- Workflow recipes live at `modules/workflows/recipes/` — stateless classes with `async execute(envelope, db, workspace_id) -> Result` pattern
+- `ComposioToolExecutor.execute()` returns `{"success": bool, "data": Any, "error": str}` — use admin pattern: `agent_id=0, skip_validation=True` for system-initiated actions
+- `CodeGraphService.search_symbols(project_name, query, limit, workspace_id)` — `workspace_id` must be a string; results under `"results"` key
+- Jira field values (issuetype, priority, project, reporter) are nested dicts — extract with `obj.get("name")` or `obj.get("key")`
+- Recipe registry at `modules/workflows/recipes/__init__.py` — `register_recipe(name, cls, workflow_id)` + `get_recipe(recipe_name=..., workflow_id=...)` for dispatch lookup
+- GitHub repo for automated recipes: `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, `GITHUB_DEFAULT_BRANCH` env vars (added to config.py)
+- Webhook `_dispatch_workflow()` checks recipe registry first; falls back to standard 9-stage pipeline if no recipe matches
+- Next.js edge proxy at `app/api/chat/route.ts` does NOT auto-forward backend response headers — must explicitly list headers to forward
+- Routing metadata convention: `x-routing-*` headers (agent-id, confidence, type, reasoning, request-id) set by backend, forwarded by proxy, read by client hook
+- Frontend `ChatMessage.routingInfo` carries routing decision data — set once from response headers before streaming begins
+- Agent name resolution: cache in `useRef` to avoid re-renders; fallback display is `Agent #id` if API call fails
+
+---
+
+## 2026-02-01 - US-001
+- **What was implemented:** Created routing data models in `orchestrator/core/models/routing.py`
+- **Models created:**
+  - `ChannelSource` enum (chatbot, jira_trigger, slack, whatsapp, api, workflow)
+  - `RequestUser` Pydantic model (id, email, name, auth_type, clerk_user_id)
+  - `RequestEnvelope` Pydantic model (id, source, content, raw_payload, user, workspace_id, metadata, override_agent_id, override_workflow_id, conversation_id, timestamp)
+  - `RoutingDecision` Pydantic model (route_type, agent_id, workflow_id, confidence, reasoning, cached, intent_category)
+  - `RoutingDecisionRecord` SQLAlchemy ORM (routing_decisions table)
+  - `RoutingRule` SQLAlchemy ORM (routing_rules table)
+  - `UnroutedEvent` SQLAlchemy ORM (unrouted_events table)
+- **Files changed:**
+  - `orchestrator/core/models/routing.py` (new)
+  - `orchestrator/core/models/__init__.py` (added routing import)
+  - `scripts/ralph/prd.json` (updated to PRD-50 content)
+- **Learnings for future iterations:**
+  - Python deps (sqlalchemy, pydantic) not installed globally — use `python3 -c "import ..."` in orchestrator dir for validation
+  - No mypy/pyright installed — use `py_compile` for syntax validation and runtime import checks
+  - `TriggerSubscription` model already exists in `core/models/composio.py` — routing engine can reference it directly
+  - `ComposioEntity` table links `entity_id` to `workspace_id` — needed for Jira trigger workspace resolution
+---
+
+## 2026-02-01 - US-002
+- **What was implemented:** Built routing cache with TTL and workspace scoping in `orchestrator/core/routing/cache.py`
+- **Features:**
+  - `RoutingCache` class with in-memory dict store keyed by `(workspace_id, sha256(normalized_content + source))`
+  - Configurable TTL via `ROUTING_CACHE_TTL_HOURS` env var (default 24 hours)
+  - `get()` — returns cached RoutingDecision with `cached=True`, or None (with lazy eviction)
+  - `put()` — stores decision with monotonic timestamp
+  - `record_correction()` — tracks corrections per agent_id; auto-updates cached entry after 2+ identical corrections
+  - `clear(workspace_id)` — removes all cache entries for a workspace
+  - `stats()` — returns size, hits, misses, hit_rate, top_routes (top 10 by agent_id)
+  - Content normalization: lowercase + strip whitespace for consistent hashing
+- **Files changed:**
+  - `orchestrator/core/routing/__init__.py` (new, empty)
+  - `orchestrator/core/routing/cache.py` (new)
+  - `scripts/ralph/prd.json` (US-002 passes: true)
+- **Learnings for future iterations:**
+  - Use `time.monotonic()` for TTL tracking (immune to system clock changes)
+  - `model_copy()` (Pydantic v2) used to avoid shared mutable references in cache entries
+  - Cache key uses SHA-256 of normalized content + source, prefixed by workspace_id for O(n) workspace clear
+  - Smoke tests run inline with `python3 -c` — good pattern for validating without a test framework
+---
+
+## 2026-02-01 - US-003
+- **What was implemented:** Built core routing engine in `orchestrator/core/routing/engine.py`
+- **Features:**
+  - `UniversalRouter` class with `async route(envelope)` method
+  - Constructor takes `db: Session` and optional `RoutingCache` instance
+  - Tier 0: Override routing — if `override_agent_id` or `override_workflow_id` set, returns immediately with confidence=1.0
+  - Tier 1: Cache lookup via `RoutingCache.get()` — returns cached decision if hit
+  - Tier 2a: Source pattern matching against `routing_rules` table (ordered by priority desc)
+  - Tier 2b: `TriggerSubscription` lookup for `jira_trigger` source — resolves workspace via `ComposioEntity`
+  - Tier 2c: `IntentClassifier` keyword matching — classifies content then matches category against rule `intent_keywords`
+  - Returns `None` when no tier matches (caller handles LLM fallback)
+  - Every routing decision logged to `routing_decisions` table via `RoutingDecisionRecord`
+  - Helper `_envelope_hash()` for compact logging/deduplication
+- **Files changed:**
+  - `orchestrator/core/routing/engine.py` (new)
+  - `scripts/ralph/prd.json` (US-003 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `IntentClassifier.classify()` returns `IntentClassification` with `.category` (e.g. "EMAIL", "PROJECT_MANAGEMENT") and `.confidence` — use category to match against `RoutingRule.intent_keywords`
+  - `TriggerSubscription` is linked to entities, not workspaces directly — resolve via `ComposioEntity.workspace_id`
+  - Database env not available locally — use `py_compile` + AST analysis for validation instead of runtime import tests
+  - `RoutingRule.source_pattern` stores the channel source value string (e.g. "chatbot", "jira_trigger") — null/empty means match any
+  - Routing rules are ordered by `priority desc` — higher priority rules evaluated first
+---
+
+## 2026-02-01 - US-004
+- **What was implemented:** Added Tier 3 LLM classification to the routing engine in `orchestrator/core/routing/engine.py`
+- **Features:**
+  - `_classify_with_llm(envelope)` async method — queries workspace agents, builds lightweight prompt, calls LLM, parses response
+  - `_build_agent_descriptions(agents)` — builds agent info dicts including assigned app names from `AgentAppAssignment`
+  - `_build_classification_prompt(content, descriptions)` — creates structured prompt asking LLM to return `{"agent_id": int, "confidence": float}`
+  - `_parse_llm_routing_response(text, agents)` — parses JSON from LLM, validates agent_id against workspace agents, clamps confidence to [0, 1]
+  - If confidence < threshold (default 0.5 via `ROUTING_LLM_CONFIDENCE_THRESHOLD` env var), returns `route_type='orchestrate'`
+  - LLM results cached via `RoutingCache.put()` for future Tier 1 hits (both high and low confidence)
+  - `_store_unrouted_event(envelope, reason)` — persists to `unrouted_events` table when all tiers fail
+  - `route()` updated: after Tier 2c returns None, calls Tier 3 LLM; if LLM also fails, stores unrouted event
+- **Files changed:**
+  - `orchestrator/core/routing/engine.py` (modified — added Tier 3 + unrouted event storage)
+  - `scripts/ralph/prd.json` (US-004 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `create_llm_manager(service_name="orchestrator")` is the standard factory for LLM access — no need to handle credentials manually
+  - `LLMResponse.content` contains the text response; parse JSON from it for structured outputs
+  - LLM may wrap JSON in markdown code fences (```json ... ```) — strip them before parsing
+  - `Agent.status == "active"` is the standard filter for workspace agents that are operational
+  - `AgentAppAssignment.is_active` filter ensures only current app assignments are included
+  - Confidence threshold is configurable via `ROUTING_LLM_CONFIDENCE_THRESHOLD` env var (US-009 will add to config.py)
+---
+
+## 2026-02-01 - US-005
+- **What was implemented:** Created base ingestor interface and chatbot ingestor for normalising chat requests into RequestEnvelope
+- **Files created:**
+  - `orchestrator/core/routing/ingestors/__init__.py` (empty)
+  - `orchestrator/core/routing/ingestors/base.py` — `BaseIngestor` ABC with abstract `ingest(**kwargs) -> RequestEnvelope`
+  - `orchestrator/core/routing/ingestors/chatbot.py` — `ChatbotIngestor` with `ingest(message, agent_id, session_id, request_context)`
+- **ChatbotIngestor mapping:**
+  - `source` = `ChannelSource.CHATBOT`
+  - `content` = message text
+  - `RequestUser` populated from `RequestContext.user` (id, email, clerk_user_id, auth_type)
+  - `workspace_id` from `RequestContext.workspace_id`
+  - `override_agent_id` = agent_id when provided, None otherwise (router decides)
+  - `conversation_id` = UUID(session_id) when valid UUID, None otherwise
+  - `raw_payload` preserves original message, agent_id, session_id for debugging
+- **Learnings for future iterations:**
+  - `RequestContext` (at `core/auth/dependencies.py`) has `.workspace_id` (UUID) and `.user` (UserContext with `.id`, `.email`, `.clerk_user_id`, `.role`)
+  - `RequestContext.auth_type` is "clerk" | "api_key" | "anonymous" — maps directly to `RequestUser.auth_type`
+  - Chat endpoint uses `request.id` as session/chat ID (not a separate session_id param) — it may not be a valid UUID (could be string)
+  - `ChatRequest.agentId` is the user's manual agent selection — when present, it becomes `override_agent_id` in the envelope
+  - Message text extracted via `ChatMessageRequest.parts[0].text` or `.content` fallback — ingestor receives pre-extracted text
+  - Ingestors use keyword-only args (`*` in signature) to enforce named parameters and improve readability
+---
+
+## 2026-02-01 - US-006
+- **What was implemented:** Created Jira trigger ingestor for normalising Jira webhook events into RequestEnvelope
+- **Files created:**
+  - `orchestrator/core/routing/ingestors/jira_trigger.py` — `JiraTriggerIngestor` with `ingest(trigger_name, entity_id, event_data, db)`
+- **JiraTriggerIngestor mapping:**
+  - `source` = `ChannelSource.JIRA_TRIGGER`
+  - `content` = `[{issue_key}] {summary}\n\n{description}`
+  - Extracts from event_data: issue_key (or key), summary, description, issue_type (or issuetype), priority, project (or project_key), reporter
+  - Reporter handled as dict (emailAddress/displayName) or flat string
+  - `metadata` dict populated with all extracted Jira fields plus trigger_name
+  - `RequestUser` from reporter email/name with auth_type="system"
+  - `workspace_id` resolved via `ComposioEntity.composio_entity_id` lookup in DB
+  - Falls back to nil UUID if entity not found
+- **Files changed:**
+  - `orchestrator/core/routing/ingestors/jira_trigger.py` (new)
+  - `scripts/ralph/prd.json` (US-006 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - Webhook payload structure: `trigger_name` (str), `entity_id` (str = composio_entity_id), `event_data` (dict with Jira fields)
+  - `ComposioEntity.composio_entity_id` is the string key linking webhook entity_id to workspace_id
+  - Jira event_data field names vary — handle both camelCase and snake_case variants (e.g. `issue_key`/`key`, `issue_type`/`issuetype`)
+  - Reporter may be a nested dict with `emailAddress`/`displayName` keys or a flat string — handle both
+  - System-originated requests (webhooks) use `auth_type="system"` since there is no authenticated user
+---
+
+## 2026-02-01 - US-007
+- **What was implemented:** Integrated the universal router into the chat endpoint so that when no `agentId` is provided, the router auto-selects the best agent
+- **Changes:**
+  - Added imports for `RoutingCache`, `UniversalRouter`, `ChatbotIngestor` to `api/chat.py`
+  - Added module-level `_routing_cache = RoutingCache()` singleton for shared cache across requests
+  - When `request.agentId` is set: skip routing entirely, use directly (user override preserved)
+  - When `request.agentId` is NOT set: create `RequestEnvelope` via `ChatbotIngestor`, call `UniversalRouter.route(envelope)`
+  - If router returns `route_type='agent'` with valid `agent_id`: use that agent
+  - If router returns None or non-agent route: fall back to `get_default_agent_id()` as safety net
+  - Added routing metadata to response headers (`x-routing-agent-id`, `x-routing-confidence`, `x-routing-type`, `x-routing-reasoning`)
+  - Unified all paths to use `stream_response_with_agent()` instead of split between `stream_response_with_agent`/`stream_response_aisdk`
+  - Removed unused `get_chat_tools` import (was only used in the removed legacy `stream_response_aisdk` path)
+- **Files changed:**
+  - `orchestrator/api/chat.py` (modified — router integration)
+  - `scripts/ralph/prd.json` (US-007 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `stream_response_with_agent()` accepts `agent_id` and activates the agent via `AgentFactory` — works for any agent, not just manually selected ones
+  - `stream_response_aisdk()` was the pre-routing legacy path using basic model selection — no longer needed with router
+  - The `RoutingCache` should be shared (module-level singleton) across requests for cache hits to work across chat calls
+  - Router is async (`await router.route(envelope)`) — the `stream_chat` endpoint is already `async def` so this works naturally
+  - Exception handling wraps the entire router call so a router failure never blocks chat — it gracefully falls back to `get_default_agent_id()`
+  - Routing metadata is exposed via `x-routing-*` response headers for frontend consumption (US-014 will use these)
+  - `ChatbotIngestor.ingest()` uses keyword-only args — pass `agent_id=None` explicitly when no override
+---
+
+## 2026-02-01 - US-008
+- **What was implemented:** Replaced the TODO in `api/composio.py` handle_webhook endpoint with full routing dispatch logic
+- **Changes:**
+  - Added imports for `asyncio`, `get_db_session`, `UnroutedEvent`, `RoutingCache`, `UniversalRouter`, `JiraTriggerIngestor`
+  - Added module-level `_routing_cache = RoutingCache()` singleton (same pattern as chat.py)
+  - Webhook handler now: determines ingestor by trigger_name prefix (JIRA_ → JiraTriggerIngestor)
+  - Creates RequestEnvelope via appropriate ingestor
+  - Calls `UniversalRouter.route(envelope)` to get RoutingDecision
+  - If `route_type == 'agent'`: dispatches via `asyncio.create_task(_dispatch_agent(...))` using `AgentFactory.execute_with_prompt()`
+  - If `route_type == 'workflow'`: dispatches via `asyncio.create_task(_dispatch_workflow(...))` creating `WorkflowExecution` then calling `execute_workflow_with_progress()`
+  - If no route found: stored as unrouted event by the router, returns 200 with `status=unrouted`
+  - For unsupported trigger types (non-JIRA_): stores `UnroutedEvent` directly and returns early
+  - Returns 200 immediately with routing decision summary (async dispatch in background)
+  - Added `_dispatch_agent()` and `_dispatch_workflow()` async helper functions
+- **Files changed:**
+  - `orchestrator/api/composio.py` (modified — webhook routing dispatch)
+  - `scripts/ralph/prd.json` (US-008 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `get_db_session()` is a sync `@contextmanager` (not async) — use `with` not `async with`
+  - `get_db_session()` auto-commits on exit, but explicit `db.commit()` within the block is fine for cases needing `db.refresh()`
+  - `WorkflowExecution.agent_id` is nullable — workflow execution pipeline selects agents dynamically via 9-stage orchestrator
+  - Background dispatch uses `asyncio.create_task()` (same pattern as `api/workflows.py` line 995)
+  - Lazy imports in dispatch helpers (`from modules.agents.factory...`) avoid circular imports and loading heavy modules at startup
+  - `UnroutedEvent.content` should be truncated ([:2000]) for safety since webhook payloads can be large
+  - The router already stores unrouted events internally when all tiers fail, so the webhook handler only needs to handle the "no ingestor" case
+---
+
+## 2026-02-01 - US-009
+- **What was implemented:** Added routing configuration variables to the centralized config module and .env.example
+- **Changes:**
+  - Added `COMPOSIO_WEBHOOK_SECRET` (str, from env, no default)
+  - Added `ROUTING_CACHE_TTL_HOURS` (int, default 24)
+  - Added `ROUTING_LLM_CONFIDENCE_THRESHOLD` (float, default 0.5)
+  - All three placed in new "ROUTING" section in `Config` class
+  - Added corresponding entries to `.env.example` with documentation
+- **Files changed:**
+  - `orchestrator/config.py` (modified — added routing config section)
+  - `orchestrator/.env.example` (modified — added routing env vars)
+  - `scripts/ralph/prd.json` (US-009 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `config.py` is the ONLY place where `os.getenv()` should be called — other modules (cache.py, engine.py, composio.py) currently call `os.getenv()` directly; they should migrate to `from config import config` in a future cleanup
+  - Config class uses class-level attributes (not `__init__`) with type annotations — new config vars follow this pattern
+  - `.env.example` serves as documentation for deployment — include sensible defaults for non-secret values
+---
+
+## 2026-02-01 - US-010
+- **What was implemented:** Created routing API endpoints in `orchestrator/api/routing.py` and registered router in `main.py`
+- **Endpoints created:**
+  - `GET /api/routing/decisions` — list recent routing decisions with optional filters (source, agent_id, was_corrected), paginated via skip/limit
+  - `POST /api/routing/rules` — create a routing rule with source_pattern, intent_keywords, target_agent_id/target_workflow_id, priority
+  - `GET /api/routing/rules` — list all active routing rules for the workspace (ordered by priority desc)
+  - `DELETE /api/routing/rules/{rule_id}` — soft delete (sets is_active=False) with workspace scoping
+  - `POST /api/routing/corrections` — record user correction: updates RoutingDecisionRecord.was_corrected + corrected_agent_id
+  - `GET /api/routing/cache/stats` — returns cache size, hits, misses, hit_rate, top 10 routes
+- **Request/response schemas:** CreateRuleRequest, RuleResponse, DecisionResponse, CorrectionRequest (Pydantic BaseModel)
+- **Auth:** All endpoints use `get_request_context_hybrid` dependency for Clerk JWT / API key / dev fallback
+- **Files changed:**
+  - `orchestrator/api/routing.py` (new)
+  - `orchestrator/main.py` (added routing_router import and include_router)
+  - `scripts/ralph/prd.json` (US-010 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - API files follow pattern: imports → logger → router → schemas → endpoints. Schemas defined locally in the API file (not in core/models) when they are endpoint-specific
+  - All list endpoints should workspace-scope where possible — RoutingDecisionRecord doesn't have workspace_id column, so decisions are not workspace-filtered (future improvement)
+  - Soft-delete pattern: set `is_active=False` rather than hard-deleting rows — consistent with RoutingRule and other models
+  - The RoutingCache is a module-level singleton — each API module (chat.py, composio.py, routing.py) creates its own instance; a shared singleton across modules would need a factory or import from a common module
+  - Corrections endpoint records in DB but cannot directly update cache without original content — the cache will self-correct via re-routing + user re-correction flow
+---
+
+## 2026-02-01 - US-011
+- **What was implemented:** Created Jira trigger subscription setup — both a management script and an API endpoint
+- **Script:** `orchestrator/scripts/setup_jira_trigger.py`
+  - Reads `COMPOSIO_API_KEY`/`COMPOSIO_KEY` from env or `.env` file
+  - Calls Composio SDK `subscribe_to_trigger()` to register `JIRA_NEW_ISSUE_TRIGGER`
+  - Creates `TriggerSubscription` record in database linking trigger to configurable `agent_id`/`workflow_id`
+  - CLI args: `--project` (default PILOT), `--agent-id`, `--workflow-id`
+  - Prints trigger ID, subscription details, and next steps for webhook URL configuration
+  - Uses `DEFAULT_TENANT_ID` for single-tenant deployments, `EntityManager.get_or_create_entity()` for entity resolution
+- **API endpoint:** `POST /api/routing/triggers/setup`
+  - Added to `orchestrator/api/routing.py` alongside existing routing endpoints
+  - `TriggerSetupRequest` schema: `trigger_name`, `project_key`, `agent_id`, `workflow_id` (all with defaults)
+  - Auth required via `get_request_context_hybrid`
+  - Uses workspace from `RequestContext` (multi-tenant capable)
+  - Calls Composio SDK, persists `TriggerSubscription`, returns subscription details with next steps
+  - Lazy imports for `get_composio_client` and `EntityManager` to avoid circular imports at module load
+- **Webhook URL documentation:** Both script output and API response include next steps:
+  1. Verify webhook URL in Composio dashboard (https://app.composio.dev → Project Settings → Webhooks)
+  2. Set webhook URL to `{BACKEND_URL}/api/composio/webhook`
+  3. (Optional) Set `COMPOSIO_WEBHOOK_SECRET` in .env for signature verification
+- **Files changed:**
+  - `orchestrator/scripts/setup_jira_trigger.py` (new)
+  - `orchestrator/api/routing.py` (modified — added TriggerSetupRequest schema and POST /api/routing/triggers/setup endpoint)
+  - `scripts/ralph/prd.json` (US-011 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - Existing `api/composio.py` already has `POST /api/composio/triggers/subscribe` which does the same thing — the new `/api/routing/triggers/setup` provides an alternative entry point from the routing admin API surface
+  - Management scripts use `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` to add orchestrator root to path
+  - `SessionLocal()` (from `core.database.database`) is the direct session factory for scripts — endpoints use `Depends(get_db)` instead
+  - `DEFAULT_TENANT_ID` (`UUID("00000000-...")`) is used in scripts for single-tenant mode; API endpoints use `ctx.workspace_id` from auth context
+  - `ComposioClient.subscribe_to_trigger()` returns `{"id": str, "trigger_name": str, "status": str}`
+  - The `trigger_config` (e.g. `{project_key: "PILOT"}`) is passed to the Composio SDK at the SDK level, not as a separate parameter — the trigger_name itself identifies the trigger type
+---
+
+## 2026-02-01 - US-012
+- **What was implemented:** Created the Jira Bug Triage workflow recipe — Read and Analyze steps (first half of the autonomous triage pipeline)
+- **Files created:**
+  - `orchestrator/modules/workflows/__init__.py` (new, empty)
+  - `orchestrator/modules/workflows/recipes/__init__.py` (new, empty)
+  - `orchestrator/modules/workflows/recipes/jira_bug_triage.py` — `JiraBugTriageRecipe` class
+- **JiraBugTriageRecipe structure:**
+  - `async execute(envelope: RequestEnvelope, db: Session, workspace_id: UUID) -> TriageResult`
+  - Step 1 — `_step_read_ticket(envelope)`: Calls `ComposioToolExecutor.execute(action="JIRA_GET_ISSUE")` with `agent_id=0, skip_validation=True` (admin pattern), extracts summary/description/type/priority/project/reporter/labels/status from Jira fields, falls back to envelope.metadata
+  - Step 2 — `_step_analyse(ticket)`: Extracts keywords from ticket summary+description (with stopword removal + dedup), searches `CodeGraphService.search_symbols()` for each keyword, deduplicates by symbol ID, caps at 20 results
+  - Step 3 — `_step_plan(ticket, symbols)`: Builds structured Jira-wiki-markup prompt with ticket details + code snippets (capped at 10 symbols, 600 chars per snippet), calls `create_llm_manager(service_name="jira_triage").generate_response()` with system + user messages
+  - `_post_comment(issue_key, body)`: Posts comment via `JIRA_ADD_COMMENT`
+  - `_post_failure_comment(issue_key, result)`: Best-effort failure summary posted as Jira comment with panel markup showing completed steps and error
+  - `TriageResult` dataclass: success, issue_key, fix_plan, relevant_files, error, steps_completed, execution_time_ms
+- **Helper functions:** `_extract_name()` / `_extract_key()` for safely extracting from Jira nested field dicts
+- **Files changed:**
+  - `orchestrator/modules/workflows/recipes/jira_bug_triage.py` (new)
+  - `orchestrator/modules/workflows/__init__.py` (new)
+  - `orchestrator/modules/workflows/recipes/__init__.py` (new)
+  - `scripts/ralph/prd.json` (US-012 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - No `workflows/` directory existed under `modules/` — created `modules/workflows/` and `modules/workflows/recipes/` from scratch
+  - Recipe pattern: stateless class with `execute(envelope, db, workspace_id)` method — no constructor state needed, consistent with AC and dispatch patterns
+  - `ComposioToolExecutor.execute()` returns `{"success": bool, "data": Any, "error": str}` — always check `.get("success")` before accessing data
+  - JIRA_GET_ISSUE response: data may have `fields` sub-dict (standard Jira REST format) or flat data — handle both with `data.get("fields", data)`
+  - Jira field values (issuetype, priority, project, reporter) are nested dicts with `name`/`displayName`/`key` — need helper functions to extract
+  - `CodeGraphService.search_symbols()` takes `workspace_id` as string, not UUID — cast with `str(workspace_id)`
+  - `CodeGraphService` search results use key `"results"` (not `"symbols"`)
+  - LLM prompt for code triage works well with Jira wiki markup format since the output goes directly to a Jira comment
+  - Lazy imports (`from core.composio... import ...` inside methods) follow existing pattern to avoid circular imports and heavy module loading at import time
+---
+
+## 2026-02-01 - US-013
+- **What was implemented:** Extended JiraBugTriageRecipe with Steps 4-6 (Clone & Fix, Open PR, Update Jira) and created a recipe registry for dispatch
+- **Steps added:**
+  - Step 4 — `_step_clone_and_fix(ticket, fix_plan, symbols)`: Creates `fix/{issue_key}` branch via `GITHUB_CREATE_BRANCH`, generates concrete file changes via LLM, applies each via `GITHUB_CREATE_OR_UPDATE_FILE`
+  - `_generate_file_changes(ticket, fix_plan, symbols)`: Asks LLM to produce JSON array of `{file_path, content, commit_message}` changes
+  - `_parse_file_changes(text)`: Parses LLM response, strips markdown fences, validates structure
+  - Step 5 — `_step_open_pr(ticket, branch_name, fix_plan)`: Creates PR via `GITHUB_CREATE_PULL_REQUEST` with Jira ticket reference in title and fix plan in body
+  - Step 6 — `_step_update_jira(issue_key, pr_url, pr_number)`: Transitions ticket via `JIRA_UPDATE_ISSUE` (non-fatal if workflow doesn't support transition), posts PR link as Jira comment with panel markup
+  - `_resolve_repo()`: Reads `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, `GITHUB_DEFAULT_BRANCH` from env
+- **Recipe registry** created at `modules/workflows/recipes/__init__.py`:
+  - `register_recipe(name, recipe_class, workflow_id)` — stores by name and optional workflow_id
+  - `get_recipe(recipe_name=..., workflow_id=...)` — lookup by either key
+  - `JiraBugTriageRecipe` registered as `"jira_bug_triage"` at module load
+- **Webhook dispatch** updated in `api/composio.py`:
+  - `_dispatch_workflow()` now checks recipe registry first via `get_recipe(workflow_id=...)`
+  - If recipe found, executes directly with full `RequestEnvelope`; otherwise falls back to standard 9-stage pipeline
+  - Function signature changed to accept `envelope` instead of separate `envelope_content`/`envelope_metadata`
+- **Config** updated:
+  - Added `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, `GITHUB_DEFAULT_BRANCH` to `config.py` ROUTING section
+  - Added corresponding entries to `.env.example`
+- **TriageResult** extended with `branch_name`, `pr_url`, `pr_number` fields
+- **Files changed:**
+  - `orchestrator/modules/workflows/recipes/jira_bug_triage.py` (modified — Steps 4-6 + helpers)
+  - `orchestrator/modules/workflows/recipes/__init__.py` (rewritten — recipe registry)
+  - `orchestrator/api/composio.py` (modified — recipe-aware dispatch)
+  - `orchestrator/config.py` (modified — GitHub repo env vars)
+  - `orchestrator/.env.example` (modified — GitHub repo env vars)
+  - `scripts/ralph/prd.json` (US-013 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - GitHub actions (GITHUB_CREATE_BRANCH, GITHUB_CREATE_OR_UPDATE_FILE, GITHUB_CREATE_PULL_REQUEST) must be pre-synced in `composio_actions_cache` table — they are not auto-discovered at runtime
+  - `JIRA_UPDATE_ISSUE` status transition may fail if the target status isn't available in the Jira project workflow — treat as non-fatal
+  - LLM-generated file changes should be parsed defensively: strip markdown fences, try regex extraction as fallback, validate each item has required fields
+  - Recipe registry uses eager registration at module load (`_register_builtins()`) — future recipes just need to be added there
+  - The `_dispatch_workflow` function now needs the full `RequestEnvelope` for recipe execution — callers must pass the envelope object, not just content/metadata strings
+---
+
+## 2026-02-01 - US-014
+- **What was implemented:** Updated chatbot UI for auto-routing indicator — shows which agent was auto-selected and allows user correction
+- **Changes:**
+  - **Agent selector** (`components/chatbot/agent-selector.tsx`): Renamed "Auto (Model Selection)" to "Auto" with description "Router picks the best agent for each message"
+  - **Chat proxy** (`app/api/chat/route.ts`): Forwards `x-routing-*` headers from backend through to client (agent-id, confidence, type, reasoning, request-id)
+  - **Types** (`types/chat.ts`): Added `RoutingInfo` interface (requestId, agentId, agentName, confidence, routeType, reasoning) and extended `ChatMessage` with `routingInfo` field
+  - **Chat hook** (`lib/chat/hooks.ts`): Extracts routing headers from response before streaming, attaches `routingInfo` to assistant message, fires `onRoutingDecision` callback
+  - **Message display** (`components/chatbot/message.tsx`): Renders routing indicator pill below assistant messages showing "Routed to: {Agent Name}" with confidence percentage
+  - **Chat component** (`components/chatbot/chat.tsx`): Resolves agent names from IDs via API with cache, records routing corrections via `POST /api/routing/corrections` when user changes agent after auto-route
+  - **Backend** (`orchestrator/api/chat.py`): Added `x-routing-request-id` header containing the envelope UUID for correction API linkage
+- **Files changed:**
+  - `frontend/app/api/chat/route.ts` (modified — forward routing headers)
+  - `frontend/components/chatbot/agent-selector.tsx` (modified — "Auto" label and description)
+  - `frontend/components/chatbot/chat.tsx` (modified — agent name resolution, correction API, handleAgentChange)
+  - `frontend/components/chatbot/message.tsx` (modified — routing indicator pill)
+  - `frontend/lib/chat/hooks.ts` (modified — capture routing headers, onRoutingDecision callback)
+  - `frontend/types/chat.ts` (modified — RoutingInfo type, ChatMessage extension)
+  - `orchestrator/api/chat.py` (modified — x-routing-request-id header)
+  - `scripts/ralph/prd.json` (US-014 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - Backend response headers are NOT auto-forwarded by the Next.js edge proxy — must explicitly forward desired headers
+  - Routing metadata uses `x-routing-*` header convention set by the backend StreamingResponse
+  - Agent name resolution requires async API call (`/api/agents/{id}`) since routing headers only include agent_id, not name
+  - Agent name cache (`useRef<Record<number, string>>`) persists across renders without causing re-renders
+  - Correction API (`POST /api/routing/corrections`) expects `request_id` (UUID from RequestEnvelope.id) + `correct_agent_id`
+  - The `selectedAgentId === null` state maps to "Auto" mode — no `agentId` sent in request body, backend router decides
+  - Frontend `node_modules` not installed locally — typecheck done via py_compile (backend) and manual review (frontend)
+  - Manual browser verification needed as no dev-browser tool was available
+---

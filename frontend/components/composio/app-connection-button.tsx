@@ -36,8 +36,15 @@ export function AppConnectionButton({
         try {
             const result = await initiateConnection.mutateAsync({
                 appName,
-                callbackUrl: `${window.location.origin}/settings/tools?connected=${appName}`,
+                callbackUrl: `${window.location.origin}/tools/callback?connected=${appName}`,
             })
+
+            // NO_AUTH apps are activated immediately — no OAuth redirect needed
+            if (!result.redirect_url) {
+                setIsConnecting(false)
+                onConnected?.()
+                return
+            }
 
             // Open OAuth popup
             const width = 600

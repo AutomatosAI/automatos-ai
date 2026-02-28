@@ -8,7 +8,7 @@ API endpoints for system statistics, agent metrics, and dashboard data.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, text
 from typing import Dict, Any
 from datetime import datetime, timedelta
 from core.database.database import get_db
@@ -19,6 +19,8 @@ from core.models import (
 import logging
 import psutil
 import time
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system", tags=["statistics"])
@@ -27,28 +29,30 @@ router = APIRouter(prefix="/api/system", tags=["statistics"])
 SYSTEM_START_TIME = time.time()
 
 @router.get("/agents/statistics", response_model=AgentStatistics)
-async def get_agent_statistics(db: Session = Depends(get_db)):
+async def get_agent_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get comprehensive agent statistics for dashboard"""
     try:
-        # Basic agent counts
-        total_agents = db.query(Agent).count()
-        active_agents = db.query(Agent).filter(Agent.status == 'active').count()
-        inactive_agents = db.query(Agent).filter(Agent.status == 'inactive').count()
-        
+        # Basic agent counts - scoped to workspace
+        total_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).count()
+        active_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == 'active').count()
+        inactive_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == 'inactive').count()
+
         # Agents by type
         agent_types = db.query(
-            Agent.agent_type, 
+            Agent.agent_type,
             func.count(Agent.id).label('count')
-        ).group_by(Agent.agent_type).all()
-        
+        ).filter(Agent.workspace_id == ctx.workspace_id).group_by(Agent.agent_type).all()
+
         agents_by_type = {agent_type: count for agent_type, count in agent_types}
-        
-        # Workflow execution statistics
-        total_executions = db.query(WorkflowExecution).count()
+
+        # Workflow execution statistics - scoped to workspace
+        total_executions = db.query(WorkflowExecution).filter(WorkflowExecution.workspace_id == ctx.workspace_id).count()
         successful_executions = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ctx.workspace_id,
             WorkflowExecution.status == 'completed'
         ).count()
         failed_executions = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ctx.workspace_id,
             WorkflowExecution.status == 'failed'
         ).count()
         
@@ -72,10 +76,10 @@ async def get_agent_statistics(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting agent statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/metrics", response_model=SystemMetrics)
-async def get_system_metrics():
+async def get_system_metrics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get system performance metrics"""
     try:
         # Calculate uptime
@@ -105,42 +109,41 @@ async def get_system_metrics():
         
     except Exception as e:
         logger.error(f"Error getting system metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/skills/statistics")
-async def get_skill_statistics(db: Session = Depends(get_db)):
+async def get_skill_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get skill-related statistics"""
     try:
-        # Skills by category
+        # Skills by category - scoped to workspace
         skill_categories = db.query(
             Skill.category,
             func.count(Skill.id).label('count')
-        ).filter(Skill.is_active == True).group_by(Skill.category).all()
-        
+        ).filter(Skill.is_active == True, Skill.workspace_id == ctx.workspace_id).group_by(Skill.category).all()
+
         skills_by_category = {category: count for category, count in skill_categories}
-        
+
         # Skills by type
         skill_types = db.query(
             Skill.skill_type,
             func.count(Skill.id).label('count')
-        ).filter(Skill.is_active == True).group_by(Skill.skill_type).all()
-        
+        ).filter(Skill.is_active == True, Skill.workspace_id == ctx.workspace_id).group_by(Skill.skill_type).all()
+
         skills_by_type = {skill_type: count for skill_type, count in skill_types}
-        
+
         # Total skills
-        total_skills = db.query(Skill).filter(Skill.is_active == True).count()
-        
+        total_skills = db.query(Skill).filter(Skill.is_active == True, Skill.workspace_id == ctx.workspace_id).count()
+
         # Most used skills (based on agent associations)
-        from sqlalchemy import text
         most_used_skills = db.execute(text("""
             SELECT s.name, s.category, COUNT(ags.agent_id) as usage_count
             FROM skills s
             LEFT JOIN agent_skills ags ON s.id = ags.skill_id
-            WHERE s.is_active = 1
+            WHERE s.is_active = true AND s.workspace_id = :workspace_id
             GROUP BY s.id, s.name, s.category
             ORDER BY usage_count DESC
             LIMIT 10
-        """)).fetchall()
+        """), {"workspace_id": str(ctx.workspace_id)}).fetchall()
         
         most_used = [
             {
@@ -159,26 +162,26 @@ async def get_skill_statistics(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting skill statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/patterns/statistics")
-async def get_pattern_statistics(db: Session = Depends(get_db)):
+async def get_pattern_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get pattern-related statistics"""
     try:
-        # Patterns by type
+        # Patterns by type - scoped to workspace
         pattern_types = db.query(
             Pattern.pattern_type,
             func.count(Pattern.id).label('count')
-        ).filter(Pattern.is_active == True).group_by(Pattern.pattern_type).all()
-        
+        ).filter(Pattern.is_active == True, Pattern.workspace_id == ctx.workspace_id).group_by(Pattern.pattern_type).all()
+
         patterns_by_type = {pattern_type: count for pattern_type, count in pattern_types}
-        
+
         # Total patterns
-        total_patterns = db.query(Pattern).filter(Pattern.is_active == True).count()
-        
+        total_patterns = db.query(Pattern).filter(Pattern.is_active == True, Pattern.workspace_id == ctx.workspace_id).count()
+
         # Most used patterns
         most_used_patterns = db.query(Pattern).filter(
-            Pattern.is_active == True
+            Pattern.is_active == True, Pattern.workspace_id == ctx.workspace_id
         ).order_by(Pattern.usage_count.desc()).limit(10).all()
         
         most_used = [
@@ -196,6 +199,7 @@ async def get_pattern_statistics(db: Session = Depends(get_db)):
             func.avg(Pattern.effectiveness_score)
         ).filter(
             Pattern.is_active == True,
+            Pattern.workspace_id == ctx.workspace_id,
             Pattern.usage_count > 0
         ).scalar() or 0.0
         
@@ -208,31 +212,30 @@ async def get_pattern_statistics(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting pattern statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/performance/statistics")
-async def get_performance_statistics(db: Session = Depends(get_db)):
+async def get_performance_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get performance-related statistics"""
     try:
         # Recent executions (last 24 hours)
         yesterday = datetime.now() - timedelta(days=1)
         
         recent_executions = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ctx.workspace_id,
             WorkflowExecution.started_at >= yesterday
         ).count()
-        
+
         recent_successful = db.query(WorkflowExecution).filter(
-            and_(
-                WorkflowExecution.started_at >= yesterday,
-                WorkflowExecution.status == 'completed'
-            )
+            WorkflowExecution.workspace_id == ctx.workspace_id,
+            WorkflowExecution.started_at >= yesterday,
+            WorkflowExecution.status == 'completed'
         ).count()
-        
+
         recent_failed = db.query(WorkflowExecution).filter(
-            and_(
-                WorkflowExecution.started_at >= yesterday,
-                WorkflowExecution.status == 'failed'
-            )
+            WorkflowExecution.workspace_id == ctx.workspace_id,
+            WorkflowExecution.started_at >= yesterday,
+            WorkflowExecution.status == 'failed'
         ).count()
         
         # Success rate
@@ -242,16 +245,16 @@ async def get_performance_statistics(db: Session = Depends(get_db)):
         # In a real system, this would calculate actual execution times
         avg_execution_time = 45.2  # seconds
         
-        # Performance by agent type
+        # Performance by agent type - scoped to workspace
         agent_performance = db.execute(text("""
-            SELECT a.agent_type, 
+            SELECT a.agent_type,
                    COUNT(we.id) as total_executions,
                    SUM(CASE WHEN we.status = 'completed' THEN 1 ELSE 0 END) as successful_executions
             FROM agents a
             LEFT JOIN workflow_executions we ON a.id = we.agent_id
-            WHERE we.started_at >= :yesterday
+            WHERE a.workspace_id = :workspace_id AND we.started_at >= :yesterday
             GROUP BY a.agent_type
-        """), {"yesterday": yesterday}).fetchall()
+        """), {"workspace_id": str(ctx.workspace_id), "yesterday": yesterday}).fetchall()
         
         performance_by_type = {}
         for row in agent_performance:
@@ -274,4 +277,4 @@ async def get_performance_statistics(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting performance statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

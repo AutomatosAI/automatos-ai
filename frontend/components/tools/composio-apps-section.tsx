@@ -87,7 +87,7 @@ export function ComposioAppsSection() {
         try {
             const result = await initiateConnection.mutateAsync({
                 appName: app.name,
-                callbackUrl: `${window.location.origin}/tools?connected=${app.name}`,
+                callbackUrl: `${window.location.origin}/tools/callback?connected=${app.name}`,
             })
 
             // Open OAuth popup

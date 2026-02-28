@@ -16,6 +16,8 @@ import logging
 from pydantic import BaseModel, Field
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from core.models import Tool, Agent, AgentToolPermission, PermissionAuditLog
 from core.models import Tool, Agent, AgentToolPermission, PermissionAuditLog
 from core.utils.logging_adapter import set_request_id
@@ -210,7 +212,7 @@ def detect_conflicts(db: Session, assignments: List[AgentToolAssignmentRequest])
 # ====================================
 
 @router.get("/matrix", response_model=PermissionMatrix)
-async def get_permission_matrix(db: Session = Depends(get_db)):
+async def get_permission_matrix(db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get the complete permission matrix showing agent types, allowed tools,
     current assignments, and any conflicts.
@@ -282,7 +284,7 @@ async def get_permission_matrix(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error retrieving permission matrix: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve permission matrix: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/assignments", response_model=List[PermissionResponse])
 async def list_assignments(
@@ -290,7 +292,8 @@ async def list_assignments(
     tool_id: Optional[int] = Query(None, description="Filter by tool ID"),
     environment: Optional[str] = Query(None, description="Filter by environment"),
     active_only: bool = Query(True, description="Only show active assignments"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """List all agent-tool assignments with optional filtering"""
     set_request_id(str(uuid.uuid4()))
@@ -345,18 +348,19 @@ async def list_assignments(
         
     except Exception as e:
         logger.error(f"Error listing assignments: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list assignments: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/assign")
 async def assign_tool_to_agent(
     assignment: AgentToolAssignmentRequest,
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
     force: bool = Query(False, description="Force assignment even if conflicts exist"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Assign a tool to an agent with permission validation"""
     set_request_id(str(uuid.uuid4()))
-    
+    user_id = ctx.user.id
+
     try:
         # Verify agent and tool exist
         agent = db.query(Agent).filter(Agent.id == assignment.agent_id).first()
@@ -445,17 +449,18 @@ async def assign_tool_to_agent(
     except Exception as e:
         logger.error(f"Error assigning tool to agent: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to assign tool: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/bulk-assign")
 async def bulk_assign_tools(
     bulk_request: BulkAssignmentRequest,
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Bulk assign multiple tools to agents with conflict validation"""
     set_request_id(str(uuid.uuid4()))
-    
+    user_id = ctx.user.id
+
     try:
         results = {
             "successful": [],
@@ -565,19 +570,20 @@ async def bulk_assign_tools(
     except Exception as e:
         logger.error(f"Error in bulk assignment: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to process bulk assignment: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/revoke")
 async def revoke_tool_access(
     agent_id: int = Query(..., description="Agent ID"),
     tool_id: int = Query(..., description="Tool ID"),
     environment: str = Query(..., description="Environment"),
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Revoke an agent's access to a tool"""
     set_request_id(str(uuid.uuid4()))
-    
+    user_id = ctx.user.id
+
     try:
         # Find the permission
         permission = db.query(AgentToolPermission).filter(
@@ -623,7 +629,7 @@ async def revoke_tool_access(
     except Exception as e:
         logger.error(f"Error revoking tool access: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to revoke access: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/audit", response_model=List[AuditLogEntry])
 async def get_permission_audit_logs(
@@ -632,7 +638,8 @@ async def get_permission_audit_logs(
     action: Optional[str] = Query(None, description="Filter by action"),
     environment: Optional[str] = Query(None, description="Filter by environment"),
     limit: int = Query(100, description="Maximum number of logs to return"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Get permission audit logs with optional filtering"""
     set_request_id(str(uuid.uuid4()))
@@ -682,7 +689,7 @@ async def get_permission_audit_logs(
         
     except Exception as e:
         logger.error(f"Error retrieving permission audit logs: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve audit logs: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ====================================
 # Health Check

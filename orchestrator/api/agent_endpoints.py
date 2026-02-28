@@ -19,6 +19,8 @@ from core.models import (
 from modules.agents import (
     AgentFactory, AgentLifecycle, create_specialized_agent
 )
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -37,6 +39,7 @@ def get_agent_factory():
 @router.post("/create-specialized", response_model=Dict[str, Any])
 async def create_specialized_agent_endpoint(
     request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -95,76 +98,15 @@ async def create_specialized_agent_endpoint(
         logger.error(f"Failed to create agent: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@router.post("/{agent_id}/execute")
-async def execute_agent_task(
-    agent_id: int,
-    request: Dict[str, Any]
-):
-    """
-    Execute a task using a specific agent's LLM.
-    
-    Request body:
-    {
-        "task": {
-            "description": "Task description",
-            "context": {...},
-            "use_memory": true
-        },
-        "execution_mode": "thorough|quick",
-        "use_tools": false
-    }
-    
-    Returns real LLM execution results.
-    """
-    try:
-        factory = get_agent_factory()
-        
-        # Extract task details
-        task_data = request.get("task", {})
-        task_description = task_data.get("description")
-        context = task_data.get("context")
-        use_memory = task_data.get("use_memory", True)
-        
-        if not task_description:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Task description is required"
-            )
-        
-        # Execute with real LLM
-        result = await factory.execute_task(
-            agent=agent_id,
-            task_description=task_description,
-            context=context,
-            use_memory=use_memory
-        )
-        
-        if result["status"] == "error":
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result.get("error", "Task execution failed")
-            )
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Task execution error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.post("/{agent_id}/learn")
 async def update_agent_learning(
     agent_id: int,
-    request: Dict[str, Any]
+    request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Provide feedback for agent learning.
@@ -228,7 +170,7 @@ async def update_agent_learning(
         logger.error(f"Learning update error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -236,6 +178,7 @@ async def update_agent_learning(
 async def get_agent_performance(
     agent_id: int,
     period: str = "all",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -248,14 +191,14 @@ async def get_agent_performance(
     """
     try:
         # Get agent from database
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
+
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         # Get agent runtime status if active (with error handling)
         factory = get_agent_factory()
         agent_status = {}
@@ -312,7 +255,7 @@ async def get_agent_performance(
         logger.error(f"Performance query error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -320,6 +263,7 @@ async def get_agent_performance(
 async def get_agent_logs(
     agent_id: int,
     limit: int = 50,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -332,13 +276,13 @@ async def get_agent_logs(
         from sqlalchemy import desc
         
         # Verify agent exists
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         # Get recent workflow executions (check all, filter by agent in subtasks)
         executions = db.query(WorkflowExecution).order_by(
             desc(WorkflowExecution.started_at)
@@ -381,41 +325,12 @@ async def get_agent_logs(
         logger.error(f"Logs query error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@router.get("/{agent_id}/status")
-async def get_agent_status_endpoint(agent_id: int):
-    """
-    Get detailed agent status including LLM connection info.
-    
-    Returns real-time agent status and configuration.
-    """
-    try:
-        factory = get_agent_factory()
-        agent_status = await factory.get_agent_status(agent_id)
-        
-        if agent_status["status"] == "not_found":
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=agent_status.get("error")
-            )
-        
-        return agent_status
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Status query error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.post("/{agent_id}/test-capabilities")
-async def test_agent_capabilities_endpoint(agent_id: int):
+async def test_agent_capabilities_endpoint(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Run comprehensive capability tests on an agent.
     
@@ -443,13 +358,14 @@ async def test_agent_capabilities_endpoint(agent_id: int):
         logger.error(f"Capability test error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.post("/batch-create")
 async def create_agent_batch(
-    request: Dict[str, Any]
+    request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Create multiple agents in batch.
@@ -494,9 +410,10 @@ async def create_agent_batch(
                 created_agents.append(agent_status)
                 
             except Exception as e:
+                logger.error(f"Failed to create agent '{config.get('name')}': {e}")
                 errors.append({
                     "name": config.get("name"),
-                    "error": str(e)
+                    "error": "Agent creation failed"
                 })
         
         return {
@@ -513,12 +430,12 @@ async def create_agent_batch(
         logger.error(f"Batch creation error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.get("/active")
-async def list_active_agents():
+async def list_active_agents(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     List all active agents in runtime.
     
@@ -541,14 +458,15 @@ async def list_active_agents():
         logger.error(f"List agents error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.post("/{agent_id}/add-skills")
 async def add_agent_skills(
     agent_id: int,
-    request: Dict[str, Any]
+    request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Add new skills to an existing agent.
@@ -596,7 +514,7 @@ async def add_agent_skills(
         logger.error(f"Add skills error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -632,9 +550,10 @@ async def agent_system_health():
         return health
         
     except Exception as e:
+        logger.error(f"Agent health check failed: {e}")
         return {
             "status": "unhealthy",
-            "error": str(e),
+            "error": "Health check failed",
             "timestamp": datetime.now().isoformat()
         }
 
@@ -646,6 +565,7 @@ async def agent_system_health():
 @router.get("/{agent_id}/model-config")
 async def get_agent_model_config(
     agent_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -655,13 +575,13 @@ async def get_agent_model_config(
     and all generation parameters.
     """
     try:
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         return {
             "agent_id": agent_id,
             "agent_name": agent.name,
@@ -675,7 +595,7 @@ async def get_agent_model_config(
         logger.error(f"Get model config error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -683,6 +603,7 @@ async def get_agent_model_config(
 async def update_agent_model_config(
     agent_id: int,
     model_config: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -706,13 +627,13 @@ async def update_agent_model_config(
         from core.llm.model_registry import ModelRegistry
         from sqlalchemy import update
         
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         # Validate model exists and auto-resolve provider from registry
         model_id = model_config.get("model_id")
         if model_id:
@@ -753,13 +674,14 @@ async def update_agent_model_config(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.get("/{agent_id}/model-usage")
 async def get_agent_model_usage(
     agent_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -768,13 +690,13 @@ async def get_agent_model_usage(
     Returns token usage, costs, and request counts.
     """
     try:
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         usage_stats = agent.model_usage_stats or {
             "total_tokens": 0,
             "total_cost": 0.0,
@@ -804,7 +726,7 @@ async def get_agent_model_usage(
         logger.error(f"Get model usage error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -812,6 +734,7 @@ async def get_agent_model_usage(
 async def switch_agent_model(
     agent_id: int,
     request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -833,13 +756,13 @@ async def switch_agent_model(
         from core.llm.model_registry import ModelRegistry
         from sqlalchemy.orm import attributes
         
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         # Validate new model
         new_model_id = request.get("model_id")
         if not new_model_id:
@@ -899,5 +822,5 @@ async def switch_agent_model(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )

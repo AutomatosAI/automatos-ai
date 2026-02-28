@@ -1,0 +1,251 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/38-3-dashboard-builder",
+  "description": "PRD-38.3: Dashboard Builder - Workspace persistence (save/load layouts), pre-built templates, layout presets, widget configuration, and basic sharing. Transforms workspace from session-based to persistent customizable dashboard.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add workspace persistence columns via migration",
+      "description": "As a developer, I need the workspaces table extended with layout, widgets, and sharing fields.",
+      "acceptanceCriteria": [
+        "Create Alembic migration adding to workspaces: layout JSONB DEFAULT '{\"columns\":12,\"rowHeight\":100}', layout_mode VARCHAR(20) DEFAULT 'grid', widgets JSONB DEFAULT '[]', description TEXT",
+        "Add is_template BOOLEAN DEFAULT FALSE, template_category VARCHAR(50), template_icon VARCHAR(10)",
+        "Add visibility VARCHAR(20) DEFAULT 'private' with CHECK IN ('private','team','organization')",
+        "Add last_opened_at TIMESTAMP WITH TIME ZONE",
+        "Add CHECK constraint on layout_mode IN ('grid','freeform','split','focus')",
+        "Add index idx_workspaces_template on is_template WHERE is_template = TRUE",
+        "Migration runs successfully without data loss",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Created 20260225_add_workspace_persistence_columns.py with 9 columns, CHECK constraints on layout_mode and visibility, partial index on is_template."
+    },
+    {
+      "id": "US-002",
+      "title": "Create workspace_shares table via migration",
+      "description": "As a developer, I need a table to track workspace sharing permissions between users.",
+      "acceptanceCriteria": [
+        "Create Alembic migration for workspace_shares table: id UUID PK, workspace_id UUID FK workspaces ON DELETE CASCADE, user_id UUID FK users, permission VARCHAR(20) DEFAULT 'view'",
+        "Add CHECK constraint on permission IN ('view','edit','admin')",
+        "Add created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
+        "Add UNIQUE constraint on (workspace_id, user_id)",
+        "Add index idx_workspace_shares_user on user_id",
+        "Migration runs successfully",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Created 20260225_create_workspace_shares.py with all columns, FK CASCADE, UNIQUE constraint, CHECK constraint, and user index."
+    },
+    {
+      "id": "US-003",
+      "title": "Update SQLAlchemy workspace model with persistence fields",
+      "description": "As a developer, I need the ORM model to include new workspace columns.",
+      "acceptanceCriteria": [
+        "Update orchestrator/core/models/workspaces.py with: layout (JSONB), layout_mode (String), widgets (JSONB), description (Text), is_template (Boolean), template_category (String), template_icon (String), visibility (String), last_opened_at (DateTime)",
+        "Create WorkspaceShare model in orchestrator/core/models/workspace_shares.py",
+        "WorkspaceShare has: id, workspace_id FK, user_id FK, permission, created_at",
+        "Add relationship from Workspace to WorkspaceShare",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Added 9 columns to Workspace model with shares relationship. Created WorkspaceShare model. Registered in __init__.py."
+    },
+    {
+      "id": "US-004",
+      "title": "Create workspace CRUD API endpoints",
+      "description": "As a frontend developer, I need REST endpoints to save, load, update, and delete workspaces.",
+      "acceptanceCriteria": [
+        "Extend orchestrator/api/workspaces.py with CRUD endpoints",
+        "GET /api/workspaces returns user's workspaces (owned + shared) with id, name, description, layout_mode, visibility, updated_at",
+        "GET /api/workspaces/:id returns full workspace including layout and widgets array",
+        "POST /api/workspaces creates workspace from body: name, description, layout, layout_mode, widgets",
+        "PUT /api/workspaces/:id updates workspace (validates ownership or edit permission)",
+        "DELETE /api/workspaces/:id deletes workspace (validates ownership)",
+        "Updates last_opened_at on GET by id",
+        "Register router in main.py if not already",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Full CRUD already existed in workspaces.py. Verified all endpoints present and registered. No changes needed."
+    },
+    {
+      "id": "US-005",
+      "title": "Create workspace templates API and seed data",
+      "description": "As a frontend developer, I need template endpoints and at least 6 built-in templates.",
+      "acceptanceCriteria": [
+        "GET /api/workspaces/templates returns template workspaces (is_template=true)",
+        "POST /api/workspaces/from-template/:id clones template into new user workspace",
+        "Seed 6 templates: Data Analysis (2x data + code + document), CRM Dashboard (email + data + workflow), DevOps Monitor (terminal + workflow + data), Content Creator (document + image + email), Research Assistant (document + memory + code), Project Manager (workflow + data + email)",
+        "Each template has name, description, icon, category, layout_mode, and widgets array",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Added GET /templates and POST /from-template/{id} endpoints. Created scripts/seed_workspace_templates.py with 6 templates including widget arrays and grid positions."
+    },
+    {
+      "id": "US-006",
+      "title": "Update workspace store with save/load actions",
+      "description": "As a frontend developer, I need the Zustand store to sync with the backend for persistence.",
+      "acceptanceCriteria": [
+        "Add to workspace-store.ts state: currentWorkspaceId, savedWorkspaces, isLoading, isSaving, lastSaved, hasUnsavedChanges",
+        "Add loadWorkspaces() action fetching GET /api/workspaces",
+        "Add loadWorkspace(id) action fetching GET /api/workspaces/:id and restoring layout + widgets",
+        "Add saveWorkspace() action that POSTs or PUTs current state",
+        "Add deleteWorkspace(id) action calling DELETE",
+        "Track hasUnsavedChanges on widget add/remove/resize/move",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Added all persistence state and actions. localStorage tracks currentWorkspaceId. hasUnsavedChanges set true on mutations, false on save/load. Re-exported from stores/index.ts."
+    },
+    {
+      "id": "US-007",
+      "title": "Build WorkspaceManager UI component",
+      "description": "As a user, I want a panel to browse, open, create, and delete my saved workspaces.",
+      "acceptanceCriteria": [
+        "Create frontend/components/workspace/WorkspaceManager.tsx",
+        "Lists saved workspaces grouped by Recent and My Workspaces",
+        "Each item shows: name, description snippet, layout_mode icon, relative updated_at, action menu (rename, delete)",
+        "New Workspace button opens name/description dialog",
+        "Clicking workspace loads via store.loadWorkspace(id)",
+        "Delete confirmation before deleting",
+        "Empty state for new users",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Created WorkspaceManager with grouped lists, action menus, create dialog, delete confirmation, and empty state with illustration."
+    },
+    {
+      "id": "US-008",
+      "title": "Build WorkspaceSaveDialog component",
+      "description": "As a user, I want to save my current layout with a name and description.",
+      "acceptanceCriteria": [
+        "Create frontend/components/workspace/WorkspaceSaveDialog.tsx modal",
+        "Fields: Name (required, max 255), Description (optional, max 500)",
+        "If currentWorkspaceId exists, show Save and Save As buttons",
+        "If new, show only Save (creates new)",
+        "Loading spinner while saving, success toast on completion",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Created WorkspaceSaveDialog with Save/Save As logic, validation, loading spinner, and toast feedback."
+    },
+    {
+      "id": "US-009",
+      "title": "Build TemplateGallery component",
+      "description": "As a user, I want to browse templates and create a workspace from one.",
+      "acceptanceCriteria": [
+        "Create frontend/components/workspace/TemplateGallery.tsx",
+        "Fetches from GET /api/workspaces/templates",
+        "Cards in grid: icon, name, description, widget count, category badge",
+        "Use Template button calls POST /from-template then loads workspace",
+        "Category filter chips: All, Analytics, CRM, DevOps, Content, Research",
+        "Loading skeleton while fetching",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Created TemplateGallery with category filter chips, responsive card grid, Use Template flow, and loading skeletons."
+    },
+    {
+      "id": "US-010",
+      "title": "Build LayoutPresets toolbar",
+      "description": "As a user, I want one-click layout presets to rearrange widgets quickly.",
+      "acceptanceCriteria": [
+        "Create frontend/components/workspace/LayoutPresets.tsx toolbar",
+        "Grid: equal-sized grid (cols = ceil(sqrt(count)))",
+        "Split: two widgets 50/50 side-by-side, rest below",
+        "Focus: one main at 75% width, others stacked 25% sidebar",
+        "Stack: all widgets single column full width",
+        "Applying preset updates widget positions in store",
+        "Active preset visually highlighted",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Created LayoutPresets with 4 presets calculating positions on 12-column grid. Active preset highlighted. Added 'stack' to LayoutMode union."
+    },
+    {
+      "id": "US-011",
+      "title": "Build WidgetConfigDialog for per-widget settings",
+      "description": "As a user, I want to configure individual widget theme, refresh, and type-specific options.",
+      "acceptanceCriteria": [
+        "Create frontend/components/workspace/WidgetConfigDialog.tsx modal",
+        "Common: Theme (default/minimal/compact), Show header toggle, Show border toggle, Auto-refresh toggle + interval",
+        "DataWidget: rows per page (10-100), chart type (bar/line/pie)",
+        "CodeWidget: font size (10-24), line numbers toggle, word wrap toggle",
+        "Validates constraints on all numeric fields",
+        "Save updates widget config in store, Cancel discards",
+        "Opens from gear icon on WidgetBase header",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Created WidgetConfigDialog with common + type-specific settings. Added WidgetConfig types to types.ts. Added gear icon to WidgetBase header."
+    },
+    {
+      "id": "US-012",
+      "title": "Create workspace sharing API endpoints",
+      "description": "As a frontend developer, I need endpoints to share workspaces and view shared workspaces.",
+      "acceptanceCriteria": [
+        "POST /api/workspaces/:id/share accepts {user_id, permission} creates workspace_shares entry",
+        "DELETE /api/workspaces/:id/share/:user_id removes share",
+        "GET /api/workspaces/shared-with-me returns workspaces shared with current user",
+        "Validates workspace ownership on share/unshare",
+        "Returns 403 if not owner",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Added POST/DELETE share and GET shared-with-me endpoints to workspaces.py. Added GET /{id}/shares for listing current shares. Ownership validation with 403."
+    },
+    {
+      "id": "US-013",
+      "title": "Build WorkspaceShareDialog component",
+      "description": "As a user, I want to share my workspace with team members.",
+      "acceptanceCriteria": [
+        "Create frontend/components/workspace/WorkspaceShareDialog.tsx modal",
+        "Search input to find users by name or email",
+        "Permission dropdown per user: Can view, Can edit",
+        "List of currently shared users with remove button",
+        "Save calls share API for changes",
+        "Only visible to workspace owner",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Created WorkspaceShareDialog with user search, permission dropdown, remove with undo, and batch save of changes."
+    },
+    {
+      "id": "US-014",
+      "title": "Add workspace selector to main navigation",
+      "description": "As a user, I want to access workspace management from the header with unsaved indicator.",
+      "acceptanceCriteria": [
+        "Add workspace dropdown to app header showing current workspace name",
+        "Dropdown shows: recent workspaces, All Workspaces link, New Workspace, Templates",
+        "Unsaved changes dot indicator when hasUnsavedChanges is true",
+        "Ctrl/Cmd+S triggers save dialog",
+        "Loads last workspace from localStorage on startup",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Created WorkspaceSelector popover in header.tsx. Recent workspaces list, Ctrl/Cmd+S shortcut, unsaved dot indicator, auto-load from localStorage on mount."
+    }
+  ]
+}

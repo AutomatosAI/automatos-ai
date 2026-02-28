@@ -135,22 +135,105 @@ async def index_github_repository(
     - Stores in database for search
     """
     try:
-        result = await service.index_github_project(
-            project_name=request.project_name,
-            github_url=request.github_url,
-            branch=request.branch,
-            auth_token=request.auth_token,
-            exclude_patterns=request.exclude_patterns,
-            workspace_id=ctx.workspace_id
-        )
-        
-        return IndexResponse(**result)
-        
+        # Create or update project record immediately so UI can track status
+        from core.database.database import SessionLocal
+        existing = service.db.execute(
+            text("SELECT id, status FROM codegraph_projects WHERE name = :name AND workspace_id = :ws LIMIT 1"),
+            {"name": request.project_name, "ws": str(ctx.workspace_id)}
+        ).fetchone()
+
+        # Guard: reject if already indexing (prevents duplicate background tasks)
+        if existing and existing.status == 'indexing':
+            return {
+                "project_id": existing.id,
+                "project_name": request.project_name,
+                "total_files": 0,
+                "total_symbols": 0,
+                "duration_seconds": 0.0,
+                "status": "indexing",
+            }
+
+        if existing:
+            project_id = existing.id
+            service.db.execute(
+                text("UPDATE codegraph_projects SET status = 'indexing', source_url = :url, branch = :branch, updated_at = NOW() WHERE id = :id"),
+                {"id": project_id, "url": request.github_url, "branch": request.branch}
+            )
+        else:
+            row = service.db.execute(
+                text("""
+                    INSERT INTO codegraph_projects (name, source_type, source_url, branch, status, workspace_id, created_at, updated_at)
+                    VALUES (:name, 'github', :url, :branch, 'indexing', :ws, NOW(), NOW())
+                    RETURNING id
+                """),
+                {"name": request.project_name, "url": request.github_url, "branch": request.branch, "ws": str(ctx.workspace_id)}
+            ).fetchone()
+            project_id = row[0] if row else 0
+        service.db.commit()
+
+        # Capture request params for background task
+        req_project_name = request.project_name
+        req_github_url = request.github_url
+        req_branch = request.branch
+        req_auth_token = request.auth_token
+        req_exclude_patterns = request.exclude_patterns
+        req_workspace_id = ctx.workspace_id
+
+        # Store background tasks to prevent garbage collection
+        background_tasks: set = getattr(router, '_background_tasks', set())
+        if not hasattr(router, '_background_tasks'):
+            router._background_tasks = background_tasks
+
+        async def run_indexing():
+            logger.info(f"[CodeGraph] Background indexing started for {req_project_name}")
+            db = SessionLocal()
+            try:
+                bg_service = CodeGraphService(db)
+                result = await bg_service.index_github_project(
+                    project_name=req_project_name,
+                    github_url=req_github_url,
+                    branch=req_branch,
+                    auth_token=req_auth_token,
+                    exclude_patterns=req_exclude_patterns,
+                    workspace_id=req_workspace_id,
+                )
+                logger.info(
+                    f"[CodeGraph] Indexing complete: {req_project_name} — "
+                    f"{result.get('total_files', 0)} files, {result.get('total_symbols', 0)} symbols"
+                )
+            except Exception as e:
+                logger.exception(f"[CodeGraph] Background indexing FAILED for {req_project_name}: {e}")
+                try:
+                    db.execute(
+                        text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
+                        {"id": project_id}
+                    )
+                    db.commit()
+                except Exception:
+                    pass
+            finally:
+                db.close()
+                background_tasks.discard(task)
+
+        task = asyncio.create_task(run_indexing())
+        background_tasks.add(task)
+
+        # Return immediately — indexing runs in background
+        return {
+            "project_id": project_id,
+            "project_name": request.project_name,
+            "total_files": 0,
+            "total_symbols": 0,
+            "duration_seconds": 0.0,
+            "status": "indexing",
+        }
+
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Validation error indexing GitHub repository: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid repository indexing parameters")
     except Exception as e:
-        logger.error(f"Error indexing GitHub repository: {e}")
-        raise HTTPException(status_code=500, detail=f"Indexing failed: {str(e)}")
+        logger.error(f"Error indexing GitHub repository: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/search/symbols", response_model=SearchResponse)
@@ -187,10 +270,11 @@ async def search_symbols(
         return SearchResponse(**results, prompt_block=None)
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Symbol search resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project or symbol not found")
     except Exception as e:
-        logger.error(f"Error searching symbols: {e}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        logger.error(f"Error searching symbols: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/search/semantic", response_model=SearchResponse)
@@ -230,10 +314,11 @@ async def search_semantic(
         return SearchResponse(**results)
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Semantic search resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project not found for semantic search")
     except Exception as e:
-        logger.error(f"Error performing semantic search: {e}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        logger.error(f"Error performing semantic search: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/projects", response_model=List[ProjectResponse])
@@ -256,7 +341,7 @@ async def get_item(
         
     except Exception as e:
         logger.error(f"Error listing projects: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list projects: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
@@ -279,7 +364,7 @@ async def get_project(
         raise
     except Exception as e:
         logger.error(f"Error getting project: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get project: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/projects/{project_id}")
@@ -304,10 +389,11 @@ async def delete_project(
         return result
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Project not found for deletion: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project not found")
     except Exception as e:
-        logger.error(f"Error deleting project: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
+        logger.error(f"Error deleting project: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/projects/{project_id}/reindex")
@@ -345,12 +431,27 @@ async def reindex_project(
         github_url = project["source_url"]
         branch = project["branch"] or "main"
         
-        # Update status to indexing immediately
+        # Clear existing data so re-index does a full re-parse
+        # (incremental indexing skips unchanged files, which means new parser
+        # features like relationship extraction never get applied to old data)
+        service.db.execute(
+            text("DELETE FROM codegraph_relationships WHERE project_id = :pid"),
+            {"pid": project_id}
+        )
+        service.db.execute(
+            text("DELETE FROM codegraph_symbols WHERE project_id = :pid"),
+            {"pid": project_id}
+        )
+        service.db.execute(
+            text("DELETE FROM codegraph_files WHERE project_id = :pid"),
+            {"pid": project_id}
+        )
         service.db.execute(
             text("UPDATE codegraph_projects SET status = 'indexing', updated_at = NOW() WHERE id = :id"),
             {"id": project_id}
         )
         service.db.commit()
+        logger.info(f"[CodeGraph] Cleared existing data for project {project_id}, starting full re-index")
         
         # Store background tasks to prevent garbage collection
         background_tasks: set = getattr(router, '_background_tasks', set())
@@ -395,7 +496,7 @@ async def reindex_project(
         raise
     except Exception as e:
         logger.error(f"Error starting re-indexing: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to start re-indexing: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/health")
@@ -428,9 +529,84 @@ async def get_call_graph_api(
         call_graph = await codegraph_service.get_call_graph(project, symbol, depth, direction, workspace_id=ctx.workspace_id)
         return call_graph
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Call graph resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Symbol or project not found for call graph")
     except Exception as e:
-        logger.error(f"Call graph error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve call graph: {e}")
+        logger.error(f"Call graph error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# ── PRD-62: Architecture Analysis (US-012) ─────────────────────────
+
+@router.get("/projects/{project_id}/architecture")
+async def get_architecture_analysis(
+    project_id: int,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """
+    Get architecture analysis: Louvain module clusters, coupling metrics,
+    hotspots, and circular dependencies.
+    """
+    try:
+        from modules.codegraph.analysis import ArchitectureAnalyzer
+        analyzer = ArchitectureAnalyzer(db)
+        report = await analyzer.analyze(
+            project_id=project_id,
+            workspace_id=ctx.workspace_id,
+        )
+        return {
+            "project_id": report.project_id,
+            "project_name": report.project_name,
+            "communities": report.communities,
+            "metrics": report.metrics,
+            "hotspots": report.hotspots,
+            "cycles": report.cycles,
+            "total_nodes": report.total_nodes,
+            "total_edges": report.total_edges,
+            "modularity_score": report.modularity_score,
+        }
+    except ValueError as e:
+        logger.error(f"Architecture analysis resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project not found for architecture analysis")
+    except Exception as e:
+        logger.error(f"Architecture analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── PRD-62: Natural Language Code Queries (US-015) ──────────────────
+
+class CodeQuestionRequest(BaseModel):
+    """Request to ask a natural language question about code."""
+    question: str = Field(..., min_length=1, description="Natural language question about the codebase")
+
+
+@router.post("/projects/{project_id}/ask")
+async def ask_code_question(
+    project_id: int,
+    body: CodeQuestionRequest,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """
+    Ask a natural language question about the codebase.
+    Examples: "What functions call authenticate?", "Show me all API endpoints"
+    """
+    if not body.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    try:
+        from modules.codegraph.search import NLCodeSearch
+        nl_search = NLCodeSearch(db)
+        result = await nl_search.query(
+            question=body.question,
+            project_id=project_id,
+            workspace_id=ctx.workspace_id,
+        )
+        return result
+    except ValueError as e:
+        logger.error(f"NL code query resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project not found for code question")
+    except Exception as e:
+        logger.error(f"NL code query error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
