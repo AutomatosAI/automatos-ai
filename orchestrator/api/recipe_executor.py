@@ -185,13 +185,30 @@ async def _execute_step(
     messages.append({"role": "user", "content": clean_prompt})
 
     # 5. Tools — per-action SDK tools (or composio_execute fallback) + builtins
+    #    When Composio actions are resolved (e.g. JIRA_CREATE_ISSUE), strip workspace
+    #    exploration tools to prevent the LLM from wasting iterations on read/list/exec
+    #    instead of calling the actual action.  Scratchpad data is already in context.
+    _STRIP_WHEN_COMPOSIO = {
+        "composio_execute",
+        "workspace_exec", "workspace_list_dir", "workspace_read_file",
+        "workspace_write_file", "read_file",
+        "platform_get_logs", "platform_list_services",
+        "search_knowledge", "semantic_search",
+        "query_database", "smart_query_database",
+        "platform_list_recipes",
+    }
     if composio_result and composio_result.tools:
-        # SDK search succeeded: strip composio_execute mega-tool, add per-action tools
+        # SDK search succeeded: keep only non-exploration builtins + per-action tools
         builtin_tools = [
             t for t in get_chat_tools(agent_id=agent.id, workspace_id=workspace_id)
-            if t.get("function", {}).get("name") != "composio_execute"
+            if t.get("function", {}).get("name") not in _STRIP_WHEN_COMPOSIO
         ]
         tools = builtin_tools + composio_result.tools
+        logger.info(
+            "[recipe_step] Composio step: %d builtins + %d actions (stripped %d exploration tools)",
+            len(builtin_tools), len(composio_result.tools),
+            len(_STRIP_WHEN_COMPOSIO),
+        )
     else:
         # Fallback: composio_execute + hints (existing behavior)
         tools = get_chat_tools(agent_id=agent.id, workspace_id=workspace_id)
