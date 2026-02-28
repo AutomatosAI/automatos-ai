@@ -279,9 +279,9 @@ class MonitoringService:
                 name="system.network.bytes_recv",
                 value=net_io.bytes_recv
             ))
-        except:
+        except Exception:
             pass
-    
+
     def _check_thresholds(self):
         """Check metrics against thresholds and create alerts"""
         

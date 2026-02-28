@@ -29,30 +29,11 @@ _init_logged = False
 
 
 def get_system_setting(key: str, default_value: Optional[str] = None) -> Optional[str]:
-    """Get system setting from database"""
+    """Get embedding system setting from database (category='embeddings')."""
     try:
-        import sys
-        # Check if database module is loaded (use correct module path)
-        if 'core.database.database' not in sys.modules:
-            logger.debug(f"Database module not loaded yet, returning default for {key}")
-            return default_value
-        
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(
-                SystemSetting.key == key
-            ).first()
-            
-            if setting and setting.value:
-                return setting.value
-            return default_value
-        finally:
-            db.close()
-    except Exception as e:
-        logger.debug(f"Failed to get system setting {key}: {e}")
+        from .manager import get_system_setting as _get_setting
+        return _get_setting("embeddings", key, default_value)
+    except Exception:
         return default_value
 
 

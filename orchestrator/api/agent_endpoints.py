@@ -23,7 +23,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/agents", tags=["agents"])
+router = APIRouter(prefix="/api/agents/factory", tags=["agent-factory"])
 
 # Global agent factory instance (in production, use dependency injection)
 _factory = None

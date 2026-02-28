@@ -420,9 +420,9 @@ Begin by analyzing what information you need to complete this task.
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
-        except:
+        except Exception:
             pass
-        
+
         # Fallback to basic parsing
         return {
             "response": content,
@@ -437,9 +437,9 @@ Begin by analyzing what information you need to complete this task.
             if "FINAL_RESPONSE:" in content:
                 json_str = content.split("FINAL_RESPONSE:")[1].strip()
                 return json.loads(json_str)
-        except:
+        except Exception:
             pass
-        
+
         return self._parse_reasoning_response(content)
     
     def _extract_function_call(self, content: str) -> Optional[Dict[str, Any]]:

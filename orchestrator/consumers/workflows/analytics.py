@@ -285,7 +285,7 @@ class WorkflowAnalyticsService:
         token_trend = []
         
         for exec in executions:
-            analytics = exec.metadata.get("analytics", {}) if exec.metadata else {}
+            analytics = exec.execution_metadata.get("analytics", {}) if exec.execution_metadata else {}
             
             if analytics:
                 duration_trend.append({
@@ -366,7 +366,7 @@ class WorkflowAnalyticsService:
         agent_stats = {}
         
         for exec in executions:
-            analytics = exec.metadata.get("analytics", {}) if exec.metadata else {}
+            analytics = exec.execution_metadata.get("analytics", {}) if exec.execution_metadata else {}
             agents_used = analytics.get("agents_used", [])
             
             for agent_data in agents_used:
@@ -457,7 +457,7 @@ class WorkflowAnalyticsService:
                     skill_demand[skill]["requested_count"] += 1
             
             # Check which skills were matched
-            analytics = exec.metadata.get("analytics", {}) if exec.metadata else {}
+            analytics = exec.execution_metadata.get("analytics", {}) if exec.execution_metadata else {}
             agents_used = analytics.get("agents_used", [])
             
             for agent_data in agents_used:

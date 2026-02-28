@@ -87,7 +87,7 @@ async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_conte
         
     except Exception as e:
         logger.error(f"Error calculating success rate: {e}")
-        return {"value": 95.2, "trend": 2.1, "total_executions": 1247, "successful_executions": 1187}
+        return {"value": 0, "trend": 0, "total_executions": 0, "successful_executions": 0, "error": str(e)}
 
 @router.get("/dashboard/task-completion-time")
 async def get_avg_task_completion_time(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
@@ -176,11 +176,12 @@ async def get_system_load_trend(ctx: RequestContext = Depends(get_request_contex
     except Exception as e:
         logger.error(f"Error getting system load: {e}")
         return {
-            "current_load": 67.3,
-            "level": "medium", 
-            "color": "yellow",
-            "memory_usage": 58.2,
-            "trend_data": [{"hour": i, "load": 60 + (i % 5) * 5} for i in range(24)]
+            "current_load": 0,
+            "level": "unknown",
+            "color": "gray",
+            "memory_usage": 0,
+            "trend_data": [],
+            "error": str(e)
         }
 
 @router.get("/dashboard/error-rate-by-type")
@@ -268,11 +269,12 @@ async def get_queue_depth(ctx: RequestContext = Depends(get_request_context_hybr
     except Exception as e:
         logger.error(f"Error getting queue depth: {e}")
         return {
-            "total_pending": 34,
-            "high_priority": 8,
-            "normal_priority": 26,
-            "average_wait_time": 2.3,
-            "trend": "stable"
+            "total_pending": 0,
+            "high_priority": 0,
+            "normal_priority": 0,
+            "average_wait_time": 0,
+            "trend": "unknown",
+            "error": str(e)
         }
 
 @router.get("/dashboard/efficiency-score")
@@ -341,15 +343,11 @@ async def get_efficiency_score(ctx: RequestContext = Depends(get_request_context
     except Exception as e:
         logger.error(f"Error calculating efficiency score: {e}")
         return {
-            "score": 87,
-            "grade": "B",
-            "color": "blue",
-            "breakdown": {
-                "cpu_efficiency": 82.5,
-                "memory_efficiency": 74.2,
-                "agent_efficiency": 91.7,
-                "workflow_efficiency": 95.8
-            }
+            "score": 0,
+            "grade": "N/A",
+            "color": "gray",
+            "breakdown": {},
+            "error": str(e)
         }
 
 # ==== NEW PERFORMANCE ANALYTICS ENHANCEMENTS ====

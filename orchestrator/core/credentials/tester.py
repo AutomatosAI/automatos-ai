@@ -660,7 +660,7 @@ class CredentialTester:
                     try:
                         error_data = await response.json()
                         error_msg = error_data.get('error', 'Invalid API token')
-                    except:
+                    except Exception:
                         error_msg = response_text[:200] if response_text else 'Invalid API token'
                     
                     logger.warning(f"Hugging Face API authentication failed: {error_msg}")

@@ -123,7 +123,7 @@ class AgentService:
             return list({a['agent_id']: a for a in agents}.values())
         
         # Otherwise return all active agents
-        return self.registry.get_all_active_agents()
+        return self.registry.get_all_agents()
     
     async def execute_task(
         self,
@@ -153,7 +153,7 @@ class AgentService:
         """Get agent service statistics"""
         
         return {
-            'active_agents': len(self.registry.get_all_active_agents()) if self._registry else 0,
+            'active_agents': len(self.registry.get_all_agents()) if self._registry else 0,
             'config': {
                 'max_concurrent': self.config.max_concurrent_agents,
                 'timeout': self.config.default_timeout_seconds,

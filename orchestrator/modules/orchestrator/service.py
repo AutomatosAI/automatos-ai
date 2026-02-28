@@ -30,6 +30,7 @@ import logging
 import time
 import asyncio
 import json
+import uuid
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -137,7 +138,7 @@ class EnhancedOrchestratorService:
         Returns:
             Dict containing the final response and execution metadata
         """
-        workflow_id = int(time.time()) # Simple ID generation
+        workflow_id = uuid.uuid4().int >> 96  # 32-bit unique ID
         start_time = time.time()
         self.logger.info(f"🚀 STARTING WORKFLOW {workflow_id}: {user_prompt[:50]}...")
         

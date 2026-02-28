@@ -34,8 +34,14 @@ class AnalyticsEngine:
             logger.info("Redis connection established successfully")
         else:
             logger.warning("Redis client not initialized")
-        
-        self.db = next(get_db())
+
+        from core.database.database import SessionLocal
+        self.db = SessionLocal()
+
+    def close(self):
+        """Close the database session. Call on shutdown."""
+        if self.db:
+            self.db.close()
     
     async def get_dashboard_overview(self) -> Dict[str, Any]:
         """
@@ -356,7 +362,7 @@ class AnalyticsEngine:
         try:
             self.db.execute(select(1))
             return True
-        except:
+        except Exception:
             return False
     
     async def _check_redis_health(self) -> bool:
@@ -365,7 +371,7 @@ class AnalyticsEngine:
             if self.redis_client:
                 self.redis_client.ping()
                 return True
-        except:
+        except Exception:
             pass
         return False
     
@@ -375,7 +381,7 @@ class AnalyticsEngine:
             uptime_seconds = psutil.boot_time()
             uptime = datetime.now() - datetime.fromtimestamp(uptime_seconds)
             return str(uptime).split('.')[0]  # Remove microseconds
-        except:
+        except Exception:
             return "Unknown"
     
     async def get_agent_analytics(self, agent_id: int, period: str = "7d") -> Dict[str, Any]:

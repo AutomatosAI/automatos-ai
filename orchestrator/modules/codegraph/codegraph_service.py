@@ -291,7 +291,6 @@ class CodeGraphService:
                                 "signature": symbol.signature,
                                 "docstring": symbol.docstring,
                                 "code_snippet": symbol.code_snippet,
-                                "code_snippet": symbol.code_snippet,
                                 "metadata": symbol.metadata,
                                 "workspace_id": workspace_id
                             })
@@ -446,17 +445,19 @@ class CodeGraphService:
         temp_dir = tempfile.mkdtemp(prefix="codegraph_")
 
         try:
-            # Add auth token to URL if provided
+            # Use auth URL for clone but keep it out of logs
+            safe_url = github_url
+            clone_url = github_url
             if auth_token and 'github.com' in github_url:
-                github_url = github_url.replace('https://', f'https://{auth_token}@')
+                clone_url = github_url.replace('https://', f'https://{auth_token}@')
 
-            logger.info(f"Cloning {github_url} (branch: {branch}) to {temp_dir}")
+            logger.info(f"Cloning {safe_url} (branch: {branch}) to {temp_dir}")
 
             # Run blocking git clone in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: Repo.clone_from(github_url, temp_dir, branch=branch, depth=1)
+                lambda: Repo.clone_from(clone_url, temp_dir, branch=branch, depth=1)
             )
 
             logger.info(f"Clone complete: {temp_dir}")
@@ -464,7 +465,7 @@ class CodeGraphService:
 
         except Exception as e:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            raise ValueError(f"Failed to clone repository: {e}")
+            raise ValueError(f"Failed to clone repository {safe_url}: {e}")
     
     def _discover_files(self, root_dir: str, exclude_patterns: List[str]) -> List[str]:
         """Discover all code files in directory"""
