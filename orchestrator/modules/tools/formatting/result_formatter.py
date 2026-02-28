@@ -98,6 +98,23 @@ class ToolResultFormatter:
         '.jsx', '.go', '.rs', '.java', '.rb', '.sh', '.toml',
     })
 
+    _db_engine = None  # cached SQLAlchemy engine
+
+    @staticmethod
+    def _get_db_engine():
+        """Return a cached SQLAlchemy engine (created once, reused)."""
+        if ToolResultFormatter._db_engine is None:
+            from sqlalchemy import create_engine
+            from config import config as app_config
+            db_url = getattr(app_config, "DATABASE_URL", None)
+            if not db_url:
+                db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                logger.warning("[FullContent] No DATABASE_URL — cannot fetch document content")
+                return None
+            ToolResultFormatter._db_engine = create_engine(db_url)
+        return ToolResultFormatter._db_engine
+
     @staticmethod
     def _fetch_document_content_from_db(document_id: int) -> str:
         """
@@ -107,16 +124,10 @@ class ToolResultFormatter:
         """
         logger.info(f"[FullContent] Fetching full document for document_id={document_id}")
         try:
-            from sqlalchemy import create_engine, text
-            from config import config as app_config
-            db_url = getattr(app_config, "DATABASE_URL", None)
-            if not db_url:
-                db_url = os.getenv("DATABASE_URL")
-            if not db_url:
-                logger.warning("[FullContent] No DATABASE_URL — cannot fetch document content")
+            from sqlalchemy import text
+            engine = ToolResultFormatter._get_db_engine()
+            if engine is None:
                 return ""
-
-            engine = create_engine(db_url)
 
             # Step 1: Try to get original file from S3
             with engine.connect() as conn:

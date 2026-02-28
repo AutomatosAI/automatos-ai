@@ -25,6 +25,19 @@ from .clients.openrouter_client import OpenRouterProvider
 
 logger = logging.getLogger(__name__)
 
+# Canonical mapping from service name to settings category
+SERVICE_CATEGORY_MAP = {
+    "orchestrator": "orchestrator_llm",
+    "codegraph": "codegraph",
+    "document_processing": "document_processing",
+    "chatbot": "chatbot",
+    "rag": "rag",
+    "embeddings": "embeddings",
+    "memory_integration": "memory_integration",
+    "nl2sql": "nl2sql",
+    "heartbeat": "orchestrator_llm",
+}
+
 
 def get_system_setting(
     category: str,
@@ -78,19 +91,7 @@ def get_provider_and_model_from_settings(service_name: str = "orchestrator") -> 
     Returns:
         Tuple of (provider_str, model_str)
     """
-    # Map service names to settings categories
-    category_map = {
-        "orchestrator": "orchestrator_llm",
-        "codegraph": "codegraph",
-        "document_processing": "document_processing",
-        "chatbot": "chatbot",
-        "rag": "rag",
-        "embeddings": "embeddings",
-        "memory_integration": "memory_integration",
-        "nl2sql": "nl2sql"
-    }
-    
-    category = category_map.get(service_name, "orchestrator_llm")
+    category = SERVICE_CATEGORY_MAP.get(service_name, "orchestrator_llm")
     
     # Get provider and model from settings (NO hardcoded defaults)
     # Note: Settings use 'llm_provider' and 'llm_model' keys, not 'provider' and 'model'
@@ -114,7 +115,10 @@ def get_provider_and_model_from_settings(service_name: str = "orchestrator") -> 
     return provider_str, model_str
 
 
-@lru_cache(maxsize=32)
+from cachetools import TTLCache, cached as ttl_cached
+_credential_cache = TTLCache(maxsize=32, ttl=300)
+
+@ttl_cached(cache=_credential_cache)
 def get_credential_data(provider: str, environment: str = None, service_name: str = "orchestrator") -> Dict[str, Any]:
     """
     Get credential data for a provider from credential system.
@@ -145,18 +149,7 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
         
         # MVP: Strategy 0 - Check system settings for explicit credential name mapping
         # e.g., orchestrator_llm.credential_name_openai = "development_openai"
-        settings_category_map = {
-            "orchestrator": "orchestrator_llm",
-            "codegraph": "codegraph",
-            "chatbot": "chatbot",
-            "document_processing": "document_processing",
-            "rag": "rag",
-            "embeddings": "embeddings",
-            "memory_integration": "memory_integration",
-            "nl2sql": "nl2sql"
-        }
-        
-        category = settings_category_map.get(service_name, "orchestrator_llm")
+        category = SERVICE_CATEGORY_MAP.get(service_name, "orchestrator_llm")
         credential_name_setting_key = f"credential_name_{provider.lower()}"
         
         # Try to get explicit credential name from system settings
@@ -484,17 +477,7 @@ class LLMManager:
                 model = default_models.get(provider, "gpt-4")
         
         # Get other settings with defaults
-        category_map = {
-            "orchestrator": "orchestrator_llm",
-            "codegraph": "codegraph",
-            "document_processing": "document_processing",
-            "chatbot": "chatbot",
-            "rag": "rag",
-            "embeddings": "embeddings",
-            "memory_integration": "memory_integration",
-            "nl2sql": "nl2sql"
-        }
-        category = category_map.get(service_name, "orchestrator_llm")
+        category = SERVICE_CATEGORY_MAP.get(service_name, "orchestrator_llm")
         
         temperature = float(get_system_setting(category, "temperature", "0.7"))
         max_tokens = int(get_system_setting(category, "max_tokens", "2000"))
@@ -630,13 +613,7 @@ class LLMManager:
     def _get_fallback_model(self) -> Optional[str]:
         """Get fallback model: user setting > provider default > None."""
         # Check for user-configured fallback
-        category_map = {
-            "orchestrator": "orchestrator_llm",
-            "codegraph": "codegraph",
-            "chatbot": "chatbot",
-            "heartbeat": "orchestrator_llm",
-        }
-        category = category_map.get(self.service_name, "orchestrator_llm")
+        category = SERVICE_CATEGORY_MAP.get(self.service_name, "orchestrator_llm")
         user_fallback = get_system_setting(category, "fallback_model")
         if user_fallback:
             return user_fallback

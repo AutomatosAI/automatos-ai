@@ -10,7 +10,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, Integer
 
 from core.models import Agent, WorkflowExecution
 from core.database.database import get_db

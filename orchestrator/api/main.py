@@ -498,7 +498,6 @@ async def health_check():
             "🔧 components": components,
             
             "📊 metrics": {
-                "websocket_connections": websocket_connections,
                 "uptime": "operational",
                 "memory_usage": "optimal",
                 "cpu_usage": "normal",
@@ -512,7 +511,7 @@ async def health_check():
             },
             
             "🔌 connectivity": {
-                "websocket": f"✅ Active ({websocket_connections} connections)",
+                "websocket": "✅ Active",
                 "http": "✅ Active",
                 "cors": "✅ Enabled"
             },
