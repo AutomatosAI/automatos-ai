@@ -38,6 +38,7 @@ export interface RecipeFormValues {
     prompt_template: string
     pass_to?: string
     error_handling: string
+    pre_exec?: string
   }>
   execution_config: {
     mode: string

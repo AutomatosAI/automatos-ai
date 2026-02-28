@@ -10,6 +10,7 @@ import {
   Bot,
   AlertCircle,
   GripVertical,
+  Terminal,
 } from 'lucide-react'
 import { useFormContext } from 'react-hook-form'
 import { Button } from '@/components/ui/button'
@@ -124,6 +125,7 @@ export function RecipeStepBuilder() {
       prompt_template: '',
       pass_to: undefined as string | undefined,
       error_handling: 'stop',
+      pre_exec: '',
     }
     methods.setValue('steps', [...steps, newStep])
   }
@@ -335,6 +337,33 @@ export function RecipeStepBuilder() {
                   onChange={(val) => updateStep(index, 'prompt_template', val)}
                   placeholder="Enter the prompt for this step. Use {variable_name} for input variables..."
                 />
+              </div>
+            </div>
+
+            {/* Pre-Exec Command (optional) */}
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById(`pre-exec-${step.step_id}`)
+                  if (el) el.classList.toggle('hidden')
+                }}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Terminal className="w-3 h-3" />
+                <span>Pre-exec command</span>
+                {step.pre_exec && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
+              </button>
+              <div id={`pre-exec-${step.step_id}`} className={step.pre_exec ? '' : 'hidden'}>
+                <Input
+                  value={step.pre_exec || ''}
+                  onChange={(e) => updateStep(index, 'pre_exec', e.target.value)}
+                  placeholder="e.g. cd repos/my-app && python3 tests/run_tests.py"
+                  className="mt-1.5 font-mono text-xs bg-secondary/50 rounded-xl border border-border/30"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Runs automatically before the agent. Output is injected into the prompt.
+                </p>
               </div>
             </div>
 

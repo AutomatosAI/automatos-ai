@@ -46,6 +46,7 @@ function transformFormToApiPayload(data: RecipeFormValues) {
     agent_id: typeof step.agent_id === 'string' ? parseInt(step.agent_id, 10) : step.agent_id,
     prompt_template: step.prompt_template,
     ...(step.pass_to ? { pass_to: step.pass_to } : {}),
+    ...(step.pre_exec ? { pre_exec: step.pre_exec } : {}),
     error_handling: step.error_handling || 'stop',
   }))
 
@@ -58,6 +59,7 @@ function transformFormToApiPayload(data: RecipeFormValues) {
       prompt_template: s.prompt_template,
       error_handling: s.error_handling,
       ...(s.pass_to ? { pass_to: s.pass_to } : {}),
+      ...(s.pre_exec ? { pre_exec: s.pre_exec } : {}),
     })),
     version: '1.0',
   }
