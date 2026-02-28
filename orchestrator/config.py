@@ -159,6 +159,13 @@ class Config:
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
 
     # =============================================================================
+    # RAILWAY API (Log retrieval for agents)
+    # =============================================================================
+    RAILWAY_API_TOKEN: str = os.getenv("RAILWAY_API_TOKEN", "")
+    RAILWAY_PROJECT_ID: str = os.getenv("RAILWAY_PROJECT_ID", "")
+    RAILWAY_ENVIRONMENT_ID: str = os.getenv("RAILWAY_ENVIRONMENT_ID", "")
+
+    # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"

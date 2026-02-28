@@ -16,6 +16,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     """Register all platform actions with the registry."""
     _register_read_actions(registry)
     _register_write_actions(registry)
+    _register_infra_actions(registry)
 
 
 def _register_read_actions(registry: ActionRegistry) -> None:
@@ -535,5 +536,73 @@ def _register_write_actions(registry: ActionRegistry) -> None:
         examples=[
             "delete the test agent",
             "remove agent 12",
+        ],
+    ))
+
+
+def _register_infra_actions(registry: ActionRegistry) -> None:
+    """Register infrastructure/observability actions."""
+
+    registry.register(ActionDefinition(
+        name="platform_get_logs",
+        description=(
+            "Fetch deployment logs from a Railway service. Returns recent log lines "
+            "with timestamps and severity levels. Use to investigate errors, capture "
+            "server-side context for bug reports, or monitor service health. "
+            "Supports filtering by keyword (e.g. 'error', 'timeout', 'Exception')."
+        ),
+        category="infrastructure",
+        parameters={
+            "type": "object",
+            "properties": {
+                "service": {
+                    "type": "string",
+                    "description": (
+                        "Railway service name to fetch logs from "
+                        "(e.g. 'automatos-api', 'workspace-worker'). "
+                        "Use 'list' to see all available services."
+                    ),
+                },
+                "lines": {
+                    "type": "integer",
+                    "description": "Number of log lines to retrieve (default 200, max 1000).",
+                },
+                "filter": {
+                    "type": "string",
+                    "description": (
+                        "Filter logs by keyword or severity. "
+                        "Examples: 'error', 'Exception', 'timeout', 'WARNING'."
+                    ),
+                },
+            },
+            "required": ["service"],
+        },
+        permission_level="read",
+        tags=["logs", "infrastructure", "railway", "observability", "debugging"],
+        examples=[
+            "get error logs from the API",
+            "fetch recent logs from automatos-api",
+            "show me the last 100 warning logs from workspace-worker",
+            "list available services",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_services",
+        description=(
+            "List all Railway services in the project. Returns service names and IDs. "
+            "Use to discover available services before fetching logs."
+        ),
+        category="infrastructure",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        permission_level="read",
+        tags=["services", "infrastructure", "railway"],
+        examples=[
+            "what services are running?",
+            "list railway services",
         ],
     ))
