@@ -207,7 +207,7 @@ async def _execute_step(
     tool_router = get_tool_router()
     all_tool_calls = []
     _composio_call_cache: Dict[str, str] = {}  # dedup: "ACTION|args_hash" → cached result
-    max_iterations = 6
+    max_iterations = 10
     response = None
 
     for iteration in range(max_iterations):
