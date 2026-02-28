@@ -1,11 +1,20 @@
 """
-Enhanced Orchestrator Service
-============================
+Enhanced Orchestrator Service (LEGACY — PRD-59 Option B)
+========================================================
 
-Implements the fully functional 9-stage workflow pipeline for Automatos AI.
-Replaces previous placeholder implementation with real, mathematically grounded logic.
+NOTE: This module is the LEGACY standalone orchestrator.
+The LIVE execution path is api/workflows.py → execute_workflow_with_progress().
 
-9-Stage Pipeline:
+PRD-59 unification (Option B incremental):
+  - execute_workflow_with_progress() is the canonical execution path.
+    It supports execution modes (AUTONOMOUS/RECIPE/HYBRID), SSE streaming,
+    dynamic phase selection via PhaseSelector, and all infrastructure
+    integrations (workspace, Redis, analytics, model tracking).
+  - This class is retained for backward compat and unit-test entry point.
+    It delegates to the same stage components but lacks SSE/Redis/workspace.
+  - New features should be added to the live path, NOT here.
+
+Original 9-Stage Pipeline (shared stage components):
 1. Task Decomposition (RealTaskDecomposer)
 2. Agent Selection (IntelligentAgentSelector)
 3. Context Engineering (ContextEngineeringIntegrator)
@@ -115,7 +124,11 @@ class EnhancedOrchestratorService:
     async def execute_workflow(self, user_prompt: str, user_id: int, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Execute the full 9-stage workflow for a user request.
-        
+
+        DEPRECATED (PRD-59): Use api/workflows.py execute_workflow_with_progress()
+        for production execution. This method is retained for unit tests and
+        backward compatibility only.
+
         Args:
             user_prompt: The user's natural language request
             user_id: ID of the requesting user

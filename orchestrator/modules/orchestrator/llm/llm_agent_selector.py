@@ -135,6 +135,18 @@ class LLMAgentSelector:
         self.llm = llm or OrchestratorLLM(temperature=0.7)
         self.use_caching = use_caching
         self.cache_ttl = cache_ttl_seconds
+
+        # PRD-59/US-006: Try to load optimized system prompt from Prompt Registry
+        self._registry_prompt = None
+        try:
+            from modules.prompts.registry import PromptRegistry
+            import asyncio
+            registry = PromptRegistry()
+            # Store for lazy async loading
+            self._prompt_registry = registry
+            logger.info("📋 Agent Selector: Prompt Registry available for agent-selector slug")
+        except (ImportError, Exception):
+            self._prompt_registry = None
         
         # Initialize semantic skill matcher for intelligent matching
         # Initialize semantic skill matcher for intelligent matching
@@ -1106,10 +1118,15 @@ Provide your response in this structure:
                     agent_name=best['name'],
                     agent_type=best.get('agent_type', 'general'),
                     match_score=best['score'],
-                    reasoning=f"Semantic match: {best['score']:.0%} skill coverage ({len(best.get('skills_matched', []))} skills matched)",
+                    reasoning=(
+                        f"Semantic match: {best['score']:.0%} skill coverage "
+                        f"({len(best.get('skills_matched', []))} skills matched), "
+                        f"performance: {best.get('performance_score', 0.7):.0%}, "
+                        f"tasks completed: {best.get('tasks_completed', 0)}"
+                    ),
                     skills_matched=best.get('skills_matched', []),
-                    performance_score=0.8,
-                    availability_score=0.9,
+                    performance_score=best.get('performance_score', 0.7),
+                    availability_score=1.0 - best.get('workload', 0.5),
                     collaboration_score=0.85
                 )
                 # Always store using normalized execution key
@@ -1212,24 +1229,35 @@ Provide your response in this structure:
             matched_skills = [d['required'] for d in match_details if d['matched']]
             matched_count = len(matched_skills)
             
-            # Build a composite score used only for ordering.
-            # Start with semantic coverage, then add adjustments for type/skill alignment.
-            sort_score = coverage
-            
+            # PRD-59 Fix 2: Close learning loop — incorporate performance metrics
+            # Formula: Score = 0.4 × skill_match + 0.3 × performance_history + 0.2 × (1 - load) + 0.1 × recency
+            perf_success_rate = agent.get('avg_success_rate', 0.7)
+            current_workload = agent.get('current_workload', 0.5)
+            tasks_completed = agent.get('total_tasks_completed', 0)
+
+            # Recency: agents with more experience get a slight boost (capped at 1.0)
+            recency_score = min(1.0, tasks_completed / 20.0) if tasks_completed > 0 else 0.5
+
+            # Composite score per PRD-59 formula
+            sort_score = (
+                0.4 * coverage +
+                0.3 * perf_success_rate +
+                0.2 * (1.0 - current_workload) +
+                0.1 * recency_score
+            )
+
+            # Additional adjustments for type/skill alignment
             if requirements:
                 if matched_count == 0:
-                    # Hard-penalize agents that meet none of the requested skills
-                    sort_score -= 0.4
+                    sort_score -= 0.15
                 else:
-                    # Small boost proportional to skill coverage
-                    sort_score += min(0.2, matched_count * 0.05)
-            
+                    sort_score += min(0.1, matched_count * 0.03)
+
             if required_type:
-                sort_score += 0.2 if type_match else -0.2
+                sort_score += 0.1 if type_match else -0.1
             else:
-                # Light boost for specialists even when no type stated
-                sort_score += 0.05 if agent.get('agent_type') != 'general' else 0.0
-            
+                sort_score += 0.02 if agent.get('agent_type') != 'general' else 0.0
+
             scored.append({
                 'agent_id': agent['agent_id'],
                 'name': agent['name'],
@@ -1240,7 +1268,10 @@ Provide your response in this structure:
                 'coverage': coverage,
                 'matched_skill_count': matched_count,
                 'type_match': type_match,
-                'sort_score': sort_score
+                'sort_score': sort_score,
+                'performance_score': perf_success_rate,
+                'workload': current_workload,
+                'tasks_completed': tasks_completed,
             })
         
         # Sort by score and return top matches

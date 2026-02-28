@@ -168,6 +168,27 @@ class AgentExecutionManager:
         # Log workspace info
         self.logger.info(f"📁 Agent execution workspace: {self.workspace_dir}")
         
+        # PRD-59/US-017: TaskRunner integration (optional)
+        self.task_runner = None
+        try:
+            from core.task_runner import get_task_runner
+            self.task_runner = get_task_runner()
+            self.logger.info(f"✅ TaskRunner available: {self.task_runner.backend_name}")
+        except (ImportError, Exception) as e:
+            self.logger.debug(f"TaskRunner not available, using direct asyncio: {e}")
+
+        # PRD-59/US-024: Neural field integration (optional)
+        self.field_reader = None
+        self.field_writer = None
+        try:
+            from core.neural_field import NeuralFieldStore, FieldReader, FieldWriter
+            store = NeuralFieldStore()
+            self.field_reader = FieldReader(store)
+            self.field_writer = FieldWriter(store)
+            self.logger.info("✅ Neural field reader/writer available")
+        except (ImportError, Exception) as e:
+            self.logger.debug(f"Neural field not available: {e}")
+
         # PHASE 2: Inter-agent communication
         self.enable_communication = enable_communication and COMMUNICATION_AVAILABLE
         if self.enable_communication:
@@ -322,7 +343,26 @@ class AgentExecutionManager:
                         all_results[subtask_id] = self._create_failed_execution(subtask_id, str(result))
                     else:
                         all_results[subtask_id] = result
-                    
+
+                        # PRD-59/US-024: Write subtask result to neural field
+                        if self.field_writer and execution_id:
+                            try:
+                                result_data = result if isinstance(result, dict) else {}
+                                agent_name = result_data.get("agent_name", "Unknown")
+                                agent_id_val = result_data.get("agent_id", 0)
+                                output_text = str(result_data.get("result", ""))[:1500]
+                                subtask_desc = result_data.get("description", subtask_id)
+                                if output_text:
+                                    await self.field_writer.write_subtask_result(
+                                        execution_id=str(execution_id),
+                                        agent_id=agent_id_val,
+                                        agent_name=agent_name,
+                                        subtask_description=subtask_desc,
+                                        result=output_text,
+                                    )
+                            except Exception as field_err:
+                                self.logger.debug(f"Neural field write failed: {field_err}")
+
                     # ✨ REAL-TIME UPDATE: Save to database immediately after each subtask
                     await self._update_execution_output_data(execution_id, subtasks, all_results)
             

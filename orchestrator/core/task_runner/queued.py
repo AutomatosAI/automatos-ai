@@ -1,16 +1,31 @@
 """
 Queued Task Runner
 ==================
-PRD-56 Phase 2: Redis queue + workspace worker containers.
+PRD-56 Phase 2 / PRD-59 US-019: Redis-backed distributed task queue.
 
-Tasks are serialized to Redis queues (priority-based), consumed by
-workspace-worker ARQ processes, and results are returned via Redis
-pub/sub + hash storage.
+Submits agent tasks to a Redis queue and polls for results.
+Worker containers (ARQ or custom) consume tasks from the queue,
+execute them, and write results back to Redis.
 
-Architecture:
-  API → QueuedTaskRunner.submit_task() → Redis queue
-  Worker → ARQ consumer → execute → Redis result + pub/sub event
-  API → QueuedTaskRunner.get_result() → Redis hash lookup
+Task lifecycle:
+  submit_task()    → LPUSH to Redis queue; status → QUEUED
+  get_status()     → HGET from Redis hash
+  get_result()     → poll/BLPOP result key with timeout
+  cancel_task()    → set cancel flag in Redis; worker checks flag
+  stream_updates() → SUBSCRIBE to task-specific Redis channel
+
+Redis key layout:
+  task:{task_id}          → JSON hash of task payload
+  task:{task_id}:status   → status string
+  task:{task_id}:result   → JSON result when complete
+  task:{task_id}:events   → pub/sub channel for streaming
+  task:{task_id}:cancel   → "1" if cancellation requested
+  queue:agent_tasks       → LIST used as FIFO queue
+  queue:agent_tasks:{pri} → priority queues (high, normal, low)
+
+Requires:
+  pip install redis  (already in project)
+  pip install arq    (optional — for managed workers)
 """
 
 from __future__ import annotations
@@ -18,7 +33,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, Optional
 
 from .base import TaskRunner
@@ -29,287 +46,353 @@ from .models import (
     TaskHandle,
     TaskResult,
     TaskStatusEnum,
+    TaskPriority,
 )
 
 logger = logging.getLogger(__name__)
 
-# Queue names by priority (highest first)
-QUEUE_NAMES = {
-    "critical": "workspace:tasks:critical",
-    "high": "workspace:tasks:high",
-    "normal": "workspace:tasks:normal",
-    "low": "workspace:tasks:low",
+# Redis key prefix
+_PREFIX = "taskrunner"
+
+# Priority queue mapping
+_PRIORITY_QUEUES = {
+    TaskPriority.CRITICAL: f"{_PREFIX}:queue:critical",
+    TaskPriority.HIGH: f"{_PREFIX}:queue:high",
+    TaskPriority.NORMAL: f"{_PREFIX}:queue:normal",
+    TaskPriority.LOW: f"{_PREFIX}:queue:low",
 }
-DEAD_LETTER_QUEUE = "workspace:tasks:dead"
 
-# Redis key patterns
-TASK_STATUS_KEY = "workspace:task:{task_id}:status"
-TASK_RESULT_KEY = "workspace:task:{task_id}:result"
-TASK_EVENTS_CHANNEL = "workspace:task:{task_id}:events"
-WS_ACTIVE_TASKS_KEY = "workspace:ws:{workspace_id}:active_tasks"
-WS_TASK_COUNT_KEY = "workspace:ws:{workspace_id}:task_count"
+# Default queue (worker consumes from all priority queues)
+_DEFAULT_QUEUE = f"{_PREFIX}:queue:normal"
 
-# TTLs
-RESULT_TTL_SECONDS = 3600       # 1 hour
-STATUS_TTL_SECONDS = 7200       # 2 hours
+# TTL for completed task data (2 hours)
+_RESULT_TTL = 7200
+
+
+def _task_key(task_id: str) -> str:
+    return f"{_PREFIX}:task:{task_id}"
+
+
+def _status_key(task_id: str) -> str:
+    return f"{_PREFIX}:task:{task_id}:status"
+
+
+def _result_key(task_id: str) -> str:
+    return f"{_PREFIX}:task:{task_id}:result"
+
+
+def _events_channel(task_id: str) -> str:
+    return f"{_PREFIX}:task:{task_id}:events"
+
+
+def _cancel_key(task_id: str) -> str:
+    return f"{_PREFIX}:task:{task_id}:cancel"
 
 
 class QueuedTaskRunner(TaskRunner):
-    """Execute agent tasks via Redis queue + workspace worker containers.
+    """Execute agent tasks via Redis queue + worker containers.
 
-    Phase 2 implementation. Tasks are enqueued to priority-based Redis
-    lists. Workspace worker processes consume tasks, execute them in
-    isolated workspace directories, and write results back to Redis.
+    The runner itself is thin — it only enqueues tasks and reads results.
+    Actual execution happens in worker processes (ARQ workers or custom).
 
-    Usage:
-        runner = QueuedTaskRunner(redis_url="redis://localhost:6379/0")
-        handle = await runner.submit_task(agent_task)
-        result = await runner.get_result(handle)
+    Configuration (env vars):
+        REDIS_HOST          — Redis host (default: 127.0.0.1)
+        REDIS_PORT          — Redis port (default: 6379)
+        REDIS_PASSWORD      — Redis password (default: None)
+        REDIS_DB            — Redis DB index (default: 0)
+        TASK_QUEUE_PREFIX   — Key prefix (default: taskrunner)
+        TASK_RESULT_TTL     — Seconds to keep completed task data (default: 7200)
     """
 
-    def __init__(self, redis_url: Optional[str] = None) -> None:
-        import os
-        self._redis_url = redis_url or os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-        self._redis = None
-        self._pubsub_connections: Dict[str, Any] = {}
+    def __init__(self) -> None:
+        import redis as _redis
+        import redis.asyncio as _aioredis
+
+        self._host = os.environ.get("REDIS_HOST", "127.0.0.1")
+        self._port = int(os.environ.get("REDIS_PORT", "6379"))
+        self._password = os.environ.get("REDIS_PASSWORD") or None
+        self._db = int(os.environ.get("REDIS_DB", "0"))
+
+        # Sync client for simple operations
+        self._redis = _redis.Redis(
+            host=self._host,
+            port=self._port,
+            password=self._password,
+            db=self._db,
+            decode_responses=True,
+            socket_timeout=5,
+        )
+
+        # Async client for streaming / blocking operations
+        self._aredis = _aioredis.Redis(
+            host=self._host,
+            port=self._port,
+            password=self._password,
+            db=self._db,
+            decode_responses=True,
+        )
+
+        logger.info(
+            "QueuedTaskRunner initialized (redis=%s:%d, db=%d)",
+            self._host, self._port, self._db,
+        )
 
     @property
     def backend_name(self) -> str:
         return "queued"
 
-    async def _get_redis(self):
-        """Lazy-init Redis connection."""
-        if self._redis is None:
-            import redis.asyncio as aioredis
-            self._redis = aioredis.from_url(
-                self._redis_url,
-                decode_responses=True,
-                max_connections=20,
-            )
-        return self._redis
-
     async def submit_task(self, task: AgentTask) -> TaskHandle:
-        """Serialize task to Redis queue. Returns immediately."""
-        redis = await self._get_redis()
+        """Serialize task to Redis and push to priority queue."""
+        task_id = task.task_id
+        payload = task.model_dump_json()
+
+        # Store task payload as hash
+        self._redis.set(_task_key(task_id), payload, ex=_RESULT_TTL * 2)
+
+        # Set initial status
+        self._redis.set(_status_key(task_id), TaskStatusEnum.QUEUED.value, ex=_RESULT_TTL * 2)
+
+        # Push to priority queue
+        queue_key = _PRIORITY_QUEUES.get(task.priority, _DEFAULT_QUEUE)
+        self._redis.lpush(queue_key, task_id)
 
         handle = TaskHandle(
-            task_id=task.task_id,
+            task_id=task_id,
             workspace_id=task.workspace_id,
             status=TaskStatusEnum.QUEUED,
             runner_backend=self.backend_name,
         )
 
-        # Serialize task payload
-        payload = {
-            "task_id": task.task_id,
-            "task_type": task.task_type.value,
-            "workspace_id": str(task.workspace_id),
-            "agent_id": task.agent_id,
-            "prompt": task.prompt,
-            "system_prompt": task.system_prompt,
-            "tools": task.tools,
-            "context": task.context,
-            "priority": task.priority.value,
-            "timeout_seconds": task.timeout_seconds,
-            "max_retries": task.max_retries,
-            "resources": task.resources.model_dump(),
-            "parent_execution_id": task.parent_execution_id,
-            "correlation_id": task.correlation_id,
-            "created_at": task.created_at.isoformat(),
-        }
-
-        # Write initial status
-        status_key = TASK_STATUS_KEY.format(task_id=task.task_id)
-        await redis.hset(status_key, mapping={
+        # Publish status event
+        await self._publish_event(task_id, TaskEventType.STATUS_CHANGED, {
             "status": TaskStatusEnum.QUEUED.value,
-            "workspace_id": str(task.workspace_id),
-            "submitted_at": handle.submitted_at.isoformat(),
-            "priority": task.priority.value,
-            "task_type": task.task_type.value,
+            "queue": queue_key,
         })
-        await redis.expire(status_key, STATUS_TTL_SECONDS)
-
-        # Track active tasks for workspace concurrency limits
-        ws_active_key = WS_ACTIVE_TASKS_KEY.format(workspace_id=task.workspace_id)
-        await redis.sadd(ws_active_key, task.task_id)
-
-        ws_count_key = WS_TASK_COUNT_KEY.format(workspace_id=task.workspace_id)
-        await redis.incr(ws_count_key)
-        await redis.expire(ws_count_key, STATUS_TTL_SECONDS)
-
-        # Enqueue to priority queue (LPUSH for FIFO with RPOP)
-        queue_name = QUEUE_NAMES.get(task.priority.value, QUEUE_NAMES["normal"])
-        await redis.lpush(queue_name, json.dumps(payload))
-
-        # Publish submission event
-        events_channel = TASK_EVENTS_CHANNEL.format(task_id=task.task_id)
-        await redis.publish(events_channel, json.dumps({
-            "event_type": TaskEventType.STATUS_CHANGED.value,
-            "task_id": task.task_id,
-            "data": {"status": TaskStatusEnum.QUEUED.value},
-        }))
 
         logger.info(
-            "Task %s queued (workspace=%s, priority=%s, queue=%s)",
-            task.task_id[:8], task.workspace_id, task.priority.value, queue_name,
+            "Task %s queued (workspace=%s, agent=%d, priority=%s, queue=%s)",
+            task_id[:8], task.workspace_id, task.agent_id,
+            task.priority.value, queue_key,
         )
 
         return handle
 
     async def get_status(self, handle: TaskHandle) -> TaskStatusEnum:
-        """Read current status from Redis hash."""
-        redis = await self._get_redis()
-        status_key = TASK_STATUS_KEY.format(task_id=handle.task_id)
-        status_str = await redis.hget(status_key, "status")
-
-        if status_str is None:
+        """Read status from Redis."""
+        raw = self._redis.get(_status_key(handle.task_id))
+        if raw is None:
             return TaskStatusEnum.FAILED
-        return TaskStatusEnum(status_str)
+        try:
+            return TaskStatusEnum(raw)
+        except ValueError:
+            return TaskStatusEnum.FAILED
 
     async def get_result(self, handle: TaskHandle, timeout: float = 300.0) -> TaskResult:
-        """Poll Redis for result until available or timeout."""
-        redis = await self._get_redis()
-        result_key = TASK_RESULT_KEY.format(task_id=handle.task_id)
-
+        """Poll Redis for result with exponential backoff, up to timeout."""
         deadline = time.monotonic() + timeout
-        poll_interval = 0.5
+        poll_interval = 0.25  # start at 250ms
 
         while time.monotonic() < deadline:
-            result_json = await redis.get(result_key)
-            if result_json:
-                data = json.loads(result_json)
-                return TaskResult(
-                    task_id=handle.task_id,
-                    status=TaskStatusEnum(data["status"]),
-                    result=data.get("result"),
-                    error=data.get("error"),
-                    tokens_used=data.get("tokens_used", 0),
-                    execution_time_ms=data.get("execution_time_ms", 0),
-                    started_at=data.get("started_at"),
-                    completed_at=data.get("completed_at"),
-                )
+            raw = self._redis.get(_result_key(handle.task_id))
+            if raw is not None:
+                try:
+                    return TaskResult.model_validate_json(raw)
+                except Exception as e:
+                    logger.error("Failed to parse task result: %s", e)
+                    return TaskResult(
+                        task_id=handle.task_id,
+                        status=TaskStatusEnum.FAILED,
+                        error=f"Result parse error: {e}",
+                    )
 
-            # Check if task failed without result
+            # Check for terminal status (failed, cancelled, timed_out)
             status = await self.get_status(handle)
             if status in (TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED, TaskStatusEnum.TIMED_OUT):
-                status_key = TASK_STATUS_KEY.format(task_id=handle.task_id)
-                error = await redis.hget(status_key, "error")
                 return TaskResult(
                     task_id=handle.task_id,
                     status=status,
-                    error=error or f"Task {status.value}",
+                    error=f"Task ended with status: {status.value}",
                 )
 
-            await asyncio.sleep(poll_interval)
-            # Back off slightly
-            poll_interval = min(poll_interval * 1.2, 2.0)
+            await asyncio.sleep(min(poll_interval, deadline - time.monotonic()))
+            poll_interval = min(poll_interval * 1.5, 5.0)  # Cap at 5s
 
+        # Timeout: request cancellation
+        await self.cancel_task(handle)
         return TaskResult(
             task_id=handle.task_id,
             status=TaskStatusEnum.TIMED_OUT,
-            error=f"Result polling timed out after {timeout}s",
+            error=f"Task timed out waiting for result after {timeout}s",
         )
 
     async def cancel_task(self, handle: TaskHandle) -> bool:
-        """Mark task as cancelled in Redis. Worker checks before executing."""
-        redis = await self._get_redis()
-        status_key = TASK_STATUS_KEY.format(task_id=handle.task_id)
-        current = await redis.hget(status_key, "status")
+        """Set cancellation flag in Redis. Worker checks this flag periodically."""
+        task_id = handle.task_id
+        self._redis.set(_cancel_key(task_id), "1", ex=_RESULT_TTL)
+        self._redis.set(_status_key(task_id), TaskStatusEnum.CANCELLED.value, ex=_RESULT_TTL)
 
-        if current in (TaskStatusEnum.COMPLETED.value, TaskStatusEnum.FAILED.value):
-            return False
+        await self._publish_event(task_id, TaskEventType.STATUS_CHANGED, {
+            "status": TaskStatusEnum.CANCELLED.value,
+        })
 
-        await redis.hset(status_key, "status", TaskStatusEnum.CANCELLED.value)
+        # Try to remove from queue if not yet picked up
+        for queue_key in _PRIORITY_QUEUES.values():
+            self._redis.lrem(queue_key, 1, task_id)
 
-        # Publish cancellation event (worker listens)
-        events_channel = TASK_EVENTS_CHANNEL.format(task_id=handle.task_id)
-        await redis.publish(events_channel, json.dumps({
-            "event_type": TaskEventType.STATUS_CHANGED.value,
-            "task_id": handle.task_id,
-            "data": {"status": TaskStatusEnum.CANCELLED.value},
-        }))
-
-        # Cleanup workspace tracking
-        ws_active_key = WS_ACTIVE_TASKS_KEY.format(workspace_id=handle.workspace_id)
-        await redis.srem(ws_active_key, handle.task_id)
-
-        logger.info("Task %s cancel requested", handle.task_id[:8])
+        logger.info("Task %s cancellation requested", task_id[:8])
         return True
 
     async def stream_updates(self, handle: TaskHandle) -> AsyncIterator[TaskEvent]:
-        """Subscribe to Redis pub/sub channel for real-time events."""
-        redis = await self._get_redis()
-        events_channel = TASK_EVENTS_CHANNEL.format(task_id=handle.task_id)
-
-        pubsub = redis.pubsub()
-        await pubsub.subscribe(events_channel)
+        """Subscribe to task-specific Redis pub/sub channel for real-time events."""
+        channel_name = _events_channel(handle.task_id)
+        pubsub = self._aredis.pubsub()
 
         try:
-            while True:
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=2.0
-                )
-                if message and message["type"] == "message":
-                    data = json.loads(message["data"])
-                    event = TaskEvent(
-                        task_id=handle.task_id,
-                        event_type=TaskEventType(data["event_type"]),
-                        data=data.get("data", {}),
-                    )
-                    yield event
+            await pubsub.subscribe(channel_name)
 
-                    # Stop on terminal states
-                    if (
-                        event.event_type == TaskEventType.STATUS_CHANGED
-                        and event.data.get("status") in (
-                            TaskStatusEnum.COMPLETED.value,
-                            TaskStatusEnum.FAILED.value,
-                            TaskStatusEnum.CANCELLED.value,
-                            TaskStatusEnum.TIMED_OUT.value,
+            while True:
+                msg = await pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=1.0,
+                )
+
+                if msg is not None and msg["type"] == "message":
+                    try:
+                        data = json.loads(msg["data"])
+                        event = TaskEvent(
+                            task_id=handle.task_id,
+                            event_type=TaskEventType(data.get("event_type", "status_changed")),
+                            data=data.get("data", {}),
                         )
+                        yield event
+
+                        # Stop on terminal status
+                        if (
+                            event.event_type == TaskEventType.STATUS_CHANGED
+                            and event.data.get("status") in (
+                                TaskStatusEnum.COMPLETED.value,
+                                TaskStatusEnum.FAILED.value,
+                                TaskStatusEnum.CANCELLED.value,
+                                TaskStatusEnum.TIMED_OUT.value,
+                            )
+                        ):
+                            return
+                    except (json.JSONDecodeError, ValueError) as e:
+                        logger.warning("Failed to parse event: %s", e)
+                else:
+                    # Check if task is already done (no more events coming)
+                    status = await self.get_status(handle)
+                    if status in (
+                        TaskStatusEnum.COMPLETED,
+                        TaskStatusEnum.FAILED,
+                        TaskStatusEnum.CANCELLED,
+                        TaskStatusEnum.TIMED_OUT,
                     ):
                         return
-
-                # Check if task already completed (missed events)
-                status = await self.get_status(handle)
-                if status in (
-                    TaskStatusEnum.COMPLETED,
-                    TaskStatusEnum.FAILED,
-                    TaskStatusEnum.CANCELLED,
-                    TaskStatusEnum.TIMED_OUT,
-                ):
-                    return
-
         finally:
-            await pubsub.unsubscribe(events_channel)
+            await pubsub.unsubscribe(channel_name)
             await pubsub.close()
 
     async def health_check(self) -> bool:
         """Verify Redis is reachable."""
         try:
-            redis = await self._get_redis()
-            await redis.ping()
-            return True
+            return self._redis.ping()
         except Exception:
             return False
 
     async def shutdown(self) -> None:
         """Close Redis connections."""
-        if self._redis:
-            await self._redis.close()
-            self._redis = None
+        try:
+            self._redis.close()
+            await self._aredis.close()
+        except Exception as e:
+            logger.warning("Error during QueuedTaskRunner shutdown: %s", e)
         logger.info("QueuedTaskRunner shutdown complete")
 
-    # -- Workspace concurrency helpers (used by API for quota checks) --
+    # -- Internal --
 
-    async def get_workspace_active_count(self, workspace_id: str) -> int:
-        """Number of active (queued + running) tasks for a workspace."""
-        redis = await self._get_redis()
-        ws_active_key = WS_ACTIVE_TASKS_KEY.format(workspace_id=workspace_id)
-        return await redis.scard(ws_active_key)
+    async def _publish_event(
+        self,
+        task_id: str,
+        event_type: TaskEventType,
+        data: Dict[str, Any],
+    ) -> None:
+        """Publish event to task-specific Redis channel."""
+        channel = _events_channel(task_id)
+        payload = json.dumps({
+            "event_type": event_type.value,
+            "data": data,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            await self._aredis.publish(channel, payload)
+        except Exception as e:
+            logger.warning("Failed to publish event for task %s: %s", task_id[:8], e)
 
-    async def cleanup_workspace_tracking(self, workspace_id: str, task_id: str) -> None:
-        """Remove a completed task from workspace active tracking. Called by worker."""
-        redis = await self._get_redis()
-        ws_active_key = WS_ACTIVE_TASKS_KEY.format(workspace_id=workspace_id)
-        await redis.srem(ws_active_key, task_id)
+    # -- Worker helpers (used by ARQ workers or custom worker process) --
+
+    @staticmethod
+    def dequeue_task_sync(redis_conn, timeout: float = 5.0) -> Optional[str]:
+        """Pop next task_id from priority queues (highest first).
+
+        This is called by worker processes. Uses BRPOP for blocking pop.
+        Workers call this in a loop.
+        """
+        queues = [
+            _PRIORITY_QUEUES[TaskPriority.CRITICAL],
+            _PRIORITY_QUEUES[TaskPriority.HIGH],
+            _PRIORITY_QUEUES[TaskPriority.NORMAL],
+            _PRIORITY_QUEUES[TaskPriority.LOW],
+        ]
+        result = redis_conn.brpop(queues, timeout=int(timeout))
+        if result:
+            _queue_name, task_id = result
+            return task_id
+        return None
+
+    @staticmethod
+    def get_task_payload_sync(redis_conn, task_id: str) -> Optional[AgentTask]:
+        """Retrieve task payload from Redis. Used by workers."""
+        raw = redis_conn.get(_task_key(task_id))
+        if raw is None:
+            return None
+        try:
+            return AgentTask.model_validate_json(raw)
+        except Exception as e:
+            logger.error("Failed to parse task payload %s: %s", task_id[:8], e)
+            return None
+
+    @staticmethod
+    def is_cancelled_sync(redis_conn, task_id: str) -> bool:
+        """Check if task has been cancelled. Workers call this periodically."""
+        return redis_conn.get(_cancel_key(task_id)) == "1"
+
+    @staticmethod
+    def write_result_sync(redis_conn, result: TaskResult) -> None:
+        """Write task result to Redis. Called by workers on completion."""
+        redis_conn.set(
+            _result_key(result.task_id),
+            result.model_dump_json(),
+            ex=_RESULT_TTL,
+        )
+        redis_conn.set(
+            _status_key(result.task_id),
+            result.status.value,
+            ex=_RESULT_TTL,
+        )
+
+    @staticmethod
+    def publish_event_sync(
+        redis_conn,
+        task_id: str,
+        event_type: TaskEventType,
+        data: Dict[str, Any],
+    ) -> None:
+        """Publish event from worker process (sync version)."""
+        channel = _events_channel(task_id)
+        payload = json.dumps({
+            "event_type": event_type.value,
+            "data": data,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        redis_conn.publish(channel, payload)
