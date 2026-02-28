@@ -780,6 +780,83 @@ async def execute_recipe_direct(
                         _persist_step_results(db, execution, step_results)
                         continue
 
+            # Pre-exec: run deterministic workspace command before the LLM loop.
+            # The output is appended to the prompt so the LLM only does analysis.
+            pre_exec_cmd = step.get("pre_exec")
+            pre_exec_cwd = step.get("pre_exec_cwd")
+            pre_exec_timeout = step.get("pre_exec_timeout", 300)
+            if pre_exec_cmd and workspace_id:
+                logger.info(f"[recipe_direct] Step {step_order} pre_exec: {pre_exec_cmd[:200]}")
+                try:
+                    from core.workspace_client import WorkspaceClient
+                    ws_client = WorkspaceClient(str(workspace_id))
+                    pre_result = await ws_client.exec_command(
+                        command=pre_exec_cmd,
+                        cwd=pre_exec_cwd,
+                        timeout=pre_exec_timeout,
+                    )
+                    pre_exit = pre_result.get("exit_code", -1)
+                    pre_stdout = pre_result.get("stdout", "")
+                    pre_stderr = pre_result.get("stderr", "")
+                    pre_duration = pre_result.get("duration_ms", 0)
+
+                    # Log the pre_exec as a tool call for visibility
+                    step_result["tool_calls"].append({
+                        "action": "pre_exec",
+                        "params": {"command": pre_exec_cmd, "cwd": pre_exec_cwd},
+                        "result": f"exit_code={pre_exit} duration={pre_duration}ms",
+                    })
+
+                    # Append output to the prompt
+                    pre_exec_block = (
+                        f"\n\n## Pre-Exec Output (automated)\n"
+                        f"Command: `{pre_exec_cmd}`\n"
+                        f"Exit code: {pre_exit}\n"
+                        f"Duration: {pre_duration}ms\n"
+                    )
+                    if pre_stdout:
+                        # Cap at 6000 chars to leave room for LLM context
+                        stdout_text = pre_stdout[:6000]
+                        if len(pre_stdout) > 6000:
+                            stdout_text += "\n... (truncated)"
+                        pre_exec_block += f"\n### stdout\n```\n{stdout_text}\n```\n"
+                    if pre_stderr and pre_exit != 0:
+                        pre_exec_block += f"\n### stderr\n```\n{pre_stderr[:2000]}\n```\n"
+
+                    clean_step_prompt += pre_exec_block
+
+                    # If pre_exec failed and error_handling is stop, abort
+                    if pre_exit != 0 and error_handling == 'stop':
+                        logger.warning(f"[recipe_direct] Step {step_order} pre_exec failed (exit={pre_exit})")
+                        step_result["status"] = "failed"
+                        step_result["error"] = f"pre_exec failed with exit code {pre_exit}: {pre_stderr[:500]}"
+                        step_result["duration_ms"] = int((time.time() - step_start) * 1000)
+                        step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+                        step_results.append(_build_compact_step_result(step_result))
+                        _persist_step_results(db, execution, step_results)
+                        await _fail_execution(
+                            db, recipe_execution_id,
+                            f"Step {step_order} pre_exec failed: {pre_stderr[:200]}",
+                            step_results=step_results,
+                        )
+                        return
+
+                    logger.info(
+                        f"[recipe_direct] Step {step_order} pre_exec completed: "
+                        f"exit={pre_exit} duration={pre_duration}ms stdout={len(pre_stdout)} chars"
+                    )
+                except Exception as pre_exc:
+                    logger.error(f"[recipe_direct] Step {step_order} pre_exec error: {pre_exc}", exc_info=True)
+                    if error_handling == 'stop':
+                        step_result["status"] = "failed"
+                        step_result["error"] = f"pre_exec error: {pre_exc}"
+                        step_result["duration_ms"] = int((time.time() - step_start) * 1000)
+                        step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
+                        step_results.append(_build_compact_step_result(step_result))
+                        _persist_step_results(db, execution, step_results)
+                        await _fail_execution(db, recipe_execution_id, f"Step {step_order} pre_exec error: {pre_exc}", step_results=step_results)
+                        return
+
             # Execute with retries
             attempt = 0
             success = False
