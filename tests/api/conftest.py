@@ -96,6 +96,24 @@ def created_key_ids() -> list:
     return []
 
 
+# ── Recipe cleanup registry ──────────────────────────────────────────
+@pytest.fixture(scope="session")
+def created_recipe_ids() -> list:
+    """Accumulates recipe template_ids created during the test session for cleanup."""
+    return []
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_recipes(client, created_recipe_ids):
+    """Session finalizer — DELETE every test recipe we created."""
+    yield
+    for template_id in created_recipe_ids:
+        try:
+            client.delete(f"/api/workflow-recipes/{template_id}")
+        except Exception:
+            pass
+
+
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_all(client, workspace_id, created_persona_ids, created_channel_ids, created_rule_ids, created_key_ids):
     """Session finalizer — clean up all test resources."""
