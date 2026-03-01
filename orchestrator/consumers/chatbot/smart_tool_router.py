@@ -186,7 +186,8 @@ class SmartToolRouter:
         self,
         query: str,
         available_tools: List[Dict[str, Any]],
-        conversation_context: Optional[List[Dict]] = None
+        conversation_context: Optional[List[Dict]] = None,
+        tool_hints: Optional[List[str]] = None,
     ) -> ToolRoutingResult:
         """
         Route a query to appropriate tools.
@@ -195,10 +196,37 @@ class SmartToolRouter:
             query: The user's message
             available_tools: All tools available to the agent
             conversation_context: Recent conversation history
+            tool_hints: PRD-68 hint keywords from AutoBrain (e.g. ["email", "github"])
 
         Returns:
             ToolRoutingResult with filtered tools and guidance
         """
+        # ── PRD-68: tool_hints from AutoBrain take priority over regex ──
+        if tool_hints and available_tools:
+            hint_matched = []
+            for tool in available_tools:
+                tool_name = tool.get("function", {}).get("name", "").lower()
+                tool_desc = tool.get("function", {}).get("description", "").lower()
+                for hint in tool_hints:
+                    hint_lower = hint.lower()
+                    if hint_lower in tool_name or hint_lower in tool_desc:
+                        hint_matched.append(tool)
+                        break
+            if hint_matched:
+                # Always include core tools alongside hint-matched tools
+                core = [t for t in available_tools if t.get("function", {}).get("name") in self.CORE_TOOLS]
+                combined = hint_matched + [c for c in core if c not in hint_matched]
+                logger.info(f"[ToolRouter] PRD-68 hint match: {len(hint_matched)} tools for hints={tool_hints}")
+                return ToolRoutingResult(
+                    should_include_tools=True,
+                    filtered_tools=combined[:15],
+                    priority_tools=[t.get("function", {}).get("name", "") for t in hint_matched[:5]],
+                    tool_choice="auto",
+                    reasoning=f"Tool hints: {tool_hints}",
+                )
+            # Hints didn't match anything — fall through to existing logic
+            logger.info(f"[ToolRouter] PRD-68 hints {tool_hints} matched 0 tools, falling through")
+
         # Classify intent
         intent_result = self.classifier.classify(query, conversation_context)
 

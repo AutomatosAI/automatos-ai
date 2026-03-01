@@ -50,8 +50,6 @@ from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
 from api.benchmarking import router as benchmarking_router
 from api.memory_stats import router as memory_stats_router
-from api.multi_agent import router as multi_agent_router
-from api.field_theory import router as field_theory_router
 from api.context_policy import router as context_policy_router
 from api.codegraph import router as codegraph_router  # PRD-11: New CodeGraph implementation
 from api.github_webhooks import router as github_webhooks_router  # GitHub PR automation
@@ -693,8 +691,6 @@ app.include_router(analytics_router)
 app.include_router(workflow_history_router)
 app.include_router(execution_history_router)  # Enhanced execution history API
 app.include_router(benchmarking_router)  # Workflow and agent analytics
-app.include_router(multi_agent_router)
-app.include_router(field_theory_router)
 app.include_router(context_policy_router)
 app.include_router(codegraph_router)  # PRD-11: CodeGraph
 app.include_router(github_webhooks_router)  # GitHub PR automation
@@ -994,8 +990,6 @@ async def root():
         "🏥 health_monitoring": {
             "system_health": "/health",
             "system_metrics": "/api/system/metrics",
-            "multi_agent_health": "/api/multi-agent/health",
-            "field_theory_health": "/api/field-theory/health"
         },
         
         "🛠️ api_endpoints": {
@@ -1003,16 +997,6 @@ async def root():
                 "base_url": "/api/agents",
                 "description": "Complete agent lifecycle management",
                 "features": ["Create agents", "Manage skills", "Performance tracking", "Agent coordination"]
-            },
-            "👥 multi_agent": {
-                "base_url": "/api/multi-agent", 
-                "description": "Collaborative multi-agent systems",
-                "features": ["Collaborative reasoning", "Agent coordination", "Behavior monitoring", "System optimization"]
-            },
-            "🌐 field_theory": {
-                "base_url": "/api/field-theory",
-                "description": "Advanced field-based context management", 
-                "features": ["Field representations", "Field propagation", "Context interactions", "Dynamic management"]
             },
             "🔄 workflows": {
                 "base_url": "/api/workflows",

@@ -119,7 +119,8 @@ class SmartChatOrchestrator:
         self,
         messages: List[Dict[str, Any]],
         available_tools: List[Dict[str, Any]],
-        chat_id: Optional[str] = None
+        chat_id: Optional[str] = None,
+        complexity_assessment: Optional[Any] = None,
     ) -> OrchestratedRequest:
         """
         Prepare a chat request for the LLM.
@@ -154,8 +155,13 @@ class SmartChatOrchestrator:
                    f"(tools: {intent_result.requires_tools}, memory: {intent_result.requires_memory})")
 
         # 2. Retrieve Memory (if needed or stale)
+        # PRD-68: ComplexityAssessment can override memory decision
         memory_result = None
-        if self._should_fetch_memory(intent_result):
+        _wants_memory = self._should_fetch_memory(intent_result)
+        if complexity_assessment and not complexity_assessment.needs_memory:
+            _wants_memory = False
+            logger.info(f"[Orchestrator] Memory SKIPPED by ComplexityAssessment ({complexity_assessment.complexity.value})")
+        if _wants_memory:
             memory_result = await self.memory_manager.retrieve_memories(
                 workspace_id=self.workspace_id,
                 agent_id=self.agent_id,
@@ -175,12 +181,20 @@ class SmartChatOrchestrator:
         self._last_memory_result = memory_result
 
         # 3. Route Tools (if needed)
+        # PRD-68: ComplexityAssessment tool_hints override intent-based routing
         tool_result = None
-        if intent_result.requires_tools and available_tools:
+        _wants_tools = intent_result.requires_tools
+        _tool_hints = None
+        if complexity_assessment and complexity_assessment.tool_hints:
+            _wants_tools = True
+            _tool_hints = complexity_assessment.tool_hints
+            logger.info(f"[Orchestrator] Tools ENABLED by tool_hints={_tool_hints}")
+        if _wants_tools and available_tools:
             tool_result = await self.tool_router.route(
                 query=latest_query,
                 available_tools=available_tools,
-                conversation_context=messages
+                conversation_context=messages,
+                tool_hints=_tool_hints,
             )
         else:
             # Even when intent says "no tools", always include platform_* tools

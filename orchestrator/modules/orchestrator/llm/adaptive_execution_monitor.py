@@ -341,6 +341,205 @@ class AdaptiveExecutionMonitor:
         
         return decision
     
+    async def evaluate_stage_outcome(
+        self,
+        stage_name: str,
+        stage_results: Dict[str, Any],
+        workflow_context: Dict[str, Any],
+        attempt_number: int = 1,
+    ) -> AdaptationDecision:
+        """
+        Stage-level evaluation: assess whether a pipeline stage produced
+        acceptable results, and decide whether to continue, retry, or abort.
+
+        Two-tier approach: fast heuristic first, LLM only when needed.
+
+        Args:
+            stage_name: "execution" or "quality"
+            stage_results: execution_summary or quality_assessment dict
+            workflow_context: task_description, steps, agent_assignments
+            attempt_number: current attempt (1 or 2)
+
+        Returns:
+            AdaptationDecision with action and reasoning
+        """
+        # ── Tier 1: Heuristic fast-path ──
+        if stage_name == "execution":
+            success_rate = stage_results.get("success_rate", 0)
+            # High success on first attempt → continue without LLM
+            if success_rate >= 0.8:
+                return AdaptationDecision(
+                    action=InterventionAction.CONTINUE,
+                    reasoning=f"Execution success rate {success_rate:.0%} is acceptable",
+                    confidence=0.95,
+                    next_steps=["Proceed to result aggregation"],
+                )
+            # Second attempt with moderate success → accept and move on
+            if attempt_number >= 2 and success_rate >= 0.4:
+                return AdaptationDecision(
+                    action=InterventionAction.CONTINUE,
+                    reasoning=f"Retry attempt {attempt_number}: success rate {success_rate:.0%} accepted (max retries reached)",
+                    confidence=0.7,
+                    next_steps=["Accept partial results, proceed"],
+                )
+        elif stage_name == "quality":
+            passes = stage_results.get("passes_threshold", False)
+            overall_score = stage_results.get("overall_score", 0)
+            # Already passing → continue
+            if passes:
+                return AdaptationDecision(
+                    action=InterventionAction.CONTINUE,
+                    reasoning=f"Quality score {overall_score:.0%} passes threshold",
+                    confidence=0.95,
+                    next_steps=["Proceed to memory storage"],
+                )
+            # Second attempt → accept whatever we have
+            if attempt_number >= 2:
+                return AdaptationDecision(
+                    action=InterventionAction.CONTINUE,
+                    reasoning=f"Retry attempt {attempt_number}: quality {overall_score:.0%} accepted (max retries reached)",
+                    confidence=0.6,
+                    next_steps=["Accept current quality, proceed"],
+                )
+
+        # ── Tier 2: LLM evaluation for ambiguous cases ──
+        try:
+            from core.llm import create_llm_manager
+
+            llm = create_llm_manager(service_name="complexity_assessor")
+
+            prompt = self._build_stage_evaluation_prompt(
+                stage_name, stage_results, workflow_context, attempt_number
+            )
+
+            response = await llm.generate(prompt)
+            content = response if isinstance(response, str) else getattr(response, "content", str(response))
+
+            return self._parse_stage_evaluation(content, stage_name, attempt_number)
+
+        except Exception as e:
+            logger.error(f"LLM stage evaluation failed: {e}", exc_info=True)
+            # Fallback: conservative decision based on stage
+            if stage_name == "execution":
+                success_rate = stage_results.get("success_rate", 0)
+                if success_rate < 0.3 and attempt_number < 2:
+                    return AdaptationDecision(
+                        action=InterventionAction.RETRY_SAME,
+                        reasoning=f"LLM unavailable; heuristic retry (success_rate={success_rate:.0%})",
+                        confidence=0.5,
+                        next_steps=["Retry execution with same agents"],
+                    )
+            return AdaptationDecision(
+                action=InterventionAction.CONTINUE,
+                reasoning=f"LLM evaluation failed, defaulting to continue: {e}",
+                confidence=0.4,
+                next_steps=["Proceed with current results"],
+            )
+
+    def _build_stage_evaluation_prompt(
+        self,
+        stage_name: str,
+        stage_results: Dict[str, Any],
+        workflow_context: Dict[str, Any],
+        attempt_number: int,
+    ) -> str:
+        """Build the LLM prompt for stage-level evaluation."""
+        task_desc = workflow_context.get("task_description", "Unknown task")[:500]
+        steps_summary = ""
+        for step in workflow_context.get("steps", [])[:6]:
+            name = step.get("name", step.get("description", "?"))[:80]
+            status = step.get("execution_result", {}).get("status", "pending")
+            steps_summary += f"\n  - {name} → {status}"
+
+        if stage_name == "execution":
+            metrics = (
+                f"Success Rate: {stage_results.get('success_rate', 0):.0%}\n"
+                f"Total Subtasks: {stage_results.get('total_subtasks', '?')}\n"
+                f"Completed: {stage_results.get('completed', '?')}\n"
+                f"Failed: {stage_results.get('failed', '?')}\n"
+                f"Total Tokens: {stage_results.get('total_tokens_used', 0)}\n"
+                f"Total Time: {stage_results.get('total_execution_time_ms', 0)}ms"
+            )
+        else:
+            metrics = (
+                f"Overall Score: {stage_results.get('overall_score', 0):.0%}\n"
+                f"Passes Threshold: {stage_results.get('passes_threshold', False)}\n"
+                f"Strengths: {stage_results.get('strengths', [])}\n"
+                f"Weaknesses: {stage_results.get('weaknesses', [])}"
+            )
+
+        return f"""STAGE EVALUATION — Decide whether to continue, retry, or abort.
+
+STAGE: {stage_name}
+ATTEMPT: {attempt_number}/2
+TASK: {task_desc}
+
+SUBTASK RESULTS:{steps_summary}
+
+METRICS:
+{metrics}
+
+DECISION OPTIONS:
+- continue: Results are acceptable, proceed to next stage
+- retry_same: Re-run this stage with the same agents (transient failures likely)
+- retry_different: Re-select agents and re-run (agent mismatch likely)
+- skip: Accept partial results and proceed to response generation
+- abort: Mark execution as failed (unrecoverable)
+
+RULES:
+- If attempt >= 2, prefer "continue" or "skip" over retry
+- If > 50% subtasks succeeded, lean toward "continue"
+- Only "abort" if results are completely unusable
+- Only "retry_different" if agent mismatch is the likely cause
+
+Respond with ONLY a JSON object:
+{{"decision": "continue|retry_same|retry_different|skip|abort", "reasoning": "brief explanation", "confidence": 0.0-1.0}}"""
+
+    def _parse_stage_evaluation(
+        self, content: str, stage_name: str, attempt_number: int
+    ) -> AdaptationDecision:
+        """Parse LLM response into an AdaptationDecision."""
+        import json as json_mod
+        import re
+
+        action_map = {
+            "continue": InterventionAction.CONTINUE,
+            "retry_same": InterventionAction.RETRY_SAME,
+            "retry_different": InterventionAction.RETRY_DIFFERENT,
+            "skip": InterventionAction.SKIP,
+            "abort": InterventionAction.ABORT,
+        }
+
+        try:
+            json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
+            if json_match:
+                result = json_mod.loads(json_match.group())
+            else:
+                result = {"decision": "continue", "reasoning": content[:200], "confidence": 0.5}
+
+            decision_str = result.get("decision", "continue").lower().strip()
+            action = action_map.get(decision_str, InterventionAction.CONTINUE)
+
+            # Safety: don't allow retry on second attempt
+            if attempt_number >= 2 and action in (InterventionAction.RETRY_SAME, InterventionAction.RETRY_DIFFERENT):
+                action = InterventionAction.CONTINUE
+                result["reasoning"] = f"Max retries reached. Original: {result.get('reasoning', '')}"
+
+            return AdaptationDecision(
+                action=action,
+                reasoning=result.get("reasoning", ""),
+                confidence=float(result.get("confidence", 0.5)),
+                next_steps=[f"After {stage_name}: {action.value}"],
+            )
+        except Exception as e:
+            logger.error(f"Failed to parse stage evaluation: {e}")
+            return AdaptationDecision(
+                action=InterventionAction.CONTINUE,
+                reasoning=f"Parse error, defaulting to continue: {e}",
+                confidence=0.3,
+                next_steps=["Continue with current results"],
+            )
+
     async def monitor_batch(
         self,
         executions: List[SubtaskExecution],

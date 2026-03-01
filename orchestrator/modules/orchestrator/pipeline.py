@@ -44,6 +44,7 @@ class ErrorStrategy(Enum):
     ABORT = "abort"           # Stop the pipeline
     SKIP = "skip"             # Skip this stage, continue
     RETRY = "retry"           # Retry once, then skip
+    REPLAN = "replan"         # Re-evaluate and potentially change approach
 
 
 @dataclass

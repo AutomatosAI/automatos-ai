@@ -36,6 +36,7 @@ SERVICE_CATEGORY_MAP = {
     "memory_integration": "memory_integration",
     "nl2sql": "nl2sql",
     "heartbeat": "orchestrator_llm",
+    "complexity_assessor": "complexity_assessor",  # PRD-68: any model for routing
 }
 
 

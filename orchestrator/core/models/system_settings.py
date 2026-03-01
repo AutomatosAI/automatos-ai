@@ -31,6 +31,7 @@ class SettingCategory(str, Enum):
     NOTIFICATIONS = "notifications"
     BACKUPS = "backups"
     MONITORING = "monitoring"
+    COMPLEXITY_ASSESSOR = "complexity_assessor"  # PRD-68: routing LLM
 
 
 class SystemSetting(Base):

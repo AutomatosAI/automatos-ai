@@ -1235,6 +1235,54 @@ def seed_system_settings(db: Session):
                 "options": ["true", "false"]
             }
         },
+
+        # ========================================
+        # PRD-68: COMPLEXITY ASSESSOR SETTINGS
+        # ========================================
+
+        {
+            "category": SettingCategory.COMPLEXITY_ASSESSOR.value,
+            "key": "provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": "LLM provider for complexity assessment routing (PRD-68). Use a fast, cheap model.",
+            "is_required": True,
+            "validation_rules": {
+                "options": ["openai", "anthropic", "google", "openrouter", "huggingface", "grok"]
+            }
+        },
+        {
+            "category": SettingCategory.COMPLEXITY_ASSESSOR.value,
+            "key": "model",
+            "default_value": "meta-llama/llama-3.1-8b-instruct",
+            "value_type": "string",
+            "description": "Model for complexity assessment. Recommend: lightweight model (Llama 8B, Haiku, Flash).",
+            "is_required": True
+        },
+        {
+            "category": SettingCategory.COMPLEXITY_ASSESSOR.value,
+            "key": "temperature",
+            "default_value": "0.1",
+            "value_type": "number",
+            "description": "Low temperature for consistent routing decisions (0.0-1.0)",
+            "is_required": False,
+            "validation_rules": {
+                "min": 0.0,
+                "max": 1.0
+            }
+        },
+        {
+            "category": SettingCategory.COMPLEXITY_ASSESSOR.value,
+            "key": "max_tokens",
+            "default_value": "200",
+            "value_type": "number",
+            "description": "Max tokens for routing response (JSON output only, keep low)",
+            "is_required": False,
+            "validation_rules": {
+                "min": 50,
+                "max": 500
+            }
+        },
     ]
     
     created_count = 0
