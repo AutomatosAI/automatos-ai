@@ -75,21 +75,41 @@ class ComposioToolService:
     # Regex to extract explicit Composio action names from prompts.
     _ACTION_NAME_RE = re.compile(r"\b([A-Z][A-Z0-9]+(?:_[A-Z0-9]+){2,})\b")
 
+    # PRD-68: Map AutoBrain tool_hints to Composio app names.
+    # AutoBrain returns LLM-curated domain keywords; we scope the SDK search.
+    _HINT_TO_APPS: Dict[str, List[str]] = {
+        "email": ["gmail"], "emails": ["gmail"], "inbox": ["gmail"],
+        "mail": ["gmail"], "gmail": ["gmail"],
+        "slack": ["slack"], "message": ["slack", "telegram"],
+        "channel": ["slack"], "chat": ["slack", "discordbot", "telegram"],
+        "calendar": ["googlecalendar"], "event": ["googlecalendar"],
+        "meeting": ["googlecalendar"], "schedule": ["googlecalendar"],
+        "drive": ["googledrive"], "file": ["googledrive", "dropbox"],
+        "sheet": ["googlesheets"], "spreadsheet": ["googlesheets"],
+        "jira": ["jira"], "ticket": ["jira"], "issue": ["jira"],
+        "github": ["github"], "repo": ["github"], "code": ["github"],
+        "pull": ["github"], "pr": ["github"],
+        "telegram": ["telegram"], "discord": ["discordbot"],
+        "doc": ["googledocs"], "document": ["googledocs"],
+        "dropbox": ["dropbox"], "search": ["composio_search", "tavily"],
+    }
+
     def get_tools_for_step(
         self,
         agent_id: int,
         workspace_id: UUID,
         task_prompt: str,
         limit: int = _MAX_TOOLS,
+        tool_hints: Optional[List[str]] = None,
     ) -> ComposioToolResult:
         """
         Resolve Composio tools for a step.
 
         Strategy:
           1. Explicit action names in prompt → exact schema lookup.
-          2. SDK semantic search (tools.get with search=query).
-          3. SDK search returns 0 → load from cache, rank by keyword
-             match on action name, cap at ``limit``.
+          2. PRD-68: If tool_hints provided, scope SDK search to hinted apps.
+          3. SDK semantic search (tools.get with search=query).
+          4. SDK search returns 0 → broadened SDK search (all allowed apps).
         """
         result = ComposioToolResult()
 
@@ -145,10 +165,28 @@ class ComposioToolService:
                     )
                     return result
 
-            # 4. SDK semantic search
+            # 4. PRD-68: Scope SDK search using tool_hints from AutoBrain
+            #    "email" → search only ["gmail"] instead of all 15 apps
+            allowed_set = {a.lower() for a in allowed_apps}
+            search_apps = [a.lower() for a in allowed_apps]  # default: all
+
+            if tool_hints:
+                hinted_apps: set = set()
+                for hint in tool_hints:
+                    for app in self._HINT_TO_APPS.get(hint.lower(), []):
+                        if app in allowed_set:
+                            hinted_apps.add(app)
+                if hinted_apps:
+                    search_apps = list(hinted_apps)
+                    logger.info(
+                        "[ComposioToolService] PRD-68 hint scope: %s → apps=%s",
+                        tool_hints, search_apps,
+                    )
+
+            # 5. SDK semantic search — scoped to hinted apps (or all if no hints)
             search_results = client.search_actions_for_step(
                 search_query=task_prompt[:200],
-                app_names=[a.lower() for a in allowed_apps],
+                app_names=search_apps,
                 entity_id=entity_id,
                 limit=limit,
             )
@@ -159,97 +197,37 @@ class ComposioToolService:
                     result.tools.append(schema)
                     result.action_set.add(action_name)
 
-            if len(result.tools) >= 5:
-                # SDK returned enough results — use them directly
+            if result.tools:
                 result.search_ms = int((time.monotonic() - t0) * 1000)
                 result.strategy = "sdk_search"
                 logger.info(
-                    "[ComposioToolService] SDK search: agent=%s actions=%d (%dms) → %s",
-                    agent_id, len(result.tools), result.search_ms,
+                    "[ComposioToolService] SDK search: agent=%s apps=%s "
+                    "actions=%d (%dms) → %s",
+                    agent_id, search_apps, len(result.tools), result.search_ms,
                     sorted(result.action_set),
                 )
                 return result
 
-            # SDK returned too few results (<5) — supplement with cache_ranked.
-            # Keep whatever SDK found but pad with keyword-ranked cached actions.
-            if result.tools:
+            # 6. SDK search returned 0 — broaden to all allowed apps if we
+            #    were scoped by hints, then retry
+            if search_apps != [a.lower() for a in allowed_apps]:
                 logger.info(
-                    "[ComposioToolService] SDK search sparse (%d actions) — "
-                    "supplementing with cache_ranked for agent=%s",
-                    len(result.tools), agent_id,
+                    "[ComposioToolService] Hint-scoped search returned 0 — "
+                    "broadening to all %d apps for agent=%s",
+                    len(allowed_apps), agent_id,
                 )
-
-            # 5. SDK search returned 0 or too few — fall back to cached SDK data.
-            #    The cache was populated by tools.get() (the SDK).
-            #    Rank actions by keyword match on action name, cap at limit.
-            all_schemas = client.get_all_schemas_for_apps(
-                app_names=[a.lower() for a in allowed_apps],
-                entity_id=entity_id,
-            )
-            if all_schemas:
-                query_words = set(re.findall(r"[a-z]{3,}", task_prompt.lower()))
-                query_lower = task_prompt.lower()
-
-                # Map query keywords to likely app prefixes for tiebreaking
-                _KEYWORD_TO_APP = {
-                    "email": "GMAIL", "emails": "GMAIL", "inbox": "GMAIL",
-                    "mail": "GMAIL", "gmail": "GMAIL",
-                    "slack": "SLACK", "message": "SLACK", "channel": "SLACK",
-                    "calendar": "GOOGLECALENDAR", "event": "GOOGLECALENDAR",
-                    "meeting": "GOOGLECALENDAR", "schedule": "GOOGLECALENDAR",
-                    "drive": "GOOGLEDRIVE", "file": "GOOGLEDRIVE",
-                    "sheet": "GOOGLESHEETS", "spreadsheet": "GOOGLESHEETS",
-                    "jira": "JIRA", "ticket": "JIRA", "issue": "JIRA",
-                    "github": "GITHUB", "repo": "GITHUB", "pull": "GITHUB",
-                    "telegram": "TELEGRAM", "discord": "DISCORDBOT",
-                    "doc": "GOOGLEDOCS", "document": "GOOGLEDOCS",
-                    "dropbox": "DROPBOX",
-                }
-                preferred_apps = set()
-                for word in query_words:
-                    if word in _KEYWORD_TO_APP:
-                        preferred_apps.add(_KEYWORD_TO_APP[word])
-
-                def _rank_action(item):
-                    name = item.get("action_name", "").lower()
-                    # Score 1: keyword overlap
-                    keyword_score = sum(1 for w in query_words if w in name)
-                    # Score 2: app preference (actions from the right app rank higher)
-                    app_prefix = item.get("action_name", "").split("_")[0]
-                    app_bonus = 10 if app_prefix in preferred_apps else 0
-                    return -(keyword_score + app_bonus)
-
-                ranked = sorted(all_schemas, key=_rank_action)
-
-                # Round-robin across apps to prevent one app monopolizing all slots
-                from collections import defaultdict
-                per_app: defaultdict = defaultdict(list)
-                for item in ranked:
+                search_results = client.search_actions_for_step(
+                    search_query=task_prompt[:200],
+                    app_names=[a.lower() for a in allowed_apps],
+                    entity_id=entity_id,
+                    limit=limit,
+                )
+                for item in search_results:
                     action_name = item.get("action_name", "")
                     schema = item.get("schema")
                     if action_name and schema and action_name not in result.action_set:
-                        app_prefix = action_name.split("_")[0]
-                        per_app[app_prefix].append((action_name, schema))
-
-                # Interleave: take up to 5 per app in round-robin order
-                max_per_app = max(5, limit // max(len(per_app), 1))
-                added = 0
-                round_idx = 0
-                while added < limit:
-                    any_added = False
-                    for app in list(per_app.keys()):
-                        items = per_app[app]
-                        if round_idx < len(items) and round_idx < max_per_app:
-                            action_name, schema = items[round_idx]
-                            result.tools.append(schema)
-                            result.action_set.add(action_name)
-                            added += 1
-                            any_added = True
-                            if added >= limit:
-                                break
-                    round_idx += 1
-                    if not any_added:
-                        break
+                        result.tools.append(schema)
+                        result.action_set.add(action_name)
 
             result.search_ms = int((time.monotonic() - t0) * 1000)
 

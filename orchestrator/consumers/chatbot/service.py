@@ -740,16 +740,29 @@ class StreamingChatService:
             )
 
             # Composio per-action tools (primary) or hint fallback
+            # PRD-68: Use tool_hints from AutoBrain to guide action discovery
             _composio_result = None
+            _tool_hints = (
+                complexity_assessment.tool_hints
+                if complexity_assessment and hasattr(complexity_assessment, 'tool_hints')
+                else []
+            )
             try:
                 if latest_text and agent_id and self.workspace_id and not skip_composio:
                     from modules.tools.services.composio_tool_service import ComposioToolService
 
                     _composio_svc = ComposioToolService(self.db)
+                    # When AutoBrain provides tool_hints, use them as the search
+                    # query instead of the raw user message — they're LLM-curated
+                    # domain keywords that map better to action names.
+                    _search_prompt = (
+                        " ".join(_tool_hints) if _tool_hints else latest_text
+                    )
                     _composio_result = _composio_svc.get_tools_for_step(
                         agent_id=agent_id,
                         workspace_id=self.workspace_id,
-                        task_prompt=latest_text,
+                        task_prompt=_search_prompt,
+                        tool_hints=_tool_hints,
                     )
                     if _composio_result and _composio_result.tools:
                         # Strip composio_execute mega-tool, add per-action tools
