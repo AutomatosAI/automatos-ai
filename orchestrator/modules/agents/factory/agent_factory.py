@@ -2340,6 +2340,14 @@ To use actions, respond with JSON blocks like:
             sections.append("Example: If your task is 'write documentation' and you have 'write_technical_content' tool → you MUST call that tool")
             sections.append("\n**Your skills are your capabilities - use them when they match the task!**")
 
+        # Response formatting — prevent raw JSON / code block dumping
+        sections.append("\n## Response Formatting Rules\n")
+        sections.append("When you receive API/tool results (emails, messages, calendar events, etc.):")
+        sections.append("- Synthesize the data into clear, conversational prose — do NOT dump raw JSON")
+        sections.append("- NEVER wrap tool results in code blocks (``` ```) — present as natural language")
+        sections.append("- Summarize key fields (subject, sender, date, status) in readable format")
+        sections.append("- Use bullet points or short paragraphs, not code formatting")
+
         prompt_text = "\n\n".join([s for s in sections if s is not None])
         return (prompt_text, skill_tool_schemas)
     
