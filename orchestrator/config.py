@@ -197,7 +197,7 @@ class Config:
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
     WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
     WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
-    PLAYBOOKS_REQUIRE_TENANT: bool = bool(int(os.getenv("PLAYBOOKS_REQUIRE_TENANT", "0")))
+    PLAYBOOKS_REQUIRE_TENANT: bool = os.getenv("PLAYBOOKS_REQUIRE_TENANT", "0").lower() in ("1", "true", "yes")
 
     # =============================================================================
     # TASK RUNNER (PRD-56: Infrastructure Scaling & Physical Workspaces)

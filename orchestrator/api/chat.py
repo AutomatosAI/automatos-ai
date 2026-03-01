@@ -425,17 +425,16 @@ async def stream_chat(
     _is_admin = _user_role in ("admin", "super_admin")
     logger.info(f"[PRD-67] user_role={_user_role!r}, is_admin={_is_admin}, user_id={getattr(ctx.user, 'id', '?')}")
 
+    # PRD-67: Admin fallback is CTO agent; non-admin fallback is workspace default
+    _cto_id = _get_cto_agent_id(db) if _is_admin else None
+    _fallback_agent_id = _cto_id or get_default_agent_id(db, ctx.workspace_id)
+
     if request.agentId:
         # User explicitly selected an agent — skip Auto, use directly
         effective_agent_id = request.agentId
         logger.info(f"[chat] Direct mode: agent_id={effective_agent_id}")
-    elif _is_admin and (cto_id := _get_cto_agent_id(db)):
-        # PRD-67: Admin without explicit agent → CTO Agent
-        effective_agent_id = cto_id
-        use_system_llm = True
-        logger.info(f"[Auto] CTO mode: admin detected, agent_id={cto_id}")
     else:
-        # --- Auto mode: the brain decides ---
+        # --- Auto mode: the brain decides (admins included, PRD-67 CTO is fallback) ---
         auto_brain = AutoBrain(db, str(ctx.workspace_id))
         complexity_assessment = await auto_brain.assess(message_text, len(message_history))
         logger.info(
@@ -448,7 +447,7 @@ async def stream_chat(
         if complexity_assessment.action == Action.RESPOND:
             # Auto handles directly — no routing, no delegation.
             # Simple greetings, conversational messages, memory recalls.
-            effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+            effective_agent_id = _fallback_agent_id
             use_system_llm = True
             logger.info(
                 f"[Auto] Direct response (complexity={complexity_assessment.complexity.value}): "
@@ -477,7 +476,7 @@ async def stream_chat(
                 universal_router = UniversalRouter(db, cache=get_routing_cache())
                 routing_decision = await universal_router.route(envelope)
             except Exception:
-                logger.exception("[chat] Router failed — falling back to default agent")
+                logger.exception("[chat] Router failed — falling back to fallback agent")
                 routing_decision = None
 
             if routing_decision is not None and routing_decision.route_type == "agent" and routing_decision.agent_id is not None:
@@ -487,8 +486,8 @@ async def stream_chat(
                     f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
                 )
             elif routing_decision is not None and routing_decision.route_type == "orchestrate":
-                # LLM explicitly chose Auto / orchestrate — use default agent with system LLM
-                effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+                # LLM explicitly chose Auto / orchestrate — use fallback agent with system LLM
+                effective_agent_id = _fallback_agent_id
                 use_system_llm = True
                 logger.info(
                     f"[Auto] Router → orchestrate "
@@ -497,10 +496,10 @@ async def stream_chat(
                     f"agent_id={effective_agent_id} with orchestrator LLM"
                 )
             else:
-                # Router couldn't decide — fall back to default agent
-                effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+                # Router couldn't decide — fall back
+                effective_agent_id = _fallback_agent_id
                 use_system_llm = True
-                logger.info(f"[Auto] Router returned no match — default agent_id={effective_agent_id}")
+                logger.info(f"[Auto] Router returned no match — fallback agent_id={effective_agent_id}")
 
     # Build response headers (include routing metadata when available)
     response_headers = {

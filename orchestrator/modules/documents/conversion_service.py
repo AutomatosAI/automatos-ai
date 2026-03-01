@@ -5,6 +5,7 @@ Converts DOCX/XLSX to PDF via Gotenberg (preferred) or LibreOffice CLI fallback.
 """
 
 import logging
+import os
 import shutil
 import subprocess
 from typing import Optional
