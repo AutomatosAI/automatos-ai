@@ -420,12 +420,13 @@ async def stream_chat(
     complexity_assessment = None
     _use_workflow_bridge = False  # PRD-68: True when ORGAN/ORGANISM triggers workflow
 
-    # PRD-67: Detect admin → default to CTO Agent
+    # PRD-67: Admin persona is CTO Agent (Auto with elevated access).
+    # AutoBrain + Router run for ALL users — the CTO agent is the fallback
+    # persona for admins (RESPOND, orchestrate, router-miss), not a routing bypass.
     _user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
     _is_admin = _user_role in ("admin", "super_admin")
     logger.info(f"[PRD-67] user_role={_user_role!r}, is_admin={_is_admin}, user_id={getattr(ctx.user, 'id', '?')}")
 
-    # PRD-67: Admin fallback is CTO agent; non-admin fallback is workspace default
     _cto_id = _get_cto_agent_id(db) if _is_admin else None
     _fallback_agent_id = _cto_id or get_default_agent_id(db, ctx.workspace_id)
 
