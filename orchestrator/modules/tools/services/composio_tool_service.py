@@ -269,8 +269,6 @@ class ComposioToolService:
             .all()
         )
         assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
-        if not assigned_apps:
-            return []
 
         # Cross-reference with connected apps
         connected_apps: List[str] = []
@@ -285,6 +283,16 @@ class ComposioToolService:
                 ]
         except Exception as conn_err:
             logger.warning("[ComposioToolService] Connection check failed: %s", conn_err)
+
+        # Auto-inherit: no explicit assignments → use all workspace-connected apps
+        if not assigned_apps:
+            if connected_apps:
+                logger.info(
+                    "[ComposioToolService] Agent %s has no app assignments — "
+                    "inheriting %d workspace apps", agent_id, len(connected_apps)
+                )
+                return connected_apps
+            return []
 
         if connected_apps:
             allowed = [a for a in assigned_apps if a in set(connected_apps)]

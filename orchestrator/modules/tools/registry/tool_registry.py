@@ -1250,18 +1250,27 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                 assigned_apps = {str(r.app_name or "").upper().strip() for r in assigned_rows if r and r.app_name}
                 assigned_apps.discard("")
 
-                if not assigned_apps:
-                    return False, "No external apps are assigned to this agent"
-
                 connected_apps = set()
                 try:
                     manager = EntityManager(db)
                     connected_apps = {a.upper().strip() for a in manager.get_connected_apps(workspace_id)}
                 except Exception:
-                    # If we can't resolve connections, fail closed (don't expose tool)
                     connected_apps = set()
 
-                eligible = assigned_apps.intersection(connected_apps)
+                # Auto-inherit: when agent has no explicit assignments, use all
+                # workspace-connected apps. 850+ tools — agents shouldn't need
+                # manual per-app assignment to use what's already connected.
+                if not assigned_apps:
+                    if connected_apps:
+                        logger.info(
+                            f"[ToolRegistry] Agent {agent_id} has no app assignments — "
+                            f"inheriting {len(connected_apps)} workspace apps: {connected_apps}"
+                        )
+                        assigned_apps = connected_apps
+                    else:
+                        return False, "No external apps are connected for this workspace"
+
+                eligible = assigned_apps.intersection(connected_apps) if connected_apps else assigned_apps
                 if not eligible:
                     return False, "No assigned external apps are connected for this workspace"
             except Exception as exc:
