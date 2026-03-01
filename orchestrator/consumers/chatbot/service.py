@@ -490,764 +490,6 @@ class StreamingChatService:
             logger.warning(f"Failed to resolve workspace_id for agent {agent_id}: {exc}")
         return self.workspace_id
     
-    async def stream_response_aisdk(
-        self,
-        chat_id: str,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Any]] = None,
-        selected_model: Optional[str] = None,
-        agent_id: int = 1
-    ) -> AsyncGenerator[str, None]:
-        """
-        DEPRECATED: This method is no longer called from the chat API.
-        All chat now flows through stream_response_with_agent() which uses
-        SmartChatOrchestrator for personality, memory, and tool orchestration.
-
-        Kept temporarily for backward compatibility with any direct callers.
-        Will be removed in a future cleanup pass.
-        """
-        import warnings
-        warnings.warn(
-            "stream_response_aisdk is deprecated. Use stream_response_with_agent instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        # Import from core.llm
-        from core.llm import create_llm_manager
-        import asyncio
-        
-        try:
-            # Send chat_id to frontend
-            yield self.streaming_handler.format_aisdk_chat_id(chat_id)
-            await asyncio.sleep(0)
-
-            # Ensure workspace_id for Composio tools permissions
-            self._resolve_workspace_id(agent_id)
-            
-            # Get tools from modules.tools with permissions for this workspace
-            if tools is None:
-                tools = get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
-            
-            # Determine provider/model from selection
-            provider, model = self._parse_model_selection(selected_model)
-            
-            # Create LLM manager via shared.llm
-            if provider and model:
-                logger.info(f"Using user-selected model: {provider}/{model}")
-                llm_manager = create_llm_manager(service_name="chatbot", provider=provider, model=model)
-            else:
-                llm_manager = create_llm_manager(service_name="chatbot")
-            
-            # Optionally ignore prior context for a fresh run
-            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-            fresh_start = self.prompt_analyzer.is_fresh_start_request(latest_text)
-            if fresh_start:
-                messages = [m for m in messages if m.get("role") == "user"][-1:]
-
-            # Ensure workspace_id for Composio tools
-            self._resolve_workspace_id(agent_id)
-
-            # Determine tool usage
-            is_simple = self.prompt_analyzer.is_simple_message(latest_text)
-            supports_native_tools = provider in ['openai', 'anthropic', 'grok', 'openrouter', 'google'] if provider else False
-            
-            # --- TOOL FILTERING (DEPRECATED path) ---
-            # This deprecated method passes all tools through without ranking.
-            # Active chat uses SmartChatOrchestrator + SmartToolRouter for semantic ranking.
-            use_tools = tools if (not is_simple and tools and supports_native_tools) else None
-            context_tools = use_tools if use_tools is not None else tools
-
-            # Convert messages to LLM format (include tool names for stronger tool routing)
-            llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-                messages,
-                available_tools=context_tools
-            )
-            assistant_parts = []
-            full_response = ""
-            tool_data = {}
-            documents_tool_used = False
-            
-            # Inject memory context via modules.memory
-            memory_context = None
-            # Optimized: Check if we should even try to retrieve memories (save tokens/time)
-            should_retrieve = await self.memory_injector.should_retrieve_memories(latest_text, chat_id)
-            
-            if not fresh_start and should_retrieve:
-                memory_context = await self.memory_injector.retrieve_relevant_memories(
-                    chat_id,
-                    latest_text,
-                    workspace_id=str(self.workspace_id) if self.workspace_id else None,
-                    agent_id=agent_id
-                )
-                if memory_context:
-                    logger.info(f"[Memory] Injecting {len(memory_context)} chars")
-                    llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
-
-            # Composio per-action tools (primary) or hint fallback
-            _composio_result = None
-            try:
-                if latest_text and agent_id and self.workspace_id:
-                    from modules.tools.services.composio_tool_service import ComposioToolService
-
-                    _composio_svc = ComposioToolService(self.db)
-                    _composio_result = _composio_svc.get_tools_for_step(
-                        agent_id=agent_id,
-                        workspace_id=self.workspace_id,
-                        task_prompt=latest_text,
-                    )
-                    insert_at = 2 if memory_context else 1
-                    if _composio_result and _composio_result.tools:
-                        # Strip composio_execute, add per-action tools
-                        if use_tools:
-                            use_tools = [
-                                t for t in use_tools
-                                if t.get("function", {}).get("name") != "composio_execute"
-                            ] + _composio_result.tools
-                        elif context_tools:
-                            use_tools = [
-                                t for t in context_tools
-                                if t.get("function", {}).get("name") != "composio_execute"
-                            ] + _composio_result.tools
-                        else:
-                            use_tools = _composio_result.tools
-                        from api.recipe_executor import _composio_scope_message
-                        llm_messages.insert(insert_at, {
-                            "role": "system",
-                            "content": _composio_scope_message(_composio_result.app_names),
-                        })
-                        logger.info(
-                            f"[ComposioToolService] strategy={_composio_result.strategy} "
-                            f"actions={len(_composio_result.action_set)} search_ms={_composio_result.search_ms}"
-                        )
-                    else:
-                        # Fallback: ComposioHintService (composio_execute mega-tool)
-                        from modules.tools.services.composio_hint_service import ComposioHintService
-
-                        hint_service = ComposioHintService(self.db)
-                        hint_result = hint_service.build_hints(
-                            agent_id=agent_id,
-                            prompt=latest_text,
-                            workspace_id=self.workspace_id,
-                        )
-                        if hint_result.hint_lines:
-                            llm_messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
-                            logger.info(f"[Composio Hints fallback] strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)}")
-            except Exception as exc:
-                logger.warning(f"Composio tool injection failed: {exc}", exc_info=True)
-
-            # Explicit tool call bypass (e.g., "Use tool X with params {...}")
-            explicit_call = self.prompt_analyzer.parse_explicit_tool_call(latest_text)
-            if explicit_call and tools:
-                available_tool_names = {
-                    t.get("function", {}).get("name")
-                    for t in tools
-                    if isinstance(t, dict)
-                }
-                tool_name = explicit_call["tool_name"]
-                tool_args = explicit_call["tool_args"]
-                parse_error = explicit_call["parse_error"]
-
-                if tool_name in available_tool_names:
-                    if parse_error:
-                        full_response = f"Invalid tool params for {tool_name}: {parse_error}"
-                    else:
-                        import time
-                        tool_call_id = str(uuid.uuid4())
-                        start_time = time.time()
-
-                        yield self.streaming_handler.format_aisdk_tool_start(
-                            tool_call_id=tool_call_id,
-                            tool_name=tool_name,
-                            tool_input=tool_args,
-                        )
-                        await asyncio.sleep(0)
-
-                        result = await self.tool_router.execute_and_format(
-                            tool_name,
-                            tool_args,
-                            agent_id=agent_id,
-                            workspace_id=self.workspace_id,
-                            original_intent=latest_text,
-                        )
-
-                        yield self.streaming_handler.format_aisdk_tool_end(
-                            tool_call_id=tool_call_id,
-                            tool_name=tool_name,
-                            success=result.get("success", False),
-                            error=(result.get("raw_result", {}) or {}).get("error"),
-                            duration_ms=int((time.time() - start_time) * 1000),
-                        )
-                        await asyncio.sleep(0)
-
-                        if result.get("frontend_data"):
-                            tool_data.update(result["frontend_data"])
-                            yield self.streaming_handler.format_aisdk_tool_data(result["frontend_data"])
-                            await asyncio.sleep(0)
-
-                        if result.get("success"):
-                            full_response = f"✅ Ran {tool_name} successfully."
-                        else:
-                            error_msg = (result.get("raw_result", {}) or {}).get("error", "Unknown error")
-                            full_response = f"❌ {tool_name} failed: {error_msg}"
-
-                    # Stream text response
-                    async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
-                        yield chunk
-
-                    # Send finish event
-                    yield self.streaming_handler.format_aisdk_finish()
-
-                    # Save assistant message
-                    assistant_parts.append({'type': 'text', 'text': full_response})
-                    self.chat_service.save_message(
-                        chat_id=chat_id,
-                        role="assistant",
-                        parts=assistant_parts,
-                        workspace_id=self.workspace_id
-                    )
-
-                    # Store memory
-                    if latest_text and full_response:
-                        await self.memory_injector.store_conversation_memory(
-                            chat_id,
-                            latest_text,
-                            full_response,
-                            workspace_id=str(self.workspace_id) if self.workspace_id else None,
-                            agent_id=agent_id
-                        )
-
-                    # FutureAGI live traffic eval (fire-and-forget)
-                    if latest_text and full_response:
-                        try:
-                            from core.services.futureagi_service import futureagi_service
-                            if futureagi_service.is_available:
-                                asyncio.create_task(
-                                    futureagi_service.eval_live_traffic(
-                                        input_text=latest_text,
-                                        output_text=full_response,
-                                    )
-                                )
-                        except Exception:
-                            pass  # Never block chat for eval
-
-                    return
-            
-            # Generate response via shared.llm
-            response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
-            
-            # DEBUG: Log LLM response to understand why tools aren't being called
-            logger.info(f"🔍 LLM Response - has_tool_calls: {bool(response.tool_calls)}, content_length: {len(response.content or '')}, finish_reason: {getattr(response, 'finish_reason', 'unknown')}")
-            if response.tool_calls:
-                logger.info(f"✅ LLM requested {len(response.tool_calls)} tool calls")
-            elif use_tools:
-                logger.warning(f"⚠️ LLM did NOT call tools despite {len(use_tools)} tools being available. Response: {response.content[:200] if response.content else 'No content'}")
-            
-            # Handle tool calls from LLM (supports multi-turn)
-            if response.tool_calls:
-                # Emit tool lifecycle events + stream tool-data incrementally
-                import time
-
-                max_iterations = 10
-                iteration = 0
-                current_response = response
-                sent_tool_data = False
-                # Allow one recovery if the model calls composio_execute with missing args.
-                composio_invalid_parameters_retry_budget = 1
-
-                # Use enhanced tool execution tracker for loop prevention
-                tool_tracker = ToolExecutionTracker()
-
-                while current_response.tool_calls and iteration < max_iterations:
-                    iteration += 1
-                    logger.info(
-                        f"Tool iteration {iteration}: LLM requested {len(current_response.tool_calls)} tool calls"
-                    )
-
-                    # Emit tool-start for all requested tools
-                    start_times: Dict[str, float] = {}
-                    tool_calls_prepared = []
-
-                    for tool_call in current_response.tool_calls:
-                        tool_name = tool_call.get("function", {}).get("name") or "unknown_tool"
-                        tool_args_raw = tool_call.get("function", {}).get("arguments", "{}")
-                        tool_id = tool_call.get("id") or str(uuid.uuid4())
-
-                        try:
-                            tool_args = json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else (tool_args_raw or {})
-                        except Exception:
-                            tool_args = {"raw": tool_args_raw}
-                        
-                        start_times[tool_id] = time.time()
-
-                        # Enhanced deduplication check with semantic similarity
-                        should_skip, skip_reason = tool_tracker.should_skip_execution(tool_name, tool_args)
-                        
-                        # Determine if this skip should be silent (hidden from UI)
-                        # We silently hide "identical parameters" duplicates to prevent "printing twice"
-                        silent_suppression = False
-                        if should_skip and "identical parameters" in skip_reason:
-                            silent_suppression = True
-                            logger.info(f"🚫 Silently suppressing duplicate tool: {tool_name}")
-                        elif should_skip:
-                            logger.warning(f"⚠️ Tool loop prevention: {skip_reason}")
-                        else:
-                            # Record the execution before it happens
-                            tool_tracker.record_execution(tool_name, tool_args)
-
-                        tool_calls_prepared.append((tool_id, tool_name, tool_args, should_skip, skip_reason, silent_suppression))
-
-                        # Only emit start event if NOT silently suppressed
-                        if not silent_suppression:
-                            yield self.streaming_handler.format_aisdk_tool_start(
-                                tool_call_id=tool_id,
-                                tool_name=tool_name,
-                                tool_input=tool_args,
-                            )
-                        await asyncio.sleep(0)
-
-                    # Execute all tools in parallel
-                    async def execute_single_tool(tool_id: str, tool_name: str, tool_args: Dict[str, Any], should_skip: bool, skip_reason: str, silent: bool):
-                        if should_skip:
-                            if not silent:
-                                logger.warning(f"⚠️ Skipping tool execution: {tool_name} - {skip_reason}")
-                            
-                            return {
-                                "tool_call_id": tool_id,
-                                "tool_name": tool_name,
-                                "tool_args": tool_args,
-                                "role": "tool",
-                                "content": f"Error: {skip_reason}. Do not call this tool again with similar parameters.",
-                                "frontend_data": {},
-                                "success": False,
-                                "error": skip_reason,
-                                "silent": silent
-                            }
-
-                        # ------------------------------------------------------------------
-                        # Generic safety guard for Composio:
-                        # Do NOT allow destructive actions unless the user explicitly asked.
-                        # This prevents "archive/delete/clear" style side-effects for requests
-                        # like "send a message".
-                        # ------------------------------------------------------------------
-                        if tool_name == "composio_execute" and isinstance(tool_args, dict):
-                            action = str(tool_args.get("action") or "").upper().strip()
-                            if action:
-                                user_text = (latest_text or "").lower()
-                                wants_destructive = bool(re.search(r"\b(archive|delete|remove|revoke|clear|close|disable)\b", user_text))
-                                is_destructive = bool(re.search(r"(ARCHIVE|DELETE|REMOVE|REVOKE|CLEAR|CLOSE|DISABLE)", action))
-                                is_messaging = bool(re.search(r"\b(send|message|post|dm|chat)\b", user_text))
-                                if is_messaging and is_destructive and not wants_destructive:
-                                    return {
-                                        "tool_call_id": tool_id,
-                                        "tool_name": tool_name,
-                                        "tool_args": tool_args,
-                                        "role": "tool",
-                                        "content": (
-                                            f"Refused to execute destructive action '{action}' for a messaging request. "
-                                            "Pick a non-destructive mapped action that sends a message."
-                                        ),
-                                        "frontend_data": {},
-                                        "success": False,
-                                        "error": "Refused destructive action for messaging intent",
-                                        "silent": False
-                                    }
-
-                        # Direct Composio action execution (per-action tools)
-                        _is_composio = (
-                            _composio_result and _composio_result.entity_id and (
-                                tool_name in _composio_result.action_set
-                                or any(tool_name.startswith(f"{app}_") for app in (_composio_result.app_names or []))
-                            )
-                        )
-                        if _is_composio:
-                            try:
-                                from modules.tools.services.composio_tool_service import ComposioToolService
-                                _exec_svc = ComposioToolService(self.db)
-                                exec_result = _exec_svc.execute_action(
-                                    action_name=tool_name,
-                                    params=tool_args,
-                                    entity_id=_composio_result.entity_id,
-                                )
-                                success = exec_result.get("success", False)
-                                data = exec_result.get("data")
-                                error = exec_result.get("error")
-                                if success:
-                                    content = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
-                                else:
-                                    content = f"Error executing {tool_name}: {error or 'unknown error'}"
-                                logger.info(f"[Composio direct] {tool_name}: success={success}")
-                            except Exception as exc:
-                                content = f"Error executing {tool_name}: {exc}"
-                                success = False
-                                error = str(exc)
-                                logger.error(f"[Composio direct] {tool_name} exception: {exc}", exc_info=True)
-
-                            if len(content) > 4000:
-                                content = content[:4000] + "\n... (truncated)"
-
-                            return {
-                                "tool_call_id": tool_id,
-                                "tool_name": tool_name,
-                                "tool_args": tool_args,
-                                "role": "tool",
-                                "content": content,
-                                "frontend_data": {},
-                                "success": success,
-                                "error": error if not success else None,
-                                "silent": False,
-                            }
-
-                        logger.info(f"Executing tool: {tool_name}")
-                        result = await self.tool_router.execute_and_format(
-                            tool_name,
-                            tool_args,
-                            agent_id=agent_id,
-                            workspace_id=self.workspace_id,
-                            original_intent=latest_text,
-                        )
-                        return {
-                            "tool_call_id": tool_id,
-                            "tool_name": tool_name,
-                            "tool_args": tool_args,
-                            "role": "tool",
-                            "content": result.get("llm_context", ""),
-                            "frontend_data": result.get("frontend_data", {}),
-                            "success": bool(result.get("success")),
-                            "error": (result.get("raw_result", {}) or {}).get("error"),
-                            "silent": False
-                        }
-
-                    results = await asyncio.gather(*[
-                        execute_single_tool(tool_id, tool_name, tool_args, should_skip, skip_reason, silent)
-                        for (tool_id, tool_name, tool_args, should_skip, skip_reason, silent) in tool_calls_prepared
-                    ])
-
-                    tool_results = []
-                    followup_system_messages: List[Dict[str, Any]] = []
-
-                    # Emit tool-end + stream tool-data for each tool
-                    for r in results:
-                        # Skip UI events for silently suppressed duplicates
-                        if r.get("silent"):
-                            # We still append to tool_results below so the LLM knows what happened
-                            # (or thinks it errored, so it stops trying), but frontend sees nothing.
-                            pass
-                        else:
-                            tool_id = r["tool_call_id"]
-                            tool_name = r["tool_name"]
-                            duration_ms = int((time.time() - start_times.get(tool_id, time.time())) * 1000)
-
-                            yield self.streaming_handler.format_aisdk_tool_end(
-                                tool_call_id=tool_id,
-                                tool_name=tool_name,
-                                success=r["success"],
-                                error=r.get("error"),
-                                duration_ms=duration_ms,
-                            )
-                            await asyncio.sleep(0)
-
-                            if r["success"] and r.get("frontend_data"):
-                                tool_data.update(r["frontend_data"])
-                                if isinstance(r["frontend_data"], dict) and r["frontend_data"].get("documents"):
-                                    documents_tool_used = True
-                                logger.info(f"[TOOL-DATA] Yielding tool-data for {r['tool_name']}: keys={list(r['frontend_data'].keys())}")
-                                yield self.streaming_handler.format_aisdk_tool_data(r["frontend_data"])
-                                sent_tool_data = True
-                                await asyncio.sleep(0)
-                            else:
-                                logger.warning(f"[TOOL-DATA] NOT yielding tool-data - success={r.get('success')}, has_frontend_data={bool(r.get('frontend_data'))}")
-
-                        tool_results.append({
-                            "tool_call_id": r["tool_call_id"],
-                            "role": "tool",
-                            "content": r.get("content", ""),
-                        })
-
-                        # If Composio execution failed due to invalid parameters (often the model sent {}),
-                        # inject ONE follow-up instruction with candidate mapped actions from DB.
-                        if (
-                            (not r.get("success"))
-                            and r.get("tool_name") == "composio_execute"
-                            and (r.get("error") or "").lower().find("missing") != -1
-                            and composio_invalid_parameters_retry_budget > 0
-                        ):
-                            composio_invalid_parameters_retry_budget -= 1
-                            try:
-                                from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
-                                from core.composio.entity_manager import EntityManager
-                                from sqlalchemy import or_
-
-                                q = (latest_text or "").lower()
-                                q_tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) > 2]
-                                stop = {"the", "and", "for", "with", "from", "that", "this", "have", "has", "are", "you", "your"}
-                                q_tokens = [t for t in q_tokens if t not in stop][:10]
-
-                                # Allowed apps = assigned EXTERNAL apps, optionally intersect with connected apps
-                                assigned = (
-                                    self.db.query(AgentAppAssignment)
-                                    .filter(
-                                        AgentAppAssignment.agent_id == agent_id,
-                                        AgentAppAssignment.is_active == True,  # noqa: E712
-                                        AgentAppAssignment.app_type == "EXTERNAL",
-                                    )
-                                    .all()
-                                )
-                                assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
-                                allowed_apps = assigned_apps
-                                if self.workspace_id:
-                                    manager = EntityManager(self.db)
-                                    entity = manager.get_entity_by_workspace(self.workspace_id)
-                                    if entity:
-                                        connected_apps = [
-                                            (c.get("app_name") or "").upper()
-                                            for c in manager.get_entity_connections(entity["id"])
-                                            if c.get("status") == "active"
-                                        ]
-                                        if connected_apps:
-                                            connected_set = set(connected_apps)
-                                            allowed_apps = [a for a in assigned_apps if a in connected_set]
-
-                                suggestions: List[str] = []
-                                if q_tokens and allowed_apps:
-                                    for app in allowed_apps[:12]:
-                                        token_filters = []
-                                        for tok in q_tokens:
-                                            like = f"%{tok}%"
-                                            token_filters.append(ComposioActionCache.action_name.ilike(like))
-                                            token_filters.append(ComposioActionCache.description.ilike(like))
-                                        rows = (
-                                            self.db.query(ComposioActionCache.action_name)
-                                            .filter(ComposioActionCache.app_name == app)
-                                            .filter(or_(*token_filters))
-                                            .limit(12)
-                                            .all()
-                                        )
-                                        for (action_name,) in rows:
-                                            if action_name:
-                                                suggestions.append(str(action_name))
-                                        if len(suggestions) >= 12:
-                                            break
-                                suggestions = list(dict.fromkeys(suggestions))[:10]
-
-                                followup_system_messages.append(
-                                    {
-                                        "role": "system",
-                                        "content": (
-                                            "Your previous `composio_execute` call was missing required fields. "
-                                            "Retry `composio_execute` with an explicit mapped `action` from "
-                                            "`composio_actions_cache` plus the required `params`.\n"
-                                            + (
-                                                f"Candidate actions for this request: {', '.join(suggestions)}"
-                                                if suggestions
-                                                else "Pick the correct mapped action for the assigned app (e.g., Slack send message)."
-                                            )
-                                        ),
-                                    }
-                                )
-                            except Exception:
-                                followup_system_messages.append(
-                                    {
-                                        "role": "system",
-                                        "content": (
-                                            "Your previous `composio_execute` call was missing required fields. "
-                                            "Retry with an explicit mapped `action` and any required `params`."
-                                        ),
-                                    }
-                                )
-
-                    # Add assistant message with tool calls and results
-                    llm_messages.append({
-                        "role": "assistant",
-                        "content": current_response.content or "",
-                        "tool_calls": current_response.tool_calls,
-                    })
-                    llm_messages.extend(tool_results)
-                    if followup_system_messages:
-                        llm_messages.extend(followup_system_messages)
-
-                    # Get next response - allow more tool calls if needed
-                    allow_more_tools = iteration < max_iterations - 1
-                    current_response = await llm_manager.generate_response(
-                        messages=llm_messages,
-                        tools=use_tools if allow_more_tools else None,
-                    )
-
-                    logger.info(
-                        f"Iteration {iteration} complete. More tool calls: {bool(current_response.tool_calls)}, "
-                        f"Has content: {bool(current_response.content)}"
-                    )
-                    # Log tool execution summary for debugging
-                    if tool_tracker.tool_counts:
-                        logger.info(f"📊 Tool execution counts this turn: {dict(tool_tracker.tool_counts)}")
-
-                if iteration >= max_iterations and current_response.tool_calls:
-                    logger.warning(f"Hit max tool iterations ({max_iterations}). Forcing final response.")
-
-                full_response = current_response.content or ""
-
-                # Safety: if we aggregated but never streamed tool-data incrementally
-                if tool_data and not sent_tool_data:
-                    yield self.streaming_handler.format_aisdk_tool_data(tool_data)
-                    await asyncio.sleep(0)
-            else:
-                full_response = response.content or ""
-
-            # ------------------------------------------------------------------
-            # Document-answer shaping (prevent filename/link dumps in chat text)
-            # ------------------------------------------------------------------
-            def _infer_doc_topic(user_text: str) -> str:
-                tl = (user_text or "").lower()
-                if "agentfactory" in tl or "agent factory" in tl:
-                    return "AgentFactory"
-                cleaned = re.sub(
-                    r"^(show|give|list|find|search)\s+(me\s+)?(the\s+)?(docs|documents)\s+(for|about)\s+",
-                    "",
-                    (user_text or "").strip(),
-                    flags=re.I,
-                )
-                cleaned = cleaned.strip().strip("?.!")
-                return cleaned[:60] if cleaned else "this topic"
-
-            def _enforce_documents_shape(text: str, topic: str) -> str:
-                """
-                Enforce:
-                - short plain-text summary (no 1./2./3. lists)
-                - then exactly: "Here are some documents that discuss <topic>:"
-                - stop (no filename list; UI cards below are the list)
-                """
-                text = (text or "").strip()
-                lines = text.splitlines()
-                out_lines: List[str] = []
-
-                filename_re = re.compile(r"\b[\w\-. ]+\.(md|pdf|txt|docx?)\b", re.I)
-                ordered_re = re.compile(r"^\s*\d+\.\s+")
-                bullet_re = re.compile(r"^\s*[-*]\s+")
-                md_link_re = re.compile(r"\[[^\]]+\]\([^)]+\)")
-
-                for line in lines:
-                    stripped = line.strip()
-                    if not stripped:
-                        out_lines.append("")
-                        continue
-
-                    # Drop ordered/bulleted list items (removes the 1/2/3 sections)
-                    if ordered_re.match(stripped) or bullet_re.match(stripped):
-                        # If it's clearly a filename/link list item, drop it
-                        if filename_re.search(stripped) or md_link_re.search(stripped):
-                            continue
-                        # Otherwise drop anyway for doc answers (keep summary plain text)
-                        continue
-
-                    # Drop standalone filename-ish lines (prevents echoed file lists)
-                    if filename_re.fullmatch(stripped) or (filename_re.search(stripped) and len(stripped) <= 90):
-                        continue
-
-                    out_lines.append(line)
-
-                cleaned = "\n".join(out_lines).strip()
-                header = f"Here are some documents that discuss {topic}:"
-
-                # Truncate at the first occurrence of the header intent if present
-                m = re.search(r"here are some documents that discuss[^:]*:", cleaned, flags=re.I)
-                if m:
-                    before = cleaned[: m.start()].strip()
-                    before = before.split("\n\n")[0].strip()  # first paragraph only
-                    return (before + "\n\n" + header).strip()
-
-                summary = cleaned.split("\n\n")[0].strip()
-                if len(summary) > 700:
-                    summary = summary[:700].rsplit(" ", 1)[0].strip() + "…"
-                return (summary + "\n\n" + header).strip()
-
-            # Only apply document shaping for DIRECT document requests
-            # Don't apply for research/synthesis queries like "write a report"
-            is_direct_doc_request = bool(re.search(
-                r'\b(show|give|list|find|search)\s+(me\s+)?(the\s+)?(docs?|documents?)\b',
-                (latest_text or '').lower()
-            ))
-            
-            if tool_data.get("documents") and is_direct_doc_request:
-                topic = _infer_doc_topic(latest_text)
-                full_response = _enforce_documents_shape(full_response, topic)
-
-            # Upload inline base64 images to S3 and replace with URLs
-            full_response = await _upload_inline_images(
-                full_response,
-                workspace_id=str(self.workspace_id) if self.workspace_id else None,
-            )
-
-            # Stream text response
-            async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
-                yield chunk
-
-            # Send usage data (tracking now handled by LLMManager)
-            if hasattr(response, 'usage') and response.usage:
-                yield self.streaming_handler.format_aisdk_usage(
-                    response.usage.get('prompt_tokens', 0),
-                    response.usage.get('completion_tokens', 0),
-                    response.usage.get('total_tokens', 0)
-                )
-
-            # Send finish event
-            yield self.streaming_handler.format_aisdk_finish()
-
-            # Save assistant message
-            assistant_parts.append({'type': 'text', 'text': full_response})
-            self.chat_service.save_message(
-                chat_id=chat_id,
-                role="assistant",
-                parts=assistant_parts,
-                workspace_id=self.workspace_id
-            )
-
-            # Store memory via modules.memory
-            if latest_text and full_response:
-                await self.memory_injector.store_conversation_memory(
-                    chat_id,
-                    latest_text,
-                    full_response,
-                    workspace_id=str(self.workspace_id) if self.workspace_id else None,
-                    agent_id=agent_id
-                )
-
-            # FutureAGI live traffic eval (fire-and-forget)
-            if latest_text and full_response:
-                try:
-                    from core.services.futureagi_service import futureagi_service
-                    if futureagi_service.is_available:
-                        asyncio.create_task(
-                            futureagi_service.eval_live_traffic(
-                                input_text=latest_text,
-                                output_text=full_response,
-                            )
-                        )
-                except Exception:
-                    pass  # Never block chat for eval
-
-            # Persist task counter to DB for the active agent
-            if agent_id:
-                try:
-                    from core.models import Agent as AgentModel
-                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
-                    if agent_row:
-                        metrics = dict(agent_row.performance_metrics or {})
-                        metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
-                        metrics["tasks_completed"] = metrics["total_tasks_executed"]
-                        agent_row.performance_metrics = metrics
-                        self.db.commit()
-                except Exception as metric_err:
-                    logger.warning(f"Failed to persist agent task counter: {metric_err}")
-                    try:
-                        self.db.rollback()
-                    except Exception:
-                        pass
-
-        except Exception as e:
-            logger.error(f"Error streaming response: {e}")
-            import traceback
-            traceback.print_exc()
-            yield self.streaming_handler.format_aisdk_error(str(e))
-
     async def stream_response_with_agent(
         self,
         chat_id: str,
@@ -1256,6 +498,7 @@ class StreamingChatService:
         user_id: int,
         use_system_llm: bool = False,
         skip_composio: bool = False,
+        complexity_assessment: Optional[Any] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream chat response using a specialized agent from AgentFactory.
@@ -1349,30 +592,58 @@ class StreamingChatService:
             # Load agent context: persona, description, skill tools
             agent_ctx = await self._load_agent_context(agent_runtime)
             skill_tools = agent_ctx["skill_tools"]
-            from consumers.chatbot.tool_router import get_chat_tools
-            is_simple = self.prompt_analyzer.is_simple_message(latest_text)
-            all_tools = None if is_simple else get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
-            if not is_simple and skill_tools:
-                all_tools = (all_tools or []) + skill_tools
 
-            # Convert messages to LLM format (no system prompt — orchestrator builds it)
-            llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-                messages,
-                system_prompt="",
-                available_tools=all_tools
+            # ── PRD-68: Branch on complexity level ──
+            from consumers.chatbot.auto import Complexity
+            _complexity = (
+                complexity_assessment.complexity
+                if complexity_assessment
+                else Complexity.MOLECULE  # default when no assessment (e.g. direct agent pick)
             )
 
-            # Orchestrate: memory + personality + tool filtering in one call
-            orchestrated = await smart_chat.prepare(llm_messages, all_tools or [], chat_id)
-            llm_messages = apply_orchestration_to_messages(orchestrated)
-            use_tools = orchestrated.tools if orchestrated.requires_tools else None
+            if _complexity == Complexity.ATOM:
+                # ATOM: No tools, no memory, no SmartChatIntegration.
+                # Minimal system prompt + conversation → LLM. Fastest path.
+                logger.info("[PRD-68] ATOM path — skipping tools, memory, orchestration")
+                _atom_prompt = (
+                    f"You are {agent_runtime.metadata.name}, a friendly AI assistant. "
+                    "Respond naturally and conversationally. Keep it brief."
+                )
+                llm_messages = self.prompt_analyzer.convert_to_llm_messages(
+                    messages, system_prompt=_atom_prompt, available_tools=None
+                )
+                use_tools = None
+                orchestrated = None
+            else:
+                # MOLECULE / CELL / ORGAN / ORGANISM: Full pipeline
+                from consumers.chatbot.tool_router import get_chat_tools
+                all_tools = get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
+                if skill_tools:
+                    all_tools = (all_tools or []) + skill_tools
 
-            logger.info(
-                f"[SmartChat] intent={orchestrated.intent.value} "
-                f"tools={len(use_tools) if use_tools else 0} "
-                f"memory={'yes' if orchestrated.memory_context else 'no'} "
-                f"prep={orchestrated.preparation_time_ms:.0f}ms"
-            )
+                llm_messages = self.prompt_analyzer.convert_to_llm_messages(
+                    messages, system_prompt="", available_tools=all_tools
+                )
+
+                # Orchestrate: memory + personality + tool filtering
+                orchestrated = await smart_chat.prepare(
+                    messages=llm_messages,
+                    available_tools=all_tools or [],
+                    chat_id=chat_id,
+                    complexity_assessment=complexity_assessment,
+                )
+                llm_messages = apply_orchestration_to_messages(orchestrated)
+                use_tools = orchestrated.tools if orchestrated.requires_tools else None
+
+            if orchestrated:
+                logger.info(
+                    f"[SmartChat] intent={orchestrated.intent.value} "
+                    f"tools={len(use_tools) if use_tools else 0} "
+                    f"memory={'yes' if orchestrated.memory_context else 'no'} "
+                    f"prep={orchestrated.preparation_time_ms:.0f}ms"
+                )
+            else:
+                logger.info("[PRD-68] ATOM — no orchestration, direct LLM")
 
             # ── PRD-67: CTO Agent system prompt override ──
             # Reuse _cto_check_result from the agent-info query above (no extra DB hit)
@@ -1422,7 +693,7 @@ class StreamingChatService:
             # ── End PRD-67 CTO override ──
 
             # US-015: Emit memory-injected SSE event when memories were retrieved
-            if orchestrated.memory_context:
+            if orchestrated and orchestrated.memory_context:
                 _mem_result = getattr(smart_chat.orchestrator, '_last_memory_result', None)
                 _memories_list = _mem_result.memories if _mem_result else []
                 _total_matched = len(_memories_list)
@@ -1692,7 +963,7 @@ class StreamingChatService:
                             futureagi_service.eval_live_traffic(
                                 input_text=latest_text,
                                 output_text=full_response,
-                                context_text=orchestrated.system_prompt,
+                                context_text=orchestrated.system_prompt if orchestrated else "",
                             )
                         )
                 except Exception:
@@ -2426,28 +1697,42 @@ class StreamingChatService:
                         yield {"_final_response": SimpleNamespace(content=final_response.content or "", tool_calls=None, usage=getattr(final_response, "usage", None))}
                         return
 
-                    # 3) Generic: for most non-Composio tools, don’t allow multiple attempts in one request.
-                    # This prevents the model from re-issuing the same tool with slightly different phrasing.
-                    # IMPORTANT: Do NOT `return` here — that kills the entire loop and prevents
-                    # the agent from calling other tools (e.g. generate_document after research).
-                    # Instead, inject a system message telling the LLM to stop using THAT tool.
+                    # 3) Per-tool retry limits.
+                    # Multi-step tools (file ops, workspace, composio) are allowed more calls
+                    # but still have a hard cap to prevent runaway loops.
+                    # Non-multi-step tools get a soft limit of 2 with a proceed instruction.
                     _MULTI_STEP_TOOLS = {
                         "composio_execute",
                         "read_file", "write_file", "list_directory", "create_directory", "delete_file",
                         "generate_document",  # PRD-63: doc gen is a creation step, not a retry
+                        "workspace_read_file", "workspace_grep", "workspace_list_dir",
+                        "workspace_write_file", "workspace_create_directory",
                     }
-                    if tool_name not in _MULTI_STEP_TOOLS and not tool_name.startswith("composio_"):
-                        if tool_attempts.get(tool_name, 0) >= 2:
-                            llm_messages.append({
-                                "role": "system",
-                                "content": (
-                                    f"You have already called `{tool_name}` multiple times. "
-                                    f"Do NOT call `{tool_name}` again. "
-                                    "Use the results you already have and proceed to fulfill the user's request "
-                                    "with your other available tools."
-                                ),
-                            })
-                            logger.info(f"[tool-loop] Tool {tool_name} hit retry limit — injecting proceed instruction")
+                    _is_multi_step = tool_name in _MULTI_STEP_TOOLS or tool_name.startswith("composio_") or tool_name.startswith("workspace_")
+                    _attempts = tool_attempts.get(tool_name, 0)
+
+                    if _is_multi_step and _attempts >= 8:
+                        # Hard cap for multi-step tools — force synthesis
+                        llm_messages.append({
+                            "role": "system",
+                            "content": (
+                                f"STOP: `{tool_name}` has been called {_attempts} times. "
+                                "You MUST now synthesize a response from the results you have. "
+                                "Do NOT call any more tools."
+                            ),
+                        })
+                        logger.warning(f"[tool-loop] Multi-step tool {tool_name} hit hard cap ({_attempts} calls) — forcing synthesis")
+                    elif not _is_multi_step and _attempts >= 2:
+                        llm_messages.append({
+                            "role": "system",
+                            "content": (
+                                f"You have already called `{tool_name}` multiple times. "
+                                f"Do NOT call `{tool_name}` again. "
+                                "Use the results you already have and proceed to fulfill the user’s request "
+                                "with your other available tools."
+                            ),
+                        })
+                        logger.info(f"[tool-loop] Tool {tool_name} hit retry limit — injecting proceed instruction")
                     
                 except Exception as e:
                     logger.error(f"Tool {tool_name} failed: {e}")
@@ -2498,8 +1783,12 @@ class StreamingChatService:
             # Do NOT stop tool use merely because one tool call succeeded: many user requests are
             # multi-step (e.g., "fetch emails THEN post summary to Slack"). Stopping after the first
             # success prevents completion of later side-effects.
-            if executed_call_key_repeat:
+            # Force synthesis if any tool hit its hard cap or exact duplicate detected
+            _any_tool_exhausted = any(v >= 8 for v in tool_attempts.values())
+            if executed_call_key_repeat or _any_tool_exhausted:
                 from types import SimpleNamespace
+                if _any_tool_exhausted:
+                    logger.warning(f"[tool-loop] Tool hard cap reached — forcing synthesis (attempts: {dict(tool_attempts)})")
                 llm_messages.append(
                     {
                         "role": "system",
