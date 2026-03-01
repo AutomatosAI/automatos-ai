@@ -1480,6 +1480,8 @@ To use actions, respond with JSON blocks like:
                         
                         # Track executed calls in this turn to prevent duplicates
                         executed_calls_hashes = set()
+                        # Mid-execution discovery: max 1 attempt per execute_with_prompt call
+                        _discovery_attempted = False
                         
                         for tool_call in response.tool_calls:
                             func_name = tool_call['function']['name']
@@ -1529,6 +1531,19 @@ To use actions, respond with JSON blocks like:
                                     agent_id=agent_runtime.agent_id,
                                     workspace_id=_composio_workspace_id
                                 )
+                                # Mid-execution discovery: check for capability gap
+                                if (
+                                    isinstance(result, dict)
+                                    and not result.get("success", True)
+                                    and not _discovery_attempted
+                                ):
+                                    tool_schemas, _disc_msg, _discovery_attempted = await self._try_discovery(
+                                        func_name, result.get("error", ""), func_args, tool_schemas,
+                                        agent_runtime, _composio_workspace_id, original_user_prompt,
+                                    )
+                                    if _disc_msg:
+                                        result = {"success": False, "error": _disc_msg, "tool": func_name}
+
                                 tool_results.append({
                                     "tool_call_id": tool_call['id'],
                                     "role": "tool",
@@ -1538,11 +1553,20 @@ To use actions, respond with JSON blocks like:
                                 self.logger.info(f"    ✅ [TRACE] {func_name} completed successfully")
                             except Exception as e:
                                 self.logger.error(f"    ❌ [TRACE] {func_name} failed: {e}")
+                                error_str = str(e)
+                                # Mid-execution discovery: check exceptions for capability gap
+                                if not _discovery_attempted:
+                                    tool_schemas, _disc_msg, _discovery_attempted = await self._try_discovery(
+                                        func_name, error_str, func_args, tool_schemas,
+                                        agent_runtime, _composio_workspace_id, original_user_prompt,
+                                    )
+                                    if _disc_msg:
+                                        error_str = _disc_msg
                                 tool_results.append({
                                     "tool_call_id": tool_call['id'],
                                     "role": "tool",
                                     "name": func_name,
-                                    "content": json.dumps({"error": str(e)})
+                                    "content": json.dumps({"error": error_str})
                                 })
                         
                         # Add assistant's tool call message and tool results to conversation
@@ -1752,6 +1776,194 @@ To use actions, respond with JSON blocks like:
             )
         
         return agent
+
+    # ======================================================================
+    # Mid-execution tool discovery helpers
+    # ======================================================================
+
+    # Map failed function names to tool categories for platform tool discovery
+    _TOOL_TO_CATEGORY = {
+        "write_file": "file_ops", "read_file": "file_ops",
+        "list_directory": "file_ops", "create_directory": "file_ops",
+        "execute_command": "shell",
+        "search_knowledge": "research", "semantic_search": "research",
+        "search_codebase": "research",
+        "query_database": "database", "smart_query_database": "database",
+    }
+
+    _TRANSIENT_PATTERNS = ("timeout", "rate limit", "connection", "permission denied", "timed out")
+
+    @staticmethod
+    def _get_schema_names(tool_schemas: List[Dict]) -> set:
+        """Extract function names from OpenAI tool schema list."""
+        return {t.get("function", {}).get("name", "") for t in tool_schemas}
+
+    def _classify_tool_failure(self, func_name: str, error_msg: str, tool_schemas: List[Dict]) -> str:
+        """
+        Classify a tool failure as CAPABILITY_GAP or TRANSIENT.
+
+        CAPABILITY_GAP: tool doesn't exist in current schema — discovery can help.
+        TRANSIENT: timeout, rate limit, bad params — retry as-is.
+        """
+        error_lower = (error_msg or "").lower()
+
+        if any(p in error_lower for p in self._TRANSIENT_PATTERNS):
+            return "TRANSIENT"
+
+        if "unknown tool" in error_lower:
+            return "CAPABILITY_GAP"
+
+        if func_name not in self._get_schema_names(tool_schemas):
+            return "CAPABILITY_GAP"
+
+        if func_name == "composio_execute" and any(
+            p in error_lower for p in ("not found", "invalid action", "unknown action")
+        ):
+            return "CAPABILITY_GAP"
+
+        return "TRANSIENT"
+
+    async def _try_discovery(
+        self,
+        func_name: str,
+        error_msg: str,
+        func_args: Dict[str, Any],
+        tool_schemas: List[Dict],
+        agent_runtime,
+        workspace_id,
+        prompt: str,
+    ) -> Tuple[List[Dict], str, bool]:
+        """
+        Classify failure and attempt discovery if it's a capability gap.
+
+        Returns (updated_tool_schemas, discovery_message, discovery_attempted).
+        """
+        failure_type = self._classify_tool_failure(func_name, error_msg, tool_schemas)
+        if failure_type != "CAPABILITY_GAP":
+            return tool_schemas, "", False
+
+        self.logger.info(f"    🔍 [DISCOVERY] Capability gap: {func_name}, searching alternatives...")
+        try:
+            if func_name == "composio_execute":
+                schemas, msg = await self._discover_composio_actions(
+                    func_args, tool_schemas, agent_runtime, workspace_id, prompt
+                )
+            else:
+                schemas, msg = self._discover_platform_tools(func_name, tool_schemas)
+            return schemas, msg, True
+        except Exception as e:
+            self.logger.warning(f"    ⚠️ [DISCOVERY] Failed: {e}", exc_info=True)
+            return tool_schemas, "", True
+
+    def _discover_platform_tools(
+        self, func_name: str, tool_schemas: List[Dict]
+    ) -> Tuple[List[Dict], str]:
+        """Path A: Discover platform tools by category."""
+        from modules.tools.registry.tool_registry import get_tool_registry
+
+        # Resolve category from name or keyword
+        category = self._TOOL_TO_CATEGORY.get(func_name)
+        if not category:
+            name_lower = func_name.lower()
+            if "file" in name_lower:
+                category = "file_ops"
+            elif "search" in name_lower or "knowledge" in name_lower:
+                category = "research"
+            elif "command" in name_lower or "shell" in name_lower or "exec" in name_lower:
+                category = "shell"
+            elif "database" in name_lower or "query" in name_lower or "sql" in name_lower:
+                category = "database"
+
+        if not category:
+            self.logger.info(f"    🔍 [DISCOVERY] No category mapping for '{func_name}'")
+            return tool_schemas, ""
+
+        registry = get_tool_registry()
+        candidates = registry.get_tools_for_categories([category])
+        if not candidates:
+            return tool_schemas, ""
+
+        existing_names = self._get_schema_names(tool_schemas)
+        new_tools = []
+        for spec in candidates:
+            if spec.name not in existing_names and len(new_tools) < 5:
+                new_tools.append({"type": "function", "function": spec.to_openai_format()})
+
+        if not new_tools:
+            return tool_schemas, ""
+
+        tool_schemas = tool_schemas + new_tools
+        new_names = [t["function"]["name"] for t in new_tools]
+        self.logger.info(f"    🔍 [DISCOVERY] Added {len(new_names)} platform tools: {new_names}")
+        msg = f"Tool '{func_name}' not available. Alternatives added: {new_names}. Try again with one of these."
+        return tool_schemas, msg
+
+    async def _discover_composio_actions(
+        self,
+        func_args: Dict[str, Any],
+        tool_schemas: List[Dict],
+        agent_runtime,
+        workspace_id,
+        prompt: str,
+    ) -> Tuple[List[Dict], str]:
+        """Path B: Discover Composio actions via HintService/ActionCapabilityFilter."""
+        from modules.tools.services.composio_hint_service import ComposioHintService
+
+        failed_action = func_args.get("action", "")
+        db = getattr(agent_runtime, "db", None)
+        if not db:
+            return tool_schemas, ""
+
+        hint_svc = ComposioHintService(db)
+        hint_result = hint_svc.build_hints(
+            agent_id=agent_runtime.agent_id,
+            prompt=prompt,
+            workspace_id=workspace_id,
+            recipe_mode=True,
+        )
+        new_actions = hint_result.matched_actions if hint_result else []
+
+        # Fallback: ActionCapabilityFilter if hint service returned nothing
+        if not new_actions:
+            from modules.tools.services.action_capability_filter import ActionCapabilityFilter
+            allowed_apps = hint_result.allowed_apps if hint_result else []
+            if allowed_apps:
+                acf = ActionCapabilityFilter(db)
+                filter_result = await acf.get_actions_for_intent(prompt, allowed_apps)
+                new_actions = [a.action_id for a in filter_result.actions]
+
+        if not new_actions:
+            return tool_schemas, ""
+
+        # Find the composio_execute schema and mutate its action enum
+        composio_schema = None
+        existing_enum: List[str] = []
+        for schema in tool_schemas:
+            if schema.get("function", {}).get("name") == "composio_execute":
+                composio_schema = schema
+                existing_enum = schema["function"].get("parameters", {}).get("properties", {}).get("action", {}).get("enum", [])
+                break
+
+        if composio_schema is None:
+            return tool_schemas, ""
+
+        existing_set = set(existing_enum)
+        added = []
+        for action in new_actions:
+            if action not in existing_set and len(added) < 5:
+                added.append(action)
+                existing_set.add(action)
+
+        if not added:
+            return tool_schemas, ""
+
+        composio_schema["function"]["parameters"]["properties"]["action"]["enum"] = list(existing_set)
+        self.logger.info(f"    🔍 [DISCOVERY] Added {len(added)} Composio actions: {added}")
+        msg = (
+            f"Action '{failed_action}' not found. Alternatives added: {added}. "
+            f"Call composio_execute with one of these."
+        )
+        return tool_schemas, msg
 
     # ======================================================================
     # PRD-22: Intelligent skill selection helper
