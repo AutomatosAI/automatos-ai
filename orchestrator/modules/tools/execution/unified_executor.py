@@ -854,14 +854,17 @@ class UnifiedToolExecutor:
     # HTTP Request Tool
     # ------------------------------------------------------------------
 
-    _ALLOWED_HTTP_DOMAINS = {
-        "automatos-ai.railway.internal",
-        "automatos-ai-frontend.railway.internal",
-        "api.automatos.app",
-        "ui.automatos.app",
-        "localhost",
-        "127.0.0.1",
-    }
+    @staticmethod
+    def _get_allowed_http_domains():
+        from config import config
+        return {
+            config.INTERNAL_API_HOSTNAME,
+            config.INTERNAL_FRONTEND_HOSTNAME,
+            "api.automatos.app",
+            "ui.automatos.app",
+            "localhost",
+            "127.0.0.1",
+        }
 
     async def _execute_http_request(
         self,
@@ -897,12 +900,13 @@ class UnifiedToolExecutor:
             if not hostname:
                 return {"success": False, "error": "Invalid URL: no hostname", "tool": tool_name}
 
-            if hostname not in self._ALLOWED_HTTP_DOMAINS:
+            allowed = self._get_allowed_http_domains()
+            if hostname not in allowed:
                 return {
                     "success": False,
                     "error": (
                         f"Domain '{hostname}' is not whitelisted. "
-                        f"Allowed: {', '.join(sorted(self._ALLOWED_HTTP_DOMAINS))}"
+                        f"Allowed: {', '.join(sorted(allowed))}"
                     ),
                     "tool": tool_name,
                 }

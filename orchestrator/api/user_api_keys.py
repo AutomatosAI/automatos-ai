@@ -19,6 +19,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import UserApiKey
 from core.credentials.encryption import get_encryption_service
+from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/keys", tags=["API Keys"])
@@ -210,8 +211,8 @@ async def test_api_key(
             from openai import OpenAI
             client = OpenAI(
                 api_key=raw_key,
-                base_url="https://openrouter.ai/api/v1",
-                default_headers={"HTTP-Referer": "https://automatos.app", "X-Title": "Automatos AI"},
+                base_url=config.OPENROUTER_BASE_URL,
+                default_headers={"HTTP-Referer": config.OPENROUTER_SITE_URL, "X-Title": "Automatos AI"},
             )
             client.models.list()
         else:

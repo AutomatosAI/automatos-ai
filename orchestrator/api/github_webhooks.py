@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 
+from config import config
 from core.database.database import get_db
 from api.workflows import execute_workflow
 
@@ -58,8 +59,7 @@ async def github_webhook(
     payload = await request.json()
 
     # Verify signature — mandatory when secret is configured
-    import os
-    webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET", "")
+    webhook_secret = config.GITHUB_WEBHOOK_SECRET or ""
     if not webhook_secret:
         logger.error("GITHUB_WEBHOOK_SECRET not configured — rejecting webhook")
         raise HTTPException(status_code=500, detail="Webhook secret not configured")
@@ -92,9 +92,8 @@ async def github_webhook(
             
             # Find the PR Review workflow by name - scoped to configured workspace
             from core.models import Workflow
-            import os
-            pr_workflow_name = os.getenv("GITHUB_PR_WORKFLOW_NAME", "PR Code Review")
-            webhook_workspace_id = os.getenv("GITHUB_WEBHOOK_WORKSPACE_ID") or os.getenv("DEFAULT_WORKSPACE_ID")
+            pr_workflow_name = config.GITHUB_PR_WORKFLOW_NAME or "PR Code Review"
+            webhook_workspace_id = config.GITHUB_WEBHOOK_WORKSPACE_ID
             query = db.query(Workflow).filter(Workflow.name == pr_workflow_name)
             if webhook_workspace_id:
                 query = query.filter(Workflow.workspace_id == webhook_workspace_id)
@@ -170,10 +169,9 @@ async def github_webhook(
 @router.get("/health")
 async def github_integration_health():
     """Health check for GitHub integration"""
-    import os
     return {
         "status": "healthy",
-        "webhook_secret_configured": bool(os.getenv("GITHUB_WEBHOOK_SECRET")),
+        "webhook_secret_configured": bool(config.GITHUB_WEBHOOK_SECRET),
         "endpoint": "/api/github/webhook"
     }
 

@@ -5,10 +5,10 @@ OpenAI Embedding Provider Implementation
 OpenAI embedding models provider (extends OpenAI client).
 """
 
-import os
 import logging
 from typing import List
 
+from config import config
 from .base import BaseEmbeddingProvider, EmbeddingConfig
 
 try:
@@ -26,7 +26,7 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
         if AsyncOpenAI is None:
             raise ImportError("OpenAI package not installed. Run: pip install openai")
         
-        api_key = self.config.api_key or os.getenv("OPENAI_API_KEY")
+        api_key = self.config.api_key or config.OPENAI_API_KEY
         
         if not api_key:
             logger.warning(

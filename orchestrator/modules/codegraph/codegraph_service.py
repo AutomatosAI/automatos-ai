@@ -78,8 +78,8 @@ class CodeGraphService:
         self._vector_store = None
         try:
             from modules.search import EnhancedVectorStore
-            import os
-            db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
+            from config import config
+            db_url = config.DATABASE_URL
             self._vector_store = EnhancedVectorStore(
                 database_url=db_url,
                 table_name="codegraph_symbols"  # Use CodeGraph's existing table

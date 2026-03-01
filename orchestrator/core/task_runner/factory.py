@@ -15,8 +15,9 @@ Configuration:
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
+
+from config import config
 
 from .base import TaskRunner
 from .local import LocalTaskRunner
@@ -44,7 +45,7 @@ def get_task_runner() -> TaskRunner:
     if _runner_instance is not None:
         return _runner_instance
 
-    backend = os.environ.get("TASK_RUNNER_BACKEND", "local").lower().strip()
+    backend = (config.TASK_RUNNER_BACKEND or "local").lower().strip()
 
     if backend == "local":
         _runner_instance = LocalTaskRunner()

@@ -11,9 +11,9 @@ CRITICAL: This script NEVER overwrites existing values.
 """
 
 import logging
-import os
 from sqlalchemy.orm import Session
 
+from config import config
 from core.models.system_settings import SystemSetting, SettingCategory
 
 logger = logging.getLogger(__name__)
@@ -274,7 +274,7 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.GENERAL.value,
             "key": "next_public_api_url",
-            "default_value": os.getenv("NEXT_PUBLIC_API_URL", ""),
+            "default_value": config.NEXT_PUBLIC_API_URL or "",
             "value_type": "string",
             "description": "Public API URL for frontend",
             "is_required": True

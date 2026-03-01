@@ -5,10 +5,10 @@ Google Gemini Provider Implementation
 Google Gemini models provider.
 """
 
-import os
 import logging
 from typing import Dict, Any, List, Optional
 
+from config import config
 from .base import BaseLLMProvider, LLMConfig, LLMResponse
 
 try:
@@ -27,7 +27,7 @@ class GoogleProvider(BaseLLMProvider):
             raise ImportError("Google Generative AI package not installed. Run: pip install google-generativeai")
         
         # Try multiple sources for API key
-        api_key = self.config.api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        api_key = self.config.api_key or config.GOOGLE_API_KEY
         
         # BOOTSTRAP STRATEGY: Don't require key at initialization
         if not api_key:

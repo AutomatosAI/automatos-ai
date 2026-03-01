@@ -147,10 +147,11 @@ class CloudFileDownloader:
     # ------------------------------------------------------------------
 
     def _get_api_key(self) -> str:
-        """Get Composio API key from environment."""
-        api_key = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
+        """Get Composio API key from config."""
+        from config import config
+        api_key = config.COMPOSIO_API_KEY
         if not api_key:
-            raise RuntimeError("COMPOSIO_API_KEY/COMPOSIO_KEY not set")
+            raise RuntimeError("COMPOSIO_API_KEY not set in config")
         return api_key
 
     def _get_entity_id(self, workspace_id: UUID) -> str:

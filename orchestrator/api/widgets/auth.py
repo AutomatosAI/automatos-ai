@@ -16,7 +16,6 @@ handlers receive via ``Depends(widget_auth)``.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 from urllib.parse import urlparse
@@ -28,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
+WIDGET_TOKEN_SECRET: str = config.WIDGET_TOKEN_SECRET or ""
 WIDGET_TOKEN_ALGORITHM: str = "HS256"
 
 

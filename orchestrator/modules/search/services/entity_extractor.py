@@ -146,8 +146,9 @@ Text to analyze:
 Return ONLY the JSON array, no other text."""
 
         try:
+            from config import config
             response = await self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",  # Fast and cheap
+                model=config.LLM_MODEL or "gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,  # Low temperature for consistency
                 max_tokens=2000
@@ -231,8 +232,9 @@ Text:
 Return ONLY the JSON array, no other text."""
 
         try:
+            from config import config
             response = await self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=config.LLM_MODEL or "gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=1500

@@ -9,7 +9,6 @@ customize, and use to create workflows.
 import hashlib
 import hmac
 import logging
-import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from uuid import uuid4
@@ -29,9 +28,7 @@ from core.models.core import RecipeExecution
 from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
-
-
-import os
+from config import config
 
 
 def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) -> Optional[str]:
@@ -82,7 +79,7 @@ def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) ->
         entity_manager = EntityManager(db)
         entity = entity_manager.get_or_create_entity(workspace_id)
 
-        backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+        backend_url = config.BACKEND_URL or "http://localhost:8000"
         callback_url = f"{backend_url}/api/composio/webhook"
 
         result = client.subscribe_to_trigger(
@@ -1635,7 +1632,7 @@ async def recipe_webhook(
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
     # Verify HMAC signature if a webhook secret is configured
-    webhook_secret = (recipe.schedule_config or {}).get("webhook_secret") or os.getenv("WEBHOOK_SECRET")
+    webhook_secret = (recipe.schedule_config or {}).get("webhook_secret") or config.WEBHOOK_SECRET
     if webhook_secret:
         sig_header = (
             request.headers.get("x-hub-signature-256")

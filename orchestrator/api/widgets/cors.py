@@ -8,14 +8,14 @@ SSE connections are **not buffered**.
 """
 
 import logging
-import os
 from starlette.types import ASGIApp, Receive, Scope, Send
+from config import config
 
 logger = logging.getLogger(__name__)
 
 # Explicit origin allowlist — comma-separated in env var.
 # Only these origins may make credentialed requests to widget endpoints.
-_RAW_ALLOWLIST = os.environ.get("WIDGET_ORIGIN_ALLOWLIST", "")
+_RAW_ALLOWLIST = config.WIDGET_ORIGIN_ALLOWLIST or ""
 WIDGET_ORIGIN_ALLOWLIST: set[str] = {
     o.strip().rstrip("/") for o in _RAW_ALLOWLIST.split(",") if o.strip()
 }

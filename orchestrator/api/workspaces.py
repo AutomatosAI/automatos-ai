@@ -7,7 +7,6 @@ dependency (`get_request_context_hybrid`) provides a request-scoped workspace UU
 """
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
@@ -21,6 +20,7 @@ from core.models.workspaces import Workspace
 
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ async def get_current_workspace(
         db.commit()
 
     # Compute webhook URL
-    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    backend_url = config.BACKEND_URL or "http://localhost:8000"
     webhook_url = f"{backend_url}/api/webhooks/ws/{workspace.webhook_key}" if workspace.webhook_key else None
 
     # Mask sensitive integration tokens for the GET response

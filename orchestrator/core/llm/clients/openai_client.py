@@ -5,10 +5,10 @@ OpenAI Provider Implementation
 OpenAI GPT models provider.
 """
 
-import os
 import logging
 from typing import Dict, Any, List, Optional
 
+from config import config
 from .base import BaseLLMProvider, LLMConfig, LLMResponse
 
 try:
@@ -64,7 +64,7 @@ class OpenAIProvider(BaseLLMProvider):
             raise ImportError("OpenAI package not installed. Run: pip install openai")
         
         # Try multiple sources for API key
-        api_key = self.config.api_key or os.getenv("OPENAI_API_KEY")
+        api_key = self.config.api_key or config.OPENAI_API_KEY
         
         # BOOTSTRAP STRATEGY: Don't require key at initialization
         # Only fail when actually making API calls

@@ -748,7 +748,8 @@ class RAGService:
 
         try:
             import asyncpg
-            db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
+            from config import config as app_config
+            db_url = app_config.DATABASE_URL
             conn = await asyncpg.connect(db_url)
 
             try:

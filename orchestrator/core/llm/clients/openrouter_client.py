@@ -6,11 +6,11 @@ OpenRouter aggregator — access 200+ models via OpenAI-compatible API.
 Uses the same chat completions format as OpenAI with extra headers.
 """
 
-import os
 import json
 import logging
 from typing import Dict, Any, List, Optional
 
+from config import config
 from .base import BaseLLMProvider, LLMConfig, LLMResponse
 
 try:
@@ -20,7 +20,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_BASE_URL = config.OPENROUTER_BASE_URL
 
 
 class OpenRouterProvider(BaseLLMProvider):
@@ -30,7 +30,7 @@ class OpenRouterProvider(BaseLLMProvider):
         if OpenAI is None:
             raise ImportError("OpenAI package not installed. Run: pip install openai")
 
-        api_key = self.config.api_key or os.getenv("OPENROUTER_API_KEY")
+        api_key = self.config.api_key or config.OPENROUTER_API_KEY
 
         if not api_key:
             logger.warning(
@@ -43,7 +43,7 @@ class OpenRouterProvider(BaseLLMProvider):
                 api_key=api_key,
                 base_url=self.config.base_url or OPENROUTER_BASE_URL,
                 default_headers={
-                    "HTTP-Referer": "https://automatos.app",
+                    "HTTP-Referer": config.OPENROUTER_SITE_URL,
                     "X-Title": "Automatos AI",
                 },
             )

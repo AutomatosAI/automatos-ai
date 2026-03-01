@@ -7,7 +7,6 @@ and OpenRouter integration (credits, key info, activity sync).
 """
 
 import logging
-import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 
@@ -23,6 +22,7 @@ from core.models.core import LLMUsage, LLMModel, UserApiKey, Agent, RecipeExecut
 from core.models import WorkflowTemplate as WorkflowRecipe
 from core.models.workspaces import Workspace
 from core.credentials.encryption import get_encryption_service
+from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics/llm", tags=["LLM Analytics"])
@@ -627,7 +627,7 @@ def _resolve_openrouter_key(workspace_id, db: Session, byok_only: bool = False) 
             logger.warning("Failed to decrypt OpenRouter key id=%s", row.id)
 
     if not byok_only:
-        env_key = os.getenv("OPENROUTER_API_KEY")
+        env_key = config.OPENROUTER_API_KEY
         if env_key:
             return env_key
 

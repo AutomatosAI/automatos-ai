@@ -33,10 +33,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, Optional
+
+from config import config
 
 from .base import TaskRunner
 from .models import (
@@ -108,10 +109,10 @@ class QueuedTaskRunner(TaskRunner):
         import redis as _redis
         import redis.asyncio as _aioredis
 
-        self._host = os.environ.get("REDIS_HOST", "127.0.0.1")
-        self._port = int(os.environ.get("REDIS_PORT", "6379"))
-        self._password = os.environ.get("REDIS_PASSWORD") or None
-        self._db = int(os.environ.get("REDIS_DB", "0"))
+        self._host = config.REDIS_HOST or "127.0.0.1"
+        self._port = int(config.REDIS_PORT or "6379")
+        self._password = config.REDIS_PASSWORD or None
+        self._db = int(config.REDIS_DB or "0")
 
         # Sync client for simple operations
         self._redis = _redis.Redis(

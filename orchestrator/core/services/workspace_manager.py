@@ -13,12 +13,13 @@ Key Features:
 Note: For production SaaS, results will move to S3/GCS with workspace_id isolation.
 """
 
-import os
 import shutil
 import logging
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class WorkspaceManager:
     
     # Base directories — configurable via AUTOMATOS_RESULTS_BASE env var
     TEMP_BASE = Path("/tmp")
-    RESULTS_BASE = Path(os.environ.get("AUTOMATOS_RESULTS_BASE", "/var/lib/automatos/results"))
+    RESULTS_BASE = Path(config.AUTOMATOS_RESULTS_BASE)
     
     def __init__(self, execution_id: int):
         """

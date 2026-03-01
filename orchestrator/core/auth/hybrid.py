@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hmac as _hmac
-import os
 import logging
 import secrets
 from typing import Optional
@@ -11,6 +10,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from config import config
 from core.auth.clerk import get_clerk_auth
 from core.auth.dependencies import RequestContext, UserContext
 from core.database.database import SessionLocal
@@ -58,11 +58,11 @@ def _get_workspace_id_from_request(request: Request) -> Optional[UUID]:
     if parsed:
         return parsed
 
-    parsed = _parse_uuid(os.getenv("WORKSPACE_ID"))
+    parsed = _parse_uuid(config.WORKSPACE_ID)
     if parsed:
         return parsed
 
-    parsed = _parse_uuid(os.getenv("DEFAULT_WORKSPACE_ID"))
+    parsed = _parse_uuid(config.DEFAULT_WORKSPACE_ID)
     if parsed:
         return parsed
 
@@ -312,8 +312,7 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
     admin_all_workspaces = raw_ws_header == "__all__"
 
     # Secure-by-default: auth is required unless explicitly disabled
-    _require_auth_raw = os.getenv("REQUIRE_AUTH", "true").strip().lower()
-    require_auth = _require_auth_raw not in {"0", "false", "no", "off"}
+    require_auth = config.REQUIRE_AUTH
 
     # Single DB session for all workspace resolution queries in this request
     db = SessionLocal()
@@ -400,17 +399,13 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
         # 2) API key
         provided_key = _get_api_key(request)
         if provided_key:
-            expected = (
-                os.getenv("ORCHESTRATOR_API_KEY")
-                or os.getenv("AUTOMATOS_API_KEY")
-                or os.getenv("API_KEY")
-            )
+            expected = config.ORCHESTRATOR_API_KEY
             if expected and _hmac.compare_digest(provided_key, expected):
                 user = UserContext(id="api_key", email=None, role="admin", system_role="admin")
                 resolved = workspace_id
                 if not resolved:
                     # Prefer env default if provided; otherwise resolve from DB.
-                    resolved = _parse_uuid(os.getenv("DEFAULT_WORKSPACE_ID")) or _resolve_workspace_for_clerk_user(
+                    resolved = _parse_uuid(config.DEFAULT_WORKSPACE_ID) or _resolve_workspace_for_clerk_user(
                         db, clerk_user_id=None, org_id=None
                     )
                 if not resolved:
@@ -430,7 +425,7 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
         # Keep noisy warnings down unless explicitly enabled
-        if os.getenv("AUTH_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}:
+        if config.AUTH_DEBUG:
             logger.info(
                 "Auth note: No credentials, using anonymous context (REQUIRE_AUTH=false)."
             )

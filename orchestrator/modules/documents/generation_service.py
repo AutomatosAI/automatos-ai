@@ -37,7 +37,7 @@ from modules.documents.template_service import DocumentTemplateService
 logger = logging.getLogger(__name__)
 
 # Base directory for generated documents
-GENERATED_DIR = os.environ.get("DOCUMENT_STORAGE_DIR", "documents")
+GENERATED_DIR = config.DOCUMENT_STORAGE_DIR
 
 # Inline fallback template used when no DB template is available
 _FALLBACK_PDF_TEMPLATE = """<!DOCTYPE html>
@@ -549,7 +549,7 @@ class DocumentGenerationService:
             return None
 
         ws_id = workspace_id or self.workspace_id
-        bucket = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
+        bucket = config.S3_DOCUMENTS_BUCKET or "automatos-ai"
         s3_key = f"workspaces/{ws_id}/generated-documents/{filename}"
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 

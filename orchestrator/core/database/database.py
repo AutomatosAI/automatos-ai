@@ -9,12 +9,12 @@ Database Configuration and Session Management
 Database setup, connection management, and session handling for Automotas AI.
 """
 
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
 import logging
 
+from config import config
 from core.database.base import Base
 
 logger = logging.getLogger(__name__)
@@ -40,16 +40,16 @@ def get_database_url() -> str:
         logger.warning(f"Using environment variables for database (credential system not available): {e}")
         
         # Try DATABASE_URL first (Heroku, Railway, etc.)
-        database_url = os.getenv("DATABASE_URL")
+        database_url = config.DATABASE_URL
         if database_url:
             return database_url
-        
+
         # Build from individual env vars - NO HARDCODED DEFAULTS!
-        user = os.getenv('POSTGRES_USER')
-        password = os.getenv('POSTGRES_PASSWORD')
-        host = os.getenv('POSTGRES_HOST')
-        port = os.getenv('POSTGRES_PORT')
-        database = os.getenv('POSTGRES_DB')
+        user = config.POSTGRES_USER
+        password = config.POSTGRES_PASSWORD
+        host = config.POSTGRES_HOST
+        port = config.POSTGRES_PORT
+        database = config.POSTGRES_DB
         
         if not all([user, password, host, port, database]):
             missing = []
@@ -69,7 +69,7 @@ def get_database_url() -> str:
 DATABASE_URL = get_database_url()
 
 # Enforce SSL in production
-_environment = os.getenv("ENVIRONMENT", "development").lower()
+_environment = (config.ENVIRONMENT or "development").lower()
 _connect_args = {}
 if _environment == "production":
     from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
@@ -85,7 +85,7 @@ engine = create_engine(
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,
-    echo=os.getenv("SQL_DEBUG", "false").lower() == "true"
+    echo=config.SQL_DEBUG
 )
 
 # Session factory

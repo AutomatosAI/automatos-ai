@@ -809,7 +809,7 @@ class StreamingChatService:
             from core.context_guard import ContextGuard
             _guard = ContextGuard()
             _model_name = getattr(agent_runtime.llm_manager, 'config', None)
-            _model_name = getattr(_model_name, 'model', 'gpt-4') if _model_name else 'gpt-4'
+            _model_name = getattr(_model_name, 'model', config.LLM_MODEL) if _model_name else config.LLM_MODEL
             llm_messages, _was_compacted = await _guard.check_and_compact(
                 messages=llm_messages,
                 model_name=_model_name,

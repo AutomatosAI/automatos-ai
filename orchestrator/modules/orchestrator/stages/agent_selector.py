@@ -19,6 +19,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 
+from config import config
 from core.llm.semantic_skill_matcher import SemanticSkillMatcher  # Stays in core/llm (general utility)
 # PHASE 2: Import ContextOptimizer from search module
 try:
@@ -176,7 +177,7 @@ class IntelligentAgentSelector:
         # 4. Cost Efficiency Score (0.0 - 1.0)
         # Based on historical token usage vs average. 
         # For now, we'll use a simplified heuristic based on model type if available, or default.
-        model = agent.get("model", "gpt-4")
+        model = agent.get("model", config.LLM_MODEL)
         if "gpt-3.5" in model or "flash" in model:
             cost_score = 0.9
         elif "gpt-4" in model:

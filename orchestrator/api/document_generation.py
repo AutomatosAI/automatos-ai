@@ -19,11 +19,12 @@ from sqlalchemy.orm import Session
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.database.database import get_db
+from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["document-generation"])
 
-GENERATED_DIR = os.environ.get("DOCUMENT_STORAGE_DIR", "documents")
+GENERATED_DIR = config.DOCUMENT_STORAGE_DIR
 
 # ------------------------------------------------------------------
 # Pydantic request/response models
@@ -388,7 +389,7 @@ async def serve_generated_file(
         if not app_config.AWS_ACCESS_KEY_ID or not app_config.AWS_SECRET_ACCESS_KEY:
             raise HTTPException(status_code=404, detail="File not found")
 
-        bucket = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
+        bucket = app_config.S3_DOCUMENTS_BUCKET
         s3_key = f"workspaces/{ctx.workspace_id}/generated-documents/{filename}"
 
         boto_cfg = BotoConfig(

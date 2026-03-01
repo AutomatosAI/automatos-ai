@@ -74,16 +74,16 @@ class EmbeddingManager:
 
             logger.debug(f"Loaded embedding settings: provider={provider_type}, model={model}, dim={dimension_str}")
 
-            # Fallback to environment variables if DB settings failed
-            import os
+            # Fallback to config if DB settings failed
+            from config import config as _config
             if not provider_type:
-                provider_type = os.getenv("EMBEDDING_PROVIDER")
+                provider_type = _config.EMBEDDING_PROVIDER
 
             if not model:
-                model = os.getenv("EMBEDDING_MODEL")
+                model = _config.EMBEDDING_MODEL
 
             if dimension_str == "2048": # If default was used
-                dimension_str = os.getenv("VECTOR_STORE_DIMENSIONS", "2048")
+                dimension_str = str(_config.VECTOR_STORE_DIMENSIONS or 2048)
                 
             dimension = int(dimension_str)
             
@@ -99,7 +99,6 @@ class EmbeddingManager:
                 
                 # Fallback to environment variables
                 if not api_key:
-                    import os
                     env_map = {
                         "openai": "OPENAI_API_KEY",
                         "google": "GOOGLE_API_KEY",
@@ -109,7 +108,7 @@ class EmbeddingManager:
                     }
                     env_var = env_map.get(provider_type)
                     if env_var:
-                        api_key = os.getenv(env_var)
+                        api_key = getattr(_config, env_var, None)
                 
                 if not api_key:
                     logger.warning(

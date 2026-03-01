@@ -5,7 +5,6 @@ Main FastAPI Application for Automotas AI
 Comprehensive API server with WebSocket support for real-time updates. DO NOT COMMENT OUT ANYTHING IN THIS FILE.
 """
 
-import os
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
@@ -507,14 +506,14 @@ app = FastAPI(
             "description": "Development server"
         },
         {
-            "url": os.getenv("API_URL", "http://localhost:8000"),
+            "url": config.API_URL or "http://localhost:8000",
             "description": "Production server"
         }
     ],
     lifespan=lifespan,
-    docs_url="/docs" if os.getenv("ENVIRONMENT", "development") != "production" else None,
-    redoc_url="/redoc" if os.getenv("ENVIRONMENT", "development") != "production" else None,
-    openapi_url="/openapi.json" if os.getenv("ENVIRONMENT", "development") != "production" else None,
+    docs_url="/docs" if config.ENVIRONMENT != "production" else None,
+    redoc_url="/redoc" if config.ENVIRONMENT != "production" else None,
+    openapi_url="/openapi.json" if config.ENVIRONMENT != "production" else None,
     swagger_ui_parameters={
         "deepLinking": True,
         "displayRequestDuration": True,
@@ -604,7 +603,7 @@ async def add_security_headers(request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
-    if os.getenv("ENVIRONMENT", "development") == "production":
+    if config.ENVIRONMENT == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
 
@@ -840,7 +839,7 @@ async def health_check():
         components["database"] = "unhealthy"
 
     # Critical config check
-    has_db_url = bool(os.getenv("DATABASE_URL") or config.DATABASE_URL)
+    has_db_url = bool(config.DATABASE_URL)
     components["config"] = "healthy" if has_db_url else "degraded"
 
     # Real system metrics via psutil

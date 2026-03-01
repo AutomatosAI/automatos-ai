@@ -217,7 +217,7 @@ IMPORTANT: Be thorough but fair. Not every import or function call is malicious.
 
 async def llm_security_scan(
     plugin_files: Dict[str, str],
-    model: str = "claude-haiku-4-5-20251001",
+    model: str = None,
 ) -> LLMScanResult:
     """Run LLM-based deep security analysis on plugin files.
 
@@ -233,6 +233,10 @@ async def llm_security_scan(
     """
     import asyncio
     import json as _json
+
+    if model is None:
+        from config import config
+        model = config.PLUGIN_LLM_SCAN_MODEL
 
     try:
         import anthropic
@@ -251,12 +255,8 @@ async def llm_security_scan(
     all_files_text = "\n\n".join(file_sections)
 
     # Get API key from config
-    try:
-        from config import config
-        api_key = config.ANTHROPIC_API_KEY
-    except Exception:
-        import os
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+    from config import config
+    api_key = config.ANTHROPIC_API_KEY
 
     if not api_key:
         logger.error("ANTHROPIC_API_KEY not configured — cannot run LLM scan")

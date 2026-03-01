@@ -23,6 +23,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.attributes import flag_modified
 
+from config import config
 from core.llm import (
     LLMManager, LLMConfig, LLMProvider, LLMResponse,
     create_llm_manager
@@ -353,7 +354,7 @@ class ModelConfiguration:
         """Create from dictionary"""
         return ModelConfiguration(
             provider=data.get("provider", "openai"),
-            model_id=data.get("model_id", "gpt-4"),
+            model_id=data.get("model_id", config.LLM_MODEL),
             temperature=data.get("temperature", 0.7),
             max_tokens=data.get("max_tokens", 2000),
             top_p=data.get("top_p", 1.0),
@@ -366,8 +367,8 @@ class ModelConfiguration:
     def get_default() -> 'ModelConfiguration':
         """Get default configuration"""
         return ModelConfiguration(
-            provider="openai",
-            model_id="gpt-4",
+            provider=config.LLM_PROVIDER,
+            model_id=config.LLM_MODEL,
             temperature=0.7,
             max_tokens=2000
         )
@@ -539,13 +540,13 @@ class AgentFactory:
             if not model:
                 model = get_system_setting("orchestrator_llm", "model")  # Fallback to old key
             
-            # If still not found, try environment variables (for backward compatibility)
+            # If still not found, try config (for backward compatibility)
             if not provider:
-                import os
-                provider = os.getenv("LLM_PROVIDER")
+                from config import config
+                provider = config.LLM_PROVIDER
             if not model:
-                import os
-                model = os.getenv("LLM_MODEL")
+                from config import config
+                model = config.LLM_MODEL
             
             # If provider/model not found, fall back to DEFAULT_LLM_CONFIG
             if not provider or not model:
@@ -561,7 +562,7 @@ class AgentFactory:
                     "azure": "gpt-4o",
                     "huggingface": "mistralai/Mistral-7B-Instruct-v0.2"
                 }
-                model = provider_defaults.get(provider, "gpt-4")
+                model = provider_defaults.get(provider, config.LLM_MODEL)
             
             # Get context window from LLM models registry
             try:
@@ -859,9 +860,9 @@ Available Shell Tools:
 
         # Bedrock uses IAM auth: api_key=access_key, secret_key=secret_access_key
         if model_config.provider in ("aws_bedrock", "bedrock"):
-            import os
-            llm_config.secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-            llm_config.base_url = os.getenv("AWS_REGION", "us-east-1")
+            from config import config
+            llm_config.secret_key = config.AWS_SECRET_ACCESS_KEY
+            llm_config.base_url = config.AWS_REGION or "us-east-1"
 
         self.logger.info(
             f"Creating LLM manager for {agent_name or 'agent'}: "
@@ -943,25 +944,23 @@ Available Shell Tools:
             except Exception:
                 continue
 
-        # 3. Fall back to environment variables
-        env_map = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "google": "GOOGLE_API_KEY",
-            "openrouter": "OPENROUTER_API_KEY",
-            "grok": "GROK_API_KEY",
-            "huggingface": "HUGGINGFACE_API_KEY",
-            "azure": "AZURE_OPENAI_API_KEY",
-            "azure_openai": "AZURE_OPENAI_API_KEY",
-            "aws_bedrock": "AWS_ACCESS_KEY_ID",
-            "bedrock": "AWS_ACCESS_KEY_ID",
+        # 3. Fall back to config (centralized env vars)
+        from config import config as _cfg
+        config_map = {
+            "openai": _cfg.OPENAI_API_KEY,
+            "anthropic": _cfg.ANTHROPIC_API_KEY,
+            "google": _cfg.GOOGLE_API_KEY,
+            "openrouter": _cfg.OPENROUTER_API_KEY,
+            "grok": _cfg.XAI_API_KEY,
+            "azure": _cfg.AZURE_OPENAI_API_KEY,
+            "azure_openai": _cfg.AZURE_OPENAI_API_KEY,
+            "aws_bedrock": _cfg.AWS_ACCESS_KEY_ID,
+            "bedrock": _cfg.AWS_ACCESS_KEY_ID,
         }
-        env_var = env_map.get(provider_name)
-        if env_var:
-            key = os.getenv(env_var)
-            if key:
-                self.logger.info(f"Using {env_var} from environment for {agent_name}")
-                return ResolvedKey(api_key=key, source="env", is_byok=False, provider=provider_name)
+        key = config_map.get(provider_name)
+        if key:
+            self.logger.info(f"Using config API key for {provider_name} for {agent_name}")
+            return ResolvedKey(api_key=key, source="env", is_byok=False, provider=provider_name)
 
         return None
     
@@ -1107,7 +1106,7 @@ Available Shell Tools:
             
             # Create LLM manager with API key resolution (PRD-54)
             provider_str = llm_config_dict.get("provider", "openai")
-            model_id_str = llm_config_dict.get("model", "gpt-4")
+            model_id_str = llm_config_dict.get("model", config.LLM_MODEL)
 
             # Auto-detect provider from model name to fix misconfigurations
             provider_str = self._resolve_provider_for_model(provider_str, model_id_str)

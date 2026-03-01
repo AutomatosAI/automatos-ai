@@ -40,7 +40,7 @@ class WidgetChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     agent_id: Optional[int] = None
-    model_id: Optional[str] = "gpt-4"
+    model_id: Optional[str] = None
 
 
 class WidgetMessageOut(BaseModel):

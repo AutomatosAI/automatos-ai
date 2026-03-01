@@ -20,7 +20,6 @@ PHASE 2 ENHANCED: Now includes CodeGraph integration
 
 import logging
 import httpx
-import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -107,7 +106,8 @@ class ContextEngineeringIntegrator:
     ):
         self.db = db_session
         # Use localhost for local development, not external API
-        self.api_base_url = api_base_url or os.getenv("API_URL", "http://localhost:8000")
+        from config import config
+        self.api_base_url = api_base_url or config.API_URL or "http://localhost:8000"
         
         # CRITICAL FIX: Ensure api_base_url is never empty
         if not self.api_base_url or not self.api_base_url.startswith("http"):
@@ -169,7 +169,8 @@ class ContextEngineeringIntegrator:
         
         # PRD-59 Fix 3: Feature flag for context optimization
         # Override via env var: ENABLE_CONTEXT_OPTIMIZATION=true/false
-        env_optimization = os.getenv("ENABLE_CONTEXT_OPTIMIZATION", "").lower()
+        from config import config as app_config
+        env_optimization = str(app_config.ENABLE_CONTEXT_OPTIMIZATION or "").lower()
         if env_optimization == "true" and not self.use_optimization:
             # Force enable if env says so and optimizer import succeeded
             if CONTEXT_OPTIMIZER_AVAILABLE:

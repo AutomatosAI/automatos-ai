@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -535,7 +537,7 @@ Be practical and consider the user's constraints. Don't over-engineer simple tas
                 }
         
         # Estimate cost
-        model = "gpt-4"  # Default assumption
+        model = config.LLM_MODEL  # Default from system config
         estimated_cost = orchestrator_config.estimate_cost(total_estimated_tokens, model)
         max_cost = user_constraints.get('max_cost', orchestrator_config.MAX_COST_USD)
         

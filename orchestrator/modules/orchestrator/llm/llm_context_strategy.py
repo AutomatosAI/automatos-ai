@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
+from config import config
 from modules.orchestrator.stages.context_engineering import (
     ContextEngineeringIntegrator,
     ContextEnhancement
@@ -588,7 +589,7 @@ RESPONSE FORMAT:
     async def _get_token_budget(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Get token budget for subtask"""
         subtask_id = parameters['subtask_id']
-        model = parameters.get('model', 'gpt-4o')
+        model = parameters.get('model', config.LLM_MODEL)
         
         # Try to get context window from database model registry
         max_context = None

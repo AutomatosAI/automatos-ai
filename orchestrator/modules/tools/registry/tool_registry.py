@@ -30,6 +30,7 @@ from enum import Enum
 from datetime import datetime
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -903,10 +904,10 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             name="http_request",
             category=ToolCategory.API_TOOLS,
             description=(
-                "Make HTTP requests to whitelisted internal and platform URLs. "
-                "Use this to test API endpoints, check health status, and verify responses. "
-                "Only allowed domains: automatos-ai.railway.internal, automatos-ai-frontend.railway.internal, "
-                "api.automatos.app, ui.automatos.app, localhost."
+                f"Make HTTP requests to whitelisted internal and platform URLs. "
+                f"Use this to test API endpoints, check health status, and verify responses. "
+                f"Only allowed domains: {config.INTERNAL_API_HOSTNAME}, {config.INTERNAL_FRONTEND_HOSTNAME}, "
+                f"api.automatos.app, ui.automatos.app, localhost."
             ),
             executor_class="UnifiedToolExecutor",
             executor_method="_execute_http_request",
@@ -951,13 +952,13 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             security_level=SecurityLevel.CAUTIOUS,
             permissions_required={"read": True, "execute": True},
             examples=[
-                {"action": "http_request", "params": {"url": "http://automatos-ai.railway.internal/health", "method": "GET"}},
-                {"action": "http_request", "params": {"url": "http://automatos-ai.railway.internal/api/agents", "method": "GET", "headers": {"x-api-key": "your-key", "x-workspace-id": "your-ws-id"}}},
+                {"action": "http_request", "params": {"url": f"http://{config.INTERNAL_API_HOSTNAME}/health", "method": "GET"}},
+                {"action": "http_request", "params": {"url": f"http://{config.INTERNAL_API_HOSTNAME}/api/agents", "method": "GET", "headers": {"x-api-key": "your-key", "x-workspace-id": "your-ws-id"}}},
             ],
             metadata={
                 "allowed_domains": [
-                    "automatos-ai.railway.internal",
-                    "automatos-ai-frontend.railway.internal",
+                    config.INTERNAL_API_HOSTNAME,
+                    config.INTERNAL_FRONTEND_HOSTNAME,
                     "api.automatos.app",
                     "ui.automatos.app",
                     "localhost",

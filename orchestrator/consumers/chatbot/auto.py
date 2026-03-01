@@ -23,7 +23,6 @@ where needs_memory and tool_hints drive downstream behavior.
 
 import logging
 import re
-import os
 import json
 import hashlib
 from dataclasses import dataclass, field
@@ -360,7 +359,8 @@ Rules:
             return
         try:
             cache_key = self._make_cache_key(msg_lower)
-            ttl = int(os.environ.get("COMPLEXITY_CACHE_TTL_HOURS", "24")) * 3600
+            from config import config
+            ttl = int(config.COMPLEXITY_CACHE_TTL_HOURS or 24) * 3600
             self._redis.setex(cache_key, ttl, json.dumps(assessment.to_dict()))
         except Exception:
             logger.debug("[AutoBrain] Cache store failed, non-critical")

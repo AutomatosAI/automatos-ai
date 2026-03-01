@@ -21,7 +21,7 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-RAILWAY_GQL_URL = "https://backboard.railway.app/graphql/v2"
+RAILWAY_GQL_URL = config.RAILWAY_GQL_URL
 
 
 class RailwayClient:

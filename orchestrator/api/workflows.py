@@ -17,6 +17,7 @@ import asyncio
 import logging
 import json
 
+from config import config
 from core.database.database import get_db
 from core.models import (
     Workflow, WorkflowExecution, Agent, workflow_agents,
@@ -30,6 +31,7 @@ from core.services.workspace_manager import WorkspaceManager
 from core.auth.hybrid import get_request_context_hybrid
 from core.task_runner import get_task_runner, AgentTask, TaskType, TaskPriority
 from core.auth.dependencies import RequestContext
+from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
@@ -2299,9 +2301,9 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         # Get agent's model configuration
                         agent = db.query(Agent).filter(Agent.id == result.agent_id).first()
                         if agent and agent.model_config:
-                            model_id = agent.model_config.get("model_id", "gpt-4")
+                            model_id = agent.model_config.get("model_id", config.LLM_MODEL)
                         else:
-                            model_id = "gpt-4"  # Default fallback
+                            model_id = config.LLM_MODEL  # Default fallback
                         
                         # Estimate input/output split (70% input, 30% output is typical)
                         input_tokens = int(result.tokens_used * 0.7)
@@ -2651,10 +2653,9 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 logger.info(f"🎯 Assessing workflow output quality...")
                 try:
                     from modules.orchestrator.stages import OutputQualityAssessor, OutputType
-                    import os
 
                     # PRD-59 Fix 1: Use LLM-based quality assessment on real outputs
-                    use_llm_quality = len(steps) >= 3 and os.environ.get("ENABLE_LLM_QUALITY_ASSESSMENT", "true").lower() == "true"
+                    use_llm_quality = len(steps) >= 3 and config.ENABLE_LLM_QUALITY_ASSESSMENT
 
                     llm_client_for_quality = None
                     if use_llm_quality:
@@ -2854,8 +2855,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         # Re-run Stage 7: Quality Assessment
                         logger.info("[Adaptive] Quality retry: re-assessing quality...")
                         from modules.orchestrator.stages import OutputQualityAssessor, OutputType
-                        import os
-                        _use_llm_q = len(steps) >= 3 and os.environ.get("ENABLE_LLM_QUALITY_ASSESSMENT", "true").lower() == "true"
+                        _use_llm_q = len(steps) >= 3 and config.ENABLE_LLM_QUALITY_ASSESSMENT
                         _llm_q = None
                         if _use_llm_q:
                             try:

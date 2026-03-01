@@ -11,6 +11,8 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,11 +76,13 @@ class AgentService:
         name: str,
         agent_type: str,
         description: str = "",
-        model_id: str = "gpt-4",
+        model_id: str = None,
         skills: List[str] = None
     ) -> Dict[str, Any]:
         """Create a new agent"""
-        
+        if model_id is None:
+            model_id = config.LLM_MODEL
+
         # Use factory to create agent
         agent = await self.factory.create_agent(
             name=name,

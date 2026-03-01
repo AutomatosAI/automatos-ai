@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hmac
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -25,6 +24,7 @@ from core.composio.entity_manager import EntityManager
 from core.database.database import get_db
 from core.models.composio_cache import ComposioActionCache, ComposioAppCache, ComposioStatsCache
 from services.metadata_sync_service import MetadataSyncService
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -656,11 +656,7 @@ async def backfill_params(
     """
     from core.auth.hybrid import _get_api_key
     provided_key = _get_api_key(request)
-    expected = (
-        os.getenv("ORCHESTRATOR_API_KEY")
-        or os.getenv("AUTOMATOS_API_KEY")
-        or os.getenv("API_KEY")
-    )
+    expected = config.ORCHESTRATOR_API_KEY
     if not provided_key or not expected or not hmac.compare_digest(provided_key, expected):
         raise HTTPException(status_code=401, detail="Valid API key required")
 

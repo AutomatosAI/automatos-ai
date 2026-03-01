@@ -13,15 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
-WORKER_URL = os.getenv("AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080")
+WORKER_URL = config.AGENT_OPT_WORKER_URL
 WORKER_TIMEOUT = 120  # seconds for assess/safety
 OPTIMIZE_TIMEOUT = 300  # seconds for optimization
 
@@ -61,7 +62,7 @@ class FutureAGIService:
 
     def _init(self) -> None:
         # Check if worker URL is configured (keys live on the worker now)
-        self._available = bool(os.getenv("AGENT_OPT_WORKER_URL") or os.getenv("FUTUREAGI_API_KEY"))
+        self._available = bool(config.AGENT_OPT_WORKER_URL or config.FUTUREAGI_API_KEY)
         if self._available:
             logger.info(f"FutureAGI service ready (worker at {WORKER_URL})")
         else:

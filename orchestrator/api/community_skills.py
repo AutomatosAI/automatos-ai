@@ -44,7 +44,8 @@ def _validate_skill_name(name: str) -> str:
     return name
 
 # skills.sh API base URL
-SKILLS_SH_API = "https://api.skills.sh/v1"
+from config import config
+SKILLS_SH_API = config.SKILLS_SH_API_URL
 
 
 @router.get("/search")

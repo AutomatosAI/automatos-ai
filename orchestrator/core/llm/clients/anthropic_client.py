@@ -5,11 +5,11 @@ Anthropic Provider Implementation
 Anthropic Claude models provider.
 """
 
-import os
 import json
 import logging
 from typing import Dict, Any, List, Optional, Union
 
+from config import config
 from .base import BaseLLMProvider, LLMConfig, LLMResponse
 
 try:
@@ -28,7 +28,7 @@ class AnthropicProvider(BaseLLMProvider):
             raise ImportError("Anthropic package not installed. Run: pip install anthropic")
         
         # Try multiple sources for API key
-        api_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
+        api_key = self.config.api_key or config.ANTHROPIC_API_KEY
         
         # BOOTSTRAP STRATEGY: Don't require key at initialization
         # Only fail when actually making API calls

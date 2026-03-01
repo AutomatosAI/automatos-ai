@@ -20,9 +20,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from typing import Dict, List, Optional
 from uuid import UUID
+
+from config import config
 
 from sqlalchemy.orm import Session
 
@@ -41,9 +42,7 @@ from core.models.routing import (
 from core.routing.cache import RoutingCache, _normalize_content
 from core.services.intent_classifier import IntentClassifier
 
-_LLM_CONFIDENCE_THRESHOLD = float(
-    os.getenv("ROUTING_LLM_CONFIDENCE_THRESHOLD", "0.5")
-)
+_LLM_CONFIDENCE_THRESHOLD = config.ROUTING_LLM_CONFIDENCE_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
