@@ -1074,8 +1074,8 @@ Available Shell Tools:
             # Get LLM config - PRIORITIZE agent's own model_config, fall back to system settings
             # PRD-54: Agents can now be assigned specific models (including OpenRouter/BYOK)
             agent_model_config = db_agent.model_config or {}
-            config = db_agent.configuration or {}
-            agent_llm_config = config.get("llm_config") or {}
+            agent_config = db_agent.configuration or {}
+            agent_llm_config = agent_config.get("llm_config") or {}
 
             # Check if agent has a specific model configured (PRD-15/54 model_config column)
             agent_has_model = (
@@ -1149,8 +1149,8 @@ Available Shell Tools:
                 name=db_agent.name,
                 agent_type=db_agent.agent_type,
                 description=db_agent.description,
-                skills=config.get("skills", []),
-                custom_metadata=config.get("custom_metadata", {})
+                skills=agent_config.get("skills", []),
+                custom_metadata=agent_config.get("custom_metadata", {})
             )
 
             # Load agent's tools
