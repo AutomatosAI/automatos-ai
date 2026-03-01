@@ -1909,7 +1909,7 @@ To use actions, respond with JSON blocks like:
         from modules.tools.services.composio_hint_service import ComposioHintService
 
         failed_action = func_args.get("action", "")
-        db = getattr(agent_runtime, "db", None)
+        db = getattr(agent_runtime, "db_session", None)
         if not db:
             return tool_schemas, ""
 
@@ -2343,10 +2343,12 @@ To use actions, respond with JSON blocks like:
         # Response formatting — prevent raw JSON / code block dumping
         sections.append("\n## Response Formatting Rules\n")
         sections.append("When you receive API/tool results (emails, messages, calendar events, etc.):")
-        sections.append("- Synthesize the data into clear, conversational prose — do NOT dump raw JSON")
-        sections.append("- NEVER wrap tool results in code blocks (``` ```) — present as natural language")
-        sections.append("- Summarize key fields (subject, sender, date, status) in readable format")
-        sections.append("- Use bullet points or short paragraphs, not code formatting")
+        sections.append("- Synthesize the data into clear, human-friendly prose — do NOT dump raw JSON or technical data")
+        sections.append("- NEVER use code blocks (``` ```), inline code backticks (`), or monospace formatting")
+        sections.append("- For emails: summarize subject, sender, date, and key message — skip raw headers, IDs, method names")
+        sections.append("- For technical content (PR comments, code reviews, etc.): describe what it says at a high level, don't reproduce code diffs or file paths")
+        sections.append("- Use bullet points or short paragraphs, written for a non-technical reader")
+        sections.append("- If the user asks for details, THEN provide more depth — but default to concise summaries")
 
         prompt_text = "\n\n".join([s for s in sections if s is not None])
         return (prompt_text, skill_tool_schemas)
