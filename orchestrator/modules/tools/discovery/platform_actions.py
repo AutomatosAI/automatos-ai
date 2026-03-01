@@ -479,6 +479,185 @@ def _register_write_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+    registry.register(ActionDefinition(
+        name="platform_update_recipe",
+        description=(
+            "Update an existing recipe's metadata. Can change name, description, tags, "
+            "execution_config, or schedule_config. Use when the user asks to rename, "
+            "update, or reconfigure a recipe."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "ID of the recipe to update.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "New name for the recipe.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "New description.",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Replace the recipe's tags with this list.",
+                },
+                "execution_config": {
+                    "type": "object",
+                    "description": "Runtime config: { mode, max_retries, timeout_per_step, quality_threshold }.",
+                },
+                "schedule_config": {
+                    "type": "object",
+                    "description": "Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config }.",
+                },
+            },
+            "required": ["recipe_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["recipes", "update", "write"],
+        examples=[
+            "rename recipe 5 to Daily Digest",
+            "update the bug triage recipe description",
+            "set recipe 3 to run on a cron schedule",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_add_recipe_step",
+        description=(
+            "Add a new step to an existing recipe. The step is appended to the end "
+            "by default, or inserted at a specific order position. Use when the user "
+            "asks to add a step to a recipe or workflow."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "ID of the recipe to add the step to.",
+                },
+                "prompt_template": {
+                    "type": "string",
+                    "description": "The prompt template for this step. Supports {input.*} and {steps[N].*} variable substitution.",
+                },
+                "agent_id": {
+                    "type": "integer",
+                    "description": "ID of the agent to execute this step (optional — uses default agent if not set).",
+                },
+                "order": {
+                    "type": "integer",
+                    "description": "Position in the step list (0-based). Defaults to end of list.",
+                },
+                "error_handling": {
+                    "type": "string",
+                    "enum": ["stop", "skip", "retry"],
+                    "description": "What to do if this step fails. Defaults to 'stop'.",
+                },
+                "output_key": {
+                    "type": "string",
+                    "description": "Key name to store this step's output under (for referencing in later steps).",
+                },
+            },
+            "required": ["recipe_id", "prompt_template"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["recipes", "steps", "add", "write"],
+        examples=[
+            "add a step to recipe 3 that summarizes the results",
+            "add a code review step to the bug triage recipe",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_update_recipe_step",
+        description=(
+            "Update an existing step in a recipe. Specify the step by its 0-based index. "
+            "Can change the prompt, agent, order, error handling, or output key. "
+            "Use when the user asks to modify or edit a recipe step."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "ID of the recipe containing the step.",
+                },
+                "step_index": {
+                    "type": "integer",
+                    "description": "0-based index of the step to update.",
+                },
+                "prompt_template": {
+                    "type": "string",
+                    "description": "New prompt template for this step.",
+                },
+                "agent_id": {
+                    "type": "integer",
+                    "description": "New agent ID for this step.",
+                },
+                "order": {
+                    "type": "integer",
+                    "description": "New position in the step list.",
+                },
+                "error_handling": {
+                    "type": "string",
+                    "enum": ["stop", "skip", "retry"],
+                    "description": "New error handling strategy.",
+                },
+                "output_key": {
+                    "type": "string",
+                    "description": "New output key name.",
+                },
+            },
+            "required": ["recipe_id", "step_index"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["recipes", "steps", "update", "write"],
+        examples=[
+            "update step 2 of recipe 5 to use agent 3",
+            "change the prompt in step 1 of the bug fixer recipe",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_delete_recipe_step",
+        description=(
+            "Delete a step from a recipe by its 0-based index. Remaining steps are "
+            "re-ordered automatically. Use when the user asks to remove a step."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "ID of the recipe to remove the step from.",
+                },
+                "step_index": {
+                    "type": "integer",
+                    "description": "0-based index of the step to delete.",
+                },
+            },
+            "required": ["recipe_id", "step_index"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["recipes", "steps", "delete", "write"],
+        examples=[
+            "delete step 3 from recipe 5",
+            "remove the last step from the bug fixer recipe",
+        ],
+    ))
+
     # ── Memory Write Actions ────────────────────────────────────────
 
     registry.register(ActionDefinition(

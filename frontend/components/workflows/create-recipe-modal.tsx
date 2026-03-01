@@ -43,11 +43,8 @@ export interface RecipeFormValues {
   execution_config: {
     mode: string
     max_retries: number
-    retry_delay: number
-    backoff_strategy: string
     timeout_per_step: number
     total_timeout: number
-    quality_threshold: number
     auto_learning: boolean
     parallel_limit: number
     memory_isolation: string
@@ -84,11 +81,8 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
       execution_config: {
         mode: 'sequential',
         max_retries: 3,
-        retry_delay: 1000,
-        backoff_strategy: 'exponential',
         timeout_per_step: 120000,
         total_timeout: 600000,
-        quality_threshold: 0.7,
         auto_learning: true,
         parallel_limit: 5,
         memory_isolation: 'shared',

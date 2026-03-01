@@ -80,7 +80,7 @@ class RecipeMemoryService:
                 "type": "recipe_execution",
                 "execution_id": execution_id,
                 "recipe_id": recipe_id,
-                "workspace_id": workspace_id,
+                "workspace_id": str(workspace_id),
                 "status": execution.status,
             })
             if result.get("error"):
@@ -118,7 +118,7 @@ class RecipeMemoryService:
                     "recipe_id": recipe_id,
                     "agent_id": agent_id,
                     "step_index": idx,
-                    "workspace_id": workspace_id,
+                    "workspace_id": str(workspace_id),
                 })
                 if result.get("error"):
                     errors.append(f"Agent {agent_id} step {idx}: {result['error']}")

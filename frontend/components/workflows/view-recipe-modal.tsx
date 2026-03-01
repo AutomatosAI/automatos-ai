@@ -432,12 +432,12 @@ export function ViewRecipeModal({
                           <span className="text-foreground">{recipe.execution_config?.max_retries || 3}</span>
                         </div>
                         <div>
-                          <span>Quality Threshold:</span>{' '}
-                          <span className="text-foreground">{recipe.execution_config?.quality_threshold || 0.7}</span>
+                          <span>Step Timeout:</span>{' '}
+                          <span className="text-foreground">{recipe.execution_config?.per_step_timeout || 120}s</span>
                         </div>
                         <div>
                           <span>Auto Learning:</span>{' '}
-                          <span className="text-foreground">{recipe.execution_config?.auto_learning ? 'Enabled' : 'Disabled'}</span>
+                          <span className="text-foreground">{(recipe.execution_config?.auto_learning ?? recipe.execution_config?.auto_learn) ? 'Enabled' : 'Disabled'}</span>
                         </div>
                       </div>
                     </div>

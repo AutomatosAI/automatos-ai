@@ -6,20 +6,6 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import type { RecipeFormValues } from './create-recipe-modal'
 
-const BACKOFF_STRATEGIES = [
-  { value: 'exponential', label: 'Exponential' },
-  { value: 'linear', label: 'Linear' },
-  { value: 'fixed', label: 'Fixed' },
-]
-
-const RETRY_DELAY_OPTIONS = [
-  { value: 500, label: '500ms' },
-  { value: 1000, label: '1s' },
-  { value: 2000, label: '2s' },
-  { value: 5000, label: '5s' },
-  { value: 10000, label: '10s' },
-]
-
 const MEMORY_ISOLATION_OPTIONS = [
   { value: 'shared', label: 'Shared' },
   { value: 'isolated', label: 'Isolated' },
@@ -93,72 +79,35 @@ export function RecipeExecutionConfig() {
         </div>
       </div>
 
-      {/* Retry Section */}
+      {/* Retry & Timeout Section */}
       <div className="glass-card rounded-2xl p-5 space-y-4 border border-border/20">
         <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-          <span className="text-base">🔄</span> Retry Configuration
+          <span className="text-base">🔄</span> Retries & Timeouts
         </h4>
 
         <div className="grid grid-cols-3 gap-3">
           {/* Max Retries */}
           <div>
-            <Label className="text-xs text-muted-foreground">Max Retries</Label>
+            <Label className="text-xs text-muted-foreground">Max Retries per Step</Label>
             <select
               value={config.max_retries}
               onChange={(e) => updateConfig('max_retries', Number(e.target.value))}
               className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
             >
-              {Array.from({ length: 11 }, (_, i) => (
+              {Array.from({ length: 6 }, (_, i) => (
                 <option key={i} value={i}>{i}</option>
               ))}
             </select>
           </div>
 
-          {/* Retry Delay */}
-          <div>
-            <Label className="text-xs text-muted-foreground">Retry Delay</Label>
-            <select
-              value={config.retry_delay}
-              onChange={(e) => updateConfig('retry_delay', Number(e.target.value))}
-              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
-            >
-              {RETRY_DELAY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Backoff Strategy */}
-          <div>
-            <Label className="text-xs text-muted-foreground">Backoff Strategy</Label>
-            <select
-              value={config.backoff_strategy}
-              onChange={(e) => updateConfig('backoff_strategy', e.target.value)}
-              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
-            >
-              {BACKOFF_STRATEGIES.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Timeout Section */}
-      <div className="glass-card rounded-2xl p-5 space-y-4 border border-border/20">
-        <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-          <span className="text-base">⏱</span> Timeout Settings
-        </h4>
-
-        <div className="grid grid-cols-2 gap-3">
           {/* Per-Step Timeout */}
           <div>
-            <Label className="text-xs text-muted-foreground">Per-Step Timeout (ms)</Label>
+            <Label className="text-xs text-muted-foreground">Step Timeout</Label>
             <Input
               type="number"
-              min={1000}
+              min={10000}
               max={600000}
-              step={1000}
+              step={10000}
               value={config.timeout_per_step}
               onChange={(e) => updateConfig('timeout_per_step', Number(e.target.value))}
               className="mt-1 bg-secondary/50 rounded-xl"
@@ -170,12 +119,12 @@ export function RecipeExecutionConfig() {
 
           {/* Total Timeout */}
           <div>
-            <Label className="text-xs text-muted-foreground">Total Timeout (ms)</Label>
+            <Label className="text-xs text-muted-foreground">Total Timeout</Label>
             <Input
               type="number"
-              min={1000}
+              min={10000}
               max={3600000}
-              step={1000}
+              step={10000}
               value={config.total_timeout}
               onChange={(e) => updateConfig('total_timeout', Number(e.target.value))}
               className="mt-1 bg-secondary/50 rounded-xl"
@@ -191,37 +140,11 @@ export function RecipeExecutionConfig() {
         </div>
       </div>
 
-      {/* Quality Section */}
+      {/* Auto-Learning Section */}
       <div className="glass-card rounded-2xl p-5 space-y-4 border border-border/20">
         <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-          <span className="text-base">⭐</span> Quality
+          <span className="text-base">🧠</span> Learning
         </h4>
-
-        {/* Quality Threshold Slider */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <Label className="text-xs text-muted-foreground">Quality Threshold</Label>
-            <span className="text-sm font-mono text-primary">{config.quality_threshold.toFixed(2)}</span>
-          </div>
-          <div className="relative">
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={config.quality_threshold}
-              onChange={(e) => updateConfig('quality_threshold', Number(e.target.value))}
-              className="w-full h-2 rounded-full appearance-none cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, hsl(var(--primary)) 0%, hsl(var(--primary)) ${config.quality_threshold * 100}%, rgba(255,255,255,0.1) ${config.quality_threshold * 100}%, rgba(255,255,255,0.1) 100%)`,
-              }}
-            />
-          </div>
-          <div className="flex justify-between text-xs text-muted-foreground/50 mt-1">
-            <span>0 (No check)</span>
-            <span>1 (Perfect)</span>
-          </div>
-        </div>
 
         {/* Auto-Learning Toggle */}
         <div className="flex items-center justify-between">

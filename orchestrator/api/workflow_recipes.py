@@ -401,11 +401,9 @@ async def create_workflow_recipe(
         execution_config = recipe_data.get('execution_config') or {
             'mode': 'sequential',
             'max_retries': 1,
-            'retry_delay': 5,
-            'per_step_timeout': 300,
-            'total_timeout': 1800,
-            'quality_threshold': 0.7,
-            'auto_learn': True,
+            'timeout_per_step': 120000,
+            'total_timeout': 600000,
+            'auto_learning': True,
         }
 
         # Ensure webhook_id in schedule_config for trigger/webhook types
