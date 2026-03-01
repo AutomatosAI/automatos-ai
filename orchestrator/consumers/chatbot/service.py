@@ -823,7 +823,7 @@ class StreamingChatService:
 
             # Generate response using agent's LLM manager
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
-            logger.info(f"Agent tools - count: {len(use_tools) if use_tools else 0}, is_simple: {is_simple}")
+            logger.info(f"Agent tools - count: {len(use_tools) if use_tools else 0}")
             if use_tools:
                 tool_names = [t.get("function", {}).get("name") for t in use_tools if isinstance(t, dict)]
                 logger.info(f"Available tools: {tool_names}")
