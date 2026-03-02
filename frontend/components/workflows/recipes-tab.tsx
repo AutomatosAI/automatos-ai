@@ -198,6 +198,7 @@ export function RecipesTab({
       prompt_template: step.prompt_template || '',
       pass_to: step.pass_to,
       error_handling: step.error_handling || 'stop',
+      pre_exec: step.pre_exec || '',
     }))
 
     const initialData = {
