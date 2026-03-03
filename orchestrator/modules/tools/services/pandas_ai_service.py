@@ -1,6 +1,5 @@
 import base64
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -45,12 +44,13 @@ class PandasAIService:
         except ImportError as exc:
             raise RuntimeError("pandasai and pandasai-litellm packages are required") from exc
 
-        api_key = os.getenv("PANDASAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        from config import config
+        api_key = config.PANDASAI_API_KEY or config.OPENAI_API_KEY
         if not api_key:
             raise RuntimeError("No API key found for PandasAI (set PANDASAI_API_KEY or OPENAI_API_KEY)")
 
-        model = os.getenv("PANDASAI_MODEL") or os.getenv("OPENAI_DEFAULT_MODEL") or "gpt-4o-mini"
-        output_dir = Path(os.getenv("PANDASAI_OUTPUT_DIR", "/tmp/pandasai_charts"))
+        model = config.PANDASAI_MODEL or config.LLM_MODEL or "gpt-4o-mini"
+        output_dir = Path(config.PANDASAI_OUTPUT_DIR or "/tmp/pandasai_charts")
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Additional directories PandasAI may emit assets into (e.g. exports/charts)

@@ -418,13 +418,14 @@ class DocumentManager:
         self._s3_backend = None
 
         # S3 configuration for document storage
-        self.s3_bucket = s3_bucket or os.getenv('S3_DOCUMENTS_BUCKET', 'automatos-ai')
-        self.s3_region = os.getenv('AWS_REGION', 'us-east-1')
+        from config import config as app_config
+        self.s3_bucket = s3_bucket or app_config.S3_DOCUMENTS_BUCKET
+        self.s3_region = app_config.AWS_REGION or 'us-east-1'
         self.s3_client = boto3.client(
             's3',
             region_name=self.s3_region,
-            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+            aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY
         )
 
         # Ensure S3 bucket exists (create if needed)
@@ -1232,7 +1233,8 @@ class DocumentManager:
         try:
             return self.embedding_manager.get_dimension()
         except Exception:
-            return int(os.getenv("S3_VECTORS_DIMENSION", "2048"))
+            from config import config as app_config
+            return int(app_config.S3_VECTORS_DIMENSION or 2048)
 
     def _ensure_embedding_dimension(self, embedding: List[float]) -> List[float]:
         """Truncate embedding to target dimension if needed (Matryoshka support)."""
@@ -1519,10 +1521,11 @@ class DocumentManager:
 # Example usage
 if __name__ == "__main__":
     import asyncio
-    
+    from config import config
+
     # Database configuration
     db_config = {
-        'host': os.getenv('POSTGRES_HOST', '127.0.0.1'),
+        'host': config.POSTGRES_HOST or '127.0.0.1',
         'database': 'orchestrator_db',
         'user': 'postgres',
         'password': 'your_password'

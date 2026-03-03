@@ -5,7 +5,6 @@ Main FastAPI Application for Automotas AI
 Comprehensive API server with WebSocket support for real-time updates. DO NOT COMMENT OUT ANYTHING IN THIS FILE.
 """
 
-import os
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
@@ -50,8 +49,6 @@ from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
 from api.benchmarking import router as benchmarking_router
 from api.memory_stats import router as memory_stats_router
-from api.multi_agent import router as multi_agent_router
-from api.field_theory import router as field_theory_router
 from api.context_policy import router as context_policy_router
 from api.codegraph import router as codegraph_router  # PRD-11: New CodeGraph implementation
 from api.github_webhooks import router as github_webhooks_router  # GitHub PR automation
@@ -347,6 +344,16 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"HeartbeatService failed to start (non-fatal): {e}")
 
+        # Recipe Cron Scheduler
+        if config.RECIPE_SCHEDULER_ENABLED:
+            try:
+                from services.recipe_scheduler import get_recipe_scheduler
+                recipe_sched = get_recipe_scheduler()
+                await recipe_sched.start()
+                logger.info("RecipeSchedulerService started successfully")
+            except Exception as e:
+                logger.warning(f"RecipeSchedulerService failed to start (non-fatal): {e}")
+
         # PRD-55: Start ChannelManager
         if config.CHANNELS_ENABLED:
             try:
@@ -372,6 +379,15 @@ async def lifespan(app: FastAPI):
             from services.heartbeat_service import get_heartbeat_service
             await get_heartbeat_service().stop()
             logger.info("HeartbeatService stopped")
+        except Exception:
+            pass
+
+    # Stop RecipeSchedulerService
+    if config.RECIPE_SCHEDULER_ENABLED:
+        try:
+            from services.recipe_scheduler import get_recipe_scheduler
+            await get_recipe_scheduler().stop()
+            logger.info("RecipeSchedulerService stopped")
         except Exception:
             pass
 
@@ -509,14 +525,14 @@ app = FastAPI(
             "description": "Development server"
         },
         {
-            "url": os.getenv("API_URL", "http://localhost:8000"),
+            "url": config.API_URL or "http://localhost:8000",
             "description": "Production server"
         }
     ],
     lifespan=lifespan,
-    docs_url="/docs" if os.getenv("ENVIRONMENT", "development") != "production" else None,
-    redoc_url="/redoc" if os.getenv("ENVIRONMENT", "development") != "production" else None,
-    openapi_url="/openapi.json" if os.getenv("ENVIRONMENT", "development") != "production" else None,
+    docs_url="/docs" if config.ENVIRONMENT != "production" else None,
+    redoc_url="/redoc" if config.ENVIRONMENT != "production" else None,
+    openapi_url="/openapi.json" if config.ENVIRONMENT != "production" else None,
     swagger_ui_parameters={
         "deepLinking": True,
         "displayRequestDuration": True,
@@ -606,7 +622,7 @@ async def add_security_headers(request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
-    if os.getenv("ENVIRONMENT", "development") == "production":
+    if config.ENVIRONMENT == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
 
@@ -693,8 +709,6 @@ app.include_router(analytics_router)
 app.include_router(workflow_history_router)
 app.include_router(execution_history_router)  # Enhanced execution history API
 app.include_router(benchmarking_router)  # Workflow and agent analytics
-app.include_router(multi_agent_router)
-app.include_router(field_theory_router)
 app.include_router(context_policy_router)
 app.include_router(codegraph_router)  # PRD-11: CodeGraph
 app.include_router(github_webhooks_router)  # GitHub PR automation
@@ -844,7 +858,7 @@ async def health_check():
         components["database"] = "unhealthy"
 
     # Critical config check
-    has_db_url = bool(os.getenv("DATABASE_URL") or config.DATABASE_URL)
+    has_db_url = bool(config.DATABASE_URL)
     components["config"] = "healthy" if has_db_url else "degraded"
 
     # Real system metrics via psutil
@@ -994,8 +1008,6 @@ async def root():
         "🏥 health_monitoring": {
             "system_health": "/health",
             "system_metrics": "/api/system/metrics",
-            "multi_agent_health": "/api/multi-agent/health",
-            "field_theory_health": "/api/field-theory/health"
         },
         
         "🛠️ api_endpoints": {
@@ -1003,16 +1015,6 @@ async def root():
                 "base_url": "/api/agents",
                 "description": "Complete agent lifecycle management",
                 "features": ["Create agents", "Manage skills", "Performance tracking", "Agent coordination"]
-            },
-            "👥 multi_agent": {
-                "base_url": "/api/multi-agent", 
-                "description": "Collaborative multi-agent systems",
-                "features": ["Collaborative reasoning", "Agent coordination", "Behavior monitoring", "System optimization"]
-            },
-            "🌐 field_theory": {
-                "base_url": "/api/field-theory",
-                "description": "Advanced field-based context management", 
-                "features": ["Field representations", "Field propagation", "Context interactions", "Dynamic management"]
             },
             "🔄 workflows": {
                 "base_url": "/api/workflows",

@@ -64,16 +64,13 @@ function transformFormToApiPayload(data: RecipeFormValues) {
     version: '1.0',
   }
 
-  // Build execution_config matching backend expectations
+  // Build execution_config matching backend expectations (timeouts in seconds)
   const executionConfig = {
     mode: data.execution_config.mode,
     max_retries: data.execution_config.max_retries,
-    retry_delay: data.execution_config.retry_delay,
-    backoff_strategy: data.execution_config.backoff_strategy,
     per_step_timeout: Math.round(data.execution_config.timeout_per_step / 1000),
     total_timeout: Math.round(data.execution_config.total_timeout / 1000),
-    quality_threshold: data.execution_config.quality_threshold,
-    auto_learn: data.execution_config.auto_learning,
+    auto_learning: data.execution_config.auto_learning,
     ...(data.execution_config.mode === 'parallel' ? { parallel_limit: data.execution_config.parallel_limit } : {}),
     memory_isolation: data.execution_config.memory_isolation,
   }

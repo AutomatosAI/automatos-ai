@@ -44,7 +44,7 @@ class LocalStorageService:
             os.path.expanduser("~"), ".automatos", "marketplace"
         )
         self.base_dir = pathlib.Path(
-            os.getenv("MARKETPLACE_LOCAL_DIR", default_dir)
+            config.MARKETPLACE_LOCAL_DIR or default_dir
         )
         self.base_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         logger.info("Using local filesystem storage at %s", self.base_dir)
@@ -65,9 +65,7 @@ class LocalStorageService:
             shutil.rmtree(dest)
         dest.mkdir(parents=True, exist_ok=True)
 
-        max_uncompressed = int(
-            os.getenv("PLUGIN_MAX_UPLOAD_SIZE_MB", "50")
-        ) * 1024 * 1024
+        max_uncompressed = config.PLUGIN_MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             total_uncompressed = sum(

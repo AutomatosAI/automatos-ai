@@ -1,31 +1,33 @@
 """
-Auto Brain — Thin Gate Before the Universal Router
+Auto Brain — The Progressive Complexity Assessor
 ====================================================
 
-Auto receives every message and makes ONE decision:
-  - Is this trivial (greeting, platform meta-query, memory recall)?
-    → Handle directly with the orchestrator LLM.
-  - Everything else → DELEGATE to the Universal Router.
+PRD-68: Progressive Complexity Routing (Atom → Organism).
 
-The router has semantic similarity (Tier 2.5) and LLM classification (Tier 3)
-which understand agent descriptions, tags, personas, and tools far better than
-keyword maps ever could.
+Auto receives every message and determines its complexity level:
+  - ATOM: Direct response (greetings, chitchat) — no tools, no memory
+  - MOLECULE: Single tool calls without deep memory
+  - CELL: Needs memory + tools + reasoning
+  - ORGAN: Multi-agent coordination
+  - ORGANISM: Full PRD-59 Neural Swarm pipelines
 
-Previous design had hardcoded _TOOL_KEYWORDS and _INTERNAL_TOOL_KEYWORDS that
-tried to match user messages to tools via substring matching.  That approach:
-  - Missed natural language variations ("create an image" ≠ "create image")
-  - Treated any short 1-2 word message as a greeting (atom), swallowing
-    legitimate requests like "send email", "find flights", "draw this"
-  - Prevented the LLM-powered router from ever seeing most messages
+3-Tier Assessment:
+  Tier 1: Redis cache lookup (<5ms, free)
+  Tier 2: Regex fast-paths (<5ms, free)
+  Tier 3: LLM classification (~200ms, ~$0.001)
 
-Now: AutoBrain is intentionally narrow.  When in doubt, DELEGATE.
+The ComplexityAssessment flows through the existing wiring:
+  api/chat.py → service.py → integration.py → smart_orchestrator.py
+where needs_memory and tool_hints drive downstream behavior.
 """
 
 import logging
 import re
+import json
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
@@ -33,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Complexity levels (Progressive Complexity Model from Platform Guide)
+# Complexity levels (Progressive Complexity Model PRD-68)
 # ---------------------------------------------------------------------------
 
 class Complexity(str, Enum):
@@ -62,13 +64,28 @@ class ComplexityAssessment:
     target_agent_name: Optional[str] = None
     matched_tools: List[str] = field(default_factory=list)
     confidence: float = 0.0
+    # PRD-68: Fields consumed by smart_orchestrator.py
+    needs_memory: bool = False
+    tool_hints: List[str] = field(default_factory=list)
+    needs_multi_agent: bool = False
+
+    def to_dict(self):
+        return {
+            "complexity": self.complexity.value,
+            "action": self.action.value,
+            "reasoning": self.reasoning,
+            "tool_hints": self.tool_hints,
+            "needs_memory": self.needs_memory,
+            "needs_multi_agent": self.needs_multi_agent,
+            "confidence": self.confidence,
+        }
 
 
 # ---------------------------------------------------------------------------
-# Patterns — intentionally narrow.  When in doubt, DON'T match.
+# Tier 2: Fast Heuristic Patterns
 # ---------------------------------------------------------------------------
 
-# Greetings and chitchat — must be the ENTIRE message (with optional punctuation).
+# Must be the ENTIRE message (with optional punctuation).
 # "hello" → atom.  "hello can you create an image" → NOT atom.
 _ATOM_PATTERNS = [
     r"^(hi|hello|hey|howdy|yo|sup)[\s!?.,:]*$",
@@ -81,9 +98,6 @@ _ATOM_PATTERNS = [
     r"^what\s+can\s+you\s+do[\s!?.]*$",
 ]
 
-# Platform self-awareness queries — meta-questions ABOUT the platform itself.
-# These are handled by Auto's internal tools, not specialized agents.
-# Patterns are intentionally specific to avoid false positives.
 _PLATFORM_KEYWORDS = {
     "platform_list_agents": [
         "list my agents", "what agents do i have", "show my agents",
@@ -125,100 +139,242 @@ _MEMORY_PATTERN = re.compile(
 
 
 # ---------------------------------------------------------------------------
-# AutoBrain
+# AutoBrain (The Assessor)
 # ---------------------------------------------------------------------------
 
 class AutoBrain:
     """
-    Thin gate before the Universal Router.
+    PRD-68: 3-Tier Progressive Complexity Assessor.
 
-    Only short-circuits for messages that clearly DON'T need a specialized
-    agent: greetings, platform meta-queries, and memory recalls.
+    Evaluates every incoming request to determine the required execution depth
+    (Atom → Organism), bypassing heavy tools and memory for simple requests.
 
-    Everything else → DELEGATE → Universal Router (semantic + LLM).
+    Tier 1: Redis cache (<5ms)
+    Tier 2: Regex heuristics (<5ms)
+    Tier 3: LLM classification (~200ms, configurable model via system settings)
     """
 
     def __init__(self, db: Session, workspace_id: str):
         self._db = db
         self._workspace_id = workspace_id
+        self._redis = None
+        try:
+            from core.redis.client import get_redis_client
+            self._redis = get_redis_client()
+        except Exception:
+            logger.debug("[AutoBrain] Redis not available, cache disabled")
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
 
     async def assess(
         self,
         message: str,
         conversation_length: int = 0,
     ) -> ComplexityAssessment:
-        """
-        Decide: handle directly (RESPOND) or send to router (DELEGATE)?
-
-        RESPOND = Auto handles with orchestrator LLM (greetings, platform, memory).
-        DELEGATE = Universal Router picks the best specialized agent.
-        """
+        """Run the 3-Tier complexity assessment."""
         if not message or not message.strip():
             return ComplexityAssessment(
-                complexity=Complexity.ATOM,
-                action=Action.RESPOND,
-                reasoning="Empty message",
-                confidence=1.0,
+                complexity=Complexity.ATOM, action=Action.RESPOND,
+                reasoning="Empty message", confidence=1.0,
             )
 
         msg_lower = message.lower().strip()
 
-        # --- Greetings & chitchat → Auto responds directly ---
+        # ── Tier 1: Redis cache lookup (<5ms) ──
+        cached = self._cache_lookup(msg_lower)
+        if cached:
+            return cached
+
+        # ── Tier 2: Regex fast-paths (FREE, <5ms) ──
+        heur = self._run_fast_heuristics(msg_lower)
+        if heur:
+            self._cache_store(msg_lower, heur)
+            return heur
+
+        # ── Tier 3: LLM classification (~200ms) ──
+        llm_result = await self._llm_classify(message, conversation_length)
+        self._cache_store(msg_lower, llm_result)
+        return llm_result
+
+    # ------------------------------------------------------------------
+    # Tier 2: Fast heuristics
+    # ------------------------------------------------------------------
+
+    def _run_fast_heuristics(self, msg_lower: str) -> Optional[ComplexityAssessment]:
+        # ATOM: Pure chitchat
         if self._is_atom(msg_lower):
-            logger.info("[AutoBrain] Atom detected: '%s'", msg_lower[:50])
+            logger.info("[AutoBrain] Tier 2 Atom: '%s'", msg_lower[:50])
             return ComplexityAssessment(
-                complexity=Complexity.ATOM,
-                action=Action.RESPOND,
-                reasoning="Greeting or chitchat",
-                confidence=0.95,
+                complexity=Complexity.ATOM, action=Action.RESPOND,
+                reasoning="Greeting or chitchat", confidence=0.95,
+                needs_memory=False, tool_hints=[], needs_multi_agent=False,
             )
 
-        # --- Platform self-awareness → Auto responds directly ---
+        # MOLECULE: Platform queries
         platform_tool = self._match_platform_query(msg_lower)
         if platform_tool:
-            logger.info("[AutoBrain] Platform query: %s", platform_tool)
+            logger.info("[AutoBrain] Tier 2 Platform query: %s", platform_tool)
             return ComplexityAssessment(
-                complexity=Complexity.MOLECULE,
-                action=Action.RESPOND,
+                complexity=Complexity.MOLECULE, action=Action.RESPOND,
                 reasoning=f"Platform query ({platform_tool})",
-                matched_tools=[platform_tool],
-                confidence=0.90,
+                matched_tools=[platform_tool], tool_hints=["platform"],
+                confidence=0.90, needs_memory=False, needs_multi_agent=False,
             )
 
-        # --- Memory recall → Auto responds directly ---
+        # CELL: Memory recall
         if self._is_memory_recall(msg_lower):
-            logger.info("[AutoBrain] Memory recall detected")
+            logger.info("[AutoBrain] Tier 2 Memory recall")
             return ComplexityAssessment(
-                complexity=Complexity.CELL,
-                action=Action.RESPOND,
-                reasoning="Memory recall - Auto handles with context",
-                confidence=0.85,
+                complexity=Complexity.CELL, action=Action.RESPOND,
+                reasoning="Explicit memory recall", confidence=0.85,
+                needs_memory=True, tool_hints=[], needs_multi_agent=False,
             )
 
-        # --- Everything else → DELEGATE to Universal Router ---
-        # The router has:
-        #   Tier 2.5 — Semantic similarity (understands agent descriptions)
-        #   Tier 3   — LLM classification (sees all agents + tools + descriptions)
-        # Both are far more capable than keyword matching.
-        logger.info("[AutoBrain] Delegating to router: '%s'", msg_lower[:80])
+        return None
+
+    # ------------------------------------------------------------------
+    # Tier 3: LLM classification
+    # ------------------------------------------------------------------
+
+    async def _llm_classify(
+        self, message: str, conversation_length: int
+    ) -> ComplexityAssessment:
+        """Use a lightweight LLM to classify complexity. Any model, any provider."""
+        logger.info("[AutoBrain] Tier 3 LLM classifying: '%s'", message[:80])
+
+        agent_summaries = self._get_agent_summaries()
+
+        prompt = f"""Classify this user message for an AI platform.
+
+Available agents: {agent_summaries}
+Conversation turn: {conversation_length}
+
+Message: "{message}"
+
+Return ONLY valid JSON:
+{{
+  "complexity": "atom|molecule|cell|organ|organism",
+  "action": "respond|delegate|workflow",
+  "tool_hints": ["domain1", "domain2"],
+  "needs_memory": true/false,
+  "needs_multi_agent": true/false,
+  "reasoning": "one sentence"
+}}
+
+Rules:
+- atom: Greetings, chitchat, simple factual. No tools.
+- molecule: Needs ONE tool/agent. "Send email", "check Jira", "search docs".
+- cell: Needs tools + memory/conversation context. "Reply to that email we discussed".
+- organ: Needs multiple agents coordinating. "Research bug, plan fix, open PR".
+- organism: Enterprise-scale multi-step. "Refactor auth across all services".
+- tool_hints: short domain keywords like "email", "github", "jira", "code", "database". Empty for atom.
+- needs_memory: true if the message references past conversations or user preferences.
+- needs_multi_agent: true only for organ/organism level tasks.
+- action: "respond" for atom, "delegate" for molecule/cell, "workflow" for organ/organism."""
+
+        try:
+            from core.llm import create_llm_manager
+
+            llm = create_llm_manager(service_name="complexity_assessor")
+            response = await llm.generate_response(
+                messages=[{"role": "user", "content": prompt}]
+            )
+            content = response.content if hasattr(response, "content") else str(response)
+
+            # Extract JSON block
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(0))
+                return ComplexityAssessment(
+                    complexity=Complexity(data.get("complexity", "molecule").lower()),
+                    action=Action(data.get("action", "delegate").lower()),
+                    reasoning=data.get("reasoning", "LLM classified"),
+                    confidence=0.85,
+                    needs_memory=data.get("needs_memory", False),
+                    tool_hints=data.get("tool_hints", []),
+                    needs_multi_agent=data.get("needs_multi_agent", False),
+                )
+        except Exception:
+            logger.exception("[AutoBrain] Tier 3 LLM classification failed, falling back to DELEGATE")
+
+        # Fallback: treat as MOLECULE / DELEGATE (current behavior)
         return ComplexityAssessment(
-            complexity=Complexity.MOLECULE,
-            action=Action.DELEGATE,
-            reasoning="Delegating to router for agent selection",
-            confidence=0.70,
+            complexity=Complexity.MOLECULE, action=Action.DELEGATE,
+            reasoning="LLM classification failed — defaulting to delegate",
+            confidence=0.50, needs_memory=False, tool_hints=[],
+            needs_multi_agent=False,
         )
 
     # ------------------------------------------------------------------
-    # Pattern matchers — intentionally narrow
+    # Agent summaries for LLM context
+    # ------------------------------------------------------------------
+
+    def _get_agent_summaries(self) -> str:
+        """Get lightweight agent descriptions for LLM context."""
+        try:
+            from core.models.agents import Agent
+            agents = self._db.query(Agent.name, Agent.description).filter(
+                Agent.workspace_id == self._workspace_id,
+                Agent.is_active == True,
+            ).all()
+            if not agents:
+                return "No custom agents configured."
+            return ", ".join(
+                f"{a.name}: {(a.description or '')[:60]}" for a in agents
+            )
+        except Exception:
+            logger.debug("[AutoBrain] Could not load agent summaries")
+            return "Agent list unavailable."
+
+    # ------------------------------------------------------------------
+    # Redis cache (Tier 1)
+    # ------------------------------------------------------------------
+
+    def _cache_lookup(self, msg_lower: str) -> Optional[ComplexityAssessment]:
+        if not self._redis:
+            return None
+        try:
+            cache_key = self._make_cache_key(msg_lower)
+            raw = self._redis.get(cache_key)
+            if raw:
+                data = json.loads(raw)
+                logger.info("[AutoBrain] Tier 1 Cache hit: '%s'", msg_lower[:50])
+                return ComplexityAssessment(
+                    complexity=Complexity(data["complexity"]),
+                    action=Action(data["action"]),
+                    reasoning=data.get("reasoning", "cached") + " (cached)",
+                    confidence=data.get("confidence", 0.90),
+                    needs_memory=data.get("needs_memory", False),
+                    tool_hints=data.get("tool_hints", []),
+                    needs_multi_agent=data.get("needs_multi_agent", False),
+                )
+        except Exception:
+            logger.debug("[AutoBrain] Cache lookup failed")
+        return None
+
+    def _cache_store(self, msg_lower: str, assessment: ComplexityAssessment) -> None:
+        if not self._redis:
+            return
+        try:
+            cache_key = self._make_cache_key(msg_lower)
+            from config import config
+            ttl = int(config.COMPLEXITY_CACHE_TTL_HOURS or 24) * 3600
+            self._redis.setex(cache_key, ttl, json.dumps(assessment.to_dict()))
+        except Exception:
+            logger.debug("[AutoBrain] Cache store failed, non-critical")
+
+    def _make_cache_key(self, msg_lower: str) -> str:
+        h = hashlib.sha256(msg_lower.encode()).hexdigest()[:16]
+        return f"complexity:{self._workspace_id}:{h}"
+
+    # ------------------------------------------------------------------
+    # Pattern matchers (Tier 2)
     # ------------------------------------------------------------------
 
     @staticmethod
     def _is_atom(msg_lower: str) -> bool:
-        """Is this a standalone greeting or chitchat that needs no agent?
-
-        Only matches complete messages like "hi", "thanks!", "ok".
-        Does NOT match "hi can you create an image" or "ok now send the email".
-        """
         for pattern in _atom_re:
             if pattern.match(msg_lower):
                 return True
@@ -226,11 +382,6 @@ class AutoBrain:
 
     @staticmethod
     def _match_platform_query(msg_lower: str) -> Optional[str]:
-        """Match platform self-awareness queries (list agents, usage, etc.).
-
-        Only matches specific phrases about the platform itself, not general
-        requests that happen to mention "agents" or "documents".
-        """
         for tool_name, phrases in _PLATFORM_KEYWORDS.items():
             for phrase in phrases:
                 if phrase in msg_lower:
@@ -239,5 +390,4 @@ class AutoBrain:
 
     @staticmethod
     def _is_memory_recall(msg_lower: str) -> bool:
-        """Is this specifically asking about past conversations/memory?"""
         return bool(_MEMORY_PATTERN.search(msg_lower))

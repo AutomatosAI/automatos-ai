@@ -17,6 +17,7 @@ import asyncio
 import logging
 import json
 
+from config import config
 from core.database.database import get_db
 from core.models import (
     Workflow, WorkflowExecution, Agent, workflow_agents,
@@ -30,6 +31,7 @@ from core.services.workspace_manager import WorkspaceManager
 from core.auth.hybrid import get_request_context_hybrid
 from core.task_runner import get_task_runner, AgentTask, TaskType, TaskPriority
 from core.auth.dependencies import RequestContext
+from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
@@ -1489,6 +1491,57 @@ async def get_execution_results(execution_id: int, db: Session = Depends(get_db)
         logger.error(f"Error getting execution results {execution_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+async def _adaptive_checkpoint(
+    stage_name: str,
+    stage_results: Dict[str, Any],
+    workflow_context: Dict[str, Any],
+    attempt: int,
+    stage_tracker,
+) -> "AdaptationDecision":
+    """
+    Two-tier adaptive checkpoint: heuristic → LLM evaluation.
+    Called after Stage 4 (execution) and Stage 7 (quality) to decide
+    whether to continue, retry, or abort.
+
+    Returns an AdaptationDecision from AdaptiveExecutionMonitor.
+    """
+    from modules.orchestrator.llm.adaptive_execution_monitor import (
+        AdaptiveExecutionMonitor,
+        AdaptationDecision,
+        InterventionAction,
+    )
+
+    await stage_tracker._emit("adaptive_checkpoint_start", {
+        "stage": stage_name,
+        "attempt": attempt,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+    monitor = AdaptiveExecutionMonitor(max_retries=1)
+    decision = await monitor.evaluate_stage_outcome(
+        stage_name=stage_name,
+        stage_results=stage_results,
+        workflow_context=workflow_context,
+        attempt_number=attempt,
+    )
+
+    logger.info(
+        f"[Adaptive] Checkpoint after {stage_name}: {decision.action.value} "
+        f"(confidence={decision.confidence:.2f}, reason={decision.reasoning[:120]})"
+    )
+
+    await stage_tracker._emit("adaptive_checkpoint_decision", {
+        "stage": stage_name,
+        "attempt": attempt,
+        "action": decision.action.value,
+        "reasoning": decision.reasoning[:200],
+        "confidence": decision.confidence,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+    return decision
+
+
 async def execute_workflow_with_progress(execution_id: int, options: Dict[str, Any]):
     """Execute workflow with COMPLETE pipeline: decompose, select, enhance, execute, score, learn, remember"""
     from core.database.database import get_db_session
@@ -2248,9 +2301,9 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         # Get agent's model configuration
                         agent = db.query(Agent).filter(Agent.id == result.agent_id).first()
                         if agent and agent.model_config:
-                            model_id = agent.model_config.get("model_id", "gpt-4")
+                            model_id = agent.model_config.get("model_id", config.LLM_MODEL)
                         else:
-                            model_id = "gpt-4"  # Default fallback
+                            model_id = config.LLM_MODEL  # Default fallback
                         
                         # Estimate input/output split (70% input, 30% output is typical)
                         input_tokens = int(result.tokens_used * 0.7)
@@ -2328,6 +2381,139 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 "success_rate": execution_summary.get("success_rate", 0) if 'execution_summary' in locals() else 0,
                 "total_tokens": execution_summary.get("total_tokens_used", 0) if 'execution_summary' in locals() else 0
             })
+
+            # ── ADAPTIVE CHECKPOINT 1: Post-Execution ──
+            # If execution success rate is poor, ask LLM whether to retry.
+            # Max 1 retry (2 total attempts). Heuristic fast-path skips LLM for good results.
+            _execution_attempt = 1
+            if (
+                'execution_summary' in locals()
+                and execution.input_data.get("agent_execution", {}).get("is_real")
+                and execution_summary.get("success_rate", 1.0) < 0.6
+            ):
+                from modules.orchestrator.llm.adaptive_execution_monitor import InterventionAction
+
+                _checkpoint_decision = await _adaptive_checkpoint(
+                    stage_name="execution",
+                    stage_results=execution_summary,
+                    workflow_context={
+                        "task_description": task_description,
+                        "steps": steps,
+                        "agent_assignments": {
+                            k: [{"agent_id": m.agent_id, "agent_name": m.agent_name} for m in v]
+                            for k, v in agent_assignments.items()
+                        } if agent_assignments else {},
+                    },
+                    attempt=_execution_attempt,
+                    stage_tracker=stage_tracker,
+                )
+
+                if _checkpoint_decision.action in (
+                    InterventionAction.RETRY_SAME,
+                    InterventionAction.RETRY_DIFFERENT,
+                ):
+                    _execution_attempt += 1
+                    await stage_tracker._emit("adaptive_retry_start", {
+                        "stage": "execution",
+                        "attempt": _execution_attempt,
+                        "action": _checkpoint_decision.action.value,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+
+                    try:
+                        # RETRY_DIFFERENT: re-select agents first
+                        if _checkpoint_decision.action == InterventionAction.RETRY_DIFFERENT:
+                            logger.info("[Adaptive] Re-selecting agents for retry...")
+                            from core.llm.llm_agent_selector import LLMAgentSelector as _RetrySelector
+                            _retry_selector = _RetrySelector(db_session=db)
+                            agent_assignments = await _retry_selector.select_agents_for_subtasks(
+                                steps,
+                                workflow_context={
+                                    "description": task_description,
+                                    "workflow_id": execution.workflow_id,
+                                },
+                            )
+                            # Update steps with new agent assignments
+                            for idx, step in enumerate(steps):
+                                subtask_id = step.get("subtask_id", f"subtask_{idx}")
+                                if subtask_id in agent_assignments and agent_assignments[subtask_id]:
+                                    best_match = agent_assignments[subtask_id][0]
+                                    step["selected_agent"] = {
+                                        "agent_id": best_match.agent_id,
+                                        "agent_name": best_match.agent_name,
+                                        "match_score": best_match.match_score,
+                                    }
+
+                        # Re-run agent execution (same or different agents)
+                        logger.info(f"[Adaptive] Retry attempt {_execution_attempt}: re-executing agents...")
+                        from modules.agents import AgentExecutionManager as _RetryExecManager
+                        _retry_exec_mgr = _RetryExecManager(
+                            db_session=db,
+                            max_parallel_executions=3,
+                            max_retries=2,
+                            workspace_dir=workspace_path,
+                        )
+                        subtask_results = await _retry_exec_mgr.execute_workflow_subtasks(
+                            subtasks=steps,
+                            agent_assignments=agent_assignments,
+                            context_enhancements=context_enhancements,
+                            execution_id=execution_id,
+                            workflow_id=execution.workflow_id,
+                            memory_retrieval_results=memory_retrieval_results,
+                            execution_strategy=execution_strategy if 'execution_strategy' in locals() else "parallel",
+                        )
+                        execution_summary = _retry_exec_mgr.get_execution_summary(subtask_results)
+
+                        # Update execution data with retry results
+                        execution.input_data["agent_execution"] = {
+                            "is_real": True,
+                            "is_retry": True,
+                            "retry_attempt": _execution_attempt,
+                            "retry_action": _checkpoint_decision.action.value,
+                            "summary": execution_summary,
+                            "results": {
+                                sid: {
+                                    "status": r.status.value,
+                                    "agent_name": r.agent_name,
+                                    "tokens_used": r.tokens_used,
+                                    "execution_time_ms": r.execution_time_ms,
+                                    "retry_count": r.retry_count,
+                                    "error": r.error_message,
+                                }
+                                for sid, r in subtask_results.items()
+                            },
+                        }
+                        attributes.flag_modified(execution, "input_data")
+                        db.commit()
+
+                        # Update steps with retry results
+                        for idx, step in enumerate(steps):
+                            subtask_id = step.get("subtask_id", f"subtask_{idx}")
+                            if subtask_id in subtask_results:
+                                result = subtask_results[subtask_id]
+                                step["execution_result"] = {
+                                    "status": result.status.value,
+                                    "llm_response": result.llm_response,
+                                    "tokens_used": result.tokens_used,
+                                    "execution_time_ms": result.execution_time_ms,
+                                }
+
+                        logger.info(
+                            f"[Adaptive] Retry complete: {execution_summary.get('success_rate', 0):.0%} success rate"
+                        )
+                    except Exception as retry_err:
+                        logger.error(f"[Adaptive] Retry failed: {retry_err}", exc_info=True)
+
+                elif _checkpoint_decision.action == InterventionAction.ABORT:
+                    logger.warning("[Adaptive] Checkpoint decided to ABORT execution")
+                    execution.status = ExecutionStatus.FAILED.value
+                    execution.input_data["adaptive_abort"] = {
+                        "stage": "execution",
+                        "reasoning": _checkpoint_decision.reasoning,
+                    }
+                    attributes.flag_modified(execution, "input_data")
+                    db.commit()
+                    return  # Exit the entire function
 
             # Complete EXECUTE phase, start EVALUATE phase
             if "EXECUTE" in active_phases:
@@ -2467,10 +2653,9 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 logger.info(f"🎯 Assessing workflow output quality...")
                 try:
                     from modules.orchestrator.stages import OutputQualityAssessor, OutputType
-                    import os
 
                     # PRD-59 Fix 1: Use LLM-based quality assessment on real outputs
-                    use_llm_quality = len(steps) >= 3 and os.environ.get("ENABLE_LLM_QUALITY_ASSESSMENT", "true").lower() == "true"
+                    use_llm_quality = len(steps) >= 3 and config.ENABLE_LLM_QUALITY_ASSESSMENT
 
                     llm_client_for_quality = None
                     if use_llm_quality:
@@ -2552,7 +2737,200 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "quality_score": quality_assessment.overall_score if 'quality_assessment' in locals() else 0,
                     "passes_threshold": quality_assessment.passes_threshold if 'quality_assessment' in locals() else False
                 })
-            
+
+            # ── ADAPTIVE CHECKPOINT 2: Post-Quality ──
+            # If quality assessment fails threshold, ask LLM whether to retry execution.
+            # Max 1 retry. Re-runs from Stage 4 through Stage 7 on retry.
+            _quality_attempt = 1
+            if (
+                'quality_assessment' in locals()
+                and hasattr(quality_assessment, 'passes_threshold')
+                and not quality_assessment.passes_threshold
+                and execution.input_data.get("quality_assessment", {}).get("is_real")
+            ):
+                from modules.orchestrator.llm.adaptive_execution_monitor import InterventionAction as _QualityIA
+
+                _quality_data = {
+                    "overall_score": quality_assessment.overall_score,
+                    "passes_threshold": quality_assessment.passes_threshold,
+                    "strengths": getattr(quality_assessment, 'strengths', []),
+                    "weaknesses": getattr(quality_assessment, 'weaknesses', []),
+                    "improvement_suggestions": getattr(quality_assessment, 'improvement_suggestions', []),
+                }
+                _quality_decision = await _adaptive_checkpoint(
+                    stage_name="quality",
+                    stage_results=_quality_data,
+                    workflow_context={
+                        "task_description": task_description,
+                        "steps": steps,
+                        "agent_assignments": {
+                            k: [{"agent_id": m.agent_id, "agent_name": m.agent_name} for m in v]
+                            for k, v in agent_assignments.items()
+                        } if agent_assignments else {},
+                    },
+                    attempt=_quality_attempt,
+                    stage_tracker=stage_tracker,
+                )
+
+                if _quality_decision.action in (
+                    _QualityIA.RETRY_SAME,
+                    _QualityIA.RETRY_DIFFERENT,
+                ):
+                    _quality_attempt += 1
+                    await stage_tracker._emit("adaptive_retry_start", {
+                        "stage": "quality",
+                        "attempt": _quality_attempt,
+                        "action": _quality_decision.action.value,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+
+                    try:
+                        # RETRY_DIFFERENT: re-select agents
+                        if _quality_decision.action == _QualityIA.RETRY_DIFFERENT:
+                            logger.info("[Adaptive] Quality retry: re-selecting agents...")
+                            from core.llm.llm_agent_selector import LLMAgentSelector as _QRetrySelector
+                            _qretry_sel = _QRetrySelector(db_session=db)
+                            agent_assignments = await _qretry_sel.select_agents_for_subtasks(
+                                steps,
+                                workflow_context={
+                                    "description": task_description,
+                                    "workflow_id": execution.workflow_id,
+                                },
+                            )
+                            for idx, step in enumerate(steps):
+                                subtask_id = step.get("subtask_id", f"subtask_{idx}")
+                                if subtask_id in agent_assignments and agent_assignments[subtask_id]:
+                                    best_match = agent_assignments[subtask_id][0]
+                                    step["selected_agent"] = {
+                                        "agent_id": best_match.agent_id,
+                                        "agent_name": best_match.agent_name,
+                                        "match_score": best_match.match_score,
+                                    }
+
+                        # Re-run Stage 4: Agent Execution
+                        logger.info(f"[Adaptive] Quality retry {_quality_attempt}: re-executing agents...")
+                        from modules.agents import AgentExecutionManager as _QRetryExecMgr
+                        _qretry_mgr = _QRetryExecMgr(
+                            db_session=db,
+                            max_parallel_executions=3,
+                            max_retries=2,
+                            workspace_dir=workspace_path,
+                        )
+                        subtask_results = await _qretry_mgr.execute_workflow_subtasks(
+                            subtasks=steps,
+                            agent_assignments=agent_assignments,
+                            context_enhancements=context_enhancements,
+                            execution_id=execution_id,
+                            workflow_id=execution.workflow_id,
+                            memory_retrieval_results=memory_retrieval_results if 'memory_retrieval_results' in locals() else {},
+                            execution_strategy=execution_strategy if 'execution_strategy' in locals() else "parallel",
+                        )
+                        execution_summary = _qretry_mgr.get_execution_summary(subtask_results)
+
+                        # Update steps with retry results
+                        for idx, step in enumerate(steps):
+                            subtask_id = step.get("subtask_id", f"subtask_{idx}")
+                            if subtask_id in subtask_results:
+                                result = subtask_results[subtask_id]
+                                step["execution_result"] = {
+                                    "status": result.status.value,
+                                    "llm_response": result.llm_response,
+                                    "tokens_used": result.tokens_used,
+                                    "execution_time_ms": result.execution_time_ms,
+                                }
+
+                        # Re-run Stage 5: Result Aggregation
+                        logger.info("[Adaptive] Quality retry: re-aggregating results...")
+                        aggregator = ResultAggregator()
+                        aggregated_results = aggregator.aggregate_results(
+                            workflow_id=execution.workflow_id,
+                            execution_id=execution_id,
+                            subtask_executions=subtask_results,
+                            decomposition_metadata=execution.input_data.get("decomposition", {}),
+                            agent_selection_metadata=execution.input_data.get("agent_selection", {}),
+                            context_engineering_metadata=execution.input_data.get("context_engineering", {}),
+                            agent_execution_metadata=execution.input_data.get("agent_execution", {}),
+                        )
+
+                        # Re-run Stage 7: Quality Assessment
+                        logger.info("[Adaptive] Quality retry: re-assessing quality...")
+                        from modules.orchestrator.stages import OutputQualityAssessor, OutputType
+                        _use_llm_q = len(steps) >= 3 and config.ENABLE_LLM_QUALITY_ASSESSMENT
+                        _llm_q = None
+                        if _use_llm_q:
+                            try:
+                                from core.llm import create_llm_manager
+                                _llm_q = create_llm_manager(service_name="orchestrator")
+                            except Exception:
+                                pass
+
+                        _qa = OutputQualityAssessor(
+                            llm_client=_llm_q,
+                            use_llm=_use_llm_q and _llm_q is not None,
+                        )
+                        actual_outputs = []
+                        for step in steps:
+                            exec_result = step.get("execution_result", {})
+                            result_content = exec_result.get("result", "") or exec_result.get("output", "") or ""
+                            if result_content:
+                                actual_outputs.append({
+                                    "subtask": step.get("description", "Unknown"),
+                                    "agent": step.get("agent_name", "Unknown"),
+                                    "output": str(result_content)[:2000],
+                                    "tokens_used": exec_result.get("tokens_used", 0),
+                                    "status": exec_result.get("status", "unknown"),
+                                })
+                        completed_count = sum(1 for s in steps if s.get("execution_result", {}).get("status") == "completed")
+                        total_count = len(steps) or 1
+                        output_summary = json.dumps({
+                            "task": task_description[:500],
+                            "subtask_outputs": actual_outputs,
+                            "overall_success_rate": completed_count / total_count,
+                            "total_subtasks": len(steps),
+                        }, indent=2)
+                        quality_assessment = await _qa.assess_quality(
+                            output=output_summary,
+                            requirements=task_description,
+                            output_type=OutputType.GENERAL,
+                            quality_threshold=0.7,
+                        )
+
+                        # Store retry quality results
+                        execution.input_data["quality_assessment"] = {
+                            "is_real": quality_assessment.assessment_method in ("llm", "hybrid"),
+                            "is_retry": True,
+                            "retry_attempt": _quality_attempt,
+                            "overall_score": quality_assessment.overall_score,
+                            "passes_threshold": quality_assessment.passes_threshold,
+                            "dimensions": {
+                                name: {"score": dim.score, "feedback": dim.feedback}
+                                for name, dim in quality_assessment.dimensions.items()
+                            },
+                            "strengths": quality_assessment.strengths,
+                            "weaknesses": quality_assessment.weaknesses,
+                        }
+                        attributes.flag_modified(execution, "input_data")
+                        db.commit()
+
+                        logger.info(
+                            f"[Adaptive] Quality retry complete: {quality_assessment.overall_score:.0%} "
+                            f"({'PASS' if quality_assessment.passes_threshold else 'FAIL'})"
+                        )
+
+                    except Exception as qretry_err:
+                        logger.error(f"[Adaptive] Quality retry failed: {qretry_err}", exc_info=True)
+
+                elif _quality_decision.action == _QualityIA.ABORT:
+                    logger.warning("[Adaptive] Quality checkpoint decided to ABORT execution")
+                    execution.status = ExecutionStatus.FAILED.value
+                    execution.input_data["adaptive_abort"] = {
+                        "stage": "quality",
+                        "reasoning": _quality_decision.reasoning,
+                    }
+                    attributes.flag_modified(execution, "input_data")
+                    db.commit()
+                    return
+
             # ========== STAGE 8: MEMORY STORAGE ==========
             await stage_tracker.start_stage(8)
 

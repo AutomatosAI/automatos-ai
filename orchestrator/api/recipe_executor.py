@@ -18,6 +18,7 @@ v2 changes:
 - Mem0 recipe memory wired for pre/post execution
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -668,11 +669,25 @@ async def execute_recipe_direct(
         except Exception as exc:
             logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
 
+        # Read timeout config (stored in seconds in execution_config)
+        exec_config = recipe.execution_config or {}
+        step_timeout_sec = exec_config.get('per_step_timeout', 120)  # default 2 min
+        total_timeout_sec = exec_config.get('total_timeout', 600)    # default 10 min
+
         # Execute each step sequentially
         step_results: List[Dict[str, Any]] = []
         execution_start = time.time()
 
         for idx, step in enumerate(steps):
+            # Total timeout check
+            elapsed = time.time() - execution_start
+            if elapsed > total_timeout_sec:
+                msg = f"Total execution timeout ({total_timeout_sec}s) exceeded after {int(elapsed)}s at step {idx + 1}"
+                logger.warning(f"[recipe_direct] {msg}")
+                _persist_step_results(db, execution, step_results)
+                await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
+                return
+
             step_id = step.get('step_id', f'step-{idx + 1}')
             step_order = step.get('order', idx + 1)
             agent_id = step.get('agent_id')
@@ -886,16 +901,19 @@ async def execute_recipe_direct(
                     step_result["retries"] = attempt
 
                 try:
-                    result = await _execute_step(
-                        db=db,
-                        agent=agent,
-                        clean_prompt=clean_step_prompt,
-                        workspace_id=workspace_id,
-                        scratchpad=scratchpad,
-                        step_order=step_order,
-                        input_data=input_data,
-                        recipe_memories=recipe_memories if idx == 0 else None,
-                        prompt_for_hints=prompt_template,
+                    result = await asyncio.wait_for(
+                        _execute_step(
+                            db=db,
+                            agent=agent,
+                            clean_prompt=clean_step_prompt,
+                            workspace_id=workspace_id,
+                            scratchpad=scratchpad,
+                            step_order=step_order,
+                            input_data=input_data,
+                            recipe_memories=recipe_memories if idx == 0 else None,
+                            prompt_for_hints=prompt_template,
+                        ),
+                        timeout=step_timeout_sec,
                     )
 
                     if result.get("status") == "success":
@@ -929,6 +947,9 @@ async def execute_recipe_direct(
                         last_error = result.get("error", "Agent returned non-success status")
                         logger.warning(f"[recipe_direct] Step {step_order} failed: {last_error}")
 
+                except asyncio.TimeoutError:
+                    last_error = f"Step timed out after {step_timeout_sec}s"
+                    logger.warning(f"[recipe_direct] Step {step_order} timed out ({step_timeout_sec}s)")
                 except Exception as e:
                     last_error = str(e)
                     logger.error(f"[recipe_direct] Step {step_order} exception: {e}", exc_info=True)
@@ -1020,9 +1041,9 @@ async def execute_recipe_direct(
         )
 
         # --- Post-execution: learning + memory storage ---
-        exec_config = recipe.execution_config or {}
+        post_exec_config = recipe.execution_config or {}
         learning_result = None
-        if exec_config.get('auto_learn', False):
+        if post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False):
             try:
                 from core.services.recipe_learning_service import RecipeLearningService
                 learning_svc = RecipeLearningService(db=db)

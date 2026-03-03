@@ -30,6 +30,7 @@ from enum import Enum
 from datetime import datetime
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -903,10 +904,10 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             name="http_request",
             category=ToolCategory.API_TOOLS,
             description=(
-                "Make HTTP requests to whitelisted internal and platform URLs. "
-                "Use this to test API endpoints, check health status, and verify responses. "
-                "Only allowed domains: automatos-ai.railway.internal, automatos-ai-frontend.railway.internal, "
-                "api.automatos.app, ui.automatos.app, localhost."
+                f"Make HTTP requests to whitelisted internal and platform URLs. "
+                f"Use this to test API endpoints, check health status, and verify responses. "
+                f"Only allowed domains: {config.INTERNAL_API_HOSTNAME}, {config.INTERNAL_FRONTEND_HOSTNAME}, "
+                f"api.automatos.app, ui.automatos.app, localhost."
             ),
             executor_class="UnifiedToolExecutor",
             executor_method="_execute_http_request",
@@ -951,13 +952,13 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             security_level=SecurityLevel.CAUTIOUS,
             permissions_required={"read": True, "execute": True},
             examples=[
-                {"action": "http_request", "params": {"url": "http://automatos-ai.railway.internal/health", "method": "GET"}},
-                {"action": "http_request", "params": {"url": "http://automatos-ai.railway.internal/api/agents", "method": "GET", "headers": {"x-api-key": "your-key", "x-workspace-id": "your-ws-id"}}},
+                {"action": "http_request", "params": {"url": f"http://{config.INTERNAL_API_HOSTNAME}/health", "method": "GET"}},
+                {"action": "http_request", "params": {"url": f"http://{config.INTERNAL_API_HOSTNAME}/api/agents", "method": "GET", "headers": {"x-api-key": "your-key", "x-workspace-id": "your-ws-id"}}},
             ],
             metadata={
                 "allowed_domains": [
-                    "automatos-ai.railway.internal",
-                    "automatos-ai-frontend.railway.internal",
+                    config.INTERNAL_API_HOSTNAME,
+                    config.INTERNAL_FRONTEND_HOSTNAME,
                     "api.automatos.app",
                     "ui.automatos.app",
                     "localhost",
@@ -1250,18 +1251,27 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                 assigned_apps = {str(r.app_name or "").upper().strip() for r in assigned_rows if r and r.app_name}
                 assigned_apps.discard("")
 
-                if not assigned_apps:
-                    return False, "No external apps are assigned to this agent"
-
                 connected_apps = set()
                 try:
                     manager = EntityManager(db)
                     connected_apps = {a.upper().strip() for a in manager.get_connected_apps(workspace_id)}
                 except Exception:
-                    # If we can't resolve connections, fail closed (don't expose tool)
                     connected_apps = set()
 
-                eligible = assigned_apps.intersection(connected_apps)
+                # Auto-inherit: when agent has no explicit assignments, use all
+                # workspace-connected apps. 850+ tools — agents shouldn't need
+                # manual per-app assignment to use what's already connected.
+                if not assigned_apps:
+                    if connected_apps:
+                        logger.info(
+                            f"[ToolRegistry] Agent {agent_id} has no app assignments — "
+                            f"inheriting {len(connected_apps)} workspace apps: {connected_apps}"
+                        )
+                        assigned_apps = connected_apps
+                    else:
+                        return False, "No external apps are connected for this workspace"
+
+                eligible = assigned_apps.intersection(connected_apps) if connected_apps else assigned_apps
                 if not eligible:
                     return False, "No assigned external apps are connected for this workspace"
             except Exception as exc:

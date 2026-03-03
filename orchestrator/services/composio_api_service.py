@@ -10,7 +10,6 @@ Usage:
     - Sync metadata during scheduled jobs
 """
 
-import os
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -117,9 +116,10 @@ class ComposioAPIService:
         if config:
             self.config = config
         else:
-            api_key = os.environ.get("COMPOSIO_API_KEY", "")
+            from config import config as app_config
+            api_key = app_config.COMPOSIO_API_KEY or ""
             if not api_key:
-                logger.warning("COMPOSIO_API_KEY not set in environment")
+                logger.warning("COMPOSIO_API_KEY not set in config")
             self.config = ComposioConfig(api_key=api_key)
         
         self._client: Optional[httpx.AsyncClient] = None

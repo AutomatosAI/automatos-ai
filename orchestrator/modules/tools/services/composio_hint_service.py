@@ -229,8 +229,6 @@ class ComposioHintService:
             .all()
         )
         assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
-        if not assigned_apps:
-            return []
 
         # Resolve workspace_id from agent if not provided
         effective_workspace_id = workspace_id
@@ -245,8 +243,6 @@ class ComposioHintService:
                 manager = EntityManager(self.db)
                 entity = manager.get_entity_by_workspace(effective_workspace_id)
                 if entity:
-                    # Accept active AND pending connections — the agent assignment
-                    # is the authorization; let the SDK fail gracefully if not truly connected.
                     connected_apps = [
                         (c.get("app_name") or "").upper()
                         for c in manager.get_entity_connections(entity["id"])
@@ -255,6 +251,17 @@ class ComposioHintService:
             except Exception as conn_err:
                 logger.warning(f"[ComposioHintService] Connection check failed: {conn_err}")
                 connected_apps = []
+
+        # Auto-inherit: when agent has no explicit assignments, use all
+        # workspace-connected apps instead of returning empty.
+        if not assigned_apps:
+            if connected_apps:
+                logger.info(
+                    f"[ComposioHintService] Agent {agent_id} has no app assignments — "
+                    f"inheriting {len(connected_apps)} workspace apps"
+                )
+                return connected_apps
+            return []
 
         allowed_apps = assigned_apps
         if connected_apps:

@@ -30,7 +30,7 @@ class ReportGenerator:
         title: str,
         content: str,
         category: str = "general"
-    ) -&gt; Dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         Create a markdown report and save it to the documents directory.
         

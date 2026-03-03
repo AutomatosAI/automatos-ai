@@ -40,6 +40,7 @@ class Config:
     POSTGRES_HOST: str = os.getenv("POSTGRES_HOST")
     POSTGRES_PORT: str = os.getenv("POSTGRES_PORT")
     DATABASE_URL: str = os.getenv("DATABASE_URL")  # If set, overrides individual params
+    SQL_DEBUG: bool = os.getenv("SQL_DEBUG", "false").lower() == "true"
     
     # =============================================================================
     # REDIS - Caching/PubSub (optional)
@@ -47,6 +48,7 @@ class Config:
     REDIS_HOST: str = os.getenv("REDIS_HOST")
     REDIS_PORT: str = os.getenv("REDIS_PORT")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD")
+    REDIS_DB: str = os.getenv("REDIS_DB", "0")
     
     @property
     def REDIS_URL(self) -> str:
@@ -65,7 +67,10 @@ class Config:
     # API SECURITY
     # =============================================================================
     API_KEY: str = os.getenv("API_KEY")
+    ORCHESTRATOR_API_KEY: str = os.getenv("ORCHESTRATOR_API_KEY") or os.getenv("AUTOMATOS_API_KEY") or os.getenv("API_KEY")
     REQUIRE_API_KEY: bool = os.getenv("REQUIRE_API_KEY", "true").lower() == "true"
+    REQUIRE_AUTH: bool = os.getenv("REQUIRE_AUTH", "true").strip().lower() in ("true", "1", "yes")
+    AUTH_DEBUG: bool = os.getenv("AUTH_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
     
     # =============================================================================
     # CORS (Frontend origins)
@@ -79,10 +84,17 @@ class Config:
     CORS_ALLOW_ORIGINS: str = ",".join([origin.strip() for origin in _cors_origins.split(",") if origin.strip()])
     
     # =============================================================================
-    # LLM KEYS (Optional - LLM Manager handles these)
+    # LLM KEYS (All providers)
     # =============================================================================
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY")
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY")
+    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    AZURE_OPENAI_API_KEY: str = os.getenv("AZURE_OPENAI_API_KEY")
+    AZURE_OPENAI_ENDPOINT: str = os.getenv("AZURE_OPENAI_ENDPOINT")
+    AZURE_OPENAI_API_VERSION: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+    XAI_API_KEY: str = os.getenv("XAI_API_KEY")
+    COHERE_API_KEY: str = os.getenv("COHERE_API_KEY")
 
     # LLM settings - loaded from database system_settings (NO hardcoded defaults)
     @property
@@ -137,16 +149,55 @@ class Config:
     NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL")
     
     # =============================================================================
+    # AUTH (Clerk, Workspaces)
+    # =============================================================================
+    CLERK_SECRET_KEY: str = os.getenv("CLERK_SECRET_KEY")
+    CLERK_PUBLISHABLE_KEY: str = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
+    CLERK_JWKS_URL: str = os.getenv("CLERK_JWKS_URL")
+    DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
+    WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
+    CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+
+    # =============================================================================
+    # URLS (Backend, Frontend, API)
+    # =============================================================================
+    BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    API_URL: str = os.getenv("API_URL", "http://localhost:8000")
+
+    # =============================================================================
+    # EXTERNAL SERVICE URLS
+    # =============================================================================
+    OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    OPENROUTER_SITE_URL: str = os.getenv("OPENROUTER_SITE_URL", "https://automatos.app")
+    COHERE_RERANK_URL: str = os.getenv("COHERE_RERANK_URL", "https://api.cohere.com/v2/rerank")
+    RAILWAY_GQL_URL: str = os.getenv("RAILWAY_GQL_URL", "https://backboard.railway.app/graphql/v2")
+    INTERNAL_API_HOSTNAME: str = os.getenv("INTERNAL_API_HOSTNAME", "automatos-ai.railway.internal")
+    INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "automatos-ai-frontend.railway.internal")
+    SKILLS_SH_API_URL: str = os.getenv("SKILLS_SH_API_URL", "https://api.skills.sh/v1")
+    COMPOSIO_API_KEY: str = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
+    COMPOSIO_API_BASE_URL: str = os.getenv("COMPOSIO_API_BASE_URL", "https://backend.composio.dev/api/v3")
+
+    # =============================================================================
     # ROUTING (Universal Orchestrator Router)
     # =============================================================================
     COMPOSIO_WEBHOOK_SECRET: str = os.getenv("COMPOSIO_WEBHOOK_SECRET")
     ROUTING_CACHE_TTL_HOURS: int = int(os.getenv("ROUTING_CACHE_TTL_HOURS", "24"))
     ROUTING_LLM_CONFIDENCE_THRESHOLD: float = float(os.getenv("ROUTING_LLM_CONFIDENCE_THRESHOLD", "0.5"))
 
-    # GitHub repo used by automated recipes (e.g., Jira Bug Triage → PR)
+    # GitHub
     GITHUB_REPO_OWNER: str = os.getenv("GITHUB_REPO_OWNER", "")
     GITHUB_REPO_NAME: str = os.getenv("GITHUB_REPO_NAME", "")
     GITHUB_DEFAULT_BRANCH: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
+    GITHUB_WEBHOOK_SECRET: str = os.getenv("GITHUB_WEBHOOK_SECRET", "")
+    GITHUB_WEBHOOK_WORKSPACE_ID: str = os.getenv("GITHUB_WEBHOOK_WORKSPACE_ID") or os.getenv("DEFAULT_WORKSPACE_ID")
+    GITHUB_PR_WORKFLOW_NAME: str = os.getenv("GITHUB_PR_WORKFLOW_NAME", "PR Code Review")
+
+    # Webhooks / Widgets
+    WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
+    WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
+    WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
+    PLAYBOOKS_REQUIRE_TENANT: bool = os.getenv("PLAYBOOKS_REQUIRE_TENANT", "0").lower() in ("1", "true", "yes")
 
     # =============================================================================
     # TASK RUNNER (PRD-56: Infrastructure Scaling & Physical Workspaces)
@@ -170,6 +221,7 @@ class Config:
     # =============================================================================
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
     HEARTBEAT_ENABLED: bool = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
+    RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING: bool = os.getenv("SEMANTIC_TOOL_ROUTING", "true").lower() == "true"
 
@@ -182,10 +234,13 @@ class Config:
 
     # S3 Vectors Configuration
     S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
-    S3_VECTORS_BUCKET: str = os.getenv("S3_VECTORS_BUCKET")  # e.g., "automatos-ai" or "automatos-vectors-{workspace_id}"
+    S3_VECTORS_BUCKET: str = os.getenv("S3_VECTORS_BUCKET")
     S3_VECTORS_INDEX_NAME: str = os.getenv("S3_VECTORS_INDEX_NAME", "documents-index")
     S3_VECTORS_DIMENSION: int = int(os.getenv("S3_VECTORS_DIMENSION", "2048"))
     S3_VECTORS_METRIC: str = os.getenv("S3_VECTORS_METRIC", "cosine")
+
+    # S3 Documents (general storage bucket)
+    S3_DOCUMENTS_BUCKET: str = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
     
     # =============================================================================
     # PRD-58: FutureAGI Integration (Prompt Scoring & Optimization)
@@ -193,6 +248,7 @@ class Config:
     FUTUREAGI_API_KEY: str = os.getenv("FUTUREAGI_API_KEY")
     FUTUREAGI_SECRET_KEY: str = os.getenv("FUTUREAGI_SECRET_KEY")
     FUTUREAGI_ENABLED: bool = os.getenv("FUTUREAGI_ENABLED", "false").lower() == "true"
+    AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080")
 
     # =============================================================================
     # JIRA BUG REPORTS (Pilot Helper Widget)
@@ -205,6 +261,7 @@ class Config:
     # =============================================================================
     MARKETPLACE_S3_BUCKET: str = os.getenv("MARKETPLACE_S3_BUCKET", "automatos-marketplace")
     # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION defined above (AWS S3 Vectors section)
+    MARKETPLACE_LOCAL_DIR: str = os.getenv("MARKETPLACE_LOCAL_DIR")
     PLUGIN_MAX_UPLOAD_SIZE_MB: int = int(os.getenv("PLUGIN_MAX_UPLOAD_SIZE_MB", "10"))
     PLUGIN_LLM_SCAN_MODEL: str = os.getenv("PLUGIN_LLM_SCAN_MODEL", "claude-haiku-4-20250414")
     PLUGIN_CACHE_TTL_SECONDS: int = int(os.getenv("PLUGIN_CACHE_TTL_SECONDS", "3600"))
@@ -217,6 +274,37 @@ class Config:
     RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
     MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
     MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
+
+    # =============================================================================
+    # EMBEDDINGS
+    # =============================================================================
+    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER")
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
+    VECTOR_STORE_DIMENSIONS: int = int(os.getenv("VECTOR_STORE_DIMENSIONS", "2048"))
+
+    # =============================================================================
+    # PANDASAI (Data Analysis)
+    # =============================================================================
+    PANDASAI_API_KEY: str = os.getenv("PANDASAI_API_KEY")
+    PANDASAI_MODEL: str = os.getenv("PANDASAI_MODEL")
+    PANDASAI_OUTPUT_DIR: str = os.getenv("PANDASAI_OUTPUT_DIR", "/tmp/pandasai_charts")
+
+    # =============================================================================
+    # AGENT EXECUTION
+    # =============================================================================
+    AUTOMATOS_WORKSPACE: str = os.getenv("AUTOMATOS_WORKSPACE", "/tmp/automatos_workspace")
+    AUTOMATOS_RESULTS_BASE: str = os.getenv("AUTOMATOS_RESULTS_BASE", "/var/lib/automatos/results")
+    AUTOMATOS_DOCUMENTS_DIRS: str = os.getenv("AUTOMATOS_DOCUMENTS_DIRS") or os.getenv("AUTOMATOS_DOCUMENTS_DIR") or os.getenv("DOCUMENTS_DIR")
+    IMAGE_STORE_LOCAL_DIR: str = os.getenv("IMAGE_STORE_LOCAL_DIR")
+    GOTENBERG_URL: str = os.getenv("GOTENBERG_URL", "http://gotenberg:3000")
+    DOCUMENT_STORAGE_DIR: str = os.getenv("DOCUMENT_STORAGE_DIR", "documents")
+
+    # =============================================================================
+    # FEATURE FLAGS (additional)
+    # =============================================================================
+    ENABLE_LLM_QUALITY_ASSESSMENT: bool = os.getenv("ENABLE_LLM_QUALITY_ASSESSMENT", "false").lower() == "true"
+    ENABLE_CONTEXT_OPTIMIZATION: bool = os.getenv("ENABLE_CONTEXT_OPTIMIZATION", "false").lower() == "true"
+    COMPLEXITY_CACHE_TTL_HOURS: int = int(os.getenv("COMPLEXITY_CACHE_TTL_HOURS", "24"))
 
     # =============================================================================
     # RAG / KNOWLEDGE SERVICES API

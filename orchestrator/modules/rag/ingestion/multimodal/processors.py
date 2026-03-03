@@ -25,6 +25,8 @@ from datetime import datetime
 import base64
 from io import BytesIO
 
+from config import config
+
 # PDF and image processing
 import pdfplumber
 from PIL import Image
@@ -442,9 +444,9 @@ class ImageProcessor:
             image.save(buffer, format='PNG')
             img_base64 = base64.b64encode(buffer.getvalue()).decode()
             
-            # Call GPT-4V
+            # Call vision-capable model
             response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
+                model=config.LLM_MODEL,
                 messages=[
                     {
                         "role": "user",

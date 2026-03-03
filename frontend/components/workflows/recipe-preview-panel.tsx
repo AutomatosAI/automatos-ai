@@ -51,9 +51,6 @@ function calculateComplexity(
   if (config.max_retries > 5) score += 10
   else if (config.max_retries > 2) score += 5
 
-  // Quality threshold strictness
-  if (config.quality_threshold > 0.8) score += 5
-
   // Scheduled/triggered adds complexity vs manual
   if (schedule.type === 'cron') score += 5
   if (schedule.type === 'trigger') score += 10

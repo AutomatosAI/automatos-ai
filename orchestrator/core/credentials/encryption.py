@@ -6,11 +6,12 @@ Handles encryption/decryption of sensitive credentials using Fernet symmetric en
 Auto-generates encryption key on first run with secure storage.
 """
 
-import os
 import logging
 from pathlib import Path
 from typing import Optional
 from cryptography.fernet import Fernet, InvalidToken
+
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class EncryptionService:
             EncryptionKeyError: If key loading/generation fails
         """
         # Try environment variable first (priority for Railway/cloud deployments)
-        key_str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+        key_str = config.CREDENTIAL_ENCRYPTION_KEY
         if key_str:
             logger.info("🔐 Using encryption key from CREDENTIAL_ENCRYPTION_KEY environment variable")
             try:
@@ -231,7 +232,7 @@ class EncryptionService:
         key_file = Path(__file__).parent.parent / ".credential_key"
         
         return {
-            "source": "environment_variable" if os.getenv("CREDENTIAL_ENCRYPTION_KEY") else "file",
+            "source": "environment_variable" if config.CREDENTIAL_ENCRYPTION_KEY else "file",
             "key_file_exists": key_file.exists(),
             "key_file_path": str(key_file) if key_file.exists() else None,
             "key_file_permissions": oct(key_file.stat().st_mode)[-3:] if key_file.exists() else None,

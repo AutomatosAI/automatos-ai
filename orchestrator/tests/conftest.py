@@ -131,6 +131,47 @@ def mock_agent():
     return agent
 
 
+# ---- Recipe mocks ----
+
+@pytest.fixture
+def mock_recipe():
+    """A WorkflowRecipe-like mock with cron schedule_config."""
+    recipe = MagicMock()
+    recipe.id = 42
+    recipe.template_id = "test-cron-recipe"
+    recipe.name = "Test Cron Recipe"
+    recipe.workspace_id = uuid4()
+    recipe.steps = [
+        {"step_id": "s1", "order": 1, "agent_id": 101, "prompt_template": "Do the thing"},
+    ]
+    recipe.schedule_config = {
+        "type": "cron",
+        "cron_expression": "0 9 * * *",
+    }
+    recipe.owner_type = "workspace"
+    recipe.is_system = False
+    return recipe
+
+
+@pytest.fixture
+def mock_recipe_manual():
+    """A WorkflowRecipe-like mock with manual schedule (no cron)."""
+    recipe = MagicMock()
+    recipe.id = 99
+    recipe.template_id = "test-manual-recipe"
+    recipe.name = "Test Manual Recipe"
+    recipe.workspace_id = uuid4()
+    recipe.steps = [
+        {"step_id": "s1", "order": 1, "agent_id": 101, "prompt_template": "Manual task"},
+    ]
+    recipe.schedule_config = {
+        "type": "manual",
+    }
+    recipe.owner_type = "workspace"
+    recipe.is_system = False
+    return recipe
+
+
 # ---- Request context mock ----
 
 @pytest.fixture

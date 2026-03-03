@@ -5,7 +5,6 @@ CodeGraph API Endpoints
 REST API for code indexing and intelligent search.
 """
 
-import os
 import logging
 import asyncio
 from typing import Optional, List
@@ -18,6 +17,7 @@ from core.database.database import get_db
 from modules.codegraph import CodeGraphService
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/code-graph", tags=["code-graph"])
@@ -94,7 +94,7 @@ def get_openai_key() -> str:
         # Fallback to direct credential lookup
         return resolver.get_credential_field("development_openai", "api_key")
     except Exception:
-        return os.getenv("OPENAI_API_KEY", "")
+        return config.OPENAI_API_KEY or ""
 
 
 def get_codegraph_service(db: Session = Depends(get_db)) -> CodeGraphService:

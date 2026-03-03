@@ -1267,17 +1267,11 @@ class WorkflowTemplate(Base):
                 return False, "mode must be 'sequential' or 'parallel'"
 
         # Validate numeric fields
-        numeric_fields = ['max_retries', 'retry_delay', 'per_step_timeout', 'total_timeout', 'parallel_limit']
+        numeric_fields = ['max_retries', 'timeout_per_step', 'total_timeout', 'parallel_limit']
         for field in numeric_fields:
             if field in self.execution_config:
                 if not isinstance(self.execution_config[field], (int, float)) or self.execution_config[field] < 0:
                     return False, f"{field} must be a non-negative number"
-
-        # Validate quality_threshold
-        if 'quality_threshold' in self.execution_config:
-            threshold = self.execution_config['quality_threshold']
-            if not isinstance(threshold, (int, float)) or threshold < 0 or threshold > 1:
-                return False, "quality_threshold must be between 0 and 1"
 
         return True, None
 

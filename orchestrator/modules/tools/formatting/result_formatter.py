@@ -77,11 +77,12 @@ class ToolResultFormatter:
             if not key:
                 return ""
 
+            from config import config as app_config
             s3_client = boto3.client(
                 's3',
-                region_name=os.getenv('AWS_REGION', 'us-east-1'),
-                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+                region_name=app_config.AWS_REGION or 'us-east-1',
+                aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
             )
             response = s3_client.get_object(Bucket=bucket, Key=key)
             content = response['Body'].read().decode('utf-8')
@@ -106,9 +107,7 @@ class ToolResultFormatter:
         if ToolResultFormatter._db_engine is None:
             from sqlalchemy import create_engine
             from config import config as app_config
-            db_url = getattr(app_config, "DATABASE_URL", None)
-            if not db_url:
-                db_url = os.getenv("DATABASE_URL")
+            db_url = app_config.DATABASE_URL
             if not db_url:
                 logger.warning("[FullContent] No DATABASE_URL — cannot fetch document content")
                 return None
@@ -217,11 +216,8 @@ class ToolResultFormatter:
         """
         roots: List[Path] = []
 
-        env_roots = (
-            os.getenv("AUTOMATOS_DOCUMENTS_DIRS")
-            or os.getenv("AUTOMATOS_DOCUMENTS_DIR")
-            or os.getenv("DOCUMENTS_DIR")
-        )
+        from config import config as app_config
+        env_roots = app_config.AUTOMATOS_DOCUMENTS_DIRS
         if env_roots:
             for raw in env_roots.split(","):
                 p = raw.strip()

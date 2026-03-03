@@ -6,12 +6,12 @@ Replaces os.getenv() calls with secure credential resolution from database.
 Provides caching, fallback to environment variables, and audit logging.
 """
 
-import os
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from functools import lru_cache
 
+from config import config
 from core.credentials.encryption import get_encryption_service, EncryptionKeyError
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class CredentialResolver:
         """
         # Determine environment
         if environment is None:
-            environment = os.getenv('ENVIRONMENT', 'development')
+            environment = config.ENVIRONMENT or 'development'
         
         # Check cache first
         cache_key = f"{credential_name}:{environment}"
@@ -125,12 +125,12 @@ class CredentialResolver:
         
         # Fallback to environment variable
         if fallback_env:
-            env_value = os.getenv(fallback_env)
+            env_value = getattr(config, fallback_env, None)
             if env_value:
                 log_func = logger.debug if silent else logger.warning
                 log_func(
                     f"Credential '{credential_name}' not found in database, "
-                    f"using environment variable '{fallback_env}' as fallback"
+                    f"using config.{fallback_env} as fallback"
                 )
                 return env_value
         
@@ -167,7 +167,7 @@ class CredentialResolver:
             Dictionary of credential values
         """
         if environment is None:
-            environment = os.getenv('ENVIRONMENT', 'production')
+            environment = config.ENVIRONMENT or 'production'
         
         cache_key = f"dict:{credential_name}:{environment}"
         cached_value = self._get_from_cache(cache_key)
@@ -247,9 +247,9 @@ class CredentialResolver:
                 )
         except CredentialNotFoundError:
             if fallback_env:
-                env_value = os.getenv(fallback_env)
+                env_value = getattr(config, fallback_env, None)
                 if env_value:
-                    logger.warning(f"Using environment variable '{fallback_env}' as fallback")
+                    logger.warning(f"Using config.{fallback_env} as fallback")
                     return env_value
             raise
     
@@ -386,11 +386,11 @@ class CredentialResolver:
             
             # Get from .env - NO HARDCODED DEFAULTS
             # If .env missing → FAIL (don't guess!)
-            host = os.getenv("POSTGRES_HOST")
-            port = os.getenv("POSTGRES_PORT")
-            database = os.getenv("POSTGRES_DB")
-            user = os.getenv("POSTGRES_USER")
-            password = os.getenv("POSTGRES_PASSWORD")
+            host = config.POSTGRES_HOST
+            port = config.POSTGRES_PORT
+            database = config.POSTGRES_DB
+            user = config.POSTGRES_USER
+            password = config.POSTGRES_PASSWORD
             
             # Validate ALL required fields present
             missing = []
@@ -438,10 +438,10 @@ class CredentialResolver:
             
             # Get from .env - NO HARDCODED DEFAULTS
             # If .env missing → FAIL (don't guess!)
-            host = os.getenv("REDIS_HOST")
-            port = os.getenv("REDIS_PORT")
-            password = os.getenv("REDIS_PASSWORD")
-            db = os.getenv("REDIS_DB", "0")  # DB 0 is reasonable default
+            host = config.REDIS_HOST
+            port = config.REDIS_PORT
+            password = config.REDIS_PASSWORD
+            db = config.REDIS_DB or "0"  # DB 0 is reasonable default
             
             # Validate required fields present
             missing = []

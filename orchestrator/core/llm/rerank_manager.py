@@ -9,16 +9,17 @@ Graceful degradation: if no API key configured, returns documents unchanged.
 """
 
 import logging
-import os
 import threading
 from dataclasses import dataclass
 from typing import List, Optional
 
 import httpx
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
-COHERE_RERANK_URL = "https://api.cohere.com/v2/rerank"
+COHERE_RERANK_URL = config.COHERE_RERANK_URL
 COHERE_DOC_CHAR_LIMIT = 4096
 DEFAULT_RERANK_MODEL = "rerank-v3.5"
 
@@ -69,7 +70,7 @@ class RerankManager:
 
         # Env var fallback for API key
         if not self._api_key:
-            self._api_key = os.getenv("COHERE_API_KEY")
+            self._api_key = config.COHERE_API_KEY
 
         self._loaded = True
 

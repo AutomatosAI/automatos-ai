@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from config import config
+
 def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool = True) -> bool:
     """Load seed data from JSON files"""
     
@@ -28,11 +30,11 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
     
     try:
         # Get database config from environment variables (works in Docker and locally)
-        db_name = os.getenv('POSTGRES_DB', 'orchestrator_db')
-        db_user = os.getenv('POSTGRES_USER', 'postgres')
-        db_password = os.getenv('POSTGRES_PASSWORD', '')
-        db_host = os.getenv('POSTGRES_HOST', 'localhost')
-        db_port = os.getenv('POSTGRES_PORT', '5432')
+        db_name = config.POSTGRES_DB or 'orchestrator_db'
+        db_user = config.POSTGRES_USER or 'postgres'
+        db_password = config.POSTGRES_PASSWORD or ''
+        db_host = config.POSTGRES_HOST or 'localhost'
+        db_port = config.POSTGRES_PORT or '5432'
         
         print(f"📍 Database: {db_name}")
         print(f"🖥️  Host: {db_host}:{db_port}")

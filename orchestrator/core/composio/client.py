@@ -11,11 +11,12 @@ Features:
 - Webhook trigger subscription
 """
 
-import os
 import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from uuid import UUID
+
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ class ComposioClient:
         Args:
             api_key: Composio API key. If not provided, uses COMPOSIO_API_KEY env var.
         """
-        self.api_key = api_key or os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
+        self.api_key = api_key or config.COMPOSIO_API_KEY
         if not self.api_key:
             logger.warning("COMPOSIO_API_KEY/COMPOSIO_KEY not set. Composio integration will not work.")
         
@@ -607,7 +608,7 @@ class ComposioClient:
             logger.warning(f"requests not available: {exc}")
             return []
 
-        url = "https://backend.composio.dev/api/v3/triggers_types"
+        url = f"{config.COMPOSIO_API_BASE_URL}/triggers_types"
         params: Dict[str, Any] = {"toolkit_versions": "latest", "limit": 1000}
         if toolkit_slugs:
             params["toolkit_slugs"] = toolkit_slugs
@@ -739,7 +740,7 @@ class ComposioClient:
             logger.warning(f"requests not available: {exc}")
             return []
 
-        url = "https://backend.composio.dev/api/v3/tools"
+        url = f"{config.COMPOSIO_API_BASE_URL}/tools"
         headers = {"x-api-key": self.api_key}
         cursor: Optional[str] = None
         out: List[Dict[str, Any]] = []

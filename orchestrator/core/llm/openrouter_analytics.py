@@ -17,9 +17,11 @@ from uuid import UUID
 
 import httpx
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
-OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+OPENROUTER_BASE = config.OPENROUTER_BASE_URL
 
 
 class OpenRouterAnalyticsService:
@@ -31,7 +33,7 @@ class OpenRouterAnalyticsService:
     def _headers(self, api_key: str) -> Dict[str, str]:
         return {
             "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://automatos.app",
+            "HTTP-Referer": config.OPENROUTER_SITE_URL,
             "X-Title": "Automatos AI",
         }
 

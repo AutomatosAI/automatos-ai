@@ -44,6 +44,10 @@ class PlatformActionExecutor:
             "platform_create_agent": self._create_agent,
             "platform_update_agent": self._update_agent,
             "platform_create_recipe": self._create_recipe,
+            "platform_update_recipe": self._update_recipe,
+            "platform_add_recipe_step": self._add_recipe_step,
+            "platform_update_recipe_step": self._update_recipe_step,
+            "platform_delete_recipe_step": self._delete_recipe_step,
             "platform_store_memory": self._store_memory,
             "platform_delete_agent": self._delete_agent,
             # Infrastructure / observability
@@ -245,8 +249,7 @@ class PlatformActionExecutor:
         except Exception:
             pass
 
-        definition = recipe.template_definition or {}
-        steps = definition.get("steps", [])
+        steps = recipe.steps or []
 
         return {
             "success": True,
@@ -258,8 +261,15 @@ class PlatformActionExecutor:
                 "tags": recipe.tags or [],
                 "step_count": len(steps),
                 "steps": [
-                    {"name": s.get("name", f"Step {i+1}"), "type": s.get("type", "unknown")}
+                    {
+                        "index": i,
+                        "prompt_preview": (s.get("prompt_template", "") or "")[:120],
+                        "agent_id": s.get("agent_id"),
+                        "error_handling": s.get("error_handling", "stop"),
+                        "output_key": s.get("output_key"),
+                    }
                     for i, s in enumerate(steps[:10])
+                    if isinstance(s, dict)
                 ],
                 "total_executions": exec_count,
             },
@@ -693,6 +703,203 @@ class PlatformActionExecutor:
                 "description": recipe.description,
             },
             "message": f"Recipe '{name}' created successfully. Add steps via the recipe editor.",
+        }
+
+    async def _update_recipe(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        from core.models.core import WorkflowTemplate
+
+        recipe_id = params.get("recipe_id")
+        if not recipe_id:
+            return {"success": False, "error": "Missing required parameter: recipe_id"}
+
+        recipe = (
+            self.db.query(WorkflowTemplate)
+            .filter(
+                WorkflowTemplate.id == recipe_id,
+                WorkflowTemplate.workspace_id == self.workspace_id,
+            )
+            .first()
+        )
+        if not recipe:
+            return {"success": False, "error": "Recipe not found"}
+
+        changes = []
+        if params.get("name"):
+            recipe.name = params["name"]
+            changes.append(f"name → '{params['name']}'")
+        if params.get("description") is not None:
+            recipe.description = params["description"]
+            changes.append("description updated")
+        if params.get("tags") is not None:
+            recipe.tags = params["tags"]
+            changes.append(f"tags → {params['tags']}")
+        if params.get("execution_config") is not None:
+            recipe.execution_config = params["execution_config"]
+            changes.append("execution_config updated")
+        if params.get("schedule_config") is not None:
+            recipe.schedule_config = params["schedule_config"]
+            changes.append("schedule_config updated")
+
+        if not changes:
+            return {"success": True, "message": "No changes specified", "recipe_id": recipe.id}
+
+        self.db.flush()
+        logger.info(f"[PlatformExecutor] Updated recipe {recipe.id}: {', '.join(changes)}")
+
+        return {
+            "success": True,
+            "recipe_id": recipe.id,
+            "changes": changes,
+            "message": f"Recipe '{recipe.name}' updated: {', '.join(changes)}",
+        }
+
+    async def _add_recipe_step(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        from core.models.core import WorkflowTemplate
+        from sqlalchemy.orm.attributes import flag_modified
+        import uuid
+
+        recipe_id = params.get("recipe_id")
+        prompt_template = params.get("prompt_template")
+        if not recipe_id or not prompt_template:
+            return {"success": False, "error": "Missing required: recipe_id and prompt_template"}
+
+        recipe = (
+            self.db.query(WorkflowTemplate)
+            .filter(
+                WorkflowTemplate.id == recipe_id,
+                WorkflowTemplate.workspace_id == self.workspace_id,
+            )
+            .first()
+        )
+        if not recipe:
+            return {"success": False, "error": "Recipe not found"}
+
+        steps = list(recipe.steps or [])
+        order = params.get("order", len(steps))
+
+        step = {
+            "step_id": uuid.uuid4().hex[:12],
+            "step_number": order + 1,
+            "prompt_template": prompt_template,
+            "agent_id": params.get("agent_id"),
+            "error_handling": params.get("error_handling", "stop"),
+            "output_key": params.get("output_key"),
+        }
+
+        if order >= len(steps):
+            steps.append(step)
+        else:
+            steps.insert(order, step)
+
+        # Re-number all steps
+        for i, s in enumerate(steps):
+            s["step_number"] = i + 1
+
+        recipe.steps = steps
+        flag_modified(recipe, "steps")
+        self.db.flush()
+
+        logger.info(f"[PlatformExecutor] Added step to recipe {recipe.id} (now {len(steps)} steps)")
+
+        return {
+            "success": True,
+            "recipe_id": recipe.id,
+            "step_index": order if order < len(steps) else len(steps) - 1,
+            "total_steps": len(steps),
+            "message": f"Step added to recipe '{recipe.name}' (now {len(steps)} steps).",
+        }
+
+    async def _update_recipe_step(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        from core.models.core import WorkflowTemplate
+        from sqlalchemy.orm.attributes import flag_modified
+
+        recipe_id = params.get("recipe_id")
+        step_index = params.get("step_index")
+        if recipe_id is None or step_index is None:
+            return {"success": False, "error": "Missing required: recipe_id and step_index"}
+
+        recipe = (
+            self.db.query(WorkflowTemplate)
+            .filter(
+                WorkflowTemplate.id == recipe_id,
+                WorkflowTemplate.workspace_id == self.workspace_id,
+            )
+            .first()
+        )
+        if not recipe:
+            return {"success": False, "error": "Recipe not found"}
+
+        steps = list(recipe.steps or [])
+        if step_index < 0 or step_index >= len(steps):
+            return {"success": False, "error": f"step_index {step_index} out of range (0-{len(steps)-1})"}
+
+        step = steps[step_index]
+        changes = []
+
+        for field in ("prompt_template", "agent_id", "order", "error_handling", "output_key"):
+            if field in params and params[field] is not None:
+                step[field] = params[field]
+                changes.append(f"{field} updated")
+
+        if not changes:
+            return {"success": True, "message": "No changes specified", "recipe_id": recipe.id}
+
+        recipe.steps = steps
+        flag_modified(recipe, "steps")
+        self.db.flush()
+
+        logger.info(f"[PlatformExecutor] Updated step {step_index} of recipe {recipe.id}: {', '.join(changes)}")
+
+        return {
+            "success": True,
+            "recipe_id": recipe.id,
+            "step_index": step_index,
+            "changes": changes,
+            "message": f"Step {step_index} of '{recipe.name}' updated: {', '.join(changes)}",
+        }
+
+    async def _delete_recipe_step(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        from core.models.core import WorkflowTemplate
+        from sqlalchemy.orm.attributes import flag_modified
+
+        recipe_id = params.get("recipe_id")
+        step_index = params.get("step_index")
+        if recipe_id is None or step_index is None:
+            return {"success": False, "error": "Missing required: recipe_id and step_index"}
+
+        recipe = (
+            self.db.query(WorkflowTemplate)
+            .filter(
+                WorkflowTemplate.id == recipe_id,
+                WorkflowTemplate.workspace_id == self.workspace_id,
+            )
+            .first()
+        )
+        if not recipe:
+            return {"success": False, "error": "Recipe not found"}
+
+        steps = list(recipe.steps or [])
+        if step_index < 0 or step_index >= len(steps):
+            return {"success": False, "error": f"step_index {step_index} out of range (0-{len(steps)-1})"}
+
+        removed = steps.pop(step_index)
+
+        # Re-number remaining steps
+        for i, s in enumerate(steps):
+            s["step_number"] = i + 1
+
+        recipe.steps = steps
+        flag_modified(recipe, "steps")
+        self.db.flush()
+
+        logger.info(f"[PlatformExecutor] Deleted step {step_index} from recipe {recipe.id} (now {len(steps)} steps)")
+
+        return {
+            "success": True,
+            "recipe_id": recipe.id,
+            "deleted_step_index": step_index,
+            "remaining_steps": len(steps),
+            "message": f"Step {step_index} removed from '{recipe.name}' ({len(steps)} steps remaining).",
         }
 
     async def _store_memory(self, params: Dict[str, Any]) -> Dict[str, Any]:

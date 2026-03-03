@@ -5,10 +5,10 @@ Azure OpenAI Provider Implementation
 Azure OpenAI service provider (OpenAI-compatible API).
 """
 
-import os
 import logging
 from typing import Dict, Any, List, Optional
 
+from config import config
 from .base import BaseLLMProvider, LLMConfig, LLMResponse
 
 try:
@@ -27,9 +27,9 @@ class AzureProvider(BaseLLMProvider):
             raise ImportError("OpenAI package not installed. Run: pip install openai")
         
         # Azure requires API key, endpoint, and API version
-        api_key = self.config.api_key or os.getenv("AZURE_OPENAI_API_KEY")
-        endpoint = self.config.base_url or os.getenv("AZURE_OPENAI_ENDPOINT")
-        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+        api_key = self.config.api_key or config.AZURE_OPENAI_API_KEY
+        endpoint = self.config.base_url or config.AZURE_OPENAI_ENDPOINT
+        api_version = config.AZURE_OPENAI_API_VERSION
         
         # BOOTSTRAP STRATEGY: Don't require key at initialization
         if not api_key or not endpoint:

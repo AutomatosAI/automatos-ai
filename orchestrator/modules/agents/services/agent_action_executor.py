@@ -422,6 +422,7 @@ def get_action_executor() -> ActionExecutor:
     global _action_executor
     if _action_executor is None:
         # Use a persistent workspace in /tmp
-        workspace = os.getenv("AUTOMATOS_WORKSPACE", "/tmp/automatos_workspace")
+        from config import config
+        workspace = config.AUTOMATOS_WORKSPACE or "/tmp/automatos_workspace"
         _action_executor = ActionExecutor(workspace_root=workspace)
     return _action_executor

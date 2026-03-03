@@ -23,6 +23,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.attributes import flag_modified
 
+from config import config
 from core.llm import (
     LLMManager, LLMConfig, LLMProvider, LLMResponse,
     create_llm_manager
@@ -353,7 +354,7 @@ class ModelConfiguration:
         """Create from dictionary"""
         return ModelConfiguration(
             provider=data.get("provider", "openai"),
-            model_id=data.get("model_id", "gpt-4"),
+            model_id=data.get("model_id", config.LLM_MODEL),
             temperature=data.get("temperature", 0.7),
             max_tokens=data.get("max_tokens", 2000),
             top_p=data.get("top_p", 1.0),
@@ -366,8 +367,8 @@ class ModelConfiguration:
     def get_default() -> 'ModelConfiguration':
         """Get default configuration"""
         return ModelConfiguration(
-            provider="openai",
-            model_id="gpt-4",
+            provider=config.LLM_PROVIDER,
+            model_id=config.LLM_MODEL,
             temperature=0.7,
             max_tokens=2000
         )
@@ -539,13 +540,13 @@ class AgentFactory:
             if not model:
                 model = get_system_setting("orchestrator_llm", "model")  # Fallback to old key
             
-            # If still not found, try environment variables (for backward compatibility)
+            # If still not found, try config (for backward compatibility)
             if not provider:
-                import os
-                provider = os.getenv("LLM_PROVIDER")
+                from config import config
+                provider = config.LLM_PROVIDER
             if not model:
-                import os
-                model = os.getenv("LLM_MODEL")
+                from config import config
+                model = config.LLM_MODEL
             
             # If provider/model not found, fall back to DEFAULT_LLM_CONFIG
             if not provider or not model:
@@ -561,7 +562,7 @@ class AgentFactory:
                     "azure": "gpt-4o",
                     "huggingface": "mistralai/Mistral-7B-Instruct-v0.2"
                 }
-                model = provider_defaults.get(provider, "gpt-4")
+                model = provider_defaults.get(provider, config.LLM_MODEL)
             
             # Get context window from LLM models registry
             try:
@@ -859,9 +860,9 @@ Available Shell Tools:
 
         # Bedrock uses IAM auth: api_key=access_key, secret_key=secret_access_key
         if model_config.provider in ("aws_bedrock", "bedrock"):
-            import os
-            llm_config.secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-            llm_config.base_url = os.getenv("AWS_REGION", "us-east-1")
+            from config import config
+            llm_config.secret_key = config.AWS_SECRET_ACCESS_KEY
+            llm_config.base_url = config.AWS_REGION or "us-east-1"
 
         self.logger.info(
             f"Creating LLM manager for {agent_name or 'agent'}: "
@@ -943,25 +944,23 @@ Available Shell Tools:
             except Exception:
                 continue
 
-        # 3. Fall back to environment variables
-        env_map = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "google": "GOOGLE_API_KEY",
-            "openrouter": "OPENROUTER_API_KEY",
-            "grok": "GROK_API_KEY",
-            "huggingface": "HUGGINGFACE_API_KEY",
-            "azure": "AZURE_OPENAI_API_KEY",
-            "azure_openai": "AZURE_OPENAI_API_KEY",
-            "aws_bedrock": "AWS_ACCESS_KEY_ID",
-            "bedrock": "AWS_ACCESS_KEY_ID",
+        # 3. Fall back to config (centralized env vars)
+        from config import config as _cfg
+        config_map = {
+            "openai": _cfg.OPENAI_API_KEY,
+            "anthropic": _cfg.ANTHROPIC_API_KEY,
+            "google": _cfg.GOOGLE_API_KEY,
+            "openrouter": _cfg.OPENROUTER_API_KEY,
+            "grok": _cfg.XAI_API_KEY,
+            "azure": _cfg.AZURE_OPENAI_API_KEY,
+            "azure_openai": _cfg.AZURE_OPENAI_API_KEY,
+            "aws_bedrock": _cfg.AWS_ACCESS_KEY_ID,
+            "bedrock": _cfg.AWS_ACCESS_KEY_ID,
         }
-        env_var = env_map.get(provider_name)
-        if env_var:
-            key = os.getenv(env_var)
-            if key:
-                self.logger.info(f"Using {env_var} from environment for {agent_name}")
-                return ResolvedKey(api_key=key, source="env", is_byok=False, provider=provider_name)
+        key = config_map.get(provider_name)
+        if key:
+            self.logger.info(f"Using config API key for {provider_name} for {agent_name}")
+            return ResolvedKey(api_key=key, source="env", is_byok=False, provider=provider_name)
 
         return None
     
@@ -1075,8 +1074,8 @@ Available Shell Tools:
             # Get LLM config - PRIORITIZE agent's own model_config, fall back to system settings
             # PRD-54: Agents can now be assigned specific models (including OpenRouter/BYOK)
             agent_model_config = db_agent.model_config or {}
-            config = db_agent.configuration or {}
-            agent_llm_config = config.get("llm_config") or {}
+            agent_config = db_agent.configuration or {}
+            agent_llm_config = agent_config.get("llm_config") or {}
 
             # Check if agent has a specific model configured (PRD-15/54 model_config column)
             agent_has_model = (
@@ -1107,7 +1106,7 @@ Available Shell Tools:
             
             # Create LLM manager with API key resolution (PRD-54)
             provider_str = llm_config_dict.get("provider", "openai")
-            model_id_str = llm_config_dict.get("model", "gpt-4")
+            model_id_str = llm_config_dict.get("model", config.LLM_MODEL)
 
             # Auto-detect provider from model name to fix misconfigurations
             provider_str = self._resolve_provider_for_model(provider_str, model_id_str)
@@ -1150,8 +1149,8 @@ Available Shell Tools:
                 name=db_agent.name,
                 agent_type=db_agent.agent_type,
                 description=db_agent.description,
-                skills=config.get("skills", []),
-                custom_metadata=config.get("custom_metadata", {})
+                skills=agent_config.get("skills", []),
+                custom_metadata=agent_config.get("custom_metadata", {})
             )
 
             # Load agent's tools
@@ -1480,6 +1479,8 @@ To use actions, respond with JSON blocks like:
                         
                         # Track executed calls in this turn to prevent duplicates
                         executed_calls_hashes = set()
+                        # Mid-execution discovery: max 1 attempt per execute_with_prompt call
+                        _discovery_attempted = False
                         
                         for tool_call in response.tool_calls:
                             func_name = tool_call['function']['name']
@@ -1529,6 +1530,19 @@ To use actions, respond with JSON blocks like:
                                     agent_id=agent_runtime.agent_id,
                                     workspace_id=_composio_workspace_id
                                 )
+                                # Mid-execution discovery: check for capability gap
+                                if (
+                                    isinstance(result, dict)
+                                    and not result.get("success", True)
+                                    and not _discovery_attempted
+                                ):
+                                    tool_schemas, _disc_msg, _discovery_attempted = await self._try_discovery(
+                                        func_name, result.get("error", ""), func_args, tool_schemas,
+                                        agent_runtime, _composio_workspace_id, original_user_prompt,
+                                    )
+                                    if _disc_msg:
+                                        result = {"success": False, "error": _disc_msg, "tool": func_name}
+
                                 tool_results.append({
                                     "tool_call_id": tool_call['id'],
                                     "role": "tool",
@@ -1538,11 +1552,20 @@ To use actions, respond with JSON blocks like:
                                 self.logger.info(f"    ✅ [TRACE] {func_name} completed successfully")
                             except Exception as e:
                                 self.logger.error(f"    ❌ [TRACE] {func_name} failed: {e}")
+                                error_str = str(e)
+                                # Mid-execution discovery: check exceptions for capability gap
+                                if not _discovery_attempted:
+                                    tool_schemas, _disc_msg, _discovery_attempted = await self._try_discovery(
+                                        func_name, error_str, func_args, tool_schemas,
+                                        agent_runtime, _composio_workspace_id, original_user_prompt,
+                                    )
+                                    if _disc_msg:
+                                        error_str = _disc_msg
                                 tool_results.append({
                                     "tool_call_id": tool_call['id'],
                                     "role": "tool",
                                     "name": func_name,
-                                    "content": json.dumps({"error": str(e)})
+                                    "content": json.dumps({"error": error_str})
                                 })
                         
                         # Add assistant's tool call message and tool results to conversation
@@ -1752,6 +1775,194 @@ To use actions, respond with JSON blocks like:
             )
         
         return agent
+
+    # ======================================================================
+    # Mid-execution tool discovery helpers
+    # ======================================================================
+
+    # Map failed function names to tool categories for platform tool discovery
+    _TOOL_TO_CATEGORY = {
+        "write_file": "file_ops", "read_file": "file_ops",
+        "list_directory": "file_ops", "create_directory": "file_ops",
+        "execute_command": "shell",
+        "search_knowledge": "research", "semantic_search": "research",
+        "search_codebase": "research",
+        "query_database": "database", "smart_query_database": "database",
+    }
+
+    _TRANSIENT_PATTERNS = ("timeout", "rate limit", "connection", "permission denied", "timed out")
+
+    @staticmethod
+    def _get_schema_names(tool_schemas: List[Dict]) -> set:
+        """Extract function names from OpenAI tool schema list."""
+        return {t.get("function", {}).get("name", "") for t in tool_schemas}
+
+    def _classify_tool_failure(self, func_name: str, error_msg: str, tool_schemas: List[Dict]) -> str:
+        """
+        Classify a tool failure as CAPABILITY_GAP or TRANSIENT.
+
+        CAPABILITY_GAP: tool doesn't exist in current schema — discovery can help.
+        TRANSIENT: timeout, rate limit, bad params — retry as-is.
+        """
+        error_lower = (error_msg or "").lower()
+
+        if any(p in error_lower for p in self._TRANSIENT_PATTERNS):
+            return "TRANSIENT"
+
+        if "unknown tool" in error_lower:
+            return "CAPABILITY_GAP"
+
+        if func_name not in self._get_schema_names(tool_schemas):
+            return "CAPABILITY_GAP"
+
+        if func_name == "composio_execute" and any(
+            p in error_lower for p in ("not found", "invalid action", "unknown action")
+        ):
+            return "CAPABILITY_GAP"
+
+        return "TRANSIENT"
+
+    async def _try_discovery(
+        self,
+        func_name: str,
+        error_msg: str,
+        func_args: Dict[str, Any],
+        tool_schemas: List[Dict],
+        agent_runtime,
+        workspace_id,
+        prompt: str,
+    ) -> Tuple[List[Dict], str, bool]:
+        """
+        Classify failure and attempt discovery if it's a capability gap.
+
+        Returns (updated_tool_schemas, discovery_message, discovery_attempted).
+        """
+        failure_type = self._classify_tool_failure(func_name, error_msg, tool_schemas)
+        if failure_type != "CAPABILITY_GAP":
+            return tool_schemas, "", False
+
+        self.logger.info(f"    🔍 [DISCOVERY] Capability gap: {func_name}, searching alternatives...")
+        try:
+            if func_name == "composio_execute":
+                schemas, msg = await self._discover_composio_actions(
+                    func_args, tool_schemas, agent_runtime, workspace_id, prompt
+                )
+            else:
+                schemas, msg = self._discover_platform_tools(func_name, tool_schemas)
+            return schemas, msg, True
+        except Exception as e:
+            self.logger.warning(f"    ⚠️ [DISCOVERY] Failed: {e}", exc_info=True)
+            return tool_schemas, "", True
+
+    def _discover_platform_tools(
+        self, func_name: str, tool_schemas: List[Dict]
+    ) -> Tuple[List[Dict], str]:
+        """Path A: Discover platform tools by category."""
+        from modules.tools.registry.tool_registry import get_tool_registry
+
+        # Resolve category from name or keyword
+        category = self._TOOL_TO_CATEGORY.get(func_name)
+        if not category:
+            name_lower = func_name.lower()
+            if "file" in name_lower:
+                category = "file_ops"
+            elif "search" in name_lower or "knowledge" in name_lower:
+                category = "research"
+            elif "command" in name_lower or "shell" in name_lower or "exec" in name_lower:
+                category = "shell"
+            elif "database" in name_lower or "query" in name_lower or "sql" in name_lower:
+                category = "database"
+
+        if not category:
+            self.logger.info(f"    🔍 [DISCOVERY] No category mapping for '{func_name}'")
+            return tool_schemas, ""
+
+        registry = get_tool_registry()
+        candidates = registry.get_tools_for_categories([category])
+        if not candidates:
+            return tool_schemas, ""
+
+        existing_names = self._get_schema_names(tool_schemas)
+        new_tools = []
+        for spec in candidates:
+            if spec.name not in existing_names and len(new_tools) < 5:
+                new_tools.append({"type": "function", "function": spec.to_openai_format()})
+
+        if not new_tools:
+            return tool_schemas, ""
+
+        tool_schemas = tool_schemas + new_tools
+        new_names = [t["function"]["name"] for t in new_tools]
+        self.logger.info(f"    🔍 [DISCOVERY] Added {len(new_names)} platform tools: {new_names}")
+        msg = f"Tool '{func_name}' not available. Alternatives added: {new_names}. Try again with one of these."
+        return tool_schemas, msg
+
+    async def _discover_composio_actions(
+        self,
+        func_args: Dict[str, Any],
+        tool_schemas: List[Dict],
+        agent_runtime,
+        workspace_id,
+        prompt: str,
+    ) -> Tuple[List[Dict], str]:
+        """Path B: Discover Composio actions via HintService/ActionCapabilityFilter."""
+        from modules.tools.services.composio_hint_service import ComposioHintService
+
+        failed_action = func_args.get("action", "")
+        db = getattr(agent_runtime, "db_session", None)
+        if not db:
+            return tool_schemas, ""
+
+        hint_svc = ComposioHintService(db)
+        hint_result = hint_svc.build_hints(
+            agent_id=agent_runtime.agent_id,
+            prompt=prompt,
+            workspace_id=workspace_id,
+            recipe_mode=True,
+        )
+        new_actions = hint_result.matched_actions if hint_result else []
+
+        # Fallback: ActionCapabilityFilter if hint service returned nothing
+        if not new_actions:
+            from modules.tools.services.action_capability_filter import ActionCapabilityFilter
+            allowed_apps = hint_result.allowed_apps if hint_result else []
+            if allowed_apps:
+                acf = ActionCapabilityFilter(db)
+                filter_result = await acf.get_actions_for_intent(prompt, allowed_apps)
+                new_actions = [a.action_id for a in filter_result.actions]
+
+        if not new_actions:
+            return tool_schemas, ""
+
+        # Find the composio_execute schema and mutate its action enum
+        composio_schema = None
+        existing_enum: List[str] = []
+        for schema in tool_schemas:
+            if schema.get("function", {}).get("name") == "composio_execute":
+                composio_schema = schema
+                existing_enum = schema["function"].get("parameters", {}).get("properties", {}).get("action", {}).get("enum", [])
+                break
+
+        if composio_schema is None:
+            return tool_schemas, ""
+
+        existing_set = set(existing_enum)
+        added = []
+        for action in new_actions:
+            if action not in existing_set and len(added) < 5:
+                added.append(action)
+                existing_set.add(action)
+
+        if not added:
+            return tool_schemas, ""
+
+        composio_schema["function"]["parameters"]["properties"]["action"]["enum"] = list(existing_set)
+        self.logger.info(f"    🔍 [DISCOVERY] Added {len(added)} Composio actions: {added}")
+        msg = (
+            f"Action '{failed_action}' not found. Alternatives added: {added}. "
+            f"Call composio_execute with one of these."
+        )
+        return tool_schemas, msg
 
     # ======================================================================
     # PRD-22: Intelligent skill selection helper
@@ -2128,6 +2339,16 @@ To use actions, respond with JSON blocks like:
             sections.append("\nExample: If your task is 'create a PDF' and you have a 'create_pdf' tool → you MUST call create_pdf")
             sections.append("Example: If your task is 'write documentation' and you have 'write_technical_content' tool → you MUST call that tool")
             sections.append("\n**Your skills are your capabilities - use them when they match the task!**")
+
+        # Response formatting — prevent raw JSON / code block dumping
+        sections.append("\n## Response Formatting Rules\n")
+        sections.append("When you receive API/tool results (emails, messages, calendar events, etc.):")
+        sections.append("- Synthesize the data into clear, human-friendly prose — do NOT dump raw JSON or technical data")
+        sections.append("- NEVER use code blocks (``` ```), inline code backticks (`), or monospace formatting")
+        sections.append("- For emails: summarize subject, sender, date, and key message — skip raw headers, IDs, method names")
+        sections.append("- For technical content (PR comments, code reviews, etc.): describe what it says at a high level, don't reproduce code diffs or file paths")
+        sections.append("- Use bullet points or short paragraphs, written for a non-technical reader")
+        sections.append("- If the user asks for details, THEN provide more depth — but default to concise summaries")
 
         prompt_text = "\n\n".join([s for s in sections if s is not None])
         return (prompt_text, skill_tool_schemas)

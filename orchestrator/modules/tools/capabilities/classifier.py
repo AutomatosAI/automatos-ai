@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 
+from config import config
+
 from .taxonomy import (
     CAPABILITY_TAXONOMY,
     DESTRUCTIVE_CAPABILITIES,
@@ -735,7 +737,7 @@ Respond in JSON only:
             # This is a placeholder - actual implementation depends on LLM client
             response = self.llm_client.complete(
                 prompt=prompt,
-                model="gpt-4o-mini",  # Use fast model for classification
+                model=config.LLM_MODEL,  # Use configured model for classification
                 response_format={"type": "json_object"}
             )
 
@@ -752,7 +754,7 @@ Respond in JSON only:
                 short_description=result.get("short_description"),
                 method="llm",
                 confidence=0.9,
-                model="gpt-4o-mini",
+                model=config.LLM_MODEL,
             )
 
         except Exception as e:

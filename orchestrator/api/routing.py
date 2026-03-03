@@ -9,7 +9,6 @@ trigger subscriptions.
 from __future__ import annotations
 
 import logging
-import os
 from typing import List, Optional
 from uuid import UUID
 
@@ -27,6 +26,7 @@ from core.models.routing import (
     RoutingRule,
 )
 from core.routing.cache import get_routing_cache
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +396,7 @@ async def setup_trigger(
         entity_pk = entity["id"]
 
         # Build callback URL
-        backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+        backend_url = config.BACKEND_URL or "http://localhost:8000"
         callback_url = f"{backend_url}/api/composio/webhook"
 
         # Subscribe via Composio SDK

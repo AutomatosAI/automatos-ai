@@ -9,7 +9,6 @@ customize, and use to create workflows.
 import hashlib
 import hmac
 import logging
-import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from uuid import uuid4
@@ -29,9 +28,23 @@ from core.models.core import RecipeExecution
 from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from config import config
 
 
-import os
+def _sync_cron_schedule(recipe: WorkflowRecipe):
+    """Sync a recipe's cron schedule with the RecipeSchedulerService."""
+    if not config.RECIPE_SCHEDULER_ENABLED:
+        return
+    try:
+        from services.recipe_scheduler import get_recipe_scheduler
+        scheduler = get_recipe_scheduler()
+        sc = recipe.schedule_config or {}
+        if sc.get("type") == "cron" and sc.get("cron_expression"):
+            scheduler.schedule_recipe(recipe)
+        else:
+            scheduler.unschedule_recipe(recipe.id)
+    except Exception as e:
+        logger.warning(f"[_sync_cron_schedule] Failed for recipe {recipe.id}: {e}")
 
 
 def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) -> Optional[str]:
@@ -82,7 +95,7 @@ def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) ->
         entity_manager = EntityManager(db)
         entity = entity_manager.get_or_create_entity(workspace_id)
 
-        backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+        backend_url = config.BACKEND_URL or "http://localhost:8000"
         callback_url = f"{backend_url}/api/composio/webhook"
 
         result = client.subscribe_to_trigger(
@@ -404,11 +417,9 @@ async def create_workflow_recipe(
         execution_config = recipe_data.get('execution_config') or {
             'mode': 'sequential',
             'max_retries': 1,
-            'retry_delay': 5,
-            'per_step_timeout': 300,
-            'total_timeout': 1800,
-            'quality_threshold': 0.7,
-            'auto_learn': True,
+            'timeout_per_step': 120000,
+            'total_timeout': 600000,
+            'auto_learning': True,
         }
 
         # Ensure webhook_id in schedule_config for trigger/webhook types
@@ -479,6 +490,9 @@ async def create_workflow_recipe(
         trigger_sub_id = _auto_register_trigger(recipe, ctx.workspace_id, db)
         if trigger_sub_id:
             db.commit()
+
+        # Sync cron scheduler
+        _sync_cron_schedule(recipe)
 
         logger.info(f"Created workflow recipe: {recipe.template_id}")
 
@@ -601,6 +615,9 @@ async def update_workflow_recipe(
                     new_sub.is_active = True
             db.commit()
 
+        # Sync cron scheduler
+        _sync_cron_schedule(recipe)
+
         logger.info(f"Updated workflow recipe: {recipe_id}")
 
         return {
@@ -641,6 +658,14 @@ async def delete_workflow_recipe(
                 status_code=403,
                 detail="System recipes cannot be deleted"
             )
+
+        # Unschedule cron job if any
+        if config.RECIPE_SCHEDULER_ENABLED:
+            try:
+                from services.recipe_scheduler import get_recipe_scheduler
+                get_recipe_scheduler().unschedule_recipe(recipe.id)
+            except Exception:
+                pass
 
         # Cleanup trigger subscriptions before deleting
         _cleanup_trigger_subscriptions(recipe.id, db)
@@ -1635,7 +1660,7 @@ async def recipe_webhook(
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
     # Verify HMAC signature if a webhook secret is configured
-    webhook_secret = (recipe.schedule_config or {}).get("webhook_secret") or os.getenv("WEBHOOK_SECRET")
+    webhook_secret = (recipe.schedule_config or {}).get("webhook_secret") or config.WEBHOOK_SECRET
     if webhook_secret:
         sig_header = (
             request.headers.get("x-hub-signature-256")

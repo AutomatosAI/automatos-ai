@@ -12,8 +12,8 @@ Usage in service.py:
     # In StreamingChatService.__init__:
     self.smart_chat = SmartChatIntegration(workspace_id, agent_id, agent_name)
 
-    # In stream_response_aisdk:
-    orchestrated = await self.smart_chat.prepare(messages, tools, chat_id)
+    # In stream_response_with_agent:
+    orchestrated = await self.smart_chat.prepare(messages, tools, chat_id, complexity_assessment)
     # Use orchestrated.system_prompt, orchestrated.tools, orchestrated.tool_choice
 
     # After response:
@@ -67,7 +67,8 @@ class SmartChatIntegration:
         self,
         messages: List[Dict[str, Any]],
         available_tools: List[Dict[str, Any]],
-        chat_id: Optional[str] = None
+        chat_id: Optional[str] = None,
+        complexity_assessment: Optional[Any] = None,
     ) -> OrchestratedRequest:
         """
         Prepare a chat request using smart orchestration.
@@ -81,6 +82,7 @@ class SmartChatIntegration:
             messages: Conversation messages
             available_tools: All tools available to agent
             chat_id: Optional chat session ID
+            complexity_assessment: Optional PRD-68 AutoBrain assessment
 
         Returns:
             OrchestratedRequest ready for LLM
@@ -88,7 +90,8 @@ class SmartChatIntegration:
         return await self.orchestrator.prepare_request(
             messages=messages,
             available_tools=available_tools,
-            chat_id=chat_id
+            chat_id=chat_id,
+            complexity_assessment=complexity_assessment,
         )
 
     async def store(
@@ -161,7 +164,7 @@ def get_tool_choice_for_llm(orchestrated: OrchestratedRequest) -> Optional[str]:
 # QUICK INTEGRATION EXAMPLE
 # =============================================================================
 """
-# In StreamingChatService.stream_response_aisdk():
+# In StreamingChatService.stream_response_with_agent():
 
 # OLD WAY (scattered logic):
 #   memory_context = await self.memory_injector.retrieve_relevant_memories(...)

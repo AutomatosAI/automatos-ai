@@ -75,21 +75,41 @@ class ComposioToolService:
     # Regex to extract explicit Composio action names from prompts.
     _ACTION_NAME_RE = re.compile(r"\b([A-Z][A-Z0-9]+(?:_[A-Z0-9]+){2,})\b")
 
+    # PRD-68: Map AutoBrain tool_hints to Composio app names.
+    # AutoBrain returns LLM-curated domain keywords; we scope the SDK search.
+    _HINT_TO_APPS: Dict[str, List[str]] = {
+        "email": ["gmail"], "emails": ["gmail"], "inbox": ["gmail"],
+        "mail": ["gmail"], "gmail": ["gmail"],
+        "slack": ["slack"], "message": ["slack", "telegram"],
+        "channel": ["slack"], "chat": ["slack", "discordbot", "telegram"],
+        "calendar": ["googlecalendar"], "event": ["googlecalendar"],
+        "meeting": ["googlecalendar"], "schedule": ["googlecalendar"],
+        "drive": ["googledrive"], "file": ["googledrive", "dropbox"],
+        "sheet": ["googlesheets"], "spreadsheet": ["googlesheets"],
+        "jira": ["jira"], "ticket": ["jira"], "issue": ["jira"],
+        "github": ["github"], "repo": ["github"], "code": ["github"],
+        "pull": ["github"], "pr": ["github"],
+        "telegram": ["telegram"], "discord": ["discordbot"],
+        "doc": ["googledocs"], "document": ["googledocs"],
+        "dropbox": ["dropbox"], "search": ["composio_search", "tavily"],
+    }
+
     def get_tools_for_step(
         self,
         agent_id: int,
         workspace_id: UUID,
         task_prompt: str,
         limit: int = _MAX_TOOLS,
+        tool_hints: Optional[List[str]] = None,
     ) -> ComposioToolResult:
         """
         Resolve Composio tools for a step.
 
         Strategy:
           1. Explicit action names in prompt → exact schema lookup.
-          2. SDK semantic search (tools.get with search=query).
-          3. SDK search returns 0 → load from cache, rank by keyword
-             match on action name, cap at ``limit``.
+          2. PRD-68: If tool_hints provided, scope SDK search to hinted apps.
+          3. SDK semantic search (tools.get with search=query).
+          4. SDK search returns 0 → broadened SDK search (all allowed apps).
         """
         result = ComposioToolResult()
 
@@ -145,10 +165,28 @@ class ComposioToolService:
                     )
                     return result
 
-            # 4. SDK semantic search
+            # 4. PRD-68: Scope SDK search using tool_hints from AutoBrain
+            #    "email" → search only ["gmail"] instead of all 15 apps
+            allowed_set = {a.lower() for a in allowed_apps}
+            search_apps = [a.lower() for a in allowed_apps]  # default: all
+
+            if tool_hints:
+                hinted_apps: set = set()
+                for hint in tool_hints:
+                    for app in self._HINT_TO_APPS.get(hint.lower(), []):
+                        if app in allowed_set:
+                            hinted_apps.add(app)
+                if hinted_apps:
+                    search_apps = list(hinted_apps)
+                    logger.info(
+                        "[ComposioToolService] PRD-68 hint scope: %s → apps=%s",
+                        tool_hints, search_apps,
+                    )
+
+            # 5. SDK semantic search — scoped to hinted apps (or all if no hints)
             search_results = client.search_actions_for_step(
                 search_query=task_prompt[:200],
-                app_names=[a.lower() for a in allowed_apps],
+                app_names=search_apps,
                 entity_id=entity_id,
                 limit=limit,
             )
@@ -163,29 +201,28 @@ class ComposioToolService:
                 result.search_ms = int((time.monotonic() - t0) * 1000)
                 result.strategy = "sdk_search"
                 logger.info(
-                    "[ComposioToolService] SDK search: agent=%s actions=%d (%dms) → %s",
-                    agent_id, len(result.tools), result.search_ms,
+                    "[ComposioToolService] SDK search: agent=%s apps=%s "
+                    "actions=%d (%dms) → %s",
+                    agent_id, search_apps, len(result.tools), result.search_ms,
                     sorted(result.action_set),
                 )
                 return result
 
-            # 5. SDK search returned 0 — fall back to cached SDK data.
-            #    The cache was populated by tools.get() (the SDK).
-            #    Rank actions by keyword match on action name, cap at limit.
-            all_schemas = client.get_all_schemas_for_apps(
-                app_names=[a.lower() for a in allowed_apps],
-                entity_id=entity_id,
-            )
-            if all_schemas:
-                query_words = set(re.findall(r"[a-z]{3,}", task_prompt.lower()))
-                ranked = sorted(
-                    all_schemas,
-                    key=lambda item: -sum(
-                        1 for w in query_words
-                        if w in item.get("action_name", "").lower()
-                    ),
+            # 6. SDK search returned 0 — broaden to all allowed apps if we
+            #    were scoped by hints, then retry
+            if search_apps != [a.lower() for a in allowed_apps]:
+                logger.info(
+                    "[ComposioToolService] Hint-scoped search returned 0 — "
+                    "broadening to all %d apps for agent=%s",
+                    len(allowed_apps), agent_id,
                 )
-                for item in ranked[:limit]:
+                search_results = client.search_actions_for_step(
+                    search_query=task_prompt[:200],
+                    app_names=[a.lower() for a in allowed_apps],
+                    entity_id=entity_id,
+                    limit=limit,
+                )
+                for item in search_results:
                     action_name = item.get("action_name", "")
                     schema = item.get("schema")
                     if action_name and schema and action_name not in result.action_set:
@@ -269,8 +306,6 @@ class ComposioToolService:
             .all()
         )
         assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
-        if not assigned_apps:
-            return []
 
         # Cross-reference with connected apps
         connected_apps: List[str] = []
@@ -285,6 +320,16 @@ class ComposioToolService:
                 ]
         except Exception as conn_err:
             logger.warning("[ComposioToolService] Connection check failed: %s", conn_err)
+
+        # Auto-inherit: no explicit assignments → use all workspace-connected apps
+        if not assigned_apps:
+            if connected_apps:
+                logger.info(
+                    "[ComposioToolService] Agent %s has no app assignments — "
+                    "inheriting %d workspace apps", agent_id, len(connected_apps)
+                )
+                return connected_apps
+            return []
 
         if connected_apps:
             allowed = [a for a in assigned_apps if a in set(connected_apps)]

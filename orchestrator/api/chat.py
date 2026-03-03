@@ -63,6 +63,139 @@ def _get_cto_agent_id(db: Session) -> Optional[int]:
 router = APIRouter(prefix="/api/chat", tags=["💬 Chat"])
 
 
+# ---------------------------------------------------------------------------
+# PRD-68 Phase 2: Workflow Bridge — ORGAN/ORGANISM chat → workflow engine
+# ---------------------------------------------------------------------------
+
+async def _stream_workflow_bridge(
+    db: Session,
+    chat_id: str,
+    message_text: str,
+    workspace_id,
+    agent_id: int,
+    user_id: int,
+    streaming_service,
+    complexity_assessment=None,
+):
+    """
+    Bridge chat messages to the PRD-59 workflow engine for ORGAN/ORGANISM tasks.
+
+    Creates a transient workflow from the user's message, executes it through
+    the full pipeline (PLAN → PREPARE → EXECUTE → EVALUATE → LEARN), and
+    streams stage events back as AI SDK format into the chat response.
+
+    The workflow is tagged 'chat_generated' so users can find/re-run it.
+    """
+    import asyncio
+    import json
+
+    # 1. Send chat_id to frontend (same as normal chat flow)
+    yield streaming_service.streaming_handler.format_aisdk_chat_id(chat_id)
+    await asyncio.sleep(0)
+
+    try:
+        from core.models.core import Workflow, WorkflowExecution
+        from consumers.workflows.streaming import stream_workflow_as_aisdk, get_stream_manager
+
+        # 2. Create transient workflow from the user's message
+        workflow = Workflow(
+            name=f"Chat workflow: {message_text[:60]}{'...' if len(message_text) > 60 else ''}",
+            description=message_text,
+            goal=message_text,
+            context=f"Generated from chat {chat_id} by AutoBrain (complexity={complexity_assessment.complexity.value})" if complexity_assessment else "",
+            workflow_definition={
+                "steps": [{
+                    "name": "Execute task",
+                    "description": message_text,
+                    "agent_id": agent_id,
+                }],
+                "source": "chat_generated",
+            },
+            status="active",
+            workspace_id=workspace_id,
+            tags=["chat_generated", "auto"],
+        )
+        db.add(workflow)
+        db.commit()
+        db.refresh(workflow)
+
+        logger.info(f"[PRD-68] Created transient workflow id={workflow.id} from chat")
+
+        # 3. Create execution record
+        execution = WorkflowExecution(
+            workflow_id=workflow.id,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            input_data={
+                "message": message_text,
+                "chat_id": chat_id,
+                "user_id": user_id,
+            },
+            status="pending",
+        )
+        db.add(execution)
+        db.commit()
+        db.refresh(execution)
+
+        logger.info(f"[PRD-68] Created workflow execution id={execution.id}")
+
+        # 4. Send workflow-started event to frontend
+        yield streaming_service.streaming_handler.format_aisdk_data({
+            "type": "workflow-update",
+            "status": "started",
+            "workflow_id": workflow.id,
+            "execution_id": execution.id,
+            "complexity": complexity_assessment.complexity.value if complexity_assessment else "organ",
+        })
+        await asyncio.sleep(0)
+
+        # 5. Kick off execution in background
+        from api.workflows import execute_workflow_with_progress
+
+        async def _run_workflow():
+            try:
+                await execute_workflow_with_progress(execution.id, {})
+            except Exception as e:
+                logger.error(f"[PRD-68] Workflow execution failed: {e}", exc_info=True)
+
+        asyncio.create_task(_run_workflow())
+
+        # 6. Stream workflow events as AI SDK format back to chat
+        # Small delay to let the workflow register with the stream manager
+        await asyncio.sleep(0.3)
+
+        async for chunk in stream_workflow_as_aisdk(execution.id):
+            yield chunk
+
+        # 7. Save the workflow result as an assistant message in the chat
+        db.refresh(execution)
+        if execution.output_data:
+            final_text = execution.output_data.get("final_response", "")
+            if final_text:
+                streaming_service.chat_service.save_message(
+                    chat_id=chat_id,
+                    role="assistant",
+                    parts=[{"type": "text", "text": final_text}],
+                    workspace_id=workspace_id,
+                )
+
+        # 8. Emit finish event
+        yield streaming_service.streaming_handler.format_aisdk_data({
+            "type": "workflow-update",
+            "status": "completed",
+            "workflow_id": workflow.id,
+            "execution_id": execution.id,
+        })
+        yield 'd:{"finishReason":"stop","usage":{"promptTokens":0,"completionTokens":0}}\n'
+
+    except Exception as e:
+        logger.error(f"[PRD-68] Workflow bridge failed: {e}", exc_info=True)
+        # Fall back to normal chat response
+        error_text = f"Workflow execution failed. Falling back to direct response.\n\nError: {e}"
+        yield f'0:{json.dumps(error_text)}\n'
+        yield f'e:{json.dumps({"message": str(e)})}\n'
+
+
 # Request/Response Models
 class MessagePart(BaseModel):
     type: str
@@ -285,23 +418,24 @@ async def stream_chat(
     routing_request_id = None
     use_system_llm = False  # True = use orchestrator LLM settings, not agent's model
     complexity_assessment = None
+    _use_workflow_bridge = False  # PRD-68: True when ORGAN/ORGANISM triggers workflow
 
-    # PRD-67: Detect admin → default to CTO Agent
+    # PRD-67: Admin persona is CTO Agent (Auto with elevated access).
+    # AutoBrain + Router run for ALL users — the CTO agent is the fallback
+    # persona for admins (RESPOND, orchestrate, router-miss), not a routing bypass.
     _user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
     _is_admin = _user_role in ("admin", "super_admin")
     logger.info(f"[PRD-67] user_role={_user_role!r}, is_admin={_is_admin}, user_id={getattr(ctx.user, 'id', '?')}")
+
+    _cto_id = _get_cto_agent_id(db) if _is_admin else None
+    _fallback_agent_id = _cto_id or get_default_agent_id(db, ctx.workspace_id)
 
     if request.agentId:
         # User explicitly selected an agent — skip Auto, use directly
         effective_agent_id = request.agentId
         logger.info(f"[chat] Direct mode: agent_id={effective_agent_id}")
-    elif _is_admin and (cto_id := _get_cto_agent_id(db)):
-        # PRD-67: Admin without explicit agent → CTO Agent
-        effective_agent_id = cto_id
-        use_system_llm = True
-        logger.info(f"[Auto] CTO mode: admin detected, agent_id={cto_id}")
     else:
-        # --- Auto mode: the brain decides ---
+        # --- Auto mode: the brain decides (admins included, PRD-67 CTO is fallback) ---
         auto_brain = AutoBrain(db, str(ctx.workspace_id))
         complexity_assessment = await auto_brain.assess(message_text, len(message_history))
         logger.info(
@@ -314,16 +448,23 @@ async def stream_chat(
         if complexity_assessment.action == Action.RESPOND:
             # Auto handles directly — no routing, no delegation.
             # Simple greetings, conversational messages, memory recalls.
-            effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+            effective_agent_id = _fallback_agent_id
             use_system_llm = True
             logger.info(
                 f"[Auto] Direct response (complexity={complexity_assessment.complexity.value}): "
                 f"agent_id={effective_agent_id} with orchestrator LLM"
             )
-        else:
-            # DELEGATE — Universal Router picks the right specialized agent.
-            # AutoBrain already filtered greetings/platform/memory → RESPOND.
-            # Everything reaching here needs a specialized agent.
+        elif complexity_assessment.action == Action.WORKFLOW:
+            # PRD-68 Phase 2: ORGAN/ORGANISM → workflow execution via chat.
+            # Create transient workflow, execute through PRD-59 pipeline,
+            # stream stage events as AI SDK format back to chat.
+            logger.info(
+                f"[Auto] WORKFLOW detected (complexity={complexity_assessment.complexity.value})"
+            )
+            _use_workflow_bridge = True
+
+        if complexity_assessment.action in (Action.DELEGATE, Action.WORKFLOW):
+            # Universal Router picks the right specialized agent.
             try:
                 ingestor = ChatbotIngestor()
                 envelope = ingestor.ingest(
@@ -336,7 +477,7 @@ async def stream_chat(
                 universal_router = UniversalRouter(db, cache=get_routing_cache())
                 routing_decision = await universal_router.route(envelope)
             except Exception:
-                logger.exception("[chat] Router failed — falling back to default agent")
+                logger.exception("[chat] Router failed — falling back to fallback agent")
                 routing_decision = None
 
             if routing_decision is not None and routing_decision.route_type == "agent" and routing_decision.agent_id is not None:
@@ -346,8 +487,8 @@ async def stream_chat(
                     f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
                 )
             elif routing_decision is not None and routing_decision.route_type == "orchestrate":
-                # LLM explicitly chose Auto / orchestrate — use default agent with system LLM
-                effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+                # LLM explicitly chose Auto / orchestrate — use fallback agent with system LLM
+                effective_agent_id = _fallback_agent_id
                 use_system_llm = True
                 logger.info(
                     f"[Auto] Router → orchestrate "
@@ -356,10 +497,10 @@ async def stream_chat(
                     f"agent_id={effective_agent_id} with orchestrator LLM"
                 )
             else:
-                # Router couldn't decide — fall back to default agent
-                effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+                # Router couldn't decide — fall back
+                effective_agent_id = _fallback_agent_id
                 use_system_llm = True
-                logger.info(f"[Auto] Router returned no match — default agent_id={effective_agent_id}")
+                logger.info(f"[Auto] Router returned no match — fallback agent_id={effective_agent_id}")
 
     # Build response headers (include routing metadata when available)
     response_headers = {
@@ -379,6 +520,9 @@ async def stream_chat(
         response_headers["x-auto-complexity"] = complexity_assessment.complexity.value
         response_headers["x-auto-action"] = complexity_assessment.action.value
         response_headers["x-auto-confidence"] = f"{complexity_assessment.confidence:.2f}"
+        response_headers["x-auto-needs-memory"] = str(complexity_assessment.needs_memory).lower()
+        if complexity_assessment.tool_hints:
+            response_headers["x-auto-tool-hints"] = ",".join(complexity_assessment.tool_hints)
 
     # PRD: Unified Agent-Chat System
     # Use agent-based streaming for all resolved agents
@@ -396,15 +540,30 @@ async def stream_chat(
 
     async def _guarded_stream():
         async with session_queue.acquire(session_key):
-            async for chunk in streaming_service.stream_response_with_agent(
-                chat_id=chat_id,
-                messages=message_history,
-                agent_id=effective_agent_id,
-                user_id=user_id,
-                use_system_llm=use_system_llm,
-                skip_composio=_skip_composio,
-            ):
-                yield chunk
+            if _use_workflow_bridge:
+                # PRD-68 Phase 2: Stream workflow execution as AI SDK events
+                async for chunk in _stream_workflow_bridge(
+                    db=db,
+                    chat_id=chat_id,
+                    message_text=message_text,
+                    workspace_id=ctx.workspace_id,
+                    agent_id=effective_agent_id,
+                    user_id=user_id,
+                    streaming_service=streaming_service,
+                    complexity_assessment=complexity_assessment,
+                ):
+                    yield chunk
+            else:
+                async for chunk in streaming_service.stream_response_with_agent(
+                    chat_id=chat_id,
+                    messages=message_history,
+                    agent_id=effective_agent_id,
+                    user_id=user_id,
+                    use_system_llm=use_system_llm,
+                    skip_composio=_skip_composio,
+                    complexity_assessment=complexity_assessment,
+                ):
+                    yield chunk
 
     return StreamingResponse(
         _guarded_stream(),

@@ -527,14 +527,14 @@ class JiraBugTriageRecipe:
     def _resolve_repo(self) -> Dict[str, str]:
         """Resolve the target GitHub repository for this workspace.
 
-        Reads from environment variables (GITHUB_REPO_OWNER, GITHUB_REPO_NAME)
+        Reads from config (GITHUB_REPO_OWNER, GITHUB_REPO_NAME)
         or falls back to metadata on the envelope if available.
         """
-        import os
+        from config import config
 
-        owner = os.getenv("GITHUB_REPO_OWNER", "")
-        repo = os.getenv("GITHUB_REPO_NAME", "")
-        default_branch = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
+        owner = config.GITHUB_REPO_OWNER or ""
+        repo = config.GITHUB_REPO_NAME or ""
+        default_branch = config.GITHUB_DEFAULT_BRANCH or "main"
 
         if not owner or not repo:
             raise RuntimeError(

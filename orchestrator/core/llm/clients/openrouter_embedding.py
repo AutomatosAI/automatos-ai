@@ -12,11 +12,11 @@ Features:
 - All top MTEB models accessible via single API key
 """
 
-import os
 import logging
 import asyncio
 from typing import List, Optional
 
+from config import config
 from .base import BaseEmbeddingProvider, EmbeddingConfig
 
 try:
@@ -72,7 +72,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
         if AsyncOpenAI is None:
             raise ImportError("OpenAI package not installed. Run: pip install openai")
 
-        api_key = self.config.api_key or os.getenv("OPENROUTER_API_KEY")
+        api_key = self.config.api_key or config.OPENROUTER_API_KEY
 
         if not api_key:
             logger.warning(
@@ -83,7 +83,7 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
         else:
             self.client = AsyncOpenAI(
                 api_key=api_key,
-                base_url="https://openrouter.ai/api/v1",
+                base_url=config.OPENROUTER_BASE_URL,
             )
             model_info = OPENROUTER_EMBEDDING_MODELS.get(self.config.model, (4096, 8192))
             logger.info(

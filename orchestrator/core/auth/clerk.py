@@ -8,10 +8,11 @@ Verifies Clerk JWTs using JWKS and extracts user/org claims.
 from typing import Optional, Dict, Any
 import jwt
 from jwt import PyJWKClient
-import os
 import logging
 from functools import lru_cache
 import httpx
+
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +26,11 @@ class ClerkAuth:
     """
     
     def __init__(self):
-        self.clerk_secret_key = os.getenv("CLERK_SECRET_KEY")
-        self.clerk_publishable_key = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
-        
+        self.clerk_secret_key = config.CLERK_SECRET_KEY
+        self.clerk_publishable_key = config.CLERK_PUBLISHABLE_KEY
+
         # Clerk JWKS URL - format: https://{clerk-frontend-api}/.well-known/jwks.json
-        self.jwks_url = os.getenv("CLERK_JWKS_URL")
+        self.jwks_url = config.CLERK_JWKS_URL
         self._jwks_client = None
         
         # Clerk API URL for fetching user details when email not in JWT

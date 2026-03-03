@@ -923,8 +923,8 @@ export function ExecutionKitchen({
           if (data?.suggestions?.length > 0) {
             setSuggestionsData(data)
 
-            // Check if quality is below threshold (default 0.7) for 3+ consecutive low-quality executions
-            const qualityThreshold = executionData?.execution_config?.quality_threshold ?? 0.7
+            // Check if quality is below threshold for 3+ consecutive low-quality executions
+            const qualityThreshold = 0.7
             const isLowQuality = data.quality_score !== null && data.quality_score < qualityThreshold
             const consecutiveLow = executionCompleteCountRef.current >= 3 || (data.analysis_count >= 3 && isLowQuality)
 

@@ -26,6 +26,8 @@ from datetime import datetime
 from enum import Enum
 import asyncio
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -104,8 +106,12 @@ class BudgetSummary:
     
     # Cost tracking
     estimated_cost: float = 0.0
-    model: str = "gpt-4"
-    
+    model: str = None
+
+    def __post_init__(self):
+        if self.model is None:
+            self.model = config.LLM_MODEL
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {

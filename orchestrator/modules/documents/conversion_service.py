@@ -10,9 +10,11 @@ import shutil
 import subprocess
 from typing import Optional
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
-GOTENBERG_URL = os.environ.get("GOTENBERG_URL", "http://gotenberg:3000")
+GOTENBERG_URL = config.GOTENBERG_URL
 
 
 class ConversionService:

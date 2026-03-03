@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 # Initialize credential resolver
+from config import config
 from core.credentials.resolver import get_credential_resolver
 from urllib.parse import urlparse
-import os
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 
@@ -47,7 +47,7 @@ def parse_database_url(url: str) -> dict:
     }
 
 # Try DATABASE_URL first (Railway, Heroku, etc.)
-database_url = os.getenv('DATABASE_URL')
+database_url = config.DATABASE_URL
 if database_url:
     postgres_creds = parse_database_url(database_url)
 else:
@@ -56,13 +56,13 @@ else:
     try:
         postgres_creds = resolver.get_dict("development_db")
     except Exception:
-        # Fallback to individual environment variables
+        # Fallback to config values
         postgres_creds = {
-            'database': os.getenv('POSTGRES_DB', 'automatos'),
-            'user': os.getenv('POSTGRES_USER', 'postgres'),
-            'password': os.getenv('POSTGRES_PASSWORD', ''),
-            'host': os.getenv('POSTGRES_HOST', 'localhost'),
-            'port': os.getenv('POSTGRES_PORT', '5432')
+            'database': config.POSTGRES_DB or 'automatos',
+            'user': config.POSTGRES_USER or 'postgres',
+            'password': config.POSTGRES_PASSWORD or '',
+            'host': config.POSTGRES_HOST or 'localhost',
+            'port': config.POSTGRES_PORT or '5432'
         }
 
 db_config = {
@@ -76,8 +76,8 @@ db_config = {
 # Document manager factory - creates instance per request with workspace context
 def get_document_manager(workspace_id: str) -> DocumentManager:
     """Get DocumentManager configured for the workspace"""
-    use_s3_vectors = os.getenv('S3_VECTORS_ENABLED', 'false').lower() == 'true'
-    s3_bucket = os.getenv('S3_DOCUMENTS_BUCKET', 'automatos-ai')
+    use_s3_vectors = config.S3_VECTORS_ENABLED
+    s3_bucket = config.S3_DOCUMENTS_BUCKET
     return DocumentManager(
         db_config=db_config,
         workspace_id=workspace_id,
@@ -1610,9 +1610,9 @@ async def reprocess_all_documents(
                             import boto3
                             s3_client = boto3.client(
                                 's3',
-                                region_name=os.getenv('AWS_REGION', 'us-east-1'),
-                                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-                                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+                                region_name=config.AWS_REGION or 'us-east-1',
+                                aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+                                aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY
                             )
                             # Parse s3://bucket/key
                             parts = file_path.replace("s3://", "").split("/", 1)

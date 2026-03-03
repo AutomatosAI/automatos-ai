@@ -6,7 +6,6 @@ Main FastAPI Application for Automotas AI
 Comprehensive API server with WebSocket support for real-time updates. DO NOT COMMENT OUT ANYTHING IN THIS FILE.
 """
 
-import os
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
@@ -26,6 +25,7 @@ env_path = Path(__file__).parent / '.env'
 load_dotenv(env_path)
 
 # Import database and models
+from config import config
 from core.database.database import init_database, get_db
 from core.models import Base
 
@@ -284,7 +284,7 @@ app = FastAPI(
             "description": "Development server"
         },
         {
-            "url": os.getenv("API_URL", "http://localhost:8000"),
+            "url": config.API_URL or "http://localhost:8000",
             "description": "Production server"
         }
     ],
@@ -314,7 +314,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=config.CORS_ALLOW_ORIGINS.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -372,7 +372,7 @@ async def api_tracking_middleware(request, call_next):
 
 # Simple API key auth dependency
 def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
+    required = config.API_KEY
     if required and x_api_key != required:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return True

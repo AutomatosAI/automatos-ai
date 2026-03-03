@@ -26,7 +26,45 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 
+from config import config
+
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Orchestrator tuning defaults (used when no user constraints are provided)
+# ---------------------------------------------------------------------------
+_ORCHESTRATOR_DEFAULTS = {
+    "ENABLE_COMPLEXITY_ANALYSIS": True,
+    "MIN_SUBTASKS": 3,
+    "DEFAULT_SUBTASKS": 5,
+    "MAX_SUBTASKS": 15,
+    "MIN_AGENTS_PER_SUBTASK": 1,
+    "DEFAULT_AGENTS_PER_SUBTASK": 2,
+    "MAX_AGENTS_PER_SUBTASK": 5,
+    "TOKEN_BUDGET_DEFAULT": 100_000,
+    "TOKEN_BUDGET_MAX_SUBTASK": 4_000,
+    "MAX_COST_USD": 5.0,
+}
+
+
+def _orch(key: str):
+    """Get an orchestrator tuning default."""
+    return _ORCHESTRATOR_DEFAULTS[key]
+
+
+def _estimate_cost(total_tokens: int, model: str | None = None) -> float:
+    """Rough cost estimate (USD) for a given token count."""
+    # ~$0.01 per 1k tokens as a conservative default
+    rate_per_1k = 0.01
+    return (total_tokens / 1000) * rate_per_1k
+
+
+def _get_default_user_constraints() -> dict:
+    """Default user constraints when none are provided."""
+    return {
+        "max_tokens": _orch("TOKEN_BUDGET_DEFAULT"),
+        "max_cost": _orch("MAX_COST_USD"),
+    }
 
 
 @dataclass
@@ -131,8 +169,7 @@ class ComplexityAnalyzer:
         # Initialize LLM if not provided and use_llm is True
         if self.use_llm and not self.llm:
             try:
-                from config import orchestrator_config
-                if orchestrator_config.ENABLE_COMPLEXITY_ANALYSIS:
+                if _orch("ENABLE_COMPLEXITY_ANALYSIS"):
                     from core.llm import create_llm_manager
                     # Use service_name to get settings from database (NO hardcoded defaults)
                     self.llm = create_llm_manager(service_name="orchestrator")
@@ -167,8 +204,7 @@ class ComplexityAnalyzer:
         
         # Default constraints
         if user_constraints is None:
-            from config import orchestrator_config
-            user_constraints = orchestrator_config.get_user_constraints()
+            user_constraints = _get_default_user_constraints()
         
         # Default context
         if context is None:
@@ -276,30 +312,27 @@ class ComplexityAnalyzer:
             complexity_level = "very_high"
         
         # Recommend subtasks based on complexity
-        from config import orchestrator_config
-        
         # CRITICAL FIX: Ensure minimum 5 subtasks for quality output
         # Previous logic gave only 2 subtasks for "low complexity", causing generic output
         # Phase 1 success required 5+ subtasks even for report tasks
         if complexity_score < 0.3:
-            # Raised minimum from 2 to 5 to ensure adequate subtask decomposition
-            recommended_subtasks = max(orchestrator_config.MIN_SUBTASKS, 5)
+            recommended_subtasks = max(_orch("MIN_SUBTASKS"), 5)
         elif complexity_score < 0.6:
-            recommended_subtasks = max(orchestrator_config.DEFAULT_SUBTASKS, 5)
+            recommended_subtasks = max(_orch("DEFAULT_SUBTASKS"), 5)
         elif complexity_score < 0.85:
-            recommended_subtasks = min(orchestrator_config.DEFAULT_SUBTASKS + 5, orchestrator_config.MAX_SUBTASKS)
+            recommended_subtasks = min(_orch("DEFAULT_SUBTASKS") + 5, _orch("MAX_SUBTASKS"))
         else:
-            recommended_subtasks = min(orchestrator_config.DEFAULT_SUBTASKS + 10, orchestrator_config.MAX_SUBTASKS)
-        
+            recommended_subtasks = min(_orch("DEFAULT_SUBTASKS") + 10, _orch("MAX_SUBTASKS"))
+
         # Recommend agents based on coordination complexity
         if coordination_complexity < 0.3:
-            recommended_agents = orchestrator_config.MIN_AGENTS_PER_SUBTASK
+            recommended_agents = _orch("MIN_AGENTS_PER_SUBTASK")
         elif coordination_complexity < 0.6:
-            recommended_agents = orchestrator_config.DEFAULT_AGENTS_PER_SUBTASK
+            recommended_agents = _orch("DEFAULT_AGENTS_PER_SUBTASK")
         else:
             recommended_agents = min(
-                orchestrator_config.DEFAULT_AGENTS_PER_SUBTASK + 2,
-                orchestrator_config.MAX_AGENTS_PER_SUBTASK
+                _orch("DEFAULT_AGENTS_PER_SUBTASK") + 2,
+                _orch("MAX_AGENTS_PER_SUBTASK")
             )
         
         return ComplexityAnalysis(
@@ -509,21 +542,19 @@ Be practical and consider the user's constraints. Don't over-engineer simple tas
         
         Adjusts recommendations to respect token/cost/time limits
         """
-        from config import orchestrator_config
-        
         adjustments = {}
-        
+
         # Estimate token usage for recommendations
-        estimated_tokens_per_subtask = orchestrator_config.TOKEN_BUDGET_MAX_SUBTASK
+        estimated_tokens_per_subtask = _orch("TOKEN_BUDGET_MAX_SUBTASK")
         total_estimated_tokens = analysis.recommended_subtasks * estimated_tokens_per_subtask
-        
-        max_tokens = user_constraints.get('max_tokens', orchestrator_config.TOKEN_BUDGET_DEFAULT)
-        
+
+        max_tokens = user_constraints.get('max_tokens', _orch("TOKEN_BUDGET_DEFAULT"))
+
         # If we exceed token budget, reduce subtasks
         if total_estimated_tokens > max_tokens:
             original_subtasks = analysis.recommended_subtasks
             adjusted_subtasks = max(
-                orchestrator_config.MIN_SUBTASKS,
+                _orch("MIN_SUBTASKS"),
                 int(max_tokens / estimated_tokens_per_subtask)
             )
             if adjusted_subtasks != original_subtasks:
@@ -533,18 +564,18 @@ Be practical and consider the user's constraints. Don't over-engineer simple tas
                     'adjusted': adjusted_subtasks,
                     'reason': f'Reduced to fit token budget ({max_tokens:,} tokens)'
                 }
-        
+
         # Estimate cost
-        model = "gpt-4"  # Default assumption
-        estimated_cost = orchestrator_config.estimate_cost(total_estimated_tokens, model)
-        max_cost = user_constraints.get('max_cost', orchestrator_config.MAX_COST_USD)
-        
+        model = config.LLM_MODEL
+        estimated_cost = _estimate_cost(total_estimated_tokens, model)
+        max_cost = user_constraints.get('max_cost', _orch("MAX_COST_USD"))
+
         if estimated_cost > max_cost:
             # Further reduce subtasks to fit cost
             cost_reduction_factor = max_cost / estimated_cost
             original_subtasks = analysis.recommended_subtasks
             adjusted_subtasks = max(
-                orchestrator_config.MIN_SUBTASKS,
+                _orch("MIN_SUBTASKS"),
                 int(analysis.recommended_subtasks * cost_reduction_factor)
             )
             if adjusted_subtasks != original_subtasks:

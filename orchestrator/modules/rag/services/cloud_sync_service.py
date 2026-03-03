@@ -249,8 +249,9 @@ class CloudSyncService:
 
             # Initialize DocumentManager (uses existing multimodal processing)
             # Configure for S3 vectors if enabled
-            # Try DATABASE_URL first (includes port), fallback to individual env vars
-            database_url = os.getenv('DATABASE_URL')
+            # Try DATABASE_URL first (includes port), fallback to individual config vars
+            from config import config as app_config
+            database_url = app_config.DATABASE_URL
             if database_url:
                 from urllib.parse import urlparse
                 parsed = urlparse(database_url)
@@ -263,16 +264,16 @@ class CloudSyncService:
                 }
             else:
                 db_config = {
-                    'host': os.getenv('POSTGRES_HOST', '127.0.0.1'),
-                    'port': int(os.getenv('POSTGRES_PORT', '5432')),
-                    'database': os.getenv('POSTGRES_DB', 'orchestrator_db'),
-                    'user': os.getenv('POSTGRES_USER', 'postgres'),
-                    'password': os.getenv('POSTGRES_PASSWORD', 'postgres')
+                    'host': app_config.POSTGRES_HOST or '127.0.0.1',
+                    'port': int(app_config.POSTGRES_PORT or 5432),
+                    'database': app_config.POSTGRES_DB or 'orchestrator_db',
+                    'user': app_config.POSTGRES_USER or 'postgres',
+                    'password': app_config.POSTGRES_PASSWORD or 'postgres'
                 }
 
             # Check if S3 vectors is enabled
-            use_s3_vectors = os.getenv('S3_VECTORS_ENABLED', 'false').lower() == 'true'
-            s3_bucket = os.getenv('S3_DOCUMENTS_BUCKET', 'automatos-ai')
+            use_s3_vectors = str(app_config.S3_VECTORS_ENABLED or 'false').lower() == 'true'
+            s3_bucket = app_config.S3_DOCUMENTS_BUCKET
 
             doc_manager = DocumentManager(
                 db_config=db_config,

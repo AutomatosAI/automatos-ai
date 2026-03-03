@@ -10,7 +10,6 @@ API routes for Composio integration:
 """
 
 import asyncio
-import os
 import hmac
 import hashlib
 import logging
@@ -34,6 +33,7 @@ from core.models.routing import UnroutedEvent
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.jira_trigger import JiraTriggerIngestor
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +298,7 @@ async def initiate_connection(
     callback_url = request.callback_url if request else None
     if not callback_url:
         # Use frontend callback URL (popup callback page)
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = config.FRONTEND_URL or "http://localhost:3000"
         callback_url = f"{frontend_url}/tools/callback?connected={app_name.upper()}"
 
     try:
@@ -556,7 +556,7 @@ async def handle_webhook(
 
     # Verify signature — supports both legacy (x-composio-signature)
     # and V3 (webhook-signature with "v1,<base64>" format)
-    webhook_secret = os.getenv("COMPOSIO_WEBHOOK_SECRET")
+    webhook_secret = config.COMPOSIO_WEBHOOK_SECRET
     v3_signature = request.headers.get("webhook-signature")
     if webhook_secret and v3_signature:
         # V3 format: "v1,<base64_signature>"
@@ -881,9 +881,9 @@ async def subscribe_to_trigger(
     entity = entity_manager.get_or_create_entity(ctx.workspace_id)
     
     # Build callback URL
-    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    backend_url = config.BACKEND_URL or "http://localhost:8000"
     callback_url = f"{backend_url}/api/composio/webhook"
-    
+
     try:
         result = client.subscribe_to_trigger(
             entity_id=entity["composio_entity_id"],

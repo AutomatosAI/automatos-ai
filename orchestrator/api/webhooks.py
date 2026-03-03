@@ -15,7 +15,6 @@ import asyncio
 import hashlib
 import hmac
 import logging
-import os
 from typing import Any, Dict, Optional, Set
 from uuid import UUID, uuid4
 
@@ -28,6 +27,7 @@ from core.models.workspaces import Workspace
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.webhook import WebhookIngestor
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -393,7 +393,7 @@ async def general_workspace_webhook(
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
     # 1b. Verify HMAC signature if a webhook secret is configured
-    webhook_secret = (workspace.settings or {}).get("webhook_secret") or os.getenv("WEBHOOK_SECRET")
+    webhook_secret = (workspace.settings or {}).get("webhook_secret") or config.WEBHOOK_SECRET
     await _verify_webhook_signature(request, webhook_secret)
 
     # 2. Detect platform and extract reply context

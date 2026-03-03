@@ -11,9 +11,9 @@ CRITICAL: This script NEVER overwrites existing values.
 """
 
 import logging
-import os
 from sqlalchemy.orm import Session
 
+from config import config
 from core.models.system_settings import SystemSetting, SettingCategory
 
 logger = logging.getLogger(__name__)
@@ -274,7 +274,7 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.GENERAL.value,
             "key": "next_public_api_url",
-            "default_value": os.getenv("NEXT_PUBLIC_API_URL", ""),
+            "default_value": config.NEXT_PUBLIC_API_URL or "",
             "value_type": "string",
             "description": "Public API URL for frontend",
             "is_required": True
@@ -1233,6 +1233,54 @@ def seed_system_settings(db: Session):
             "is_required": False,
             "validation_rules": {
                 "options": ["true", "false"]
+            }
+        },
+
+        # ========================================
+        # PRD-68: COMPLEXITY ASSESSOR SETTINGS
+        # ========================================
+
+        {
+            "category": SettingCategory.COMPLEXITY_ASSESSOR.value,
+            "key": "provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": "LLM provider for complexity assessment routing (PRD-68). Use a fast, cheap model.",
+            "is_required": True,
+            "validation_rules": {
+                "options": ["openai", "anthropic", "google", "openrouter", "huggingface", "grok"]
+            }
+        },
+        {
+            "category": SettingCategory.COMPLEXITY_ASSESSOR.value,
+            "key": "model",
+            "default_value": "meta-llama/llama-3.1-8b-instruct",
+            "value_type": "string",
+            "description": "Model for complexity assessment. Recommend: lightweight model (Llama 8B, Haiku, Flash).",
+            "is_required": True
+        },
+        {
+            "category": SettingCategory.COMPLEXITY_ASSESSOR.value,
+            "key": "temperature",
+            "default_value": "0.1",
+            "value_type": "number",
+            "description": "Low temperature for consistent routing decisions (0.0-1.0)",
+            "is_required": False,
+            "validation_rules": {
+                "min": 0.0,
+                "max": 1.0
+            }
+        },
+        {
+            "category": SettingCategory.COMPLEXITY_ASSESSOR.value,
+            "key": "max_tokens",
+            "default_value": "200",
+            "value_type": "number",
+            "description": "Max tokens for routing response (JSON output only, keep low)",
+            "is_required": False,
+            "validation_rules": {
+                "min": 50,
+                "max": 500
             }
         },
     ]

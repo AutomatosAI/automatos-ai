@@ -538,10 +538,10 @@ async def run_scheduled_sync():
     """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    import os
-    
+    from config import config as app_config
+
     # Get database connection
-    db_url = os.environ.get("DATABASE_URL", "postgresql://localhost/automatos")
+    db_url = app_config.DATABASE_URL
     engine = create_engine(db_url)
     Session = sessionmaker(bind=engine)
     

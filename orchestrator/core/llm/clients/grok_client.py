@@ -5,10 +5,10 @@ Grok (xAI) Provider Implementation
 xAI Grok models provider using OpenAI-compatible API.
 """
 
-import os
 import logging
 from typing import Dict, Any, List, Optional
 
+from config import config
 from .base import BaseLLMProvider, LLMConfig, LLMResponse
 
 try:
@@ -30,7 +30,7 @@ class GrokProvider(BaseLLMProvider):
             raise ImportError("OpenAI package not installed. Run: pip install openai")
         
         # Try multiple sources for API key
-        api_key = self.config.api_key or os.getenv("XAI_API_KEY")
+        api_key = self.config.api_key or config.XAI_API_KEY
         
         if not api_key:
             logger.warning(

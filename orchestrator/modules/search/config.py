@@ -9,6 +9,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
+from config import config as app_config
+
 
 def _get_system_dimension() -> int:
     """Get embedding dimension from system settings"""
@@ -32,34 +34,34 @@ def _get_system_dimension() -> int:
 @dataclass
 class SearchConfig:
     """Configuration for the Search module"""
-    
+
     # Database configuration
-    database_url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
-    
+    database_url: str = field(default_factory=lambda: app_config.DATABASE_URL or "")
+
     # Embedding configuration - reads from system settings (no hardcoded defaults)
     embedding_dimension: int = field(default_factory=_get_system_dimension)
-    embedding_model: str = field(default_factory=lambda: os.getenv("EMBEDDING_MODEL", ""))
-    
+    embedding_model: str = field(default_factory=lambda: app_config.EMBEDDING_MODEL or "")
+
     # Vector store configuration
     similarity_function: str = "cosine"  # cosine, l2, inner_product
     vector_table_name: str = "document_chunks"
-    
+
     # Retrieval configuration
     default_max_results: int = 10
     default_min_relevance: float = 0.5
     cache_ttl_minutes: int = 30
-    
+
     # Optimization configuration
     knapsack_enabled: bool = True
     mmr_lambda: float = 0.7  # Balance between relevance and diversity
-    
+
     @classmethod
     def from_env(cls) -> "SearchConfig":
-        """Create config from environment variables (prefers system settings)"""
+        """Create config from app config (prefers system settings)"""
         return cls(
-            database_url=os.getenv("DATABASE_URL", ""),
+            database_url=app_config.DATABASE_URL or "",
             embedding_dimension=_get_system_dimension(),  # Always from system settings
-            embedding_model=os.getenv("EMBEDDING_MODEL", ""),
+            embedding_model=app_config.EMBEDDING_MODEL or "",
             similarity_function=os.getenv("SIMILARITY_FUNCTION", "cosine"),
             vector_table_name=os.getenv("VECTOR_TABLE_NAME", "document_chunks"),
             default_max_results=int(os.getenv("DEFAULT_MAX_RESULTS", "10")),

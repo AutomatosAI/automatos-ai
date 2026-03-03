@@ -198,6 +198,7 @@ export function RecipesTab({
       prompt_template: step.prompt_template || '',
       pass_to: step.pass_to,
       error_handling: step.error_handling || 'stop',
+      pre_exec: step.pre_exec || '',
     }))
 
     const initialData = {
@@ -209,12 +210,9 @@ export function RecipesTab({
       execution_config: {
         mode: backendConfig.mode || 'sequential',
         max_retries: backendConfig.max_retries ?? 3,
-        retry_delay: backendConfig.retry_delay ?? 1000,
-        backoff_strategy: backendConfig.backoff_strategy || 'exponential',
         timeout_per_step: (backendConfig.per_step_timeout ?? 120) * 1000,
         total_timeout: (backendConfig.total_timeout ?? 600) * 1000,
-        quality_threshold: backendConfig.quality_threshold ?? 0.7,
-        auto_learning: backendConfig.auto_learn ?? true,
+        auto_learning: backendConfig.auto_learning ?? backendConfig.auto_learn ?? true,
         parallel_limit: backendConfig.parallel_limit ?? 5,
         memory_isolation: backendConfig.memory_isolation || 'shared',
       },

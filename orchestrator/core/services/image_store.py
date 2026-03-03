@@ -43,8 +43,8 @@ class LocalImageStore:
 
     def __init__(self):
         self.base_dir = pathlib.Path(
-            os.getenv("IMAGE_STORE_LOCAL_DIR",
-                       os.path.join(os.path.expanduser("~"), ".automatos", "generated-images"))
+            config.IMAGE_STORE_LOCAL_DIR or
+            os.path.join(os.path.expanduser("~"), ".automatos", "generated-images")
         )
         self.base_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         logger.info("Image store: local filesystem at %s", self.base_dir)
@@ -96,7 +96,7 @@ class S3ImageStore:
     """S3-backed image store for production."""
 
     def __init__(self):
-        self.bucket = getattr(config, "RECIPE_LOG_S3_BUCKET", "automatos-ai")
+        self.bucket = config.S3_DOCUMENTS_BUCKET
         boto_cfg = BotoConfig(
             region_name=config.AWS_REGION or "us-east-1",
             signature_version="v4",
