@@ -313,14 +313,14 @@ async def _execute_step(
                 all_tool_calls.append({
                     "action": tool_name,
                     "params": tool_args,
-                    "result": result_text[:4000],
+                    "result": result_text[:8000],
                     "duration_ms": exec_ms,
                     "composio_direct": True,
                 })
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_id,
-                    "content": result_text[:8000],
+                    "content": result_text[:20000],
                 })
                 continue
 
@@ -1162,8 +1162,8 @@ def _resolve_prompt(
                     tc_result = tc.get("result", "")
                     if tc_result:
                         result_str = json.dumps(tc_result, indent=2) if isinstance(tc_result, (dict, list)) else str(tc_result)
-                        if len(result_str) > 8000:
-                            result_str = result_str[:8000] + "\n... (truncated)"
+                        if len(result_str) > 20000:
+                            result_str = result_str[:20000] + "\n... (truncated)"
                         context_parts.append(f"[Tool: {action}]\n{result_str}")
 
             if sr_output:
