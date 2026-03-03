@@ -186,17 +186,12 @@ async def _execute_step(
     messages.append({"role": "user", "content": clean_prompt})
 
     # 5. Tools — per-action SDK tools (or composio_execute fallback) + builtins
-    #    When Composio actions are resolved (e.g. JIRA_CREATE_ISSUE), strip workspace
-    #    exploration tools to prevent the LLM from wasting iterations on read/list/exec
-    #    instead of calling the actual action.  Scratchpad data is already in context.
+    #    When Composio actions are resolved (e.g. JIRA_CREATE_ISSUE), strip only
+    #    the generic fallback executor. Keep platform tools, workspace tools, and
+    #    knowledge tools — the LLM needs them for context gathering (e.g. fetching
+    #    logs to attach to JIRA tickets, reading test reports, etc.).
     _STRIP_WHEN_COMPOSIO = {
-        "composio_execute",
-        "workspace_exec", "workspace_list_dir", "workspace_read_file",
-        "workspace_write_file", "read_file",
-        "platform_get_logs", "platform_list_services",
-        "search_knowledge", "semantic_search",
-        "query_database", "smart_query_database",
-        "platform_list_recipes",
+        "composio_execute",  # Only strip the generic fallback — per-action tools replace it
     }
     if composio_result and composio_result.tools:
         # SDK search succeeded: keep only non-exploration builtins + per-action tools
