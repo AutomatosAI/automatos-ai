@@ -542,7 +542,11 @@ async def update_workflow_recipe(
         if 'schedule_config' in recipe_data:
             sc = recipe_data['schedule_config']
             if sc and sc.get('type') in ('trigger', 'webhook') and 'webhook_id' not in sc:
-                sc['webhook_id'] = uuid4().hex
+                # Preserve existing webhook_id on update — generating a new one
+                # breaks any external automation (JIRA, GitHub, etc.) already
+                # configured to POST to the old URL.
+                existing_wh = (recipe.schedule_config or {}).get('webhook_id')
+                sc['webhook_id'] = existing_wh or uuid4().hex
 
         # Update fields if provided
         updatable_fields = [
