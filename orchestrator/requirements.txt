@@ -61,7 +61,7 @@ jsonschema>=4.0.0
 pdfplumber>=0.11.7
 pdfminer.six>=20251230
 camelot-py==0.11.0
-opencv-python-headless==4.8.1.78  # Lighter than opencv-python (needed by camelot)
+opencv-python-headless>=4.10.0  # Upgraded for numpy 2.x compat (needed by camelot)
 
 # AI provider clients (API-based, no local models)
 tiktoken>=0.5.0  # Token counting for context management (RAG, context_guard)
@@ -70,7 +70,7 @@ anthropic>=0.40.0,<1.0.0
 google-generativeai>=0.8.0  # Google Gemini native API
 
 # Data & ML (actively used in multi-agent optimization + RAG)
-numpy>=1.26.2
+numpy>=1.26.2,<3.0.0
 pandas>=2.2.0,<3.0
 scikit-learn>=1.5.0,<2.0.0
 nltk>=3.9.3
