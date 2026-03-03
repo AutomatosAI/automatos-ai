@@ -829,7 +829,7 @@ async def execute_recipe_direct(
                     )
                     pre_exit = pre_result.get("exit_code", -1)
                     pre_stdout = pre_result.get("stdout", "")
-                    pre_stderr = pre_result.get("stderr", "")
+                    pre_stderr = pre_result.get("stderr", "") or pre_result.get("error", "")
                     pre_duration = pre_result.get("duration_ms", 0)
 
                     # Log the pre_exec as a tool call for visibility
