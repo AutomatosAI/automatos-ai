@@ -362,13 +362,29 @@ class WorkspaceToolExecutor:
     # Git operations (high-level)
     # =========================================================================
 
+    # Branch name pattern — alphanumeric + . / _ - only, no leading dash.
+    _BRANCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/\-]{0,254}$")
+
     async def _git_clone(
         self,
         repo_url: str,
         branch: Optional[str] = None,
         shallow: bool = True,
     ) -> Dict[str, Any]:
-        """Clone a repo into the workspace repos/ directory. Uses cache if exists."""
+        """Clone a repo into the workspace repos/ directory. Uses cache if exists.
+
+        PRD-70 FIX-01: Validates branch name and uses ``--`` separator to
+        prevent argument injection in the worker container.
+        """
+        # PRD-70 FIX-01: Validate branch to prevent --upload-pack injection
+        if branch:
+            if branch.startswith("-") or not self._BRANCH_RE.match(branch):
+                return {
+                    "exit_code": 1,
+                    "stdout": "",
+                    "stderr": f"Invalid branch name: {branch}",
+                }
+
         # Extract repo name from URL
         repo_name = repo_url.rstrip("/").split("/")[-1]
         if repo_name.endswith(".git"):
@@ -381,12 +397,13 @@ class WorkspaceToolExecutor:
             logger.info("Repo %s already cached, pulling updates", repo_name)
             return await self._git_pull(repo_name, branch)
 
-        # Build clone command
+        # Build clone command with -- separator (PRD-70 FIX-01)
         cmd_parts = ["git", "clone"]
         if shallow:
             cmd_parts.extend(["--depth", "1"])
         if branch:
             cmd_parts.extend(["--branch", branch])
+        cmd_parts.append("--")  # End of options — positional args only after this
         cmd_parts.extend([repo_url, str(repo_path)])
 
         cmd = " ".join(shlex.quote(p) for p in cmd_parts)
@@ -444,7 +461,9 @@ class WorkspaceToolExecutor:
         # Extract the first binary from the command
         # Handle: pipes, &&, ||, semicolons, subshells
         # We check each command segment
-        segments = re.split(r'[|&;]', command)
+        # Split on actual command separators (&&, ||, ;, |) — NOT single &
+        # which appears in shell redirects like 2>&1.
+        segments = re.split(r'&&|\|\||[;|]', command)
         for segment in segments:
             segment = segment.strip()
             if not segment:

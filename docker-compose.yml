@@ -49,7 +49,16 @@ services:
     image: redis:7-alpine
     container_name: automatos_redis
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required - set in .env file} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # PRD-70 FIX-05: Disable dangerous Redis commands to prevent data wipe if exposed.
+    # Note: CONFIG rename breaks redis-cli CONFIG commands — acceptable for production.
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required - set in .env file}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --rename-command FLUSHDB ""
+      --rename-command FLUSHALL ""
+      --rename-command DEBUG ""
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:

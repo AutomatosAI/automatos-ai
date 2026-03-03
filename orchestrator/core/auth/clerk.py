@@ -78,19 +78,22 @@ class ClerkAuth:
             # Get signing key from JWKS
             signing_key = self.jwks_client.get_signing_key_from_jwt(token)
             
-            # Verify and decode the token
+            # PRD-70 FIX-03: Enforce audience validation when CLERK_AUDIENCE is set.
+            # This prevents cross-Clerk-app JWT reuse.
+            audience = config.CLERK_AUDIENCE or None
             payload = jwt.decode(
                 token,
                 signing_key.key,
                 algorithms=["RS256"],
+                audience=audience,
                 options={
-                    "verify_aud": False,  # Clerk doesn't use standard aud claim
+                    "verify_aud": bool(audience),
                     "verify_exp": True,
                     "verify_iat": True,
                     "verify_nbf": True,
                 }
             )
-            
+
             return payload
             
         except jwt.ExpiredSignatureError:

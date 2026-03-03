@@ -40,14 +40,8 @@ export function RoleProvider({ children }: { children: ReactNode }) {
         // Access public metadata from the session user
         const publicMetadata = session.user.publicMetadata as { role?: string } | undefined
         roleFromToken = publicMetadata?.role
-
-        // Auto-admin for @automatos.app domain
-        // Anyone with an @automatos.app email is automatically an admin
-        // This overrides any publicMetadata settings
-        const primaryEmail = session.user.primaryEmailAddress?.emailAddress
-        if (primaryEmail?.endsWith('@automatos.app')) {
-            roleFromToken = 'admin'
-        }
+        // PRD-70 FIX-02: Domain-based auto-admin removed. Admin role comes
+        // exclusively from Clerk publicMetadata (set in Clerk Dashboard).
     }
 
     // Default to 'user' if no role is set

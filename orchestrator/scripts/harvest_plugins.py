@@ -146,10 +146,13 @@ SKIP_PATTERNS = {".git", "__pycache__", ".DS_Store", "node_modules", ".pytest_ca
 # ---------------------------------------------------------------------------
 
 def clone_repo(url: str, dest: Path) -> bool:
-    """Shallow-clone a repo. Returns True on success."""
+    """Shallow-clone a repo. Returns True on success.
+
+    PRD-70 FIX-01: Uses ``--`` separator to prevent argument injection.
+    """
     try:
         subprocess.run(
-            ["git", "clone", "--depth", "1", url, str(dest)],
+            ["git", "clone", "--depth", "1", "--", url, str(dest)],
             check=True,
             capture_output=True,
             text=True,

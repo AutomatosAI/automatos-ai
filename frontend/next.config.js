@@ -49,6 +49,26 @@ const nextConfig = {
             key: 'X-DNS-Prefetch-Control',
             value: 'on',
           },
+          // PRD-70 FIX-08: Content-Security-Policy
+          // Restricts script/style/image sources to prevent XSS.
+          // 'unsafe-inline' needed for Next.js styled-jsx and Clerk components.
+          // 'unsafe-eval' needed for Next.js dev mode — remove in production hardening phase.
+          {
+            key: 'Content-Security-Policy',
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com",
+              "font-src 'self' data:",
+              "connect-src 'self' https://*.clerk.accounts.dev https://api.clerk.com wss: ws:",
+              "frame-src 'self' https://*.clerk.accounts.dev https://challenges.cloudflare.com",
+              "object-src 'none'",
+              "base-uri 'self'",
+              "form-action 'self'",
+              "frame-ancestors 'none'",
+            ].join('; '),
+          },
         ],
       },
     ]

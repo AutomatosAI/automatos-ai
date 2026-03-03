@@ -23,6 +23,8 @@ from pathlib import Path
 import zipfile
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.security.git_sanitizer import validate_branch
+from core.security.rate_limiter import check_rate_limit
 
 # Adjust imports to match your project structure
 from core.database.database import get_db
@@ -119,6 +121,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/skills", tags=["skills-prd22"])
 
 
+def _assert_admin(ctx: RequestContext) -> None:
+    """Raise 403 if the current user is not an admin."""
+    if ctx.auth_type == "clerk":
+        role = getattr(ctx.user, "system_role", None) or getattr(ctx.user, "role", None)
+        if role not in ("admin", "super_admin"):
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+
 # ----------------------------------------------------------------------------
 # PRD-22: Local skill recommendation helper
 # ----------------------------------------------------------------------------
@@ -202,9 +212,23 @@ async def import_git_repository(
             "auto_update": true
         }
     """
+    # PRD-70 FIX-01: Skills import is admin-only until a safe user-facing flow
+    # with full security scan + approval workflow is built.
+    _assert_admin(ctx)
+
+    # PRD-70 FIX-07: Rate limit git clone operations per workspace
+    ws_id = str(getattr(ctx, "workspace_id", "global"))
+    await check_rate_limit(ws_id, "skill_import")
+
+    # Validate branch to prevent argument injection (--upload-pack, etc.)
+    if source_data.branch:
+        ok, err = validate_branch(source_data.branch)
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"Invalid branch: {err}")
+
     try:
         skill_loader = get_skill_loader(db)
-        
+
         # Import repository (this may take a while for large repos)
         result = skill_loader.add_git_repository(
             git_url=source_data.git_url,

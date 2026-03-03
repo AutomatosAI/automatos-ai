@@ -28,6 +28,12 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from functools import lru_cache
 from collections import OrderedDict
+
+from core.security.git_sanitizer import (
+    validate_git_url as _secure_validate_git_url,
+    validate_branch as _secure_validate_branch,
+    build_git_clone_cmd,
+)
 import hashlib
 
 from sqlalchemy.orm import Session
@@ -94,23 +100,8 @@ def estimate_tokens(text: str) -> int:
 
 
 def validate_git_url(git_url: str) -> Tuple[bool, Optional[str]]:
-    """
-    Validate Git URL against whitelist.
-    
-    Returns:
-        (is_valid, error_message)
-    """
-    from urllib.parse import urlparse as _urlparse
-    try:
-        parsed = _urlparse(git_url)
-        hostname = (parsed.hostname or "").lower()
-    except Exception:
-        return False, "Invalid Git URL format"
-    for domain in SkillLoaderConfig.ALLOWED_GIT_DOMAINS:
-        if hostname == domain or hostname.endswith("." + domain):
-            return True, None
-    
-    return False, f"Git URL domain not in whitelist. Allowed: {SkillLoaderConfig.ALLOWED_GIT_DOMAINS}"
+    """Validate Git URL — delegates to centralized git_sanitizer (PRD-70 FIX-01)."""
+    return _secure_validate_git_url(git_url, SkillLoaderConfig.ALLOWED_GIT_DOMAINS)
 
 
 def scan_for_dangerous_patterns(content: str) -> Tuple[bool, List[str]]:
@@ -550,21 +541,20 @@ class SkillLoader:
     # ========================================================================
     
     def _git_clone(self, git_url: str, local_path: str, branch: str) -> Dict[str, Any]:
-        """Execute git clone"""
+        """Execute git clone with sanitized inputs (PRD-70 FIX-01)."""
         try:
+            # Validate branch to prevent argument injection
+            ok, err = _secure_validate_branch(branch)
+            if not ok:
+                return {"success": False, "error": f"Invalid branch: {err}"}
+
             # Remove directory if exists
             if os.path.exists(local_path):
                 shutil.rmtree(local_path)
-            
-            # Clone with depth limit for faster cloning
-            cmd = [
-                "git", "clone",
-                "--depth", "50",
-                "--branch", branch,
-                git_url,
-                local_path
-            ]
-            
+
+            # Build safe command with -- separator
+            cmd = build_git_clone_cmd(git_url, local_path, branch=branch, depth=50)
+
             result = subprocess.run(
                 cmd,
                 timeout=SkillLoaderConfig.GIT_CLONE_TIMEOUT,

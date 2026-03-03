@@ -22,7 +22,11 @@ class SQLValidator:
     DENY_KEYWORDS = [
         r"\bINSERT\b", r"\bUPDATE\b", r"\bDELETE\b", r"\bALTER\b",
         r"\bTRUNCATE\b", r"\bDROP\b", r"\bCREATE\b", r"\bMERGE\b",
-        r"\bGRANT\b", r"\bREVOKE\b", r"\bVACUUM\b"
+        r"\bGRANT\b", r"\bREVOKE\b", r"\bVACUUM\b",
+        # PRD-70 FIX-04: Additional deny keywords
+        r"\bRETURNING\b",  # Prevents mutation disguised as SELECT
+        r"\bCOPY\b",       # Prevents COPY TO/FROM
+        r"\bEXECUTE\b",    # Prevents dynamic SQL execution
     ]
 
     # SQL functions/keywords that look like columns but aren't
@@ -208,6 +212,17 @@ class SQLValidator:
         for kw in self.DENY_KEYWORDS:
             if re.search(kw, clean_sql, flags=re.IGNORECASE):
                 raise SQLValidationError("Statement contains forbidden keyword")
+
+        # PRD-70 FIX-04: Block CTEs (WITH clauses) — they can hide mutations
+        # and complicate static analysis. Regex can't reliably parse nested SQL.
+        if re.search(r"\bWITH\b", clean_sql, flags=re.IGNORECASE):
+            raise SQLValidationError("CTEs (WITH clauses) are not allowed")
+
+        # PRD-70 FIX-04: Block UNION-based cross-workspace data exfiltration.
+        # UNION allows combining results from different WHERE clauses, bypassing
+        # workspace isolation if the attacker crafts a second SELECT.
+        if re.search(r"\bUNION\b", clean_sql, flags=re.IGNORECASE):
+            raise SQLValidationError("UNION queries are not allowed")
 
         # Schema-based validation
         if schema_metadata:

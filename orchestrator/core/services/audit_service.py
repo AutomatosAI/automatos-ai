@@ -40,6 +40,12 @@ class AuditEventType(str, Enum):
     CREDENTIAL_ACCESS = "credential.access"
     ADMIN_ACTION = "admin.action"
     SETTING_CHANGE = "setting.change"
+    # PRD-70 FIX-06: Security-sensitive operation types
+    GIT_CLONE = "git.clone"
+    SKILL_IMPORT = "skill.import"
+    PLUGIN_IMPORT = "plugin.import"
+    NL2SQL_QUERY = "nl2sql.query"
+    API_KEY_CREATE = "api_key.create"
 
 
 # Allowed event type values for fast membership testing.
@@ -263,6 +269,80 @@ class AuditService:
         )
 
     # ------------------------------------------------------------------
+    # PRD-70 FIX-06: Security-sensitive operation helpers
+    # ------------------------------------------------------------------
+
+    async def log_git_clone(
+        self,
+        actor_id: str,
+        workspace_id: str,
+        *,
+        git_url: str,
+        branch: str = "main",
+        source: str = "unknown",
+        result: str = "success",
+        ip_address: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return await self.log_event(
+            event_type=AuditEventType.GIT_CLONE,
+            actor_id=actor_id,
+            resource_type="repository",
+            resource_id=git_url,
+            workspace_id=workspace_id,
+            details={
+                "action": "clone",
+                "branch": branch,
+                "source": source,
+                "result": result,
+            },
+            ip_address=ip_address,
+        )
+
+    async def log_skill_import(
+        self,
+        actor_id: str,
+        workspace_id: str,
+        *,
+        git_url: str,
+        source_name: str = "",
+        result: str = "success",
+    ) -> Dict[str, Any]:
+        return await self.log_event(
+            event_type=AuditEventType.SKILL_IMPORT,
+            actor_id=actor_id,
+            resource_type="skill_source",
+            resource_id=git_url,
+            workspace_id=workspace_id,
+            details={
+                "action": "import",
+                "source_name": source_name,
+                "result": result,
+            },
+        )
+
+    async def log_nl2sql_query(
+        self,
+        actor_id: str,
+        workspace_id: str,
+        *,
+        query_hash: str,
+        tables: Optional[list] = None,
+        result: str = "success",
+    ) -> Dict[str, Any]:
+        return await self.log_event(
+            event_type=AuditEventType.NL2SQL_QUERY,
+            actor_id=actor_id,
+            resource_type="nl2sql",
+            resource_id=query_hash,
+            workspace_id=workspace_id,
+            details={
+                "action": "execute",
+                "tables": tables or [],
+                "result": result,
+            },
+        )
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -280,6 +360,12 @@ class AuditService:
             AuditEventType.PERMISSION_CHANGE: logging.INFO,
             AuditEventType.ADMIN_ACTION: logging.INFO,
             AuditEventType.SETTING_CHANGE: logging.INFO,
+            # PRD-70: git/skill/plugin operations are security-sensitive
+            AuditEventType.GIT_CLONE: logging.WARNING,
+            AuditEventType.SKILL_IMPORT: logging.WARNING,
+            AuditEventType.PLUGIN_IMPORT: logging.WARNING,
+            AuditEventType.NL2SQL_QUERY: logging.INFO,
+            AuditEventType.API_KEY_CREATE: logging.WARNING,
         }
         return _levels.get(event_type, logging.INFO)
 
