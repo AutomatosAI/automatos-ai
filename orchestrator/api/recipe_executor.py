@@ -847,10 +847,15 @@ async def execute_recipe_direct(
                         f"Duration: {pre_duration}ms\n"
                     )
                     if pre_stdout:
-                        # Cap at 6000 chars to leave room for LLM context
-                        stdout_text = pre_stdout[:6000]
-                        if len(pre_stdout) > 6000:
-                            stdout_text += "\n... (truncated)"
+                        # Keep head + tail to preserve both setup context and
+                        # test summary (pytest prints results at the end).
+                        max_chars = 10000
+                        if len(pre_stdout) <= max_chars:
+                            stdout_text = pre_stdout
+                        else:
+                            head = pre_stdout[:3000]
+                            tail = pre_stdout[-6000:]
+                            stdout_text = head + "\n\n... (truncated middle) ...\n\n" + tail
                         pre_exec_block += f"\n### stdout\n```\n{stdout_text}\n```\n"
                     if pre_stderr and pre_exit != 0:
                         pre_exec_block += f"\n### stderr\n```\n{pre_stderr[:2000]}\n```\n"
