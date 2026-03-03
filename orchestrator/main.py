@@ -344,6 +344,16 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"HeartbeatService failed to start (non-fatal): {e}")
 
+        # Recipe Cron Scheduler
+        if config.RECIPE_SCHEDULER_ENABLED:
+            try:
+                from services.recipe_scheduler import get_recipe_scheduler
+                recipe_sched = get_recipe_scheduler()
+                await recipe_sched.start()
+                logger.info("RecipeSchedulerService started successfully")
+            except Exception as e:
+                logger.warning(f"RecipeSchedulerService failed to start (non-fatal): {e}")
+
         # PRD-55: Start ChannelManager
         if config.CHANNELS_ENABLED:
             try:
@@ -369,6 +379,15 @@ async def lifespan(app: FastAPI):
             from services.heartbeat_service import get_heartbeat_service
             await get_heartbeat_service().stop()
             logger.info("HeartbeatService stopped")
+        except Exception:
+            pass
+
+    # Stop RecipeSchedulerService
+    if config.RECIPE_SCHEDULER_ENABLED:
+        try:
+            from services.recipe_scheduler import get_recipe_scheduler
+            await get_recipe_scheduler().stop()
+            logger.info("RecipeSchedulerService stopped")
         except Exception:
             pass
 

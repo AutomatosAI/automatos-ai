@@ -31,6 +31,22 @@ from core.auth.dependencies import RequestContext
 from config import config
 
 
+def _sync_cron_schedule(recipe: WorkflowRecipe):
+    """Sync a recipe's cron schedule with the RecipeSchedulerService."""
+    if not config.RECIPE_SCHEDULER_ENABLED:
+        return
+    try:
+        from services.recipe_scheduler import get_recipe_scheduler
+        scheduler = get_recipe_scheduler()
+        sc = recipe.schedule_config or {}
+        if sc.get("type") == "cron" and sc.get("cron_expression"):
+            scheduler.schedule_recipe(recipe)
+        else:
+            scheduler.unschedule_recipe(recipe.id)
+    except Exception as e:
+        logger.warning(f"[_sync_cron_schedule] Failed for recipe {recipe.id}: {e}")
+
+
 def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) -> Optional[str]:
     """
     If recipe.schedule_config is type=trigger with a Composio trigger,
@@ -475,6 +491,9 @@ async def create_workflow_recipe(
         if trigger_sub_id:
             db.commit()
 
+        # Sync cron scheduler
+        _sync_cron_schedule(recipe)
+
         logger.info(f"Created workflow recipe: {recipe.template_id}")
 
         return {
@@ -596,6 +615,9 @@ async def update_workflow_recipe(
                     new_sub.is_active = True
             db.commit()
 
+        # Sync cron scheduler
+        _sync_cron_schedule(recipe)
+
         logger.info(f"Updated workflow recipe: {recipe_id}")
 
         return {
@@ -636,6 +658,14 @@ async def delete_workflow_recipe(
                 status_code=403,
                 detail="System recipes cannot be deleted"
             )
+
+        # Unschedule cron job if any
+        if config.RECIPE_SCHEDULER_ENABLED:
+            try:
+                from services.recipe_scheduler import get_recipe_scheduler
+                get_recipe_scheduler().unschedule_recipe(recipe.id)
+            except Exception:
+                pass
 
         # Cleanup trigger subscriptions before deleting
         _cleanup_trigger_subscriptions(recipe.id, db)
