@@ -42,6 +42,36 @@ def test_channel_analytics(client):
     assert r.status_code == 200
 
 
+def test_channel_analytics_source_query(client):
+    """Channel analytics must not silently swallow SQL errors.
+
+    Bug: orchestrator/api/channels.py line 326 queries
+        SELECT source_channel FROM routing_decisions
+    but routing_decisions only has a 'source' column (line 96 of
+    orchestrator/core/models/routing.py). The column 'source_channel'
+    exists on routing_rules (line 115), not routing_decisions.
+
+    The exception is caught at line 356 and returns empty data, masking
+    the bug. This test verifies the response shape is valid and that
+    today_by_source is a dict (not None or missing).
+
+    Fix: channels.py lines 326+329+346 — change source_channel to source.
+    """
+    r = client.get("/api/channels/analytics")
+    assert r.status_code == 200
+    data = r.json()
+    assert "today_by_source" in data, (
+        "Response missing 'today_by_source' key. "
+        "Bug: channels.py:326 queries non-existent column 'source_channel' "
+        "on routing_decisions table. Should be 'source'."
+    )
+    assert isinstance(data["today_by_source"], dict), (
+        f"today_by_source should be dict, got {type(data['today_by_source']).__name__}. "
+        f"Bug: SQL error caught silently at channels.py:356."
+    )
+    assert "channels" in data, "Response missing 'channels' key"
+
+
 def test_delete_channel(client, channel_state, created_channel_ids):
     if not channel_state["channel_id"]:
         pytest.skip("No channel created")

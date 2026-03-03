@@ -89,11 +89,45 @@ def load_report() -> dict | None:
         return json.load(f)
 
 
-def build_summary(report: dict) -> dict:
-    """Build a compact summary dict from the full pytest report.
+def _extract_source_files(longrepr: str) -> list[str]:
+    """Extract source file paths from a pytest traceback string."""
+    import re
+    # Match patterns like "orchestrator/api/channels.py:326" in tracebacks
+    paths = re.findall(r'([\w/]+\.py):(\d+)', longrepr)
+    # Deduplicate, keep order, skip test infrastructure files
+    seen = set()
+    result = []
+    for fpath, lineno in paths:
+        key = f"{fpath}:{lineno}"
+        if key not in seen and "site-packages" not in fpath:
+            seen.add(key)
+            result.append(key)
+    return result
 
-    This is the file recipe agents should read — small, structured,
-    and easy for an LLM to parse without garbling.
+
+def _extract_assertion_message(longrepr: str) -> str:
+    """Extract the AssertionError message from a traceback — this often
+    contains the fix hint embedded by test authors."""
+    import re
+    # Look for "AssertionError: <message>" or "assert ... , '<message>'"
+    m = re.search(r'(?:AssertionError|assert\w*Error):\s*(.+?)(?:\n|$)', longrepr, re.DOTALL)
+    if m:
+        return m.group(1).strip()[:2000]
+    # Fallback: last non-empty line (often the assertion)
+    lines = [ln.strip() for ln in longrepr.strip().splitlines() if ln.strip()]
+    return lines[-1][:2000] if lines else ""
+
+
+def build_summary(report: dict) -> dict:
+    """Build a structured summary for recipe agents.
+
+    Each failure includes:
+    - nodeid: test path for the Bug Fixer to locate the test
+    - error: full traceback (up to 3000 chars) so the agent can see
+      the exact file/line that raised and the assertion message
+    - assertion_message: extracted assertion text (often contains fix hints)
+    - source_files: list of source file:line references from the traceback
+    - severity: P0/P1/P2 if the test docstring contains it
     """
     summary = report.get("summary", {})
     total = summary.get("total", 0)
@@ -107,16 +141,23 @@ def build_summary(report: dict) -> dict:
         if test.get("outcome") == "failed":
             nodeid = test.get("nodeid", "unknown")
             dur = round(test.get("duration", 0), 3)
-            # Extract error message — first 500 chars of longrepr
+
+            # Full error — 3000 chars gives enough traceback for the
+            # Bug Fixer to identify the exact source file and line.
             call = test.get("call", {})
-            error_msg = ""
+            longrepr = ""
             if isinstance(call, dict) and call.get("longrepr"):
-                error_msg = call["longrepr"][:500]
-            failures.append({
+                longrepr = call["longrepr"]
+
+            failure_entry = {
                 "nodeid": nodeid,
                 "duration_seconds": dur,
-                "error": error_msg,
-            })
+                "error": longrepr[:3000],
+                "assertion_message": _extract_assertion_message(longrepr),
+                "source_files": _extract_source_files(longrepr),
+            }
+
+            failures.append(failure_entry)
 
     return {
         "run_date": datetime.now(timezone.utc).isoformat(),
