@@ -16,7 +16,7 @@ export function SettingsPanel() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div data-tour="settings-page-header">
         <h1 className="text-2xl md:text-3xl font-bold">Settings</h1>
         <p className="text-muted-foreground mt-1">
           Manage system configuration, credentials, and security
@@ -24,7 +24,7 @@ export function SettingsPanel() {
       </div>
 
       <Tabs defaultValue="system-settings" className="space-y-6">
-        <TabsList className="w-full justify-start gap-1">
+        <TabsList data-tour="settings-tabs" className="w-full justify-start gap-1">
           <TabsTrigger value="system-settings">
             <Settings className="w-4 h-4 mr-1 shrink-0" />
             <span className="hidden sm:inline">System</span> Settings
@@ -41,7 +41,7 @@ export function SettingsPanel() {
             <KeyRound className="w-4 h-4 mr-1 shrink-0" />
             API Keys
           </TabsTrigger>
-          <TabsTrigger value="credentials">
+          <TabsTrigger value="credentials" data-tour="settings-credentials-tab">
             <Key className="w-4 h-4 mr-1 shrink-0" />
             Credentials
           </TabsTrigger>

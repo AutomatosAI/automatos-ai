@@ -205,7 +205,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <Link
                 href={item.href}
                 onClick={() => onToggle(true)}
-                data-tour={item.href === '/agents' ? 'nav-agents' : undefined}
+                data-tour={`nav-${item.href.replace('/', '')}`}
                 className={cn(
                   'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
                   isActive
@@ -249,6 +249,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <div className="absolute bottom-4 left-3 right-3">
           <Link
             href="/settings"
+            data-tour="nav-settings"
             className={cn(
               'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
               pathname === '/settings'
