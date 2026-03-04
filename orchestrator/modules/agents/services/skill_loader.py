@@ -107,16 +107,27 @@ def validate_git_url(git_url: str) -> Tuple[bool, Optional[str]]:
 def scan_for_dangerous_patterns(content: str) -> Tuple[bool, List[str]]:
     """
     Scan content for dangerous code patterns.
-    
+
+    PRD-71: Delegates to the full 42-pattern scanner from plugin_security_scanner.
+    Falls back to the original 8-pattern list if the import fails.
+
     Returns:
         (is_safe, list_of_matches)
     """
-    matches = []
-    for pattern in SkillLoaderConfig.DANGEROUS_PATTERNS:
-        if re.search(pattern, content, re.IGNORECASE):
-            matches.append(pattern)
-    
-    return len(matches) == 0, matches
+    try:
+        from core.services.plugin_security_scanner import quick_scan
+        findings = quick_scan(content, filename="SKILL.md")
+        if findings:
+            matches = [f.description for f in findings]
+            return False, matches
+        return True, []
+    except ImportError:
+        # Fallback: original 8 patterns
+        matches = []
+        for pattern in SkillLoaderConfig.DANGEROUS_PATTERNS:
+            if re.search(pattern, content, re.IGNORECASE):
+                matches.append(pattern)
+        return len(matches) == 0, matches
 
 
 def parse_yaml_frontmatter(content: str) -> Tuple[Optional[Dict], str]:

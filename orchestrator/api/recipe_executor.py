@@ -92,8 +92,8 @@ async def _execute_step(
             "execution": {"tokens_used": 0, "tool_calls": [], "messages": []},
         }
 
-    # 1. System prompt — build from agent's identity and skills
-    system_prompt = await _build_system_prompt(agent, db)
+    # 1. System prompt — PRD-71: use pre-built prompt from agent_runtime
+    system_prompt = await _build_system_prompt(agent, db, agent_runtime=agent_runtime)
     messages = [{"role": "system", "content": system_prompt}]
 
     # 1b. Recipe step scope — prevent agent from wandering into other steps' tasks
@@ -392,16 +392,22 @@ def _composio_scope_message(app_names: List[str]) -> str:
     )
 
 
-async def _build_system_prompt(agent: Agent, db: Session) -> str:
+async def _build_system_prompt(
+    agent: Agent, db: Session, agent_runtime=None,
+) -> str:
     """
-    Build a system prompt for the agent from its DB record.
+    Build a system prompt for the agent.
 
-    Simplified version of agent_factory._build_agent_system_prompt —
-    loads identity + skills without the full factory machinery.
-
-    If the agent has assigned plugins, loads plugin context (Tier 1 + Tier 2)
-    and skips skill loading entirely.
+    PRD-71: Uses the pre-built system prompt from AgentRuntime (built once at
+    activation by agent_factory). Falls back to a minimal prompt if the runtime
+    has no pre-built prompt.
     """
+    # PRD-71: Use pre-built prompt from AgentRuntime (single injection point)
+    if agent_runtime and getattr(agent_runtime, 'system_prompt', None):
+        return agent_runtime.system_prompt
+
+    # Fallback: minimal identity-only prompt (shouldn't happen in normal flow)
+    logger.warning("[recipe] No pre-built system_prompt on AgentRuntime — using minimal fallback")
     sections = [
         f"# Agent: {agent.name}",
         f"Agent ID: {agent.id}",
@@ -409,66 +415,6 @@ async def _build_system_prompt(agent: Agent, db: Session) -> str:
     ]
     if agent.description:
         sections.append(agent.description)
-
-    # PRD-42: Inject persona
-    try:
-        if getattr(agent, 'use_custom_persona', False) and agent.custom_persona_prompt:
-            sections.append(f"\n## Persona & Communication Style\n{agent.custom_persona_prompt}")
-            logger.info(f"[recipe] Loaded custom persona for agent {agent.id}")
-        elif getattr(agent, 'persona_id', None) and getattr(agent, 'persona', None):
-            persona_prompt = agent.persona.system_prompt or ""
-            if persona_prompt:
-                sections.append(f"\n## Persona & Communication Style\n{persona_prompt}")
-                logger.info(f"[recipe] Loaded persona '{agent.persona.name}' for agent {agent.id}")
-    except Exception as e:
-        logger.warning(f"[recipe] Failed to load persona for agent {agent.id}: {e}")
-
-    # PRD-42: Load plugins — if present, skip skills entirely
-    has_plugins = False
-    try:
-        from core.services.plugin_context_service import PluginContextService
-
-        plugin_svc = PluginContextService(db)
-        plugin_rows = plugin_svc.get_assigned_plugins(agent.id)
-        if plugin_rows:
-            has_plugins = True
-            tier1 = plugin_svc.build_tier1_summary(plugin_rows)
-            tier2 = await plugin_svc.build_tier2_content(
-                plugin_rows,
-                task_context=agent.description,
-            )
-            sections.append(tier1)
-            if tier2:
-                sections.append(tier2)
-            logger.info(
-                "[recipe] Loaded plugin context for agent %s (%d plugins)",
-                agent.id, len(plugin_rows),
-            )
-    except Exception as e:
-        logger.warning(f"[recipe] Failed to load plugins for agent {agent.id}: {e}")
-
-    # Load skills if assigned (skipped when plugins are present)
-    if not has_plugins and getattr(agent, 'skills', None):
-        sections.append("\n## Your Specialized Skills\n")
-        try:
-            from modules.agents.services.skill_loader import get_skill_loader
-            loader = get_skill_loader(db)
-            for skill in agent.skills:
-                sections.append(f"### {skill.name}")
-                core_content = None
-                try:
-                    core_content = loader.load_skill_core(skill.name, db=db)
-                except Exception:
-                    pass
-                if core_content and isinstance(core_content, str) and core_content.strip():
-                    sections.append(core_content)
-                else:
-                    fallback = skill.prompt_template or skill.description or ""
-                    if fallback:
-                        sections.append(str(fallback))
-        except Exception as e:
-            logger.warning(f"[recipe_step] Skill loading failed: {e}")
-
     return "\n\n".join(sections)
 
 

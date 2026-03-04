@@ -49,8 +49,10 @@ BLOCKED_NETWORK_PATTERNS: List[Dict[str, str]] = [
 ]
 
 BLOCKED_FS_PATTERNS: List[Dict[str, str]] = [
-    {"pattern": r"\bopen\s*\(.+['\"]w['\"]", "type": "file_write", "severity": "high", "description": "Opens file in write mode"},
-    {"pattern": r"\bopen\s*\(.+['\"]a['\"]", "type": "file_write", "severity": "medium", "description": "Opens file in append mode"},
+    {"pattern": r"\bopen\s*\(.+['\"]w[+b]*['\"]", "type": "file_write", "severity": "high", "description": "Opens file in write mode"},
+    {"pattern": r"\bopen\s*\(.+['\"]a[+b]*['\"]", "type": "file_write", "severity": "medium", "description": "Opens file in append mode"},
+    {"pattern": r"\bopen\s*\(.+['\"]r\+[b]?['\"]", "type": "file_write", "severity": "medium", "description": "Opens file in read-write mode"},
+    {"pattern": r"\bopen\s*\(.+['\"]x[b]?['\"]", "type": "file_write", "severity": "high", "description": "Opens file in exclusive creation mode"},
     {"pattern": r"\bos\.remove\s*\(", "type": "file_delete", "severity": "high", "description": "Deletes a file via os.remove()"},
     {"pattern": r"\bos\.unlink\s*\(", "type": "file_delete", "severity": "high", "description": "Deletes a file via os.unlink()"},
     {"pattern": r"\bshutil\.rmtree\s*\(", "type": "file_delete", "severity": "critical", "description": "Recursively deletes directory tree"},
@@ -142,6 +144,86 @@ async def static_scan(plugin_files: Dict[str, str]) -> StaticScanResult:
     logger.info(
         "Static scan complete: status=%s, findings=%d", status, len(findings)
     )
+    return StaticScanResult(status=status, findings=findings)
+
+
+# ---------------------------------------------------------------------------
+# PRD-71: Quick scan (synchronous, single-content) for skills
+# ---------------------------------------------------------------------------
+
+def quick_scan(content: str, filename: str = "SKILL.md") -> List[StaticFinding]:
+    """
+    Run all 42 patterns against a single piece of content synchronously.
+
+    Used by skill_loader and SkillMaterializer for immediate security checks.
+
+    Returns:
+        List of StaticFinding objects (empty = clean).
+    """
+    findings: List[StaticFinding] = []
+    lines = content.split("\n")
+
+    for line_num, line_text in enumerate(lines, start=1):
+        for pattern_group in ALL_PATTERN_GROUPS:
+            for pat_def in pattern_group:
+                match = re.search(pat_def["pattern"], line_text, re.IGNORECASE)
+                if match:
+                    findings.append(
+                        StaticFinding(
+                            type=pat_def["type"],
+                            severity=pat_def["severity"],
+                            file=filename,
+                            line=line_num,
+                            pattern=pat_def["pattern"],
+                            matched_text=match.group(0),
+                            description=pat_def["description"],
+                        )
+                    )
+
+    return findings
+
+
+async def scan_skill_content(
+    content: str,
+    filename: str = "SKILL.md",
+    run_llm_scan: bool = False,
+) -> StaticScanResult:
+    """
+    PRD-71: Full security scan for skill content — 42-pattern static scan
+    plus optional LLM-based analysis.
+
+    Args:
+        content: The skill content to scan
+        filename: Name of the source file
+        run_llm_scan: If True, also run the LLM scan (async, slower).
+                      Default False — callers in hot paths should leave this off.
+                      Set True for one-time admin operations (e.g. git import).
+
+    Returns:
+        StaticScanResult with all findings
+    """
+    findings = quick_scan(content, filename)
+
+    if run_llm_scan:
+        try:
+            llm_result = await llm_security_scan({filename: content})
+            if llm_result.findings:
+                for llm_finding in llm_result.findings:
+                    findings.append(
+                        StaticFinding(
+                            type=llm_finding.category,
+                            severity=llm_finding.severity,
+                            file=llm_finding.file or filename,
+                            line=0,
+                            pattern="llm_analysis",
+                            matched_text=llm_finding.evidence[:200] if llm_finding.evidence else "",
+                            description=llm_finding.description,
+                        )
+                    )
+        except Exception as e:
+            logger.warning("LLM scan failed for %s (non-blocking): %s", filename, e)
+
+    status = "passed" if not findings else "flagged"
     return StaticScanResult(status=status, findings=findings)
 
 

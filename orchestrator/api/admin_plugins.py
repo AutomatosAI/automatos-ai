@@ -240,10 +240,23 @@ async def approve_plugin(
         db.add(history)
         db.commit()
 
+        # PRD-71: Materialize SKILL.md files from the plugin into Skill records
+        materialized_ids = []
+        try:
+            from core.services.skill_materializer import SkillMaterializer
+            materializer = SkillMaterializer(db)
+            materialized_ids = await materializer.materialize_plugin(plugin)
+        except Exception as mat_err:
+            logger.warning(
+                "Skill materialization failed for plugin %s (non-blocking): %s",
+                plugin.slug, mat_err,
+            )
+
         return {
             "success": True,
             "message": f"Plugin '{plugin.name}' approved",
             "plugin_id": str(plugin.id),
+            "materialized_skill_ids": materialized_ids,
         }
 
     except HTTPException:

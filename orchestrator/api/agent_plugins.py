@@ -191,6 +191,53 @@ async def update_agent_plugins(
             )
             db.add(assignment)
 
+        # PRD-71: Auto-assign materialized skills from assigned plugins
+        from core.models.core import Skill, agent_skills as agent_skills_table
+        from core.models.marketplace_plugins import WorkspaceEnabledSkill
+
+        materialized_skill_ids = set()
+        if unique_plugin_ids:
+            plugins = db.query(MarketplacePlugin).filter(
+                MarketplacePlugin.id.in_(unique_plugin_ids),
+            ).all()
+            for plugin in plugins:
+                for sid in (plugin.materialized_skill_ids or []):
+                    materialized_skill_ids.add(sid)
+
+        if materialized_skill_ids:
+            # Ensure skills are enabled for the workspace
+            for sid in materialized_skill_ids:
+                existing = db.query(WorkspaceEnabledSkill).filter(
+                    WorkspaceEnabledSkill.workspace_id == workspace_id,
+                    WorkspaceEnabledSkill.skill_id == sid,
+                ).first()
+                if not existing:
+                    db.add(WorkspaceEnabledSkill(
+                        workspace_id=workspace_id,
+                        skill_id=sid,
+                    ))
+
+            # Add agent_skills junction entries (if not already present)
+            from sqlalchemy import select as sa_select
+            existing_skill_ids = {
+                row[0] for row in db.execute(
+                    sa_select(agent_skills_table.c.skill_id).where(
+                        agent_skills_table.c.agent_id == agent_id,
+                    )
+                ).fetchall()
+            }
+            for sid in materialized_skill_ids:
+                if sid not in existing_skill_ids:
+                    db.execute(
+                        agent_skills_table.insert().values(
+                            agent_id=agent_id, skill_id=sid,
+                        )
+                    )
+            logger.info(
+                "Auto-assigned %d materialized skill(s) to agent %s",
+                len(materialized_skill_ids), agent_id,
+            )
+
         db.commit()
 
         return {
@@ -198,6 +245,7 @@ async def update_agent_plugins(
             "message": f"Agent plugins updated ({len(unique_plugin_ids)} assigned)",
             "agent_id": agent_id,
             "plugin_ids": [str(pid) for pid in unique_plugin_ids],
+            "materialized_skill_ids": list(materialized_skill_ids),
         }
 
     except HTTPException:

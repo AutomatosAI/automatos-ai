@@ -176,10 +176,8 @@ try:
     from api.channels import router as channels_router
 except ImportError:
     channels_router = None
-try:
-    from api.community_skills import router as community_skills_router
-except ImportError:
-    community_skills_router = None
+
+# PRD-71: community_skills router removed — skills now unified through marketplace pattern
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -792,8 +790,6 @@ if heartbeat_router is not None:
     app.include_router(heartbeat_router)
 if channels_router is not None:
     app.include_router(channels_router)
-if community_skills_router is not None:
-    app.include_router(community_skills_router)
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
