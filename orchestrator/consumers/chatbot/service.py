@@ -995,9 +995,17 @@ class StreamingChatService:
                 agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
                 if agent_row:
                     metrics = dict(agent_row.performance_metrics or {})
-                    metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
-                    metrics["tasks_completed"] = metrics["total_tasks_executed"]
+                    from sqlalchemy.orm.attributes import flag_modified
+                    total = metrics.get("total_tasks_executed", 0) + 1
+                    successes = metrics.get("success_count", 0) + 1
+                    metrics["total_tasks_executed"] = total
+                    metrics["tasks_completed"] = total
+                    metrics["success_count"] = successes
+                    metrics["success_rate"] = round(successes / total, 4) if total > 0 else 0
+                    metrics["last_task_at"] = datetime.now(timezone.utc).isoformat()
+                    metrics["last_task_success"] = True
                     agent_row.performance_metrics = metrics
+                    flag_modified(agent_row, "performance_metrics")
                     self.db.commit()
             except Exception as metric_err:
                 logger.warning(f"Failed to persist agent task counter: {metric_err}")

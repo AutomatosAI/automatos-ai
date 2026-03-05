@@ -986,6 +986,9 @@ async def execute_recipe_direct(
             f"{len(step_results)} steps, {total_duration}ms, {total_tokens} tokens"
         )
 
+        # --- Post-execution: update agent performance_metrics ---
+        _update_agent_performance_metrics(db, step_results, success=True)
+
         # --- Post-execution: learning + memory storage ---
         post_exec_config = recipe.execution_config or {}
         learning_result = None
@@ -1197,6 +1200,60 @@ async def _fail_execution(
                 execution.step_results = step_results
             db.commit()
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
+            # Update agent performance_metrics for failure
+            _update_agent_performance_metrics(db, step_results or [], success=False)
     except Exception as e:
         logger.error(f"[recipe_direct] Failed to mark execution as failed: {e}")
         db.rollback()
+
+
+def _update_agent_performance_metrics(
+    db: Session,
+    step_results: List[dict],
+    success: bool,
+):
+    """Update performance_metrics on every agent that participated in this execution.
+
+    Increments tasks_completed, tracks success/failure counts, and recalculates
+    success_rate.  Follows the same JSONB pattern as UsageTracker.track().
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    # Collect unique agent IDs from step results
+    agent_ids = list({
+        s.get("agent_id") for s in step_results
+        if s.get("agent_id")
+    })
+    if not agent_ids:
+        return
+
+    try:
+        agents = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+        for agent in agents:
+            metrics = dict(agent.performance_metrics or {})
+            total = metrics.get("total_tasks_executed", 0) + 1
+            successes = metrics.get("success_count", 0) + (1 if success else 0)
+            failures = metrics.get("failure_count", 0) + (0 if success else 1)
+
+            metrics["total_tasks_executed"] = total
+            metrics["tasks_completed"] = total
+            metrics["success_count"] = successes
+            metrics["failure_count"] = failures
+            metrics["success_rate"] = round(successes / total, 4) if total > 0 else 0
+            metrics["last_task_at"] = datetime.now(timezone.utc).isoformat()
+            metrics["last_task_success"] = success
+
+            agent.performance_metrics = metrics
+            flag_modified(agent, "performance_metrics")
+
+        db.commit()
+        logger.info(
+            f"[recipe_direct] Updated performance_metrics for {len(agents)} agents "
+            f"(success={success})"
+        )
+    except Exception as e:
+        logger.warning(f"[recipe_direct] Agent metrics update failed (non-blocking): {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
