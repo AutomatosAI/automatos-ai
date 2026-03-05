@@ -469,9 +469,14 @@ export function AgentConfigurationModal({
 
     try {
       if (wasAssigned) {
-        await apiClient.removeSkillFromAgent(agentId.toString(), skillId.toString())
+        await apiClient.request(`/api/agents/${agentId}/skills/${skillId}`, {
+          method: 'DELETE',
+        })
       } else {
-        await apiClient.addSkillToAgent(agentId.toString(), skillId.toString())
+        await apiClient.request(`/api/agents/${agentId}/skills`, {
+          method: 'POST',
+          body: JSON.stringify([skillId]),
+        })
       }
     } catch (err) {
       // Revert on error

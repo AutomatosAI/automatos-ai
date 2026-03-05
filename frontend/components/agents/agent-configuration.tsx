@@ -288,9 +288,14 @@ export function AgentConfiguration({
 
     try {
       if (wasAssigned) {
-        await apiClient.removeSkillFromAgent(selectedAgentId, skillId.toString())
+        await apiClient.request(`/api/agents/${selectedAgentId}/skills/${skillId}`, {
+          method: 'DELETE',
+        })
       } else {
-        await apiClient.addSkillToAgent(selectedAgentId, skillId.toString())
+        await apiClient.request(`/api/agents/${selectedAgentId}/skills`, {
+          method: 'POST',
+          body: JSON.stringify([skillId]),
+        })
       }
     } catch (err) {
       console.error('Failed to update skill assignment:', err)
