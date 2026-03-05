@@ -827,9 +827,26 @@ async def _execute_recipe_inner(
                         )
                         await ws_client_cred.exec_command(command=refresh_cmd, timeout=10)
                         logger.info("[recipe_direct] Step %d: set GitHub push credentials for %s/%s", step_order, github_owner, github_repo)
+
+                        # Reset workspace to clean main — previous recipe steps
+                        # (e.g. bug fixers) may leave the workspace on a dirty
+                        # branch, causing "git checkout main" in the pre_exec to
+                        # fail silently (masked by || true).
+                        reset_cmd = (
+                            f"cd {repo_dir} && "
+                            f"git checkout -f main 2>&1; "
+                            f"git clean -fd 2>&1"
+                        )
+                        reset_result = await ws_client_cred.exec_command(
+                            command=reset_cmd, timeout=30,
+                        )
+                        logger.info(
+                            "[recipe_direct] Step %d: workspace reset to main (exit=%s)",
+                            step_order, reset_result.get("exit_code"),
+                        )
                 except Exception as cred_err:
                     # Non-blocking — push may still work with cached credentials
-                    logger.info("[recipe_direct] Git credential refresh skipped: %s", cred_err)
+                    logger.info("[recipe_direct] Git setup skipped: %s", cred_err)
 
             # Pre-exec: run deterministic workspace command before the LLM loop.
             # The output is appended to the prompt so the LLM only does analysis.
