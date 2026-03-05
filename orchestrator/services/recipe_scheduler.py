@@ -163,7 +163,7 @@ class RecipeSchedulerService:
 
             execution_id = f"cron-{uuid4().hex[:12]}"
             execution = RecipeExecution(
-                id=execution_id,
+                execution_id=execution_id,
                 recipe_id=recipe.id,
                 workspace_id=recipe.workspace_id,
                 status="pending",

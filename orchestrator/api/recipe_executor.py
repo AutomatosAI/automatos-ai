@@ -186,17 +186,12 @@ async def _execute_step(
     messages.append({"role": "user", "content": clean_prompt})
 
     # 5. Tools — per-action SDK tools (or composio_execute fallback) + builtins
-    #    When Composio actions are resolved (e.g. JIRA_CREATE_ISSUE), strip workspace
-    #    exploration tools to prevent the LLM from wasting iterations on read/list/exec
-    #    instead of calling the actual action.  Scratchpad data is already in context.
+    #    When Composio actions are resolved (e.g. JIRA_CREATE_ISSUE), strip only
+    #    the generic fallback executor. Keep platform tools, workspace tools, and
+    #    knowledge tools — the LLM needs them for context gathering (e.g. fetching
+    #    logs to attach to JIRA tickets, reading test reports, etc.).
     _STRIP_WHEN_COMPOSIO = {
-        "composio_execute",
-        "workspace_exec", "workspace_list_dir", "workspace_read_file",
-        "workspace_write_file", "read_file",
-        "platform_get_logs", "platform_list_services",
-        "search_knowledge", "semantic_search",
-        "query_database", "smart_query_database",
-        "platform_list_recipes",
+        "composio_execute",  # Only strip the generic fallback — per-action tools replace it
     }
     if composio_result and composio_result.tools:
         # SDK search succeeded: keep only non-exploration builtins + per-action tools
@@ -318,14 +313,14 @@ async def _execute_step(
                 all_tool_calls.append({
                     "action": tool_name,
                     "params": tool_args,
-                    "result": result_text[:4000],
+                    "result": result_text[:8000],
                     "duration_ms": exec_ms,
                     "composio_direct": True,
                 })
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_id,
-                    "content": result_text[:8000],
+                    "content": result_text[:20000],
                 })
                 continue
 
@@ -829,7 +824,7 @@ async def execute_recipe_direct(
                     )
                     pre_exit = pre_result.get("exit_code", -1)
                     pre_stdout = pre_result.get("stdout", "")
-                    pre_stderr = pre_result.get("stderr", "")
+                    pre_stderr = pre_result.get("stderr", "") or pre_result.get("error", "")
                     pre_duration = pre_result.get("duration_ms", 0)
 
                     # Log the pre_exec as a tool call for visibility
@@ -847,10 +842,15 @@ async def execute_recipe_direct(
                         f"Duration: {pre_duration}ms\n"
                     )
                     if pre_stdout:
-                        # Cap at 6000 chars to leave room for LLM context
-                        stdout_text = pre_stdout[:6000]
-                        if len(pre_stdout) > 6000:
-                            stdout_text += "\n... (truncated)"
+                        # Keep head + tail to preserve both setup context and
+                        # test summary (pytest prints results at the end).
+                        max_chars = 10000
+                        if len(pre_stdout) <= max_chars:
+                            stdout_text = pre_stdout
+                        else:
+                            head = pre_stdout[:3000]
+                            tail = pre_stdout[-6000:]
+                            stdout_text = head + "\n\n... (truncated middle) ...\n\n" + tail
                         pre_exec_block += f"\n### stdout\n```\n{stdout_text}\n```\n"
                     if pre_stderr and pre_exit != 0:
                         pre_exec_block += f"\n### stderr\n```\n{pre_stderr[:2000]}\n```\n"
@@ -1162,8 +1162,8 @@ def _resolve_prompt(
                     tc_result = tc.get("result", "")
                     if tc_result:
                         result_str = json.dumps(tc_result, indent=2) if isinstance(tc_result, (dict, list)) else str(tc_result)
-                        if len(result_str) > 8000:
-                            result_str = result_str[:8000] + "\n... (truncated)"
+                        if len(result_str) > 20000:
+                            result_str = result_str[:20000] + "\n... (truncated)"
                         context_parts.append(f"[Tool: {action}]\n{result_str}")
 
             if sr_output:

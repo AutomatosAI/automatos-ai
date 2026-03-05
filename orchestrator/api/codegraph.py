@@ -17,6 +17,7 @@ from core.database.database import get_db
 from modules.codegraph import CodeGraphService
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.security.rate_limiter import check_rate_limit
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,10 @@ async def index_github_repository(
     - Generates semantic embeddings
     - Stores in database for search
     """
+    # PRD-70 FIX-07: Rate limit git clone operations per workspace
+    ws_id = str(getattr(ctx, "workspace_id", "global"))
+    await check_rate_limit(ws_id, "git_clone")
+
     try:
         # Create or update project record immediately so UI can track status
         from core.database.database import SessionLocal

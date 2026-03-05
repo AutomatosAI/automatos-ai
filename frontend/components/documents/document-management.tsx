@@ -573,7 +573,7 @@ export function DocumentManagement() {
         className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
       >
         <div>
-          <h1 data-testid="page-title" className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">
+          <h1 data-testid="page-title" data-tour="documents-page-header" className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">
             Knowledge <span className="gradient-text">Bases</span>
           </h1>
           <p className="text-muted-foreground text-sm md:text-lg">
@@ -583,6 +583,7 @@ export function DocumentManagement() {
 
         <Button
           className="gradient-accent hover:opacity-90 transition-opacity shrink-0"
+          data-tour="documents-upload-btn"
           onClick={() => setShowUploadModal(true)}
           disabled={uploadDocumentMutation.isLoading}
         >
@@ -631,7 +632,7 @@ export function DocumentManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="documents" className="space-y-6">
-          <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
+          <TabsList data-tour="documents-tabs" className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
             <TabsTrigger value="documents" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
               <span>Documents</span>

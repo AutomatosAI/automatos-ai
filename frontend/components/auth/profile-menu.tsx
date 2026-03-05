@@ -129,8 +129,8 @@ export function ProfileMenu() {
                             // Small delay so the dropdown closes first
                             setTimeout(async () => {
                                 if (user) {
-                                    const { createFirstLoginTour } = await import('@/lib/shepherd/first-login-tour')
-                                    const tour = createFirstLoginTour(user.id)
+                                    const { createWelcomeTour } = await import('@/lib/shepherd/tours/welcome-tour')
+                                    const tour = createWelcomeTour(user.id)
                                     tour.start()
                                 }
                             }, 150)

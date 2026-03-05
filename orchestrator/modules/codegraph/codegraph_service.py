@@ -18,6 +18,8 @@ import builtins
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from core.security.git_sanitizer import validate_git_url, validate_branch
 from dataclasses import dataclass
 import time
 
@@ -438,9 +440,23 @@ class CodeGraphService:
         branch: str,
         auth_token: Optional[str]
     ) -> str:
-        """Clone GitHub repository to temp directory (non-blocking)"""
+        """Clone GitHub repository to temp directory (non-blocking).
+
+        PRD-70 FIX-01: Validates URL (HTTPS + domain allowlist) and branch
+        name before cloning to prevent command injection and SSRF.
+        """
         import asyncio
         from git import Repo
+
+        # --- PRD-70 FIX-01: Validate URL and branch ---
+        ok, err = validate_git_url(github_url)
+        if not ok:
+            raise ValueError(f"Invalid repository URL: {err}")
+
+        if branch:
+            ok, err = validate_branch(branch)
+            if not ok:
+                raise ValueError(f"Invalid branch name: {err}")
 
         temp_dir = tempfile.mkdtemp(prefix="codegraph_")
 
@@ -453,11 +469,16 @@ class CodeGraphService:
 
             logger.info(f"Cloning {safe_url} (branch: {branch}) to {temp_dir}")
 
+            # Build clone kwargs — GitPython passes branch to git CLI
+            clone_kwargs = {"depth": 1}
+            if branch:
+                clone_kwargs["branch"] = branch
+
             # Run blocking git clone in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: Repo.clone_from(clone_url, temp_dir, branch=branch, depth=1)
+                lambda: Repo.clone_from(clone_url, temp_dir, **clone_kwargs)
             )
 
             logger.info(f"Clone complete: {temp_dir}")

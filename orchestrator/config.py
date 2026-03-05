@@ -41,6 +41,21 @@ class Config:
     POSTGRES_PORT: str = os.getenv("POSTGRES_PORT")
     DATABASE_URL: str = os.getenv("DATABASE_URL")  # If set, overrides individual params
     SQL_DEBUG: bool = os.getenv("SQL_DEBUG", "false").lower() == "true"
+
+    # PRD-70 FIX-05: Enforce SSL for database connections in production.
+    # Skipped for local dev (localhost / docker-compose internal hostnames).
+    @staticmethod
+    def get_database_url() -> str:
+        """Return DATABASE_URL with sslmode=require enforced for non-local hosts."""
+        url = Config.DATABASE_URL
+        if not url:
+            return url
+        _local_hosts = ("localhost", "127.0.0.1", "postgres", "db")
+        if any(h in url for h in _local_hosts):
+            return url
+        if "sslmode" not in url:
+            url += "?sslmode=require" if "?" not in url else "&sslmode=require"
+        return url
     
     # =============================================================================
     # REDIS - Caching/PubSub (optional)
@@ -154,6 +169,7 @@ class Config:
     CLERK_SECRET_KEY: str = os.getenv("CLERK_SECRET_KEY")
     CLERK_PUBLISHABLE_KEY: str = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
     CLERK_JWKS_URL: str = os.getenv("CLERK_JWKS_URL")
+    CLERK_AUDIENCE: str = os.getenv("CLERK_AUDIENCE", "")
     DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
     WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")

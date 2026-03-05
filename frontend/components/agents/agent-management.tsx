@@ -127,6 +127,7 @@ export function AgentManagement() {
   return (
     <div ref={ref} className="space-y-6">
       {/* Header */}
+      <div data-tour="agents-page-header">
       <PageHeader
         title="Agent"
         titleAccent="Management"
@@ -159,6 +160,7 @@ export function AgentManagement() {
           </>
         }
       />
+      </div>
 
       {!!agentsError && (
         <div className="rounded-2xl border border-[hsl(var(--destructive))]/20 bg-[hsl(var(--destructive))]/5 p-4">
