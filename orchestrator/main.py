@@ -82,6 +82,7 @@ except ImportError:
     admin_prompts_router = None
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
+from api.workspace_skills import router as workspace_skills_router  # PRD-71: Workspace Skill Enablement
 from api.agent_plugins import router as agent_plugins_router  # PRD-42: Agent Plugin Assignment
 from api.personas import router as personas_router  # PRD-42: Persona API
 from api.generated_images import router as generated_images_router  # Generated image serving
@@ -767,6 +768,7 @@ app.include_router(composio_analytics_router)  # PRD-54: Composio Analytics
 app.include_router(analytics_charts_router)  # PRD-54: PandasAI Charts
 app.include_router(user_api_keys_router)  # PRD-54: BYOK API Key Management
 app.include_router(workspace_plugins_router)  # PRD-42: Workspace Plugin Enablement
+app.include_router(workspace_skills_router)  # PRD-71: Workspace Skill Enablement
 app.include_router(agent_plugins_router)  # PRD-42: Agent Plugin Assignment
 app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
