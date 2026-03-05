@@ -39,6 +39,22 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Per-workspace execution lock — prevents concurrent recipes stomping on the
+# same git working tree.  Keys are workspace_id strings; values are asyncio
+# Locks created on first access.  The dict itself is process-global but safe
+# because asyncio is single-threaded.
+# ---------------------------------------------------------------------------
+_workspace_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _get_workspace_lock(workspace_id: str) -> asyncio.Lock:
+    """Return (or create) an asyncio.Lock for the given workspace."""
+    if workspace_id not in _workspace_locks:
+        _workspace_locks[workspace_id] = asyncio.Lock()
+    return _workspace_locks[workspace_id]
+
+
+# ---------------------------------------------------------------------------
 # Step executor — uses chatbot's exact component path
 # ---------------------------------------------------------------------------
 
@@ -533,6 +549,39 @@ async def execute_recipe_direct(
     5. Upload full log to S3, store compact summary in DB
     6. Handle errors per step.error_handling config
     """
+    # Serialize recipe executions per workspace — prevents concurrent
+    # bug-fixer runs from stomping on each other's git branches.
+    ws_lock = _get_workspace_lock(str(workspace_id))
+    waiting = ws_lock.locked()
+    if waiting:
+        logger.info(
+            "[recipe_direct] QUEUED — waiting for workspace lock %s (execution=%s, recipe=%s)",
+            workspace_id, recipe_execution_id, recipe_id,
+        )
+    async with ws_lock:
+        logger.info(
+            "[recipe_direct] Lock ACQUIRED for %s (execution=%s, recipe=%s, was_waiting=%s)",
+            workspace_id, recipe_execution_id, recipe_id, waiting,
+        )
+        try:
+            await _execute_recipe_inner(
+                recipe_execution_id, recipe_id, workspace_id, input_data, db_url,
+            )
+        finally:
+            logger.info(
+                "[recipe_direct] Lock RELEASED for %s (execution=%s)",
+                workspace_id, recipe_execution_id,
+            )
+
+
+async def _execute_recipe_inner(
+    recipe_execution_id: str,
+    recipe_id: int,
+    workspace_id: UUID,
+    input_data: dict,
+    db_url: Optional[str] = None,
+):
+    """Inner recipe execution — runs under the per-workspace lock."""
     # Create a fresh DB session for this async task
     _engine = None
     if db_url:
@@ -752,6 +801,35 @@ async def execute_recipe_direct(
                         step_results.append(_build_compact_step_result(step_result))
                         _persist_step_results(db, execution, step_results)
                         continue
+
+            # Ensure git push credentials are set — uses the GITHUB PAT from
+            # Railway env vars (long-lived, has push scope).  Runs once per
+            # step that has a git-related pre_exec.
+            if workspace_id and step.get("pre_exec") and "git" in step.get("pre_exec", ""):
+                try:
+                    from config import config as _cfg
+                    github_pat = _cfg.GITHUB_PAT
+                    github_owner = _cfg.GITHUB_REPO_OWNER or "AutomatosAI"
+                    github_repo = _cfg.GITHUB_REPO_NAME or "automatos-ai"
+                    if github_pat:
+                        from core.workspace_client import WorkspaceClient
+                        import re as _re
+
+                        ws_client_cred = WorkspaceClient(str(workspace_id))
+                        # Discover repo dir from pre_exec command
+                        _m = _re.search(r"cd\s+(repos/[^\s&]+)", step.get("pre_exec", ""))
+                        repo_dir = _m.group(1) if _m else f"repos/{github_repo}"
+
+                        refresh_cmd = (
+                            f"cd {repo_dir} && "
+                            f"git remote set-url origin "
+                            f"https://x-access-token:{github_pat}@github.com/{github_owner}/{github_repo}.git"
+                        )
+                        await ws_client_cred.exec_command(command=refresh_cmd, timeout=10)
+                        logger.info("[recipe_direct] Step %d: set GitHub push credentials for %s/%s", step_order, github_owner, github_repo)
+                except Exception as cred_err:
+                    # Non-blocking — push may still work with cached credentials
+                    logger.info("[recipe_direct] Git credential refresh skipped: %s", cred_err)
 
             # Pre-exec: run deterministic workspace command before the LLM loop.
             # The output is appended to the prompt so the LLM only does analysis.

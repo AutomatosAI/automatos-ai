@@ -202,6 +202,7 @@ class Config:
     ROUTING_LLM_CONFIDENCE_THRESHOLD: float = float(os.getenv("ROUTING_LLM_CONFIDENCE_THRESHOLD", "0.5"))
 
     # GitHub
+    GITHUB_PAT: str = os.getenv("GITHUB", "")  # Personal Access Token for git push
     GITHUB_REPO_OWNER: str = os.getenv("GITHUB_REPO_OWNER", "")
     GITHUB_REPO_NAME: str = os.getenv("GITHUB_REPO_NAME", "")
     GITHUB_DEFAULT_BRANCH: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
