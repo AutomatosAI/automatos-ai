@@ -5,10 +5,12 @@ Heartbeat API Endpoints (PRD-55 US-008)
 Manage and monitor heartbeat ticks for orchestrator and agents.
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, text
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,140 @@ from core.auth.dependencies import RequestContext
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/heartbeat", tags=["heartbeat"])
+
+
+# ── Heartbeat Config Schema ───────────────────────────────────────
+
+class HeartbeatConfigPayload(BaseModel):
+    enabled: bool = False
+    interval_minutes: int = Field(60, ge=5, le=1440)
+    inherit_active_hours: bool = True
+    active_hours_start: str = "08:00"
+    active_hours_end: str = "20:00"
+    prompt: str = ""
+    auto_act: bool = False
+    report_to: str = "orchestrator"  # orchestrator | direct | channel:<id> | webhook
+    webhook_url: Optional[str] = None
+    channel_id: Optional[str] = None
+
+
+# ── Agent Heartbeat Config CRUD ───────────────────────────────────
+
+def _verify_agent_ownership(agent_id: int, workspace_id: str, db: Session):
+    """Verify agent belongs to workspace. Raises HTTPException on failure."""
+    row = db.execute(
+        text("SELECT workspace_id FROM agents WHERE id = :aid"),
+        {"aid": agent_id},
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, f"Agent {agent_id} not found")
+    if str(row.workspace_id) != str(workspace_id):
+        raise HTTPException(403, "Agent does not belong to this workspace")
+
+
+@router.get("/agents/{agent_id}/config")
+async def get_agent_heartbeat_config(
+    agent_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Get heartbeat config for an agent."""
+    _verify_agent_ownership(agent_id, str(ctx.workspace_id), db)
+
+    row = db.execute(
+        text("SELECT configuration FROM agents WHERE id = :aid"),
+        {"aid": agent_id},
+    ).fetchone()
+
+    config = row.configuration if row and row.configuration else {}
+    hb = config.get("heartbeat", {})
+    return {
+        "enabled": hb.get("enabled", False),
+        "interval_minutes": hb.get("interval_minutes", 60),
+        "inherit_active_hours": hb.get("inherit_active_hours", True),
+        "active_hours_start": hb.get("active_hours_start", "08:00"),
+        "active_hours_end": hb.get("active_hours_end", "20:00"),
+        "prompt": hb.get("prompt", ""),
+        "auto_act": hb.get("auto_act", False),
+        "report_to": hb.get("report_to", "orchestrator"),
+        "webhook_url": hb.get("webhook_url"),
+        "channel_id": hb.get("channel_id"),
+    }
+
+
+@router.put("/agents/{agent_id}/config")
+async def save_agent_heartbeat_config(
+    agent_id: int,
+    payload: HeartbeatConfigPayload,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Save heartbeat config for an agent, updating agent.configuration.heartbeat."""
+    _verify_agent_ownership(agent_id, str(ctx.workspace_id), db)
+
+    # Read current configuration (immutable pattern — build new dict)
+    row = db.execute(
+        text("SELECT configuration FROM agents WHERE id = :aid"),
+        {"aid": agent_id},
+    ).fetchone()
+
+    current_config = dict(row.configuration) if row and row.configuration else {}
+    new_config = {**current_config, "heartbeat": payload.dict()}
+
+    db.execute(
+        text("UPDATE agents SET configuration = :cfg WHERE id = :aid"),
+        {"cfg": json.dumps(new_config), "aid": agent_id},
+    )
+    db.commit()
+
+    # Reschedule or unschedule the heartbeat job
+    try:
+        from services.heartbeat_service import get_heartbeat_service
+        service = get_heartbeat_service()
+        if payload.enabled:
+            service.schedule_agent_heartbeat(
+                agent_id, str(ctx.workspace_id), payload.dict()
+            )
+        else:
+            service.unschedule_heartbeat(f"agent_hb_{agent_id}")
+    except Exception as e:
+        logger.warning("Failed to update heartbeat schedule for agent %s: %s", agent_id, e)
+
+    return {"ok": True}
+
+
+@router.get("/agents/{agent_id}/last")
+async def get_agent_last_heartbeat(
+    agent_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Get the most recent heartbeat result for an agent."""
+    _verify_agent_ownership(agent_id, str(ctx.workspace_id), db)
+
+    row = db.execute(
+        text("""
+            SELECT id, status, findings, actions_taken, tokens_used, cost, created_at
+            FROM heartbeat_results
+            WHERE workspace_id = :ws_id AND source_type = 'agent' AND source_id = :agent_id
+            ORDER BY created_at DESC
+            LIMIT 1
+        """),
+        {"ws_id": str(ctx.workspace_id), "agent_id": str(agent_id)},
+    ).fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "id": row.id,
+        "status": row.status,
+        "findings": row.findings,
+        "actions_taken": row.actions_taken,
+        "tokens_used": row.tokens_used,
+        "cost": row.cost,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
 
 
 # ── Orchestrator Heartbeat ─────────────────────────────────────────
@@ -79,19 +215,7 @@ async def run_agent_heartbeat(
     db: Session = Depends(get_db),
 ):
     """Trigger an immediate heartbeat tick for a specific agent."""
-    # Verify agent belongs to the requesting workspace
-    row = db.execute(
-        text("SELECT workspace_id FROM agents WHERE id = :aid"),
-        {"aid": agent_id},
-    ).fetchone()
-    if not row:
-        raise HTTPException(404, f"Agent {agent_id} not found")
-    if str(row.workspace_id) != str(ctx.workspace_id):
-        logger.warning(
-            "Unauthorized heartbeat attempt: agent %s belongs to %s, not %s",
-            agent_id, row.workspace_id, ctx.workspace_id,
-        )
-        raise HTTPException(403, "Agent does not belong to this workspace")
+    _verify_agent_ownership(agent_id, str(ctx.workspace_id), db)
 
     try:
         from services.heartbeat_service import get_heartbeat_service

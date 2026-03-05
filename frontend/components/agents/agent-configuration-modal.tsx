@@ -149,10 +149,14 @@ export function AgentConfigurationModal({
     active_hours_end: '20:00',
     prompt: '',
     auto_act: false,
-    report_to: 'orchestrator'
+    report_to: 'orchestrator',
+    webhook_url: '',
+    channel_id: '',
   })
   const [heartbeatRunning, setHeartbeatRunning] = useState(false)
   const [lastHeartbeatResult, setLastHeartbeatResult] = useState<any>(null)
+  const [connectedChannels, setConnectedChannels] = useState<Array<{ id: string; platform: string; status: string }>>([])
+
 
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
@@ -307,7 +311,7 @@ export function AgentConfigurationModal({
     return () => { mounted = false }
   }, [open, agentId])
 
-  // PRD-55: Load heartbeat config when modal opens
+  // PRD-55: Load heartbeat config + connected channels when modal opens
   useEffect(() => {
     if (!open || !agentId) return
     let mounted = true
@@ -324,6 +328,15 @@ export function AgentConfigurationModal({
       .then((data) => {
         if (!mounted) return
         if (data) setLastHeartbeatResult(data)
+      })
+      .catch(() => {})
+    // Load connected channels for Report To dropdown
+    apiClient.request<any>(`/api/channels`)
+      .then((data) => {
+        if (!mounted) return
+        if (Array.isArray(data)) {
+          setConnectedChannels(data.filter((ch: any) => ch.status === 'active'))
+        }
       })
       .catch(() => {})
     return () => { mounted = false }
@@ -1715,12 +1728,53 @@ export function AgentConfigurationModal({
                             >
                               <SelectTrigger><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="orchestrator">Orchestrator</SelectItem>
+                                <SelectItem value="orchestrator">Orchestrator (DB only)</SelectItem>
                                 <SelectItem value="direct">Direct (Chat)</SelectItem>
-                                <SelectItem value="webhook">Webhook</SelectItem>
+                                {connectedChannels.map((ch) => (
+                                  <SelectItem key={ch.id} value={`channel:${ch.id}`}>
+                                    {ch.platform.charAt(0).toUpperCase() + ch.platform.slice(1)}
+                                  </SelectItem>
+                                ))}
+                                <SelectItem value="webhook">Webhook URL</SelectItem>
                               </SelectContent>
                             </Select>
+                            <p className="text-xs text-muted-foreground">
+                              {heartbeatConfig.report_to === 'orchestrator' && 'Results stored in database, visible in analytics'}
+                              {heartbeatConfig.report_to === 'direct' && 'Results appear in agent chat'}
+                              {heartbeatConfig.report_to.startsWith('channel:') && 'Results pushed to connected channel'}
+                              {heartbeatConfig.report_to === 'webhook' && 'Results POSTed as JSON to your URL'}
+                            </p>
                           </div>
+
+                          {/* Webhook URL (shown when webhook selected) */}
+                          {heartbeatConfig.report_to === 'webhook' && (
+                            <div className="space-y-2">
+                              <Label>Webhook URL</Label>
+                              <Input
+                                type="url"
+                                value={heartbeatConfig.webhook_url || ''}
+                                onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, webhook_url: e.target.value }))}
+                                placeholder="https://hooks.slack.com/... or any endpoint"
+                                className="bg-secondary/50"
+                              />
+                            </div>
+                          )}
+
+                          {/* Channel target chat ID (shown when channel selected) */}
+                          {heartbeatConfig.report_to.startsWith('channel:') && (
+                            <div className="space-y-2">
+                              <Label>Channel/Chat ID <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                              <Input
+                                value={heartbeatConfig.channel_id || ''}
+                                onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, channel_id: e.target.value }))}
+                                placeholder="Leave empty to use default chat"
+                                className="bg-secondary/50"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Telegram: chat ID or group ID. Slack: channel ID. Leave empty to use the channel default.
+                              </p>
+                            </div>
+                          )}
                         </>
                       )}
 

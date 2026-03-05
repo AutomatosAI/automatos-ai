@@ -281,6 +281,7 @@ class HeartbeatService:
                 db.close()
 
             await self._store_heartbeat_result(result)
+            await self._deliver_notification(result, hb_config)
             logger.info(
                 "[Heartbeat] Orchestrator tick completed for ws=%s: %d findings",
                 workspace_id,
@@ -296,6 +297,7 @@ class HeartbeatService:
             result["status"] = "error"
             result["findings"].append({"check": "error", "detail": str(e)})
             await self._store_heartbeat_result(result)
+            await self._deliver_notification(result, hb_config)
         finally:
             self._running_ticks.pop(tick_key, None)
 
@@ -434,6 +436,7 @@ class HeartbeatService:
                 db.close()
 
             await self._store_heartbeat_result(result)
+            await self._deliver_notification(result, hb_config)
             logger.info(
                 "[Heartbeat] Agent tick completed for agent=%s", agent_id
             )
@@ -445,6 +448,7 @@ class HeartbeatService:
             result["status"] = "error"
             result["findings"].append({"check": "error", "detail": str(e)})
             await self._store_heartbeat_result(result)
+            await self._deliver_notification(result, hb_config)
         finally:
             self._running_ticks.pop(tick_key, None)
 
@@ -568,6 +572,139 @@ class HeartbeatService:
                 db.close()
         except Exception as e:
             logger.error("[Heartbeat] Failed to store result: %s", e)
+
+    # ------------------------------------------------------------------
+    # Notification delivery
+    # ------------------------------------------------------------------
+
+    async def _deliver_notification(self, result: dict, hb_config: dict):
+        """Deliver heartbeat result to the configured destination.
+
+        report_to values:
+          - "orchestrator"  → DB only (no extra delivery)
+          - "direct"        → no-op for now (result is in DB, frontend polls)
+          - "channel:<id>"  → push via channel adapter (Telegram, Slack, etc.)
+          - "webhook"       → HTTP POST to webhook_url
+        """
+        report_to = hb_config.get("report_to", "orchestrator")
+
+        if report_to in ("orchestrator", "direct"):
+            return
+
+        message = self._format_heartbeat_message(result)
+
+        if report_to.startswith("channel:"):
+            channel_conn_id = report_to.split(":", 1)[1]
+            await self._send_via_channel(channel_conn_id, message, hb_config)
+        elif report_to == "webhook":
+            webhook_url = hb_config.get("webhook_url")
+            if webhook_url:
+                await self._send_via_webhook(webhook_url, result, message)
+            else:
+                logger.warning("[Heartbeat] report_to=webhook but no webhook_url configured")
+
+    def _format_heartbeat_message(self, result: dict) -> str:
+        """Format heartbeat result as a human-readable notification message."""
+        source = result.get("source_type", "unknown")
+        source_id = result.get("source_id", "?")
+        status = result.get("status", "unknown")
+        status_emoji = "OK" if status == "success" else "ERROR"
+
+        lines = [f"[Heartbeat {status_emoji}] {source}/{source_id}"]
+
+        findings = result.get("findings", [])
+        for f in findings:
+            check = f.get("check", "")
+            detail = f.get("detail", "")
+            if detail:
+                lines.append(f"  {check}: {detail[:300]}")
+
+        tokens = result.get("tokens_used", 0)
+        if tokens:
+            lines.append(f"  tokens: {tokens}")
+
+        return "\n".join(lines)
+
+    async def _send_via_channel(self, connection_id: str, message: str, hb_config: dict):
+        """Send notification through a connected channel (Telegram, Slack, etc.)."""
+        try:
+            from channels.manager import get_channel_manager
+
+            mgr = get_channel_manager()
+            adapter = mgr._adapters.get(connection_id)
+            if not adapter:
+                logger.warning(
+                    "[Heartbeat] Channel adapter %s not found/running, skipping notification",
+                    connection_id,
+                )
+                return
+
+            # Use the channel_id from hb_config if set, otherwise fall back
+            # to the adapter's default chat (from channel_connections.metadata)
+            target_chat = hb_config.get("channel_id") or ""
+            if not target_chat:
+                # Try to get default chat from the connection's metadata
+                from core.database.database import SessionLocal
+                from sqlalchemy import text as sql_text
+
+                db = SessionLocal()
+                try:
+                    row = db.execute(
+                        sql_text("SELECT metadata FROM channel_connections WHERE id = :cid"),
+                        {"cid": connection_id},
+                    ).fetchone()
+                    if row and row.metadata:
+                        meta = row.metadata if isinstance(row.metadata, dict) else json.loads(row.metadata)
+                        target_chat = str(meta.get("default_chat_id", ""))
+                finally:
+                    db.close()
+
+            if not target_chat:
+                logger.warning(
+                    "[Heartbeat] No target chat ID for channel %s, skipping",
+                    connection_id,
+                )
+                return
+
+            ok = await adapter.send_message(target_chat, message)
+            if ok:
+                logger.info("[Heartbeat] Notification sent via channel %s", connection_id)
+            else:
+                logger.warning("[Heartbeat] Channel %s send_message returned False", connection_id)
+
+        except Exception as e:
+            logger.error("[Heartbeat] Failed to send via channel %s: %s", connection_id, e)
+
+    async def _send_via_webhook(self, url: str, result: dict, message: str):
+        """POST heartbeat result to a webhook URL."""
+        try:
+            import aiohttp
+
+            payload = {
+                "source_type": result.get("source_type"),
+                "source_id": result.get("source_id"),
+                "status": result.get("status"),
+                "message": message,
+                "findings": result.get("findings", []),
+                "tokens_used": result.get("tokens_used", 0),
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status < 300:
+                        logger.info("[Heartbeat] Webhook delivered to %s (status %s)", url, resp.status)
+                    else:
+                        body = await resp.text()
+                        logger.warning(
+                            "[Heartbeat] Webhook %s returned %s: %s",
+                            url, resp.status, body[:200],
+                        )
+        except Exception as e:
+            logger.error("[Heartbeat] Webhook delivery failed to %s: %s", url, e)
 
     # ------------------------------------------------------------------
     # Public API (manual triggers)
