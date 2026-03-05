@@ -38,6 +38,7 @@ apscheduler>=3.10
 
 # Network & async
 aiofiles==23.2.1
+aiohttp>=3.9.0
 
 # Configuration
 python-dotenv==1.0.0
