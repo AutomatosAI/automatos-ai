@@ -72,6 +72,12 @@ export function AgentConfiguration({
   const [pluginsLoading, setPluginsLoading] = useState(false)
   const [pluginsSaving, setPluginsSaving] = useState(false)
 
+  // PRD-71: Skill assignment state
+  const [workspaceSkills, setWorkspaceSkills] = useState<any[]>([])
+  const [assignedSkillIds, setAssignedSkillIds] = useState<Set<number>>(new Set())
+  const [skillsLoading, setSkillsLoading] = useState(false)
+  const [skillsSaving, setSkillsSaving] = useState(false)
+
   // Fetch agent and configuration data
   const { data: agent, isLoading: agentLoading } = useAgent(selectedAgentId)
   const { data: agentConfig, isLoading: configLoading } = useAgentConfig(selectedAgentId)
@@ -130,6 +136,46 @@ export function AgentConfiguration({
         }
       } finally {
         if (mounted) setPluginsLoading(false)
+      }
+    })()
+    return () => { mounted = false }
+  }, [selectedAgentId])
+
+  // PRD-71: Fetch workspace-enabled skills and agent skill assignments
+  useEffect(() => {
+    if (!selectedAgentId) return
+    let mounted = true
+    setSkillsLoading(true)
+    ;(async () => {
+      try {
+        const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+        if (!workspaceId) {
+          if (mounted) {
+            setWorkspaceSkills([])
+            setAssignedSkillIds(new Set())
+            setSkillsLoading(false)
+          }
+          return
+        }
+        const [wsRes, asRes] = await Promise.all([
+          apiClient.request<any>(`/api/workspaces/${workspaceId}/skills`, { method: 'GET' }),
+          apiClient.request<any>(`/api/agents/${selectedAgentId}/skills`, { method: 'GET' }),
+        ])
+        if (!mounted) return
+        const wsItems = wsRes?.items || []
+        const agentSkills = asRes?.data || asRes || []
+        setWorkspaceSkills(Array.isArray(wsItems) ? wsItems : [])
+        setAssignedSkillIds(new Set(
+          (Array.isArray(agentSkills) ? agentSkills : []).map((s: any) => s.id)
+        ))
+      } catch (err) {
+        console.error('Failed to fetch skills:', err)
+        if (mounted) {
+          setWorkspaceSkills([])
+          setAssignedSkillIds(new Set())
+        }
+      } finally {
+        if (mounted) setSkillsLoading(false)
       }
     })()
     return () => { mounted = false }
@@ -225,6 +271,39 @@ export function AgentConfiguration({
   const assignedTokenEstimate = workspacePlugins
     .filter((p: any) => assignedPluginIds.has(p.plugin_id))
     .reduce((sum: number, p: any) => sum + (p.token_estimate || 0), 0)
+
+  // PRD-71: Toggle skill assignment and persist via API
+  const toggleSkillAssignment = async (skillId: number) => {
+    if (!selectedAgentId) return
+    const wasAssigned = assignedSkillIds.has(skillId)
+    const newIds = new Set(assignedSkillIds)
+    if (wasAssigned) {
+      newIds.delete(skillId)
+    } else {
+      newIds.add(skillId)
+    }
+
+    setAssignedSkillIds(newIds)
+    setSkillsSaving(true)
+
+    try {
+      if (wasAssigned) {
+        await apiClient.removeSkillFromAgent(selectedAgentId, skillId.toString())
+      } else {
+        await apiClient.addSkillToAgent(selectedAgentId, skillId.toString())
+      }
+    } catch (err) {
+      console.error('Failed to update skill assignment:', err)
+      setAssignedSkillIds(assignedSkillIds)
+    } finally {
+      setSkillsSaving(false)
+    }
+  }
+
+  // PRD-71: Compute total token estimate for assigned skills
+  const assignedSkillTokenEstimate = workspaceSkills
+    .filter((s: any) => assignedSkillIds.has(s.skill_id))
+    .reduce((sum: number, s: any) => sum + (s.estimated_tokens || 0), 0)
 
   // Handle tools assignment toggle
   const toggleToolAssignment = (toolId: number) => {
@@ -807,6 +886,109 @@ export function AgentConfiguration({
                 <h3 className="text-lg font-semibold mb-2">No Capabilities Available</h3>
                 <p className="text-muted-foreground">
                   No capabilities are enabled for this workspace yet.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* PRD-71: Skill Assignment */}
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-primary" />
+              Skill Assignment
+            </CardTitle>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Assign individual skills to inject methodology into this agent
+              </p>
+              {assignedSkillIds.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs">
+                    <Coins className="w-3 h-3 mr-1" />
+                    ~{assignedSkillTokenEstimate.toLocaleString()} tokens
+                  </Badge>
+                  <Badge variant="outline" className="text-xs">
+                    {assignedSkillIds.size} assigned
+                  </Badge>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {skillsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+              </div>
+            ) : workspaceSkills.length > 0 ? (
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {workspaceSkills.map((skill: any) => {
+                  const isAssigned = assignedSkillIds.has(skill.skill_id)
+                  return (
+                    <div
+                      key={skill.skill_id}
+                      className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${
+                        isAssigned
+                          ? 'bg-primary/5 border-primary/30'
+                          : 'bg-background/50 border-border/50'
+                      }`}
+                    >
+                      <Checkbox
+                        id={`cfg-skill-${skill.skill_id}`}
+                        checked={isAssigned}
+                        onCheckedChange={() => toggleSkillAssignment(skill.skill_id)}
+                        disabled={skillsSaving}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <Label htmlFor={`cfg-skill-${skill.skill_id}`} className="cursor-pointer">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-medium truncate">{skill.name}</span>
+                              {skill.skill_version && (
+                                <Badge variant="outline" className="text-xs shrink-0">
+                                  v{skill.skill_version}
+                                </Badge>
+                              )}
+                            </div>
+                            {skill.category && (
+                              <Badge variant="secondary" className="text-xs shrink-0">
+                                {skill.category}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                            {skill.description || 'No description available'}
+                          </p>
+                          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                            {skill.estimated_tokens > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Coins className="w-3 h-3" />
+                                ~{skill.estimated_tokens.toLocaleString()} tokens
+                              </span>
+                            )}
+                            {skill.skill_source && (
+                              <span className="flex items-center gap-1">
+                                <Terminal className="w-3 h-3" />
+                                {skill.skill_source}
+                              </span>
+                            )}
+                          </div>
+                        </Label>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-6">
+                <Zap className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">
+                  No skills enabled for this workspace yet.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enable skills in Marketplace &gt; Capabilities &gt; Skills
                 </p>
               </div>
             )}
