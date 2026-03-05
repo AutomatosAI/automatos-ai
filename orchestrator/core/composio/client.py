@@ -534,13 +534,33 @@ class ComposioClient:
                         or 0
                     )
 
+                # Logo: top-level field on AppModel, fallback to meta dict
+                logo_url = getattr(app, "logo", None)
+                if not logo_url and hasattr(app, "meta") and isinstance(app.meta, dict):
+                    logo_url = app.meta.get("logo")
+
+                # Categories: top-level List[str] on AppModel, fallback to meta
+                categories = getattr(app, "categories", None) or []
+                if not categories and hasattr(app, "meta"):
+                    meta_cats = (
+                        app.meta.get("categories", [])
+                        if isinstance(app.meta, dict)
+                        else getattr(app.meta, "categories", [])
+                    )
+                    categories = [
+                        (c.name if hasattr(c, "name") else str(c))
+                        for c in (meta_cats or [])
+                    ]
+                else:
+                    categories = [str(c) for c in categories]
+
                 results.append(
                     {
                         "name": app.slug,  # Use slug as the identifier (e.g. 'github')
                         "display_name": app.name,
                         "description": description,
-                        "logo_url": app.meta.logo if hasattr(app, "meta") else None,
-                        "categories": [c.name for c in app.meta.categories] if hasattr(app, "meta") and app.meta.categories else [],
+                        "logo_url": logo_url,
+                        "categories": categories,
                         "auth_schemes": app.auth_schemes or [],
                         "action_count": action_count,
                         "triggers": normalized_triggers,
