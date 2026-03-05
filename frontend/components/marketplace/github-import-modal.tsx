@@ -38,9 +38,20 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
       const data: any = await apiClient.post('/api/admin/plugins/import-github', {
         github_url: url.trim(),
       })
-      setResults(data.plugins || [])
-      toast.success(`Imported ${data.total} plugin(s) from GitHub`)
+      const items = data.plugins || []
+      setResults(items)
+      const successCount = items.filter((r: ImportResult) => r.status === 'uploaded' || r.status === 'updated').length
+      toast.success(`Imported ${successCount} item(s) from GitHub`)
       onImportComplete()
+
+      // Auto-close after 2s on success
+      if (successCount > 0) {
+        setTimeout(() => {
+          setUrl('')
+          setResults(null)
+          onClose()
+        }, 2000)
+      }
     } catch (error: any) {
       toast.error('Import failed', {
         description: error?.message || 'Failed to import from GitHub',
@@ -103,7 +114,7 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
             </div>
             {isImporting && (
               <p className="text-xs text-muted-foreground">
-                Cloning repo and scanning plugins... this may take 30+ seconds.
+                Cloning repo and scanning for plugins and skills... this may take 30+ seconds.
               </p>
             )}
           </div>
@@ -137,11 +148,11 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
                           {r.security_status}
                         </Badge>
                       )}
-                      {r.status === 'uploaded' && (
+                      {(r.status === 'uploaded' || r.status === 'updated') && (
                         <CheckCircle className="w-4 h-4 text-green-400" />
                       )}
                       {r.status === 'already_exists' && (
-                        <SkipForward className="w-4 h-4 text-yellow-400" title="Already exists" />
+                        <span title="Already exists"><SkipForward className="w-4 h-4 text-yellow-400" /></span>
                       )}
                       {r.status === 'error' && (
                         <AlertCircle className="w-4 h-4 text-red-400" />

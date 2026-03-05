@@ -1,15 +1,27 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import {
+  Zap,
+  CheckCircle,
+  Loader2,
+  Download,
+  Trash2,
+  Search,
+} from 'lucide-react'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Search, Download, Trash2, Shield, CheckCircle2, Loader2, Zap } from 'lucide-react'
+import { StatusBadge } from '@/components/shared'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
+
+// ===================================================================
+// Types
+// ===================================================================
 
 interface Skill {
   id: number
@@ -35,14 +47,23 @@ interface EnabledSkill {
   enabled_at: string | null
 }
 
-export function MarketplaceSkillsTab({ searchQuery, workspaceId }: { searchQuery: string; workspaceId: string }) {
+interface MarketplaceSkillsTabProps {
+  searchQuery: string
+  workspaceId: string
+}
+
+// ===================================================================
+// Component
+// ===================================================================
+
+export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSkillsTabProps) {
   const [viewMode, setViewMode] = useViewMode('mp-skills')
   const [available, setAvailable] = useState<Skill[]>([])
   const [enabled, setEnabled] = useState<EnabledSkill[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [enabling, setEnabling] = useState<number | null>(null)
   const [disabling, setDisabling] = useState<number | null>(null)
-  const [localSearch, setLocalSearch] = useState(searchQuery || '')
+  const [localSearch, setLocalSearch] = useState('')
 
   const fetchEnabled = useCallback(async () => {
     if (!workspaceId) return
@@ -58,11 +79,8 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: { searchQuery
     if (!workspaceId) return
     setLoading(true)
     try {
-      const params = new URLSearchParams()
-      if (localSearch.trim()) params.set('q', localSearch.trim())
-      const qs = params.toString()
       const data: any = await apiClient.get(
-        `/api/workspaces/${workspaceId}/skills/available${qs ? `?${qs}` : ''}`
+        `/api/workspaces/${workspaceId}/skills/available`
       )
       setAvailable(data.items || [])
     } catch {
@@ -70,26 +88,33 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: { searchQuery
     } finally {
       setLoading(false)
     }
-  }, [workspaceId, localSearch])
+  }, [workspaceId])
 
   useEffect(() => {
     fetchEnabled()
     fetchAvailable()
   }, [fetchEnabled, fetchAvailable])
 
-  const enableSkill = async (skillId: number) => {
+  const enableSkill = async (skillId: number, skillName: string) => {
     setEnabling(skillId)
     try {
       await apiClient.post(`/api/workspaces/${workspaceId}/skills`, {
         skill_id: skillId,
       })
-      toast.success('Skill enabled for workspace')
+      toast.success('Skill Enabled', {
+        description: `${skillName} has been enabled for your workspace.`,
+      })
       await fetchEnabled()
       await fetchAvailable()
     } catch (error: any) {
-      toast.error('Failed to enable skill', {
-        description: error?.message || 'Unknown error',
-      })
+      const msg = error?.message || 'Failed to enable skill'
+      if (msg.includes('already enabled') || msg.includes('409')) {
+        toast.info('Already Enabled', {
+          description: `${skillName} is already enabled for your workspace.`,
+        })
+      } else {
+        toast.error('Failed to enable skill', { description: msg })
+      }
     } finally {
       setEnabling(null)
     }
@@ -100,7 +125,9 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: { searchQuery
     setDisabling(skillId)
     try {
       await apiClient.delete(`/api/workspaces/${workspaceId}/skills/${skillId}`)
-      toast.success('Skill disabled')
+      toast.success('Skill Disabled', {
+        description: `${skillName} has been disabled for your workspace.`,
+      })
       await fetchEnabled()
       await fetchAvailable()
     } catch (error: any) {
@@ -112,163 +139,355 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: { searchQuery
     }
   }
 
+  // Client-side search filter (matches plugin tab pattern)
+  const filteredAvailable = useMemo(() => {
+    const query = (searchQuery || localSearch).toLowerCase().trim()
+    if (!query) return available.filter(s => !s.is_enabled)
+
+    return available
+      .filter(s => !s.is_enabled)
+      .filter(
+        s =>
+          s.name.toLowerCase().includes(query) ||
+          s.description?.toLowerCase().includes(query) ||
+          s.category?.toLowerCase().includes(query) ||
+          (s.tags || []).some(t => t.toLowerCase().includes(query))
+      )
+  }, [available, searchQuery, localSearch])
+
   const enabledIds = new Set(enabled.map(s => s.skill_id))
 
-  // Skill card component to avoid duplication
-  const SkillCard = ({ skill, isEnabled, compact }: { skill: Skill | EnabledSkill; isEnabled: boolean; compact: boolean }) => {
-    const id = 'skill_id' in skill ? skill.skill_id : skill.id
-    const name = skill.name
-    const tokens = skill.estimated_tokens
+  // Loading skeleton (matches plugin tab)
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        {viewMode === 'list' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-16 glass-card animate-pulse rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {[...Array(8)].map((_, i) => (
+              <Card key={i} className="glass-card animate-pulse">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-secondary/50 rounded-lg" />
+                    <div className="space-y-2">
+                      <div className="h-4 w-24 bg-secondary/50 rounded" />
+                      <div className="h-3 w-32 bg-secondary/50 rounded" />
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-8 w-full bg-secondary/50 rounded mt-2" />
+                  <div className="h-6 w-20 bg-secondary/50 rounded mt-3" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
 
-    if (compact) {
-      return (
-        <Card className="glass-card hover:border-primary/20 transition-all">
-          <CardContent className="p-3">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center shrink-0">
-                <Zap className="w-5 h-5 text-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-sm truncate">{name}</span>
-                  {skill.category && <Badge variant="outline" className="text-[10px] shrink-0">{skill.category}</Badge>}
-                </div>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{skill.description}</p>
-                {tokens > 0 && <span className="text-[10px] text-muted-foreground">~{tokens} tokens</span>}
-              </div>
-              {isEnabled ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 w-8 p-0 shrink-0"
-                  onClick={() => disableSkill(id, name)}
-                  disabled={disabling === id}
-                >
-                  {disabling === id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 w-8 p-0 shrink-0"
-                  onClick={() => enableSkill(id)}
-                  disabled={enabling === id}
-                >
-                  {enabling === id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                </Button>
+  return (
+    <div className="space-y-6">
+      {/* Header Stats */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-semibold">Skills Library</h3>
+          <p className="text-sm text-muted-foreground">
+            Inject specialised methodology into your agents with curated skills
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <StatusBadge size="sm" status="success" dot>
+            {enabled.length} Enabled
+          </StatusBadge>
+          <StatusBadge size="sm" status="info">
+            {available.length} Available
+          </StatusBadge>
+        </div>
+      </div>
+
+      {/* Search + View Toggle */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex gap-2 flex-1">
+          <Input
+            placeholder="Search skills..."
+            value={localSearch}
+            onChange={e => setLocalSearch(e.target.value)}
+            className="bg-secondary/50 border-secondary"
+          />
+        </div>
+        <ViewToggle value={viewMode} onChange={setViewMode} />
+      </div>
+
+      {/* Available Skills */}
+      {filteredAvailable.length === 0 && !loading ? (
+        <div className="text-center py-12">
+          <div className="w-16 h-16 rounded-lg bg-secondary/30 flex items-center justify-center mx-auto mb-4">
+            <Zap className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <h3 className="text-lg font-semibold mb-2">No skills found</h3>
+          <p className="text-muted-foreground mb-4">
+            {(searchQuery || localSearch)
+              ? `No skills match "${searchQuery || localSearch}"`
+              : 'No marketplace skills available yet. Import skills via Plugins > Import from GitHub.'}
+          </p>
+        </div>
+      ) : viewMode === 'list' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filteredAvailable.map(skill => (
+            <SkillListCard
+              key={skill.id}
+              skill={skill}
+              isEnabled={false}
+              isEnabling={enabling === skill.id}
+              onEnable={() => enableSkill(skill.id, skill.name)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <AnimatePresence>
+            {filteredAvailable.map((skill, index) => (
+              <SkillGridCard
+                key={skill.id}
+                skill={skill}
+                index={index}
+                isEnabled={false}
+                isEnabling={enabling === skill.id}
+                onEnable={() => enableSkill(skill.id, skill.name)}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* Enabled Skills */}
+      {enabled.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-primary" />
+            <h4 className="text-sm font-semibold text-primary uppercase tracking-wider">
+              Enabled for Workspace
+            </h4>
+            <StatusBadge size="sm" status="success">{enabled.length}</StatusBadge>
+          </div>
+          {viewMode === 'list' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {enabled.map(skill => (
+                <SkillListCard
+                  key={skill.skill_id}
+                  skill={skill}
+                  isEnabled
+                  isDisabling={disabling === skill.skill_id}
+                  onDisable={() => disableSkill(skill.skill_id, skill.name)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              <AnimatePresence>
+                {enabled.map((skill, index) => (
+                  <SkillGridCard
+                    key={skill.skill_id}
+                    skill={skill}
+                    index={index}
+                    isEnabled
+                    isDisabling={disabling === skill.skill_id}
+                    onDisable={() => disableSkill(skill.skill_id, skill.name)}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ===================================================================
+// Skill List Card (compact view — matches plugin list card)
+// ===================================================================
+
+interface SkillListCardProps {
+  skill: Skill | EnabledSkill
+  isEnabled: boolean
+  isEnabling?: boolean
+  isDisabling?: boolean
+  onEnable?: () => void
+  onDisable?: () => void
+}
+
+function SkillListCard({ skill, isEnabled, isEnabling, isDisabling, onEnable, onDisable }: SkillListCardProps) {
+  const name = skill.name
+  const tokens = skill.estimated_tokens
+
+  return (
+    <Card className="glass-card hover:border-primary/20 transition-all">
+      <CardContent className="p-3">
+        <div className="flex items-center gap-3">
+          <Zap className="w-9 h-9 text-primary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-sm truncate">{name}</span>
+              {skill.category && (
+                <StatusBadge size="sm" status="neutral" className="shrink-0">
+                  {skill.category}
+                </StatusBadge>
               )}
             </div>
-          </CardContent>
-        </Card>
-      )
-    }
-
-    return (
-      <Card className="border-border/40 bg-card/50">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">{name}</CardTitle>
-            {skill.category && <Badge variant="outline">{skill.category}</Badge>}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+              {tokens > 0 && <span>~{tokens} tokens</span>}
+              {skill.skill_source && (
+                <>
+                  {tokens > 0 && <span>&middot;</span>}
+                  <span>{skill.skill_source}</span>
+                </>
+              )}
+            </div>
           </div>
-          <CardDescription className="text-xs">{skill.description}</CardDescription>
+          {isEnabled ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0 shrink-0 text-destructive hover:text-destructive"
+              onClick={onDisable}
+              disabled={isDisabling}
+            >
+              {isDisabling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 shrink-0"
+              onClick={onEnable}
+              disabled={isEnabling}
+            >
+              {isEnabling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ===================================================================
+// Skill Grid Card (expanded view — matches plugin grid card)
+// ===================================================================
+
+interface SkillGridCardProps {
+  skill: Skill | EnabledSkill
+  index: number
+  isEnabled: boolean
+  isEnabling?: boolean
+  isDisabling?: boolean
+  onEnable?: () => void
+  onDisable?: () => void
+}
+
+function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEnable, onDisable }: SkillGridCardProps) {
+  const name = skill.name
+  const tokens = skill.estimated_tokens
+  const version = skill.skill_version
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 20 }}
+      transition={{ delay: Math.min(index * 0.05, 0.5) }}
+    >
+      <Card className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20 transition-all duration-300">
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <Zap className="w-10 h-10 text-primary shrink-0" />
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-foreground line-clamp-1">{name}</h3>
+                <p className="text-xs text-muted-foreground">
+                  {version && <>v{version}</>}
+                  {skill.skill_source && (
+                    <>{version && <> &middot; </>}{skill.skill_source}</>
+                  )}
+                </p>
+              </div>
+            </div>
+            {isEnabled && (
+              <StatusBadge size="sm" status="success" className="flex-shrink-0">
+                <CheckCircle className="w-2.5 h-2.5 mr-0.5" />
+                Enabled
+              </StatusBadge>
+            )}
+          </div>
         </CardHeader>
-        <CardContent>
+
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground line-clamp-2">
+            {skill.description || 'No description available'}
+          </p>
+
+          {/* Category + Tags */}
+          <div className="flex flex-wrap gap-1.5">
+            {skill.category && (
+              <StatusBadge size="sm" status="neutral">
+                {skill.category}
+              </StatusBadge>
+            )}
+            {(skill.tags || []).slice(0, 3).map(tag => (
+              <StatusBadge key={tag} size="sm" status="neutral">
+                {tag}
+              </StatusBadge>
+            ))}
+          </div>
+
+          {/* Stats + Action Row */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {skill.skill_version && <span className="text-xs text-muted-foreground">v{skill.skill_version}</span>}
-              {tokens > 0 && <span className="text-xs text-muted-foreground">~{tokens} tokens</span>}
-              {skill.tags?.map(tag => (
-                <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
-              ))}
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              {tokens > 0 && (
+                <span>~{tokens} tokens</span>
+              )}
             </div>
             {isEnabled ? (
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => disableSkill(id, name)}
-                disabled={disabling === id}
+                className="text-destructive hover:text-destructive"
+                onClick={onDisable}
+                disabled={isDisabling}
               >
-                {disabling === id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3 mr-1" />}
+                {isDisabling ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <Trash2 className="h-3 w-3 mr-1" />
+                )}
                 Disable
               </Button>
             ) : (
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => enableSkill(id)}
-                disabled={enabling === id}
+                onClick={onEnable}
+                disabled={isEnabling}
               >
-                {enabling === id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Download className="h-3 w-3 mr-1" />}
+                {isEnabling ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <Download className="h-3 w-3 mr-1" />
+                )}
                 Enable
               </Button>
             )}
           </div>
         </CardContent>
       </Card>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Search */}
-      <div className="flex gap-2">
-        <Input
-          placeholder="Search marketplace skills..."
-          value={localSearch}
-          onChange={e => setLocalSearch(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && fetchAvailable()}
-        />
-        <Button onClick={fetchAvailable} disabled={loading}>
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-        </Button>
-        <ViewToggle value={viewMode} onChange={setViewMode} />
-      </div>
-
-      {/* Available Skills */}
-      {available.length > 0 && (
-        <div>
-          <h3 className="text-lg font-semibold mb-3">
-            Available Skills
-            <span className="text-sm text-muted-foreground font-normal ml-2">
-              {available.filter(s => !s.is_enabled).length} available
-            </span>
-          </h3>
-          <div className={viewMode === 'list'
-            ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
-            : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-          }>
-            {available.filter(s => !s.is_enabled).map(skill => (
-              <SkillCard key={skill.id} skill={skill} isEnabled={false} compact={viewMode === 'list'} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {available.length === 0 && !loading && (
-        <div className="text-center py-12 text-muted-foreground">
-          <Zap className="h-12 w-12 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No marketplace skills available yet.</p>
-          <p className="text-xs mt-1">Import skills via Capabilities &gt; Import from GitHub</p>
-        </div>
-      )}
-
-      {/* Enabled Skills */}
-      {enabled.length > 0 && (
-        <div>
-          <h3 className="text-lg font-semibold mb-3">
-            Enabled Skills
-            <Badge variant="secondary" className="ml-2 text-xs">{enabled.length}</Badge>
-          </h3>
-          <div className={viewMode === 'list'
-            ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
-            : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-          }>
-            {enabled.map(skill => (
-              <SkillCard key={skill.skill_id} skill={skill} isEnabled={true} compact={viewMode === 'list'} />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    </motion.div>
   )
 }
