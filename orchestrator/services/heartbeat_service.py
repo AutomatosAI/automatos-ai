@@ -354,14 +354,13 @@ class HeartbeatService:
                 auto_act = hb_config.get("auto_act", False)
 
                 prompt = (
-                    f"You are running a scheduled heartbeat check.\n\n"
-                    f"Your task: {heartbeat_prompt}\n\n"
-                    f"Current time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
-                    "Use your tools to complete this check. Be concise in your report.\n"
+                    f"Scheduled heartbeat check. {heartbeat_prompt}\n"
+                    f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n"
+                    "Use your tools to check. Reply with a SHORT plain-text summary (max 500 chars), no markdown.\n"
                     + (
                         "You may take action if needed."
                         if auto_act
-                        else "Report findings only, do not take action."
+                        else "Report findings only."
                     )
                 )
 
@@ -374,18 +373,29 @@ class HeartbeatService:
                         agent=agent_id,
                         prompt=prompt,
                         context={"source": "heartbeat", "workspace_id": workspace_id},
+                        use_memory=False,  # keep context lean
                     )
 
-                    llm_text = (
-                        exec_result.get("response")
-                        or exec_result.get("output")
-                        or exec_result.get("content")
-                        or str(exec_result)[:500]
-                    )
+                    # Extract the actual text from nested result
+                    llm_text = ""
+                    if isinstance(exec_result, dict):
+                        llm_text = (
+                            exec_result.get("result")
+                            or exec_result.get("response")
+                            or exec_result.get("output")
+                            or exec_result.get("content")
+                            or ""
+                        )
+                        # Handle nested dict in result
+                        if isinstance(llm_text, dict):
+                            llm_text = llm_text.get("result") or llm_text.get("response") or str(llm_text)
+                    if not llm_text:
+                        llm_text = str(exec_result)[:500]
+
                     result["findings"].append(
-                        {"check": "llm_analysis", "detail": llm_text}
+                        {"check": "llm_analysis", "detail": str(llm_text)[:1000]}
                     )
-                    result["tokens_used"] = exec_result.get("tokens_used", 0)
+                    result["tokens_used"] = exec_result.get("tokens_used", 0) if isinstance(exec_result, dict) else 0
 
                 except Exception as exec_err:
                     logger.warning(
@@ -574,26 +584,29 @@ class HeartbeatService:
                 logger.warning("[Heartbeat] report_to=webhook but no webhook_url configured")
 
     def _format_heartbeat_message(self, result: dict) -> str:
-        """Format heartbeat result as a human-readable notification message."""
-        source = result.get("source_type", "unknown")
-        source_id = result.get("source_id", "?")
+        """Format heartbeat result as a clean notification message."""
         status = result.get("status", "unknown")
-        status_emoji = "OK" if status == "success" else "ERROR"
+        status_icon = "OK" if status == "success" else "ERROR"
 
-        lines = [f"[Heartbeat {status_emoji}] {source}/{source_id}"]
-
+        # Extract the main analysis text from findings
         findings = result.get("findings", [])
+        analysis = ""
         for f in findings:
-            check = f.get("check", "")
+            if f.get("check") == "llm_analysis":
+                analysis = f.get("detail", "")
+                break
+
+        if analysis:
+            return f"[Heartbeat {status_icon}]\n{analysis[:2000]}"
+
+        # Fallback: summarize all findings
+        lines = [f"[Heartbeat {status_icon}]"]
+        for f in findings:
             detail = f.get("detail", "")
             if detail:
-                lines.append(f"  {check}: {detail[:300]}")
+                lines.append(detail[:300])
 
-        tokens = result.get("tokens_used", 0)
-        if tokens:
-            lines.append(f"  tokens: {tokens}")
-
-        return "\n".join(lines)
+        return "\n".join(lines) if len(lines) > 1 else f"[Heartbeat {status_icon}] No findings."
 
     async def _send_via_integration(
         self, workspace_id: str, platform: str, message: str, hb_config: dict
