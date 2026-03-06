@@ -175,19 +175,60 @@ class HeartbeatService:
     # Active-hours guard
     # ------------------------------------------------------------------
 
-    async def _is_within_active_hours(self, hb_config: dict) -> bool:
-        """Check if current time is within the heartbeat's active hours."""
+    async def _is_within_active_hours(
+        self, hb_config: dict, workspace_id: str = ""
+    ) -> bool:
+        """Check if current time is within the heartbeat's active hours.
+
+        When ``inherit_active_hours`` is True in *hb_config*, the active-hours
+        window and timezone are loaded from the **orchestrator** workspace
+        settings instead of the agent's own config.
+        """
         import pytz
 
-        tz_name = hb_config.get("timezone", "UTC")
+        active_cfg = dict(hb_config)
+
+        # If inheriting, load orchestrator-level active hours
+        if hb_config.get("inherit_active_hours") and workspace_id:
+            try:
+                from core.database.database import SessionLocal
+                from core.models.workspaces import Workspace
+
+                db = SessionLocal()
+                try:
+                    ws = db.query(Workspace).get(workspace_id)
+                    if ws:
+                        orch = (ws.settings or {}).get("orchestrator", {})
+                        orch_hb = orch.get("heartbeat", {})
+                        if orch_hb.get("active_hours_start"):
+                            active_cfg["active_hours_start"] = orch_hb["active_hours_start"]
+                        if orch_hb.get("active_hours_end"):
+                            active_cfg["active_hours_end"] = orch_hb["active_hours_end"]
+                        if orch_hb.get("timezone"):
+                            active_cfg["timezone"] = orch_hb["timezone"]
+                        logger.debug(
+                            "[Heartbeat] Inherited active hours from orchestrator: %s–%s (%s)",
+                            active_cfg.get("active_hours_start"),
+                            active_cfg.get("active_hours_end"),
+                            active_cfg.get("timezone"),
+                        )
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.warning(
+                    "[Heartbeat] Failed to inherit orchestrator active hours for ws=%s: %s",
+                    workspace_id, e,
+                )
+
+        tz_name = active_cfg.get("timezone", "UTC")
         try:
             tz = pytz.timezone(tz_name)
         except pytz.UnknownTimeZoneError:
             tz = pytz.UTC
 
         now = datetime.now(tz)
-        start_str = hb_config.get("active_hours_start", "08:00")
-        end_str = hb_config.get("active_hours_end", "20:00")
+        start_str = active_cfg.get("active_hours_start", "08:00")
+        end_str = active_cfg.get("active_hours_end", "20:00")
 
         def _to_minutes(s: str) -> int:
             h, m = map(int, s.split(":"))
@@ -216,7 +257,7 @@ class HeartbeatService:
             )
             return {"status": "skipped", "reason": "already_running"}
 
-        if not await self._is_within_active_hours(hb_config):
+        if not await self._is_within_active_hours(hb_config, workspace_id):
             logger.debug(
                 "[Heartbeat] Outside active hours for ws=%s, skipping",
                 workspace_id,
@@ -315,7 +356,7 @@ class HeartbeatService:
             )
             return {"status": "skipped", "reason": "already_running"}
 
-        if not await self._is_within_active_hours(hb_config):
+        if not await self._is_within_active_hours(hb_config, workspace_id):
             return {"status": "skipped", "reason": "outside_active_hours"}
 
         self._running_ticks[tick_key] = True
