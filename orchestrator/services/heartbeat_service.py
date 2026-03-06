@@ -667,16 +667,20 @@ class HeartbeatService:
                         integrations.get("telegram_bot_token")
                         or channel_config.get("bot_token")
                     )
+                    if not token:
+                        logger.warning("[Heartbeat] No telegram bot token found for ws=%s", workspace_id)
+                        return
+
                     chat_id = (
                         hb_config.get("channel_id")
                         or integrations.get("telegram_default_chat_id")
                         or channel_config.get("default_chat_id")
                     )
-                    if not token:
-                        logger.warning("[Heartbeat] No telegram bot token found for ws=%s", workspace_id)
-                        return
+                    # Auto-resolve chat_id from Telegram API if not stored
                     if not chat_id:
-                        logger.warning("[Heartbeat] No chat_id for Telegram notification (ws=%s). Send a message to the bot first.", workspace_id)
+                        chat_id = await self._resolve_telegram_chat_id(token)
+                    if not chat_id:
+                        logger.warning("[Heartbeat] Could not resolve Telegram chat_id for ws=%s", workspace_id)
                         return
 
                     from api.webhooks import _send_telegram_reply
@@ -716,6 +720,32 @@ class HeartbeatService:
                 db.close()
         except Exception as e:
             logger.error("[Heartbeat] Integration notification failed (%s): %s", platform, e)
+
+    async def _resolve_telegram_chat_id(self, bot_token: str) -> Optional[str]:
+        """Get the most recent chat_id from the Telegram Bot API."""
+        try:
+            import aiohttp
+
+            url = f"https://api.telegram.org/bot{bot_token}/getUpdates?limit=1&offset=-1"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json()
+                    results = data.get("result", [])
+                    if not results:
+                        return None
+                    # Extract chat_id from the most recent update
+                    update = results[0]
+                    msg = update.get("message") or update.get("channel_post") or {}
+                    chat = msg.get("chat", {})
+                    chat_id = chat.get("id")
+                    if chat_id:
+                        logger.info("[Heartbeat] Auto-resolved Telegram chat_id=%s", chat_id)
+                        return str(chat_id)
+        except Exception as e:
+            logger.debug("[Heartbeat] Failed to resolve Telegram chat_id: %s", e)
+        return None
 
     async def _send_via_webhook(self, url: str, result: dict, message: str):
         """POST heartbeat result to a webhook URL."""
