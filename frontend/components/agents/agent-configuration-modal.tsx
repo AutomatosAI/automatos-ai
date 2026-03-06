@@ -1783,25 +1783,16 @@ export function AgentConfigurationModal({
                             </div>
                           )}
 
-                          {/* Chat/Channel ID (shown when telegram or slack selected) */}
-                          {(heartbeatConfig.report_to === 'telegram' || heartbeatConfig.report_to === 'slack') && (
+                          {/* Slack channel ID (only shown for Slack — Telegram auto-resolves) */}
+                          {heartbeatConfig.report_to === 'slack' && (
                             <div className="space-y-2">
-                              <Label>
-                                {heartbeatConfig.report_to === 'telegram' ? 'Telegram Chat ID' : 'Slack Channel ID'}
-                              </Label>
+                              <Label>Slack Channel ID</Label>
                               <Input
                                 value={heartbeatConfig.channel_id || ''}
                                 onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, channel_id: e.target.value }))}
-                                placeholder={heartbeatConfig.report_to === 'telegram'
-                                  ? 'e.g. -1001234567890 (group) or 123456789 (DM)'
-                                  : 'e.g. C01ABCDEF'}
+                                placeholder="e.g. C01ABCDEF"
                                 className="bg-secondary/50"
                               />
-                              <p className="text-xs text-muted-foreground">
-                                {heartbeatConfig.report_to === 'telegram'
-                                  ? 'Your Telegram chat or group ID. Send /start to your bot to get it.'
-                                  : 'The Slack channel ID where notifications should go.'}
-                              </p>
                             </div>
                           )}
                         </>
