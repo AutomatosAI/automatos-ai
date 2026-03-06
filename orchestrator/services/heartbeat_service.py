@@ -354,10 +354,10 @@ class HeartbeatService:
                 auto_act = hb_config.get("auto_act", False)
 
                 prompt = (
-                    f"You are {agent.name}, running a scheduled heartbeat check.\n\n"
+                    f"You are running a scheduled heartbeat check.\n\n"
                     f"Your task: {heartbeat_prompt}\n\n"
                     f"Current time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
-                    "Review your domain and report any findings. Be concise.\n"
+                    "Use your tools to complete this check. Be concise in your report.\n"
                     + (
                         "You may take action if needed."
                         if auto_act
@@ -365,71 +365,38 @@ class HeartbeatService:
                     )
                 )
 
-                # Use the codebase LLM manager for the call
+                # Execute through AgentFactory so the agent has its full toolset
                 try:
-                    from core.llm import create_llm_manager
+                    from modules.agents.factory.agent_factory import AgentFactory
 
-                    model_config = (
-                        agent.configuration.get("model_config", {})
-                        if agent.configuration
-                        else {}
+                    factory = AgentFactory(db_session=db)
+                    exec_result = await factory.execute_with_prompt(
+                        agent=agent_id,
+                        prompt=prompt,
+                        context={"source": "heartbeat", "workspace_id": workspace_id},
                     )
-                    provider = model_config.get("provider")
-                    model = model_config.get("model_id")
-
-                    llm = create_llm_manager(
-                        service_name="heartbeat",
-                        provider=provider,
-                        model=model,
-                    )
-
-                    messages = [
-                        {"role": "system", "content": prompt},
-                        {
-                            "role": "user",
-                            "content": "Run your heartbeat check now.",
-                        },
-                    ]
-
-                    response = await llm.generate_response(messages)
-
-                    # Flag if fallback model was used (primary model dead)
-                    if getattr(response, "_used_fallback", False):
-                        failed_model = getattr(response, "_failed_model", "unknown")
-                        fallback_model = getattr(response, "_fallback_model", "unknown")
-                        result["findings"].append({
-                            "check": "model_fallback",
-                            "detail": (
-                                f"Primary model '{failed_model}' is unavailable. "
-                                f"Used fallback '{fallback_model}'. "
-                                f"Update model in Settings > Orchestrator."
-                            ),
-                        })
 
                     llm_text = (
-                        response.content
-                        if hasattr(response, "content")
-                        else str(response)
+                        exec_result.get("response")
+                        or exec_result.get("output")
+                        or exec_result.get("content")
+                        or str(exec_result)[:500]
                     )
                     result["findings"].append(
                         {"check": "llm_analysis", "detail": llm_text}
                     )
+                    result["tokens_used"] = exec_result.get("tokens_used", 0)
 
-                    if hasattr(response, "usage") and response.usage:
-                        result["tokens_used"] = response.usage.get(
-                            "total_tokens", 0
-                        )
-
-                except Exception as llm_err:
+                except Exception as exec_err:
                     logger.warning(
-                        "[Heartbeat] LLM call failed for agent=%s: %s",
+                        "[Heartbeat] Agent execution failed for agent=%s: %s",
                         agent_id,
-                        llm_err,
+                        exec_err,
                     )
                     result["findings"].append(
                         {
-                            "check": "llm_error",
-                            "detail": f"LLM call failed: {str(llm_err)[:200]}",
+                            "check": "exec_error",
+                            "detail": f"Agent execution failed: {str(exec_err)[:200]}",
                         }
                     )
             finally:
