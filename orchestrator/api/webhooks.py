@@ -297,6 +297,29 @@ def _extract_response_text(result: Any) -> str:
 
 
 # =============================================================================
+# Integration defaults persistence
+# =============================================================================
+
+def _persist_integration_default(db: Session, workspace, key: str, value: str):
+    """Store a platform default (e.g. telegram_default_chat_id) in workspace
+    settings.integrations if not already set or changed."""
+    try:
+        settings = dict(workspace.settings or {})
+        integrations = dict(settings.get("integrations", {}))
+        if integrations.get(key) == value:
+            return  # already correct
+        integrations[key] = value
+        settings["integrations"] = integrations
+        workspace.settings = settings
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(workspace, "settings")
+        db.commit()
+        logger.info("[webhook] Persisted %s=%s for workspace %s", key, value, workspace.id)
+    except Exception as e:
+        logger.debug("[webhook] Failed to persist %s: %s", key, e)
+
+
+# =============================================================================
 # Webhook Endpoints
 # =============================================================================
 
@@ -405,6 +428,12 @@ async def general_workspace_webhook(
         "[webhook/ws] workspace=%s platform=%s has_integrations=%s",
         workspace.id, platform, bool(integrations),
     )
+
+    # 2b. Persist platform-specific IDs for reuse (heartbeat, notifications)
+    if platform == "telegram" and reply_ctx.get("chat_id"):
+        _persist_integration_default(db, workspace, "telegram_default_chat_id", str(reply_ctx["chat_id"]))
+    elif platform == "slack" and reply_ctx.get("channel"):
+        _persist_integration_default(db, workspace, "slack_default_channel", reply_ctx["channel"])
 
     # 3. Build RequestEnvelope via WebhookIngestor
     ingestor = WebhookIngestor()
