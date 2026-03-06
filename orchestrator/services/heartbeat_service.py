@@ -671,8 +671,10 @@ class HeartbeatService:
                         logger.warning("[Heartbeat] No telegram bot token found for ws=%s", workspace_id)
                         return
 
+                    raw_channel_id = hb_config.get("channel_id") or ""
+                    # Guard: ignore if someone accidentally saved a bot token as chat_id
                     chat_id = (
-                        hb_config.get("channel_id")
+                        (raw_channel_id if raw_channel_id and ":" not in raw_channel_id else "")
                         or integrations.get("telegram_default_chat_id")
                         or channel_config.get("default_chat_id")
                     )
