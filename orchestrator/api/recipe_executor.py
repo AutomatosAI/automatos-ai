@@ -68,6 +68,7 @@ async def _execute_step(
     input_data: Optional[dict] = None,
     recipe_memories: Optional[dict] = None,
     prompt_for_hints: Optional[str] = None,
+    max_iterations: int = 25,
 ) -> dict:
     """
     Execute a single recipe step using the chatbot's exact component path.
@@ -83,6 +84,10 @@ async def _execute_step(
         recipe_memories: Mem0 memories to inject (first step only)
         prompt_for_hints: Clean task-only prompt for hint generation (avoids
             trigger metadata polluting action matching). Falls back to clean_prompt.
+        max_iterations: Max LLM tool-call turns for this step. Higher values
+            let the agent do more work (e.g. bug fixer needs ~15-20 turns).
+            Configurable per step via step.max_iterations, per agent via
+            agent.configuration.max_iterations, or falls back to 25.
 
     Returns:
         Dict with status, result, and execution metadata.
@@ -236,7 +241,6 @@ async def _execute_step(
     tool_router = get_tool_router()
     all_tool_calls = []
     _composio_call_cache: Dict[str, str] = {}  # dedup: "ACTION|args_hash" → cached result
-    max_iterations = 10
     response = None
 
     for iteration in range(max_iterations):
@@ -688,7 +692,9 @@ async def _execute_recipe_inner(
             agent = agent_map.get(agent_id)
             agent_name = agent.name if agent else f"Agent {agent_id}"
 
-            logger.info(f"[recipe_direct] Step {step_order}/{total_steps}: {agent_name} — {prompt_template[:200]}")
+            agent_cfg = getattr(agent, 'configuration', None) or {}
+            step_max_iter = step.get("max_iterations", agent_cfg.get("max_iterations", 25))
+            logger.info(f"[recipe_direct] Step {step_order}/{total_steps}: {agent_name} (max_turns={step_max_iter}) — {prompt_template[:200]}")
 
             # Update execution progress
             execution.current_step = idx + 1
@@ -953,6 +959,7 @@ async def _execute_recipe_inner(
                             input_data=input_data,
                             recipe_memories=recipe_memories if idx == 0 else None,
                             prompt_for_hints=prompt_template,
+                            max_iterations=step_max_iter,
                         ),
                         timeout=step_timeout_sec,
                     )
