@@ -357,6 +357,10 @@ class HeartbeatService:
             return {"status": "skipped", "reason": "already_running"}
 
         if not await self._is_within_active_hours(hb_config, workspace_id):
+            logger.info(
+                "[Heartbeat] Outside active hours for agent=%s (ws=%s), skipping",
+                agent_id, workspace_id,
+            )
             return {"status": "skipped", "reason": "outside_active_hours"}
 
         self._running_ticks[tick_key] = True
@@ -828,6 +832,7 @@ class HeartbeatService:
             **hb_config,
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
+            "inherit_active_hours": False,  # manual runs always execute
         }
         return await self._orchestrator_tick(workspace_id, hb_config_override)
 
@@ -850,6 +855,7 @@ class HeartbeatService:
             **hb_config,
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
+            "inherit_active_hours": False,  # manual runs always execute
         }
         return await self._agent_tick(agent_id, workspace_id, hb_config_override)
 
