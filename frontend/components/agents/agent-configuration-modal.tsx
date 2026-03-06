@@ -330,21 +330,37 @@ export function AgentConfigurationModal({
         if (data) setLastHeartbeatResult(data)
       })
       .catch(() => {})
-    // Load workspace integrations for Report To dropdown
-    apiClient.request<any>(`/api/workspaces/current/integrations`)
-      .then((data) => {
-        if (!mounted || !data) return
-        const platformMap: Record<string, string> = {
-          telegram_bot_token: 'telegram',
-          slack_bot_token: 'slack',
+    // Load connected messaging platforms for Report To dropdown
+    // Check both workspace integrations AND channel_connections
+    Promise.all([
+      apiClient.request<any>(`/api/workspaces/current/integrations`).catch(() => ({})),
+      apiClient.request<any>(`/api/channels`).catch(() => []),
+    ]).then(([integrations, channels]) => {
+      if (!mounted) return
+      const found: Array<{ key: string; platform: string }> = []
+      const seen = new Set<string>()
+      // From workspace integrations
+      const platformMap: Record<string, string> = { telegram_bot_token: 'telegram', slack_bot_token: 'slack' }
+      if (integrations) {
+        for (const [key, val] of Object.entries(integrations)) {
+          const platform = platformMap[key]
+          if (platform && (val as any)?.configured && !seen.has(platform)) {
+            found.push({ key, platform })
+            seen.add(platform)
+          }
         }
-        const configured = Object.entries(data)
-          .filter(([_, v]: any) => v?.configured)
-          .map(([key]) => ({ key, platform: platformMap[key] || key }))
-          .filter(i => i.platform) // only messaging platforms
-        setConnectedIntegrations(configured)
-      })
-      .catch(() => {})
+      }
+      // From channel_connections
+      if (Array.isArray(channels)) {
+        for (const ch of channels) {
+          if (!seen.has(ch.platform)) {
+            found.push({ key: `channel:${ch.id}`, platform: ch.platform })
+            seen.add(ch.platform)
+          }
+        }
+      }
+      setConnectedIntegrations(found)
+    })
     return () => { mounted = false }
   }, [open, agentId])
 

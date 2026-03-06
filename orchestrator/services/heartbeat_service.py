@@ -645,14 +645,38 @@ class HeartbeatService:
 
                 integrations = (ws.settings or {}).get("integrations", {})
 
+                # Also check channel_connections for bot tokens
+                from sqlalchemy import text as sql_text
+                channel_config = {}
+                try:
+                    row = db.execute(
+                        sql_text(
+                            "SELECT config FROM channel_connections "
+                            "WHERE workspace_id = :ws AND platform = :plat "
+                            "ORDER BY created_at DESC LIMIT 1"
+                        ),
+                        {"ws": workspace_id, "plat": platform},
+                    ).fetchone()
+                    if row and row.config:
+                        channel_config = row.config if isinstance(row.config, dict) else json.loads(row.config)
+                except Exception as e:
+                    logger.debug("[Heartbeat] Could not load channel_connections for %s: %s", platform, e)
+
                 if platform == "telegram":
-                    token = integrations.get("telegram_bot_token")
-                    chat_id = hb_config.get("channel_id") or integrations.get("telegram_default_chat_id")
+                    token = (
+                        integrations.get("telegram_bot_token")
+                        or channel_config.get("bot_token")
+                    )
+                    chat_id = (
+                        hb_config.get("channel_id")
+                        or integrations.get("telegram_default_chat_id")
+                        or channel_config.get("default_chat_id")
+                    )
                     if not token:
-                        logger.warning("[Heartbeat] No telegram_bot_token configured for ws=%s", workspace_id)
+                        logger.warning("[Heartbeat] No telegram bot token found for ws=%s", workspace_id)
                         return
                     if not chat_id:
-                        logger.warning("[Heartbeat] No chat_id for Telegram notification (ws=%s)", workspace_id)
+                        logger.warning("[Heartbeat] No chat_id for Telegram notification (ws=%s). Send a message to the bot first.", workspace_id)
                         return
 
                     from api.webhooks import _send_telegram_reply
@@ -663,10 +687,17 @@ class HeartbeatService:
                         logger.warning("[Heartbeat] Telegram send failed for chat %s", chat_id)
 
                 elif platform == "slack":
-                    token = integrations.get("slack_bot_token")
-                    channel = hb_config.get("channel_id") or integrations.get("slack_default_channel")
+                    token = (
+                        integrations.get("slack_bot_token")
+                        or channel_config.get("bot_token")
+                    )
+                    channel = (
+                        hb_config.get("channel_id")
+                        or integrations.get("slack_default_channel")
+                        or channel_config.get("default_channel")
+                    )
                     if not token:
-                        logger.warning("[Heartbeat] No slack_bot_token configured for ws=%s", workspace_id)
+                        logger.warning("[Heartbeat] No slack bot token found for ws=%s", workspace_id)
                         return
                     if not channel:
                         logger.warning("[Heartbeat] No channel for Slack notification (ws=%s)", workspace_id)
