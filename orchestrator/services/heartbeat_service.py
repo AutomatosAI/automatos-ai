@@ -583,7 +583,8 @@ class HeartbeatService:
         report_to values:
           - "orchestrator"  → DB only (no extra delivery)
           - "direct"        → no-op for now (result is in DB, frontend polls)
-          - "channel:<id>"  → push via channel adapter (Telegram, Slack, etc.)
+          - "telegram"      → push via workspace Telegram bot integration
+          - "slack"         → push via workspace Slack bot integration
           - "webhook"       → HTTP POST to webhook_url
         """
         report_to = hb_config.get("report_to", "orchestrator")
@@ -592,10 +593,12 @@ class HeartbeatService:
             return
 
         message = self._format_heartbeat_message(result)
+        workspace_id = result.get("workspace_id")
 
-        if report_to.startswith("channel:"):
-            channel_conn_id = report_to.split(":", 1)[1]
-            await self._send_via_channel(channel_conn_id, message, hb_config)
+        if report_to == "telegram":
+            await self._send_via_integration(workspace_id, "telegram", message, hb_config)
+        elif report_to == "slack":
+            await self._send_via_integration(workspace_id, "slack", message, hb_config)
         elif report_to == "webhook":
             webhook_url = hb_config.get("webhook_url")
             if webhook_url:
@@ -625,55 +628,63 @@ class HeartbeatService:
 
         return "\n".join(lines)
 
-    async def _send_via_channel(self, connection_id: str, message: str, hb_config: dict):
-        """Send notification through a connected channel (Telegram, Slack, etc.)."""
+    async def _send_via_integration(
+        self, workspace_id: str, platform: str, message: str, hb_config: dict
+    ):
+        """Send notification through workspace integration (Telegram, Slack, etc.)."""
         try:
-            from channels.manager import get_channel_manager
+            from core.database.database import SessionLocal
+            from core.models.workspaces import Workspace
 
-            mgr = get_channel_manager()
-            adapter = mgr._adapters.get(connection_id)
-            if not adapter:
-                logger.warning(
-                    "[Heartbeat] Channel adapter %s not found/running, skipping notification",
-                    connection_id,
-                )
-                return
+            db = SessionLocal()
+            try:
+                ws = db.query(Workspace).get(workspace_id)
+                if not ws:
+                    logger.warning("[Heartbeat] Workspace %s not found for notification", workspace_id)
+                    return
 
-            # Use the channel_id from hb_config if set, otherwise fall back
-            # to the adapter's default chat (from channel_connections.metadata)
-            target_chat = hb_config.get("channel_id") or ""
-            if not target_chat:
-                # Try to get default chat from the connection's metadata
-                from core.database.database import SessionLocal
-                from sqlalchemy import text as sql_text
+                integrations = (ws.settings or {}).get("integrations", {})
 
-                db = SessionLocal()
-                try:
-                    row = db.execute(
-                        sql_text("SELECT metadata FROM channel_connections WHERE id = :cid"),
-                        {"cid": connection_id},
-                    ).fetchone()
-                    if row and row.metadata:
-                        meta = row.metadata if isinstance(row.metadata, dict) else json.loads(row.metadata)
-                        target_chat = str(meta.get("default_chat_id", ""))
-                finally:
-                    db.close()
+                if platform == "telegram":
+                    token = integrations.get("telegram_bot_token")
+                    chat_id = hb_config.get("channel_id") or integrations.get("telegram_default_chat_id")
+                    if not token:
+                        logger.warning("[Heartbeat] No telegram_bot_token configured for ws=%s", workspace_id)
+                        return
+                    if not chat_id:
+                        logger.warning("[Heartbeat] No chat_id for Telegram notification (ws=%s)", workspace_id)
+                        return
 
-            if not target_chat:
-                logger.warning(
-                    "[Heartbeat] No target chat ID for channel %s, skipping",
-                    connection_id,
-                )
-                return
+                    from api.webhooks import _send_telegram_reply
+                    ok = await _send_telegram_reply(int(chat_id), message, token)
+                    if ok:
+                        logger.info("[Heartbeat] Telegram notification sent to chat %s", chat_id)
+                    else:
+                        logger.warning("[Heartbeat] Telegram send failed for chat %s", chat_id)
 
-            ok = await adapter.send_message(target_chat, message)
-            if ok:
-                logger.info("[Heartbeat] Notification sent via channel %s", connection_id)
-            else:
-                logger.warning("[Heartbeat] Channel %s send_message returned False", connection_id)
+                elif platform == "slack":
+                    token = integrations.get("slack_bot_token")
+                    channel = hb_config.get("channel_id") or integrations.get("slack_default_channel")
+                    if not token:
+                        logger.warning("[Heartbeat] No slack_bot_token configured for ws=%s", workspace_id)
+                        return
+                    if not channel:
+                        logger.warning("[Heartbeat] No channel for Slack notification (ws=%s)", workspace_id)
+                        return
 
+                    from api.webhooks import _send_slack_reply
+                    ok = await _send_slack_reply(channel, message, token)
+                    if ok:
+                        logger.info("[Heartbeat] Slack notification sent to %s", channel)
+                    else:
+                        logger.warning("[Heartbeat] Slack send failed for %s", channel)
+
+                else:
+                    logger.warning("[Heartbeat] Unknown integration platform: %s", platform)
+            finally:
+                db.close()
         except Exception as e:
-            logger.error("[Heartbeat] Failed to send via channel %s: %s", connection_id, e)
+            logger.error("[Heartbeat] Integration notification failed (%s): %s", platform, e)
 
     async def _send_via_webhook(self, url: str, result: dict, message: str):
         """POST heartbeat result to a webhook URL."""

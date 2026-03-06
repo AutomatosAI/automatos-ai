@@ -155,7 +155,7 @@ export function AgentConfigurationModal({
   })
   const [heartbeatRunning, setHeartbeatRunning] = useState(false)
   const [lastHeartbeatResult, setLastHeartbeatResult] = useState<any>(null)
-  const [connectedChannels, setConnectedChannels] = useState<Array<{ id: string; platform: string; status: string }>>([])
+  const [connectedIntegrations, setConnectedIntegrations] = useState<Array<{ key: string; platform: string }>>([])
 
 
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
@@ -330,13 +330,19 @@ export function AgentConfigurationModal({
         if (data) setLastHeartbeatResult(data)
       })
       .catch(() => {})
-    // Load connected channels for Report To dropdown
-    apiClient.request<any>(`/api/channels`)
+    // Load workspace integrations for Report To dropdown
+    apiClient.request<any>(`/api/workspaces/current/integrations`)
       .then((data) => {
-        if (!mounted) return
-        if (Array.isArray(data)) {
-          setConnectedChannels(data.filter((ch: any) => ch.status === 'active'))
+        if (!mounted || !data) return
+        const platformMap: Record<string, string> = {
+          telegram_bot_token: 'telegram',
+          slack_bot_token: 'slack',
         }
+        const configured = Object.entries(data)
+          .filter(([_, v]: any) => v?.configured)
+          .map(([key]) => ({ key, platform: platformMap[key] || key }))
+          .filter(i => i.platform) // only messaging platforms
+        setConnectedIntegrations(configured)
       })
       .catch(() => {})
     return () => { mounted = false }
@@ -1730,9 +1736,9 @@ export function AgentConfigurationModal({
                               <SelectContent>
                                 <SelectItem value="orchestrator">Orchestrator (DB only)</SelectItem>
                                 <SelectItem value="direct">Direct (Chat)</SelectItem>
-                                {connectedChannels.map((ch) => (
-                                  <SelectItem key={ch.id} value={`channel:${ch.id}`}>
-                                    {ch.platform.charAt(0).toUpperCase() + ch.platform.slice(1)}
+                                {connectedIntegrations.map((i) => (
+                                  <SelectItem key={i.key} value={i.platform}>
+                                    {i.platform.charAt(0).toUpperCase() + i.platform.slice(1)}
                                   </SelectItem>
                                 ))}
                                 <SelectItem value="webhook">Webhook URL</SelectItem>
@@ -1741,7 +1747,8 @@ export function AgentConfigurationModal({
                             <p className="text-xs text-muted-foreground">
                               {heartbeatConfig.report_to === 'orchestrator' && 'Results stored in database, visible in analytics'}
                               {heartbeatConfig.report_to === 'direct' && 'Results appear in agent chat'}
-                              {heartbeatConfig.report_to.startsWith('channel:') && 'Results pushed to connected channel'}
+                              {heartbeatConfig.report_to === 'telegram' && 'Results sent to your Telegram chat'}
+                              {heartbeatConfig.report_to === 'slack' && 'Results sent to your Slack channel'}
                               {heartbeatConfig.report_to === 'webhook' && 'Results POSTed as JSON to your URL'}
                             </p>
                           </div>
@@ -1760,18 +1767,24 @@ export function AgentConfigurationModal({
                             </div>
                           )}
 
-                          {/* Channel target chat ID (shown when channel selected) */}
-                          {heartbeatConfig.report_to.startsWith('channel:') && (
+                          {/* Chat/Channel ID (shown when telegram or slack selected) */}
+                          {(heartbeatConfig.report_to === 'telegram' || heartbeatConfig.report_to === 'slack') && (
                             <div className="space-y-2">
-                              <Label>Channel/Chat ID <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                              <Label>
+                                {heartbeatConfig.report_to === 'telegram' ? 'Telegram Chat ID' : 'Slack Channel ID'}
+                              </Label>
                               <Input
                                 value={heartbeatConfig.channel_id || ''}
                                 onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, channel_id: e.target.value }))}
-                                placeholder="Leave empty to use default chat"
+                                placeholder={heartbeatConfig.report_to === 'telegram'
+                                  ? 'e.g. -1001234567890 (group) or 123456789 (DM)'
+                                  : 'e.g. C01ABCDEF'}
                                 className="bg-secondary/50"
                               />
                               <p className="text-xs text-muted-foreground">
-                                Telegram: chat ID or group ID. Slack: channel ID. Leave empty to use the channel default.
+                                {heartbeatConfig.report_to === 'telegram'
+                                  ? 'Your Telegram chat or group ID. Send /start to your bot to get it.'
+                                  : 'The Slack channel ID where notifications should go.'}
                               </p>
                             </div>
                           )}
