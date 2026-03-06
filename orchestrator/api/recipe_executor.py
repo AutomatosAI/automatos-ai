@@ -852,7 +852,7 @@ async def _execute_recipe_inner(
             # The output is appended to the prompt so the LLM only does analysis.
             pre_exec_cmd = step.get("pre_exec")
             pre_exec_cwd = step.get("pre_exec_cwd")
-            pre_exec_timeout = step.get("pre_exec_timeout", 300)
+            pre_exec_timeout = step.get("pre_exec_timeout", 600)
             if pre_exec_cmd and workspace_id:
                 logger.info(f"[recipe_direct] Step {step_order} pre_exec: {pre_exec_cmd[:200]}")
                 try:

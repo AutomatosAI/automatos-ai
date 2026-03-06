@@ -33,7 +33,7 @@ def _get_client() -> httpx.AsyncClient:
         if config.WORKER_INTERNAL_TOKEN:
             headers["X-Internal-Token"] = config.WORKER_INTERNAL_TOKEN
         _client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=130.0, write=30.0, pool=10.0),
+            timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=10.0),
             headers=headers,
         )
     return _client
@@ -139,7 +139,7 @@ class WorkspaceClient:
         """Run a sandboxed shell command in the workspace."""
         client = _get_client()
         url = _worker_url(self.workspace_id, "/exec")
-        body: Dict[str, Any] = {"command": command, "timeout": min(timeout, 300)}
+        body: Dict[str, Any] = {"command": command, "timeout": min(timeout, 600)}
         if cwd:
             body["cwd"] = cwd
         try:
