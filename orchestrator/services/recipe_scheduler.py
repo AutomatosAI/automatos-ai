@@ -150,7 +150,6 @@ class RecipeSchedulerService:
         from core.database.database import SessionLocal
         from core.models import WorkflowTemplate as WorkflowRecipe
         from core.models.core import RecipeExecution
-        from api.recipe_executor import execute_recipe_direct
         from uuid import uuid4
 
         db = SessionLocal()
@@ -191,13 +190,12 @@ class RecipeSchedulerService:
 
             logger.info("[RecipeScheduler] Firing recipe %d (%s), execution=%s", recipe.id, recipe.name, execution_id)
 
-            asyncio.create_task(
-                execute_recipe_direct(
-                    recipe_execution_id=execution_id,
-                    recipe_id=recipe.id,
-                    workspace_id=UUID(str(recipe.workspace_id)),
-                    input_data={},
-                )
+            from api.recipe_executor import launch_recipe_task
+            launch_recipe_task(
+                recipe_execution_id=execution_id,
+                recipe_id=recipe.id,
+                workspace_id=UUID(str(recipe.workspace_id)),
+                input_data={},
             )
         except Exception as e:
             logger.error("[RecipeScheduler] Failed to fire recipe %d: %s", recipe_id, e, exc_info=True)

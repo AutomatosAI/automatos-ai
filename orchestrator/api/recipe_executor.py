@@ -532,6 +532,51 @@ def _build_compact_step_result(
 
 
 # ---------------------------------------------------------------------------
+# Safe fire-and-forget wrapper
+# ---------------------------------------------------------------------------
+
+def launch_recipe_task(
+    recipe_execution_id: str,
+    recipe_id: int,
+    workspace_id: UUID,
+    input_data: dict,
+):
+    """Launch execute_recipe_direct as an async task with crash protection.
+
+    If the task raises an unhandled exception, the execution record is
+    marked as 'failed' instead of silently staying in 'pending' forever.
+    """
+
+    async def _safe_execute():
+        try:
+            await execute_recipe_direct(
+                recipe_execution_id=recipe_execution_id,
+                recipe_id=recipe_id,
+                workspace_id=workspace_id,
+                input_data=input_data,
+            )
+        except Exception as e:
+            logger.error(
+                "[recipe_direct] Async task crashed for execution %s: %s",
+                recipe_execution_id, e, exc_info=True,
+            )
+            # Last-resort: mark execution as failed so it doesn't hang forever
+            try:
+                db = SessionLocal()
+                try:
+                    await _fail_execution(db, recipe_execution_id, f"Task crashed: {e}")
+                finally:
+                    db.close()
+            except Exception as inner:
+                logger.error(
+                    "[recipe_direct] Could not mark execution %s as failed: %s",
+                    recipe_execution_id, inner,
+                )
+
+    asyncio.create_task(_safe_execute())
+
+
+# ---------------------------------------------------------------------------
 # Main executor
 # ---------------------------------------------------------------------------
 

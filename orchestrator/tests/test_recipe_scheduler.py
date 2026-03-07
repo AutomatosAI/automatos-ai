@@ -283,29 +283,28 @@ class TestFireRecipe:
 
     @pytest.mark.asyncio
     async def test_fire_recipe_success(self, mock_recipe):
-        """Re-fetches recipe, creates RecipeExecution, calls execute_recipe_direct."""
+        """Re-fetches recipe, creates RecipeExecution, calls launch_recipe_task."""
         svc = RecipeSchedulerService()
         mock_sched = MagicMock()
         svc._scheduler = mock_sched
 
         mock_db, db_module = _make_db_mock(first_result=mock_recipe)
-        mock_exec_direct = AsyncMock()
+        mock_launch = MagicMock()
         mock_execution_cls = MagicMock()
 
         extra = {
             "core.models.core": MagicMock(RecipeExecution=mock_execution_cls),
-            "api.recipe_executor": MagicMock(execute_recipe_direct=mock_exec_direct),
+            "api.recipe_executor": MagicMock(launch_recipe_task=mock_launch),
         }
 
-        with patch.dict(sys.modules, _lazy_import_patches(db_module, extra)), \
-             patch("asyncio.create_task") as mock_create_task:
+        with patch.dict(sys.modules, _lazy_import_patches(db_module, extra)):
             await svc._fire_recipe(mock_recipe.id, str(mock_recipe.workspace_id))
 
         # Should have added a RecipeExecution to the DB
         mock_db.add.assert_called_once()
         mock_db.commit.assert_called_once()
-        # Should have created a task for execution
-        mock_create_task.assert_called_once()
+        # Should have launched the recipe task
+        mock_launch.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_fire_recipe_deleted(self, mock_recipe):
