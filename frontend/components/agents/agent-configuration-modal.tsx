@@ -120,6 +120,12 @@ export function AgentConfigurationModal({
   const [pluginsLoading, setPluginsLoading] = useState(false)
   const [pluginsSaving, setPluginsSaving] = useState(false)
 
+  // PRD-71: Skill assignment state
+  const [workspaceSkills, setWorkspaceSkills] = useState<any[]>([])
+  const [assignedSkillIds, setAssignedSkillIds] = useState<Set<number>>(new Set())
+  const [skillsLoading, setSkillsLoading] = useState(false)
+  const [skillsSaving, setSkillsSaving] = useState(false)
+
   // US-023: Persona state
   type PersonaMode = 'none' | 'predefined' | 'custom'
   const [personaMode, setPersonaMode] = useState<PersonaMode>('none')
@@ -143,10 +149,14 @@ export function AgentConfigurationModal({
     active_hours_end: '20:00',
     prompt: '',
     auto_act: false,
-    report_to: 'orchestrator'
+    report_to: 'orchestrator',
+    webhook_url: '',
+    channel_id: '',
   })
   const [heartbeatRunning, setHeartbeatRunning] = useState(false)
   const [lastHeartbeatResult, setLastHeartbeatResult] = useState<any>(null)
+  const [connectedIntegrations, setConnectedIntegrations] = useState<Array<{ key: string; platform: string }>>([])
+
 
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
@@ -207,6 +217,45 @@ export function AgentConfigurationModal({
     return () => { mounted = false }
   }, [open, agentId])
 
+  // PRD-71: Fetch workspace-enabled skills and agent skill assignments when modal opens
+  useEffect(() => {
+    if (!open || !agentId) return
+    let mounted = true
+    ;(async () => {
+      setSkillsLoading(true)
+      try {
+        const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+        if (!workspaceId) {
+          if (mounted) setSkillsLoading(false)
+          return
+        }
+
+        const [wsRes, asRes] = await Promise.all([
+          apiClient.request<any>(`/api/workspaces/${workspaceId}/skills`, { method: 'GET' }),
+          apiClient.request<any>(`/api/agents/${agentId}/skills`, { method: 'GET' }),
+        ])
+
+        if (!mounted) return
+
+        const wsItems = wsRes?.items || []
+        const agentSkills = asRes?.data || asRes || []
+        setWorkspaceSkills(Array.isArray(wsItems) ? wsItems : [])
+        setAssignedSkillIds(new Set(
+          (Array.isArray(agentSkills) ? agentSkills : []).map((s: any) => s.id)
+        ))
+      } catch (err) {
+        console.error('Failed to fetch skills:', err)
+        if (mounted) {
+          setWorkspaceSkills([])
+          setAssignedSkillIds(new Set())
+        }
+      } finally {
+        if (mounted) setSkillsLoading(false)
+      }
+    })()
+    return () => { mounted = false }
+  }, [open, agentId])
+
   // US-023: Fetch personas list and current agent persona when modal opens
   useEffect(() => {
     if (!open || !agentId) return
@@ -262,7 +311,7 @@ export function AgentConfigurationModal({
     return () => { mounted = false }
   }, [open, agentId])
 
-  // PRD-55: Load heartbeat config when modal opens
+  // PRD-55: Load heartbeat config + connected channels when modal opens
   useEffect(() => {
     if (!open || !agentId) return
     let mounted = true
@@ -281,6 +330,37 @@ export function AgentConfigurationModal({
         if (data) setLastHeartbeatResult(data)
       })
       .catch(() => {})
+    // Load connected messaging platforms for Report To dropdown
+    // Check both workspace integrations AND channel_connections
+    Promise.all([
+      apiClient.request<any>(`/api/workspaces/current/integrations`).catch(() => ({})),
+      apiClient.request<any>(`/api/channels`).catch(() => []),
+    ]).then(([integrations, channels]) => {
+      if (!mounted) return
+      const found: Array<{ key: string; platform: string }> = []
+      const seen = new Set<string>()
+      // From workspace integrations
+      const platformMap: Record<string, string> = { telegram_bot_token: 'telegram', slack_bot_token: 'slack' }
+      if (integrations) {
+        for (const [key, val] of Object.entries(integrations)) {
+          const platform = platformMap[key]
+          if (platform && (val as any)?.configured && !seen.has(platform)) {
+            found.push({ key, platform })
+            seen.add(platform)
+          }
+        }
+      }
+      // From channel_connections
+      if (Array.isArray(channels)) {
+        for (const ch of channels) {
+          if (!seen.has(ch.platform)) {
+            found.push({ key: `channel:${ch.id}`, platform: ch.platform })
+            seen.add(ch.platform)
+          }
+        }
+      }
+      setConnectedIntegrations(found)
+    })
     return () => { mounted = false }
   }, [open, agentId])
 
@@ -406,6 +486,46 @@ export function AgentConfigurationModal({
   const assignedTokenEstimate = workspacePlugins
     .filter((p: any) => assignedPluginIds.has(p.plugin_id))
     .reduce((sum: number, p: any) => sum + (p.token_estimate || 0), 0)
+
+  // PRD-71: Toggle skill assignment and persist via API
+  const toggleSkillAssignment = async (skillId: number) => {
+    if (!agentId) return
+    const wasAssigned = assignedSkillIds.has(skillId)
+    const newIds = new Set(assignedSkillIds)
+    if (wasAssigned) {
+      newIds.delete(skillId)
+    } else {
+      newIds.add(skillId)
+    }
+
+    // Optimistic update
+    setAssignedSkillIds(newIds)
+    setSkillsSaving(true)
+
+    try {
+      if (wasAssigned) {
+        await apiClient.request(`/api/agents/${agentId}/skills/${skillId}`, {
+          method: 'DELETE',
+        })
+      } else {
+        await apiClient.request(`/api/agents/${agentId}/skills`, {
+          method: 'POST',
+          body: JSON.stringify([skillId]),
+        })
+      }
+    } catch (err) {
+      // Revert on error
+      console.error('Failed to update skill assignment:', err)
+      setAssignedSkillIds(assignedSkillIds)
+    } finally {
+      setSkillsSaving(false)
+    }
+  }
+
+  // PRD-71: Compute total token estimate for assigned skills
+  const assignedSkillTokenEstimate = workspaceSkills
+    .filter((s: any) => assignedSkillIds.has(s.skill_id))
+    .reduce((sum: number, s: any) => sum + (s.estimated_tokens || 0), 0)
 
   // US-023: Save persona assignment
   const handleSavePersona = async () => {
@@ -1198,6 +1318,109 @@ export function AgentConfigurationModal({
                       )}
                     </CardContent>
                   </Card>
+
+                  {/* PRD-71: Skill Assignment */}
+                  <Card className="bg-secondary/30 border-border/30">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Zap className="h-5 w-5 text-primary" />
+                        Skill Assignment
+                      </CardTitle>
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-muted-foreground">
+                          Assign individual skills to inject methodology into this agent
+                        </p>
+                        {assignedSkillIds.size > 0 && (
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="text-xs">
+                              <Coins className="w-3 h-3 mr-1" />
+                              ~{assignedSkillTokenEstimate.toLocaleString()} tokens
+                            </Badge>
+                            <Badge variant="outline" className="text-xs">
+                              {assignedSkillIds.size} assigned
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {skillsLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                        </div>
+                      ) : workspaceSkills.length > 0 ? (
+                        <div className="space-y-3">
+                          {workspaceSkills.map((skill: any) => {
+                            const isAssigned = assignedSkillIds.has(skill.skill_id)
+                            return (
+                              <div
+                                key={skill.skill_id}
+                                className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${
+                                  isAssigned
+                                    ? 'bg-primary/5 border-primary/30'
+                                    : 'bg-background/50 border-border/50'
+                                }`}
+                              >
+                                <Checkbox
+                                  id={`skill-${skill.skill_id}`}
+                                  checked={isAssigned}
+                                  onCheckedChange={() => toggleSkillAssignment(skill.skill_id)}
+                                  disabled={skillsSaving}
+                                  className="mt-1"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <Label htmlFor={`skill-${skill.skill_id}`} className="cursor-pointer">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="font-medium truncate">{skill.name}</span>
+                                        {skill.skill_version && (
+                                          <Badge variant="outline" className="text-xs shrink-0">
+                                            v{skill.skill_version}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      {skill.category && (
+                                        <Badge variant="secondary" className="text-xs shrink-0">
+                                          {skill.category}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                      {skill.description || 'No description available'}
+                                    </p>
+                                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                      {skill.estimated_tokens > 0 && (
+                                        <span className="flex items-center gap-1">
+                                          <Coins className="w-3 h-3" />
+                                          ~{skill.estimated_tokens.toLocaleString()} tokens
+                                        </span>
+                                      )}
+                                      {skill.skill_source && (
+                                        <span className="flex items-center gap-1">
+                                          <Terminal className="w-3 h-3" />
+                                          {skill.skill_source}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </Label>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-6">
+                          <Zap className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                          <p className="text-sm text-muted-foreground">
+                            No skills enabled for this workspace yet.
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Enable skills in Marketplace &gt; Capabilities &gt; Skills
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
                 </TabsContent>
 
                 <TabsContent value="tools" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
@@ -1527,12 +1750,51 @@ export function AgentConfigurationModal({
                             >
                               <SelectTrigger><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="orchestrator">Orchestrator</SelectItem>
+                                <SelectItem value="orchestrator">Orchestrator (DB only)</SelectItem>
                                 <SelectItem value="direct">Direct (Chat)</SelectItem>
-                                <SelectItem value="webhook">Webhook</SelectItem>
+                                {connectedIntegrations.map((i) => (
+                                  <SelectItem key={i.key} value={i.platform}>
+                                    {i.platform.charAt(0).toUpperCase() + i.platform.slice(1)}
+                                  </SelectItem>
+                                ))}
+                                <SelectItem value="webhook">Webhook URL</SelectItem>
                               </SelectContent>
                             </Select>
+                            <p className="text-xs text-muted-foreground">
+                              {heartbeatConfig.report_to === 'orchestrator' && 'Results stored in database, visible in analytics'}
+                              {heartbeatConfig.report_to === 'direct' && 'Results appear in agent chat'}
+                              {heartbeatConfig.report_to === 'telegram' && 'Results sent to your Telegram chat'}
+                              {heartbeatConfig.report_to === 'slack' && 'Results sent to your Slack channel'}
+                              {heartbeatConfig.report_to === 'webhook' && 'Results POSTed as JSON to your URL'}
+                            </p>
                           </div>
+
+                          {/* Webhook URL (shown when webhook selected) */}
+                          {heartbeatConfig.report_to === 'webhook' && (
+                            <div className="space-y-2">
+                              <Label>Webhook URL</Label>
+                              <Input
+                                type="url"
+                                value={heartbeatConfig.webhook_url || ''}
+                                onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, webhook_url: e.target.value }))}
+                                placeholder="https://hooks.slack.com/... or any endpoint"
+                                className="bg-secondary/50"
+                              />
+                            </div>
+                          )}
+
+                          {/* Slack channel ID (only shown for Slack — Telegram auto-resolves) */}
+                          {heartbeatConfig.report_to === 'slack' && (
+                            <div className="space-y-2">
+                              <Label>Slack Channel ID</Label>
+                              <Input
+                                value={heartbeatConfig.channel_id || ''}
+                                onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, channel_id: e.target.value }))}
+                                placeholder="e.g. C01ABCDEF"
+                                className="bg-secondary/50"
+                              />
+                            </div>
+                          )}
                         </>
                       )}
 

@@ -29,7 +29,9 @@ router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 # Keys that are allowed in workspace.settings.integrations
 _ALLOWED_INTEGRATION_KEYS = {
     "telegram_bot_token",
+    "telegram_default_chat_id",
     "slack_bot_token",
+    "slack_default_channel",
     "whatsapp_phone_number_id",
     "whatsapp_access_token",
 }

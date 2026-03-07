@@ -106,6 +106,9 @@ class MarketplacePlugin(Base):
     # Usage
     enable_count = Column(Integer, default=0)
 
+    # PRD-71: IDs of Skill records materialized from this plugin's SKILL.md files
+    materialized_skill_ids = Column(JSONB, default=list)
+
     # Timestamps
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -202,6 +205,33 @@ class WorkspaceEnabledPlugin(Base):
 
     # Relationships
     plugin = relationship("MarketplacePlugin")
+
+
+# ============================================================================
+# PRD-71: Workspace Skill Enablement (Junction) — mirrors WorkspaceEnabledPlugin
+# ============================================================================
+
+class WorkspaceEnabledSkill(Base):
+    """Junction table: which skills are enabled for which workspaces."""
+    __tablename__ = "workspace_enabled_skills"
+    __table_args__ = (
+        Index("idx_workspace_enabled_skills_workspace", "workspace_id"),
+        Index("idx_workspace_enabled_skills_skill", "skill_id"),
+        {"extend_existing": True},
+    )
+
+    workspace_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    skill_id = Column(
+        Integer,
+        ForeignKey("skills.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    enabled_at = Column(DateTime, server_default=func.now(), nullable=False)
+    enabled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
 
 # ============================================================================

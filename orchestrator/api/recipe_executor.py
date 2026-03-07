@@ -39,6 +39,22 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Per-workspace execution lock — prevents concurrent recipes stomping on the
+# same git working tree.  Keys are workspace_id strings; values are asyncio
+# Locks created on first access.  The dict itself is process-global but safe
+# because asyncio is single-threaded.
+# ---------------------------------------------------------------------------
+_workspace_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _get_workspace_lock(workspace_id: str) -> asyncio.Lock:
+    """Return (or create) an asyncio.Lock for the given workspace."""
+    if workspace_id not in _workspace_locks:
+        _workspace_locks[workspace_id] = asyncio.Lock()
+    return _workspace_locks[workspace_id]
+
+
+# ---------------------------------------------------------------------------
 # Step executor — uses chatbot's exact component path
 # ---------------------------------------------------------------------------
 
@@ -52,6 +68,7 @@ async def _execute_step(
     input_data: Optional[dict] = None,
     recipe_memories: Optional[dict] = None,
     prompt_for_hints: Optional[str] = None,
+    max_iterations: int = 25,
 ) -> dict:
     """
     Execute a single recipe step using the chatbot's exact component path.
@@ -67,6 +84,10 @@ async def _execute_step(
         recipe_memories: Mem0 memories to inject (first step only)
         prompt_for_hints: Clean task-only prompt for hint generation (avoids
             trigger metadata polluting action matching). Falls back to clean_prompt.
+        max_iterations: Max LLM tool-call turns for this step. Higher values
+            let the agent do more work (e.g. bug fixer needs ~15-20 turns).
+            Configurable per step via step.max_iterations, per agent via
+            agent.configuration.max_iterations, or falls back to 25.
 
     Returns:
         Dict with status, result, and execution metadata.
@@ -78,8 +99,11 @@ async def _execute_step(
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.tools.builtin.scratchpad_tool import (
         SCRATCHPAD_WRITE_TOOL_DEF,
+        SCRATCHPAD_READ_TOOL_DEF,
         SCRATCHPAD_TOOL_NAME,
+        SCRATCHPAD_READ_NAME,
         handle_scratchpad_write,
+        handle_scratchpad_read,
     )
 
     # 0. Activate agent via factory — gives us the agent's LLM manager
@@ -92,8 +116,8 @@ async def _execute_step(
             "execution": {"tokens_used": 0, "tool_calls": [], "messages": []},
         }
 
-    # 1. System prompt — build from agent's identity and skills
-    system_prompt = await _build_system_prompt(agent, db)
+    # 1. System prompt — PRD-71: use pre-built prompt from agent_runtime
+    system_prompt = await _build_system_prompt(agent, db, agent_runtime=agent_runtime)
     messages = [{"role": "system", "content": system_prompt}]
 
     # 1b. Recipe step scope — prevent agent from wandering into other steps' tasks
@@ -209,7 +233,10 @@ async def _execute_step(
         # Fallback: composio_execute + hints (existing behavior)
         tools = get_chat_tools(agent_id=agent.id, workspace_id=workspace_id)
     if scratchpad:
-        tools = list(tools) + [SCRATCHPAD_WRITE_TOOL_DEF]
+        scratchpad_tools = [SCRATCHPAD_WRITE_TOOL_DEF]
+        if step_order > 1:
+            scratchpad_tools.append(SCRATCHPAD_READ_TOOL_DEF)
+        tools = list(tools) + scratchpad_tools
 
     # 6. LLM — agent's own LLM manager (with tracking context for recipe)
     llm = agent_runtime.llm_manager
@@ -220,7 +247,6 @@ async def _execute_step(
     tool_router = get_tool_router()
     all_tool_calls = []
     _composio_call_cache: Dict[str, str] = {}  # dedup: "ACTION|args_hash" → cached result
-    max_iterations = 10
     response = None
 
     for iteration in range(max_iterations):
@@ -246,7 +272,7 @@ async def _execute_step(
             except json.JSONDecodeError:
                 tool_args = {}
 
-            # Handle scratchpad_write inline (no tool_router needed)
+            # Handle scratchpad tools inline (no tool_router needed)
             if tool_name == SCRATCHPAD_TOOL_NAME and scratchpad:
                 result_text = handle_scratchpad_write(
                     key=tool_args.get("key", "unknown"),
@@ -256,6 +282,23 @@ async def _execute_step(
                 )
                 all_tool_calls.append({
                     "action": SCRATCHPAD_TOOL_NAME,
+                    "params": tool_args,
+                    "result": result_text,
+                })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_id,
+                    "content": result_text,
+                })
+                continue
+
+            if tool_name == SCRATCHPAD_READ_NAME and scratchpad:
+                result_text = handle_scratchpad_read(
+                    key=tool_args.get("key", ""),
+                    scratchpad=scratchpad,
+                )
+                all_tool_calls.append({
+                    "action": SCRATCHPAD_READ_NAME,
                     "params": tool_args,
                     "result": result_text,
                 })
@@ -392,16 +435,22 @@ def _composio_scope_message(app_names: List[str]) -> str:
     )
 
 
-async def _build_system_prompt(agent: Agent, db: Session) -> str:
+async def _build_system_prompt(
+    agent: Agent, db: Session, agent_runtime=None,
+) -> str:
     """
-    Build a system prompt for the agent from its DB record.
+    Build a system prompt for the agent.
 
-    Simplified version of agent_factory._build_agent_system_prompt —
-    loads identity + skills without the full factory machinery.
-
-    If the agent has assigned plugins, loads plugin context (Tier 1 + Tier 2)
-    and skips skill loading entirely.
+    PRD-71: Uses the pre-built system prompt from AgentRuntime (built once at
+    activation by agent_factory). Falls back to a minimal prompt if the runtime
+    has no pre-built prompt.
     """
+    # PRD-71: Use pre-built prompt from AgentRuntime (single injection point)
+    if agent_runtime and getattr(agent_runtime, 'system_prompt', None):
+        return agent_runtime.system_prompt
+
+    # Fallback: minimal identity-only prompt (shouldn't happen in normal flow)
+    logger.warning("[recipe] No pre-built system_prompt on AgentRuntime — using minimal fallback")
     sections = [
         f"# Agent: {agent.name}",
         f"Agent ID: {agent.id}",
@@ -409,66 +458,6 @@ async def _build_system_prompt(agent: Agent, db: Session) -> str:
     ]
     if agent.description:
         sections.append(agent.description)
-
-    # PRD-42: Inject persona
-    try:
-        if getattr(agent, 'use_custom_persona', False) and agent.custom_persona_prompt:
-            sections.append(f"\n## Persona & Communication Style\n{agent.custom_persona_prompt}")
-            logger.info(f"[recipe] Loaded custom persona for agent {agent.id}")
-        elif getattr(agent, 'persona_id', None) and getattr(agent, 'persona', None):
-            persona_prompt = agent.persona.system_prompt or ""
-            if persona_prompt:
-                sections.append(f"\n## Persona & Communication Style\n{persona_prompt}")
-                logger.info(f"[recipe] Loaded persona '{agent.persona.name}' for agent {agent.id}")
-    except Exception as e:
-        logger.warning(f"[recipe] Failed to load persona for agent {agent.id}: {e}")
-
-    # PRD-42: Load plugins — if present, skip skills entirely
-    has_plugins = False
-    try:
-        from core.services.plugin_context_service import PluginContextService
-
-        plugin_svc = PluginContextService(db)
-        plugin_rows = plugin_svc.get_assigned_plugins(agent.id)
-        if plugin_rows:
-            has_plugins = True
-            tier1 = plugin_svc.build_tier1_summary(plugin_rows)
-            tier2 = await plugin_svc.build_tier2_content(
-                plugin_rows,
-                task_context=agent.description,
-            )
-            sections.append(tier1)
-            if tier2:
-                sections.append(tier2)
-            logger.info(
-                "[recipe] Loaded plugin context for agent %s (%d plugins)",
-                agent.id, len(plugin_rows),
-            )
-    except Exception as e:
-        logger.warning(f"[recipe] Failed to load plugins for agent {agent.id}: {e}")
-
-    # Load skills if assigned (skipped when plugins are present)
-    if not has_plugins and getattr(agent, 'skills', None):
-        sections.append("\n## Your Specialized Skills\n")
-        try:
-            from modules.agents.services.skill_loader import get_skill_loader
-            loader = get_skill_loader(db)
-            for skill in agent.skills:
-                sections.append(f"### {skill.name}")
-                core_content = None
-                try:
-                    core_content = loader.load_skill_core(skill.name, db=db)
-                except Exception:
-                    pass
-                if core_content and isinstance(core_content, str) and core_content.strip():
-                    sections.append(core_content)
-                else:
-                    fallback = skill.prompt_template or skill.description or ""
-                    if fallback:
-                        sections.append(str(fallback))
-        except Exception as e:
-            logger.warning(f"[recipe_step] Skill loading failed: {e}")
-
     return "\n\n".join(sections)
 
 
@@ -566,6 +555,51 @@ def _build_compact_step_result(
 
 
 # ---------------------------------------------------------------------------
+# Safe fire-and-forget wrapper
+# ---------------------------------------------------------------------------
+
+def launch_recipe_task(
+    recipe_execution_id: str,
+    recipe_id: int,
+    workspace_id: UUID,
+    input_data: dict,
+):
+    """Launch execute_recipe_direct as an async task with crash protection.
+
+    If the task raises an unhandled exception, the execution record is
+    marked as 'failed' instead of silently staying in 'pending' forever.
+    """
+
+    async def _safe_execute():
+        try:
+            await execute_recipe_direct(
+                recipe_execution_id=recipe_execution_id,
+                recipe_id=recipe_id,
+                workspace_id=workspace_id,
+                input_data=input_data,
+            )
+        except Exception as e:
+            logger.error(
+                "[recipe_direct] Async task crashed for execution %s: %s",
+                recipe_execution_id, e, exc_info=True,
+            )
+            # Last-resort: mark execution as failed so it doesn't hang forever
+            try:
+                db = SessionLocal()
+                try:
+                    await _fail_execution(db, recipe_execution_id, f"Task crashed: {e}")
+                finally:
+                    db.close()
+            except Exception as inner:
+                logger.error(
+                    "[recipe_direct] Could not mark execution %s as failed: %s",
+                    recipe_execution_id, inner,
+                )
+
+    asyncio.create_task(_safe_execute())
+
+
+# ---------------------------------------------------------------------------
 # Main executor
 # ---------------------------------------------------------------------------
 
@@ -587,6 +621,39 @@ async def execute_recipe_direct(
     5. Upload full log to S3, store compact summary in DB
     6. Handle errors per step.error_handling config
     """
+    # Serialize recipe executions per workspace — prevents concurrent
+    # bug-fixer runs from stomping on each other's git branches.
+    ws_lock = _get_workspace_lock(str(workspace_id))
+    waiting = ws_lock.locked()
+    if waiting:
+        logger.info(
+            "[recipe_direct] QUEUED — waiting for workspace lock %s (execution=%s, recipe=%s)",
+            workspace_id, recipe_execution_id, recipe_id,
+        )
+    async with ws_lock:
+        logger.info(
+            "[recipe_direct] Lock ACQUIRED for %s (execution=%s, recipe=%s, was_waiting=%s)",
+            workspace_id, recipe_execution_id, recipe_id, waiting,
+        )
+        try:
+            await _execute_recipe_inner(
+                recipe_execution_id, recipe_id, workspace_id, input_data, db_url,
+            )
+        finally:
+            logger.info(
+                "[recipe_direct] Lock RELEASED for %s (execution=%s)",
+                workspace_id, recipe_execution_id,
+            )
+
+
+async def _execute_recipe_inner(
+    recipe_execution_id: str,
+    recipe_id: int,
+    workspace_id: UUID,
+    input_data: dict,
+    db_url: Optional[str] = None,
+):
+    """Inner recipe execution — runs under the per-workspace lock."""
     # Create a fresh DB session for this async task
     _engine = None
     if db_url:
@@ -664,10 +731,26 @@ async def execute_recipe_direct(
         except Exception as exc:
             logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
 
-        # Read timeout config (stored in seconds in execution_config)
+        # Read timeout config from execution_config
+        # Values may be stored in ms (>=10000) or seconds (<10000) depending on
+        # when the recipe was created. Normalise to seconds.
+        # Threshold: 10000+ is clearly ms (e.g. 120000ms=120s).
+        # Values like 1200 are valid seconds (20min), NOT milliseconds.
         exec_config = recipe.execution_config or {}
-        step_timeout_sec = exec_config.get('per_step_timeout', 120)  # default 2 min
-        total_timeout_sec = exec_config.get('total_timeout', 600)    # default 10 min
+
+        raw_step = exec_config.get('timeout_per_step') or exec_config.get('per_step_timeout') or 300
+        raw_total = exec_config.get('total_timeout') or 600
+
+        step_timeout_sec = raw_step / 1000 if raw_step >= 10000 else raw_step   # ms → s
+        total_timeout_sec = raw_total / 1000 if raw_total >= 10000 else raw_total
+
+        # Clamp: at least 60s per step, at least 120s total
+        step_timeout_sec = max(step_timeout_sec, 60)
+        total_timeout_sec = max(total_timeout_sec, 120)
+        logger.info(
+            f"[recipe_direct] Timeouts: step={step_timeout_sec:.0f}s, "
+            f"total={total_timeout_sec:.0f}s (raw: step={raw_step}, total={raw_total})"
+        )
 
         # Execute each step sequentially
         step_results: List[Dict[str, Any]] = []
@@ -693,7 +776,9 @@ async def execute_recipe_direct(
             agent = agent_map.get(agent_id)
             agent_name = agent.name if agent else f"Agent {agent_id}"
 
-            logger.info(f"[recipe_direct] Step {step_order}/{total_steps}: {agent_name} — {prompt_template[:200]}")
+            agent_cfg = getattr(agent, 'configuration', None) or {}
+            step_max_iter = step.get("max_iterations", agent_cfg.get("max_iterations", 25))
+            logger.info(f"[recipe_direct] Step {step_order}/{total_steps}: {agent_name} (max_turns={step_max_iter}) — {prompt_template[:200]}")
 
             # Update execution progress
             execution.current_step = idx + 1
@@ -807,11 +892,57 @@ async def execute_recipe_direct(
                         _persist_step_results(db, execution, step_results)
                         continue
 
+            # Ensure git push credentials are set — uses the GITHUB PAT from
+            # Railway env vars (long-lived, has push scope).  Runs once per
+            # step that has a git-related pre_exec.
+            if workspace_id and step.get("pre_exec") and "git" in step.get("pre_exec", ""):
+                try:
+                    from config import config as _cfg
+                    github_pat = _cfg.GITHUB_PAT
+                    github_owner = _cfg.GITHUB_REPO_OWNER or "AutomatosAI"
+                    github_repo = _cfg.GITHUB_REPO_NAME or "automatos-ai"
+                    if github_pat:
+                        from core.workspace_client import WorkspaceClient
+                        import re as _re
+
+                        ws_client_cred = WorkspaceClient(str(workspace_id))
+                        # Discover repo dir from pre_exec command
+                        _m = _re.search(r"cd\s+(repos/[^\s&]+)", step.get("pre_exec", ""))
+                        repo_dir = _m.group(1) if _m else f"repos/{github_repo}"
+
+                        refresh_cmd = (
+                            f"cd {repo_dir} && "
+                            f"git remote set-url origin "
+                            f"https://x-access-token:{github_pat}@github.com/{github_owner}/{github_repo}.git"
+                        )
+                        await ws_client_cred.exec_command(command=refresh_cmd, timeout=10)
+                        logger.info("[recipe_direct] Step %d: set GitHub push credentials for %s/%s", step_order, github_owner, github_repo)
+
+                        # Reset workspace to clean main — previous recipe steps
+                        # (e.g. bug fixers) may leave the workspace on a dirty
+                        # branch, causing "git checkout main" in the pre_exec to
+                        # fail silently (masked by || true).
+                        reset_cmd = (
+                            f"cd {repo_dir} && "
+                            f"git checkout -f main 2>&1; "
+                            f"git clean -fd 2>&1"
+                        )
+                        reset_result = await ws_client_cred.exec_command(
+                            command=reset_cmd, timeout=30,
+                        )
+                        logger.info(
+                            "[recipe_direct] Step %d: workspace reset to main (exit=%s)",
+                            step_order, reset_result.get("exit_code"),
+                        )
+                except Exception as cred_err:
+                    # Non-blocking — push may still work with cached credentials
+                    logger.info("[recipe_direct] Git setup skipped: %s", cred_err)
+
             # Pre-exec: run deterministic workspace command before the LLM loop.
             # The output is appended to the prompt so the LLM only does analysis.
             pre_exec_cmd = step.get("pre_exec")
             pre_exec_cwd = step.get("pre_exec_cwd")
-            pre_exec_timeout = step.get("pre_exec_timeout", 300)
+            pre_exec_timeout = step.get("pre_exec_timeout", 600)
             if pre_exec_cmd and workspace_id:
                 logger.info(f"[recipe_direct] Step {step_order} pre_exec: {pre_exec_cmd[:200]}")
                 try:
@@ -912,6 +1043,7 @@ async def execute_recipe_direct(
                             input_data=input_data,
                             recipe_memories=recipe_memories if idx == 0 else None,
                             prompt_for_hints=prompt_template,
+                            max_iterations=step_max_iter,
                         ),
                         timeout=step_timeout_sec,
                     )
@@ -1039,6 +1171,9 @@ async def execute_recipe_direct(
             f"[recipe_direct] Execution {recipe_execution_id} COMPLETED — "
             f"{len(step_results)} steps, {total_duration}ms, {total_tokens} tokens"
         )
+
+        # --- Post-execution: update agent performance_metrics ---
+        _update_agent_performance_metrics(db, step_results, success=True)
 
         # --- Post-execution: learning + memory storage ---
         post_exec_config = recipe.execution_config or {}
@@ -1251,6 +1386,60 @@ async def _fail_execution(
                 execution.step_results = step_results
             db.commit()
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
+            # Update agent performance_metrics for failure
+            _update_agent_performance_metrics(db, step_results or [], success=False)
     except Exception as e:
         logger.error(f"[recipe_direct] Failed to mark execution as failed: {e}")
         db.rollback()
+
+
+def _update_agent_performance_metrics(
+    db: Session,
+    step_results: List[dict],
+    success: bool,
+):
+    """Update performance_metrics on every agent that participated in this execution.
+
+    Increments tasks_completed, tracks success/failure counts, and recalculates
+    success_rate.  Follows the same JSONB pattern as UsageTracker.track().
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    # Collect unique agent IDs from step results
+    agent_ids = list({
+        s.get("agent_id") for s in step_results
+        if s.get("agent_id")
+    })
+    if not agent_ids:
+        return
+
+    try:
+        agents = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+        for agent in agents:
+            metrics = dict(agent.performance_metrics or {})
+            total = metrics.get("total_tasks_executed", 0) + 1
+            successes = metrics.get("success_count", 0) + (1 if success else 0)
+            failures = metrics.get("failure_count", 0) + (0 if success else 1)
+
+            metrics["total_tasks_executed"] = total
+            metrics["tasks_completed"] = total
+            metrics["success_count"] = successes
+            metrics["failure_count"] = failures
+            metrics["success_rate"] = round(successes / total, 4) if total > 0 else 0
+            metrics["last_task_at"] = datetime.now(timezone.utc).isoformat()
+            metrics["last_task_success"] = success
+
+            agent.performance_metrics = metrics
+            flag_modified(agent, "performance_metrics")
+
+        db.commit()
+        logger.info(
+            f"[recipe_direct] Updated performance_metrics for {len(agents)} agents "
+            f"(success={success})"
+        )
+    except Exception as e:
+        logger.warning(f"[recipe_direct] Agent metrics update failed (non-blocking): {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass

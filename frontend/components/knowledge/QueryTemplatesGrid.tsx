@@ -207,23 +207,23 @@ export function QueryTemplatesGrid({ templates: initialTemplates, selectedSource
           return (
             <Card 
               key={template.id}
-              className="hover:shadow-lg transition-all cursor-pointer relative"
+              className="hover:border-primary/20 transition-all duration-300 cursor-pointer relative"
               onClick={() => setSelectedTemplate(template)}
             >
               {template.is_featured && (
                 <div className="absolute top-2 right-2">
-                  <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
+                  <Star className="h-4 w-4 text-[hsl(var(--warning))] fill-[hsl(var(--warning))]" />
                 </div>
               )}
               
               <CardHeader>
                 <div className="flex items-start justify-between">
                   <Icon className={`h-8 w-8 mb-2 ${
-                    template.category === 'analytics' ? 'text-blue-500' :
-                    template.category === 'reporting' ? 'text-green-500' :
-                    template.category === 'monitoring' ? 'text-orange-500' :
-                    template.category === 'troubleshooting' ? 'text-red-500' :
-                    'text-purple-500'
+                    template.category === 'analytics' ? 'text-[hsl(var(--info))]' :
+                    template.category === 'reporting' ? 'text-[hsl(var(--success))]' :
+                    template.category === 'monitoring' ? 'text-primary' :
+                    template.category === 'troubleshooting' ? 'text-[hsl(var(--destructive))]' :
+                    'text-[hsl(var(--agent))]'
                   }`} />
                   <VizIcon className="h-5 w-5 text-muted-foreground" />
                 </div>

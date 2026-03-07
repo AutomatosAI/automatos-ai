@@ -66,6 +66,7 @@
 | 33 | `platform_store_memory` | memory | — | write | PlatformActionExecutor |
 | 34 | `platform_delete_agent` | agents | — | destructive | PlatformActionExecutor |
 | 35 | `scratchpad_write` | recipe | — | write | handle_scratchpad_write |
+| 36 | `scratchpad_read` | recipe | — | read | handle_scratchpad_read |
 
 ---
 
@@ -1237,7 +1238,7 @@ Platform actions are routed by the `platform_` prefix in tool name. They execute
 
 ---
 
-## 13. Recipe Built-in (1)
+## 13. Recipe Built-ins (2)
 
 ### 13.1 `scratchpad_write`
 
@@ -1281,6 +1282,34 @@ Platform actions are routed by the `platform_` prefix in tool name. They execute
 - Missing value: error
 - Overwrite existing key: verify behavior
 - Only available in recipe context: not in chat tools
+
+### 13.2 `scratchpad_read`
+
+| Field | Value |
+|-------|-------|
+| **Description** | Read values from the shared recipe scratchpad written by earlier steps. Only available in recipe steps 2+. |
+| **Injected by** | Recipe step executor (not in ToolRegistry) — only for `step_order > 1` |
+| **Executor** | `handle_scratchpad_read()` in `modules/tools/builtin/scratchpad_tool.py` |
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `key` | string | no | Key to read. Use `*` or omit to read all exports. |
+
+**Returns:**
+- All exports as JSON (when key is `*` or omitted)
+- Single value string (when key matches)
+- Error with available keys (when key not found)
+- Empty scratchpad message (when no exports exist)
+
+**Test Scenarios:**
+- Read all exports: returns JSON of all keys
+- Read specific key: returns value string
+- Key not found: returns error with available keys listed
+- Empty scratchpad: returns informative message
+- Not available in step 1 (only step 2+)
+- Not available in chat context
 
 ---
 

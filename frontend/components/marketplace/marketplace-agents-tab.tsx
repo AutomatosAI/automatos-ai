@@ -2,12 +2,13 @@
 
 import { useState } from 'react'
 import {
-  Loader2, Download, Bot, Check, Trash2, Zap, MoreVertical, Eye,
+  Loader2, Download, Bot, Check, Trash2, Zap, MoreVertical,
   UserCircle, Headphones, Terminal, Share2, Calculator, ShoppingBag, PenTool, Users, BarChart3, Wrench
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import {
@@ -239,7 +240,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
           {agents.map((agent: MarketplaceAgent) => (
             <Card
               key={agent.id}
-              className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20 transition-all duration-300 cursor-pointer"
+              className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
               onClick={() => handleAgentClick(agent)}
             >
               <CardHeader className="pb-3">
@@ -265,32 +266,24 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                       </p>
                     </div>
                   </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}>
-                        <Eye className="w-4 h-4 mr-2" />
-                        View Details
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}>
-                        <Download className="w-4 h-4 mr-2" />
-                        Add to Workspace
-                      </DropdownMenuItem>
-                      {isAdmin && !agent.is_approved && (
-                        <DropdownMenuItem
-                          onClick={(e) => { e.stopPropagation(); handleApprove(e as any, agent.id) }}
-                          disabled={approvingId === agent.id}
-                          title="Approve"
-                        >
-                          <Check className="w-4 h-4 mr-2" />
-                          {approvingId === agent.id ? 'Approving...' : 'Approve'}
-                        </DropdownMenuItem>
-                      )}
-                      {isAdmin && (
+                  {isAdmin && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {!agent.is_approved && (
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); handleApprove(e as any, agent.id) }}
+                            disabled={approvingId === agent.id}
+                            title="Approve"
+                          >
+                            <Check className="w-4 h-4 mr-2" />
+                            {approvingId === agent.id ? 'Approving...' : 'Approve'}
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10 focus:text-[hsl(var(--destructive))] focus:bg-[hsl(var(--destructive))]/10"
                           onClick={(e) => { e.stopPropagation(); handleDelete(e as any, agent.id) }}
@@ -299,9 +292,9 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                           <Trash2 className="w-4 h-4 mr-2" />
                           {deletingId === agent.id ? 'Deleting...' : 'Delete'}
                         </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               </CardHeader>
 
@@ -325,7 +318,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
 
                 {/* Tools Preview - matching agent roster */}
                 {agent.metadata.tool_names && agent.metadata.tool_names.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-3 border-t border-white/5">
+                  <div className="flex flex-wrap gap-2 pt-3 border-t border-border/30">
                     {agent.metadata.tool_names.slice(0, 5).map((toolName, idx) => (
                       <div key={idx} title={toolName}>
                         <ToolLogo
@@ -333,12 +326,12 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                           logo={agent.metadata.tool_icons?.[idx]}
                           size={24}
                           showBackground={true}
-                          className="bg-secondary/30 border border-white/5"
+                          className="bg-secondary/30 border border-border/30"
                         />
                       </div>
                     ))}
                     {agent.metadata.tool_names.length > 5 && (
-                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-white/5 text-[10px] text-muted-foreground">
+                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-border/30 text-[10px] text-muted-foreground">
                         +{agent.metadata.tool_names.length - 5}
                       </div>
                     )}
@@ -351,6 +344,18 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                 </div>
 
               </CardContent>
+              <Separator />
+              <div className="flex items-center justify-between px-6 py-3">
+                <Button variant="ghost" size="sm"
+                  onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}
+                  className="text-muted-foreground hover:text-foreground p-0 h-auto">
+                  Details
+                </Button>
+                <Button size="sm" variant="outline"
+                  onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}>
+                  Add to Workspace
+                </Button>
+              </div>
             </Card>
           ))}
         </div>

@@ -160,13 +160,18 @@ class Mem0Client:
             return {"success": False, "error": "Mem0 unavailable (circuit breaker or timeout)"}
 
         if resp.status_code >= 400:
-            logger.error("[Mem0] Add failed: status=%s", resp.status_code)
-            return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+            body_preview = (resp.text or "")[:300]
+            logger.error("[Mem0] Add failed: status=%s body=%s", resp.status_code, body_preview)
+            return {"error": f"HTTP {resp.status_code}: {body_preview}"}
 
         normalized = (resp.text or "").strip().lower()
         if normalized == "" or normalized == "null":
-            logger.warning("[Mem0] Empty/null response — memory may not have been stored")
-            return {"success": False, "error": "Empty response from Mem0"}
+            logger.info(
+                "[Mem0] No facts extracted (status=%s) for user_id=%s — "
+                "LLM found nothing to remember from the input text.",
+                resp.status_code, user_id,
+            )
+            return {"success": True, "facts_extracted": 0}
 
         try:
             result = resp.json()

@@ -992,12 +992,21 @@ class StreamingChatService:
                 )
             # Persist task counter to DB so dashboard shows it
             try:
+                from core.models import Agent as AgentModel
                 agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
                 if agent_row:
                     metrics = dict(agent_row.performance_metrics or {})
-                    metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
-                    metrics["tasks_completed"] = metrics["total_tasks_executed"]
+                    from sqlalchemy.orm.attributes import flag_modified
+                    total = metrics.get("total_tasks_executed", 0) + 1
+                    successes = metrics.get("success_count", 0) + 1
+                    metrics["total_tasks_executed"] = total
+                    metrics["tasks_completed"] = total
+                    metrics["success_count"] = successes
+                    metrics["success_rate"] = round(successes / total, 4) if total > 0 else 0
+                    metrics["last_task_at"] = datetime.now(timezone.utc).isoformat()
+                    metrics["last_task_success"] = True
                     agent_row.performance_metrics = metrics
+                    flag_modified(agent_row, "performance_metrics")
                     self.db.commit()
             except Exception as metric_err:
                 logger.warning(f"Failed to persist agent task counter: {metric_err}")
@@ -1145,16 +1154,36 @@ class StreamingChatService:
         return provider, model
     async def _load_agent_context(self, agent_runtime) -> dict:
         """
-        Load agent-specific context: persona, description, plugins/skills, tool schemas.
+        Load agent-specific context: persona, description, skills/plugins, tool schemas.
+
+        PRD-71: Uses the pre-built system prompt from AgentRuntime (built once at
+        activation by agent_factory). Falls back to DB query only if the runtime
+        has no pre-built prompt (backwards compat for non-factory activations).
 
         Returns a dict with keys:
-            - persona: str (agent's persona/communication style prompt)
-            - description: str (agent name + type + description)
+            - persona: str (empty — persona is already in system_prompt)
+            - description: str (empty — identity is already in system_prompt)
+            - extra_context: str (the pre-built system prompt from agent_factory)
             - skill_tools: list (tool schemas from skills)
         """
-        from core.models import Skill
+        # PRD-71: If AgentRuntime has a pre-built system_prompt, use it directly
+        if getattr(agent_runtime, 'system_prompt', None):
+            return {
+                "persona": "",
+                "description": "",
+                "extra_context": agent_runtime.system_prompt,
+                "skill_tools": getattr(agent_runtime, 'skill_tool_schemas', []),
+            }
 
-        # Load persona from agent's DB record
+        # Fallback: build context from DB (backwards compat for old callers)
+        # This path means the AgentRuntime was created without going through
+        # agent_factory.activate_agent(). Skills/plugins will NOT be loaded.
+        logger.error(
+            "Agent %s has no pre-built system_prompt on AgentRuntime — "
+            "skills and plugins will be missing from this conversation. "
+            "Ensure activate_agent() is called before using the agent.",
+            agent_runtime.agent_id,
+        )
         persona = ""
         try:
             from core.models import Agent as AgentModel
@@ -1162,74 +1191,22 @@ class StreamingChatService:
             if db_agent:
                 if getattr(db_agent, "use_custom_persona", False) and getattr(db_agent, "custom_persona_prompt", None):
                     persona = db_agent.custom_persona_prompt
-                    logger.info(f"Loaded custom persona for agent {agent_runtime.agent_id}")
                 elif getattr(db_agent, "persona_id", None) and getattr(db_agent, "persona", None):
                     persona = db_agent.persona.system_prompt or ""
-                    logger.info(f"Loaded persona '{db_agent.persona.name}' for agent {agent_runtime.agent_id}")
         except Exception as e:
             logger.warning(f"Failed to load persona for agent {agent_runtime.agent_id}: {e}")
 
-        # Agent description
         description = (
             f"You are {agent_runtime.metadata.name}, "
             f"a specialized {agent_runtime.metadata.agent_type} agent.\n"
             f"{agent_runtime.metadata.description or ''}"
         )
 
-        # Load plugins OR skills for additional context
-        extra_context = ""
-        has_plugins = False
-        try:
-            from core.services.plugin_context_service import PluginContextService
-            plugin_svc = PluginContextService(self.db)
-            plugin_rows = plugin_svc.get_assigned_plugins(agent_runtime.agent_id)
-            if plugin_rows:
-                has_plugins = True
-                tier1 = plugin_svc.build_tier1_summary(plugin_rows)
-                tier2 = await plugin_svc.build_tier2_content(
-                    plugin_rows,
-                    task_context=agent_runtime.metadata.description,
-                )
-                extra_context = f"\n{tier1}\n{tier2}" if tier2 else f"\n{tier1}"
-                logger.info(
-                    "Loaded plugin context for agent %s (%d plugins)",
-                    agent_runtime.agent_id, len(plugin_rows),
-                )
-        except Exception as e:
-            logger.warning(f"Failed to load plugins for agent {agent_runtime.agent_id}: {e}")
-
-        if not has_plugins and agent_runtime.metadata.skills:
-            skills = self.db.query(Skill).filter(
-                Skill.name.in_(agent_runtime.metadata.skills),
-                Skill.is_active.is_(True),
-            ).all()
-            parts = []
-            for skill in skills:
-                if skill.prompt_template:
-                    parts.append(skill.prompt_template)
-                elif skill.description:
-                    parts.append(f"- {skill.name}: {skill.description}")
-            if parts:
-                extra_context = "\n".join(parts)
-
-        # Extract tool schemas from skills
-        tool_schemas = []
-        if not has_plugins and agent_runtime.metadata.skills:
-            skills = self.db.query(Skill).filter(
-                Skill.name.in_(agent_runtime.metadata.skills),
-                Skill.is_active == True,  # noqa: E712
-            ).all()
-            for skill in skills:
-                if skill.content and isinstance(skill.content, dict):
-                    schemas = skill.content.get("tools_schema", [])
-                    if schemas:
-                        tool_schemas.extend(schemas)
-
         return {
             "persona": persona,
             "description": description,
-            "extra_context": extra_context,
-            "skill_tools": tool_schemas,
+            "extra_context": "",
+            "skill_tools": [],
         }
     
     async def _handle_tool_calls_aisdk(

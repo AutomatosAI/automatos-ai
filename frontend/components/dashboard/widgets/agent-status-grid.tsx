@@ -157,7 +157,7 @@ export function AgentStatusGrid({ agentMetrics, agents = [] }: AgentStatusGridPr
               whileHover={{ scale: 1.02 }}
               onClick={() => setSelectedAgent(agent.agent_id === selectedAgent ? null : agent.agent_id)}
             >
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow">
+              <Card className="cursor-pointer hover:border-primary/20 transition-all duration-300">
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">

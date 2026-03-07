@@ -294,7 +294,11 @@ class Skill(Base):
     created_by = Column(String(255))
 
     # PRD-37: Workspace isolation for multi-tenant SaaS
-    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
+    # PRD-71: nullable — NULL = marketplace/global skill, UUID = workspace-specific
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=True)
+
+    # PRD-71: Plugin materialization — tracks which plugin package this skill came from
+    package_slug = Column(String(100), nullable=True)
 
     # PRD-22: New fields for Git-backed skills
     prompt_template = Column(Text, nullable=True)  # Core skill content (Level 2 progressive disclosure)

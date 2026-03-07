@@ -203,7 +203,7 @@ export function TemplateGallery({ className, onWorkspaceCreated }: TemplateGalle
             return (
               <Card
                 key={template.id}
-                className="flex flex-col transition-shadow hover:shadow-lg"
+                className="flex flex-col transition-all duration-300 hover:border-primary/20"
               >
                 <CardHeader className="gap-1">
                   <div className="flex items-start justify-between">

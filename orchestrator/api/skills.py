@@ -103,6 +103,8 @@ class EnhancedSkillResponse(BaseModel):
     updated_at: datetime
     last_sync_at: Optional[datetime]
     files: List[SkillFileInfo] = []
+    # PRD-71: Token estimate for budget warnings
+    estimated_tokens: int = 0
     class Config:
         from_attributes = True
 
@@ -768,32 +770,53 @@ async def get_agent_skills(
     """
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        
+
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        
-        return [
-            EnhancedSkillResponse(
-                id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                skill_type=skill.skill_type,
-                category=getattr(skill, 'category', None) or skill.skill_type,  # Fallback to skill_type if category missing
-                skill_version=skill.skill_version,
-                skill_source=skill.skill_source,
-                git_repo_url=skill.git_repo_url,
-                git_commit_sha=skill.git_commit_sha,
-                filesystem_path=skill.filesystem_path,
-                tags=skill.tags or [],
-                is_active=skill.is_active,
-                created_at=skill.created_at,
-                updated_at=skill.updated_at,
-                last_sync_at=skill.last_sync_at,
-                files=[]
+
+        TOKEN_WARNING_THRESHOLD = 15_000
+
+        skills_out = []
+        total_tokens = 0
+        for skill in agent.skills:
+            est = len(skill.prompt_template or "") // 4 if skill.prompt_template else 0
+            total_tokens += est
+            skills_out.append(
+                EnhancedSkillResponse(
+                    id=skill.id,
+                    name=skill.name,
+                    description=skill.description,
+                    skill_type=skill.skill_type,
+                    category=getattr(skill, 'category', None) or skill.skill_type,
+                    skill_version=skill.skill_version,
+                    skill_source=skill.skill_source,
+                    git_repo_url=skill.git_repo_url,
+                    git_commit_sha=skill.git_commit_sha,
+                    filesystem_path=skill.filesystem_path,
+                    tags=skill.tags or [],
+                    is_active=skill.is_active,
+                    created_at=skill.created_at,
+                    updated_at=skill.updated_at,
+                    last_sync_at=skill.last_sync_at,
+                    files=[],
+                    estimated_tokens=est,
+                )
             )
-            for skill in agent.skills
-        ]
-        
+
+        warning = None
+        if total_tokens > TOKEN_WARNING_THRESHOLD:
+            warning = (
+                f"Combined skill tokens ({total_tokens:,}) exceed recommended "
+                f"threshold ({TOKEN_WARNING_THRESHOLD:,}). Consider removing "
+                f"lower-priority skills to leave room for conversation context."
+            )
+
+        return {
+            "skills": skills_out,
+            "total_estimated_tokens": total_tokens,
+            "warning": warning,
+        }
+
     except HTTPException:
         raise
     except Exception as e:
@@ -841,13 +864,28 @@ async def assign_skills_to_agent(
             existing_skill_ids = {s.id for s in agent.skills}
             new_skills = [s for s in skills if s.id not in existing_skill_ids]
             agent.skills.extend(new_skills)
-        
+
         db.commit()
-        
+
+        # PRD-71: Calculate token budget warning
+        total_tokens = sum(
+            len(s.prompt_template or "") // 4
+            for s in agent.skills
+            if s.prompt_template
+        )
+        warning = None
+        if total_tokens > 15_000:
+            warning = (
+                f"Combined skill tokens ({total_tokens:,}) exceed 15,000. "
+                f"Consider reducing the number of skills for optimal performance."
+            )
+
         return {
             "message": f"Successfully assigned {len(skills)} skills to agent",
             "agent_id": agent_id,
-            "skill_ids": skill_ids
+            "skill_ids": skill_ids,
+            "total_estimated_tokens": total_tokens,
+            "warning": warning,
         }
         
     except HTTPException:

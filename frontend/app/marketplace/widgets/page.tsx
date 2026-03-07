@@ -230,7 +230,7 @@ export default function WidgetMarketplacePage() {
                   key={widget.id}
                   role="button"
                   tabIndex={0}
-                  className="min-w-[300px] max-w-[300px] snap-start cursor-pointer glass-card card-glow hover:border-primary/50 transition-all duration-200 hover:shadow-lg hover:shadow-primary/10 focus:outline-none focus:ring-2 focus:ring-primary/50 shrink-0"
+                  className="min-w-[300px] max-w-[300px] snap-start cursor-pointer glass-card card-glow hover:border-primary/20 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/50 shrink-0"
                   onClick={() => handleWidgetClick(widget.id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {

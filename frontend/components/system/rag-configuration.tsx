@@ -107,8 +107,8 @@ export function RAGConfiguration() {
         <Card className="glass-card">
           <CardContent className="flex items-center justify-center p-8">
             <div className="text-center">
-              <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-4" />
-              <p className="text-red-500 mb-2">Error loading RAG configurations</p>
+              <AlertCircle className="h-8 w-8 text-[hsl(var(--destructive))] mx-auto mb-4" />
+              <p className="text-[hsl(var(--destructive))] mb-2">Error loading RAG configurations</p>
               <p className="text-sm text-muted-foreground">{error}</p>
               <Button onClick={fetchConfigs} className="mt-4">
                 Try Again
@@ -172,7 +172,7 @@ export function RAGConfiguration() {
                     <h3 className="font-semibold">{config.name}</h3>
                     <div className="flex items-center space-x-2">
                       {config.is_active && (
-                        <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
+                        <Badge className="bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20">
                           <CheckCircle className="w-3 h-3 mr-1" />
                           Active
                         </Badge>
@@ -309,7 +309,7 @@ export function RAGConfiguration() {
                   {testResults && (
                     <div className="mt-4 p-4 bg-secondary/30 rounded-lg">
                       {testResults.error ? (
-                        <div className="text-red-500 text-sm">
+                        <div className="text-[hsl(var(--destructive))] text-sm">
                           <AlertCircle className="w-4 h-4 inline mr-2" />
                           {testResults.error}
                         </div>

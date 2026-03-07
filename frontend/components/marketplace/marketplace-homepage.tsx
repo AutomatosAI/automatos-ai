@@ -1,11 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Search, Download, TrendingUp, Grid3X3, Store, Code } from 'lucide-react'
+import { Search, Download, TrendingUp, Grid3X3, Store } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Input } from '@/components/ui/input'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
 import { SearchInput } from '@/components/shared/search-input'
@@ -33,6 +30,29 @@ export interface MarketplaceItem {
   metadata: Record<string, any>
   created_at: string
   updated_at: string
+}
+
+function CapabilitiesTab({ searchQuery, workspaceId }: { searchQuery: string; workspaceId: string }) {
+  const [subTab, setSubTab] = useState('plugins')
+
+  return (
+    <div className="space-y-4">
+      <Tabs value={subTab} onValueChange={setSubTab}>
+        <TabsList>
+          <TabsTrigger value="plugins">Plugins</TabsTrigger>
+          <TabsTrigger value="skills">Skills</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="plugins" className="mt-4">
+          <MarketplacePluginsTab searchQuery={searchQuery} />
+        </TabsContent>
+
+        <TabsContent value="skills" className="mt-4">
+          <MarketplaceSkillsTab searchQuery={searchQuery} workspaceId={workspaceId} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
 }
 
 export function MarketplaceHomepage() {
@@ -121,8 +141,7 @@ export function MarketplaceHomepage() {
             <TabsTrigger value="agents">Agents</TabsTrigger>
             <TabsTrigger value="recipes">Recipes</TabsTrigger>
             <TabsTrigger value="llms">LLMs</TabsTrigger>
-            <TabsTrigger value="plugins">Capabilities</TabsTrigger>
-            <TabsTrigger value="skills"><Code className="h-4 w-4 mr-1" /> Skills</TabsTrigger>
+            <TabsTrigger value="capabilities">Capabilities</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -154,12 +173,8 @@ export function MarketplaceHomepage() {
           <MarketplaceLlmsTab searchQuery={searchQuery} />
         </TabsContent>
 
-        <TabsContent value="plugins" className="mt-0">
-          <MarketplacePluginsTab searchQuery={searchQuery} />
-        </TabsContent>
-
-        <TabsContent value="skills" className="mt-0">
-          <MarketplaceSkillsTab searchQuery={searchQuery} workspaceId={workspaceId || ''} />
+        <TabsContent value="capabilities" className="mt-0">
+          <CapabilitiesTab searchQuery={searchQuery} workspaceId={workspaceId || ''} />
         </TabsContent>
       </Tabs>
     </div>

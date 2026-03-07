@@ -276,7 +276,7 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
             >
-              <Card className="glass-card card-glow hover:border-primary/30 transition-all duration-300 h-full flex flex-col">
+              <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300 h-full flex flex-col">
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className="flex-1">

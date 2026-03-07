@@ -84,7 +84,7 @@ export function CodeBlock({ code, language = '' }: CodeBlockProps) {
   return (
     <div className="group/code relative rounded-xl border border-orange-500/10 bg-[#1a1a1a] overflow-hidden my-3">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 bg-white/[0.02]">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border/30 bg-white/[0.02]">
         <span className="text-[11px] font-medium tracking-wide text-orange-400/80 uppercase select-none">
           {label}
         </span>

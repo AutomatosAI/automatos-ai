@@ -25,35 +25,46 @@ class RecipeSchedulerService:
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
+        self._owns_scheduler: bool = False  # True when we created our own scheduler (tests)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self):
-        """Initialize scheduler and load all cron recipes from DB."""
-        jobstores = {"default": MemoryJobStore()}
+    async def start(self, scheduler: Optional[AsyncIOScheduler] = None):
+        """Initialize scheduler and load all cron recipes from DB.
 
-        try:
-            from config import config as app_config
-            if app_config.REDIS_URL:
-                from apscheduler.jobstores.redis import RedisJobStore
-                jobstores["default"] = RedisJobStore(url=app_config.REDIS_URL)
-                logger.info("[RecipeScheduler] Using Redis job store")
-        except Exception:
-            logger.info("[RecipeScheduler] Using memory job store")
-
-        self._scheduler = AsyncIOScheduler(jobstores=jobstores)
-        self._scheduler.start()
+        Args:
+            scheduler: Shared APScheduler instance from UnifiedScheduler.
+                        If None, creates a local scheduler (useful for tests).
+        """
+        if scheduler:
+            self._scheduler = scheduler
+            self._owns_scheduler = False
+        else:
+            # Standalone mode (tests / backwards compat)
+            jobstores = {"default": MemoryJobStore()}
+            try:
+                from config import config as app_config
+                if app_config.REDIS_URL:
+                    from apscheduler.jobstores.redis import RedisJobStore
+                    jobstores["default"] = RedisJobStore(url=app_config.REDIS_URL)
+                    logger.info("[RecipeScheduler] Using Redis job store (standalone)")
+            except Exception:
+                pass
+            self._scheduler = AsyncIOScheduler(jobstores=jobstores)
+            self._scheduler.start()
+            self._owns_scheduler = True
 
         await self._load_cron_recipes()
         logger.info("[RecipeScheduler] Service started")
 
     async def stop(self):
-        """Gracefully stop scheduler."""
-        if self._scheduler:
+        """Remove recipe jobs. Only shuts down scheduler if we own it."""
+        if self._scheduler and self._owns_scheduler:
             self._scheduler.shutdown(wait=False)
-            logger.info("[RecipeScheduler] Service stopped")
+            logger.info("[RecipeScheduler] Standalone scheduler stopped")
+        logger.info("[RecipeScheduler] Service stopped")
 
     # ------------------------------------------------------------------
     # Load from DB
@@ -139,7 +150,6 @@ class RecipeSchedulerService:
         from core.database.database import SessionLocal
         from core.models import WorkflowTemplate as WorkflowRecipe
         from core.models.core import RecipeExecution
-        from api.recipe_executor import execute_recipe_direct
         from uuid import uuid4
 
         db = SessionLocal()
@@ -180,13 +190,12 @@ class RecipeSchedulerService:
 
             logger.info("[RecipeScheduler] Firing recipe %d (%s), execution=%s", recipe.id, recipe.name, execution_id)
 
-            asyncio.create_task(
-                execute_recipe_direct(
-                    recipe_execution_id=execution_id,
-                    recipe_id=recipe.id,
-                    workspace_id=UUID(str(recipe.workspace_id)),
-                    input_data={},
-                )
+            from api.recipe_executor import launch_recipe_task
+            launch_recipe_task(
+                recipe_execution_id=execution_id,
+                recipe_id=recipe.id,
+                workspace_id=UUID(str(recipe.workspace_id)),
+                input_data={},
             )
         except Exception as e:
             logger.error("[RecipeScheduler] Failed to fire recipe %d: %s", recipe_id, e, exc_info=True)

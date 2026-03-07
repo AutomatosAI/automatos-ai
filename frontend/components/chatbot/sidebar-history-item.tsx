@@ -1,14 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { MessageSquare, Trash2, MoreHorizontal } from 'lucide-react'
+import { MessageSquare, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { deleteChat } from '@/lib/chat/api'
 import { truncate } from '@/lib/utils'
 import type { Chat } from '@/types'
@@ -74,26 +68,15 @@ export function SidebarHistoryItem({ chat, onDelete, onSelect, isActive = false 
       <MessageSquare className="w-4 h-4 flex-shrink-0" />
       <span className="flex-1 text-sm truncate">{truncate(chat.title, 30)}</span>
       
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="opacity-0 group-hover:opacity-100 h-6 w-6 p-0"
-          >
-            <MoreHorizontal className="w-4 h-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="bg-popover border-border">
-          <DropdownMenuItem
-            onClick={handleDelete}
-            className="text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer"
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="opacity-0 group-hover:opacity-100 h-6 w-6 p-0 text-muted-foreground hover:text-[hsl(var(--destructive))]"
+        onClick={handleDelete}
+        title="Delete"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </Button>
     </button>
   )
 }

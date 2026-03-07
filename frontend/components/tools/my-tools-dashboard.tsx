@@ -155,7 +155,7 @@ export function MyToolsDashboard() {
           {filteredConnections.map((connection) => (
             <Card
               key={connection.connection_id || connection.app_name}
-              className="glass-card card-glow hover:border-primary/50 transition-all duration-200"
+              className="glass-card card-glow hover:border-primary/20 transition-all duration-300"
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">

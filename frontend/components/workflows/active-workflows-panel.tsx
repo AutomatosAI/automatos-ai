@@ -712,7 +712,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onRecipeRunClick }: Acti
 
                   {/* Step Results Preview (collapsed) */}
                   {run.step_results && run.step_results.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-white/5">
+                    <div className="mt-3 pt-3 border-t border-border/30">
                       <div className="flex gap-2 flex-wrap">
                         {run.step_results.map((step: any, stepIdx: number) => (
                           <div
