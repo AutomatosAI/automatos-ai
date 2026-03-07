@@ -168,6 +168,12 @@ from api.database_analytics import router as database_analytics_router  # PRD-21
 from api.document_generation import router as document_generation_router  # PRD-63: Document Generation
 from api.widget_workflows import router as widget_workflows_router  # US-014: Widget Workflow Control
 
+# PRD-72: Activity Command Centre
+try:
+    from api.activity import router as activity_router
+except ImportError:
+    activity_router = None
+
 # PRD-55: Autonomous Assistant Platform (optional modules)
 try:
     from api.heartbeat import router as heartbeat_router
@@ -790,6 +796,10 @@ if widget_marketplace_router is not None:
     app.include_router(widget_marketplace_router)  # PRD-38.5: Widget Marketplace
 if evaluation_router is not None:
     app.include_router(evaluation_router)  # Evaluation methodologies
+
+# PRD-72: Activity Command Centre
+if activity_router is not None:
+    app.include_router(activity_router)
 
 # PRD-55: Autonomous Assistant Platform
 if heartbeat_router is not None:
