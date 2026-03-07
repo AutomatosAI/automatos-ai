@@ -329,8 +329,8 @@ export function DocumentLibrary({
               >
                 <Card
                   data-testid="doc-card"
-                  className={`glass-card cursor-pointer transition-all duration-200 hover:shadow-lg hover:border-brand-primary/30 ${
-                    selectedDocumentId === document.id ? 'border-brand-primary shadow-lg' : ''
+                  className={`glass-card cursor-pointer transition-all duration-300 hover:border-primary/20 ${
+                    selectedDocumentId === document.id ? 'border-primary' : ''
                   }`}
                 >
                   <CardHeader className="pb-2">
@@ -490,8 +490,8 @@ export function DocumentLibrary({
               >
                 <Card
                   data-testid="doc-card"
-                  className={`glass-card cursor-pointer transition-all duration-200 hover:shadow-lg hover:border-brand-primary/30 ${
-                    selectedDocumentId === document.id ? 'border-brand-primary shadow-lg' : ''
+                  className={`glass-card cursor-pointer transition-all duration-300 hover:border-primary/20 ${
+                    selectedDocumentId === document.id ? 'border-primary' : ''
                   }`}
                   onClick={() => onDocumentSelect(document.id)}
                 >

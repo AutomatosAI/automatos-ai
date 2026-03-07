@@ -207,7 +207,7 @@ export function QueryTemplatesGrid({ templates: initialTemplates, selectedSource
           return (
             <Card 
               key={template.id}
-              className="hover:shadow-lg transition-all cursor-pointer relative"
+              className="hover:border-primary/20 transition-all duration-300 cursor-pointer relative"
               onClick={() => setSelectedTemplate(template)}
             >
               {template.is_featured && (

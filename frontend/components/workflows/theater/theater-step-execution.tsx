@@ -150,7 +150,7 @@ function CollapsibleSection({
   const [isOpen, setIsOpen] = useState(defaultOpen)
 
   return (
-    <div className="border border-white/5 rounded-xl overflow-hidden">
+    <div className="border border-border/30 rounded-xl overflow-hidden">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center gap-2 p-3 text-left hover:bg-white/5 transition-colors"
@@ -252,7 +252,7 @@ function ToolCallsSection({ toolCalls }: { toolCalls: ToolCall[] }) {
       {toolCalls.map((tool, i) => {
         const isExpanded = expandedTools.has(i)
         return (
-          <div key={i} className="rounded-lg border border-white/5 bg-black/20 overflow-hidden">
+          <div key={i} className="rounded-lg border border-border/30 bg-black/20 overflow-hidden">
             <button
               onClick={() => toggleTool(i)}
               className="w-full flex items-center gap-2 p-2.5 text-left hover:bg-white/5 transition-colors"
@@ -349,7 +349,7 @@ function StepResultSection({ result }: { result: unknown }) {
         )}
       </button>
       <pre
-        className="text-sm bg-black/30 border border-white/5 rounded-xl p-4 whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto theater-scrollbar"
+        className="text-sm bg-black/30 border border-border/30 rounded-xl p-4 whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto theater-scrollbar"
         dangerouslySetInnerHTML={{ __html: highlightJson(result) }}
       />
     </div>

@@ -280,7 +280,7 @@ export function MarketplaceAppDetailsModal({
                             filteredActions.map(action => (
                               <div
                                 key={action.name}
-                                className="flex items-start justify-between p-3 rounded-lg border border-white/5 bg-secondary/10"
+                                className="flex items-start justify-between p-3 rounded-lg border border-border/30 bg-secondary/10"
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="font-medium text-sm flex items-center gap-2">
@@ -330,7 +330,7 @@ export function MarketplaceAppDetailsModal({
                               return (
                                 <div
                                   key={triggerName}
-                                  className="flex items-start justify-between p-3 rounded-lg border border-white/5 bg-secondary/10"
+                                  className="flex items-start justify-between p-3 rounded-lg border border-border/30 bg-secondary/10"
                                 >
                                   <div className="min-w-0 flex-1">
                                     <div className="font-medium text-sm flex items-center gap-2">

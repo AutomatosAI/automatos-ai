@@ -318,7 +318,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
 
                 {/* Tools Preview - matching agent roster */}
                 {agent.metadata.tool_names && agent.metadata.tool_names.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-3 border-t border-white/5">
+                  <div className="flex flex-wrap gap-2 pt-3 border-t border-border/30">
                     {agent.metadata.tool_names.slice(0, 5).map((toolName, idx) => (
                       <div key={idx} title={toolName}>
                         <ToolLogo
@@ -326,12 +326,12 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                           logo={agent.metadata.tool_icons?.[idx]}
                           size={24}
                           showBackground={true}
-                          className="bg-secondary/30 border border-white/5"
+                          className="bg-secondary/30 border border-border/30"
                         />
                       </div>
                     ))}
                     {agent.metadata.tool_names.length > 5 && (
-                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-white/5 text-[10px] text-muted-foreground">
+                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-border/30 text-[10px] text-muted-foreground">
                         +{agent.metadata.tool_names.length - 5}
                       </div>
                     )}

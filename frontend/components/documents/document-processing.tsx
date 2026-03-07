@@ -333,7 +333,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
           <h3 className="text-lg font-semibold">Recently Completed ({completedDocuments.length})</h3>
 
           {completedDocuments.slice(0, 10).map(doc => (
-            <Card key={doc.id} className="glass-card cursor-pointer hover:shadow-lg" onClick={() => onDocumentSelect(doc.id)}>
+            <Card key={doc.id} className="glass-card cursor-pointer hover:border-primary/20 transition-all duration-300" onClick={() => onDocumentSelect(doc.id)}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">

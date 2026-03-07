@@ -329,7 +329,7 @@ export function MarketplacePluginDetailModal({
                           {skills.map((skill, idx) => (
                             <div
                               key={idx}
-                              className="flex items-start p-3 rounded-lg border border-white/5 bg-secondary/10"
+                              className="flex items-start p-3 rounded-lg border border-border/30 bg-secondary/10"
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="font-medium text-sm flex items-center gap-2">
@@ -359,7 +359,7 @@ export function MarketplacePluginDetailModal({
                           {commands.map((cmd, idx) => (
                             <div
                               key={idx}
-                              className="flex items-start p-3 rounded-lg border border-white/5 bg-secondary/10"
+                              className="flex items-start p-3 rounded-lg border border-border/30 bg-secondary/10"
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="font-medium text-sm flex items-center gap-2">
@@ -389,7 +389,7 @@ export function MarketplacePluginDetailModal({
                           {agents.map((agent, idx) => (
                             <div
                               key={idx}
-                              className="flex items-start p-3 rounded-lg border border-white/5 bg-secondary/10"
+                              className="flex items-start p-3 rounded-lg border border-border/30 bg-secondary/10"
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="font-medium text-sm flex items-center gap-2">

@@ -672,7 +672,7 @@ function FeaturedPluginCard({
 }: FeaturedPluginCardProps) {
   return (
     <Card
-      className="min-w-[300px] max-w-[340px] flex-shrink-0 bg-gradient-to-br from-primary/10 to-secondary/30 border-primary/20 hover:border-primary/40 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-primary/10"
+      className="min-w-[300px] max-w-[340px] flex-shrink-0 bg-gradient-to-br from-primary/10 to-secondary/30 border-primary/20 hover:border-primary/20 transition-all duration-300 cursor-pointer"
       onClick={onClick}
     >
       <CardContent className="p-4 space-y-3">

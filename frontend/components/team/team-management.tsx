@@ -162,9 +162,9 @@ export function TeamManagement() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.2 }}
-                className="glass-card rounded-xl border border-white/5 overflow-hidden"
+                className="glass-card rounded-xl border border-border/30 overflow-hidden"
             >
-                <div className="p-4 border-b border-white/5 bg-white/5 hidden md:grid grid-cols-12 gap-4 font-medium text-sm text-muted-foreground">
+                <div className="p-4 border-b border-border/30 bg-white/5 hidden md:grid grid-cols-12 gap-4 font-medium text-sm text-muted-foreground">
                     <div className="col-span-5">User</div>
                     <div className="col-span-3">Role</div>
                     <div className="col-span-3">Joined</div>

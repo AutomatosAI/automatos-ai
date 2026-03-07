@@ -217,7 +217,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <div className="font-medium text-sm">{agent.name}</div>
-                    <span className="text-[10px] text-muted-foreground/70 bg-secondary/30 px-1.5 py-0.5 rounded border border-white/5">
+                    <span className="text-[10px] text-muted-foreground/70 bg-secondary/30 px-1.5 py-0.5 rounded border border-border/30">
                       {getModelDisplayName(agent.agent_model_config?.model_id || agent.model_config?.model_id)}
                     </span>
                   </div>
@@ -242,7 +242,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
 
                   {/* Tools Preview */}
                   {agent.tools && agent.tools.length > 0 && (
-                    <div className="flex items-center gap-1 mt-2 pt-2 border-t border-white/5">
+                    <div className="flex items-center gap-1 mt-2 pt-2 border-t border-border/30">
                       {agent.tools.slice(0, 5).map((tool) => (
                         <ToolLogo
                           key={tool.id}
@@ -250,7 +250,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                           logo={tool.icon}
                           size={14}
                           showBackground={true}
-                          className="bg-secondary/30 border border-white/5 opacity-70 hover:opacity-100 transition-opacity"
+                          className="bg-secondary/30 border border-border/30 opacity-70 hover:opacity-100 transition-opacity"
                         />
                       ))}
                       {agent.tools.length > 5 && (

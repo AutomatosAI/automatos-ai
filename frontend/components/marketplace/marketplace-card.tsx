@@ -28,7 +28,7 @@ export function MarketplaceCard({ item, onClick }: MarketplaceCardProps) {
     <Card
       role="button"
       tabIndex={0}
-      className="cursor-pointer glass-card card-glow hover:border-primary/50 transition-all duration-200 hover:shadow-lg hover:shadow-primary/10 focus:outline-none focus:ring-2 focus:ring-primary/50"
+      className="cursor-pointer glass-card card-glow hover:border-primary/20 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/50"
       onClick={onClick}
       onKeyDown={handleKeyDown}
     >

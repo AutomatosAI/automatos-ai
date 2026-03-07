@@ -211,7 +211,7 @@ export function CodingCanvasWidget({
                   <p className="text-xs text-muted-foreground">No files in workspace</p>
                   <button
                     onClick={() => setRepoSelectorOpen(true)}
-                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                    className="px-3 py-1.5 text-xs font-medium rounded-md border border-border hover:bg-secondary transition-colors text-foreground"
                   >
                     Connect Repo
                   </button>
