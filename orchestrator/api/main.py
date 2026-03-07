@@ -101,6 +101,9 @@ from api.workspace_files import router as workspace_files_router
 # PRD-60: RAG v3 Feedback
 from api.rag_feedback import router as rag_feedback_router
 
+# PRD-72: Activity Command Centre
+from api.activity import router as activity_router
+
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
     register_dashboard_routes,
@@ -441,6 +444,7 @@ app.include_router(heartbeat_router)  # PRD-55: Heartbeat management
 app.include_router(tasks_router)  # PRD-56: Workspace task management
 app.include_router(workspace_files_router)  # PRD-66: Workspace file browser + terminal exec
 app.include_router(rag_feedback_router)  # PRD-60: RAG v3 Feedback
+app.include_router(activity_router)  # PRD-72: Activity Command Centre
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
