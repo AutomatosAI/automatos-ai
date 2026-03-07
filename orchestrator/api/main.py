@@ -88,6 +88,9 @@ from api.auth import router as auth_router
 from api.workspaces import router as workspaces_router
 from api.api_keys import router as api_keys_router
 
+# PRD-55: Heartbeat management
+from api.heartbeat import router as heartbeat_router
+
 # PRD-56: Workspace Tasks
 from api.tasks import router as tasks_router
 
@@ -434,6 +437,7 @@ app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(auth_router)
 app.include_router(workspaces_router)
 app.include_router(api_keys_router)
+app.include_router(heartbeat_router)  # PRD-55: Heartbeat management
 app.include_router(tasks_router)  # PRD-56: Workspace task management
 app.include_router(workspace_files_router)  # PRD-66: Workspace file browser + terminal exec
 app.include_router(rag_feedback_router)  # PRD-60: RAG v3 Feedback
