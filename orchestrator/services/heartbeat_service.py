@@ -816,7 +816,14 @@ class HeartbeatService:
         return None
 
     async def _send_via_webhook(self, url: str, result: dict, message: str):
-        """POST heartbeat result to a webhook URL."""
+        """POST heartbeat result to a webhook URL (with SSRF validation)."""
+        from core.security.url_validator import validate_webhook_url
+
+        is_valid, reason = validate_webhook_url(url)
+        if not is_valid:
+            logger.warning("[Heartbeat] Webhook URL blocked (%s): %s", reason, url)
+            return
+
         try:
             import aiohttp
 

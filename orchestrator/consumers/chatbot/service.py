@@ -992,6 +992,7 @@ class StreamingChatService:
                 )
             # Persist task counter to DB so dashboard shows it
             try:
+                from core.models import Agent as AgentModel
                 agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
                 if agent_row:
                     metrics = dict(agent_row.performance_metrics or {})
