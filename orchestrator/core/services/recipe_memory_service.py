@@ -138,10 +138,15 @@ class RecipeMemoryService:
             "errors": errors,
         }
 
-        logger.info(
-            f"Stored {len(stored_memories)} memories for execution {execution_id} "
-            f"({len(errors)} errors)"
-        )
+        if errors:
+            logger.warning(
+                f"Stored {len(stored_memories)} memories for execution {execution_id} "
+                f"({len(errors)} errors): {errors}"
+            )
+        else:
+            logger.info(
+                f"Stored {len(stored_memories)} memories for execution {execution_id}"
+            )
 
         return result
 
