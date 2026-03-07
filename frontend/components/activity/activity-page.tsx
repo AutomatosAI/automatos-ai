@@ -18,6 +18,8 @@ import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { RecipesTab } from '@/components/workflows/recipes-tab'
 import { ActivityMissions } from './activity-missions'
 import { ActivityRoutines } from './activity-routines'
+import { ActivityFeed } from './activity-feed'
+import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
 
 const PERIOD_OPTIONS = [
@@ -41,11 +43,13 @@ export function ActivityPage() {
   // RecipesTab requires onUseRecipe — no-op in Activity context (full edit is in /workflows)
   const handleUseRecipe = useCallback(() => {}, [])
 
+  const { data: liveStats } = useActivityStats(period)
+
   const stats: StatItem[] = [
-    { label: 'Working Now', value: 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]' },
-    { label: 'Channels Live', value: 0, icon: Radio, iconColor: 'text-[hsl(var(--info))]' },
-    { label: 'Completed Today', value: 0, icon: CheckCircle2, iconColor: 'text-[hsl(var(--success))]' },
-    { label: 'Needs Attention', value: 0, icon: AlertTriangle, iconColor: 'text-destructive' },
+    { label: 'Working Now', value: liveStats?.working_now ?? 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]' },
+    { label: 'Channels Live', value: liveStats?.channels_live ?? 0, icon: Radio, iconColor: 'text-[hsl(var(--info))]' },
+    { label: 'Completed Today', value: liveStats?.completed_today ?? 0, icon: CheckCircle2, iconColor: 'text-[hsl(var(--success))]' },
+    { label: 'Needs Attention', value: liveStats?.needs_attention ?? 0, icon: AlertTriangle, iconColor: 'text-destructive' },
   ]
 
   return (
@@ -86,10 +90,8 @@ export function ActivityPage() {
       <div data-tour="activity-tabs">
         <FilterTabs tabs={TAB_DEFS} value={activeTab} onValueChange={setActiveTab}>
           <TabsContent value="feed">
-            <div data-tour="activity-content" className="glass-card p-8 text-center text-muted-foreground">
-              <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="font-medium">Feed coming soon</p>
-              <p className="text-sm mt-1">All your AI workforce activity in one timeline</p>
+            <div data-tour="activity-content">
+              <ActivityFeed period={period} />
             </div>
           </TabsContent>
 
