@@ -46,6 +46,7 @@ import { useToast } from '@/hooks/use-toast'
 import { CreateRecipeModal } from './create-recipe-modal'
 import { ViewRecipeModal } from './view-recipe-modal'
 import { RecipeSuggestionsPanel } from './recipe-suggestions-panel'
+import { RecipeRunDots } from './recipe-run-dots'
 
 interface RecipeExecutionInfo {
   recipeExecutionId: string
@@ -324,6 +325,11 @@ export function RecipesTab({
                         <span>{agentIds.length} Agents</span>
                         <span>&middot;</span>
                         <span>{recipe.use_count || 0} Runs</span>
+                        <RecipeRunDots
+                          recipeId={recipe.template_id || String(recipe.id || '')}
+                          compact
+                          onClick={() => handleViewClick(recipe)}
+                        />
                       </div>
                     </div>
                     <Button
@@ -442,6 +448,13 @@ export function RecipesTab({
                         <div className="text-[10px] text-muted-foreground">Runs</div>
                       </div>
                     </div>
+
+                    {/* Run history dots */}
+                    <RecipeRunDots
+                      recipeId={recipe.template_id || String(recipe.id || '')}
+                      useCount={recipe.use_count}
+                      onClick={() => handleViewClick(recipe)}
+                    />
 
                     {/* Agent avatars */}
                     {agentIds.length > 0 && (
