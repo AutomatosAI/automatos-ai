@@ -13,7 +13,6 @@ import {
   AlertTriangle,
   Search,
   Filter,
-  Eye,
   Clock,
   Star,
   Share2,
@@ -28,6 +27,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
@@ -485,47 +485,52 @@ export function RecipesTab({
                     )}
 
                     {/* Action buttons */}
-                    <div className="flex gap-1.5 pt-1 border-t border-border/30">
-                      <Button
-                        className="flex-1 bg-primary/90 hover:bg-primary/80 text-primary-foreground text-xs h-8 transition-all duration-200"
-                        size="sm"
-                        onClick={() => handleCookRecipe(recipe)}
-                        disabled={isCooking}
-                      >
-                        {isCooking ? (
-                          <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-                        ) : (
-                          <Play className="w-3 h-3 mr-1.5" />
-                        )}
-                        {isCooking ? 'Starting...' : 'Cook'}
+                    <Separator />
+                    <div className="flex items-center justify-between">
+                      <Button variant="ghost" size="sm" onClick={() => handleViewClick(recipe)}
+                        className="text-muted-foreground hover:text-foreground p-0 h-auto">
+                        Details
                       </Button>
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleViewClick(recipe)} title="View">
-                        <Eye className="w-3.5 h-3.5" />
-                      </Button>
-                      {!recipe.is_system && (
-                        <>
-                          {!recipe.is_marketplace_item && (
-                            <Button
-                              variant="ghost" size="sm" className="h-8 w-8 p-0"
-                              onClick={() => handleShareToMarketplace(recipe)}
-                              disabled={isSharing}
-                              title="Share"
-                            >
-                              {isSharing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
+                      <div className="flex items-center gap-1">
+                        {!recipe.is_system && (
+                          <>
+                            {!recipe.is_marketplace_item && (
+                              <Button
+                                variant="ghost" size="sm" className="h-8 w-8 p-0"
+                                onClick={() => handleShareToMarketplace(recipe)}
+                                disabled={isSharing}
+                                title="Share"
+                              >
+                                {isSharing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
+                              </Button>
+                            )}
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEditClick(recipe)} title="Edit">
+                              <Edit className="w-3.5 h-3.5" />
                             </Button>
+                            <Button
+                              variant="ghost" size="sm" className="h-8 w-8 p-0 text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]/80"
+                              onClick={() => handleDeleteClick(recipe)}
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-24"
+                          onClick={() => handleCookRecipe(recipe)}
+                          disabled={isCooking}
+                        >
+                          {isCooking ? (
+                            <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                          ) : (
+                            <Play className="w-3 h-3 mr-1.5" />
                           )}
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEditClick(recipe)} title="Edit">
-                            <Edit className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost" size="sm" className="h-8 w-8 p-0 text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]/80"
-                            onClick={() => handleDeleteClick(recipe)}
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        </>
-                      )}
+                          {isCooking ? 'Starting...' : 'Cook'}
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
