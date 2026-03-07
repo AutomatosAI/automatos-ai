@@ -196,11 +196,12 @@ class RecipeQualityService:
         step_results = execution.step_results or []
         execution_config = recipe.execution_config or {}
 
-        # Get configured timeouts — normalise ms or seconds to ms
+        # Get configured timeouts — normalise to ms for quality scoring
+        # Threshold: 10000+ is clearly ms (e.g. 120000ms). Below that is seconds.
         raw_step = execution_config.get("timeout_per_step") or execution_config.get("per_step_timeout") or 300
         raw_total = execution_config.get("total_timeout") or 600
-        timeout_per_step = raw_step if raw_step >= 1000 else raw_step * 1000   # → ms
-        total_timeout = raw_total if raw_total >= 1000 else raw_total * 1000
+        timeout_per_step = raw_step if raw_step >= 10000 else raw_step * 1000   # → ms
+        total_timeout = raw_total if raw_total >= 10000 else raw_total * 1000
 
         # Score: per-step time efficiency
         step_time_scores: List[float] = []
