@@ -196,11 +196,11 @@ class RecipeQualityService:
         step_results = execution.step_results or []
         execution_config = recipe.execution_config or {}
 
-        # Get configured timeouts (stored in seconds in WorkflowTemplate, convert to ms)
-        per_step_sec = execution_config.get("per_step_timeout", 120)  # default 2 min in seconds
-        total_sec = execution_config.get("total_timeout", 600)  # default 10 min in seconds
-        timeout_per_step = per_step_sec * 1000  # convert to ms
-        total_timeout = total_sec * 1000  # convert to ms
+        # Get configured timeouts — normalise ms or seconds to ms
+        raw_step = execution_config.get("timeout_per_step") or execution_config.get("per_step_timeout") or 300
+        raw_total = execution_config.get("total_timeout") or 600
+        timeout_per_step = raw_step if raw_step >= 1000 else raw_step * 1000   # → ms
+        total_timeout = raw_total if raw_total >= 1000 else raw_total * 1000
 
         # Score: per-step time efficiency
         step_time_scores: List[float] = []

@@ -110,7 +110,7 @@ export function RecipeStepProgress({
       items.push({
         order: i + 1,
         stepId: stepDef?.step_id || result?.step_id || `step-${i + 1}`,
-        prompt: stepDef?.prompt_template || '',
+        prompt: stepDef?.prompt_template || result?.prompt_template || '',
         agentName: result?.agent_name || `Agent ${stepDef?.agent_id || '?'}`,
         agentId: stepDef?.agent_id || result?.agent_id || 0,
         status: result?.status || (i + 1 < currentStep ? 'success' : i + 1 === currentStep && status === 'running' ? 'running' : 'pending'),

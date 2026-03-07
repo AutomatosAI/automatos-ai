@@ -731,10 +731,24 @@ async def _execute_recipe_inner(
         except Exception as exc:
             logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
 
-        # Read timeout config (stored in seconds in execution_config)
+        # Read timeout config from execution_config
+        # Values may be stored in ms (>=1000) or seconds (<1000) depending on
+        # when the recipe was created. Normalise to seconds.
         exec_config = recipe.execution_config or {}
-        step_timeout_sec = exec_config.get('per_step_timeout', 120)  # default 2 min
-        total_timeout_sec = exec_config.get('total_timeout', 600)    # default 10 min
+
+        raw_step = exec_config.get('timeout_per_step') or exec_config.get('per_step_timeout') or 300
+        raw_total = exec_config.get('total_timeout') or 600
+
+        step_timeout_sec = raw_step / 1000 if raw_step >= 1000 else raw_step   # ms → s
+        total_timeout_sec = raw_total / 1000 if raw_total >= 1000 else raw_total
+
+        # Clamp: at least 60s per step, at least 120s total
+        step_timeout_sec = max(step_timeout_sec, 60)
+        total_timeout_sec = max(total_timeout_sec, 120)
+        logger.info(
+            f"[recipe_direct] Timeouts: step={step_timeout_sec:.0f}s, "
+            f"total={total_timeout_sec:.0f}s (raw: step={raw_step}, total={raw_total})"
+        )
 
         # Execute each step sequentially
         step_results: List[Dict[str, Any]] = []

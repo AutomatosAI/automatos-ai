@@ -414,11 +414,12 @@ async def create_workflow_recipe(
             )
 
         # Apply execution_config defaults if not provided
+        # Timeouts in seconds (executor normalises legacy ms values automatically)
         execution_config = recipe_data.get('execution_config') or {
             'mode': 'sequential',
             'max_retries': 1,
-            'timeout_per_step': 120000,
-            'total_timeout': 600000,
+            'timeout_per_step': 300,
+            'total_timeout': 600,
             'auto_learning': True,
         }
 
