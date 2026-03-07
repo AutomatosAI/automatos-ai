@@ -53,12 +53,12 @@ const registry: Record<string, TourRegistryEntry> = {
       return createDocumentsTour(userId)
     },
   },
-  '/workflows': {
-    id: 'workflows',
-    label: 'Workflows',
+  '/activity': {
+    id: 'activity',
+    label: 'Activity',
     factory: async (userId) => {
-      const { createWorkflowsTour } = await import('./tours/workflows-tour')
-      return createWorkflowsTour(userId)
+      const { createActivityTour } = await import('./tours/activity-tour')
+      return createActivityTour(userId)
     },
   },
   '/analytics': {
