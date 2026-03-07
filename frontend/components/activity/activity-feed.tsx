@@ -4,7 +4,6 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import {
   Activity,
-  MessageCircle,
   RefreshCw,
   ChefHat,
   Rocket,
@@ -26,7 +25,6 @@ import { cn } from '@/lib/utils'
 // ─── Filter Chip Config ─────────────────────────────────
 
 const TYPE_CHIPS = [
-  { value: 'chat', label: 'Chats', icon: MessageCircle },
   { value: 'routine', label: 'Routines', icon: RefreshCw },
   { value: 'recipe', label: 'Recipes', icon: ChefHat },
   { value: 'mission', label: 'Missions', icon: Rocket },
