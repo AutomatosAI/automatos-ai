@@ -539,6 +539,15 @@ class ComposioClient:
                 if not logo_url and hasattr(app, "meta") and isinstance(app.meta, dict):
                     logo_url = app.meta.get("logo")
 
+                # DEBUG: log logo extraction for first 5 apps
+                if len(results) < 5:
+                    logger.info(
+                        f"[LOGO_DEBUG] {app.slug}: logo_url={logo_url!r}, "
+                        f"type(app)={type(app).__name__}, "
+                        f"dir_has_logo={'logo' in dir(app)}, "
+                        f"meta_type={type(getattr(app, 'meta', None)).__name__}"
+                    )
+
                 # Categories: top-level List[str] on AppModel, fallback to meta
                 categories = getattr(app, "categories", None) or []
                 if not categories and hasattr(app, "meta"):
