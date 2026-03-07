@@ -1,13 +1,26 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { RefreshCw, Pause, Play, Settings, Clock } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import {
+  RefreshCw,
+  Pause,
+  Play,
+  Settings,
+  Clock,
+  ChevronDown,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+} from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { ItemCard } from '@/components/shared/item-card'
 import { StatusBadge } from '@/components/shared/status-badge'
-import { useToggleHeartbeat } from '@/hooks/use-heartbeats-api'
-import type { HeartbeatConfig } from '@/hooks/use-heartbeats-api'
+import { useToggleHeartbeat, useHeartbeatExecutions } from '@/hooks/use-heartbeats-api'
+import type { HeartbeatConfig, HeartbeatExecution } from '@/hooks/use-heartbeats-api'
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -47,6 +60,10 @@ interface RoutineCardProps {
 export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps) {
   const router = useRouter()
   const toggleMutation = useToggleHeartbeat()
+  const [expanded, setExpanded] = useState(false)
+
+  const { data: historyData, isLoading: historyLoading } =
+    useHeartbeatExecutions(heartbeat.agent_id, { enabled: expanded })
 
   const isActive = heartbeat.enabled
 
@@ -58,6 +75,11 @@ export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps)
   const handleEdit = (e: React.MouseEvent) => {
     e.stopPropagation()
     router.push(`/agents?agent=${heartbeat.agent_id}`)
+  }
+
+  const handleExpandToggle = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setExpanded((prev) => !prev)
   }
 
   return (
@@ -95,37 +117,183 @@ export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps)
         </div>
       }
       actions={
-        <div className="flex items-center gap-2 w-full justify-end">
+        <div className="flex items-center gap-2 w-full justify-between">
           <Button
             variant="ghost"
             size="sm"
-            onClick={handleToggle}
-            disabled={toggleMutation.isLoading}
-            className="text-xs"
+            onClick={handleExpandToggle}
+            className="text-xs text-muted-foreground"
           >
-            {isActive ? (
-              <>
-                <Pause className="w-3.5 h-3.5 mr-1" />
-                Pause
-              </>
-            ) : (
-              <>
-                <Play className="w-3.5 h-3.5 mr-1" />
-                Resume
-              </>
-            )}
+            <ChevronDown
+              className={`w-3.5 h-3.5 mr-1 transition-transform duration-200 ${
+                expanded ? 'rotate-180' : ''
+              }`}
+            />
+            History
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleEdit}
-            className="text-xs"
-          >
-            <Settings className="w-3.5 h-3.5 mr-1" />
-            Edit
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleToggle}
+              disabled={toggleMutation.isLoading}
+              className="text-xs"
+            >
+              {isActive ? (
+                <>
+                  <Pause className="w-3.5 h-3.5 mr-1" />
+                  Pause
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5 mr-1" />
+                  Resume
+                </>
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleEdit}
+              className="text-xs"
+            >
+              <Settings className="w-3.5 h-3.5 mr-1" />
+              Edit
+            </Button>
+          </div>
         </div>
       }
-    />
+    >
+      {/* Expandable execution history */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="pt-2 space-y-1.5">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                Execution History
+              </div>
+              {historyLoading ? (
+                <ExecutionHistorySkeleton />
+              ) : historyData?.executions?.length ? (
+                historyData.executions.map((exec) => (
+                  <ExecutionLogEntry key={exec.id} execution={exec} />
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground py-2">
+                  No executions recorded yet
+                </p>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </ItemCard>
+  )
+}
+
+// ─── Execution Log Entry ─────────────────────────────────
+
+function ExecutionLogEntry({ execution }: { execution: HeartbeatExecution }) {
+  const isSuccess = execution.status === 'completed' || execution.status === 'success'
+  const isFailed = execution.status === 'failed' || execution.status === 'error'
+  const isRunning = execution.status === 'running'
+
+  const entryClass = isSuccess
+    ? 'log-entry log-entry-success'
+    : isFailed
+      ? 'log-entry log-entry-error'
+      : isRunning
+        ? 'log-entry log-entry-info'
+        : 'log-entry'
+
+  const StatusIcon = isSuccess
+    ? CheckCircle2
+    : isFailed
+      ? XCircle
+      : isRunning
+        ? Loader2
+        : Clock
+
+  const statusLabel = isSuccess
+    ? 'Completed'
+    : isFailed
+      ? 'Failed'
+      : isRunning
+        ? 'Running'
+        : execution.status
+
+  const durationText =
+    execution.duration_seconds != null
+      ? execution.duration_seconds < 60
+        ? `${execution.duration_seconds.toFixed(1)}s`
+        : `${Math.floor(execution.duration_seconds / 60)}m ${Math.round(execution.duration_seconds % 60)}s`
+      : null
+
+  const timeText = execution.started_at
+    ? format(new Date(execution.started_at), 'MMM d, HH:mm')
+    : 'Unknown'
+
+  return (
+    <div className={`${entryClass} px-3 py-2 text-xs`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <StatusIcon
+            className={`w-3.5 h-3.5 shrink-0 ${
+              isSuccess
+                ? 'text-[hsl(var(--success))]'
+                : isFailed
+                  ? 'text-destructive'
+                  : isRunning
+                    ? 'text-[hsl(var(--info))] animate-spin'
+                    : 'text-muted-foreground'
+            }`}
+          />
+          <span className="font-medium">{statusLabel}</span>
+          <span className="text-muted-foreground">·</span>
+          <span className="text-muted-foreground">{timeText}</span>
+          {durationText && (
+            <>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground">{durationText}</span>
+            </>
+          )}
+        </div>
+        {execution.findings_count > 0 && (
+          <span className="text-muted-foreground shrink-0">
+            {execution.findings_count} finding{execution.findings_count !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
+      {isFailed && execution.error_message && (
+        <p className="mt-1 text-destructive/80 truncate pl-5.5">
+          {execution.error_message}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── Skeleton ────────────────────────────────────────────
+
+function ExecutionHistorySkeleton() {
+  return (
+    <div className="space-y-1.5">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="log-entry px-3 py-2">
+          <div className="flex items-center gap-2">
+            <Skeleton className="w-3.5 h-3.5 rounded-full" />
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-10" />
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
