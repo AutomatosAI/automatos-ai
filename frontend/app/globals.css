@@ -290,6 +290,16 @@
   
   .log-entry-new { animation: log-slide-in 0.3s ease-out; }
 
+  /* Badge-level pulse for running status badges (lighter than full stage-active) */
+  .stage-active-badge {
+    animation: badge-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes badge-pulse {
+    0%, 100% { box-shadow: 0 0 8px hsla(var(--info) / 0.3); }
+    50% { box-shadow: 0 0 16px hsla(var(--info) / 0.5); }
+  }
+
   .progress-shimmer {
     background: linear-gradient(90deg, transparent 0%, hsla(0 0% 100% / 0.1) 50%, transparent 100%);
     background-size: 200% 100%;
@@ -374,7 +384,8 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   .parallax-bg { background-attachment: scroll; }
-  .stage-active, .progress-shimmer, .flow-particle, .agent-avatar-active { animation: none; }
+  .stage-active, .progress-shimmer, .flow-particle, .agent-avatar-active,
+  .log-entry-new, .stage-active-badge { animation: none; }
 }
 
 /* ── Mobile Performance Optimizations ── */

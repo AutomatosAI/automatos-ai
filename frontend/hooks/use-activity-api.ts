@@ -1,0 +1,129 @@
+/**
+ * Activity API hooks (PRD-72 US-006)
+ * React Query integration for the unified activity feed and stats endpoints.
+ */
+
+import { useQuery } from '@tanstack/react-query'
+import { apiClient } from '@/lib/api-client'
+
+// ============= TYPES =============
+
+export interface ActivityAgent {
+  id: number | null
+  name: string
+  avatar_url: string | null
+}
+
+export interface ActivityStepProgress {
+  current: number
+  total: number
+  steps: Array<{
+    name: string
+    status: 'pending' | 'running' | 'completed' | 'failed'
+  }>
+}
+
+export interface ActivityChannel {
+  type: 'telegram' | 'whatsapp' | 'slack' | 'email' | 'webchat'
+  name: string
+}
+
+export interface ActivityFeedItem {
+  id: string
+  type: 'chat' | 'routine' | 'recipe' | 'mission'
+  name: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused'
+  started_at: string | null
+  completed_at: string | null
+  duration_seconds: number | null
+  agent: ActivityAgent | null
+  agents: ActivityAgent[]
+  summary: string
+  source_id: string | null
+  source_url: string | null
+  trigger: 'manual' | 'scheduled' | 'event' | 'webhook' | 'heartbeat' | null
+  channel?: ActivityChannel | null
+  step_progress?: ActivityStepProgress | null
+  error_message: string | null
+}
+
+export interface ActivityFeedResponse {
+  items: ActivityFeedItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ActivityStats {
+  working_now: number
+  channels_live: number
+  completed_today: number
+  needs_attention: number
+  period: string
+}
+
+export interface ActivityFeedFilters {
+  types?: string[]
+  status?: string | null
+  period?: string
+  limit?: number
+  offset?: number
+}
+
+// ============= QUERY KEYS =============
+
+export const activityQueryKeys = {
+  all: ['activity'] as const,
+  feed: (filters?: ActivityFeedFilters) => ['activity', 'feed', filters] as const,
+  stats: (period?: string) => ['activity', 'stats', period] as const,
+}
+
+// ============= QUERY HOOKS =============
+
+/**
+ * Fetch the unified activity feed with polling.
+ * Merges chats, routines, and recipes sorted by started_at DESC.
+ */
+export function useActivityFeed(filters?: ActivityFeedFilters) {
+  const params = new URLSearchParams()
+
+  if (filters?.types && filters.types.length > 0) {
+    params.set('type', filters.types.join(','))
+  }
+  if (filters?.status) {
+    params.set('status', filters.status)
+  }
+  if (filters?.period) {
+    params.set('period', filters.period)
+  }
+  if (filters?.limit) {
+    params.set('limit', String(filters.limit))
+  }
+  if (filters?.offset) {
+    params.set('offset', String(filters.offset))
+  }
+
+  const queryString = params.toString()
+  const endpoint = `/api/activity/feed${queryString ? `?${queryString}` : ''}`
+
+  return useQuery<ActivityFeedResponse>({
+    queryKey: activityQueryKeys.feed(filters),
+    queryFn: () => apiClient.request<ActivityFeedResponse>(endpoint),
+    refetchInterval: 15000,
+    staleTime: 10000,
+  })
+}
+
+/**
+ * Fetch hero-card stats with polling.
+ * Returns working_now, channels_live, completed_today, needs_attention.
+ */
+export function useActivityStats(period: string = '1d') {
+  return useQuery<ActivityStats>({
+    queryKey: activityQueryKeys.stats(period),
+    queryFn: () =>
+      apiClient.request<ActivityStats>(`/api/activity/stats?period=${period}`),
+    refetchInterval: 15000,
+    staleTime: 10000,
+  })
+}

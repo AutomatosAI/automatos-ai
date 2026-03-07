@@ -1,12 +1,14 @@
 """
-Heartbeat API Endpoints (PRD-55 US-008)
-========================================
+Heartbeat API Endpoints (PRD-55 US-008, PRD-72 US-003)
+=======================================================
 
 Manage and monitor heartbeat ticks for orchestrator and agents.
+PRD-72 adds workspace listing, toggle, and execution history endpoints.
 """
 
 import json
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -17,6 +19,7 @@ from sqlalchemy.orm import Session
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.models import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -339,3 +342,217 @@ async def get_heartbeat_analytics(
     except Exception as e:
         logger.error("Failed to get heartbeat analytics: %s", e)
         return {"today": {"total_heartbeats": 0, "total_tokens": 0}, "recent_events": []}
+
+
+# ── PRD-72: Activity Command Centre Endpoints ─────────────────────
+
+@router.get("/workspace")
+async def list_workspace_heartbeats(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """List all heartbeat configurations for the current workspace.
+
+    Returns agent heartbeats with their config, last run, and status.
+    Used by the Activity Command Centre Routines tab (PRD-72).
+    """
+    ws_id = str(ctx.workspace_id)
+
+    try:
+        # Get all agents in this workspace
+        agents = (
+            db.query(Agent)
+            .filter(Agent.workspace_id == ctx.workspace_id)
+            .all()
+        )
+
+        heartbeats: List[Dict[str, Any]] = []
+        for agent in agents:
+            cfg = agent.configuration or {}
+            hb = cfg.get("heartbeat", {})
+            if not hb:
+                continue
+
+            # Get last execution for this agent heartbeat
+            last_run_row = db.execute(
+                text("""
+                    SELECT id, status, findings, tokens_used, cost, created_at
+                    FROM heartbeat_results
+                    WHERE workspace_id = :ws_id
+                      AND source_type = 'agent'
+                      AND source_id = :agent_id
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """),
+                {"ws_id": ws_id, "agent_id": str(agent.id)},
+            ).fetchone()
+
+            # Get next run time from scheduler if available
+            next_run_at = None
+            try:
+                from services.heartbeat_service import get_heartbeat_service
+                service = get_heartbeat_service()
+                if service._scheduler:
+                    job = service._scheduler.get_job(f"agent_hb_{agent.id}")
+                    if job and job.next_run_time:
+                        next_run_at = job.next_run_time.isoformat()
+            except Exception:
+                pass  # Scheduler may not be running in all environments
+
+            heartbeats.append({
+                "id": agent.id,
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "agent_description": agent.description,
+                "enabled": hb.get("enabled", False),
+                "interval_minutes": hb.get("interval_minutes", 60),
+                "prompt": hb.get("prompt", ""),
+                "auto_act": hb.get("auto_act", False),
+                "timezone": hb.get("timezone", "UTC"),
+                "active_hours_start": hb.get("active_hours_start", "08:00"),
+                "active_hours_end": hb.get("active_hours_end", "20:00"),
+                "last_run": {
+                    "status": last_run_row.status,
+                    "created_at": last_run_row.created_at.isoformat() if last_run_row.created_at else None,
+                    "tokens_used": last_run_row.tokens_used,
+                } if last_run_row else None,
+                "next_run_at": next_run_at,
+            })
+
+        return {"heartbeats": heartbeats, "total": len(heartbeats)}
+
+    except Exception as e:
+        logger.error("Failed to list workspace heartbeats: %s", e, exc_info=True)
+        raise HTTPException(500, "Internal server error")
+
+
+@router.patch("/{heartbeat_id}/toggle")
+async def toggle_heartbeat(
+    heartbeat_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Toggle a heartbeat's enabled state (pause/resume).
+
+    heartbeat_id is the agent ID whose heartbeat config should be toggled.
+    """
+    agent = (
+        db.query(Agent)
+        .filter(Agent.id == heartbeat_id, Agent.workspace_id == ctx.workspace_id)
+        .first()
+    )
+    if not agent:
+        raise HTTPException(404, f"Agent {heartbeat_id} not found in this workspace")
+
+    cfg = agent.configuration or {}
+    hb = cfg.get("heartbeat")
+    if not hb:
+        raise HTTPException(404, f"Agent {heartbeat_id} has no heartbeat configuration")
+
+    # Toggle the enabled flag — use immutable update
+    new_enabled = not hb.get("enabled", False)
+    updated_hb = {**hb, "enabled": new_enabled}
+    updated_cfg = {**cfg, "heartbeat": updated_hb}
+
+    # SQLAlchemy needs the column reassigned to detect JSON mutation
+    agent.configuration = updated_cfg
+    db.commit()
+    db.refresh(agent)
+
+    # Schedule or unschedule in the heartbeat service
+    try:
+        from services.heartbeat_service import get_heartbeat_service
+        service = get_heartbeat_service()
+        job_id = f"agent_hb_{agent.id}"
+        if new_enabled:
+            service.schedule_agent_heartbeat(
+                agent.id, str(agent.workspace_id), updated_hb
+            )
+        else:
+            service.unschedule_heartbeat(job_id)
+    except Exception as sched_err:
+        logger.warning("Failed to update heartbeat schedule for agent %s: %s", heartbeat_id, sched_err)
+
+    return {
+        "id": agent.id,
+        "agent_id": agent.id,
+        "agent_name": agent.name,
+        "enabled": new_enabled,
+        "interval_minutes": updated_hb.get("interval_minutes", 60),
+        "message": f"Heartbeat {'enabled' if new_enabled else 'paused'} for {agent.name}",
+    }
+
+
+@router.get("/{heartbeat_id}/executions")
+async def get_heartbeat_executions(
+    heartbeat_id: int,
+    limit: int = Query(10, ge=1, le=100),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Get execution history for a specific agent's heartbeat.
+
+    heartbeat_id is the agent ID. Returns the last N executions
+    from heartbeat_results ordered by most recent first.
+    """
+    ws_id = str(ctx.workspace_id)
+
+    # Verify agent belongs to this workspace
+    agent = (
+        db.query(Agent)
+        .filter(Agent.id == heartbeat_id, Agent.workspace_id == ctx.workspace_id)
+        .first()
+    )
+    if not agent:
+        raise HTTPException(404, f"Agent {heartbeat_id} not found in this workspace")
+
+    try:
+        rows = db.execute(
+            text("""
+                SELECT id, status, findings, actions_taken, tokens_used, cost, created_at
+                FROM heartbeat_results
+                WHERE workspace_id = :ws_id
+                  AND source_type = 'agent'
+                  AND source_id = :agent_id
+                ORDER BY created_at DESC
+                LIMIT :lim
+            """),
+            {"ws_id": ws_id, "agent_id": str(heartbeat_id), "lim": limit},
+        ).fetchall()
+
+        executions = []
+        for r in rows:
+            findings = r.findings
+            if isinstance(findings, str):
+                findings = json.loads(findings)
+
+            # Extract error message from findings if status is error
+            error_message = None
+            if r.status == "error" and findings:
+                for f in findings:
+                    if f.get("check") in ("error", "llm_error"):
+                        error_message = f.get("detail", "")[:500]
+                        break
+
+            executions.append({
+                "id": r.id,
+                "status": r.status,
+                "started_at": r.created_at.isoformat() if r.created_at else None,
+                "completed_at": r.created_at.isoformat() if r.created_at else None,
+                "duration_seconds": None,  # Not tracked separately; heartbeats are fast
+                "tokens_used": r.tokens_used,
+                "cost": r.cost,
+                "error_message": error_message,
+                "findings_count": len(findings) if findings else 0,
+            })
+
+        return {
+            "agent_id": heartbeat_id,
+            "agent_name": agent.name,
+            "executions": executions,
+            "total": len(executions),
+        }
+
+    except Exception as e:
+        logger.error("Failed to get heartbeat executions for agent %s: %s", heartbeat_id, e, exc_info=True)
+        raise HTTPException(500, "Internal server error")

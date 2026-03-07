@@ -34,7 +34,7 @@ export function FilterTabs({
       <div className="flex items-center gap-4">
         <TabsList className="bg-secondary/50 shrink-0">
           {tabs.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5">
+            <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5 min-h-[44px] sm:min-h-0">
               {tab.icon && <tab.icon className="w-4 h-4" />}
               <span className="hidden sm:inline">{tab.label}</span>
               {tab.count !== undefined && (
