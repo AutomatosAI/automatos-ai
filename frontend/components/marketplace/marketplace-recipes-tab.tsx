@@ -241,7 +241,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
           {recipes.map((recipe: any) => (
             <Card
               key={recipe.id}
-              className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20 transition-all duration-300 cursor-pointer"
+              className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
               onClick={() => handleViewRecipe(recipe)}
             >
               <CardHeader className="pb-3">

@@ -21,20 +21,12 @@ import {
     AlertTriangle,
     Clock,
     RefreshCw,
-    MoreVertical,
-    Eye,
     Download,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import { useToast } from '@/hooks/use-toast'
 import { ViewToggle } from '@/components/shared/view-toggle'
@@ -612,7 +604,7 @@ function ToolCard({
             transition={{ delay: index * 0.1 }}
         >
             <Card
-                className="glass-card card-glow hover:border-primary/20 transition-all duration-200 group hover:shadow-lg hover:shadow-primary/20"
+                className="glass-card card-glow hover:border-primary/20 transition-all duration-300 group"
             >
                 <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
@@ -629,33 +621,12 @@ function ToolCard({
                                 <p className="text-xs text-muted-foreground">Composio</p>
                             </div>
                         </div>
-                        <div className="flex items-center space-x-2">
-                            {isInWorkspace && (
-                                <Badge variant="secondary" className="text-xs bg-secondary/50 border border-border/50">
-                                    <CheckCircle className="w-3 h-3 mr-1" />
-                                    Added
-                                </Badge>
-                            )}
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                        <MoreVertical className="h-4 w-4" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={onDetails}>
-                                        <Eye className="w-4 h-4 mr-2" />
-                                        View Details
-                                    </DropdownMenuItem>
-                                    {!isInWorkspace && (
-                                        <DropdownMenuItem onClick={onConnect} disabled={isConnecting}>
-                                            <Download className="w-4 h-4 mr-2" />
-                                            {isConnecting ? 'Adding...' : 'Add to Workspace'}
-                                        </DropdownMenuItem>
-                                    )}
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </div>
+                        {isInWorkspace && (
+                            <Badge variant="secondary" className="text-xs bg-secondary/50 border border-border/50">
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                Added
+                            </Badge>
+                        )}
                     </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -703,6 +674,25 @@ function ToolCard({
                     )}
 
                 </CardContent>
+                <Separator />
+                <div className="flex items-center justify-between px-6 py-3">
+                    <Button variant="ghost" size="sm" onClick={onDetails}
+                        className="text-muted-foreground hover:text-foreground p-0 h-auto">
+                        Details
+                    </Button>
+                    {isInWorkspace ? (
+                        <Button size="sm" variant="secondary"
+                            className="bg-secondary/50 hover:bg-secondary border border-white/10">
+                            <CheckCircle className="w-3 h-3 mr-2" />
+                            Added
+                        </Button>
+                    ) : (
+                        <Button size="sm" variant="outline" onClick={onConnect}
+                            disabled={isConnecting}>
+                            {isConnecting ? 'Adding...' : 'Add to Workspace'}
+                        </Button>
+                    )}
+                </div>
             </Card>
         </motion.div>
     )

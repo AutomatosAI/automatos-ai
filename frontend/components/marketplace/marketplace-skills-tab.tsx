@@ -405,7 +405,7 @@ function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEna
       exit={{ opacity: 0, y: 20 }}
       transition={{ delay: Math.min(index * 0.05, 0.5) }}
     >
-      <Card className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20 transition-all duration-300">
+      <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3 flex-1 min-w-0">

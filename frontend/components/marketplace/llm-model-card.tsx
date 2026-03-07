@@ -205,7 +205,7 @@ export function LLMModelCard({
 
   return (
     <Card
-      className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/10 transition-all duration-300 cursor-pointer flex flex-col relative"
+      className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer flex flex-col relative"
       onClick={onClick}
     >
       {/* Featured star */}

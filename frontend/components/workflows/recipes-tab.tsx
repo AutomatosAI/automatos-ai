@@ -485,7 +485,7 @@ export function RecipesTab({
                     )}
 
                     {/* Action buttons */}
-                    <div className="flex gap-1.5 pt-1 border-t border-border/5">
+                    <div className="flex gap-1.5 pt-1 border-t border-border/30">
                       <Button
                         className="flex-1 bg-primary/90 hover:bg-primary/80 text-primary-foreground text-xs h-8 transition-all duration-200"
                         size="sm"

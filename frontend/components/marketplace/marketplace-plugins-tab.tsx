@@ -796,7 +796,7 @@ function PluginCard({
       transition={{ delay: Math.min(index * 0.05, 0.5) }}
     >
       <Card
-        className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20 transition-all duration-300 cursor-pointer"
+        className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
         onClick={onClick}
       >
         <CardHeader className="pb-3">
