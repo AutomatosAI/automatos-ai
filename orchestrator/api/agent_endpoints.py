@@ -624,9 +624,6 @@ async def update_agent_model_config(
     Note: Agent must be recreated for changes to take effect in runtime.
     """
     try:
-        from core.llm.model_registry import ModelRegistry
-        from sqlalchemy import update
-        
         agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
@@ -634,11 +631,13 @@ async def update_agent_model_config(
                 detail=f"Agent {agent_id} not found"
             )
 
-        # Validate model exists and auto-resolve provider from registry
+        # Validate model exists and auto-resolve provider from registry.
+        # Uses _get_or_create_from_cache so any marketplace model (including
+        # those only in the OpenRouter cache) can be assigned to an agent.
         model_id = model_config.get("model_id")
         if model_id:
-            registry = ModelRegistry(db)
-            model = registry.get_model(model_id)
+            from api.llm_marketplace import _get_or_create_from_cache
+            model = _get_or_create_from_cache(db, model_id)
             if not model:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

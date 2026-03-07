@@ -347,6 +347,7 @@ export function AgentConfiguration({
 
       // 2. Save model configuration (PRD-15)
       // Note: Plugin assignments are saved immediately via togglePluginAssignment
+      let modelConfigFailed = false
       if (modelConfigData && Object.keys(modelConfigData).length > 0) {
         try {
           await updateModelConfigMutation.mutateAsync({
@@ -354,12 +355,16 @@ export function AgentConfiguration({
             modelConfig: modelConfigData
           })
         } catch (error) {
+          modelConfigFailed = true
           console.error('Failed to save model config:', error)
-          toast.error('Some settings saved, but model configuration failed')
         }
       }
 
       toast.dismiss()
+      if (modelConfigFailed) {
+        toast.error('Agent saved, but model configuration failed to save. Please try again.')
+        return
+      }
       toast.success('Configuration saved!')
       setHasUnsavedChanges(false)
 

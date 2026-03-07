@@ -99,8 +99,11 @@ async def _execute_step(
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.tools.builtin.scratchpad_tool import (
         SCRATCHPAD_WRITE_TOOL_DEF,
+        SCRATCHPAD_READ_TOOL_DEF,
         SCRATCHPAD_TOOL_NAME,
+        SCRATCHPAD_READ_NAME,
         handle_scratchpad_write,
+        handle_scratchpad_read,
     )
 
     # 0. Activate agent via factory — gives us the agent's LLM manager
@@ -230,7 +233,10 @@ async def _execute_step(
         # Fallback: composio_execute + hints (existing behavior)
         tools = get_chat_tools(agent_id=agent.id, workspace_id=workspace_id)
     if scratchpad:
-        tools = list(tools) + [SCRATCHPAD_WRITE_TOOL_DEF]
+        scratchpad_tools = [SCRATCHPAD_WRITE_TOOL_DEF]
+        if step_order > 1:
+            scratchpad_tools.append(SCRATCHPAD_READ_TOOL_DEF)
+        tools = list(tools) + scratchpad_tools
 
     # 6. LLM — agent's own LLM manager (with tracking context for recipe)
     llm = agent_runtime.llm_manager
@@ -266,7 +272,7 @@ async def _execute_step(
             except json.JSONDecodeError:
                 tool_args = {}
 
-            # Handle scratchpad_write inline (no tool_router needed)
+            # Handle scratchpad tools inline (no tool_router needed)
             if tool_name == SCRATCHPAD_TOOL_NAME and scratchpad:
                 result_text = handle_scratchpad_write(
                     key=tool_args.get("key", "unknown"),
@@ -276,6 +282,23 @@ async def _execute_step(
                 )
                 all_tool_calls.append({
                     "action": SCRATCHPAD_TOOL_NAME,
+                    "params": tool_args,
+                    "result": result_text,
+                })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_id,
+                    "content": result_text,
+                })
+                continue
+
+            if tool_name == SCRATCHPAD_READ_NAME and scratchpad:
+                result_text = handle_scratchpad_read(
+                    key=tool_args.get("key", ""),
+                    scratchpad=scratchpad,
+                )
+                all_tool_calls.append({
+                    "action": SCRATCHPAD_READ_NAME,
                     "params": tool_args,
                     "result": result_text,
                 })
