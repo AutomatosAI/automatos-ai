@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
@@ -78,7 +78,9 @@ export function ItemCard({
     </Card>
   )
 
-  if (!animated) return content
+  const prefersReducedMotion = useReducedMotion()
+
+  if (!animated || prefersReducedMotion) return content
 
   return (
     <motion.div
