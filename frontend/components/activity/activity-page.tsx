@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import {
   Activity,
   RefreshCw,
@@ -15,6 +15,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
+import { RecipesTab } from '@/components/workflows/recipes-tab'
+import { ActivityMissions } from './activity-missions'
 import type { StatItem } from '@/components/shared/stats-bar'
 
 const PERIOD_OPTIONS = [
@@ -34,6 +36,9 @@ const TAB_DEFS = [
 export function ActivityPage() {
   const [activeTab, setActiveTab] = useState('feed')
   const [period, setPeriod] = useState('1d')
+
+  // RecipesTab requires onUseRecipe — no-op in Activity context (full edit is in /workflows)
+  const handleUseRecipe = useCallback(() => {}, [])
 
   const stats: StatItem[] = [
     { label: 'Working Now', value: 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]' },
@@ -96,19 +101,11 @@ export function ActivityPage() {
           </TabsContent>
 
           <TabsContent value="recipes">
-            <div className="glass-card p-8 text-center text-muted-foreground">
-              <ChefHat className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="font-medium">Recipes coming soon</p>
-              <p className="text-sm mt-1">Your workflow recipes will be wired in next</p>
-            </div>
+            <RecipesTab onUseRecipe={handleUseRecipe} />
           </TabsContent>
 
           <TabsContent value="missions">
-            <div className="glass-card p-8 text-center text-muted-foreground">
-              <Rocket className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="font-medium">Missions coming soon</p>
-              <p className="text-sm mt-1">Multi-agent projects — coming in a future release</p>
-            </div>
+            <ActivityMissions />
           </TabsContent>
         </FilterTabs>
       </div>

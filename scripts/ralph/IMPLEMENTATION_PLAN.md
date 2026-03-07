@@ -18,7 +18,7 @@ Replace `/workflows` with `/activity` — a unified Activity Command Centre show
 ## Tasks
 
 - [x] **US-001: Create /activity route shell page** — Create `frontend/app/activity/page.tsx` + `frontend/components/activity/activity-page.tsx` with PageHeader, StatsBar (hardcoded), FilterTabs (4 tabs). Update sidebar.tsx nav item. Add `/workflows` → `/activity` redirect. NOTE: `CookingPot` icon doesn't exist in this lucide-react version — use `ChefHat` instead.
-- [ ] **US-002: Build Missions placeholder + wire RecipesTab** — Create `activity-missions.tsx` Coming Soon card. Import existing RecipesTab into Recipes tab of activity-page.
+- [x] **US-002: Build Missions placeholder + wire RecipesTab** — Created `activity-missions.tsx` Coming Soon card with glass-card styling, gradient-text accent, capability bullets, and "Request Early Access" button routing to /chat. Wired existing RecipesTab into Recipes tab and ActivityMissions into Missions tab of activity-page.tsx.
 - [ ] **US-003: Register heartbeat router + add endpoints** — Register heartbeat_router in main.py. Add GET /api/heartbeat/workspace, PATCH /api/heartbeat/{id}/toggle, GET /api/heartbeat/{id}/executions.
 - [ ] **US-004: Create activity_service.py** — Backend service merging chats, heartbeat_executions, recipe_executions into unified ActivityFeedItem list. get_feed() + get_stats() methods.
 - [ ] **US-005: Create /api/activity/feed + /api/activity/stats endpoints** — FastAPI router in `orchestrator/api/activity.py`. Register in main.py.
