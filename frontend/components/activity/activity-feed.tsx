@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import {
   Activity,
@@ -69,6 +69,28 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
   const items = data?.items ?? []
   const total = data?.total ?? 0
   const hasMore = items.length < total
+
+  // Track known IDs to detect items arriving via polling (for log-slide-in animation)
+  const knownIds = useRef<Set<string>>(new Set())
+  const isInitialLoad = useRef(true)
+
+  const newItemIds = useMemo(() => {
+    if (isInitialLoad.current || items.length === 0) return new Set<string>()
+    const result = new Set<string>()
+    for (const item of items) {
+      if (!knownIds.current.has(item.id)) result.add(item.id)
+    }
+    return result
+  }, [items])
+
+  useEffect(() => {
+    if (items.length > 0) {
+      for (const item of items) {
+        knownIds.current.add(item.id)
+      }
+      isInitialLoad.current = false
+    }
+  }, [items])
 
   const toggleType = useCallback((type: string) => {
     setActiveTypes((prev) => {
@@ -150,6 +172,7 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
               key={item.id}
               item={item}
               animationDelay={index * 0.05}
+              isNew={newItemIds.has(item.id)}
             />
           ))}
         </AnimatePresence>

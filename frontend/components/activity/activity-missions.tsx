@@ -2,6 +2,7 @@
 
 import { Rocket, Sparkles } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { motion, useReducedMotion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 
 const CAPABILITIES = [
@@ -13,9 +14,15 @@ const CAPABILITIES = [
 
 export function ActivityMissions() {
   const router = useRouter()
+  const prefersReducedMotion = useReducedMotion()
 
   return (
-    <div className="glass-card p-8 md:p-12 max-w-2xl mx-auto text-center space-y-6">
+    <motion.div
+      initial={prefersReducedMotion ? false : { opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="glass-card p-8 md:p-12 max-w-2xl mx-auto text-center space-y-6"
+    >
       <Rocket className="w-12 h-12 mx-auto text-muted-foreground/30" />
 
       <div>
@@ -60,6 +67,6 @@ export function ActivityMissions() {
         <Rocket className="w-4 h-4 mr-2" />
         Request Early Access
       </Button>
-    </div>
+    </motion.div>
   )
 }

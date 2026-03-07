@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import {
   RefreshCw,
   Pause,
@@ -59,6 +59,7 @@ interface RoutineCardProps {
 
 export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps) {
   const router = useRouter()
+  const prefersReducedMotion = useReducedMotion()
   const toggleMutation = useToggleHeartbeat()
   const [expanded, setExpanded] = useState(false)
 
@@ -168,10 +169,10 @@ export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps)
       <AnimatePresence>
         {expanded && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
+            initial={prefersReducedMotion ? false : { opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
+            exit={prefersReducedMotion ? undefined : { opacity: 0, height: 0 }}
+            transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
             className="overflow-hidden"
           >
             <div className="pt-2 space-y-1.5">

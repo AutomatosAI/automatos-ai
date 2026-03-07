@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import {
   MessageCircle,
   RefreshCw,
@@ -21,6 +21,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import type { StatusVariant } from '@/components/shared/status-badge'
+import { cn } from '@/lib/utils'
 import type { ActivityFeedItem } from '@/hooks/use-activity-api'
 
 // ─── Type Config ─────────────────────────────────────────
@@ -199,10 +200,12 @@ function ContextLine({ item }: { item: ActivityFeedItem }) {
 interface ActivityFeedItemCardProps {
   item: ActivityFeedItem
   animationDelay?: number
+  isNew?: boolean
 }
 
-export function ActivityFeedItemCard({ item, animationDelay = 0 }: ActivityFeedItemCardProps) {
+export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false }: ActivityFeedItemCardProps) {
   const router = useRouter()
+  const prefersReducedMotion = useReducedMotion()
   const typeConfig = TYPE_CONFIG[item.type]
   const statusConfig = STATUS_MAP[item.status]
   const TypeIcon = typeConfig.icon
@@ -210,6 +213,7 @@ export function ActivityFeedItemCard({ item, animationDelay = 0 }: ActivityFeedI
   const relativeTime = formatRelativeTime(item.started_at)
   const viewUrl = getViewUrl(item)
   const configureUrl = getConfigureUrl(item)
+  const isRunning = item.status === 'running'
 
   const handleView = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -223,10 +227,11 @@ export function ActivityFeedItemCard({ item, animationDelay = 0 }: ActivityFeedI
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={prefersReducedMotion ? false : { opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 20 }}
+      exit={prefersReducedMotion ? undefined : { opacity: 0, y: 20 }}
       transition={{ duration: 0.4, delay: animationDelay }}
+      className={cn(isNew && !prefersReducedMotion && 'log-entry-new')}
     >
       <div
         className={`glass-card card-glow border-l-[3px] ${typeConfig.borderColor} hover:border-primary/20 transition-all duration-300 p-4 space-y-2`}
@@ -264,6 +269,7 @@ export function ActivityFeedItemCard({ item, animationDelay = 0 }: ActivityFeedI
             status={statusConfig.variant}
             dot={statusConfig.dot}
             size="sm"
+            className={cn(isRunning && 'shadow-[0_0_12px_hsla(var(--info)/0.3)] stage-active-badge')}
           >
             {statusConfig.label}
           </StatusBadge>

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import {
   ArrowLeft,
   ChefHat,
@@ -271,6 +271,7 @@ interface ExecutionDetailProps {
 
 export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
   const router = useRouter()
+  const prefersReducedMotion = useReducedMotion()
   const [logsExpanded, setLogsExpanded] = useState(true)
 
   const typeConfig = TYPE_CONFIG[item.type]
@@ -321,10 +322,10 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={prefersReducedMotion ? false : { opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 20 }}
-      transition={{ duration: 0.3 }}
+      exit={prefersReducedMotion ? undefined : { opacity: 0, y: 20 }}
+      transition={{ duration: prefersReducedMotion ? 0 : 0.3 }}
     >
       <div className={`glass-panel rounded-xl border-l-[3px] ${typeConfig.borderColor} p-6 space-y-6`}>
         {/* Back link */}
@@ -448,10 +449,10 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
           <AnimatePresence>
             {logsExpanded && (
               <motion.div
-                initial={{ height: 0, opacity: 0 }}
+                initial={prefersReducedMotion ? false : { height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
+                exit={prefersReducedMotion ? undefined : { height: 0, opacity: 0 }}
+                transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
                 className="overflow-hidden"
               >
                 <ExecutionLog entries={logEntries} />
