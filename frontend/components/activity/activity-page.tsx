@@ -17,6 +17,7 @@ import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { RecipesTab } from '@/components/workflows/recipes-tab'
 import { ActivityMissions } from './activity-missions'
+import { ActivityRoutines } from './activity-routines'
 import type { StatItem } from '@/components/shared/stats-bar'
 
 const PERIOD_OPTIONS = [
@@ -93,11 +94,7 @@ export function ActivityPage() {
           </TabsContent>
 
           <TabsContent value="routines">
-            <div className="glass-card p-8 text-center text-muted-foreground">
-              <RefreshCw className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="font-medium">Routines coming soon</p>
-              <p className="text-sm mt-1">Your agent heartbeat routines will appear here</p>
-            </div>
+            <ActivityRoutines />
           </TabsContent>
 
           <TabsContent value="recipes">
