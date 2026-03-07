@@ -355,7 +355,7 @@ export function AnalyticsWorkflows({ days }: Props) {
                                 )}
                                 <div className="flex gap-2">
                                   {recipe.isSystem && (
-                                    <Badge variant="outline" className="text-[hsl(var(--info))] border-blue-400/30 text-xs">
+                                    <Badge variant="outline" className="text-[hsl(var(--info))] border-[hsl(var(--info))]/30 text-xs">
                                       <Shield className="w-3 h-3 mr-1" /> System
                                     </Badge>
                                   )}
