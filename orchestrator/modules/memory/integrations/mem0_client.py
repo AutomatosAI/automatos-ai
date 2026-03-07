@@ -166,12 +166,12 @@ class Mem0Client:
 
         normalized = (resp.text or "").strip().lower()
         if normalized == "" or normalized == "null":
-            logger.warning(
-                "[Mem0] Empty/null response (status=%s) for user_id=%s — "
-                "memory may not have been stored. Check Mem0 server vector store config.",
+            logger.info(
+                "[Mem0] No facts extracted (status=%s) for user_id=%s — "
+                "LLM found nothing to remember from the input text.",
                 resp.status_code, user_id,
             )
-            return {"success": False, "error": f"Empty response from Mem0 (HTTP {resp.status_code})"}
+            return {"success": True, "facts_extracted": 0}
 
         try:
             result = resp.json()
