@@ -57,6 +57,7 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
   'dashboard': false,        // ✅ Use real APIs - working endpoints
   'agents': false,           // ✅ Use real APIs - working endpoints (FIXED: recursive call bug)
   'workflows': false,        // ✅ Use real APIs - working endpoints
+  'activity': false,         // ✅ Use real APIs - PRD-72 Activity Command Centre
   'documents': false,        // false = REAL APIs ✅ | true = MOCK data ❌
   'analytics': false,        // ✅ Use real APIs - working endpoints
   'context': false,          // ✅ Use real APIs - all context endpoints working
