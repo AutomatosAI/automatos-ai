@@ -216,9 +216,10 @@ class HeartbeatService:
                     db.close()
             except Exception as e:
                 logger.warning(
-                    "[Heartbeat] Failed to inherit orchestrator active hours for ws=%s: %s",
+                    "[Heartbeat] Failed to inherit orchestrator active hours for ws=%s: %s — assuming within hours",
                     workspace_id, e,
                 )
+                return True  # fail open: if we can't check, let the tick run
 
         tz_name = active_cfg.get("timezone", "UTC")
         try:

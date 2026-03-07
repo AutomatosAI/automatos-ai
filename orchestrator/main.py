@@ -333,13 +333,23 @@ async def lifespan(app: FastAPI):
         await startup_dashboard(app)
         logger.info("Dashboard services initialized successfully")
 
-        # PRD-55: Start HeartbeatService
+        # PRD-55: Start HeartbeatService (only in one worker to avoid 4x duplicate ticks)
         if config.HEARTBEAT_ENABLED:
             try:
-                from services.heartbeat_service import get_heartbeat_service
-                heartbeat_svc = get_heartbeat_service()
-                await heartbeat_svc.start()
-                logger.info("HeartbeatService started successfully")
+                import fcntl
+                lock_path = "/tmp/heartbeat_scheduler.lock"
+                lock_file = open(lock_path, "w")
+                try:
+                    fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    # We got the lock — this worker owns the scheduler
+                    from services.heartbeat_service import get_heartbeat_service
+                    heartbeat_svc = get_heartbeat_service()
+                    await heartbeat_svc.start()
+                    app.state.heartbeat_lock = lock_file  # keep file open to hold lock
+                    logger.info("HeartbeatService started successfully (this worker owns scheduler)")
+                except BlockingIOError:
+                    lock_file.close()
+                    logger.info("HeartbeatService: another worker owns the scheduler, skipping")
             except Exception as e:
                 logger.warning(f"HeartbeatService failed to start (non-fatal): {e}")
 
