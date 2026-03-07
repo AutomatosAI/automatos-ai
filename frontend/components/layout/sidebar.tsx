@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   Users,
-  GitBranch,
+  Activity,
   Brain,
   Settings,
   ChevronLeft,
@@ -36,11 +36,11 @@ const navigationItems = [
     description: 'Your AI workspace'
   },
   {
-    name: 'Workflow Management',
-    href: '/workflows',
-    icon: GitBranch,
-    iconColor: 'text-[hsl(var(--agent))]',
-    description: 'Create and monitor workflows'
+    name: 'Activity',
+    href: '/activity',
+    icon: Activity,
+    iconColor: 'text-[hsl(var(--info))]',
+    description: 'Your AI workforce at a glance'
   },
   {
     name: 'Agent Management',

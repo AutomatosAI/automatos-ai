@@ -1,0 +1,36 @@
+# Implementation Plan: PRD-72 Activity Command Centre
+
+> **Scope**: Cross-cutting (frontend + backend) | **Risk**: Balanced | **Branch**: `ralph/72-activity-command-centre`
+
+## Summary
+
+Replace `/workflows` with `/activity` — a unified Activity Command Centre showing chats, routines, recipes, and missions across four tabs. Backend: register heartbeat router, create activity service + API endpoints. Frontend: new page shell, feed items, routine cards, execution detail drill-down, live stats.
+
+## Reference
+
+- **PRD**: `docs/PRDS/72-ACTIVITY-COMMAND-CENTRE.md`
+- **Design system**: `frontend/app/globals.css` (glass-card, card-glow, stage-*, log-entry-*, semantic colour tokens)
+- **Shared components**: `frontend/components/shared/` (PageHeader, StatsBar, FilterTabs, SearchInput)
+- **Hook pattern**: `frontend/hooks/use-workflow-api.ts` (React Query key factory + useQuery + useMutation)
+- **Backend pattern**: `orchestrator/api/execution_history.py` (FastAPI router + hybrid auth)
+- **Existing heartbeat API**: `orchestrator/api/heartbeat.py` (exists but NOT registered in main.py)
+
+## Tasks
+
+- [x] **US-001: Create /activity route shell page** — Create `frontend/app/activity/page.tsx` + `frontend/components/activity/activity-page.tsx` with PageHeader, StatsBar (hardcoded), FilterTabs (4 tabs). Update sidebar.tsx nav item. Add `/workflows` → `/activity` redirect. NOTE: `CookingPot` icon doesn't exist in this lucide-react version — use `ChefHat` instead.
+- [ ] **US-002: Build Missions placeholder + wire RecipesTab** — Create `activity-missions.tsx` Coming Soon card. Import existing RecipesTab into Recipes tab of activity-page.
+- [ ] **US-003: Register heartbeat router + add endpoints** — Register heartbeat_router in main.py. Add GET /api/heartbeat/workspace, PATCH /api/heartbeat/{id}/toggle, GET /api/heartbeat/{id}/executions.
+- [ ] **US-004: Create activity_service.py** — Backend service merging chats, heartbeat_executions, recipe_executions into unified ActivityFeedItem list. get_feed() + get_stats() methods.
+- [ ] **US-005: Create /api/activity/feed + /api/activity/stats endpoints** — FastAPI router in `orchestrator/api/activity.py`. Register in main.py.
+- [ ] **US-006: Create use-activity-api.ts hooks** — React Query hooks for feed + stats with 15s polling. Query key factory. TypeScript interfaces.
+- [ ] **US-007: Create use-heartbeats-api.ts hook** — React Query hooks for heartbeat list, toggle mutation, execution history.
+- [ ] **US-008: Build routine-card.tsx** — Glass-card component showing agent, schedule, status badge, pause/edit actions.
+- [ ] **US-009: Build activity-routines.tsx** — Routines tab with card grid, New Routine CTA, empty state, loading skeletons. Wire into activity-page.
+- [ ] **US-010: Add execution history to routine-card** — Expandable section showing last 10 runs with log-entry CSS classes.
+- [ ] **US-011: Build activity-feed-item.tsx** — Feed card with type-coloured border, status badge, channel badge, context line, View/Configure actions.
+- [ ] **US-012: Build activity-feed.tsx + wire live stats** — Feed tab with filter chips, status dropdown, renders feed items. Replace hardcoded StatsBar with live data.
+- [ ] **US-013: Build execution-detail.tsx** — Drill-down view with step pipeline (stage-* classes), output panel, execution log, Re-run/Edit actions.
+- [ ] **US-014: Add run history dots to recipe cards** — Modify RecipesTab to show last 3 runs as coloured status dots per recipe card.
+- [ ] **US-015: Loading skeletons + animations** — Skeleton states for all tabs. stage-active pulse on running items. log-slide-in for new feed items. framer-motion stagger. prefers-reduced-motion.
+- [ ] **US-016: Mobile responsive pass** — 2x2 stats grid, single-column cards, scrollable filter chips, reduced blur, 44px touch targets.
+- [ ] **US-017: Update SHEPHERD tour for /activity** — Create activity-tour.ts. Update tour-registry.ts. Add data-tour attributes.
