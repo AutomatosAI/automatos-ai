@@ -185,7 +185,7 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
             size="sm"
             onClick={handleLoadMore}
             disabled={isFetching}
-            className="min-w-[120px]"
+            className="min-w-[120px] w-full sm:w-auto min-h-[44px] sm:min-h-0"
           >
             {isFetching ? (
               <>
@@ -220,14 +220,14 @@ function FilterBar({
   isFetching,
 }: FilterBarProps) {
   return (
-    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin -mx-1 px-1">
       {/* Type chips */}
       <Button
         variant={activeTypes.length === 0 ? 'secondary' : 'ghost'}
         size="sm"
         onClick={() => onToggleType('__all__')}
         className={cn(
-          'text-xs h-7 shrink-0',
+          'text-xs min-h-[44px] sm:min-h-0 sm:h-7 shrink-0',
           activeTypes.length === 0 && 'bg-secondary/80'
         )}
       >
@@ -244,12 +244,12 @@ function FilterBar({
             size="sm"
             onClick={() => onToggleType(chip.value)}
             className={cn(
-              'text-xs h-7 shrink-0 gap-1.5',
+              'text-xs min-h-[44px] sm:min-h-0 sm:h-7 shrink-0 gap-1.5',
               isActive && 'bg-secondary/80'
             )}
           >
             <Icon className="w-3.5 h-3.5" />
-            {chip.label}
+            <span className="hidden xs:inline">{chip.label}</span>
           </Button>
         )
       })}
@@ -259,7 +259,7 @@ function FilterBar({
 
       {/* Status dropdown */}
       <Select value={statusFilter} onValueChange={onStatusChange}>
-        <SelectTrigger className="w-[140px] h-7 text-xs bg-secondary/50 shrink-0">
+        <SelectTrigger className="w-[140px] min-h-[44px] sm:min-h-0 sm:h-7 text-xs bg-secondary/50 shrink-0">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

@@ -45,7 +45,7 @@ function RoutinesEmptyState() {
   const router = useRouter()
 
   return (
-    <div className="glass-card p-8 text-center text-muted-foreground">
+    <div className="glass-card p-6 sm:p-8 text-center text-muted-foreground">
       <RefreshCw className="w-12 h-12 mx-auto mb-3 opacity-30" />
       <p className="font-medium">No routines set up</p>
       <p className="text-sm mt-1 max-w-md mx-auto">
@@ -55,7 +55,7 @@ function RoutinesEmptyState() {
       <Button
         variant="outline"
         size="sm"
-        className="mt-4"
+        className="mt-4 min-h-[44px] sm:min-h-0 w-full sm:w-auto"
         onClick={() => {
           router.push('/agents')
           toast('Select an agent to configure its routine', { icon: '🔄' })
@@ -103,7 +103,7 @@ export function ActivityRoutines() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-end">
-        <Button variant="outline" size="sm" onClick={handleNewRoutine}>
+        <Button variant="outline" size="sm" onClick={handleNewRoutine} className="min-h-[44px] sm:min-h-0">
           <Plus className="w-4 h-4 mr-1.5" />
           New Routine
         </Button>

@@ -234,7 +234,7 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false }
       className={cn(isNew && !prefersReducedMotion && 'log-entry-new')}
     >
       <div
-        className={`glass-card card-glow border-l-[3px] ${typeConfig.borderColor} hover:border-primary/20 transition-all duration-300 p-4 space-y-2`}
+        className={`glass-card card-glow border-l-[3px] ${typeConfig.borderColor} hover:border-primary/20 transition-all duration-300 p-3 sm:p-4 space-y-2`}
       >
         {/* Row 1: Type + Name + Time */}
         <div className="flex items-center justify-between gap-2">
@@ -298,13 +298,13 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false }
 
         {/* Actions */}
         {(viewUrl || configureUrl) && (
-          <div className="flex items-center justify-end gap-2 pt-1">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center sm:justify-end gap-2 pt-1">
             {viewUrl && (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleView}
-                className="text-xs h-7"
+                className="text-xs min-h-[44px] sm:min-h-0 sm:h-7 justify-center"
               >
                 <Eye className="w-3.5 h-3.5 mr-1" />
                 View
@@ -315,7 +315,7 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false }
                 variant="ghost"
                 size="sm"
                 onClick={handleConfigure}
-                className="text-xs h-7"
+                className="text-xs min-h-[44px] sm:min-h-0 sm:h-7 justify-center"
               >
                 <Settings className="w-3.5 h-3.5 mr-1" />
                 Configure

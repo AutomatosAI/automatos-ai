@@ -53,7 +53,7 @@ export function ActivityPage() {
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div data-tour="activity-page-header">
         <PageHeader
           title="Command"
@@ -62,7 +62,7 @@ export function ActivityPage() {
           actions={
             <>
               <Select value={period} onValueChange={setPeriod}>
-                <SelectTrigger className="w-28 bg-secondary/50">
+                <SelectTrigger className="w-28 bg-secondary/50 min-h-[44px] sm:min-h-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -74,9 +74,9 @@ export function ActivityPage() {
                 </SelectContent>
               </Select>
 
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" className="min-h-[44px] sm:min-h-0">
                 <RefreshCw className="w-4 h-4 mr-2" />
-                Refresh
+                <span className="hidden sm:inline">Refresh</span>
               </Button>
             </>
           }
@@ -84,7 +84,7 @@ export function ActivityPage() {
       </div>
 
       <div data-tour="activity-stats">
-        <StatsBar stats={stats} />
+        <StatsBar stats={stats} className="grid gap-3 md:gap-4" />
       </div>
 
       <div data-tour="activity-tabs">

@@ -118,12 +118,12 @@ export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps)
         </div>
       }
       actions={
-        <div className="flex items-center gap-2 w-full justify-between">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:justify-between">
           <Button
             variant="ghost"
             size="sm"
             onClick={handleExpandToggle}
-            className="text-xs text-muted-foreground"
+            className="text-xs text-muted-foreground min-h-[44px] sm:min-h-0 justify-center"
           >
             <ChevronDown
               className={`w-3.5 h-3.5 mr-1 transition-transform duration-200 ${
@@ -138,7 +138,7 @@ export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps)
               size="sm"
               onClick={handleToggle}
               disabled={toggleMutation.isLoading}
-              className="text-xs"
+              className="text-xs min-h-[44px] sm:min-h-0 flex-1 sm:flex-initial justify-center"
             >
               {isActive ? (
                 <>
@@ -156,7 +156,7 @@ export function RoutineCard({ heartbeat, animationDelay = 0 }: RoutineCardProps)
               variant="ghost"
               size="sm"
               onClick={handleEdit}
-              className="text-xs"
+              className="text-xs min-h-[44px] sm:min-h-0 flex-1 sm:flex-initial justify-center"
             >
               <Settings className="w-3.5 h-3.5 mr-1" />
               Edit

@@ -327,11 +327,11 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
       exit={prefersReducedMotion ? undefined : { opacity: 0, y: 20 }}
       transition={{ duration: prefersReducedMotion ? 0 : 0.3 }}
     >
-      <div className={`glass-panel rounded-xl border-l-[3px] ${typeConfig.borderColor} p-6 space-y-6`}>
+      <div className={`glass-panel rounded-xl border-l-[3px] ${typeConfig.borderColor} p-4 sm:p-6 space-y-5 sm:space-y-6`}>
         {/* Back link */}
         <button
           onClick={handleBack}
-          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors min-h-[44px] sm:min-h-0"
         >
           <ArrowLeft className="w-4 h-4" />
           Back to Activity
@@ -462,14 +462,14 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
         </section>
 
         {/* Actions */}
-        <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-border/30">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center sm:justify-end gap-2 pt-2 border-t border-border/30">
           {item.type === 'recipe' && item.source_id && (
             <Button
               variant="outline"
               size="sm"
               onClick={handleReRun}
               disabled={executeRecipe.isLoading}
-              className="text-xs"
+              className="text-xs min-h-[44px] sm:min-h-0 justify-center"
             >
               {executeRecipe.isLoading ? (
                 <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
@@ -484,7 +484,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
               variant="outline"
               size="sm"
               onClick={handleEdit}
-              className="text-xs"
+              className="text-xs min-h-[44px] sm:min-h-0 justify-center"
             >
               <Pencil className="w-3.5 h-3.5 mr-1.5" />
               {item.type === 'recipe' ? 'Edit Recipe' : 'Edit Routine'}
@@ -495,7 +495,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
               variant="outline"
               size="sm"
               onClick={handleViewSource}
-              className="text-xs"
+              className="text-xs min-h-[44px] sm:min-h-0 justify-center"
             >
               <FileText className="w-3.5 h-3.5 mr-1.5" />
               View Logs
@@ -511,7 +511,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
 
 export function ExecutionDetailSkeleton() {
   return (
-    <div className="glass-panel rounded-xl border-l-[3px] border-border/30 p-6 space-y-6">
+    <div className="glass-panel rounded-xl border-l-[3px] border-border/30 p-4 sm:p-6 space-y-5 sm:space-y-6">
       {/* Back link */}
       <div className="h-4 w-28 bg-secondary/50 rounded animate-pulse" />
 

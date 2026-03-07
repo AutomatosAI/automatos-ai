@@ -21,7 +21,7 @@ export function ActivityMissions() {
       initial={prefersReducedMotion ? false : { opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className="glass-card p-8 md:p-12 max-w-2xl mx-auto text-center space-y-6"
+      className="glass-card p-6 sm:p-8 md:p-12 max-w-2xl mx-auto text-center space-y-5 sm:space-y-6"
     >
       <Rocket className="w-12 h-12 mx-auto text-muted-foreground/30" />
 
@@ -62,7 +62,7 @@ export function ActivityMissions() {
       <Button
         variant="outline"
         onClick={() => router.push('/chat')}
-        className="border-primary/30 hover:border-primary/50"
+        className="border-primary/30 hover:border-primary/50 min-h-[44px] w-full sm:w-auto"
       >
         <Rocket className="w-4 h-4 mr-2" />
         Request Early Access
