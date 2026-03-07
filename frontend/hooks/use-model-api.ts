@@ -201,7 +201,7 @@ export function useAgentModelConfig(agentId: number | null) {
     queryKey: ['agent-model-config', agentId],
     queryFn: async () => {
       if (!agentId) throw new Error('Agent ID is required')
-      const response = await apiClient.request(`/api/agents/${agentId}/model-config`)
+      const response = await apiClient.request(`/api/agents/factory/${agentId}/model-config`)
       return response
     },
     enabled: !!agentId,
@@ -216,7 +216,7 @@ export function useUpdateAgentModelConfig() {
 
   return useMutation({
     mutationFn: async ({ agentId, modelConfig }: { agentId: number; modelConfig: Record<string, any> }) => {
-      const response = await apiClient.request(`/api/agents/${agentId}/model-config`, {
+      const response = await apiClient.request(`/api/agents/factory/${agentId}/model-config`, {
         method: 'PUT',
         body: JSON.stringify(modelConfig),
       })
@@ -238,7 +238,7 @@ export function useAgentModelUsage(agentId: number | null) {
     queryKey: ['agent-model-usage', agentId],
     queryFn: async () => {
       if (!agentId) throw new Error('Agent ID is required')
-      const response = await apiClient.request(`/api/agents/${agentId}/model-usage`)
+      const response = await apiClient.request(`/api/agents/factory/${agentId}/model-usage`)
       return response
     },
     enabled: !!agentId,
