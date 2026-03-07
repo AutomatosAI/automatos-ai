@@ -333,35 +333,38 @@ async def lifespan(app: FastAPI):
         await startup_dashboard(app)
         logger.info("Dashboard services initialized successfully")
 
-        # PRD-55: Start HeartbeatService (only in one worker to avoid 4x duplicate ticks)
-        if config.HEARTBEAT_ENABLED:
+        # Unified Scheduler: single fcntl lock guards heartbeat + recipe schedulers
+        # Only one uvicorn worker acquires the lock — prevents 4x duplicate executions
+        if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED:
             try:
                 import fcntl
-                lock_path = "/tmp/heartbeat_scheduler.lock"
+                lock_path = "/tmp/automatos_scheduler.lock"
                 lock_file = open(lock_path, "w")
                 try:
                     fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    # We got the lock — this worker owns the scheduler
-                    from services.heartbeat_service import get_heartbeat_service
-                    heartbeat_svc = get_heartbeat_service()
-                    await heartbeat_svc.start()
-                    app.state.heartbeat_lock = lock_file  # keep file open to hold lock
-                    logger.info("HeartbeatService started successfully (this worker owns scheduler)")
+                    # We got the lock — this worker owns ALL scheduled services
+                    from services.scheduler import get_unified_scheduler
+                    unified = get_unified_scheduler()
+                    unified.start()
+                    shared_sched = unified.apscheduler
+                    app.state.scheduler_lock = lock_file  # keep file open to hold lock
+
+                    if config.HEARTBEAT_ENABLED:
+                        from services.heartbeat_service import get_heartbeat_service
+                        await get_heartbeat_service().start(scheduler=shared_sched)
+                        logger.info("HeartbeatService started on unified scheduler")
+
+                    if config.RECIPE_SCHEDULER_ENABLED:
+                        from services.recipe_scheduler import get_recipe_scheduler
+                        await get_recipe_scheduler().start(scheduler=shared_sched)
+                        logger.info("RecipeSchedulerService started on unified scheduler")
+
+                    logger.info("Unified scheduler started (this worker owns it)")
                 except BlockingIOError:
                     lock_file.close()
-                    logger.info("HeartbeatService: another worker owns the scheduler, skipping")
+                    logger.info("Unified scheduler: another worker owns it, skipping")
             except Exception as e:
-                logger.warning(f"HeartbeatService failed to start (non-fatal): {e}")
-
-        # Recipe Cron Scheduler
-        if config.RECIPE_SCHEDULER_ENABLED:
-            try:
-                from services.recipe_scheduler import get_recipe_scheduler
-                recipe_sched = get_recipe_scheduler()
-                await recipe_sched.start()
-                logger.info("RecipeSchedulerService started successfully")
-            except Exception as e:
-                logger.warning(f"RecipeSchedulerService failed to start (non-fatal): {e}")
+                logger.warning(f"Unified scheduler failed to start (non-fatal): {e}")
 
         # PRD-55: Start ChannelManager
         if config.CHANNELS_ENABLED:
@@ -382,21 +385,12 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Automotas AI API Server...")
 
-    # PRD-55: Stop HeartbeatService
-    if config.HEARTBEAT_ENABLED:
+    # Stop unified scheduler (shuts down all heartbeat + recipe jobs at once)
+    if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED:
         try:
-            from services.heartbeat_service import get_heartbeat_service
-            await get_heartbeat_service().stop()
-            logger.info("HeartbeatService stopped")
-        except Exception:
-            pass
-
-    # Stop RecipeSchedulerService
-    if config.RECIPE_SCHEDULER_ENABLED:
-        try:
-            from services.recipe_scheduler import get_recipe_scheduler
-            await get_recipe_scheduler().stop()
-            logger.info("RecipeSchedulerService stopped")
+            from services.scheduler import get_unified_scheduler
+            get_unified_scheduler().stop()
+            logger.info("Unified scheduler stopped")
         except Exception:
             pass
 

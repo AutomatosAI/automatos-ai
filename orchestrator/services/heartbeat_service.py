@@ -16,6 +16,7 @@ from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
+from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class HeartbeatService:
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
+        self._owns_scheduler: bool = False  # True when we created our own scheduler (tests)
         self._running_ticks: Dict[str, bool] = {}  # track concurrent ticks
         self._max_concurrent_per_workspace = 5
 
@@ -38,24 +40,32 @@ class HeartbeatService:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self):
-        """Initialize scheduler and load all active heartbeat configs."""
-        jobstores = {"default": MemoryJobStore()}
+    async def start(self, scheduler: Optional[AsyncIOScheduler] = None):
+        """Initialize scheduler and load all active heartbeat configs.
 
-        # Try Redis if available, fall back to memory
-        try:
-            from config import config as app_config
+        Args:
+            scheduler: Shared APScheduler instance from UnifiedScheduler.
+                        If None, creates a local scheduler (useful for tests).
+        """
+        if scheduler:
+            self._scheduler = scheduler
+            self._owns_scheduler = False
+        else:
+            # Standalone mode (tests / backwards compat)
+            jobstores = {"default": MemoryJobStore()}
+            try:
+                from config import config as app_config
 
-            if app_config.REDIS_URL:
-                from apscheduler.jobstores.redis import RedisJobStore
+                if app_config.REDIS_URL:
+                    from apscheduler.jobstores.redis import RedisJobStore
 
-                jobstores["default"] = RedisJobStore(url=app_config.REDIS_URL)
-                logger.info("[Heartbeat] Using Redis job store")
-        except Exception:
-            logger.info("[Heartbeat] Using memory job store")
-
-        self._scheduler = AsyncIOScheduler(jobstores=jobstores)
-        self._scheduler.start()
+                    jobstores["default"] = RedisJobStore(url=app_config.REDIS_URL)
+                    logger.info("[Heartbeat] Using Redis job store (standalone)")
+            except Exception:
+                pass
+            self._scheduler = AsyncIOScheduler(jobstores=jobstores)
+            self._scheduler.start()
+            self._owns_scheduler = True
 
         # Load and schedule all active heartbeats
         await self._load_heartbeat_configs()
@@ -73,10 +83,11 @@ class HeartbeatService:
         logger.info("[Heartbeat] Service started (daily summary at 01:00 UTC)")
 
     async def stop(self):
-        """Gracefully stop scheduler, waiting for running ticks."""
-        if self._scheduler:
+        """Remove heartbeat jobs. Only shuts down scheduler if we own it."""
+        if self._scheduler and self._owns_scheduler:
             self._scheduler.shutdown(wait=True)
-            logger.info("[Heartbeat] Service stopped")
+            logger.info("[Heartbeat] Standalone scheduler stopped")
+        logger.info("[Heartbeat] Service stopped")
 
     # ------------------------------------------------------------------
     # Config loading
@@ -115,6 +126,31 @@ class HeartbeatService:
     # Scheduling
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _interval_to_cron_trigger(minutes: int) -> CronTrigger:
+        """Convert an interval in minutes to a CronTrigger firing at fixed times.
+
+        Examples:
+            60  → ``0 * * * *``  (top of every hour)
+            30  → ``0,30 * * * *``
+            15  → ``0,15,30,45 * * * *``
+            120 → ``0 */2 * * *``  (every 2 hours)
+        """
+        if minutes <= 0:
+            minutes = 60
+
+        if minutes < 60:
+            # Sub-hour: distribute evenly within the hour
+            offsets = list(range(0, 60, minutes))
+            minute_field = ",".join(str(o) for o in offsets)
+            return CronTrigger(minute=minute_field)
+        else:
+            # Hourly or multi-hour
+            hours = minutes // 60
+            if hours == 1:
+                return CronTrigger(minute="0")
+            return CronTrigger(minute="0", hour=f"*/{hours}")
+
     def schedule_orchestrator_heartbeat(
         self, workspace_id: str, hb_config: dict
     ):
@@ -125,19 +161,21 @@ class HeartbeatService:
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
 
+        trigger = self._interval_to_cron_trigger(interval_minutes)
+
         self._scheduler.add_job(
             self._orchestrator_tick,
-            "interval",
-            minutes=interval_minutes,
+            trigger,
             id=job_id,
             args=[workspace_id, hb_config],
             replace_existing=True,
             max_instances=1,
         )
         logger.info(
-            "[Heartbeat] Scheduled orchestrator heartbeat for ws=%s every %dm",
+            "[Heartbeat] Scheduled orchestrator heartbeat for ws=%s every %dm (cron: %s)",
             workspace_id,
             interval_minutes,
+            trigger,
         )
 
     def schedule_agent_heartbeat(
@@ -150,19 +188,21 @@ class HeartbeatService:
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
 
+        trigger = self._interval_to_cron_trigger(interval_minutes)
+
         self._scheduler.add_job(
             self._agent_tick,
-            "interval",
-            minutes=interval_minutes,
+            trigger,
             id=job_id,
             args=[agent_id, workspace_id, hb_config],
             replace_existing=True,
             max_instances=1,
         )
         logger.info(
-            "[Heartbeat] Scheduled agent heartbeat for agent=%s every %dm",
+            "[Heartbeat] Scheduled agent heartbeat for agent=%s every %dm (cron: %s)",
             agent_id,
             interval_minutes,
+            trigger,
         )
 
     def unschedule_heartbeat(self, job_id: str):
