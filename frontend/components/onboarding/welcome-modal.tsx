@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Sparkles } from 'lucide-react'
-import { markOnboardingSkipped } from '@/lib/shepherd/tour-storage'
+import { markTourSkipped } from '@/lib/shepherd/tour-storage'
 
 interface WelcomeModalProps {
   open: boolean
@@ -17,7 +17,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
   const [isStarting, setIsStarting] = useState(false)
 
   const handleSkip = () => {
-    markOnboardingSkipped(userId)
+    markTourSkipped('welcome', userId)
     onOpenChange(false)
   }
 
@@ -29,8 +29,8 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
     setTimeout(async () => {
       // Dynamic import — shepherd.js accesses `window` at module init,
       // so it must NOT be imported at the top level (breaks SSR).
-      const { createFirstLoginTour } = await import('@/lib/shepherd/first-login-tour')
-      const tour = createFirstLoginTour(userId)
+      const { createWelcomeTour } = await import('@/lib/shepherd/tours/welcome-tour')
+      const tour = createWelcomeTour(userId)
       tour.start()
       setIsStarting(false)
     }, 300)
@@ -64,9 +64,8 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
           {/* Friendly overview */}
           <div>
             <p className="text-gray-300 leading-relaxed">
-              We&apos;ll walk you through setting up your workspace, designing your first AI agent,
-              choosing a persona and model, connecting tools, and exploring recipes and workflows.
-              It only takes a couple of minutes!
+              Quick 60-second orientation — we&apos;ll show you where everything lives.
+              Each page also has its own mini-tour that appears on your first visit.
             </p>
           </div>
 
@@ -113,7 +112,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
               </div>
               <div className="flex-1">
                 <div className="font-medium text-gray-200 mb-1">
-                  Take a 2-minute tour
+                  Take a quick tour
                 </div>
                 <div className="text-sm text-gray-400">
                   We&apos;ll guide you step by step — you can skip or exit anytime by pressing{' '}

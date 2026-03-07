@@ -634,6 +634,7 @@ export function ToolsDashboard() {
   return (
     <div className="space-y-6">
       {/* Header Section */}
+      <div data-tour="tools-page-header">
       <PageHeader
         title="Tools &"
         titleAccent="Integrations"
@@ -645,6 +646,7 @@ export function ToolsDashboard() {
           </Badge>
         }
       />
+      </div>
 
       {/* Statistics Cards */}
       <StatsBar
@@ -713,12 +715,14 @@ export function ToolsDashboard() {
             </div>
 
             {/* Search - Full Width */}
+            <div data-tour="tools-search">
             <SearchInput
               value={searchQuery}
               onChange={setSearchQuery}
               placeholder="Search tools..."
               loading={toolsFetching}
             />
+            </div>
 
             {/* View Mode Toggle */}
             <div className="flex items-center space-x-1 bg-secondary/30 rounded-lg p-1 justify-self-end">
@@ -741,7 +745,7 @@ export function ToolsDashboard() {
             </div>
           </div>
 
-          <TabsContent value="enabled" className="space-y-6">
+          <TabsContent value="enabled" className="space-y-6" data-tour="tools-connected-section">
             {/* Enabled Tools Management */}
             <div className="space-y-4">
               <h3 className="text-xl font-semibold">Applications</h3>

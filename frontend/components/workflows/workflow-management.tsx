@@ -536,6 +536,7 @@ export function WorkflowManagement() {
   return (
     <div className="space-y-8">
       {/* Header */}
+      <div data-tour="workflows-page-header">
       <PageHeader
         title="Workflow"
         titleAccent="Management"
@@ -543,6 +544,7 @@ export function WorkflowManagement() {
         actions={
           <Button
             variant="outline"
+            data-tour="workflows-create-btn"
             onClick={() => setRecipeCreateOpen(true)}
           >
             <Plus className="w-4 h-4 mr-2" />
@@ -550,6 +552,7 @@ export function WorkflowManagement() {
           </Button>
         }
       />
+      </div>
 
       {/* Stats Overview */}
       <div ref={ref}>
@@ -574,11 +577,11 @@ export function WorkflowManagement() {
         <Tabs defaultValue="templates" className="space-y-6">
           <div className="flex items-center gap-4">
             <TabsList className="bg-secondary/50 shrink-0">
-              <TabsTrigger value="templates" className="flex items-center space-x-2">
+              <TabsTrigger value="templates" data-tour="workflows-recipes-tab" className="flex items-center space-x-2">
                 <GitBranch className="w-4 h-4" />
                 <span className="hidden sm:inline">Recipes</span>
               </TabsTrigger>
-              <TabsTrigger value="active" className="flex items-center space-x-2">
+              <TabsTrigger value="active" data-tour="workflows-active-tab" className="flex items-center space-x-2">
                 <Play className="w-4 h-4" />
                 <span className="hidden sm:inline">Cooking</span>
               </TabsTrigger>

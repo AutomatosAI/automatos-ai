@@ -99,6 +99,7 @@ export function MarketplaceHomepage() {
       />
 
       {/* Stats Cards */}
+      <div data-tour="marketplace-stats">
       <StatsBar
         stats={[
           {
@@ -130,11 +131,12 @@ export function MarketplaceHomepage() {
           },
         ] satisfies StatItem[]}
       />
+      </div>
 
       {/* Tabs and Search Bar - Full Width */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between w-full">
         <Tabs value={selectedTab} onValueChange={setSelectedTab}>
-          <TabsList>
+          <TabsList data-tour="marketplace-tabs">
             <TabsTrigger value="tools">Applications</TabsTrigger>
             <TabsTrigger value="agents">Agents</TabsTrigger>
             <TabsTrigger value="recipes">Recipes</TabsTrigger>
@@ -143,16 +145,18 @@ export function MarketplaceHomepage() {
           </TabsList>
         </Tabs>
 
+        <div data-tour="marketplace-search">
         <SearchInput
           value={searchQuery}
           onChange={setSearchQuery}
           placeholder="Search marketplace..."
           className="w-full sm:flex-1"
         />
+        </div>
       </div>
 
       {/* Tab Content */}
-      <Tabs value={selectedTab} className="space-y-6">
+      <Tabs value={selectedTab} className="space-y-6" data-tour="marketplace-content">
         <TabsContent value="tools" className="mt-0">
           <MarketplaceToolsTab searchQuery={searchQuery} />
         </TabsContent>

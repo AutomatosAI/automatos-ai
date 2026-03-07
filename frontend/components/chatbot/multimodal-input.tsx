@@ -110,7 +110,7 @@ export function MultimodalInput({
   const isStreaming = status === 'streaming'
 
   return (
-    <form onSubmit={handleSubmit} className="w-full">
+    <form onSubmit={handleSubmit} className="w-full" data-tour="chat-input-area">
       <input
         ref={fileInputRef}
         type="file"

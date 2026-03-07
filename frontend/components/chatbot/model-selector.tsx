@@ -55,6 +55,7 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
         <Button
           variant="ghost"
           size="sm"
+          data-tour="chat-model-selector"
           className="h-8 px-3 rounded-full border-2 border-orange-500/20 bg-black/20 hover:bg-orange-500/5 hover:border-orange-500/40 text-foreground/90 text-xs gap-2 shadow-[0_0_18px_rgba(249,115,22,0.10)]"
         >
           {isLoading ? (
