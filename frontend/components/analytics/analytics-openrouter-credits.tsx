@@ -20,15 +20,15 @@ function formatCurrency(n: number): string {
 }
 
 function getUsageColor(percentage: number): string {
-  if (percentage >= 90) return 'bg-red-500'
-  if (percentage >= 70) return 'bg-yellow-500'
-  return 'bg-green-500'
+  if (percentage >= 90) return 'bg-[hsl(var(--destructive))]'
+  if (percentage >= 70) return 'bg-[hsl(var(--warning))]'
+  return 'bg-[hsl(var(--success))]'
 }
 
 function getUsageTextColor(percentage: number): string {
-  if (percentage >= 90) return 'text-red-400'
-  if (percentage >= 70) return 'text-yellow-400'
-  return 'text-green-400'
+  if (percentage >= 90) return 'text-[hsl(var(--destructive))]'
+  if (percentage >= 70) return 'text-[hsl(var(--warning))]'
+  return 'text-[hsl(var(--success))]'
 }
 
 export function AnalyticsOpenRouterCredits() {
@@ -44,7 +44,7 @@ export function AnalyticsOpenRouterCredits() {
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-purple-400" />
+            <CreditCard className="w-5 h-5 text-[hsl(var(--agent))]" />
             OpenRouter Credits
           </CardTitle>
         </CardHeader>
@@ -69,7 +69,7 @@ export function AnalyticsOpenRouterCredits() {
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-purple-400" />
+            <CreditCard className="w-5 h-5 text-[hsl(var(--agent))]" />
             OpenRouter Credits
           </CardTitle>
         </CardHeader>
@@ -98,7 +98,7 @@ export function AnalyticsOpenRouterCredits() {
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span className="flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-purple-400" />
+            <CreditCard className="w-5 h-5 text-[hsl(var(--agent))]" />
             OpenRouter Credits
           </span>
           <Button
@@ -148,21 +148,21 @@ export function AnalyticsOpenRouterCredits() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="p-3 rounded-lg bg-secondary/20">
               <div className="flex items-center gap-2 mb-1">
-                <Clock className="w-4 h-4 text-blue-400" />
+                <Clock className="w-4 h-4 text-[hsl(var(--info))]" />
                 <span className="text-xs text-muted-foreground">Daily</span>
               </div>
               <p className="text-sm font-medium">{formatCurrency(keyInfo.usage_daily)}</p>
             </div>
             <div className="p-3 rounded-lg bg-secondary/20">
               <div className="flex items-center gap-2 mb-1">
-                <CalendarDays className="w-4 h-4 text-green-400" />
+                <CalendarDays className="w-4 h-4 text-[hsl(var(--success))]" />
                 <span className="text-xs text-muted-foreground">Weekly</span>
               </div>
               <p className="text-sm font-medium">{formatCurrency(keyInfo.usage_weekly)}</p>
             </div>
             <div className="p-3 rounded-lg bg-secondary/20">
               <div className="flex items-center gap-2 mb-1">
-                <Calendar className="w-4 h-4 text-orange-400" />
+                <Calendar className="w-4 h-4 text-primary" />
                 <span className="text-xs text-muted-foreground">Monthly</span>
               </div>
               <p className="text-sm font-medium">{formatCurrency(keyInfo.usage_monthly)}</p>
@@ -175,20 +175,20 @@ export function AnalyticsOpenRouterCredits() {
           <div className="text-xs text-muted-foreground border-t border-border/50 pt-3">
             Rate limit remaining: {formatCurrency(keyInfo.limit_remaining)}
             {keyInfo.is_free_tier && (
-              <span className="ml-2 text-yellow-400">(Free tier)</span>
+              <span className="ml-2 text-[hsl(var(--warning))]">(Free tier)</span>
             )}
           </div>
         )}
 
         {/* Sync result feedback */}
         {syncMutation.isSuccess && (
-          <div className="text-xs text-green-400 border-t border-border/50 pt-3">
+          <div className="text-xs text-[hsl(var(--success))] border-t border-border/50 pt-3">
             Synced {syncMutation.data.synced} records
             {syncMutation.data.skipped > 0 && ` (${syncMutation.data.skipped} skipped)`}
           </div>
         )}
         {syncMutation.isError && (
-          <div className="text-xs text-red-400 border-t border-border/50 pt-3">
+          <div className="text-xs text-[hsl(var(--destructive))] border-t border-border/50 pt-3">
             Sync failed: {syncMutation.error.message}
           </div>
         )}

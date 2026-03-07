@@ -32,7 +32,7 @@ export function FilterTabs({
   return (
     <Tabs value={value} onValueChange={onValueChange} className={cn('space-y-6', className)}>
       <div className="flex items-center gap-4">
-        <TabsList className="bg-secondary/40 backdrop-blur shrink-0">
+        <TabsList className="bg-secondary/50 shrink-0">
           {tabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5">
               {tab.icon && <tab.icon className="w-4 h-4" />}

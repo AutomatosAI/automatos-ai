@@ -431,9 +431,9 @@ export function ToolsDashboard() {
         </div>
 
         {/* Tools grid skeleton */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="glass-card">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Card key={i} className="glass-card card-glow">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <div className="h-8 w-8 bg-secondary/50 rounded" />
@@ -745,7 +745,7 @@ export function ToolsDashboard() {
             {/* Enabled Tools Management */}
             <div className="space-y-4">
               <h3 className="text-xl font-semibold">Applications</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 <AnimatePresence>
                   {enabledTools.map((tool, index) => (
                       <ToolCard
@@ -987,10 +987,10 @@ function ToolCard({
       exit={{ opacity: 0, y: 20 }}
       transition={{ delay: index * 0.1 }}
     >
-      <Card className={`bg-secondary/30 border-border/30 transition-all duration-200 group ${
+      <Card className={`glass-card card-glow transition-all duration-300 flex flex-col h-full group ${
         isConnected
-          ? 'border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5 hover:border-[hsl(var(--success))]/50 hover:shadow-lg hover:shadow-[hsl(var(--success))]/20'
-          : 'hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20'
+          ? 'border-[hsl(var(--success))]/30 hover:border-[hsl(var(--success))]/50'
+          : 'hover:border-primary/20'
       }`}>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">

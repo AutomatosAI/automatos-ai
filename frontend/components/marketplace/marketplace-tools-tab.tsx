@@ -339,7 +339,7 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                         ))}
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         {[...Array(8)].map((_, i) => (
                             <Card key={i} className="glass-card animate-pulse">
                                 <CardHeader className="pb-2">
@@ -495,7 +495,7 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                     })}
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     <AnimatePresence>
                         {paginatedApps.map((app, index) => {
                             const isConnected = connectedApps.has(app.name.toUpperCase())
@@ -612,7 +612,7 @@ function ToolCard({
             transition={{ delay: index * 0.1 }}
         >
             <Card
-                className="glass-card card-glow hover:border-primary/30 transition-all duration-200 group hover:shadow-lg hover:shadow-primary/20"
+                className="glass-card card-glow hover:border-primary/20 transition-all duration-200 group hover:shadow-lg hover:shadow-primary/20"
             >
                 <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">

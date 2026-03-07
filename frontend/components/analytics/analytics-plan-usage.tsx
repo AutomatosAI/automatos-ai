@@ -18,15 +18,15 @@ interface Props {
 }
 
 function getUsageColor(percentage: number): string {
-  if (percentage >= 90) return 'bg-red-500'
-  if (percentage >= 70) return 'bg-yellow-500'
-  return 'bg-green-500'
+  if (percentage >= 90) return 'bg-[hsl(var(--destructive))]'
+  if (percentage >= 70) return 'bg-[hsl(var(--warning))]'
+  return 'bg-[hsl(var(--success))]'
 }
 
 function getUsageTextColor(percentage: number): string {
-  if (percentage >= 90) return 'text-red-400'
-  if (percentage >= 70) return 'text-yellow-400'
-  return 'text-green-400'
+  if (percentage >= 90) return 'text-[hsl(var(--destructive))]'
+  if (percentage >= 70) return 'text-[hsl(var(--warning))]'
+  return 'text-[hsl(var(--success))]'
 }
 
 function formatNumber(n: number): string {
@@ -61,7 +61,7 @@ export function AnalyticsPlanUsage({ data, isLoading }: Props) {
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span className="flex items-center gap-2">
-            <Gauge className="w-5 h-5 text-blue-400" />
+            <Gauge className="w-5 h-5 text-[hsl(var(--info))]" />
             Plan Usage
           </span>
           <Badge variant="outline" className="text-xs">

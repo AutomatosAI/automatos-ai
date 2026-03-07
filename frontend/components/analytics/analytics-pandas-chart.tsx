@@ -44,7 +44,7 @@ export function AnalyticsPandasChart({ presetId, query, chartType }: AnalyticsPa
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
-            <BarChart3 className="w-4 h-4 text-purple-400" />
+            <BarChart3 className="w-4 h-4 text-[hsl(var(--agent))]" />
             {title}
           </CardTitle>
         </CardHeader>
@@ -64,7 +64,7 @@ export function AnalyticsPandasChart({ presetId, query, chartType }: AnalyticsPa
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
-            <BarChart3 className="w-4 h-4 text-purple-400" />
+            <BarChart3 className="w-4 h-4 text-[hsl(var(--agent))]" />
             {title}
           </CardTitle>
         </CardHeader>
@@ -86,13 +86,13 @@ export function AnalyticsPandasChart({ presetId, query, chartType }: AnalyticsPa
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
-            <BarChart3 className="w-4 h-4 text-purple-400" />
+            <BarChart3 className="w-4 h-4 text-[hsl(var(--agent))]" />
             {title}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="text-center py-8">
-            <AlertCircle className="w-8 h-8 mx-auto mb-3 text-red-400 opacity-70" />
+            <AlertCircle className="w-8 h-8 mx-auto mb-3 text-[hsl(var(--destructive))] opacity-70" />
             <p className="text-sm text-muted-foreground">
               Failed to generate chart
             </p>
@@ -112,7 +112,7 @@ export function AnalyticsPandasChart({ presetId, query, chartType }: AnalyticsPa
     <Card className="glass-card">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm">
-          <BarChart3 className="w-4 h-4 text-purple-400" />
+          <BarChart3 className="w-4 h-4 text-[hsl(var(--agent))]" />
           {title}
         </CardTitle>
       </CardHeader>

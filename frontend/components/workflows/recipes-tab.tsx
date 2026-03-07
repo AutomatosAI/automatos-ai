@@ -346,7 +346,7 @@ export function RecipesTab({
           })}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {recipes.map((recipe: any, index: number) => {
             const steps = recipe.steps || []
             const agentIds = [...new Set(steps.map((s: any) => s.agent_id).filter(Boolean))] as number[]
@@ -364,7 +364,7 @@ export function RecipesTab({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: index * 0.05 }}
               >
-                <Card data-testid="workflow-card" className="glass-card hover:border-primary/30 transition-all duration-300 h-full flex flex-col group">
+                <Card data-testid="workflow-card" className="glass-card card-glow hover:border-primary/20 transition-all duration-300 h-full flex flex-col group">
                   {/* Card Header — icon, name, badges */}
                   <CardHeader className="pb-3">
                     <div className="flex items-start gap-3">

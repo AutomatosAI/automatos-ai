@@ -62,11 +62,11 @@ export function SystemHealthWidget({ data }: SystemHealthWidgetProps) {
     switch (status) {
       case 'healthy':
       case 'excellent':
-        return <CheckCircle className="w-4 h-4 text-green-500" />
+        return <CheckCircle className="w-4 h-4 text-[hsl(var(--success))]" />
       case 'warning':
-        return <AlertTriangle className="w-4 h-4 text-yellow-500" />
+        return <AlertTriangle className="w-4 h-4 text-[hsl(var(--warning))]" />
       case 'critical':
-        return <AlertTriangle className="w-4 h-4 text-red-500" />
+        return <AlertTriangle className="w-4 h-4 text-[hsl(var(--destructive))]" />
       default:
         return null
     }
@@ -76,11 +76,11 @@ export function SystemHealthWidget({ data }: SystemHealthWidgetProps) {
     switch (status) {
       case 'healthy':
       case 'excellent':
-        return 'text-green-500'
+        return 'text-[hsl(var(--success))]'
       case 'warning':
-        return 'text-yellow-500'
+        return 'text-[hsl(var(--warning))]'
       case 'critical':
-        return 'text-red-500'
+        return 'text-[hsl(var(--destructive))]'
       default:
         return 'text-gray-500'
     }

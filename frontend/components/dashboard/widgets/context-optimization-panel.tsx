@@ -122,7 +122,7 @@ export function ContextOptimizationPanel({ contextData, overview }: ContextOptim
                     : data.total_tokens_saved
                   }
                 </p>
-                <p className="text-xs text-green-400 flex items-center mt-1">
+                <p className="text-xs text-[hsl(var(--success))] flex items-center mt-1">
                   <ArrowDown className="w-3 h-3" />
                   tokens
                 </p>
@@ -138,12 +138,12 @@ export function ContextOptimizationPanel({ contextData, overview }: ContextOptim
               <div>
                 <p className="text-xs text-muted-foreground">Compression</p>
                 <p className="text-2xl font-bold text-card-foreground">{data.compression_ratio.toFixed(1)}x</p>
-                <p className="text-xs text-blue-400 flex items-center mt-1">
+                <p className="text-xs text-[hsl(var(--info))] flex items-center mt-1">
                   <TrendingDown className="w-3 h-3" />
                   {savingsPercent.toFixed(1)}%
                 </p>
               </div>
-              <BarChart3 className="w-8 h-8 text-blue-400" />
+              <BarChart3 className="w-8 h-8 text-[hsl(var(--info))]" />
             </div>
           </CardContent>
         </Card>
@@ -154,12 +154,12 @@ export function ContextOptimizationPanel({ contextData, overview }: ContextOptim
               <div>
                 <p className="text-xs text-muted-foreground">Info Density</p>
                 <p className="text-2xl font-bold text-card-foreground">{data.avg_information_density.toFixed(3)}</p>
-                <p className="text-xs text-purple-400 flex items-center mt-1">
+                <p className="text-xs text-[hsl(var(--agent))] flex items-center mt-1">
                   <ArrowUp className="w-3 h-3" />
                   bits/token
                 </p>
               </div>
-              <Info className="w-8 h-8 text-purple-400" />
+              <Info className="w-8 h-8 text-[hsl(var(--agent))]" />
             </div>
           </CardContent>
         </Card>
@@ -295,7 +295,7 @@ export function ContextOptimizationPanel({ contextData, overview }: ContextOptim
               <p className="text-xs text-muted-foreground">Avg Tokens/Optimization</p>
             </div>
             <div>
-              <p className="text-lg font-bold text-green-400">
+              <p className="text-lg font-bold text-[hsl(var(--success))]">
                 ${(data.total_tokens_saved * 0.00002).toFixed(2)}
               </p>
               <p className="text-xs text-muted-foreground">Estimated Savings</p>
