@@ -133,10 +133,6 @@ async def marketplace(
     )
 
     # Build response with triggers from app_metadata
-    # DEBUG: log first 3 apps logo_url to verify cache state
-    for dbg in apps[:3]:
-        logger.info(f"[LOGO_CACHE_DEBUG] {dbg.app_name}: logo_url={dbg.logo_url!r}")
-
     apps_out = []
     for a in apps:
         # Extract triggers from app_metadata JSONB field

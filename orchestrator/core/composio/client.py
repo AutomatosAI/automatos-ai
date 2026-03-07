@@ -534,19 +534,13 @@ class ComposioClient:
                         or 0
                     )
 
-                # Logo: top-level field on AppModel, fallback to meta dict
-                logo_url = getattr(app, "logo", None)
-                if not logo_url and hasattr(app, "meta") and isinstance(app.meta, dict):
-                    logo_url = app.meta.get("logo")
-
-                # DEBUG: log logo extraction for first 5 apps
-                if len(results) < 5:
-                    logger.info(
-                        f"[LOGO_DEBUG] {app.slug}: logo_url={logo_url!r}, "
-                        f"type(app)={type(app).__name__}, "
-                        f"dir_has_logo={'logo' in dir(app)}, "
-                        f"meta_type={type(getattr(app, 'meta', None)).__name__}"
-                    )
+                # Logo: nested under meta (Pydantic model or dict)
+                logo_url = None
+                if hasattr(app, "meta") and app.meta is not None:
+                    if isinstance(app.meta, dict):
+                        logo_url = app.meta.get("logo")
+                    else:
+                        logo_url = getattr(app.meta, "logo", None)
 
                 # Categories: top-level List[str] on AppModel, fallback to meta
                 categories = getattr(app, "categories", None) or []
@@ -576,6 +570,8 @@ class ComposioClient:
                         "trigger_count": len(normalized_triggers),
                     }
                 )
+            logos_found = sum(1 for r in results if r.get("logo_url"))
+            logger.info(f"Composio apps: {len(results)} total, {logos_found} with logos")
             return results
         except Exception as e:
             logger.error(f"Failed to get available apps: {e}")
