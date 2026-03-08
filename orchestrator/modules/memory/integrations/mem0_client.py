@@ -70,9 +70,15 @@ class Mem0Client:
 
     def __init__(self, api_url: Optional[str] = None, api_key: Optional[str] = None):
         from config import config
-        self.api_url = api_url or config.MEM0_API_URL
+        self.api_url = (api_url or config.MEM0_API_URL or "").strip()
         self.api_key = api_key or config.MEM0_API_KEY
         self.timeout = _DEFAULT_TIMEOUT
+
+        if not self.api_url:
+            logger.warning("[Mem0] No API URL configured (MEM0_API_URL). Memory storage disabled.")
+            self.api_url = ""
+            self.headers = {}
+            return
 
         # Ensure URL has correct format
         if not self.api_url.startswith("http"):
@@ -89,8 +95,13 @@ class Mem0Client:
         """
         Make an HTTP request with retry + circuit breaker.
 
+        Returns None early if api_url is not configured.
         Returns the response or None if all attempts fail.
         """
+        if not self.api_url:
+            logger.debug("[Mem0] No API URL configured — skipping request")
+            return None
+
         if not _breaker.allow_request():
             logger.debug("[Mem0] Circuit breaker open — skipping request")
             return None
