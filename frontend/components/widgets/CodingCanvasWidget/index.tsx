@@ -90,7 +90,7 @@ export function CodingCanvasWidget({
   // When a new file event comes in from task streaming, auto-open it
   useEffect(() => {
     if (data.lastEvent?.path && data.lastEvent.type === 'file_write') {
-      handleFileSelect(data.lastEvent.path)
+      handleFileSelect(data.lastEvent.path, { forceReload: true })
       invalidateCache()
       fetchDirectory('.')
     }
@@ -100,25 +100,20 @@ export function CodingCanvasWidget({
   // ------ Handlers ------
 
   const handleFileSelect = useCallback(
-    async (filePath: string) => {
-      // If already open AND has content, just activate it
+    async (filePath: string, options?: { forceReload?: boolean }) => {
+      // If already open AND has content, just activate it (skip on forceReload)
       const existing = openTabs.find((t) => t.path === filePath)
-      if (existing && !existing.isLoading && existing.content != null) {
+      if (!options?.forceReload && existing && !existing.isLoading && existing.content != null) {
         setActiveTabPath(filePath)
         return
       }
 
-      // Create a loading tab (or keep existing one)
-      if (!existing) {
+      // Atomically add tab if not present (prevents race on rapid clicks)
+      setOpenTabs((prev) => {
+        if (prev.find((t) => t.path === filePath)) return prev
         const name = filePath.split('/').pop() || filePath
-        const loadingTab: OpenFileTab = {
-          path: filePath,
-          name,
-          language: 'plaintext',
-          isLoading: true,
-        }
-        setOpenTabs((prev) => [...prev, loadingTab])
-      }
+        return [...prev, { path: filePath, name, language: 'plaintext', isLoading: true }]
+      })
       setActiveTabPath(filePath)
 
       // Fetch content (also re-fetches if tab was stuck loading)

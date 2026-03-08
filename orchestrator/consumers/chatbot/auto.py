@@ -506,7 +506,8 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
     def _match_platform_query(msg_lower: str) -> Optional[str]:
         for tool_name, phrases in _PLATFORM_KEYWORDS.items():
             for phrase in phrases:
-                if phrase in msg_lower:
+                # Word-boundary match to avoid false triggers on substrings
+                if re.search(r'\b' + re.escape(phrase) + r'\b', msg_lower):
                     return tool_name
         return None
 

@@ -189,7 +189,7 @@ class ActivityService:
                 summary = self._routine_summary(r.findings)
                 error_msg = self._routine_error(r.status, r.findings)
 
-                agent_name = r.agent_name or "Orchestrator"
+                agent_name = r.agent_name or ("Orchestrator" if r.source_type == "orchestrator" else "Unknown Agent")
                 is_orchestrator = r.source_type == "orchestrator"
                 agent_info = None if is_orchestrator else {
                     "id": int(r.source_id) if r.source_id else None,

@@ -1458,7 +1458,12 @@ class PlatformActionExecutor:
                 input_data=input_data,
             )
         except Exception as e:
-            logger.warning("[PlatformExecutor] Failed to launch recipe task: %s", e)
+            logger.error("[PlatformExecutor] Failed to launch recipe task: %s", e)
+            # Mark execution as failed so it doesn't stay "pending" forever
+            execution.status = "failed"
+            execution.error_message = f"Failed to enqueue: {str(e)[:500]}"
+            self.db.commit()
+            return {"success": False, "error": f"Recipe triggered but failed to launch: {str(e)[:200]}"}
 
         logger.info(
             "[PlatformExecutor] Triggered recipe '%s' (id=%d) — execution_id=%s",
@@ -1554,7 +1559,8 @@ class PlatformActionExecutor:
 
         # 1. Database
         try:
-            self.db.execute(func.literal(1).select())
+            from sqlalchemy import select as sa_select
+            self.db.execute(sa_select(1))
             components["database"] = {"status": "healthy"}
         except Exception as e:
             components["database"] = {"status": "unhealthy", "error": str(e)[:100]}
@@ -1747,18 +1753,12 @@ class PlatformActionExecutor:
                 filename=doc.original_filename or doc.filename,
             )
 
-            # Refresh doc from DB to get updated chunk_count
-            self.db.refresh(doc)
-            doc.status = "completed"
-            self.db.flush()
-
-            logger.info("[PlatformExecutor] Reprocessed document %d", doc.id)
+            logger.info("[PlatformExecutor] Reprocessed document %d → new doc %s", doc.id, new_doc_id)
 
             return {
                 "success": True,
-                "document_id": doc.id,
-                "status": "completed",
-                "chunk_count": doc.chunk_count or 0,
+                "document_id": new_doc_id,
+                "original_document_id": doc.id,
                 "message": f"Document '{doc.original_filename or doc.filename}' reprocessed successfully.",
             }
         except Exception as e:

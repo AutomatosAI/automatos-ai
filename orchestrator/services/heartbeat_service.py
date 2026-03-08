@@ -316,6 +316,14 @@ class HeartbeatService:
             "tokens_used": 0,
         }
 
+        # Resolve proactive_level once for both success and error paths
+        try:
+            from consumers.chatbot.personality import load_orchestrator_settings as _load_orch
+            _orch = _load_orch(workspace_id)
+            _proactive_level = hb_config.get("proactive_level") or _orch.get("proactive_level", "notify")
+        except Exception:
+            _proactive_level = "notify"
+
         try:
             logger.info(
                 "[Heartbeat] Orchestrator tick starting for ws=%s", workspace_id
@@ -336,12 +344,7 @@ class HeartbeatService:
 
             await self._store_heartbeat_result(result)
 
-            # Respect proactive_level for notification delivery
-            # proactive_level lives at orchestrator level, not inside heartbeat config
-            from consumers.chatbot.personality import load_orchestrator_settings
-            orch_settings = load_orchestrator_settings(workspace_id)
-            proactive_level = hb_config.get("proactive_level") or orch_settings.get("proactive_level", "notify")
-            if proactive_level != "silent":
+            if _proactive_level != "silent":
                 await self._deliver_notification(result, hb_config)
 
             logger.info(
@@ -357,7 +360,8 @@ class HeartbeatService:
             result["status"] = "error"
             result["findings"].append({"check": "error", "detail": str(e)})
             await self._store_heartbeat_result(result)
-            await self._deliver_notification(result, hb_config)
+            if _proactive_level != "silent":
+                await self._deliver_notification(result, hb_config)
         finally:
             self._running_ticks.pop(tick_key, None)
 
@@ -480,7 +484,7 @@ class HeartbeatService:
 
                     try:
                         fn_args = json.loads(fn_args_raw) if isinstance(fn_args_raw, str) else fn_args_raw
-                        tool_result = executor.execute(fn_name, fn_args)
+                        tool_result = await executor.execute(fn_name, fn_args)
                         result["actions_taken"].append({"tool": fn_name, "params": fn_args})
                     except Exception as tool_err:
                         tool_result = {"error": str(tool_err)[:500]}

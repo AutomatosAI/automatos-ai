@@ -71,6 +71,7 @@ interface OrchestratorConfig {
     timezone: string
     checklist: string
     notification_channel: string
+    channel_id?: string
   }
 }
 
@@ -340,9 +341,24 @@ export default function SystemLLMSettingsTab({
     if (!orchConfig) return
     try {
       setOrchSaving(true)
+      // Parse channel key to extract platform + channel_id for heartbeat delivery
+      const hb = { ...orchConfig.heartbeat }
+      const channelKey = hb.notification_channel
+      if (channelKey?.startsWith('channel:')) {
+        const channelId = channelKey.replace('channel:', '')
+        const found = connectedChannels.find(ch => ch.key === channelKey)
+        hb.notification_channel = found?.platform || channelKey
+        hb.channel_id = channelId
+      } else if (channelKey === 'in_app' || channelKey === 'webhook') {
+        // Built-in channels, no channel_id needed
+      } else {
+        // Direct platform name (e.g. "telegram" from workspace integrations)
+        hb.notification_channel = channelKey
+      }
+      const payload = { ...orchConfig, heartbeat: hb }
       await apiClient.request('/api/workspaces/current/orchestrator', {
         method: 'PUT',
-        body: JSON.stringify(orchConfig),
+        body: JSON.stringify(payload),
       })
       toast.success('Orchestrator settings saved')
     } catch (err) {
@@ -867,7 +883,7 @@ export default function SystemLLMSettingsTab({
                             <SelectContent>
                               <SelectItem value="in_app">In-App Notification</SelectItem>
                               {connectedChannels.map((ch) => (
-                                <SelectItem key={ch.platform} value={ch.platform}>
+                                <SelectItem key={ch.key} value={ch.key}>
                                   {ch.platform.charAt(0).toUpperCase() + ch.platform.slice(1)}
                                 </SelectItem>
                               ))}
