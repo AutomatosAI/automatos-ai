@@ -25,6 +25,7 @@ import logging
 import re
 import json
 import hashlib
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Dict, Any
@@ -88,14 +89,27 @@ class ComplexityAssessment:
 # Must be the ENTIRE message (with optional punctuation).
 # "hello" → atom.  "hello can you create an image" → NOT atom.
 _ATOM_PATTERNS = [
-    r"^(hi|hello|hey|howdy|yo|sup)[\s!?.,:]*$",
-    r"^(thanks|thank you|thx|ty|cheers)[\s!?.,:]*$",
-    r"^(bye|goodbye|see ya|later|cya)[\s!?.,:]*$",
-    r"^(ok|okay|yes|no|sure|cool|nice|great|awesome|perfect|got it|alright)[\s!?.,:]*$",
-    r"^(good\s+(morning|afternoon|evening|night))[\s!?.,:]*$",
+    # Greetings (with optional name: "hi auto", "morning auto", "hey there")
+    r"^(hi|hello|hey|howdy|yo|sup)(\s+\w+)?[\s!?.,:]*$",
+    r"^(good\s+)?(morning|afternoon|evening|night)(\s+\w+)?[\s!?.,:]*$",
+    r"^(g'day|hiya|heya|oi|ello|mornin)(\s+\w+)?[\s!?.,:]*$",
+    # Informal greetings and check-ins
+    r"^what'?s\s+up[\s!?.,:]*$",
+    r"^how'?s\s+it\s+going[\s!?.,:]*$",
+    r"^how\s+are\s+(you|things|ya)[\s!?.,:]*$",
+    r"^how'?s\s+everything[\s!?.,:]*$",
+    r"^long\s+time\s+no\s+see[\s!?.,:]*$",
+    # Thanks / bye / acknowledgements
+    r"^(thanks|thank you|thx|ty|cheers)(\s+\w+)?[\s!?.,:]*$",
+    r"^(bye|goodbye|see ya|later|cya|see you)(\s+\w+)?[\s!?.,:]*$",
+    r"^(ok|okay|yes|no|sure|cool|nice|great|awesome|perfect|got it|alright|grand|brilliant)[\s!?.,:]*$",
+    # Identity questions
     r"^(what|who)\s+(are|is)\s+(you|automatos|auto)[\s!?.]*$",
-    r"^how\s+are\s+you[\s!?.]*$",
     r"^what\s+can\s+you\s+do[\s!?.]*$",
+    # Simple chitchat (no tools needed)
+    r"^tell\s+me\s+a\s+joke[\s!?.,:]*$",
+    r"^what\s+(time|day)\s+is\s+it[\s!?.,:]*$",
+    r"^(lol|haha|lmao|rofl|ha+)[\s!?.,:]*$",
 ]
 
 _PLATFORM_KEYWORDS = {
@@ -205,32 +219,56 @@ class AutoBrain:
     def _run_fast_heuristics(self, msg_lower: str) -> Optional[ComplexityAssessment]:
         # ATOM: Pure chitchat
         if self._is_atom(msg_lower):
-            logger.info("[AutoBrain] Tier 2 Atom: '%s'", msg_lower[:50])
-            return ComplexityAssessment(
+            assessment = ComplexityAssessment(
                 complexity=Complexity.ATOM, action=Action.RESPOND,
                 reasoning="Greeting or chitchat", confidence=0.95,
                 needs_memory=False, tool_hints=[], needs_multi_agent=False,
             )
+            logger.info(
+                "[AutoBrain] assessed",
+                extra={
+                    "tier": 2, "complexity": "atom", "action": "respond",
+                    "confidence": 0.95, "latency_ms": 0, "cache_hit": False,
+                    "workspace_id": self._workspace_id,
+                },
+            )
+            return assessment
 
         # MOLECULE: Platform queries
         platform_tool = self._match_platform_query(msg_lower)
         if platform_tool:
-            logger.info("[AutoBrain] Tier 2 Platform query: %s", platform_tool)
-            return ComplexityAssessment(
+            assessment = ComplexityAssessment(
                 complexity=Complexity.MOLECULE, action=Action.RESPOND,
                 reasoning=f"Platform query ({platform_tool})",
                 matched_tools=[platform_tool], tool_hints=["platform"],
                 confidence=0.90, needs_memory=False, needs_multi_agent=False,
             )
+            logger.info(
+                "[AutoBrain] assessed",
+                extra={
+                    "tier": 2, "complexity": "molecule", "action": "respond",
+                    "confidence": 0.90, "latency_ms": 0, "cache_hit": False,
+                    "workspace_id": self._workspace_id,
+                },
+            )
+            return assessment
 
         # CELL: Memory recall
         if self._is_memory_recall(msg_lower):
-            logger.info("[AutoBrain] Tier 2 Memory recall")
-            return ComplexityAssessment(
+            assessment = ComplexityAssessment(
                 complexity=Complexity.CELL, action=Action.RESPOND,
                 reasoning="Explicit memory recall", confidence=0.85,
                 needs_memory=True, tool_hints=[], needs_multi_agent=False,
             )
+            logger.info(
+                "[AutoBrain] assessed",
+                extra={
+                    "tier": 2, "complexity": "cell", "action": "respond",
+                    "confidence": 0.85, "latency_ms": 0, "cache_hit": False,
+                    "workspace_id": self._workspace_id,
+                },
+            )
+            return assessment
 
         return None
 
@@ -241,38 +279,61 @@ class AutoBrain:
     async def _llm_classify(
         self, message: str, conversation_length: int
     ) -> ComplexityAssessment:
-        """Use a lightweight LLM to classify complexity. Any model, any provider."""
+        """Use a lightweight LLM to classify complexity. Any model, any provider.
+
+        Context Engineering: No agent summaries in the prompt — they bias toward
+        delegation and waste tokens. Agent routing happens downstream, not here.
+        """
         logger.info("[AutoBrain] Tier 3 LLM classifying: '%s'", message[:80])
+        t0 = time.monotonic()
 
-        agent_summaries = self._get_agent_summaries()
+        prompt = f"""You are a message complexity classifier for an AI platform.
 
-        prompt = f"""Classify this user message for an AI platform.
-
-Available agents: {agent_summaries}
-Conversation turn: {conversation_length}
+Analyze the user's message step by step, then classify it.
 
 Message: "{message}"
+Conversation turn: {conversation_length}
+
+## Reasoning Steps (think through each):
+
+1. **Intent**: What is the user asking for? (greeting, question, action, complex task)
+2. **Tool need**: Does this require external data or actions? (database, email, search, file ops)
+3. **Memory need**: Does this reference past conversations or user preferences?
+4. **Coordination**: How many systems need to work together?
+
+## Classification levels:
+
+- **atom**: Greetings, chitchat, opinions, simple factual questions, jokes, acknowledgements. NO tools needed. This is the most common category — when in doubt, choose atom.
+- **molecule**: Needs ONE tool or action. "Send email", "search docs", "check Jira", "list my agents".
+- **cell**: Needs tools + memory/context. "Reply to that email we discussed", "update the report from last week".
+- **organ**: Multiple agents coordinating. "Research this bug, plan a fix, open a PR".
+- **organism**: Enterprise multi-step pipeline. Rare.
+
+## Examples:
+
+- "Morning Auto" → atom (greeting)
+- "How are you?" → atom (chitchat)
+- "What's the weather like?" → atom (conversational)
+- "Tell me about yourself" → atom (identity question)
+- "Send an email to John" → molecule (email tool)
+- "What agents do I have?" → molecule (platform query)
+- "Search my docs for the Q4 report" → molecule (search tool)
+- "Remember last week's meeting? Update those notes" → cell (memory + action)
+
+**Default bias: atom.** Most messages are simpler than they look.
 
 Return ONLY valid JSON:
 {{
   "complexity": "atom|molecule|cell|organ|organism",
   "action": "respond|delegate|workflow",
-  "tool_hints": ["domain1", "domain2"],
-  "needs_memory": true/false,
-  "needs_multi_agent": true/false,
+  "tool_hints": [],
+  "needs_memory": false,
+  "needs_multi_agent": false,
   "reasoning": "one sentence"
 }}
 
-Rules:
-- atom: Greetings, chitchat, simple factual. No tools.
-- molecule: Needs ONE tool/agent. "Send email", "check Jira", "search docs".
-- cell: Needs tools + memory/conversation context. "Reply to that email we discussed".
-- organ: Needs multiple agents coordinating. "Research bug, plan fix, open PR".
-- organism: Enterprise-scale multi-step. "Refactor auth across all services".
-- tool_hints: short domain keywords like "email", "github", "jira", "code", "database". Empty for atom.
-- needs_memory: true if the message references past conversations or user preferences.
-- needs_multi_agent: true only for organ/organism level tasks.
-- action: "respond" for atom, "delegate" for molecule/cell, "workflow" for organ/organism."""
+action mapping: "respond" for atom, "delegate" for molecule/cell, "workflow" for organ/organism.
+tool_hints: short domain keywords like "email", "github", "jira", "code", "database". Empty for atom."""
 
         try:
             from core.llm import create_llm_manager
@@ -287,46 +348,41 @@ Rules:
             json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group(0))
-                return ComplexityAssessment(
-                    complexity=Complexity(data.get("complexity", "molecule").lower()),
-                    action=Action(data.get("action", "delegate").lower()),
+                elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+                assessment = ComplexityAssessment(
+                    complexity=Complexity(data.get("complexity", "atom").lower()),
+                    action=Action(data.get("action", "respond").lower()),
                     reasoning=data.get("reasoning", "LLM classified"),
                     confidence=0.85,
                     needs_memory=data.get("needs_memory", False),
                     tool_hints=data.get("tool_hints", []),
                     needs_multi_agent=data.get("needs_multi_agent", False),
                 )
+                logger.info(
+                    "[AutoBrain] assessed",
+                    extra={
+                        "tier": 3,
+                        "complexity": assessment.complexity.value,
+                        "action": assessment.action.value,
+                        "confidence": assessment.confidence,
+                        "latency_ms": elapsed_ms,
+                        "cache_hit": False,
+                        "workspace_id": self._workspace_id,
+                    },
+                )
+                return assessment
         except Exception:
-            logger.exception("[AutoBrain] Tier 3 LLM classification failed, falling back to DELEGATE")
+            logger.exception("[AutoBrain] Tier 3 LLM classification failed, falling back to ATOM")
 
-        # Fallback: treat as MOLECULE / DELEGATE (current behavior)
+        # Fallback: treat as ATOM / RESPOND (chat naturally, don't waste tools)
+        # Rationale: a wrong ATOM is a slightly impersonal greeting;
+        # a wrong MOLECULE is a wasted tool call + latency + cost.
         return ComplexityAssessment(
-            complexity=Complexity.MOLECULE, action=Action.DELEGATE,
-            reasoning="LLM classification failed — defaulting to delegate",
+            complexity=Complexity.ATOM, action=Action.RESPOND,
+            reasoning="LLM classification failed — defaulting to conversational",
             confidence=0.50, needs_memory=False, tool_hints=[],
             needs_multi_agent=False,
         )
-
-    # ------------------------------------------------------------------
-    # Agent summaries for LLM context
-    # ------------------------------------------------------------------
-
-    def _get_agent_summaries(self) -> str:
-        """Get lightweight agent descriptions for LLM context."""
-        try:
-            from core.models.agents import Agent
-            agents = self._db.query(Agent.name, Agent.description).filter(
-                Agent.workspace_id == self._workspace_id,
-                Agent.is_active == True,
-            ).all()
-            if not agents:
-                return "No custom agents configured."
-            return ", ".join(
-                f"{a.name}: {(a.description or '')[:60]}" for a in agents
-            )
-        except Exception:
-            logger.debug("[AutoBrain] Could not load agent summaries")
-            return "Agent list unavailable."
 
     # ------------------------------------------------------------------
     # Redis cache (Tier 1)
@@ -340,7 +396,15 @@ Rules:
             raw = self._redis.get(cache_key)
             if raw:
                 data = json.loads(raw)
-                logger.info("[AutoBrain] Tier 1 Cache hit: '%s'", msg_lower[:50])
+                logger.info(
+                    "[AutoBrain] assessed",
+                    extra={
+                        "tier": 1, "complexity": data.get("complexity", "?"),
+                        "confidence": data.get("confidence", 0.90),
+                        "latency_ms": 0, "cache_hit": True,
+                        "workspace_id": self._workspace_id,
+                    },
+                )
                 return ComplexityAssessment(
                     complexity=Complexity(data["complexity"]),
                     action=Action(data["action"]),

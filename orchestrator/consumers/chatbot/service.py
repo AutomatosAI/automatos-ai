@@ -605,9 +605,18 @@ class StreamingChatService:
                 # ATOM: No tools, no memory, no SmartChatIntegration.
                 # Minimal system prompt + conversation → LLM. Fastest path.
                 logger.info("[PRD-68] ATOM path — skipping tools, memory, orchestration")
+                from datetime import datetime as _dt
+                _now = _dt.utcnow()
+                _time_ctx = (
+                    "Good morning" if _now.hour < 12
+                    else "Good afternoon" if _now.hour < 18
+                    else "Good evening"
+                )
                 _atom_prompt = (
-                    f"You are {agent_runtime.metadata.name}, a friendly AI assistant. "
-                    "Respond naturally and conversationally. Keep it brief."
+                    f"You are {agent_runtime.metadata.name}, a warm and helpful AI assistant "
+                    f"on the Automatos platform. {_time_ctx}! "
+                    "Respond naturally and conversationally — be friendly, be brief. "
+                    "You're chatting, not executing tasks."
                 )
                 llm_messages = self.prompt_analyzer.convert_to_llm_messages(
                     messages, system_prompt=_atom_prompt, available_tools=None

@@ -260,7 +260,7 @@ async def update_agent_plugins(
             "message": f"Agent plugins updated ({len(unique_plugin_ids)} assigned)",
             "agent_id": agent_id,
             "plugin_ids": [str(pid) for pid in unique_plugin_ids],
-            "materialized_skill_ids": list(materialized_skill_ids),
+            "materialized_skill_ids": [int(sid) for sid in valid_skill_ids] if candidate_skill_ids else [],
         }
 
     except HTTPException:
