@@ -70,12 +70,42 @@ export interface ActivityFeedFilters {
   offset?: number
 }
 
+export interface ScheduleItem {
+  id: string
+  name: string
+  type: 'routine' | 'recipe'
+  next_run_at: string | null
+  frequency: string
+  agent_name: string | null
+  agent_id: number | null
+}
+
+export interface ScheduleResponse {
+  scheduled: ScheduleItem[]
+}
+
+export interface AgentReport {
+  agent_id: number
+  agent_name: string
+  agent_icon: string | null
+  status: 'completed' | 'failed' | 'no_data' | 'error'
+  summary: string
+  last_run: string | null
+  execution_id: string | null
+}
+
+export interface AgentReportsResponse {
+  reports: AgentReport[]
+}
+
 // ============= QUERY KEYS =============
 
 export const activityQueryKeys = {
   all: ['activity'] as const,
   feed: (filters?: ActivityFeedFilters) => ['activity', 'feed', filters] as const,
   stats: (period?: string) => ['activity', 'stats', period] as const,
+  schedule: (range?: string) => ['activity', 'schedule', range] as const,
+  agentReports: (agentIds?: number[]) => ['activity', 'agent-reports', agentIds] as const,
 }
 
 // ============= QUERY HOOKS =============
@@ -125,5 +155,33 @@ export function useActivityStats(period: string = '1d') {
       apiClient.request<ActivityStats>(`/api/activity/stats?period=${period}`),
     refetchInterval: 15000,
     staleTime: 10000,
+  })
+}
+
+/**
+ * Fetch upcoming scheduled routines/recipes for the calendar widget.
+ */
+export function useActivitySchedule(range: string = '7d') {
+  return useQuery<ScheduleResponse>({
+    queryKey: activityQueryKeys.schedule(range),
+    queryFn: () =>
+      apiClient.request<ScheduleResponse>(`/api/activity/schedule?range=${range}`),
+    refetchInterval: 30000,
+    staleTime: 20000,
+  })
+}
+
+/**
+ * Fetch latest reports from pinned agents.
+ */
+export function useAgentReports(agentIds: number[]) {
+  const idsParam = agentIds.join(',')
+  return useQuery<AgentReportsResponse>({
+    queryKey: activityQueryKeys.agentReports(agentIds),
+    queryFn: () =>
+      apiClient.request<AgentReportsResponse>(`/api/activity/agent-reports?agent_ids=${idsParam}`),
+    enabled: agentIds.length > 0,
+    refetchInterval: 30000,
+    staleTime: 20000,
   })
 }
