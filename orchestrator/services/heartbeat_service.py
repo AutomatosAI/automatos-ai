@@ -289,7 +289,7 @@ class HeartbeatService:
     # ------------------------------------------------------------------
 
     async def _orchestrator_tick(self, workspace_id: str, hb_config: dict) -> Dict[str, Any]:
-        """Execute an orchestrator heartbeat tick. Returns result dict."""
+        """Execute an LLM-powered orchestrator heartbeat tick."""
         tick_key = f"orch_{workspace_id}"
         if self._running_ticks.get(tick_key):
             logger.debug(
@@ -316,74 +316,241 @@ class HeartbeatService:
             "tokens_used": 0,
         }
 
+        # Resolve proactive_level once for both success and error paths
+        try:
+            from consumers.chatbot.personality import load_orchestrator_settings as _load_orch
+            _orch = _load_orch(workspace_id)
+            _proactive_level = hb_config.get("proactive_level") or _orch.get("proactive_level", "notify")
+        except Exception:
+            _proactive_level = "notify"
+
         try:
             logger.info(
                 "[Heartbeat] Orchestrator tick starting for ws=%s", workspace_id
             )
 
-            from core.database.database import SessionLocal
-            from core.models import Agent
-
-            db = SessionLocal()
+            # Try LLM-powered tick; fall back to shallow analysis on failure
             try:
-                agents = (
-                    db.query(Agent)
-                    .filter(Agent.workspace_id == workspace_id)
-                    .all()
+                await self._orchestrator_tick_llm(workspace_id, hb_config, result)
+            except Exception as llm_err:
+                logger.warning(
+                    "[Heartbeat] LLM tick failed for ws=%s, falling back to shallow: %s",
+                    workspace_id, llm_err, exc_info=True,
                 )
-                active_agents = [a for a in agents if a.status == "active"]
-                inactive_agents = [a for a in agents if a.status != "active"]
-
                 result["findings"].append(
-                    {
-                        "check": "agent_health",
-                        "detail": (
-                            f"{len(active_agents)} active, "
-                            f"{len(inactive_agents)} inactive agents"
-                        ),
-                    }
+                    {"check": "llm_error", "detail": f"LLM unavailable: {str(llm_err)[:200]}"}
                 )
-
-                # Execute checklist items if provided
-                checklist = hb_config.get("checklist", "")
-                if checklist:
-                    items = [
-                        line.strip().lstrip("- ")
-                        for line in checklist.split("\n")
-                        if line.strip()
-                    ]
-                    result["findings"].append(
-                        {
-                            "check": "checklist",
-                            "items": items,
-                            "detail": f"Reviewed {len(items)} checklist items",
-                        }
-                    )
-            finally:
-                db.close()
+                await self._orchestrator_tick_shallow(workspace_id, hb_config, result)
 
             await self._store_heartbeat_result(result)
-            await self._deliver_notification(result, hb_config)
+
+            if _proactive_level != "silent":
+                await self._deliver_notification(result, hb_config)
+
             logger.info(
-                "[Heartbeat] Orchestrator tick completed for ws=%s: %d findings",
-                workspace_id,
-                len(result["findings"]),
+                "[Heartbeat] Orchestrator tick completed for ws=%s: %d findings, %d tokens",
+                workspace_id, len(result["findings"]), result.get("tokens_used", 0),
             )
 
         except Exception as e:
             logger.error(
                 "[Heartbeat] Orchestrator tick failed for ws=%s: %s",
-                workspace_id,
-                e,
+                workspace_id, e, exc_info=True,
             )
             result["status"] = "error"
             result["findings"].append({"check": "error", "detail": str(e)})
             await self._store_heartbeat_result(result)
-            await self._deliver_notification(result, hb_config)
+            if _proactive_level != "silent":
+                await self._deliver_notification(result, hb_config)
         finally:
             self._running_ticks.pop(tick_key, None)
 
         return result
+
+    async def _orchestrator_tick_llm(
+        self, workspace_id: str, hb_config: dict, result: Dict[str, Any],
+    ) -> None:
+        """Run the LLM-powered orchestrator heartbeat with tool loop."""
+        from consumers.chatbot.personality import load_orchestrator_settings
+        from core.llm.manager import LLMManager
+        from modules.tools.discovery.action_registry import get_action_registry
+        from modules.tools.discovery.platform_executor import PlatformActionExecutor
+        from core.database.database import SessionLocal
+
+        # 1. Load personality settings
+        orch_settings = load_orchestrator_settings(workspace_id)
+        personality_mode = orch_settings.get("personality_mode", "friendly")
+        communication_style = orch_settings.get("communication_style", "balanced")
+        proactive_level = hb_config.get("proactive_level") or orch_settings.get("proactive_level", "notify")
+
+        # 2. Build tools based on proactive_level
+        registry = get_action_registry()
+        if proactive_level in ("silent", "notify"):
+            platform_tools = registry.to_openai_tools(permission_filter="read")
+        elif proactive_level == "act_notify":
+            # read + write (exclude destructive)
+            platform_tools = [
+                a.to_openai_schema()
+                for a in registry.get_all()
+                if a.permission_level in ("read", "write")
+            ]
+        else:  # autonomous
+            platform_tools = registry.to_openai_tools()
+
+        # 3. Build proactive_level instruction
+        level_instructions = {
+            "silent": "Report findings only. Do NOT take any corrective actions.",
+            "notify": "Report findings only. Do NOT take any corrective actions.",
+            "act_notify": "Take corrective action if needed using your tools. Report what you did.",
+            "autonomous": "Act independently to resolve any issues you find. Report a summary of actions taken.",
+        }
+        level_instruction = level_instructions.get(proactive_level, level_instructions["notify"])
+
+        # 4. Build communication style suffix
+        style_suffix = {
+            "concise": " Keep your response extremely short and direct.",
+            "balanced": "",
+            "detailed": " Provide thorough analysis with specifics.",
+        }.get(communication_style, "")
+
+        # 5. Build checklist
+        checklist = hb_config.get("checklist", "")
+        checklist_block = ""
+        if checklist and checklist.strip():
+            checklist_block = f"\n\nChecklist to review:\n{checklist}"
+
+        # 6. Build system prompt
+        system_prompt = (
+            f"You are the Automatos orchestrator performing a scheduled health check.\n"
+            f"Personality: {personality_mode}.\n\n"
+            f"Your task: Analyze your workspace using the tools provided.{checklist_block}\n\n"
+            f"{level_instruction}{style_suffix}\n\n"
+            f"Reply with a SHORT plain-text summary (max 500 chars). No markdown."
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Run the scheduled heartbeat check now. Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"},
+        ]
+
+        # 7. Create LLM manager (maps to orchestrator_llm settings)
+        llm = LLMManager(
+            service_name="heartbeat",
+            workspace_id=workspace_id,
+            request_type="heartbeat",
+        )
+
+        # 8. Tool loop (max 5 iterations)
+        max_iterations = 5
+        total_tokens = 0
+        db = SessionLocal()
+        try:
+            executor = PlatformActionExecutor(db, workspace_id)
+
+            for iteration in range(max_iterations):
+                response = await llm.generate_response(messages, tools=platform_tools if platform_tools else None)
+
+                # Track tokens
+                usage = getattr(response, "usage", None) or {}
+                total_tokens += usage.get("total_tokens", 0) or (
+                    (usage.get("prompt_tokens", 0) or 0) + (usage.get("completion_tokens", 0) or 0)
+                )
+
+                # Check for tool calls
+                tool_calls = getattr(response, "tool_calls", None) or []
+                if not tool_calls:
+                    # No more tool calls — capture final response
+                    content = getattr(response, "content", "") or ""
+                    if content:
+                        result["findings"].append(
+                            {"check": "llm_analysis", "detail": str(content)[:1000]}
+                        )
+                    break
+
+                # Build assistant message with all tool calls, then execute each
+                assistant_msg = {"role": "assistant", "content": getattr(response, "content", "") or None, "tool_calls": []}
+                tool_results_msgs = []
+                for tc in tool_calls:
+                    func = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", {})
+                    tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+                    fn_name = func.get("name", "") if isinstance(func, dict) else getattr(func, "name", "")
+                    fn_args_raw = func.get("arguments", "{}") if isinstance(func, dict) else getattr(func, "arguments", "{}")
+
+                    assistant_msg["tool_calls"].append({
+                        "id": tc_id,
+                        "type": "function",
+                        "function": {"name": fn_name, "arguments": fn_args_raw},
+                    })
+
+                    try:
+                        fn_args = json.loads(fn_args_raw) if isinstance(fn_args_raw, str) else fn_args_raw
+                        tool_result = await executor.execute(fn_name, fn_args)
+                        result["actions_taken"].append({"tool": fn_name, "params": fn_args})
+                    except Exception as tool_err:
+                        tool_result = {"error": str(tool_err)[:500]}
+                        logger.warning("[Heartbeat] Tool %s failed: %s", fn_name, tool_err)
+
+                    tool_results_msgs.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": json.dumps(tool_result, default=str)[:4000],
+                    })
+
+                messages.append(assistant_msg)
+                messages.extend(tool_results_msgs)
+            else:
+                # Max iterations reached
+                result["findings"].append(
+                    {"check": "llm_analysis", "detail": "Heartbeat analysis completed (max tool iterations reached)."}
+                )
+        finally:
+            db.close()
+
+        result["tokens_used"] = total_tokens
+
+    async def _orchestrator_tick_shallow(
+        self, workspace_id: str, hb_config: dict, result: Dict[str, Any],
+    ) -> None:
+        """Shallow fallback when LLM is unavailable — counts agents and parses checklist."""
+        from core.database.database import SessionLocal
+        from core.models import Agent
+
+        db = SessionLocal()
+        try:
+            agents = (
+                db.query(Agent)
+                .filter(Agent.workspace_id == workspace_id)
+                .all()
+            )
+            active_agents = [a for a in agents if a.status == "active"]
+            inactive_agents = [a for a in agents if a.status != "active"]
+
+            result["findings"].append(
+                {
+                    "check": "agent_health",
+                    "detail": (
+                        f"{len(active_agents)} active, "
+                        f"{len(inactive_agents)} inactive agents"
+                    ),
+                }
+            )
+
+            checklist = hb_config.get("checklist", "")
+            if checklist:
+                items = [
+                    line.strip().lstrip("- ")
+                    for line in checklist.split("\n")
+                    if line.strip()
+                ]
+                result["findings"].append(
+                    {
+                        "check": "checklist",
+                        "items": items,
+                        "detail": f"Reviewed {len(items)} checklist items (shallow mode — LLM unavailable)",
+                    }
+                )
+        finally:
+            db.close()
 
     async def _agent_tick(
         self, agent_id: int, workspace_id: str, hb_config: dict
@@ -650,7 +817,10 @@ class HeartbeatService:
           - "slack"         → push via workspace Slack bot integration
           - "webhook"       → HTTP POST to webhook_url
         """
-        report_to = hb_config.get("report_to", "orchestrator")
+        report_to = hb_config.get("report_to") or hb_config.get("notification_channel", "orchestrator")
+        # Map frontend values to backend values
+        _CHANNEL_MAP = {"in_app": "direct"}
+        report_to = _CHANNEL_MAP.get(report_to, report_to)
 
         if report_to in ("orchestrator", "direct"):
             return

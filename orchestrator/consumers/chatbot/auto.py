@@ -141,6 +141,53 @@ _PLATFORM_KEYWORDS = {
         "list my connected apps", "list my integrations",
         "what integrations do i have",
     ],
+    "platform_list_tools": [
+        "what tools", "list my tools", "available tools",
+        "what can i use", "show my tools", "what integrations",
+        "composio tools", "connected tools",
+    ],
+    "platform_list_llms": [
+        "what models", "available models", "list llms", "list models",
+        "what llms", "cheapest model", "show models",
+        "openrouter models",
+    ],
+    "platform_list_datasources": [
+        "what data", "data sources", "what databases", "list datasources",
+        "what documents", "rag sources", "nl2sql", "queryable databases",
+        "what repos are indexed",
+    ],
+    "platform_workspace_stats": [
+        "workspace stats", "platform stats", "usage stats",
+        "how many queries", "agent activity", "what's being used",
+        "show stats", "show usage",
+    ],
+    "platform_execute_recipe": [
+        "run the recipe", "execute recipe", "trigger recipe",
+        "run automation", "start recipe",
+    ],
+    "platform_get_recipe_execution": [
+        "recipe status", "execution status", "recipe result",
+        "did the recipe run", "check recipe",
+    ],
+    "platform_get_system_health": [
+        "system health", "platform health", "system status",
+        "check health", "health check", "is everything working",
+    ],
+    "platform_delete_document": [
+        "delete document", "remove document",
+        "delete from knowledge base",
+    ],
+    "platform_reprocess_document": [
+        "reprocess document", "re-embed document", "reindex document",
+        "regenerate chunks", "rebuild embeddings",
+    ],
+    "platform_delete_recipe": [
+        "delete recipe", "remove recipe", "delete automation",
+    ],
+    "platform_get_activity_feed": [
+        "recent activity", "activity feed", "what's been happening",
+        "show activity", "what has been running", "activity log",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]
@@ -478,7 +525,8 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
     def _match_platform_query(msg_lower: str) -> Optional[str]:
         for tool_name, phrases in _PLATFORM_KEYWORDS.items():
             for phrase in phrases:
-                if phrase in msg_lower:
+                # Word-boundary match to avoid false triggers on substrings
+                if re.search(r'\b' + re.escape(phrase) + r'\b', msg_lower):
                     return tool_name
         return None
 

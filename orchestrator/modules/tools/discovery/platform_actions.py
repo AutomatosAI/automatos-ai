@@ -17,6 +17,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_read_actions(registry)
     _register_write_actions(registry)
     _register_infra_actions(registry)
+    _register_self_management_actions(registry)
 
 
 def _register_read_actions(registry: ActionRegistry) -> None:
@@ -300,6 +301,150 @@ def _register_read_actions(registry: ActionRegistry) -> None:
             "what apps are connected?",
             "list my integrations",
             "show connected services",
+        ],
+    ))
+
+    # ── Visibility / Discovery ─────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_list_tools",
+        description=(
+            "List all available tools — platform actions, Composio integrations, "
+            "and internal tools. Grouped by category with descriptions and connection "
+            "status. Use when the user asks what tools are available, what can be done, "
+            "or when Auto needs to discover capabilities for workflow design."
+        ),
+        category="discovery",
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["platform", "composio", "all"],
+                    "description": "Filter by tool type. Defaults to 'all'.",
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Fuzzy search across tool names and descriptions.",
+                },
+                "connected_only": {
+                    "type": "boolean",
+                    "description": "Only show tools with active connections. Defaults to false.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["tools", "discovery", "capabilities", "integrations"],
+        examples=[
+            "what tools can I use?",
+            "list my tools",
+            "what integrations are available?",
+            "show connected tools",
+            "search tools for github",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_llms",
+        description=(
+            "List available LLM models from the OpenRouter model cache with costs, "
+            "capabilities, and context windows. Filterable by capability (tools, vision, "
+            "reasoning) and tier (free, budget, mid, premium). Use when the user asks "
+            "about available models, pricing, or model capabilities."
+        ),
+        category="discovery",
+        parameters={
+            "type": "object",
+            "properties": {
+                "capability": {
+                    "type": "string",
+                    "enum": ["tools", "vision", "reasoning", "json_mode"],
+                    "description": "Filter by model capability.",
+                },
+                "tier": {
+                    "type": "string",
+                    "enum": ["free", "budget", "mid", "premium"],
+                    "description": "Filter by pricing tier.",
+                },
+                "sort_by": {
+                    "type": "string",
+                    "enum": ["cost", "context_length", "name"],
+                    "description": "Sort results. Defaults to 'cost'.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return. Defaults to 20, max 50.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["models", "llm", "discovery", "pricing", "openrouter"],
+        examples=[
+            "what models are available?",
+            "list LLMs",
+            "cheapest model with tool support",
+            "show models with vision capability",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_datasources",
+        description=(
+            "List all data sources — document collections (RAG knowledge base) and "
+            "database connections (NL2SQL). Shows document counts, chunk totals, file "
+            "types, and database connection details. Use when the user asks about their "
+            "data, documents, databases, or what knowledge is available."
+        ),
+        category="discovery",
+        parameters={
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["documents", "databases", "all"],
+                    "description": "Filter by data source type. Defaults to 'all'.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["data", "documents", "databases", "rag", "nl2sql", "discovery"],
+        examples=[
+            "what data sources do I have?",
+            "show my databases",
+            "what documents are indexed?",
+            "list datasources",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_workspace_stats",
+        description=(
+            "Get workspace usage statistics — LLM usage, top models, top agents, "
+            "routing distribution, and resource counts. Use when the user asks for "
+            "a dashboard view, usage summary, or platform health check."
+        ),
+        category="analytics",
+        parameters={
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string",
+                    "enum": ["today", "7d", "30d"],
+                    "description": "Time period for stats. Defaults to '7d'.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["stats", "analytics", "usage", "dashboard"],
+        examples=[
+            "show workspace stats",
+            "platform usage summary",
+            "what's been happening this week?",
+            "show me agent activity",
         ],
     ))
 
@@ -783,5 +928,234 @@ def _register_infra_actions(registry: ActionRegistry) -> None:
         examples=[
             "what services are running?",
             "list railway services",
+        ],
+    ))
+
+
+def _register_self_management_actions(registry: ActionRegistry) -> None:
+    """Register self-management actions — execute recipes, manage docs, health, activity."""
+
+    # ── Recipe Execution ─────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_execute_recipe",
+        description=(
+            "Trigger a recipe run asynchronously. Returns an execution_id immediately "
+            "that can be used to check status later. Use when the user asks to run, "
+            "execute, or trigger a recipe or automation."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "ID of the recipe to execute.",
+                },
+                "recipe_name": {
+                    "type": "string",
+                    "description": "Name of the recipe to execute (alternative to ID).",
+                },
+                "input_data": {
+                    "type": "object",
+                    "description": "Input data to pass to the recipe (key-value pairs).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["recipes", "execute", "run", "write"],
+        examples=[
+            "run the daily digest recipe",
+            "execute recipe 5",
+            "trigger the bug triage automation",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_get_recipe_execution",
+        description=(
+            "Check the status and results of a recipe execution. Returns execution "
+            "status, step results summary, and timing. Use when the user asks about "
+            "a recipe run's status or results."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "execution_id": {
+                    "type": "string",
+                    "description": "The execution_id returned from platform_execute_recipe.",
+                },
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "Recipe ID to list recent executions for (if no execution_id).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["recipes", "execution", "status", "results"],
+        examples=[
+            "what's the status of that recipe run?",
+            "check recipe execution abc123",
+            "did the recipe run successfully?",
+        ],
+    ))
+
+    # ── System Health ────────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_get_system_health",
+        description=(
+            "Check system health — database, Redis, API, RAG pipeline, and server "
+            "metrics (CPU, memory, disk). Use when the user asks if the system is "
+            "healthy, working, or wants a status check."
+        ),
+        category="infrastructure",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        permission_level="read",
+        tags=["health", "status", "infrastructure", "monitoring"],
+        examples=[
+            "is the system healthy?",
+            "check system health",
+            "is everything working?",
+            "platform health check",
+        ],
+    ))
+
+    # ── Document Management ──────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_delete_document",
+        description=(
+            "Delete a document from the knowledge base. Cleans up the S3 file, "
+            "vector embeddings, and database record. This is permanent and cannot "
+            "be undone. Use when the user explicitly asks to delete a document."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "document_id": {
+                    "type": "integer",
+                    "description": "ID of the document to delete.",
+                },
+            },
+            "required": ["document_id"],
+        },
+        permission_level="destructive",
+        requires_confirmation=True,
+        tags=["documents", "delete", "destructive"],
+        examples=[
+            "delete document 5",
+            "remove that document from the knowledge base",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_reprocess_document",
+        description=(
+            "Re-process a document — regenerate chunks and vector embeddings. "
+            "Use when the user asks to re-embed, reindex, or reprocess a document "
+            "in the knowledge base."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "document_id": {
+                    "type": "integer",
+                    "description": "ID of the document to reprocess.",
+                },
+            },
+            "required": ["document_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["documents", "reprocess", "embed", "write"],
+        examples=[
+            "reprocess document 3",
+            "re-embed document 7",
+            "reindex that document",
+            "regenerate chunks for document 10",
+        ],
+    ))
+
+    # ── Recipe Deletion ──────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_delete_recipe",
+        description=(
+            "Delete a recipe with full cleanup — trigger subscriptions, scheduler, "
+            "and memory. System recipes cannot be deleted. This is permanent. "
+            "Use only when the user explicitly asks to delete a recipe."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "ID of the recipe to delete.",
+                },
+                "recipe_name": {
+                    "type": "string",
+                    "description": "Name of the recipe to delete (alternative to ID).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="destructive",
+        requires_confirmation=True,
+        tags=["recipes", "delete", "destructive"],
+        examples=[
+            "delete the test recipe",
+            "remove recipe 5",
+            "delete automation 3",
+        ],
+    ))
+
+    # ── Activity Feed ────────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_get_activity_feed",
+        description=(
+            "Get a unified activity feed — recent chats, recipe runs, and routines. "
+            "Shows what's been happening in the workspace. Use when the user asks "
+            "about recent activity, what's been running, or wants an activity log."
+        ),
+        category="analytics",
+        parameters={
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string",
+                    "enum": ["1d", "7d", "30d", "90d"],
+                    "description": "Time period to look back. Defaults to '7d'.",
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Comma-separated activity types: 'chat', 'recipe', 'routine'. Defaults to all.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of items to return. Defaults to 20, max 50.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["activity", "feed", "analytics", "history"],
+        examples=[
+            "what's been happening?",
+            "show recent activity",
+            "activity feed for the last week",
+            "what has been running?",
         ],
     ))
