@@ -140,7 +140,7 @@ class SmartToolRouter:
         query: str,
         available_tools: List[Dict[str, Any]],
         intent_result: IntentResult,
-        max_tools: int = 15,
+        max_tools: int = 30,
     ) -> List[Dict[str, Any]]:
         """
         Rank tools by cosine similarity between query embedding and tool embeddings.
@@ -321,7 +321,7 @@ class SmartToolRouter:
                 filtered.append(tool)
 
         # Limit to reasonable number
-        if len(filtered) > 15:
+        if len(filtered) > 30:
             # Keep suggested + core + first N others
             priority_tools = []
             other_tools = []
@@ -331,7 +331,7 @@ class SmartToolRouter:
                     priority_tools.append(tool)
                 else:
                     other_tools.append(tool)
-            filtered = priority_tools + other_tools[:15 - len(priority_tools)]
+            filtered = priority_tools + other_tools[:30 - len(priority_tools)]
 
         logger.debug(f"[ToolRouter] Filtered {len(all_tools)} tools to {len(filtered)}")
         return filtered

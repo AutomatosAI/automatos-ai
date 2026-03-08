@@ -873,11 +873,15 @@ class StreamingChatService:
                     llm_messages.insert(2, {
                         "role": "system",
                         "content": (
-                            "You have platform introspection tools available. "
-                            "When the user asks about their agents, recipes, workflows, documents, "
-                            "workspace, usage, costs, integrations, or memory — ALWAYS call the "
-                            "appropriate platform_* tool to get real data. Never guess or say you "
-                            "can't — use the tools."
+                            "You have platform management tools available (platform_* functions). "
+                            "These tools let you both READ and WRITE to the platform:\n"
+                            "- **Read**: list agents, recipes, documents, usage, stats, workspace info\n"
+                            "- **Write**: create agents, update agents, create recipes, install skills/plugins, "
+                            "assign skills/plugins/tools to agents, store memories\n\n"
+                            "When the user asks about their workspace data — call the appropriate platform_* tool. "
+                            "When the user asks you to CREATE, BUILD, SET UP, INSTALL, or ASSIGN anything — "
+                            "call the appropriate platform_* write tool. "
+                            "You CAN execute these tools. Never say you can't — just call them."
                         ),
                     })
 
