@@ -216,10 +216,19 @@ class SmartToolRouter:
                 # Always include core tools alongside hint-matched tools
                 core = [t for t in available_tools if t.get("function", {}).get("name") in self.CORE_TOOLS]
                 combined = hint_matched + [c for c in core if c not in hint_matched]
+
+                # If there are too many matches (e.g. "platform" matches 30+ tools),
+                # prioritize write tools alongside essential reads
+                if len(combined) > 15:
+                    _write_kw = ("create", "update", "delete", "install", "assign", "add_recipe", "execute", "store", "reprocess")
+                    write_tools = [t for t in combined if any(kw in t.get("function", {}).get("name", "") for kw in _write_kw)]
+                    read_tools = [t for t in combined if t not in write_tools]
+                    combined = write_tools + read_tools
+
                 logger.info(f"[ToolRouter] PRD-68 hint match: {len(hint_matched)} tools for hints={tool_hints}")
                 return ToolRoutingResult(
                     should_include_tools=True,
-                    filtered_tools=combined[:15],
+                    filtered_tools=combined[:20],
                     priority_tools=[t.get("function", {}).get("name", "") for t in hint_matched[:5]],
                     tool_choice="auto",
                     reasoning=f"Tool hints: {tool_hints}",

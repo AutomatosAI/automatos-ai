@@ -235,6 +235,15 @@ _PLATFORM_KEYWORDS = {
         "assign plugin to agent", "add plugin to agent",
         "give agent a plugin", "attach plugin to agent",
     ],
+    "platform_create_agent": [
+        "create agent", "create an agent", "build agent", "build an agent",
+        "make agent", "make an agent", "set up agent", "setup agent",
+        "new agent", "create a new agent", "build me an agent",
+    ],
+    "platform_update_agent": [
+        "update agent", "modify agent", "change agent", "edit agent",
+        "configure agent", "reconfigure agent",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]
@@ -328,23 +337,47 @@ class AutoBrain:
             )
             return assessment
 
-        # MOLECULE: Platform queries
+        # MOLECULE/CELL: Platform queries
         platform_tool = self._match_platform_query(msg_lower)
         if platform_tool:
-            assessment = ComplexityAssessment(
-                complexity=Complexity.MOLECULE, action=Action.RESPOND,
-                reasoning=f"Platform query ({platform_tool})",
-                matched_tools=[platform_tool], tool_hints=["platform"],
-                confidence=0.90, needs_memory=False, needs_multi_agent=False,
+            # Write actions (create/install/assign/update) are CELL — they need
+            # multiple tools in sequence (list → browse → install → create → assign)
+            _write_prefixes = (
+                "platform_create_", "platform_update_", "platform_delete_",
+                "platform_install_", "platform_assign_", "platform_execute_",
+                "platform_add_recipe_step",
             )
-            logger.info(
-                "[AutoBrain] assessed",
-                extra={
-                    "tier": 2, "complexity": "molecule", "action": "respond",
-                    "confidence": 0.90, "latency_ms": 0, "cache_hit": False,
-                    "workspace_id": self._workspace_id,
-                },
-            )
+            is_write = any(platform_tool.startswith(p) for p in _write_prefixes)
+            if is_write:
+                assessment = ComplexityAssessment(
+                    complexity=Complexity.CELL, action=Action.DELEGATE,
+                    reasoning=f"Platform write action ({platform_tool})",
+                    matched_tools=[platform_tool], tool_hints=["platform"],
+                    confidence=0.90, needs_memory=False, needs_multi_agent=False,
+                )
+                logger.info(
+                    "[AutoBrain] assessed",
+                    extra={
+                        "tier": 2, "complexity": "cell", "action": "delegate",
+                        "confidence": 0.90, "latency_ms": 0, "cache_hit": False,
+                        "workspace_id": self._workspace_id,
+                    },
+                )
+            else:
+                assessment = ComplexityAssessment(
+                    complexity=Complexity.MOLECULE, action=Action.RESPOND,
+                    reasoning=f"Platform query ({platform_tool})",
+                    matched_tools=[platform_tool], tool_hints=["platform"],
+                    confidence=0.90, needs_memory=False, needs_multi_agent=False,
+                )
+                logger.info(
+                    "[AutoBrain] assessed",
+                    extra={
+                        "tier": 2, "complexity": "molecule", "action": "respond",
+                        "confidence": 0.90, "latency_ms": 0, "cache_hit": False,
+                        "workspace_id": self._workspace_id,
+                    },
+                )
             return assessment
 
         # CELL: Memory recall
@@ -413,8 +446,12 @@ Conversation turn: {conversation_length}
 - "What agents do I have?" → molecule (platform query)
 - "Search my docs for the Q4 report" → molecule (search tool)
 - "Remember last week's meeting? Update those notes" → cell (memory + action)
+- "Create an agent called SENTINEL" → cell (platform create + assign tools)
+- "Build me a monitoring agent with the sentinel skill" → cell (platform builder)
+- "Install the gmail plugin and assign it to my agent" → cell (install + assign)
 
 **Default bias: atom.** Most messages are simpler than they look.
+**Exception: "build/create/install/assign" requests are at least cell — they need multiple tools.**
 
 Return ONLY valid JSON:
 {{
