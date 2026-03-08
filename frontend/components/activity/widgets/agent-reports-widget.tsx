@@ -26,7 +26,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
 
 const PINNED_AGENTS_KEY = 'automatos:pinned-agents'
-const MAX_PINNED = 4
+const MAX_PINNED = 12
 
 function loadPinnedAgents(): number[] {
   if (typeof window === 'undefined') return []
@@ -283,7 +283,7 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {reports.map((report) => (
               <ReportCard key={report.agent_id} report={report} />
             ))}

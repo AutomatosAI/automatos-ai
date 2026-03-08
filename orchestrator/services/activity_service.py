@@ -261,7 +261,7 @@ class ActivityService:
                 # Build deep-link to ExecutionKitchen
                 exec_id = getattr(ex, "execution_id", None) or str(ex.id)
                 recipe_template_id = recipe.template_id if recipe else str(ex.recipe_id)
-                source_url = f"/workflows?openExecution={exec_id}&recipeId={recipe_template_id}"
+                source_url = f"/activity?openExecution={exec_id}&recipeId={recipe_template_id}"
 
                 # Aggregate tokens and duration from step_results
                 total_tokens = 0
@@ -570,12 +570,15 @@ class ActivityService:
     def get_schedule(self, *, range_days: int = 7) -> Dict[str, Any]:
         """Return upcoming scheduled routines and recipes for the calendar widget."""
         scheduled: List[Dict[str, Any]] = []
+        scheduler_active = False
 
         # 1) Agent heartbeat routines (from APScheduler via heartbeat_service)
         try:
             from services.heartbeat_service import get_heartbeat_service
             hb_svc = get_heartbeat_service()
             hb_status = hb_svc.get_status()
+            if hb_status.get("active"):
+                scheduler_active = True
 
             # Fetch agent names for the jobs
             agent_ids = []
@@ -683,7 +686,7 @@ class ActivityService:
         # Sort by next_run_at
         scheduled.sort(key=lambda x: x.get("next_run_at") or "9999")
 
-        return {"scheduled": scheduled}
+        return {"scheduled": scheduled, "scheduler_active": scheduler_active}
 
     # ── Agent Reports Endpoint ─────────────────────────────────
 

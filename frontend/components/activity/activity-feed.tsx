@@ -101,13 +101,16 @@ function formatTimestamp(dateStr: string | null) {
 
 interface ActivityFeedProps {
   period?: string
+  openExecution?: string | null
+  deepLinkRecipeId?: string | null
 }
 
-export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
+export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }: ActivityFeedProps) {
   const [activeTypes, setActiveTypes] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState('all')
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [selectedItem, setSelectedItem] = useState<ActivityFeedItem | null>(null)
+  const deepLinkHandled = useRef(false)
 
   const filters = useMemo<ActivityFeedFilters>(
     () => ({
@@ -147,6 +150,40 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
       isInitialLoad.current = false
     }
   }, [items])
+
+  // Deep-link: /activity?openExecution=X&recipeId=Y → auto-select matching item
+  useEffect(() => {
+    if (!openExecution || deepLinkHandled.current || items.length === 0) return
+    // Find matching item by execution ID in the source_url or id
+    const match = items.find(
+      (item) =>
+        item.source_url?.includes(`openExecution=${openExecution}`) ||
+        item.id === `recipe-${openExecution}`
+    )
+    if (match) {
+      setSelectedItem(match)
+      deepLinkHandled.current = true
+    } else if (!isLoading) {
+      // Item not in current page — build a minimal stub so ExecutionDetail can render
+      setSelectedItem({
+        id: `recipe-${openExecution}`,
+        type: 'recipe',
+        name: 'Recipe Execution',
+        status: 'completed',
+        started_at: null,
+        completed_at: null,
+        duration_seconds: null,
+        agent: null,
+        agents: [],
+        summary: '',
+        source_id: deepLinkRecipeId || null,
+        source_url: `/activity?openExecution=${openExecution}&recipeId=${deepLinkRecipeId}`,
+        trigger: null,
+        error_message: null,
+      })
+      deepLinkHandled.current = true
+    }
+  }, [openExecution, deepLinkRecipeId, items, isLoading])
 
   const toggleType = useCallback((type: string) => {
     setActiveTypes((prev) => {
