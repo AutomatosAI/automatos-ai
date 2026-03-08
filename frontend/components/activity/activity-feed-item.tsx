@@ -215,10 +215,14 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
   const configureUrl = getConfigureUrl(item)
   const isRunning = item.status === 'running'
 
-  // For recipes/routines, drill down inline. For chats, navigate.
+  // Recipes navigate to ExecutionKitchen via /workflows URL params.
+  // Routines drill down inline. Chats navigate to /chat.
   const handleView = (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (onViewItem && (item.type === 'recipe' || item.type === 'routine')) {
+    if (item.type === 'recipe' && item.source_url) {
+      // Deep-link to ExecutionKitchen on the workflows page
+      router.push(item.source_url)
+    } else if (onViewItem && item.type === 'routine') {
       onViewItem(item)
     } else {
       const url = getViewUrl(item)
@@ -231,9 +235,10 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
     if (configureUrl) router.push(configureUrl)
   }
 
-  // Clicking the whole card also drills down for recipes/routines
   const handleCardClick = () => {
-    if (onViewItem && (item.type === 'recipe' || item.type === 'routine')) {
+    if (item.type === 'recipe' && item.source_url) {
+      router.push(item.source_url)
+    } else if (onViewItem && item.type === 'routine') {
       onViewItem(item)
     }
   }

@@ -257,6 +257,10 @@ class ActivityService:
                 # Map trigger
                 trigger = self._map_recipe_trigger(ex.triggered_by)
 
+                # Build deep-link to ExecutionKitchen
+                exec_id = getattr(ex, "execution_id", None) or str(ex.id)
+                source_url = f"/workflows?openExecution={exec_id}&recipeId={ex.recipe_id}"
+
                 items.append(
                     self._build_feed_item(
                         id=f"recipe-{ex.id}",
@@ -269,7 +273,7 @@ class ActivityService:
                         agent=None,  # Recipes may use multiple agents
                         summary=self._recipe_summary(ex, recipe_name),
                         source_id=str(ex.recipe_id),
-                        source_url=f"/activity?tab=recipes",
+                        source_url=source_url,
                         trigger=trigger,
                         step_progress=step_progress,
                         error_message=ex.error_message,
