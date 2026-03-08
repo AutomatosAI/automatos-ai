@@ -20,7 +20,6 @@ import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { RecipesTab } from '@/components/workflows/recipes-tab'
 import { ActivityMissions } from './activity-missions'
-import { ActivityRoutines } from './activity-routines'
 import { ActivityFeed } from './activity-feed'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
@@ -55,7 +54,6 @@ const PERIOD_OPTIONS = [
 const TAB_DEFS = [
   { value: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { value: 'feed', label: 'Feed', icon: List },
-  { value: 'routines', label: 'Routines', icon: RefreshCw },
   { value: 'recipes', label: 'Recipes', icon: ChefHat },
   { value: 'missions', label: 'Missions', icon: Rocket },
 ]
@@ -131,10 +129,6 @@ export function ActivityPage() {
             <div data-tour="activity-content">
               <ActivityFeed period={period} />
             </div>
-          </TabsContent>
-
-          <TabsContent value="routines">
-            <ActivityRoutines />
           </TabsContent>
 
           <TabsContent value="recipes">

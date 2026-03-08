@@ -1,15 +1,22 @@
 'use client'
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
-import { AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Activity,
   RefreshCw,
   ChefHat,
   Rocket,
   Loader2,
+  CheckCircle,
+  AlertTriangle,
+  Clock,
+  Zap,
+  Eye,
 } from 'lucide-react'
+import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -19,7 +26,6 @@ import {
 } from '@/components/ui/select'
 import { useActivityFeed } from '@/hooks/use-activity-api'
 import type { ActivityFeedFilters, ActivityFeedItem } from '@/hooks/use-activity-api'
-import { ActivityFeedItemCard, ActivityFeedItemSkeleton } from './activity-feed-item'
 import { ExecutionDetail } from './execution-detail'
 import { cn } from '@/lib/utils'
 
@@ -40,6 +46,56 @@ const STATUS_OPTIONS = [
 ] as const
 
 const PAGE_SIZE = 20
+
+// ─── Status Helpers ─────────────────────────────────────
+
+function getStatusIcon(status: string) {
+  switch (status) {
+    case 'completed':
+      return <CheckCircle className="w-5 h-5 text-green-400" />
+    case 'failed':
+      return <AlertTriangle className="w-5 h-5 text-red-400" />
+    case 'running':
+      return <Activity className="w-5 h-5 text-blue-400 animate-pulse" />
+    default:
+      return <Clock className="w-5 h-5 text-gray-400" />
+  }
+}
+
+function getStatusBg(status: string) {
+  switch (status) {
+    case 'completed':
+      return 'bg-green-500/20'
+    case 'failed':
+      return 'bg-red-500/20'
+    case 'running':
+      return 'bg-blue-500/20'
+    default:
+      return 'bg-gray-500/20'
+  }
+}
+
+function getStatusBadge(status: string) {
+  switch (status) {
+    case 'completed':
+      return { label: 'cooked', className: 'bg-green-500/20 text-green-400 border-green-500/30' }
+    case 'failed':
+      return { label: 'burnt', className: 'bg-red-500/20 text-red-400 border-red-500/30' }
+    case 'running':
+      return { label: 'cooking', className: 'bg-blue-500/20 text-blue-400 border-blue-500/30' }
+    default:
+      return { label: status, className: 'bg-gray-500/20 text-gray-400 border-gray-500/30' }
+  }
+}
+
+function formatTimestamp(dateStr: string | null) {
+  if (!dateStr) return ''
+  try {
+    return formatDistanceToNow(new Date(dateStr), { addSuffix: true })
+  } catch {
+    return ''
+  }
+}
 
 // ─── Component ──────────────────────────────────────────
 
@@ -97,12 +153,12 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
       if (type === '__all__') return []
       return prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     })
-    setLimit(PAGE_SIZE) // reset pagination on filter change
+    setLimit(PAGE_SIZE)
   }, [])
 
   const handleStatusChange = useCallback((value: string) => {
     setStatusFilter(value)
-    setLimit(PAGE_SIZE) // reset pagination on filter change
+    setLimit(PAGE_SIZE)
   }, [])
 
   const handleLoadMore = useCallback(() => {
@@ -160,7 +216,15 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
         />
         <div className="space-y-3">
           {Array.from({ length: 5 }).map((_, i) => (
-            <ActivityFeedItemSkeleton key={i} />
+            <div key={i} className="glass-card p-4 animate-pulse">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-lg bg-secondary/30" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-secondary/30 rounded w-1/3" />
+                  <div className="h-3 bg-secondary/20 rounded w-1/4" />
+                </div>
+              </div>
+            </div>
           ))}
         </div>
       </div>
@@ -182,12 +246,12 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
       <div className="space-y-3">
         <AnimatePresence mode="popLayout">
           {items.map((item, index) => (
-            <ActivityFeedItemCard
+            <FeedRow
               key={item.id}
               item={item}
-              animationDelay={index * 0.05}
+              index={index}
               isNew={newItemIds.has(item.id)}
-              onViewItem={handleViewItem}
+              onView={handleViewItem}
             />
           ))}
         </AnimatePresence>
@@ -214,6 +278,214 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
         </div>
       )}
     </div>
+  )
+}
+
+// ─── Feed Row (Cooking-Style Slim Row) ──────────────────
+
+interface FeedRowProps {
+  item: ActivityFeedItem
+  index: number
+  isNew: boolean
+  onView: (item: ActivityFeedItem) => void
+}
+
+function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
+  const isRecipe = item.type === 'recipe'
+  const isRoutine = item.type === 'routine'
+  const statusBadge = getStatusBadge(item.status)
+
+  return (
+    <motion.div
+      className="glass-card p-4 hover:border-primary/20 transition-all duration-300 cursor-pointer"
+      initial={{ opacity: 0, x: isNew ? -20 : 0 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      transition={{ duration: 0.3, delay: index * 0.05 }}
+      layout
+      onClick={() => onView(item)}
+    >
+      <div className="flex items-center gap-4">
+        {/* Status Indicator */}
+        <div className={cn('flex items-center justify-center w-10 h-10 rounded-lg shrink-0', getStatusBg(item.status))}>
+          {getStatusIcon(item.status)}
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <h4 className="font-semibold text-sm sm:text-base truncate">{item.name}</h4>
+            {isRecipe && (
+              <Badge className="text-xs bg-orange-500/20 text-orange-300 border-orange-500/30 shrink-0">
+                <Zap className="w-3 h-3 mr-1" />
+                Recipe
+              </Badge>
+            )}
+            {isRoutine && (
+              <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 shrink-0">
+                <RefreshCw className="w-3 h-3 mr-1" />
+                Routine
+              </Badge>
+            )}
+            {!isRecipe && !isRoutine && (
+              <Badge className="text-xs bg-blue-500/20 text-blue-300 border-blue-500/30 shrink-0">
+                <Rocket className="w-3 h-3 mr-1" />
+                Mission
+              </Badge>
+            )}
+            <Badge className={cn('text-xs shrink-0', statusBadge.className)}>
+              {statusBadge.label}
+            </Badge>
+          </div>
+
+          {/* Sub-line: step progress or summary */}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {isRecipe && item.step_progress ? (
+              <>
+                <span>Step {item.step_progress.current} of {item.step_progress.total}</span>
+                {item.error_message && (
+                  <span className="text-red-400 truncate max-w-[200px]">{item.error_message}</span>
+                )}
+              </>
+            ) : (
+              <span className="truncate max-w-[300px]">{item.summary}</span>
+            )}
+          </div>
+
+          {/* Agent pills */}
+          {item.agents && item.agents.length > 0 && (
+            <div className="flex gap-2 flex-wrap mt-1.5">
+              {item.agents.map((agent, agentIdx) => (
+                <div
+                  key={agent.id ?? agentIdx}
+                  className={cn(
+                    'flex items-center gap-1 text-xs px-2 py-0.5 rounded-md',
+                    item.status === 'completed'
+                      ? 'bg-green-500/10 text-green-400'
+                      : item.status === 'failed'
+                        ? 'bg-red-500/10 text-red-400'
+                        : item.status === 'running'
+                          ? 'bg-blue-500/10 text-blue-400'
+                          : 'bg-gray-500/10 text-gray-400'
+                  )}
+                >
+                  {item.status === 'completed' ? (
+                    <CheckCircle className="w-3 h-3" />
+                  ) : item.status === 'failed' ? (
+                    <AlertTriangle className="w-3 h-3" />
+                  ) : item.status === 'running' ? (
+                    <Activity className="w-3 h-3 animate-pulse" />
+                  ) : (
+                    <Clock className="w-3 h-3" />
+                  )}
+                  <span>{agent.name}</span>
+                  {item.duration_seconds != null && item.duration_seconds > 0 && (
+                    <span className="opacity-60">({item.duration_seconds.toFixed(1)}s)</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Recipe step agent pills (from step_progress) */}
+          {isRecipe && item.step_progress?.steps && item.step_progress.steps.length > 0 && item.agents.length === 0 && (
+            <div className="flex gap-2 flex-wrap mt-1.5">
+              {item.step_progress.steps.map((step, stepIdx) => (
+                <div
+                  key={stepIdx}
+                  className={cn(
+                    'flex items-center gap-1 text-xs px-2 py-0.5 rounded-md',
+                    step.status === 'completed'
+                      ? 'bg-green-500/10 text-green-400'
+                      : step.status === 'failed'
+                        ? 'bg-red-500/10 text-red-400'
+                        : step.status === 'running'
+                          ? 'bg-blue-500/10 text-blue-400'
+                          : 'bg-gray-500/10 text-gray-400'
+                  )}
+                >
+                  {step.status === 'completed' ? (
+                    <CheckCircle className="w-3 h-3" />
+                  ) : step.status === 'failed' ? (
+                    <AlertTriangle className="w-3 h-3" />
+                  ) : step.status === 'running' ? (
+                    <Activity className="w-3 h-3 animate-pulse" />
+                  ) : (
+                    <Clock className="w-3 h-3" />
+                  )}
+                  <span>{step.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Metrics (hidden on mobile) */}
+        <div className="hidden lg:flex items-center gap-6 text-sm shrink-0">
+          {item.started_at && (
+            <div className="text-left max-w-[200px]">
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock className="w-3 h-3" />
+                <span>{formatTimestamp(item.started_at)}</span>
+              </div>
+            </div>
+          )}
+
+          {isRecipe && item.step_progress && (
+            <div className="text-center">
+              <p className="text-muted-foreground text-xs">Steps</p>
+              <p className="font-medium">{item.step_progress.total}</p>
+            </div>
+          )}
+
+          {/* Tokens for recipes */}
+          {isRecipe && item.total_tokens != null && item.total_tokens > 0 && (
+            <div className="text-center">
+              <p className="text-muted-foreground text-xs">Tokens</p>
+              <p className="font-medium">{item.total_tokens.toLocaleString()}</p>
+            </div>
+          )}
+
+          {/* Tokens for routines */}
+          {isRoutine && item.tokens_used != null && item.tokens_used > 0 && (
+            <div className="text-center">
+              <p className="text-muted-foreground text-xs">Tokens</p>
+              <p className="font-medium">{item.tokens_used.toLocaleString()}</p>
+            </div>
+          )}
+
+          {/* Duration for recipes */}
+          {isRecipe && item.total_duration_ms != null && item.total_duration_ms > 0 && (
+            <div className="text-center">
+              <p className="text-muted-foreground text-xs">Duration</p>
+              <p className="font-medium">{(item.total_duration_ms / 1000).toFixed(1)}s</p>
+            </div>
+          )}
+
+          {/* Duration fallback from duration_seconds */}
+          {!isRecipe && item.duration_seconds != null && item.duration_seconds > 0 && (
+            <div className="text-center">
+              <p className="text-muted-foreground text-xs">Duration</p>
+              <p className="font-medium">{item.duration_seconds.toFixed(1)}s</p>
+            </div>
+          )}
+        </div>
+
+        {/* View button */}
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          onClick={(e) => {
+            e.stopPropagation()
+            onView(item)
+          }}
+        >
+          <Eye className="w-4 h-4" />
+          <span className="hidden xl:inline ml-1">View</span>
+        </Button>
+      </div>
+    </motion.div>
   )
 }
 

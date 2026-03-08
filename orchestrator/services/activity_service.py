@@ -207,6 +207,7 @@ class ActivityService:
                         source_url=f"/agents/{r.source_id}" if r.source_id else None,
                         trigger="heartbeat",
                         error_message=error_msg,
+                        tokens_used=r.tokens_used,
                     )
                 )
             return items
@@ -262,6 +263,16 @@ class ActivityService:
                 recipe_template_id = recipe.template_id if recipe else str(ex.recipe_id)
                 source_url = f"/workflows?openExecution={exec_id}&recipeId={recipe_template_id}"
 
+                # Aggregate tokens and duration from step_results
+                total_tokens = 0
+                total_duration_ms = 0
+                step_res = ex.step_results or []
+                if isinstance(step_res, list):
+                    for sr in step_res:
+                        if isinstance(sr, dict):
+                            total_tokens += sr.get("tokens", 0) or 0
+                            total_duration_ms += sr.get("duration_ms", 0) or 0
+
                 items.append(
                     self._build_feed_item(
                         id=f"recipe-{ex.id}",
@@ -278,6 +289,8 @@ class ActivityService:
                         trigger=trigger,
                         step_progress=step_progress,
                         error_message=ex.error_message,
+                        total_tokens=total_tokens if total_tokens > 0 else None,
+                        total_duration_ms=total_duration_ms if total_duration_ms > 0 else None,
                     )
                 )
             return items
@@ -403,6 +416,9 @@ class ActivityService:
         channel: Optional[Dict[str, str]] = None,
         step_progress: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None,
+        tokens_used: Optional[int] = None,
+        total_tokens: Optional[int] = None,
+        total_duration_ms: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Construct a unified ActivityFeedItem dict matching PRD-72 schema."""
         if duration_seconds is None and completed_at and started_at:
@@ -425,6 +441,9 @@ class ActivityService:
             "channel": channel,
             "step_progress": step_progress,
             "error_message": error_message,
+            "tokens_used": tokens_used,
+            "total_tokens": total_tokens,
+            "total_duration_ms": total_duration_ms,
         }
 
     # ── Internal Helpers ──────────────────────────────────────────
