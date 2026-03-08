@@ -21,8 +21,7 @@ import {
 } from '@/components/ui/popover'
 import { useAgentReports } from '@/hooks/use-activity-api'
 import type { AgentReport } from '@/hooks/use-activity-api'
-import { apiClient } from '@/lib/api-client'
-import { useQuery } from '@tanstack/react-query'
+import { useAgents } from '@/hooks/use-agent-api'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
 
@@ -48,20 +47,6 @@ interface SimpleAgent {
   id: number
   name: string
   marketplace_icon?: string | null
-}
-
-function useWorkspaceAgents() {
-  return useQuery<SimpleAgent[]>({
-    queryKey: ['agents', 'simple-list'],
-    queryFn: async () => {
-      const res = await apiClient.request<SimpleAgent[] | { agents: SimpleAgent[] }>('/api/agents')
-      // API returns flat array (List[AgentResponse]), handle both shapes
-      if (Array.isArray(res)) return res
-      if (res && 'agents' in res && Array.isArray(res.agents)) return res.agents
-      return []
-    },
-    staleTime: 60000,
-  })
 }
 
 const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; color: string; label: string }> = {
@@ -204,7 +189,11 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
     setInitialized(true)
   }, [])
 
-  const { data: allAgents, isLoading: agentsLoading } = useWorkspaceAgents()
+  const { data: rawAgents, isLoading: agentsLoading } = useAgents()
+  // Map to SimpleAgent shape — useAgents returns full AgentResponse objects
+  const allAgents: SimpleAgent[] | undefined = rawAgents
+    ? (rawAgents as any[]).map((a: any) => ({ id: a.id, name: a.name, marketplace_icon: a.marketplace_icon ?? null }))
+    : undefined
   const hasPinned = pinnedIds.length > 0
   const { data: reportsData, isLoading: reportsLoading } = useAgentReports(pinnedIds)
   const reports = reportsData?.reports ?? []
