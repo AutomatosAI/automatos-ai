@@ -545,6 +545,200 @@ class ActivityService:
             return "event"
         return "manual"
 
+    # ── Schedule Endpoint ────────────────────────────────────────
+
+    def get_schedule(self, *, range_days: int = 7) -> Dict[str, Any]:
+        """Return upcoming scheduled routines and recipes for the calendar widget."""
+        scheduled: List[Dict[str, Any]] = []
+
+        # 1) Agent heartbeat routines (from APScheduler via heartbeat_service)
+        try:
+            from services.heartbeat_service import get_heartbeat_service
+            hb_svc = get_heartbeat_service()
+            hb_status = hb_svc.get_status()
+
+            # Fetch agent names for the jobs
+            agent_ids = []
+            for job in hb_status.get("jobs", []):
+                # Job IDs are like "agent_42_heartbeat" or "heartbeat_agent_42"
+                parts = job["id"].split("_")
+                for p in parts:
+                    if p.isdigit():
+                        agent_ids.append(int(p))
+                        break
+
+            agents_by_id: Dict[int, Any] = {}
+            if agent_ids:
+                agents = (
+                    self.db.query(Agent)
+                    .filter(
+                        Agent.id.in_(agent_ids),
+                        Agent.workspace_id == self.workspace_id,
+                    )
+                    .all()
+                )
+                agents_by_id = {a.id: a for a in agents}
+
+            for job in hb_status.get("jobs", []):
+                agent_id = None
+                parts = job["id"].split("_")
+                for p in parts:
+                    if p.isdigit():
+                        agent_id = int(p)
+                        break
+
+                agent = agents_by_id.get(agent_id) if agent_id else None
+                if not agent:
+                    continue  # Skip jobs not in this workspace
+
+                hb_config = (agent.configuration or {}).get("heartbeat", {})
+                interval = hb_config.get("interval_minutes", 60)
+
+                scheduled.append({
+                    "id": f"routine-{agent_id}",
+                    "name": f"{agent.name} Routine",
+                    "type": "routine",
+                    "next_run_at": job.get("next_run_at"),
+                    "frequency": f"Every {interval}m" if interval < 60 else f"Every {interval // 60}h",
+                    "agent_name": agent.name,
+                    "agent_id": agent_id,
+                })
+        except Exception as e:
+            logger.error("Failed to fetch routine schedule: %s", e, exc_info=True)
+
+        # 2) Cron-scheduled recipes (from recipe_scheduler)
+        try:
+            from services.recipe_scheduler import get_recipe_scheduler
+            sched = get_recipe_scheduler()
+            if sched:
+                sched_status = sched.get_status()
+                recipe_ids_from_jobs = []
+                for job in sched_status.get("jobs", []):
+                    # Job IDs like "recipe_cron_42"
+                    parts = job["id"].split("_")
+                    for p in parts:
+                        if p.isdigit():
+                            recipe_ids_from_jobs.append(int(p))
+                            break
+
+                recipes_by_id: Dict[int, WorkflowTemplate] = {}
+                if recipe_ids_from_jobs:
+                    recipes = (
+                        self.db.query(WorkflowTemplate)
+                        .filter(
+                            WorkflowTemplate.id.in_(recipe_ids_from_jobs),
+                            WorkflowTemplate.workspace_id == self.workspace_id,
+                        )
+                        .all()
+                    )
+                    recipes_by_id = {r.id: r for r in recipes}
+
+                for job in sched_status.get("jobs", []):
+                    recipe_id = None
+                    parts = job["id"].split("_")
+                    for p in parts:
+                        if p.isdigit():
+                            recipe_id = int(p)
+                            break
+
+                    recipe = recipes_by_id.get(recipe_id) if recipe_id else None
+                    if not recipe:
+                        continue
+
+                    sc = recipe.schedule_config or {}
+                    cron_expr = sc.get("cron_expression", "")
+
+                    scheduled.append({
+                        "id": f"recipe-{recipe_id}",
+                        "name": recipe.name,
+                        "type": "recipe",
+                        "next_run_at": job.get("next_run_at"),
+                        "frequency": cron_expr or "Scheduled",
+                        "agent_name": None,
+                        "agent_id": None,
+                    })
+        except Exception as e:
+            logger.error("Failed to fetch recipe schedule: %s", e, exc_info=True)
+
+        # Sort by next_run_at
+        scheduled.sort(key=lambda x: x.get("next_run_at") or "9999")
+
+        return {"scheduled": scheduled}
+
+    # ── Agent Reports Endpoint ─────────────────────────────────
+
+    def get_agent_reports(self, *, agent_ids: List[int]) -> Dict[str, Any]:
+        """Return latest execution summaries for pinned agents."""
+        reports: List[Dict[str, Any]] = []
+
+        if not agent_ids:
+            return {"reports": reports}
+
+        # Fetch agent metadata
+        agents = (
+            self.db.query(Agent)
+            .filter(
+                Agent.id.in_(agent_ids),
+                Agent.workspace_id == self.workspace_id,
+            )
+            .all()
+        )
+        agents_by_id = {a.id: a for a in agents}
+
+        # Get latest heartbeat result per agent
+        for aid in agent_ids:
+            agent = agents_by_id.get(aid)
+            if not agent:
+                continue
+
+            try:
+                row = self.db.execute(
+                    text("""
+                        SELECT hr.id, hr.status, hr.findings, hr.tokens_used, hr.created_at
+                        FROM heartbeat_results hr
+                        WHERE hr.workspace_id = :ws_id
+                          AND hr.source_type = 'agent'
+                          AND hr.source_id = :agent_id
+                        ORDER BY hr.created_at DESC
+                        LIMIT 1
+                    """),
+                    {"ws_id": self._ws_str, "agent_id": str(aid)},
+                ).fetchone()
+
+                summary = ""
+                status = "no_data"
+                last_run = None
+                execution_id = None
+
+                if row:
+                    status = "completed" if row.status == "success" else "failed"
+                    summary = self._routine_summary(row.findings)
+                    last_run = row.created_at.isoformat() if row.created_at else None
+                    execution_id = str(row.id)
+
+                reports.append({
+                    "agent_id": aid,
+                    "agent_name": agent.name,
+                    "agent_icon": agent.marketplace_icon,
+                    "status": status,
+                    "summary": summary[:300],
+                    "last_run": last_run,
+                    "execution_id": execution_id,
+                })
+            except Exception as e:
+                logger.error("Failed to fetch report for agent %d: %s", aid, e, exc_info=True)
+                reports.append({
+                    "agent_id": aid,
+                    "agent_name": agent.name if agent else f"Agent #{aid}",
+                    "agent_icon": None,
+                    "status": "error",
+                    "summary": "",
+                    "last_run": None,
+                    "execution_id": None,
+                })
+
+        return {"reports": reports}
+
     @staticmethod
     def _recipe_summary(execution: RecipeExecution, recipe_name: str) -> str:
         """Build a context-line summary for a recipe execution."""

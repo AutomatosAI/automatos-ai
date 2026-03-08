@@ -59,6 +59,49 @@ async def get_activity_feed(
         raise HTTPException(status_code=500, detail="Failed to fetch activity feed")
 
 
+@router.get("/schedule")
+async def get_activity_schedule(
+    range: str = Query(
+        "7d",
+        description="Schedule range: 7d, 14d, 30d",
+    ),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Return upcoming scheduled routines and recipes for the calendar widget."""
+    try:
+        days_map = {"7d": 7, "14d": 14, "30d": 30}
+        range_days = days_map.get(range, 7)
+
+        svc = ActivityService(db, ctx.workspace_id)
+        return svc.get_schedule(range_days=range_days)
+    except Exception as e:
+        logger.error("Activity schedule error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch schedule")
+
+
+@router.get("/agent-reports")
+async def get_agent_reports(
+    agent_ids: str = Query(
+        ...,
+        description="Comma-separated agent IDs to fetch reports for",
+    ),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Return latest execution summaries for pinned agents."""
+    try:
+        ids = [int(x.strip()) for x in agent_ids.split(",") if x.strip().isdigit()]
+        if not ids:
+            return {"reports": []}
+
+        svc = ActivityService(db, ctx.workspace_id)
+        return svc.get_agent_reports(agent_ids=ids)
+    except Exception as e:
+        logger.error("Agent reports error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch agent reports")
+
+
 @router.get("/stats")
 async def get_activity_stats(
     period: str = Query(
