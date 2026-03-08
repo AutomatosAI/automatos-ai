@@ -489,7 +489,7 @@ export function AgentRoster({
                   <p className="text-xs text-muted-foreground">Tasks Completed</p>
                 </div>
                 <div>
-                  <p className="text-lg font-bold">{agent.plugins?.length || 0}</p>
+                  <p className="text-lg font-bold">{(agent.plugins?.length || 0) + (agent.skills?.length || 0)}</p>
                   <p className="text-xs text-muted-foreground">Capabilities</p>
                 </div>
               </div>
@@ -498,16 +498,21 @@ export function AgentRoster({
               <div className="mb-4">
                 <p className="text-xs text-muted-foreground mb-2">Capabilities</p>
                 <div className="flex flex-wrap gap-1">
-                  {agent.plugins && agent.plugins.length > 0 ? (
+                  {((agent.plugins?.length || 0) + (agent.skills?.length || 0)) > 0 ? (
                     <>
-                      {agent.plugins.slice(0, 3).map((plugin: any) => (
-                        <Badge key={plugin.plugin_id} variant="secondary" className="text-xs">
+                      {agent.skills?.slice(0, 3).map((skill: any) => (
+                        <Badge key={`skill-${skill.id}`} variant="secondary" className="text-xs">
+                          {skill.name}
+                        </Badge>
+                      ))}
+                      {agent.plugins?.slice(0, Math.max(0, 3 - (agent.skills?.length || 0))).map((plugin: any) => (
+                        <Badge key={`plugin-${plugin.plugin_id}`} variant="secondary" className="text-xs">
                           {plugin.name}
                         </Badge>
                       ))}
-                      {agent.plugins.length > 3 && (
+                      {(agent.plugins?.length || 0) + (agent.skills?.length || 0) > 3 && (
                         <Badge variant="secondary" className="text-xs">
-                          +{agent.plugins.length - 3} more
+                          +{(agent.plugins?.length || 0) + (agent.skills?.length || 0) - 3} more
                         </Badge>
                       )}
                     </>
