@@ -833,6 +833,10 @@ export default function SystemLLMSettingsTab({
                               <SelectItem value="30">Every 30 minutes</SelectItem>
                               <SelectItem value="60">Every hour</SelectItem>
                               <SelectItem value="120">Every 2 hours</SelectItem>
+                              <SelectItem value="240">Every 4 hours</SelectItem>
+                              <SelectItem value="480">Every 8 hours</SelectItem>
+                              <SelectItem value="1440">Daily</SelectItem>
+                              <SelectItem value="10080">Weekly</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

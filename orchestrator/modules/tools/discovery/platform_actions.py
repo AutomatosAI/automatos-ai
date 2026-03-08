@@ -1553,7 +1553,7 @@ def _register_marketplace_actions(registry: ActionRegistry) -> None:
                 },
                 "interval_minutes": {
                     "type": "integer",
-                    "description": "How often the heartbeat runs, in minutes. Common: 15, 30, 60, 120. Defaults to 60.",
+                    "description": "How often the heartbeat runs, in minutes. Options: 15, 30, 60, 120, 240, 480 (8hr), 1440 (daily), 10080 (weekly). Defaults to 60.",
                 },
                 "prompt": {
                     "type": "string",

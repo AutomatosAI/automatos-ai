@@ -131,10 +131,13 @@ class HeartbeatService:
         """Convert an interval in minutes to a CronTrigger firing at fixed times.
 
         Examples:
-            60  → ``0 * * * *``  (top of every hour)
-            30  → ``0,30 * * * *``
-            15  → ``0,15,30,45 * * * *``
-            120 → ``0 */2 * * *``  (every 2 hours)
+            15    → ``0,15,30,45 * * * *``
+            30    → ``0,30 * * * *``
+            60    → ``0 * * * *``  (top of every hour)
+            120   → ``0 */2 * * *``  (every 2 hours)
+            480   → ``0 */8 * * *``  (every 8 hours)
+            1440  → ``0 9 * * *``   (daily at 9am)
+            10080 → ``0 9 * * 1``   (weekly, Monday 9am)
         """
         if minutes <= 0:
             minutes = 60
@@ -144,6 +147,12 @@ class HeartbeatService:
             offsets = list(range(0, 60, minutes))
             minute_field = ",".join(str(o) for o in offsets)
             return CronTrigger(minute=minute_field)
+        elif minutes >= 10080:
+            # Weekly: Monday at 9am
+            return CronTrigger(minute="0", hour="9", day_of_week="mon")
+        elif minutes >= 1440:
+            # Daily: at 9am
+            return CronTrigger(minute="0", hour="9")
         else:
             # Hourly or multi-hour
             hours = minutes // 60
