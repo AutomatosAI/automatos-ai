@@ -923,12 +923,19 @@ async def get_recipe_execution_detail(
     Used by frontend for polling execution progress.
     """
     try:
-        # Validate recipe ownership
+        # Validate recipe ownership — try template_id first, fall back to integer id
         recipe = db.query(WorkflowRecipe).filter(
             WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.template_id == recipe_id
         ).first()
+
+        if not recipe and recipe_id.isdigit():
+            recipe = db.query(WorkflowRecipe).filter(
+                WorkflowRecipe.owner_type == 'workspace',
+                WorkflowRecipe.workspace_id == ctx.workspace_id,
+                WorkflowRecipe.id == int(recipe_id)
+            ).first()
 
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
@@ -995,12 +1002,19 @@ async def get_step_full_logs(
     full agent output, tool call results, and message history from S3.
     """
     try:
-        # Validate recipe ownership
+        # Validate recipe ownership — try template_id first, fall back to integer id
         recipe = db.query(WorkflowRecipe).filter(
             WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.template_id == recipe_id
         ).first()
+
+        if not recipe and recipe_id.isdigit():
+            recipe = db.query(WorkflowRecipe).filter(
+                WorkflowRecipe.owner_type == 'workspace',
+                WorkflowRecipe.workspace_id == ctx.workspace_id,
+                WorkflowRecipe.id == int(recipe_id)
+            ).first()
 
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")

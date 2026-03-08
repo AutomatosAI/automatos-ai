@@ -259,7 +259,8 @@ class ActivityService:
 
                 # Build deep-link to ExecutionKitchen
                 exec_id = getattr(ex, "execution_id", None) or str(ex.id)
-                source_url = f"/workflows?openExecution={exec_id}&recipeId={ex.recipe_id}"
+                recipe_template_id = recipe.template_id if recipe else str(ex.recipe_id)
+                source_url = f"/workflows?openExecution={exec_id}&recipeId={recipe_template_id}"
 
                 items.append(
                     self._build_feed_item(
