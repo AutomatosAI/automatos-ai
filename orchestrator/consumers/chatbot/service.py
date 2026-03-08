@@ -862,28 +862,8 @@ class StreamingChatService:
             except Exception as exc:
                 logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
 
-            # PRD-64: Inject platform tool scope message so LLM knows to call them
-            if use_tools:
-                platform_tool_names = [
-                    t.get("function", {}).get("name")
-                    for t in use_tools
-                    if isinstance(t, dict) and t.get("function", {}).get("name", "").startswith("platform_")
-                ]
-                if platform_tool_names:
-                    llm_messages.insert(2, {
-                        "role": "system",
-                        "content": (
-                            "You have platform management tools available (platform_* functions). "
-                            "These tools let you both READ and WRITE to the platform:\n"
-                            "- **Read**: list agents, recipes, documents, usage, stats, workspace info\n"
-                            "- **Write**: create agents, update agents, create recipes, install skills/plugins, "
-                            "assign skills/plugins/tools to agents, store memories\n\n"
-                            "When the user asks about their workspace data — call the appropriate platform_* tool. "
-                            "When the user asks you to CREATE, BUILD, SET UP, INSTALL, or ASSIGN anything — "
-                            "call the appropriate platform_* write tool. "
-                            "You CAN execute these tools. Never say you can't — just call them."
-                        ),
-                    })
+            # Platform tool guidance is now part of the personality system prompt
+            # (AutomatosPersonality.get_platform_skill) — no separate injection needed.
 
             # Context Window Guard — auto-compact if approaching context limit
             from core.context_guard import ContextGuard
