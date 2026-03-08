@@ -108,7 +108,8 @@ _ATOM_PATTERNS = [
     r"^what\s+can\s+you\s+do[\s!?.]*$",
     # Simple chitchat (no tools needed)
     r"^tell\s+me\s+a\s+joke[\s!?.,:]*$",
-    r"^what\s+(time|day)\s+is\s+it[\s!?.,:]*$",
+    # NOTE: "what time/day is it" intentionally excluded — ATOM path lacks
+    # grounding context; let Tier 3 route these to the full prompt.
     r"^(lol|haha|lmao|rofl|ha+)[\s!?.,:]*$",
 ]
 
@@ -372,11 +373,21 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
                 )
                 return assessment
         except Exception:
-            logger.exception("[AutoBrain] Tier 3 LLM classification failed, falling back to ATOM")
+            logger.exception("[AutoBrain] Tier 3 LLM classification failed")
 
-        # Fallback: treat as ATOM / RESPOND (chat naturally, don't waste tools)
-        # Rationale: a wrong ATOM is a slightly impersonal greeting;
-        # a wrong MOLECULE is a wasted tool call + latency + cost.
+        # Fallback: cheap keyword heuristic before defaulting to ATOM.
+        # Messages reaching Tier 3 already passed Tier 2 without matching
+        # greetings/platform queries — so they're more likely action-oriented.
+        # A quick keyword scan avoids silently dropping real requests.
+        if self._has_action_keywords(message):
+            logger.info("[AutoBrain] Tier 3 fallback → MOLECULE (action keywords detected)")
+            return ComplexityAssessment(
+                complexity=Complexity.MOLECULE, action=Action.DELEGATE,
+                reasoning="LLM classification failed — action keywords detected, routing to tools",
+                confidence=0.40, needs_memory=False, tool_hints=[],
+                needs_multi_agent=False,
+            )
+
         return ComplexityAssessment(
             complexity=Complexity.ATOM, action=Action.RESPOND,
             reasoning="LLM classification failed — defaulting to conversational",
@@ -451,6 +462,17 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
                 if phrase in msg_lower:
                     return tool_name
         return None
+
+    @staticmethod
+    def _has_action_keywords(message: str) -> bool:
+        """Cheap scan for action-oriented keywords. Used only as Tier 3 fallback."""
+        msg = message.lower()
+        return any(kw in msg for kw in (
+            "send", "email", "search", "find", "create", "open",
+            "run", "fetch", "query", "calendar", "schedule",
+            "deploy", "build", "delete", "update", "upload",
+            "download", "generate", "analyze", "report",
+        ))
 
     @staticmethod
     def _is_memory_recall(msg_lower: str) -> bool:
