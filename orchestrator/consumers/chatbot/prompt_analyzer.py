@@ -286,15 +286,22 @@ Let's get stuff done! What can I help you with?"""
         return llm_messages
     
     def _extract_message_content(self, msg: Dict[str, Any]) -> str:
-        """Extract text content from a message."""
+        """Extract text content from a message.
+
+        File parts should already be resolved to text by _resolve_file_parts
+        in the service layer, but we handle unresolved ones gracefully.
+        """
         if msg.get('parts'):
             text_parts = []
             for p in msg['parts']:
-                if p.get('type') != 'text':
-                    continue
-                text_value = p.get('text')
-                if text_value is not None:
-                    text_parts.append(str(text_value))
+                if p.get('type') == 'text':
+                    text_value = p.get('text')
+                    if text_value is not None:
+                        text_parts.append(str(text_value))
+                elif p.get('type') == 'file':
+                    # Fallback for unresolved file parts
+                    filename = p.get('filename', 'file')
+                    text_parts.append(f"[Attached file: {filename} — content not available]")
             return '\n'.join(text_parts)
         return msg.get('content', '')
     
