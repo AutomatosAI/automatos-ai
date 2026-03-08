@@ -46,6 +46,11 @@ export function CodeEditor({ file }: CodeEditorProps) {
       language={file.language}
       value={file.content ?? ''}
       theme="vs-dark"
+      loading={
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      }
       options={{
         readOnly: true,
         minimap: { enabled: true },
