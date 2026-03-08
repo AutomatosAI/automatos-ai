@@ -76,6 +76,10 @@ class PlatformActionExecutor:
             "platform_install_plugin": self._install_plugin,
             "platform_install_skill": self._install_skill,
             "platform_install_model": self._install_model,
+            # Agent assignment (PRD-71)
+            "platform_assign_tool_to_agent": self._assign_tool_to_agent,
+            "platform_assign_skill_to_agent": self._assign_skill_to_agent,
+            "platform_assign_plugin_to_agent": self._assign_plugin_to_agent,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -2346,4 +2350,232 @@ class PlatformActionExecutor:
             "success": True,
             "model": {"model_id": llm.model_id, "display_name": llm.display_name},
             "message": f"Model '{llm.display_name}' installed for this workspace.",
+        }
+
+    # ══════════════════════════════════════════════════════════════════
+    # AGENT ASSIGNMENT HANDLERS (PRD-71)
+    # ══════════════════════════════════════════════════════════════════
+
+    def _resolve_agent(self, params: Dict[str, Any]):
+        """Resolve agent by ID or name within this workspace. Returns (agent, error_dict)."""
+        from core.models import Agent
+
+        agent_id = params.get("agent_id")
+        agent_name = params.get("agent_name")
+
+        if not agent_id and not agent_name:
+            return None, {"success": False, "error": "Provide agent_id or agent_name"}
+
+        query = self.db.query(Agent).filter(Agent.workspace_id == self.workspace_id)
+        if agent_id:
+            query = query.filter(Agent.id == agent_id)
+        else:
+            query = query.filter(Agent.name.ilike(f"%{agent_name}%"))
+
+        agent = query.first()
+        if not agent:
+            return None, {"success": False, "error": "Agent not found in this workspace"}
+
+        return agent, None
+
+    async def _assign_tool_to_agent(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Assign a Composio tool/app to an agent."""
+        from core.models.composio_cache import AgentAppAssignment
+
+        agent, err = self._resolve_agent(params)
+        if err:
+            return err
+
+        app_name = params.get("app_name")
+        if not app_name:
+            return {"success": False, "error": "Missing required parameter: app_name"}
+
+        app_name = app_name.upper()
+
+        # Idempotency: check existing assignment
+        existing = (
+            self.db.query(AgentAppAssignment)
+            .filter(
+                AgentAppAssignment.agent_id == agent.id,
+                AgentAppAssignment.app_name == app_name,
+            )
+            .first()
+        )
+
+        if existing:
+            if existing.is_active:
+                return {
+                    "success": True,
+                    "already_assigned": True,
+                    "agent": {"id": agent.id, "name": agent.name},
+                    "app_name": app_name,
+                    "message": f"Tool '{app_name}' is already assigned to agent '{agent.name}'.",
+                }
+            # Re-activate
+            existing.is_active = True
+            self.db.flush()
+            logger.info("[PlatformExecutor] Re-activated tool '%s' for agent %d", app_name, agent.id)
+            return {
+                "success": True,
+                "reactivated": True,
+                "agent": {"id": agent.id, "name": agent.name},
+                "app_name": app_name,
+                "message": f"Tool '{app_name}' re-activated for agent '{agent.name}'.",
+            }
+
+        # Create assignment
+        assignment = AgentAppAssignment(
+            agent_id=agent.id,
+            app_name=app_name,
+            app_type="EXTERNAL",
+            is_active=True,
+        )
+        self.db.add(assignment)
+        self.db.flush()
+
+        logger.info("[PlatformExecutor] Assigned tool '%s' to agent '%s' (id=%d)", app_name, agent.name, agent.id)
+
+        return {
+            "success": True,
+            "agent": {"id": agent.id, "name": agent.name},
+            "app_name": app_name,
+            "message": f"Tool '{app_name}' assigned to agent '{agent.name}'.",
+        }
+
+    async def _assign_skill_to_agent(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Assign a skill to an agent via the agent_skills M2M table."""
+        from core.models.core import Skill, agent_skills
+
+        agent, err = self._resolve_agent(params)
+        if err:
+            return err
+
+        skill_id = params.get("skill_id")
+        skill_name = params.get("skill_name")
+
+        if not skill_id and not skill_name:
+            return {"success": False, "error": "Provide skill_id or skill_name"}
+
+        # Resolve skill
+        query = self.db.query(Skill)
+        if skill_id:
+            query = query.filter(Skill.id == skill_id)
+        else:
+            query = query.filter(Skill.name.ilike(f"%{skill_name}%"))
+
+        skill = query.first()
+        if not skill:
+            return {"success": False, "error": "Skill not found"}
+
+        # Idempotency: check if already assigned
+        from sqlalchemy import select as sa_select
+        existing = self.db.execute(
+            sa_select(agent_skills).where(
+                agent_skills.c.agent_id == agent.id,
+                agent_skills.c.skill_id == skill.id,
+            )
+        ).first()
+
+        if existing:
+            return {
+                "success": True,
+                "already_assigned": True,
+                "agent": {"id": agent.id, "name": agent.name},
+                "skill": {"id": skill.id, "name": skill.name},
+                "message": f"Skill '{skill.name}' is already assigned to agent '{agent.name}'.",
+            }
+
+        # Insert into M2M table
+        self.db.execute(
+            agent_skills.insert().values(agent_id=agent.id, skill_id=skill.id)
+        )
+        self.db.flush()
+
+        logger.info("[PlatformExecutor] Assigned skill '%s' (id=%d) to agent '%s' (id=%d)",
+                     skill.name, skill.id, agent.name, agent.id)
+
+        return {
+            "success": True,
+            "agent": {"id": agent.id, "name": agent.name},
+            "skill": {"id": skill.id, "name": skill.name},
+            "message": f"Skill '{skill.name}' assigned to agent '{agent.name}'.",
+        }
+
+    async def _assign_plugin_to_agent(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Assign a marketplace plugin to an agent."""
+        from core.models.marketplace_plugins import (
+            MarketplacePlugin, WorkspaceEnabledPlugin, AgentAssignedPlugin,
+        )
+
+        agent, err = self._resolve_agent(params)
+        if err:
+            return err
+
+        plugin_id = params.get("plugin_id")
+        plugin_slug = params.get("plugin_slug")
+
+        if not plugin_id and not plugin_slug:
+            return {"success": False, "error": "Provide plugin_id or plugin_slug"}
+
+        # Resolve plugin
+        query = self.db.query(MarketplacePlugin)
+        if plugin_id:
+            from uuid import UUID as _UUID
+            query = query.filter(MarketplacePlugin.id == _UUID(str(plugin_id)))
+        else:
+            query = query.filter(MarketplacePlugin.slug == plugin_slug)
+
+        plugin = query.first()
+        if not plugin:
+            return {"success": False, "error": "Plugin not found"}
+
+        # Verify plugin is enabled for this workspace
+        ws_enabled = (
+            self.db.query(WorkspaceEnabledPlugin)
+            .filter(
+                WorkspaceEnabledPlugin.workspace_id == self.workspace_id,
+                WorkspaceEnabledPlugin.plugin_id == plugin.id,
+            )
+            .first()
+        )
+        if not ws_enabled:
+            return {
+                "success": False,
+                "error": f"Plugin '{plugin.name}' is not enabled for this workspace. Install it first with platform_install_plugin.",
+            }
+
+        # Idempotency check
+        existing = (
+            self.db.query(AgentAssignedPlugin)
+            .filter(
+                AgentAssignedPlugin.agent_id == agent.id,
+                AgentAssignedPlugin.plugin_id == plugin.id,
+            )
+            .first()
+        )
+        if existing:
+            return {
+                "success": True,
+                "already_assigned": True,
+                "agent": {"id": agent.id, "name": agent.name},
+                "plugin": {"id": str(plugin.id), "slug": plugin.slug, "name": plugin.name},
+                "message": f"Plugin '{plugin.name}' is already assigned to agent '{agent.name}'.",
+            }
+
+        # Create assignment
+        assignment = AgentAssignedPlugin(
+            agent_id=agent.id,
+            plugin_id=plugin.id,
+        )
+        self.db.add(assignment)
+        self.db.flush()
+
+        logger.info("[PlatformExecutor] Assigned plugin '%s' to agent '%s' (id=%d)",
+                     plugin.name, agent.name, agent.id)
+
+        return {
+            "success": True,
+            "agent": {"id": agent.id, "name": agent.name},
+            "plugin": {"id": str(plugin.id), "slug": plugin.slug, "name": plugin.name},
+            "message": f"Plugin '{plugin.name}' assigned to agent '{agent.name}'.",
         }

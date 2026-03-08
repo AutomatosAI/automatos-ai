@@ -222,6 +222,19 @@ _PLATFORM_KEYWORDS = {
         "install model", "enable model", "add model",
         "activate model",
     ],
+    # Agent assignment (PRD-71)
+    "platform_assign_tool_to_agent": [
+        "assign tool to agent", "add tool to agent",
+        "give agent a tool", "connect tool to agent",
+    ],
+    "platform_assign_skill_to_agent": [
+        "assign skill to agent", "add skill to agent",
+        "give agent a skill", "attach skill to agent",
+    ],
+    "platform_assign_plugin_to_agent": [
+        "assign plugin to agent", "add plugin to agent",
+        "give agent a plugin", "attach plugin to agent",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]
