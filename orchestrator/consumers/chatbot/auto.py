@@ -235,6 +235,11 @@ _PLATFORM_KEYWORDS = {
         "assign plugin to agent", "add plugin to agent",
         "give agent a plugin", "attach plugin to agent",
     ],
+    "platform_configure_agent_heartbeat": [
+        "configure heartbeat", "set heartbeat", "agent heartbeat",
+        "heartbeat schedule", "enable heartbeat", "disable heartbeat",
+        "heartbeat interval", "set active hours",
+    ],
     "platform_create_agent": [
         "create agent", "create an agent", "build agent", "build an agent",
         "make agent", "make an agent", "set up agent", "setup agent",
