@@ -501,23 +501,21 @@ class StreamingChatService:
         complexity_assessment: Optional[Any] = None,
     ) -> AsyncGenerator[str, None]:
         """
-        Stream chat response using a specialized agent from AgentFactory.
-
-        PRD: Unified Agent-Chat System
-        - Activates agent from factory
-        - Uses agent's LLM manager, skills, and tools
-        - Builds system prompt from agent's skills
-        - Uses shared user-level memory
-
-        Args:
-            chat_id: Chat session ID
-            messages: Chat messages
-            agent_id: ID of agent to use
-            user_id: User ID for memory
-            use_system_llm: Use orchestrator LLM settings instead of agent's model
-
-        Yields:
-            AI SDK formatted response chunks
+        Stream a chat response produced by the specified agent, yielding AISDK-formatted chunks for frontend consumption.
+        
+        Activates the agent runtime, prepares and orchestrates context (persona, memory, tools, and prompts), invokes the agent LLM, handles any tool calls and image uploads, persists the assistant message and relevant metrics, and emits memory/usage/finish or error events during the streaming session.
+        
+        Parameters:
+            chat_id (str): Identifier for the chat session.
+            messages (List[Dict[str, Any]]): Conversation history to use as context (ordered).
+            agent_id (int): ID of the agent to activate and run.
+            user_id (int): ID of the requesting user (used for memory and telemetry).
+            use_system_llm (bool): If true, prefer the orchestrator/system LLM configuration over the agent's default.
+            skip_composio (bool): If true, disable Composio-based per-action tool discovery and injection.
+            complexity_assessment (Optional[Any]): Optional complexity/hint structure (e.g., tool_hints and complexity level) used to select ATOM vs full pipeline.
+        
+        Returns:
+            Yields AISDK-formatted strings representing streamed events and text chunks (including memory-injected, tool events, usage, finish, or error payloads).
         """
         import asyncio
         
@@ -601,9 +599,16 @@ class StreamingChatService:
                 # ATOM: No tools, no memory, no agent context loading.
                 # Minimal system prompt + conversation → LLM. Fastest path.
                 logger.info("[PRD-68] ATOM path — skipping tools, memory, orchestration")
+                from datetime import datetime as _dt
+                _now = _dt.utcnow()
+                _time_ctx = (
+                    "Good morning" if _now.hour < 12
+                    else "Good afternoon" if _now.hour < 18
+                    else "Good evening"
+                )
                 _atom_prompt = (
                     f"You are {agent_runtime.metadata.name}, a warm and helpful AI assistant "
-                    "on the Automatos platform. "
+                    f"on the Automatos platform. {_time_ctx}! "
                     "Respond naturally and conversationally — be friendly, be brief. "
                     "You're chatting, not executing tasks."
                 )

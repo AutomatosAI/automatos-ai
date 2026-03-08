@@ -131,13 +131,19 @@ class AutomatosPersonality:
         orchestrator_settings: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Get the base system prompt with personality.
-
-        Args:
-            user_name: User's name if known from memory
-            agent_name: Agent's name if custom agent
-            msg_count: Number of messages in conversation
-            orchestrator_settings: Workspace orchestrator config
+        Build the base system prompt that defines the assistant's identity, selected personality, communication style, memory note, and core response rules.
+        
+        Parameters:
+            user_name (Optional[str]): The user's name if known; used to personalize the greeting.
+            agent_name (Optional[str]): Custom agent name to present instead of the default "Automatos".
+            msg_count (int): Number of messages in the current conversation; included in the memory/context section.
+            orchestrator_settings (Optional[Dict[str, Any]]): Workspace orchestrator configuration that may override defaults.
+                Recognized keys: `personality_mode`, `custom_soul`, `communication_style`.
+        
+        Returns:
+            base_system_prompt (str): A multi-section system prompt string that includes identity, a time-aware greeting,
+            a personality block (from defaults, a custom soul, or PromptRegistry), a memory/context note, concise guidance on
+            how the assistant works, and explicit response rules.
         """
         settings = orchestrator_settings or _ORCHESTRATOR_DEFAULTS
         personality_mode = settings.get("personality_mode", "friendly")
@@ -238,11 +244,14 @@ I'll use this context naturally in our chat. If anything's outdated or wrong, ju
     @staticmethod
     def get_tool_guidance_prompt(has_tools: bool = True, tool_names: Optional[List[str]] = None) -> str:
         """
-        Get tool usage guidance with personality.
-
-        Deliberately minimal — tool schemas are already passed to the LLM as
-        function definitions. A prose summary just primes the model to use
-        tools even when unnecessary.
+        Return a short prose section that primes the assistant on when and how to use tools.
+        
+        Parameters:
+            has_tools (bool): Whether the assistant currently has tools available.
+            tool_names (Optional[List[str]]): Optional list of tool names (ignored in output; present for context).
+        
+        Returns:
+            str: A brief "Tools" guidance block instructing the assistant to use tools only when helpful and to present results without technical detail.
         """
         if not has_tools:
             return """

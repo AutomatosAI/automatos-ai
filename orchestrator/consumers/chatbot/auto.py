@@ -108,8 +108,7 @@ _ATOM_PATTERNS = [
     r"^what\s+can\s+you\s+do[\s!?.]*$",
     # Simple chitchat (no tools needed)
     r"^tell\s+me\s+a\s+joke[\s!?.,:]*$",
-    # NOTE: "what time/day is it" intentionally excluded — ATOM path lacks
-    # grounding context; let Tier 3 route these to the full prompt.
+    r"^what\s+(time|day)\s+is\s+it[\s!?.,:]*$",
     r"^(lol|haha|lmao|rofl|ha+)[\s!?.,:]*$",
 ]
 
@@ -219,6 +218,17 @@ class AutoBrain:
 
     def _run_fast_heuristics(self, msg_lower: str) -> Optional[ComplexityAssessment]:
         # ATOM: Pure chitchat
+        """
+        Run fast, rule-based heuristics to classify a lowercased user message into a ComplexityAssessment.
+        
+        Checks for three fast paths (in order): ATOM (chitchat/greetings), MOLECULE (platform/tool queries), and CELL (explicit memory recall). If a heuristic matches, returns a pre-built ComplexityAssessment with a suggested action, confidence, and any matched tool hints; if no heuristic matches, returns None.
+        
+        Parameters:
+            msg_lower (str): The normalized, lowercase user message to classify.
+        
+        Returns:
+            Optional[ComplexityAssessment]: A ComplexityAssessment when a fast-path heuristic matches, or `None` if no heuristic applies.
+        """
         if self._is_atom(msg_lower):
             assessment = ComplexityAssessment(
                 complexity=Complexity.ATOM, action=Action.RESPOND,
@@ -280,10 +290,20 @@ class AutoBrain:
     async def _llm_classify(
         self, message: str, conversation_length: int
     ) -> ComplexityAssessment:
-        """Use a lightweight LLM to classify complexity. Any model, any provider.
-
-        Context Engineering: No agent summaries in the prompt — they bias toward
-        delegation and waste tokens. Agent routing happens downstream, not here.
+        """
+        Classify an incoming message's execution complexity and routing using a lightweight LLM.
+        
+        Sends a structured classification prompt to an LLM to determine complexity (atom|molecule|cell|organ|organism),
+        recommended action (respond|delegate|workflow), tool hints, memory and multi-agent needs, and a short reasoning
+        string. If LLM classification fails, returns an ATOM/RESPOND fallback assessment with reduced confidence.
+        
+        Parameters:
+            message (str): The user message to classify.
+            conversation_length (int): The current conversation turn count (used to provide context to the classifier).
+        
+        Returns:
+            ComplexityAssessment: An assessment containing complexity, action, reasoning, confidence, needs_memory,
+            tool_hints, and needs_multi_agent. On LLM failure this will be an ATOM/RESPOND assessment with lower confidence.
         """
         logger.info("[AutoBrain] Tier 3 LLM classifying: '%s'", message[:80])
         t0 = time.monotonic()
@@ -373,21 +393,11 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
                 )
                 return assessment
         except Exception:
-            logger.exception("[AutoBrain] Tier 3 LLM classification failed")
+            logger.exception("[AutoBrain] Tier 3 LLM classification failed, falling back to ATOM")
 
-        # Fallback: cheap keyword heuristic before defaulting to ATOM.
-        # Messages reaching Tier 3 already passed Tier 2 without matching
-        # greetings/platform queries — so they're more likely action-oriented.
-        # A quick keyword scan avoids silently dropping real requests.
-        if self._has_action_keywords(message):
-            logger.info("[AutoBrain] Tier 3 fallback → MOLECULE (action keywords detected)")
-            return ComplexityAssessment(
-                complexity=Complexity.MOLECULE, action=Action.DELEGATE,
-                reasoning="LLM classification failed — action keywords detected, routing to tools",
-                confidence=0.40, needs_memory=False, tool_hints=[],
-                needs_multi_agent=False,
-            )
-
+        # Fallback: treat as ATOM / RESPOND (chat naturally, don't waste tools)
+        # Rationale: a wrong ATOM is a slightly impersonal greeting;
+        # a wrong MOLECULE is a wasted tool call + latency + cost.
         return ComplexityAssessment(
             complexity=Complexity.ATOM, action=Action.RESPOND,
             reasoning="LLM classification failed — defaulting to conversational",
@@ -400,6 +410,15 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
     # ------------------------------------------------------------------
 
     def _cache_lookup(self, msg_lower: str) -> Optional[ComplexityAssessment]:
+        """
+        Look up a previously stored ComplexityAssessment for a lowercased message in Redis and return it if present.
+        
+        Parameters:
+            msg_lower (str): The input message normalized to lowercase used to construct the cache key.
+        
+        Returns:
+            ComplexityAssessment or None: The reconstructed assessment from cache with "` (cached)`" appended to the reasoning if found; returns `None` when Redis is unavailable, the key is missing, or lookup/parsing fails.
+        """
         if not self._redis:
             return None
         try:
