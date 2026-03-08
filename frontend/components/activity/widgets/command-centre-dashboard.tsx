@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback, useMemo, useEffect } from 'react'
-import { Settings2, RotateCcw } from 'lucide-react'
+import { useState, useCallback, useEffect } from 'react'
+import { Settings2, RotateCcw, GripVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ActiveNowWidget } from './active-now-widget'
 import { ScheduleWidget } from './schedule-widget'
@@ -9,52 +9,24 @@ import { AgentReportsWidget } from './agent-reports-widget'
 import { RecentActivityWidget } from './recent-activity-widget'
 import { cn } from '@/lib/utils'
 
-// react-grid-layout uses CommonJS — require for SSR-safe dynamic import
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const RGL = require('react-grid-layout')
-const ResponsiveGridLayout = RGL.WidthProvider(RGL.Responsive)
+// ── Widget Order Storage ────────────────────────────────────
 
-type Layout = { i: string; x: number; y: number; w: number; h: number; minW?: number; minH?: number }
-type Layouts = Record<string, Layout[]>
+const ORDER_STORAGE_KEY = 'automatos:command-centre-order'
+const DEFAULT_ORDER = ['active-now', 'schedule', 'agent-reports', 'recent-activity']
 
-// ── Layout Storage ──────────────────────────────────────────
-
-const LAYOUT_STORAGE_KEY = 'automatos:command-centre-layout'
-
-const DEFAULT_LAYOUTS: Layouts = {
-  lg: [
-    { i: 'active-now', x: 0, y: 0, w: 5, h: 5, minW: 3, minH: 3 },
-    { i: 'schedule', x: 5, y: 0, w: 7, h: 5, minW: 4, minH: 3 },
-    { i: 'agent-reports', x: 0, y: 5, w: 12, h: 5, minW: 6, minH: 3 },
-    { i: 'recent-activity', x: 0, y: 10, w: 12, h: 4, minW: 6, minH: 3 },
-  ],
-  md: [
-    { i: 'active-now', x: 0, y: 0, w: 5, h: 5, minW: 3, minH: 3 },
-    { i: 'schedule', x: 5, y: 0, w: 5, h: 5, minW: 3, minH: 3 },
-    { i: 'agent-reports', x: 0, y: 5, w: 10, h: 5, minW: 5, minH: 3 },
-    { i: 'recent-activity', x: 0, y: 10, w: 10, h: 4, minW: 5, minH: 3 },
-  ],
-  sm: [
-    { i: 'active-now', x: 0, y: 0, w: 6, h: 5, minW: 3, minH: 3 },
-    { i: 'schedule', x: 0, y: 5, w: 6, h: 5, minW: 3, minH: 3 },
-    { i: 'agent-reports', x: 0, y: 10, w: 6, h: 6, minW: 3, minH: 3 },
-    { i: 'recent-activity', x: 0, y: 16, w: 6, h: 4, minW: 3, minH: 3 },
-  ],
-}
-
-function loadSavedLayouts(): Layouts | null {
+function loadSavedOrder(): string[] | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
+    const raw = localStorage.getItem(ORDER_STORAGE_KEY)
     return raw ? JSON.parse(raw) : null
   } catch {
     return null
   }
 }
 
-function saveLayouts(layouts: Layouts) {
+function saveOrder(order: string[]) {
   if (typeof window === 'undefined') return
-  localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layouts))
+  localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(order))
 }
 
 // ── Dashboard Component ─────────────────────────────────────
@@ -65,50 +37,84 @@ interface CommandCentreDashboardProps {
 }
 
 export function CommandCentreDashboard({ period, onViewAllActivity }: CommandCentreDashboardProps) {
-  const [layouts, setLayouts] = useState<Layouts>(DEFAULT_LAYOUTS)
+  const [widgetOrder, setWidgetOrder] = useState<string[]>(DEFAULT_ORDER)
   const [isCustomizing, setIsCustomizing] = useState(false)
-  const [mounted, setMounted] = useState(false)
+  const [draggedWidget, setDraggedWidget] = useState<string | null>(null)
 
-  // Load saved layouts on mount
   useEffect(() => {
-    const saved = loadSavedLayouts()
-    if (saved) {
-      setLayouts(saved)
+    const saved = loadSavedOrder()
+    if (saved && saved.length === DEFAULT_ORDER.length) {
+      setWidgetOrder(saved)
     }
-    setMounted(true)
-  }, [])
-
-  const handleLayoutChange = useCallback((_layout: Layout[], allLayouts: Layouts) => {
-    setLayouts(allLayouts)
-    saveLayouts(allLayouts)
   }, [])
 
   const handleReset = useCallback(() => {
-    setLayouts(DEFAULT_LAYOUTS)
-    saveLayouts(DEFAULT_LAYOUTS)
+    setWidgetOrder(DEFAULT_ORDER)
+    saveOrder(DEFAULT_ORDER)
   }, [])
 
   const toggleCustomize = useCallback(() => {
     setIsCustomizing((prev) => !prev)
   }, [])
 
-  // Widget wrapper with glass-card styling
-  const widgetClass = useMemo(() => cn(
-    'glass-card overflow-hidden rounded-xl border',
-    isCustomizing && 'ring-1 ring-dashed ring-primary/30'
-  ), [isCustomizing])
+  // Simple drag-and-drop reorder
+  const handleDragStart = useCallback((widgetId: string) => {
+    setDraggedWidget(widgetId)
+  }, [])
 
-  if (!mounted) {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="h-[280px] bg-secondary/20 rounded-xl animate-pulse" />
-          <div className="h-[280px] bg-secondary/20 rounded-xl animate-pulse" />
-        </div>
-        <div className="h-[280px] bg-secondary/20 rounded-xl animate-pulse" />
-        <div className="h-[220px] bg-secondary/20 rounded-xl animate-pulse" />
-      </div>
-    )
+  const handleDragOver = useCallback((e: React.DragEvent, targetId: string) => {
+    e.preventDefault()
+    if (!draggedWidget || draggedWidget === targetId) return
+
+    setWidgetOrder((prev) => {
+      const newOrder = [...prev]
+      const fromIdx = newOrder.indexOf(draggedWidget)
+      const toIdx = newOrder.indexOf(targetId)
+      if (fromIdx === -1 || toIdx === -1) return prev
+      newOrder.splice(fromIdx, 1)
+      newOrder.splice(toIdx, 0, draggedWidget)
+      return newOrder
+    })
+  }, [draggedWidget])
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedWidget(null)
+    setWidgetOrder((current) => {
+      saveOrder(current)
+      return current
+    })
+  }, [])
+
+  // Render widget by ID
+  const renderWidget = (widgetId: string) => {
+    switch (widgetId) {
+      case 'active-now':
+        return <ActiveNowWidget period={period} />
+      case 'schedule':
+        return <ScheduleWidget />
+      case 'agent-reports':
+        return <AgentReportsWidget />
+      case 'recent-activity':
+        return <RecentActivityWidget period={period} onViewAll={onViewAllActivity} />
+      default:
+        return null
+    }
+  }
+
+  // Grid span config for each widget
+  const gridSpan: Record<string, string> = {
+    'active-now': 'lg:col-span-5',
+    'schedule': 'lg:col-span-7',
+    'agent-reports': 'lg:col-span-12',
+    'recent-activity': 'lg:col-span-12',
+  }
+
+  // Height config
+  const gridHeight: Record<string, string> = {
+    'active-now': 'min-h-[320px]',
+    'schedule': 'min-h-[320px]',
+    'agent-reports': 'min-h-[280px]',
+    'recent-activity': 'min-h-[240px]',
   }
 
   return (
@@ -137,55 +143,31 @@ export function CommandCentreDashboard({ period, onViewAllActivity }: CommandCen
         </Button>
       </div>
 
-      {/* Grid Layout */}
-      <ResponsiveGridLayout
-        className="layout"
-        layouts={layouts}
-        breakpoints={{ lg: 1200, md: 996, sm: 0 }}
-        cols={{ lg: 12, md: 10, sm: 6 }}
-        rowHeight={56}
-        margin={[16, 16]}
-        containerPadding={[0, 0]}
-        onLayoutChange={handleLayoutChange}
-        isDraggable={isCustomizing}
-        isResizable={isCustomizing}
-        draggableHandle=".widget-drag-handle"
-        useCSSTransforms={true}
-        compactType="vertical"
-      >
-        <div key="active-now" className={widgetClass}>
-          {isCustomizing && <DragHandle />}
-          <ActiveNowWidget period={period} />
-        </div>
-
-        <div key="schedule" className={widgetClass}>
-          {isCustomizing && <DragHandle />}
-          <ScheduleWidget />
-        </div>
-
-        <div key="agent-reports" className={widgetClass}>
-          {isCustomizing && <DragHandle />}
-          <AgentReportsWidget />
-        </div>
-
-        <div key="recent-activity" className={widgetClass}>
-          {isCustomizing && <DragHandle />}
-          <RecentActivityWidget period={period} onViewAll={onViewAllActivity} />
-        </div>
-      </ResponsiveGridLayout>
-    </div>
-  )
-}
-
-// ── Drag Handle ─────────────────────────────────────────────
-
-function DragHandle() {
-  return (
-    <div className="widget-drag-handle absolute top-0 left-0 right-0 h-8 flex items-center justify-center cursor-grab active:cursor-grabbing z-10 bg-gradient-to-b from-background/60 to-transparent">
-      <div className="flex gap-0.5">
-        <div className="w-1 h-1 rounded-full bg-muted-foreground/40" />
-        <div className="w-1 h-1 rounded-full bg-muted-foreground/40" />
-        <div className="w-1 h-1 rounded-full bg-muted-foreground/40" />
+      {/* Widget Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {widgetOrder.map((widgetId) => (
+          <div
+            key={widgetId}
+            draggable={isCustomizing}
+            onDragStart={() => handleDragStart(widgetId)}
+            onDragOver={(e) => handleDragOver(e, widgetId)}
+            onDragEnd={handleDragEnd}
+            className={cn(
+              'glass-card overflow-hidden rounded-xl border col-span-1 relative',
+              gridSpan[widgetId],
+              gridHeight[widgetId],
+              isCustomizing && 'ring-1 ring-dashed ring-primary/30',
+              isCustomizing && draggedWidget === widgetId && 'opacity-50',
+            )}
+          >
+            {isCustomizing && (
+              <div className="absolute top-2 left-2 z-10 cursor-grab active:cursor-grabbing p-1 rounded bg-background/80 backdrop-blur-sm border border-border/50">
+                <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
+              </div>
+            )}
+            {renderWidget(widgetId)}
+          </div>
+        ))}
       </div>
     </div>
   )
