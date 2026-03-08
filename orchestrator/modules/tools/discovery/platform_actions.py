@@ -20,6 +20,10 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_self_management_actions(registry)
     _register_marketplace_actions(registry)
 
+    # Workspace tools (file I/O, grep, exec, git)
+    from .workspace_actions import register_workspace_actions
+    register_workspace_actions(registry)
+
 
 def _register_read_actions(registry: ActionRegistry) -> None:
     """Register read-only platform actions."""
