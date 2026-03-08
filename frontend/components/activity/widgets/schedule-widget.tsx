@@ -105,8 +105,9 @@ function UpcomingList({ items }: { items: ScheduleItem[] }) {
 }
 
 export function ScheduleWidget({ className }: ScheduleWidgetProps) {
-  const { data, isLoading } = useActivitySchedule('7d')
+  const { data, isLoading, isError } = useActivitySchedule('7d')
   const items = data?.scheduled ?? []
+  const schedulerActive = data?.scheduler_active ?? false
 
   return (
     <div className={cn('h-full flex flex-col', className)}>
@@ -125,6 +126,10 @@ export function ScheduleWidget({ className }: ScheduleWidgetProps) {
               <div key={i} className="h-4 bg-secondary/50 rounded animate-pulse" />
             ))}
           </div>
+        ) : isError ? (
+          <p className="text-xs text-muted-foreground text-center py-3">
+            Failed to load schedule
+          </p>
         ) : (
           <>
             <WeekCalendar items={items} />
@@ -132,7 +137,13 @@ export function ScheduleWidget({ className }: ScheduleWidgetProps) {
               <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
                 Upcoming
               </p>
-              <UpcomingList items={items} />
+              {items.length === 0 && !schedulerActive ? (
+                <p className="text-xs text-muted-foreground text-center py-3">
+                  Scheduler starting up...
+                </p>
+              ) : (
+                <UpcomingList items={items} />
+              )}
             </div>
           </>
         )}

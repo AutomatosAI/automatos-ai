@@ -483,5 +483,16 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
         return None
 
     @staticmethod
+    def _has_action_keywords(message: str) -> bool:
+        """Cheap scan for action-oriented keywords. Used only as Tier 3 fallback."""
+        msg = message.lower()
+        return any(kw in msg for kw in (
+            "send", "email", "search", "find", "create", "open",
+            "run", "fetch", "query", "calendar", "schedule",
+            "deploy", "build", "delete", "update", "upload",
+            "download", "generate", "analyze", "report",
+        ))
+
+    @staticmethod
     def _is_memory_recall(msg_lower: str) -> bool:
         return bool(_MEMORY_PATTERN.search(msg_lower))

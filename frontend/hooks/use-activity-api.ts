@@ -85,6 +85,7 @@ export interface ScheduleItem {
 
 export interface ScheduleResponse {
   scheduled: ScheduleItem[]
+  scheduler_active?: boolean
 }
 
 export interface AgentReport {
@@ -171,6 +172,7 @@ export function useActivitySchedule(range: string = '7d') {
       apiClient.request<ScheduleResponse>(`/api/activity/schedule?range=${range}`),
     refetchInterval: 30000,
     staleTime: 20000,
+    keepPreviousData: true,  // Don't blank widget on transient empty refetch
   })
 }
 

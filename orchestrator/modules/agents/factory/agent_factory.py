@@ -2064,8 +2064,13 @@ To use actions, respond with JSON blocks like:
             if active_skills:
                 sections.append("\n## Your Specialized Skills\n")
                 loader = get_skill_loader(db) if db is not None else None
+                loaded_skill_ids: set = set()
 
                 for skill in active_skills:
+                    if skill.id in loaded_skill_ids:
+                        self.logger.debug("Skipping duplicate skill %s (id=%s)", skill.name, skill.id)
+                        continue
+                    loaded_skill_ids.add(skill.id)
                     self.logger.info(f"Loading skill: {skill.name}")
                     sections.append(f"### {skill.name}")
 

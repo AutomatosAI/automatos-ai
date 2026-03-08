@@ -587,10 +587,6 @@ class StreamingChatService:
                 widget_mode=self.widget_mode
             )
 
-            # Load agent context: persona, description, skill tools
-            agent_ctx = await self._load_agent_context(agent_runtime)
-            skill_tools = agent_ctx["skill_tools"]
-
             # ── PRD-68: Branch on complexity level ──
             from consumers.chatbot.auto import Complexity
             _complexity = (
@@ -600,7 +596,7 @@ class StreamingChatService:
             )
 
             if _complexity == Complexity.ATOM:
-                # ATOM: No tools, no memory, no SmartChatIntegration.
+                # ATOM: No tools, no memory, no agent context loading.
                 # Minimal system prompt + conversation → LLM. Fastest path.
                 logger.info("[PRD-68] ATOM path — skipping tools, memory, orchestration")
                 from datetime import datetime as _dt
@@ -623,6 +619,10 @@ class StreamingChatService:
                 orchestrated = None
             else:
                 # MOLECULE / CELL / ORGAN / ORGANISM: Full pipeline
+                # Load agent context only when needed (persona, skills, tools)
+                agent_ctx = await self._load_agent_context(agent_runtime)
+                skill_tools = agent_ctx["skill_tools"]
+
                 from consumers.chatbot.tool_router import get_chat_tools
                 all_tools = get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
                 if skill_tools:
