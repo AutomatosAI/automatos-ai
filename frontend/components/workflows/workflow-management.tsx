@@ -1,7 +1,8 @@
 
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { useQueryClient } from '@tanstack/react-query'
@@ -208,6 +209,24 @@ export function WorkflowManagement() {
     recipeSteps: Array<{ step_id: string; order: number; prompt_template: string; agent_id: number }>
     recipeName: string
   } | null>(null)
+
+  // Deep-link from Activity Command Centre: /workflows?openExecution=X&recipeId=Y
+  const searchParams = useSearchParams()
+  useEffect(() => {
+    const openExecution = searchParams.get('openExecution')
+    const recipeIdParam = searchParams.get('recipeId')
+    if (openExecution && recipeIdParam) {
+      setRecipeExecInfo({
+        recipeExecutionId: openExecution,
+        recipeId: recipeIdParam,
+        recipeSteps: [],
+        recipeName: '',
+      })
+      setSelectedWorkflowId(null)
+      setAutoStartExecution(false)
+      setShowExecutionKitchen(true)
+    }
+  }, [searchParams])
 
   // Workflow creation form state
   const [workflowForm, setWorkflowForm] = useState({
