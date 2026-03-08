@@ -188,6 +188,52 @@ _PLATFORM_KEYWORDS = {
         "recent activity", "activity feed", "what's been happening",
         "show activity", "what has been running", "activity log",
     ],
+    # Marketplace discovery & workspace inventory (PRD-71)
+    "platform_browse_marketplace_plugins": [
+        "marketplace plugins", "browse plugins", "search plugins",
+        "available plugins", "find a plugin",
+    ],
+    "platform_browse_marketplace_skills": [
+        "marketplace skills", "browse skills", "search skills",
+        "available skills", "find a skill",
+    ],
+    "platform_list_workspace_plugins": [
+        "my plugins", "workspace plugins", "enabled plugins",
+        "installed plugins", "what plugins do i have",
+    ],
+    "platform_list_workspace_skills": [
+        "my skills", "workspace skills", "enabled skills",
+        "installed skills", "what skills do i have",
+    ],
+    "platform_list_workspace_models": [
+        "my models", "workspace models", "installed models",
+        "what models do i have", "enabled models",
+    ],
+    "platform_install_plugin": [
+        "install plugin", "enable plugin", "add plugin",
+        "activate plugin",
+    ],
+    "platform_install_skill": [
+        "install skill", "enable skill", "add skill",
+        "activate skill",
+    ],
+    "platform_install_model": [
+        "install model", "enable model", "add model",
+        "activate model",
+    ],
+    # Agent assignment (PRD-71)
+    "platform_assign_tool_to_agent": [
+        "assign tool to agent", "add tool to agent",
+        "give agent a tool", "connect tool to agent",
+    ],
+    "platform_assign_skill_to_agent": [
+        "assign skill to agent", "add skill to agent",
+        "give agent a skill", "attach skill to agent",
+    ],
+    "platform_assign_plugin_to_agent": [
+        "assign plugin to agent", "add plugin to agent",
+        "give agent a plugin", "attach plugin to agent",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]
