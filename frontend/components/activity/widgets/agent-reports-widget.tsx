@@ -27,6 +27,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
 
 const PINNED_AGENTS_KEY = 'automatos:pinned-agents'
+const MAX_PINNED = 4
 
 function loadPinnedAgents(): number[] {
   if (typeof window === 'undefined') return []
@@ -53,8 +54,11 @@ function useWorkspaceAgents() {
   return useQuery<SimpleAgent[]>({
     queryKey: ['agents', 'simple-list'],
     queryFn: async () => {
-      const res = await apiClient.request<{ agents: SimpleAgent[] }>('/api/agents')
-      return res.agents ?? res as unknown as SimpleAgent[]
+      const res = await apiClient.request<SimpleAgent[] | { agents: SimpleAgent[] }>('/api/agents')
+      // API returns flat array (List[AgentResponse]), handle both shapes
+      if (Array.isArray(res)) return res
+      if (res && 'agents' in res && Array.isArray(res.agents)) return res.agents
+      return []
     },
     staleTime: 60000,
   })
@@ -127,19 +131,36 @@ interface PinSelectorProps {
   agents: SimpleAgent[]
   pinnedIds: number[]
   onToggle: (id: number) => void
+  isLoading?: boolean
 }
 
-function PinSelector({ agents, pinnedIds, onToggle }: PinSelectorProps) {
+function PinSelector({ agents, pinnedIds, onToggle, isLoading }: PinSelectorProps) {
   const pinnedSet = new Set(pinnedIds)
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-4">
+        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (agents.length === 0) {
+    return (
+      <div className="py-4 text-center text-xs text-muted-foreground">
+        No agents found. Create agents first.
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-1 max-h-60 overflow-y-auto">
       <p className="text-xs text-muted-foreground px-2 pb-1">
-        Pin up to 4 agents
+        Pin up to {MAX_PINNED} agents ({pinnedIds.length}/{MAX_PINNED})
       </p>
       {agents.map((agent) => {
         const isPinned = pinnedSet.has(agent.id)
-        const isDisabled = !isPinned && pinnedIds.length >= 4
+        const isDisabled = !isPinned && pinnedIds.length >= MAX_PINNED
         return (
           <button
             key={agent.id}
@@ -151,12 +172,17 @@ function PinSelector({ agents, pinnedIds, onToggle }: PinSelectorProps) {
               isDisabled && 'opacity-40 cursor-not-allowed'
             )}
           >
-            {isPinned ? (
+            {agent.marketplace_icon ? (
+              <span className="text-sm shrink-0">{agent.marketplace_icon}</span>
+            ) : isPinned ? (
               <Pin className="w-3 h-3 text-primary shrink-0" />
             ) : (
               <PinOff className="w-3 h-3 text-muted-foreground shrink-0" />
             )}
             <span className="truncate">{agent.name}</span>
+            {isPinned && (
+              <span className="ml-auto text-[10px] text-primary">pinned</span>
+            )}
           </button>
         )
       })}
@@ -170,30 +196,36 @@ interface AgentReportsWidgetProps {
 
 export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
   const [pinnedIds, setPinnedIds] = useState<number[]>([])
+  const [initialized, setInitialized] = useState(false)
 
   // Load pinned IDs from localStorage
   useEffect(() => {
     setPinnedIds(loadPinnedAgents())
+    setInitialized(true)
   }, [])
 
-  const { data: allAgents } = useWorkspaceAgents()
-  const { data: reportsData, isLoading } = useAgentReports(pinnedIds)
+  const { data: allAgents, isLoading: agentsLoading } = useWorkspaceAgents()
+  const hasPinned = pinnedIds.length > 0
+  const { data: reportsData, isLoading: reportsLoading } = useAgentReports(pinnedIds)
   const reports = reportsData?.reports ?? []
 
-  // Auto-pin first 3 agents if nothing pinned
+  // Only show reports loading when we actually have pinned agents and are fetching
+  const showReportsLoading = hasPinned && reportsLoading
+
+  // Auto-pin first 3 agents if nothing pinned and localStorage was empty
   useEffect(() => {
-    if (pinnedIds.length === 0 && allAgents && allAgents.length > 0) {
-      const autoPinned = allAgents.slice(0, 3).map((a) => a.id)
+    if (initialized && pinnedIds.length === 0 && allAgents && allAgents.length > 0) {
+      const autoPinned = allAgents.slice(0, Math.min(3, allAgents.length)).map((a) => a.id)
       setPinnedIds(autoPinned)
       savePinnedAgents(autoPinned)
     }
-  }, [allAgents, pinnedIds.length])
+  }, [allAgents, pinnedIds.length, initialized])
 
   const togglePin = useCallback((id: number) => {
     setPinnedIds((prev) => {
       const next = prev.includes(id)
         ? prev.filter((x) => x !== id)
-        : prev.length < 4
+        : prev.length < MAX_PINNED
           ? [...prev, id]
           : prev
       savePinnedAgents(next)
@@ -207,9 +239,11 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-primary" />
           <h3 className="text-sm font-semibold">Agent Reports</h3>
-          <span className="text-[10px] text-muted-foreground">
-            {pinnedIds.length} of {allAgents?.length ?? 0}
-          </span>
+          {allAgents && (
+            <span className="text-[10px] text-muted-foreground">
+              {pinnedIds.length} of {allAgents.length}
+            </span>
+          )}
         </div>
         <Popover>
           <PopoverTrigger asChild>
@@ -222,20 +256,42 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
               agents={allAgents ?? []}
               pinnedIds={pinnedIds}
               onToggle={togglePin}
+              isLoading={agentsLoading}
             />
           </PopoverContent>
         </Popover>
       </div>
 
       <div className="flex-1 overflow-x-auto px-4 py-3">
-        {isLoading ? (
+        {agentsLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
-        ) : reports.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-            <Bot className="w-8 h-8 mb-2 opacity-30" />
-            <p className="text-xs">Pin agents to see their reports</p>
+        ) : !hasPinned ? (
+          /* No agents pinned — show inline pin selector */
+          <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+            <Bot className="w-8 h-8 mb-3 opacity-30" />
+            <p className="text-sm font-medium mb-1">No agents pinned</p>
+            <p className="text-xs mb-4 text-center max-w-[250px]">
+              Pin agents to track their latest routine reports here
+            </p>
+            {allAgents && allAgents.length > 0 ? (
+              <div className="w-full max-w-[280px] border border-border/50 rounded-lg p-2 bg-secondary/20">
+                <PinSelector
+                  agents={allAgents}
+                  pinnedIds={pinnedIds}
+                  onToggle={togglePin}
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground/60">
+                Create agents first to see reports
+              </p>
+            )}
+          </div>
+        ) : showReportsLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

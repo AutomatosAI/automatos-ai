@@ -45,6 +45,9 @@ export interface ActivityFeedItem {
   channel?: ActivityChannel | null
   step_progress?: ActivityStepProgress | null
   error_message: string | null
+  tokens_used?: number | null
+  total_tokens?: number | null
+  total_duration_ms?: number | null
 }
 
 export interface ActivityFeedResponse {
