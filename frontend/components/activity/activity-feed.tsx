@@ -4,7 +4,6 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import {
   Activity,
-  MessageCircle,
   RefreshCw,
   ChefHat,
   Rocket,
@@ -19,14 +18,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useActivityFeed } from '@/hooks/use-activity-api'
-import type { ActivityFeedFilters } from '@/hooks/use-activity-api'
+import type { ActivityFeedFilters, ActivityFeedItem } from '@/hooks/use-activity-api'
 import { ActivityFeedItemCard, ActivityFeedItemSkeleton } from './activity-feed-item'
+import { ExecutionDetail } from './execution-detail'
 import { cn } from '@/lib/utils'
 
 // ─── Filter Chip Config ─────────────────────────────────
 
 const TYPE_CHIPS = [
-  { value: 'chat', label: 'Chats', icon: MessageCircle },
   { value: 'routine', label: 'Routines', icon: RefreshCw },
   { value: 'recipe', label: 'Recipes', icon: ChefHat },
   { value: 'mission', label: 'Missions', icon: Rocket },
@@ -52,6 +51,7 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
   const [activeTypes, setActiveTypes] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState('all')
   const [limit, setLimit] = useState(PAGE_SIZE)
+  const [selectedItem, setSelectedItem] = useState<ActivityFeedItem | null>(null)
 
   const filters = useMemo<ActivityFeedFilters>(
     () => ({
@@ -109,6 +109,20 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
     setLimit((prev) => prev + PAGE_SIZE)
   }, [])
 
+  const handleViewItem = useCallback((item: ActivityFeedItem) => {
+    setSelectedItem(item)
+  }, [])
+
+  const handleCloseDetail = useCallback(() => {
+    setSelectedItem(null)
+  }, [])
+
+  // ─── Execution Detail Drill-Down ──────────────────
+
+  if (selectedItem) {
+    return <ExecutionDetail item={selectedItem} onClose={handleCloseDetail} />
+  }
+
   // ─── Empty State ────────────────────────────────
 
   if (!isLoading && items.length === 0) {
@@ -125,7 +139,7 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
           <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="font-medium">No activity yet</p>
           <p className="text-sm mt-1 max-w-sm mx-auto">
-            Start a chat, create a routine, or run a recipe to see your workforce in action
+            Create a routine or run a recipe to see your workforce in action
           </p>
         </div>
       </div>
@@ -173,6 +187,7 @@ export function ActivityFeed({ period = '1d' }: ActivityFeedProps) {
               item={item}
               animationDelay={index * 0.05}
               isNew={newItemIds.has(item.id)}
+              onViewItem={handleViewItem}
             />
           ))}
         </AnimatePresence>

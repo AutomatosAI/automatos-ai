@@ -1,5 +1,15 @@
-import { redirect } from 'next/navigation'
+'use client'
+
+import { MainLayout } from '@/components/layout/main-layout'
+import { WorkflowManagement } from '@/components/workflows/workflow-management'
+import { usePageAPI } from '@/hooks/use-page-api'
 
 export default function WorkflowsPage() {
-  redirect('/activity')
+  usePageAPI('workflows')
+
+  return (
+    <MainLayout>
+      <WorkflowManagement />
+    </MainLayout>
+  )
 }

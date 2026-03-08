@@ -18,6 +18,7 @@ import {
   Store,
   BarChart3,
   LayoutDashboard,
+  GitBranch,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSystemRole } from '@/contexts/role-context'
@@ -34,6 +35,13 @@ const navigationItems = [
     icon: MessageCircle,
     iconColor: 'text-primary',
     description: 'Your AI workspace'
+  },
+  {
+    name: 'Workflow Management',
+    href: '/workflows',
+    icon: GitBranch,
+    iconColor: 'text-[hsl(var(--agent))]',
+    description: 'Create and monitor workflows'
   },
   {
     name: 'Activity',

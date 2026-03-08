@@ -201,9 +201,10 @@ interface ActivityFeedItemCardProps {
   item: ActivityFeedItem
   animationDelay?: number
   isNew?: boolean
+  onViewItem?: (item: ActivityFeedItem) => void
 }
 
-export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false }: ActivityFeedItemCardProps) {
+export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, onViewItem }: ActivityFeedItemCardProps) {
   const router = useRouter()
   const prefersReducedMotion = useReducedMotion()
   const typeConfig = TYPE_CONFIG[item.type]
@@ -211,18 +212,30 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false }
   const TypeIcon = typeConfig.icon
   const duration = formatDuration(item.duration_seconds)
   const relativeTime = formatRelativeTime(item.started_at)
-  const viewUrl = getViewUrl(item)
   const configureUrl = getConfigureUrl(item)
   const isRunning = item.status === 'running'
 
+  // For recipes/routines, drill down inline. For chats, navigate.
   const handleView = (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (viewUrl) router.push(viewUrl)
+    if (onViewItem && (item.type === 'recipe' || item.type === 'routine')) {
+      onViewItem(item)
+    } else {
+      const url = getViewUrl(item)
+      if (url) router.push(url)
+    }
   }
 
   const handleConfigure = (e: React.MouseEvent) => {
     e.stopPropagation()
     if (configureUrl) router.push(configureUrl)
+  }
+
+  // Clicking the whole card also drills down for recipes/routines
+  const handleCardClick = () => {
+    if (onViewItem && (item.type === 'recipe' || item.type === 'routine')) {
+      onViewItem(item)
+    }
   }
 
   return (
@@ -234,7 +247,10 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false }
       className={cn(isNew && !prefersReducedMotion && 'log-entry-new')}
     >
       <div
-        className={`glass-card card-glow border-l-[3px] ${typeConfig.borderColor} hover:border-primary/20 transition-all duration-300 p-3 sm:p-4 space-y-2`}
+        onClick={handleCardClick}
+        className={`glass-card card-glow border-l-[3px] ${typeConfig.borderColor} hover:border-primary/20 transition-all duration-300 p-3 sm:p-4 space-y-2 ${
+          onViewItem && (item.type === 'recipe' || item.type === 'routine') ? 'cursor-pointer' : ''
+        }`}
       >
         {/* Row 1: Type + Name + Time */}
         <div className="flex items-center justify-between gap-2">
@@ -297,32 +313,28 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false }
         )}
 
         {/* Actions */}
-        {(viewUrl || configureUrl) && (
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center sm:justify-end gap-2 pt-1">
-            {viewUrl && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleView}
-                className="text-xs min-h-[44px] sm:min-h-0 sm:h-7 justify-center"
-              >
-                <Eye className="w-3.5 h-3.5 mr-1" />
-                View
-              </Button>
-            )}
-            {configureUrl && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleConfigure}
-                className="text-xs min-h-[44px] sm:min-h-0 sm:h-7 justify-center"
-              >
-                <Settings className="w-3.5 h-3.5 mr-1" />
-                Configure
-              </Button>
-            )}
-          </div>
-        )}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center sm:justify-end gap-2 pt-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleView}
+            className="text-xs min-h-[44px] sm:min-h-0 sm:h-7 justify-center"
+          >
+            <Eye className="w-3.5 h-3.5 mr-1" />
+            View
+          </Button>
+          {configureUrl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleConfigure}
+              className="text-xs min-h-[44px] sm:min-h-0 sm:h-7 justify-center"
+            >
+              <Settings className="w-3.5 h-3.5 mr-1" />
+              Configure
+            </Button>
+          )}
+        </div>
       </div>
     </motion.div>
   )
