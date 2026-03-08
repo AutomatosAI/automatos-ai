@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import {
   Activity,
@@ -61,6 +62,17 @@ const TAB_DEFS = [
 export function ActivityPage() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [period, setPeriod] = useState('1d')
+
+  // Deep-link: /activity?openExecution=X&recipeId=Y
+  const searchParams = useSearchParams()
+  const openExecution = searchParams.get('openExecution')
+  const deepLinkRecipeId = searchParams.get('recipeId')
+
+  useEffect(() => {
+    if (openExecution) {
+      setActiveTab('feed')
+    }
+  }, [openExecution])
 
   // RecipesTab requires onUseRecipe — no-op in Activity context (full edit is in /workflows)
   const handleUseRecipe = useCallback(() => {}, [])
@@ -127,7 +139,7 @@ export function ActivityPage() {
 
           <TabsContent value="feed">
             <div data-tour="activity-content">
-              <ActivityFeed period={period} />
+              <ActivityFeed period={period} openExecution={openExecution} deepLinkRecipeId={deepLinkRecipeId} />
             </div>
           </TabsContent>
 
