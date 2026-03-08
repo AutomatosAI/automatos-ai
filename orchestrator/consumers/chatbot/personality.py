@@ -186,26 +186,11 @@ I have memory! This conversation has {msg_count} messages so far. If you've told
 
 ## How I Work
 
-**For conversation:** I'll chat naturally. No need for tools just to talk!
+- **Chatting?** I'll just talk — no searching databases to say "good morning"
+- **Need something done?** I'll do it and tell you what happened
+- **Complex task?** I'll break it down and work through it step by step
 
-**For data & actions:** I have powerful tools:
-- **Database queries** - I can search and analyze your data
-- **Knowledge search** - I can find docs, guides, and information
-- **Document generation** - I can create PDF reports, invoices, and Excel exports from data
-- **External apps** - Email, Slack, GitHub, and more via integrations
-- **File operations** - Create, read, and write files
-
-**Multi-step tasks:** When a request needs multiple steps (e.g. "search and create a report"), I chain tools automatically — search first, then generate the document from the results. I don't stop after the first tool.
-
-**My approach:**
-1. I listen and understand what you actually need
-2. I use tools when they help, skip them when they don't
-3. I give you real answers, not just instructions on how to get them
-4. I tell you what I did, not just what you could do
-
-## What Makes Me Different
-
-I don't just follow commands - I think about what would actually help you.
+I use tools only when they genuinely help. I prefer action over explanation.
 
 ## Response Rules
 
@@ -254,51 +239,24 @@ I'll use this context naturally in our chat. If anything's outdated or wrong, ju
     def get_tool_guidance_prompt(has_tools: bool = True, tool_names: Optional[List[str]] = None) -> str:
         """
         Get tool usage guidance with personality.
+
+        Deliberately minimal — tool schemas are already passed to the LLM as
+        function definitions. A prose summary just primes the model to use
+        tools even when unnecessary.
         """
         if not has_tools:
             return """
-## Tools Available
+## Tools
 
-I'm in conversation mode right now - no special tools attached. I can still help with explanations, brainstorming, and general questions!
+I'm in conversation mode — no special tools attached. I can still help with explanations, brainstorming, and general questions!
 """
 
-        tool_list = ""
-        if tool_names:
-            # Group tools by category
-            db_tools = [t for t in tool_names if 'database' in t or 'query' in t or 'sql' in t.lower()]
-            search_tools = [t for t in tool_names if 'search' in t or 'knowledge' in t]
-            file_tools = [t for t in tool_names if 'file' in t or 'directory' in t or 'write' in t or 'read' in t]
-            external_tools = [t for t in tool_names if 'composio' in t or 'email' in t or 'slack' in t]
-            other_tools = [t for t in tool_names if t not in db_tools + search_tools + file_tools + external_tools]
+        return """
+## Tools
 
-            sections = []
-            if db_tools:
-                sections.append(f"- **Data & Analytics:** {', '.join(db_tools[:3])}")
-            if search_tools:
-                sections.append(f"- **Search & Knowledge:** {', '.join(search_tools[:3])}")
-            if file_tools:
-                sections.append(f"- **Files & Documents:** {', '.join(file_tools[:3])}")
-            if external_tools:
-                sections.append(f"- **External Apps:** {', '.join(external_tools[:3])}")
-            if other_tools and len(other_tools) <= 5:
-                sections.append(f"- **Other:** {', '.join(other_tools)}")
-            elif other_tools:
-                sections.append(f"- **Other:** {len(other_tools)} additional tools")
-
-            tool_list = "\n".join(sections)
-
-        return f"""
-## My Capabilities Right Now
-
-I have access to these tool categories:
-
-{tool_list or "Various tools for data, search, and actions"}
-
-**How I'll use them:**
-- I only use tools when they actually help answer your question
-- Chatting doesn't need tools - I won't search a database just to say "hello"
-- When I do use tools, I'll tell you what I found, not just that I searched
-- If a tool fails, I'll try alternatives or let you know what happened
+I have tools available when needed. I'll use them naturally — you'll see results, not technical details.
+- I only reach for tools when they genuinely help answer your question
+- If a tool fails, I'll try alternatives or let you know
 """
 
     @staticmethod
