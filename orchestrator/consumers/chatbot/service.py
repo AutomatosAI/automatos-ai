@@ -474,6 +474,64 @@ class StreamingChatService:
         self.agent_factory = AgentFactory(db_session=db)
         logger.info("StreamingChatService initialized with AgentFactory integration")
 
+    def _resolve_file_parts(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Resolve document:// file parts to inline text content.
+
+        When users attach files in chat, parts contain {type: "file", url: "document://<id>", filename: "..."}.
+        This method fetches the document content from chunks and converts file parts to text parts
+        so the LLM can actually read the uploaded content.
+        """
+        from sqlalchemy import text as sa_text
+
+        resolved = []
+        for msg in messages:
+            parts = msg.get("parts")
+            if not parts:
+                resolved.append(msg)
+                continue
+
+            new_parts = []
+            for part in parts:
+                if part.get("type") == "file" and part.get("url", "").startswith("document://"):
+                    doc_id_str = part["url"].replace("document://", "")
+                    filename = part.get("filename", "uploaded file")
+                    try:
+                        doc_id = int(doc_id_str)
+                        result = self.db.execute(
+                            sa_text(
+                                "SELECT content FROM document_chunks "
+                                "WHERE document_id = :doc_id ORDER BY chunk_index"
+                            ),
+                            {"doc_id": doc_id}
+                        )
+                        chunks = result.fetchall()
+                        if chunks:
+                            content = "\n\n".join(row.content for row in chunks)
+                            new_parts.append({
+                                "type": "text",
+                                "text": f"[Attached file: {filename}]\n{content}"
+                            })
+                            logger.info(f"[file-resolve] Injected document {doc_id} ({filename}, {len(chunks)} chunks) into chat context")
+                        else:
+                            # Document exists but no chunks yet (still processing?)
+                            new_parts.append({
+                                "type": "text",
+                                "text": f"[Attached file: {filename} — document is still being processed, content not yet available]"
+                            })
+                            logger.warning(f"[file-resolve] Document {doc_id} has no chunks yet")
+                    except Exception as e:
+                        logger.error(f"[file-resolve] Failed to resolve document {doc_id_str}: {e}")
+                        new_parts.append({
+                            "type": "text",
+                            "text": f"[Attached file: {filename} — could not load content]"
+                        })
+                else:
+                    new_parts.append(part)
+
+            resolved.append({**msg, "parts": new_parts})
+
+        return resolved
+
     def _resolve_workspace_id(self, agent_id: int) -> Optional[str]:
         logger.info(f"[chat] resolve_workspace_id current={self.workspace_id} agent={agent_id}")
         if self.workspace_id:
@@ -586,6 +644,9 @@ class StreamingChatService:
                 agent_name=agent_runtime.metadata.name,
                 widget_mode=self.widget_mode
             )
+
+            # ── Resolve file attachments to inline text ──
+            messages = self._resolve_file_parts(messages)
 
             # ── PRD-68: Branch on complexity level ──
             from consumers.chatbot.auto import Complexity
@@ -1044,6 +1105,7 @@ class StreamingChatService:
         
         try:
             llm_manager = create_llm_manager(service_name="chatbot")
+            messages = self._resolve_file_parts(messages)
             latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
             if self.prompt_analyzer.is_fresh_start_request(latest_text):
                 messages = [m for m in messages if m.get("role") == "user"][-1:]

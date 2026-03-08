@@ -338,6 +338,11 @@ class SmartChatOrchestrator:
                 for part in msg["parts"]:
                     if part.get("type") == "text" and part.get("text"):
                         text_parts.append(part["text"])
+                    elif part.get("type") == "file":
+                        # File parts should already be resolved by _resolve_file_parts
+                        # but handle gracefully if they slip through
+                        filename = part.get("filename", "file")
+                        text_parts.append(f"[Attached file: {filename} — content not available]")
                 content = "\n".join(text_parts)
             else:
                 content = msg.get("content", "")
