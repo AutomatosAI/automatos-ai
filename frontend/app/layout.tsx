@@ -3,8 +3,6 @@ import type { Metadata } from 'next'
 import { Providers } from '../components/providers'
 import './globals.css'
 import '../styles/shepherd-custom.css'
-import 'react-grid-layout/css/styles.css'
-import 'react-resizable/css/styles.css'
 
 // Force dynamic rendering to prevent build-time Clerk errors
 export const dynamic = 'force-dynamic'
