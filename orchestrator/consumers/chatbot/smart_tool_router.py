@@ -219,7 +219,7 @@ class SmartToolRouter:
                 logger.info(f"[ToolRouter] PRD-68 hint match: {len(hint_matched)} tools for hints={tool_hints}")
                 return ToolRoutingResult(
                     should_include_tools=True,
-                    filtered_tools=combined[:15],
+                    filtered_tools=combined,
                     priority_tools=[t.get("function", {}).get("name", "") for t in hint_matched[:5]],
                     tool_choice="auto",
                     reasoning=f"Tool hints: {tool_hints}",

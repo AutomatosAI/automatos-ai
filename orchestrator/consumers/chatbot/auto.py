@@ -234,6 +234,15 @@ _PLATFORM_KEYWORDS = {
         "assign plugin to agent", "add plugin to agent",
         "give agent a plugin", "attach plugin to agent",
     ],
+    "platform_create_agent": [
+        "create agent", "create an agent", "build agent", "build an agent",
+        "make agent", "make an agent", "set up agent", "setup agent",
+        "new agent", "create a new agent", "build me an agent",
+    ],
+    "platform_update_agent": [
+        "update agent", "modify agent", "change agent", "edit agent",
+        "configure agent", "reconfigure agent",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]
