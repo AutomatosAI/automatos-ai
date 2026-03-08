@@ -456,7 +456,7 @@ Return ONLY valid JSON:
 }}
 
 action mapping: "respond" for atom, "delegate" for molecule/cell, "workflow" for organ/organism.
-tool_hints: short domain keywords like "email", "github", "jira", "code", "database". Empty for atom."""
+tool_hints: short domain keywords like "email", "github", "jira", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
 
         try:
             from core.llm import create_llm_manager
