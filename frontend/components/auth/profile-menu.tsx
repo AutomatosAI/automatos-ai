@@ -149,8 +149,8 @@ export function ProfileMenu() {
                                         setOpen(false)
                                         setTimeout(async () => {
                                             if (user) {
-                                                const { createFirstLoginTour } = await import('@/lib/shepherd/first-login-tour')
-                                                const tour = createFirstLoginTour(user.id)
+                                                const { createWelcomeTour } = await import('@/lib/shepherd/tours/welcome-tour')
+                                                const tour = createWelcomeTour(user.id)
                                                 tour.start()
                                             }
                                         }, 150)
@@ -168,8 +168,8 @@ export function ProfileMenu() {
                                             if (user) {
                                                 // Page-specific tours can be added later;
                                                 // for now re-launch the main tour
-                                                const { createFirstLoginTour } = await import('@/lib/shepherd/first-login-tour')
-                                                const tour = createFirstLoginTour(user.id)
+                                                const { createWelcomeTour } = await import('@/lib/shepherd/tours/welcome-tour')
+                                                const tour = createWelcomeTour(user.id)
                                                 tour.start()
                                             }
                                         }, 150)
