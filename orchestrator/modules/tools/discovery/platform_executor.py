@@ -978,33 +978,28 @@ class PlatformActionExecutor:
             return {"success": False, "error": "Missing required parameter: content"}
 
         try:
-            import httpx
-            from config import config
+            import asyncio
+            from modules.memory.integrations.mem0_client import Mem0Client
 
-            mem0_url = config.MEM0_API_URL
-            if not mem0_url:
-                return {"success": False, "error": "Memory service not configured"}
+            client = Mem0Client()
+            if not client.api_url:
+                return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
 
-            headers = {}
-            if config.MEM0_API_KEY:
-                headers["Authorization"] = f"Bearer {config.MEM0_API_KEY}"
+            messages = [{"role": "user", "content": content}]
+            user_id = str(self.workspace_id)
 
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{mem0_url}/v1/memories/",
-                    json={
-                        "messages": [{"role": "user", "content": content}],
-                        "user_id": str(self.workspace_id),
-                    },
-                    headers=headers,
-                )
-                if resp.status_code in (200, 201):
-                    return {
-                        "success": True,
-                        "message": f"Stored in memory: '{content[:100]}...'",
-                    }
-                else:
-                    return {"success": False, "error": f"Memory API returned {resp.status_code}"}
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: client.add(messages=messages, user_id=user_id)
+            )
+
+            if result.get("error"):
+                return {"success": False, "error": result["error"]}
+            return {
+                "success": True,
+                "message": f"Stored in memory: '{content[:100]}...'",
+            }
         except Exception as e:
             logger.warning(f"[PlatformExecutor] Memory store failed: {e}")
             return {"success": False, "error": f"Memory service error: {e}"}
