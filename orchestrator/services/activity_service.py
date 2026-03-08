@@ -168,13 +168,13 @@ class ActivityService:
         try:
             rows = self.db.execute(
                 text("""
-                    SELECT hr.id, hr.source_id, hr.status, hr.findings,
+                    SELECT hr.id, hr.source_id, hr.source_type, hr.status, hr.findings,
                            hr.tokens_used, hr.created_at,
                            a.name AS agent_name, a.marketplace_icon AS agent_icon
                     FROM heartbeat_results hr
-                    LEFT JOIN agents a ON a.id = CAST(hr.source_id AS INTEGER)
+                    LEFT JOIN agents a ON hr.source_type = 'agent' AND a.id = CAST(hr.source_id AS INTEGER)
                     WHERE hr.workspace_id = :ws_id
-                      AND hr.source_type = 'agent'
+                      AND hr.source_type IN ('agent', 'orchestrator')
                       AND hr.created_at >= :since
                     ORDER BY hr.created_at DESC
                     LIMIT :lim
@@ -189,22 +189,27 @@ class ActivityService:
                 summary = self._routine_summary(r.findings)
                 error_msg = self._routine_error(r.status, r.findings)
 
+                agent_name = r.agent_name or "Orchestrator"
+                is_orchestrator = r.source_type == "orchestrator"
+                agent_info = None if is_orchestrator else {
+                    "id": int(r.source_id) if r.source_id else None,
+                    "name": r.agent_name or "Unknown Agent",
+                    "avatar_url": r.agent_icon,
+                }
+                source_url = None if is_orchestrator else f"/agents/{r.source_id}"
+
                 items.append(
                     self._build_feed_item(
                         id=f"routine-{r.id}",
                         item_type="routine",
-                        name=f"{r.agent_name or 'Agent'} Routine",
+                        name=f"{agent_name} Routine",
                         status=feed_status,
                         started_at=r.created_at,
                         completed_at=r.created_at,  # Heartbeats are near-instant
-                        agent={
-                            "id": int(r.source_id) if r.source_id else None,
-                            "name": r.agent_name or "Unknown Agent",
-                            "avatar_url": r.agent_icon,
-                        },
+                        agent=agent_info,
                         summary=summary,
                         source_id=r.source_id,
-                        source_url=f"/agents/{r.source_id}" if r.source_id else None,
+                        source_url=source_url,
                         trigger="heartbeat",
                         error_message=error_msg,
                     )

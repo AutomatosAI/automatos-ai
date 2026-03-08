@@ -220,7 +220,7 @@ _VALID_COMMUNICATION_STYLES = {"concise", "balanced", "detailed"}
 _VALID_PROACTIVE_LEVELS = {"silent", "notify", "act_notify", "autonomous"}
 _VALID_THINKING_LEVELS = {"off", "minimal", "low", "medium", "high"}
 _VALID_HEARTBEAT_INTERVALS = {15, 30, 60, 120}
-_VALID_NOTIFICATION_CHANNELS = {"in_app", "email", "webhook"}
+_VALID_NOTIFICATION_CHANNELS = {"in_app", "webhook", "telegram", "slack", "discord", "teams", "whatsapp", "line", "signal"}
 
 _ORCHESTRATOR_DEFAULTS = {
     "personality_mode": "friendly",
