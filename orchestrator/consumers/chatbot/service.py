@@ -657,9 +657,9 @@ class StreamingChatService:
             )
 
             if _complexity == Complexity.ATOM:
-                # ATOM: No tools, no memory, no agent context loading.
-                # Minimal system prompt + conversation → LLM. Fastest path.
-                logger.info("[PRD-68] ATOM path — skipping tools, memory, orchestration")
+                # ATOM: No tools, no orchestration — but still retrieve memory
+                # so the agent knows who the user is and remembers past context.
+                logger.info("[PRD-68] ATOM path — skipping tools/orchestration, retrieving memory")
                 from datetime import datetime as _dt
                 _now = _dt.utcnow()
                 _time_ctx = (
@@ -667,11 +667,36 @@ class StreamingChatService:
                     else "Good afternoon" if _now.hour < 18
                     else "Good evening"
                 )
+
+                # Lightweight memory retrieval (cached, ~200ms first call)
+                _memory_block = ""
+                try:
+                    _user_msg = next(
+                        (m.get("content", "") for m in reversed(messages)
+                         if isinstance(m, dict) and m.get("role") == "user"),
+                        ""
+                    )
+                    if _user_msg and smart_chat.orchestrator and smart_chat.orchestrator.memory_manager:
+                        _mem_result = await smart_chat.orchestrator.memory_manager.retrieve_memories(
+                            workspace_id=str(self.workspace_id),
+                            agent_id=agent_id,
+                            query=_user_msg if len(_user_msg) > 5 else "user context",
+                            widget_mode=self.widget_mode,
+                        )
+                        if _mem_result and _mem_result.formatted_context:
+                            _memory_block = f"\n\n## What you remember about this user:\n{_mem_result.formatted_context}\n"
+                            logger.info(
+                                f"[PRD-68] ATOM memory: {len(_mem_result.memories)} memories injected"
+                            )
+                except Exception as _mem_err:
+                    logger.debug(f"[PRD-68] ATOM memory retrieval skipped: {_mem_err}")
+
                 _atom_prompt = (
                     f"You are {agent_runtime.metadata.name}, a warm and helpful AI assistant "
                     f"on the Automatos platform. {_time_ctx}! "
                     "Respond naturally and conversationally — be friendly, be brief. "
                     "You're chatting, not executing tasks."
+                    f"{_memory_block}"
                 )
                 llm_messages = self.prompt_analyzer.convert_to_llm_messages(
                     messages, system_prompt=_atom_prompt, available_tools=None
