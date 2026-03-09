@@ -190,6 +190,12 @@ try:
 except ImportError:
     activity_router = None
 
+# PRD-74: Voice Chat
+try:
+    from api.chat_voice import router as chat_voice_router
+except ImportError:
+    chat_voice_router = None
+
 # PRD-71: community_skills router removed — skills now unified through marketplace pattern
 
 # Import Dashboard Integration (PRD-06)
@@ -828,6 +834,10 @@ if channels_router is not None:
     app.include_router(channels_router)
 if activity_router is not None:
     app.include_router(activity_router)  # PRD-72: Activity Command Centre
+
+# PRD-74: Voice Chat
+if chat_voice_router is not None:
+    app.include_router(chat_voice_router)
 
 # PRD-73: Monitoring Stack Integration
 # Prometheus /metrics endpoint + request instrumentation
