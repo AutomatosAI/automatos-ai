@@ -980,6 +980,44 @@ def _register_chat_search_actions(registry: ActionRegistry) -> None:
     ))
 
 
+    registry.register(ActionDefinition(
+        name="platform_search_memory",
+        description=(
+            "Search the agent's long-term memory (Mem0) for stored facts, preferences, "
+            "and past context. Searches both global workspace memories and per-agent "
+            "memories. Use when the user asks what the system remembers, or to look up "
+            "specific stored facts."
+        ),
+        category="memory",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to search for in memory.",
+                },
+                "agent_id": {
+                    "type": "integer",
+                    "description": "Optional: search memories for a specific agent only.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 10, max 50).",
+                },
+            },
+            "required": ["query"],
+        },
+        permission_level="read",
+        tags=["memory", "search", "recall", "context"],
+        examples=[
+            "what do you remember about me?",
+            "search memory for Slack channel",
+            "what's stored about the deployment?",
+            "do you remember my name?",
+        ],
+    ))
+
+
 def _register_monitoring_actions(registry: ActionRegistry) -> None:
     """Register PRD-73 monitoring/observability tools (Loki, Prometheus, Alerts)."""
 

@@ -188,6 +188,13 @@ _PLATFORM_KEYWORDS = {
         "recent activity", "activity feed", "what's been happening",
         "show activity", "what has been running", "activity log",
     ],
+    # Memory search
+    "platform_search_memory": [
+        "search memory", "what do you remember", "recall",
+        "do you remember", "what's in memory", "memory search",
+        "what do you know about me", "check memory",
+        "stored memories", "my preferences", "what have you learned",
+    ],
     # Chat history search
     "platform_search_chat_history": [
         "search chat", "search conversations", "find in chat",

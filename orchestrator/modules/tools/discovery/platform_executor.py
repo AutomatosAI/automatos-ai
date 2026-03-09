@@ -54,8 +54,9 @@ class PlatformActionExecutor:
             # Infrastructure / observability
             "platform_get_logs": self._get_logs,
             "platform_list_services": self._list_services,
-            # Chat history search
+            # Chat & memory search
             "platform_search_chat_history": self._search_chat_history,
+            "platform_search_memory": self._search_memory,
             # PRD-73: Monitoring (Loki, Prometheus, Alerts)
             "platform_query_loki_logs": self._query_loki_logs,
             "platform_query_prometheus": self._query_prometheus,
@@ -514,37 +515,76 @@ class PlatformActionExecutor:
     # ── Memory Handlers ─────────────────────────────────────────────
 
     async def _get_memory_stats(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Get memory stats. Queries mem0 API if available, otherwise returns basic info."""
+        """Get memory stats from Mem0 — global + per-agent memories."""
+        import asyncio
+        from modules.memory.integrations.mem0_client import Mem0Client
+
         try:
-            import httpx
-            from config import config
+            client = Mem0Client()
+            if not client.api_url:
+                return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
 
-            mem0_url = config.MEM0_API_URL
-            if not mem0_url:
-                return {"success": True, "message": "Memory service not configured", "total_memories": 0}
+            ws_id = str(self.workspace_id)
+            global_user_id = f"ws_{ws_id}"
 
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(
-                    f"{mem0_url}/v1/memories/",
-                    params={"user_id": str(self.workspace_id)},
-                    headers={"Authorization": f"Bearer {config.MEM0_API_KEY}"} if config.MEM0_API_KEY else {},
+            loop = asyncio.get_event_loop()
+
+            # Fetch global memories
+            global_memories = await loop.run_in_executor(
+                None, lambda: client.get_all(user_id=global_user_id, limit=200)
+            )
+
+            # Also check per-agent memories for workspace agents
+            from core.models.core import Agent
+            agents = (
+                self.db.query(Agent.id, Agent.name)
+                .filter(Agent.workspace_id == self.workspace_id)
+                .all()
+            )
+
+            agent_stats = []
+            for agent_id, agent_name in agents[:10]:  # Cap at 10 to avoid slow queries
+                agent_user_id = f"ws_{ws_id}_agent_{agent_id}"
+                agent_mems = await loop.run_in_executor(
+                    None, lambda uid=agent_user_id: client.get_all(user_id=uid, limit=200)
                 )
-                if resp.status_code == 200:
-                    memories = resp.json()
-                    mem_list = memories if isinstance(memories, list) else memories.get("results", [])
-                    return {
-                        "success": True,
-                        "total_memories": len(mem_list),
-                        "workspace_id": str(self.workspace_id),
-                    }
-        except Exception as e:
-            logger.debug(f"[PlatformExecutor] Memory stats unavailable: {e}")
+                if agent_mems:
+                    agent_stats.append({
+                        "agent_id": agent_id,
+                        "agent_name": agent_name,
+                        "memory_count": len(agent_mems),
+                        "sample": [m.get("memory") or m.get("content", "")[:80] for m in agent_mems[:3]],
+                    })
 
-        return {
-            "success": True,
-            "total_memories": 0,
-            "message": "Memory service unavailable or not configured",
-        }
+            global_count = len(global_memories) if global_memories else 0
+            total_agent = sum(a["memory_count"] for a in agent_stats)
+
+            # Format for LLM
+            lines = [f"Memory Stats for workspace {ws_id}:\n"]
+            lines.append(f"Global memories: {global_count}")
+            if global_memories:
+                lines.append("Sample global memories:")
+                for m in (global_memories or [])[:5]:
+                    content = m.get("memory") or m.get("content", "")
+                    lines.append(f"  - {content[:100]}")
+
+            lines.append(f"\nAgent-specific memories: {total_agent} across {len(agent_stats)} agent(s)")
+            for a in agent_stats:
+                lines.append(f"  {a['agent_name']}: {a['memory_count']} memories")
+                for s in a["sample"]:
+                    lines.append(f"    - {s[:80]}")
+
+            return {
+                "success": True,
+                "global_memories": global_count,
+                "agent_memories": total_agent,
+                "total_memories": global_count + total_agent,
+                "agent_stats": agent_stats,
+                "formatted": "\n".join(lines),
+            }
+        except Exception as e:
+            logger.warning(f"[PlatformExecutor] Memory stats failed: {e}", exc_info=True)
+            return {"success": False, "error": f"Memory service error: {e}"}
 
     # ── Integration Handlers ────────────────────────────────────────
 
@@ -992,22 +1032,35 @@ class PlatformActionExecutor:
                 return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
 
             messages = [{"role": "user", "content": content}]
-            user_id = str(self.workspace_id)
+            # Use correct user_id format: ws_{workspace_id} for global memories
+            user_id = f"ws_{self.workspace_id}"
+
+            # If agent_id provided, store as agent-specific memory
+            agent_id = params.get("agent_id")
+            if agent_id:
+                user_id = f"ws_{self.workspace_id}_agent_{agent_id}"
 
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
-                lambda: client.add(messages=messages, user_id=user_id)
+                lambda: client.add(
+                    messages=messages,
+                    user_id=user_id,
+                    metadata={"workspace_id": str(self.workspace_id), "source": "platform_tool"},
+                )
             )
 
             if result.get("error"):
                 return {"success": False, "error": result["error"]}
+
+            facts = result.get("facts_extracted", "unknown")
             return {
                 "success": True,
-                "message": f"Stored in memory: '{content[:100]}...'",
+                "message": f"Stored in memory (user_id={user_id}): '{content[:100]}'",
+                "facts_extracted": facts,
             }
         except Exception as e:
-            logger.warning(f"[PlatformExecutor] Memory store failed: {e}")
+            logger.warning(f"[PlatformExecutor] Memory store failed: {e}", exc_info=True)
             return {"success": False, "error": f"Memory service error: {e}"}
 
     async def _delete_agent(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1181,6 +1234,95 @@ class PlatformActionExecutor:
         except Exception as exc:
             logger.error("[PlatformExecutor] Chat search failed: %s", exc, exc_info=True)
             return {"success": False, "error": f"Chat search failed: {exc}"}
+
+    async def _search_memory(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Search Mem0 memories by query."""
+        import asyncio
+        from modules.memory.integrations.mem0_client import Mem0Client
+
+        query = params.get("query", "").strip()
+        if not query:
+            return {"success": False, "error": "query parameter is required"}
+
+        agent_id = params.get("agent_id")
+        limit = min(params.get("limit", 10), 50)
+
+        try:
+            client = Mem0Client()
+            if not client.api_url:
+                return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
+
+            ws_id = str(self.workspace_id)
+            loop = asyncio.get_event_loop()
+
+            # Search global memories
+            global_user_id = f"ws_{ws_id}"
+            global_results = await loop.run_in_executor(
+                None, lambda: client.search(query=query, user_id=global_user_id, limit=limit)
+            )
+
+            # Search agent-specific if agent_id given, otherwise search all agents
+            agent_results = []
+            if agent_id:
+                agent_user_id = f"ws_{ws_id}_agent_{agent_id}"
+                agent_results = await loop.run_in_executor(
+                    None, lambda: client.search(query=query, user_id=agent_user_id, limit=limit)
+                )
+                for m in agent_results:
+                    m["_tier"] = f"agent-{agent_id}"
+            else:
+                # Search top agents
+                from core.models.core import Agent
+                agents = (
+                    self.db.query(Agent.id)
+                    .filter(Agent.workspace_id == self.workspace_id)
+                    .limit(5)
+                    .all()
+                )
+                for (aid,) in agents:
+                    uid = f"ws_{ws_id}_agent_{aid}"
+                    res = await loop.run_in_executor(
+                        None, lambda u=uid: client.search(query=query, user_id=u, limit=5)
+                    )
+                    for m in (res or []):
+                        m["_tier"] = f"agent-{aid}"
+                    agent_results.extend(res or [])
+
+            # Mark global
+            for m in (global_results or []):
+                m["_tier"] = "global"
+
+            all_results = (global_results or []) + agent_results
+
+            # Format
+            lines = [f"Memory search for '{query}': {len(all_results)} result(s)\n"]
+            for i, m in enumerate(all_results[:limit], 1):
+                content = m.get("memory") or m.get("content", "")
+                tier = m.get("_tier", "unknown")
+                created = m.get("created_at", "")
+                lines.append(f"{i}. [{tier}] {content}")
+                if created:
+                    lines.append(f"   Created: {created}")
+
+            return {
+                "success": True,
+                "query": query,
+                "total": len(all_results),
+                "global_count": len(global_results or []),
+                "agent_count": len(agent_results),
+                "results": [
+                    {
+                        "memory": m.get("memory") or m.get("content", ""),
+                        "tier": m.get("_tier", "unknown"),
+                        "created_at": m.get("created_at"),
+                    }
+                    for m in all_results[:limit]
+                ],
+                "formatted": "\n".join(lines),
+            }
+        except Exception as e:
+            logger.warning(f"[PlatformExecutor] Memory search failed: {e}", exc_info=True)
+            return {"success": False, "error": f"Memory search error: {e}"}
 
     # ══════════════════════════════════════════════════════════════════
     # PRD-73: MONITORING HANDLERS (Loki, Prometheus, Alerts)
