@@ -204,7 +204,12 @@ from core.utils.logging_adapter import (
     install_request_context_logging,
     set_request_id,
     clear_request_id,
+    set_request_context,
     request_id_var,
+    workspace_id_var,
+    user_id_var,
+    http_method_var,
+    http_path_var,
 )
 
 # Configure logging — ships to log-relay → Loki when LOG_RELAY_URL is set
@@ -646,9 +651,20 @@ install_request_context_logging()
 async def add_request_id_middleware(request, call_next):
     inbound = request.headers.get("X-Request-ID")
     token = set_request_id(inbound or uuid.uuid4().hex[:12])
+
+    # PRD-73 Phase 2: Enrich logs with request context (workspace, user, method, path)
+    # ContextVars are captured automatically by LogRelayHandler — zero cost at call sites
+    http_method_var.set(request.method)
+    http_path_var.set(request.url.path)
+
+    # Extract workspace_id and user_id from auth headers (best-effort, pre-auth)
+    ws_header = request.headers.get("x-workspace-id", "") or request.headers.get("x-workspace", "")
+    if ws_header and ws_header != "__all__":
+        workspace_id_var.set(ws_header)
+
     try:
         response = await call_next(request)
-        response.headers["X-Request-ID"] = request.headers.get("X-Request-ID") or request_id_var.get()
+        response.headers["X-Request-ID"] = request.headers.get("X-Request-ID") or request_id_var.get("")
         return response
     finally:
         clear_request_id(token)
@@ -830,6 +846,15 @@ try:
     logger.info("Alert ingest endpoint enabled at /api/alerts/ingest")
 except Exception as e:
     logger.warning(f"Alert ingest disabled: {e}")
+
+# PRD-73 Phase 2: Loki log query API for SENTINEL investigation
+try:
+    from core.monitoring.automatos_logs_api import create_logs_router
+    logs_router = create_logs_router()
+    app.include_router(logs_router, prefix="/api")
+    logger.info("Loki log query API enabled at /api/logs/query")
+except Exception as e:
+    logger.warning(f"Loki log query API disabled: {e}")
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

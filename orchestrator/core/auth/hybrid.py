@@ -18,6 +18,23 @@ from core.database.database import SessionLocal
 logger = logging.getLogger(__name__)
 
 
+def _enrich_log_context(ctx: RequestContext) -> None:
+    """Set ContextVars from resolved auth context for structured logging.
+
+    Called after auth resolves so every downstream log entry
+    carries workspace_id and user_id automatically.
+    """
+    try:
+        from core.utils.logging_adapter import workspace_id_var, user_id_var, tenant_id_var
+        if ctx.workspace_id:
+            workspace_id_var.set(str(ctx.workspace_id))
+            tenant_id_var.set(str(ctx.workspace_id))
+        if ctx.user and ctx.user.id:
+            user_id_var.set(str(ctx.user.id))
+    except Exception:
+        pass  # Never break auth for logging
+
+
 def _parse_uuid(value: Optional[str]) -> Optional[UUID]:
     if not value:
         return None
@@ -350,7 +367,9 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                         raw_claims=claims,
                     )
                     # workspace_id=None tells endpoints to skip workspace filter
-                    return RequestContext(workspace_id=admin_home_ws, user=user, auth_type="clerk", admin_all_workspaces=True)
+                    result = RequestContext(workspace_id=admin_home_ws, user=user, auth_type="clerk", admin_all_workspaces=True)
+                    _enrich_log_context(result)
+                    return result
 
                 # If client sent a workspace ID via header, verify the user has access
                 if workspace_id:
@@ -390,7 +409,9 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                     org_id=info.get("org_id"),
                     raw_claims=claims,
                 )
-                return RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
+                result = RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
+                _enrich_log_context(result)
+                return result
 
             # If a bearer token is present but invalid, treat as unauthorized.
             logger.warning("Auth failed: Invalid or expired Clerk token")
@@ -412,9 +433,11 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace not resolved")
                 if not _workspace_exists(db, resolved):
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-                return RequestContext(
+                result = RequestContext(
                     workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
                 )
+                _enrich_log_context(result)
+                return result
 
             logger.warning("Auth failed: Invalid API key provided")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
@@ -437,6 +460,8 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
             )
-        return RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
+        result = RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
+        _enrich_log_context(result)
+        return result
     finally:
         db.close()
