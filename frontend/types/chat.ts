@@ -160,11 +160,25 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
 /**
  * Message part types (text, file, tool result)
  */
-export type MessagePart = 
+export type MessagePart =
   | { type: 'text'; text: string }
   | { type: 'file'; filename: string; mediaType: string; url: string }
   | { type: 'tool-result'; toolName: string; result: any }
   | { type: 'artifact'; artifact: Artifact }
+  | { type: 'voice'; transcript: string; audioUrl?: string; durationMs?: number }
+
+/**
+ * Voice message metadata from STT/TTS pipeline
+ */
+export interface VoiceMetadata {
+  transcript: string
+  audioUrl?: string | null
+  sttModel?: string
+  ttsModel?: string
+  ttsVoice?: string
+  sttLatencyMs?: number
+  ttsLatencyMs?: number
+}
 
 /**
  * App usage/token tracking

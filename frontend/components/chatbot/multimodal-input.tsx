@@ -2,11 +2,16 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Send, StopCircle, Paperclip } from 'lucide-react'
+import { AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ModelSelector } from './model-selector'
 import { AgentSelector, type Agent } from './agent-selector'
 import { ToolLogo } from '@/components/ui/tool-logo'
+import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
+import { VoiceRecordingIndicator } from '@/components/voice/VoiceRecordingIndicator'
+import { useVoiceRecorder } from '@/hooks/use-voice-recorder'
+import { sendVoiceMessage, checkVoiceHealth } from '@/lib/voice-client'
 import type { VisibilityType, AppUsage } from '@/types'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
@@ -45,6 +50,54 @@ export function MultimodalInput({
   const [uploadedDocs, setUploadedDocs] = useState<Array<{ document_id: string; filename: string; status: string }>>([])
   const [input, setInput] = useState('')
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
+
+  // Voice recording — hook lifted here so both mic button and indicator can control it
+  const handleVoiceComplete = useCallback(
+    async (blob: Blob, durationMs: number) => {
+      try {
+        const response = await sendVoiceMessage(blob, chatId, {
+          agentId: selectedAgentId ?? undefined,
+          responseFormat: 'both',
+        })
+
+        // Build user voice message parts
+        const userParts: any[] = [
+          {
+            type: 'voice',
+            transcript: response.transcript,
+            durationMs,
+          },
+        ]
+
+        // Send the transcribed text as user message through the normal chat flow
+        sendMessage({
+          role: 'user',
+          content: response.transcript,
+          parts: userParts,
+        })
+      } catch (err: any) {
+        toast.error(err?.message || 'Voice message failed')
+      }
+    },
+    [chatId, selectedAgentId, sendMessage]
+  )
+
+  const voiceRecorder = useVoiceRecorder({
+    maxDurationMs: 120_000,
+    onRecordingComplete: handleVoiceComplete,
+  })
+
+  // Check voice service availability on mount
+  useEffect(() => {
+    checkVoiceHealth()
+      .then((health) => {
+        setVoiceEnabled(health.voice_enabled && health.voice_service_healthy)
+      })
+      .catch(() => {
+        setVoiceEnabled(false)
+      })
+  }, [])
 
   // Safe input with default
   const safeInput = input || ''
@@ -183,36 +236,65 @@ export function MultimodalInput({
       {/* Large input box with everything inside - Incredible-style centered card */}
       <div
         className={[
-          'relative w-full rounded-3xl border-2 border-orange-500/20 bg-transparent',
-          'focus-within:border-orange-500/40 focus-within:ring-2 focus-within:ring-orange-500/15',
+          'relative w-full rounded-3xl border-2',
+          voiceRecorder.state === 'recording'
+            ? 'border-red-500/30 ring-2 ring-red-500/15'
+            : 'border-orange-500/20 focus-within:border-orange-500/40 focus-within:ring-2 focus-within:ring-orange-500/15',
           'transition-all shadow-[0_0_60px_rgba(249,115,22,0.08)]',
         ].join(' ')}
       >
-        {/* Textarea */}
-        <Textarea
-          ref={textareaRef}
-          value={safeInput}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Send a message..."
-          className="min-h-[60px] max-h-[200px] w-full resize-none rounded-3xl bg-transparent border-0 px-4 pt-4 pb-14 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-          rows={1}
-        />
+        {/* Textarea or Recording Indicator */}
+        <AnimatePresence mode="wait">
+          {voiceRecorder.state === 'recording' ? (
+            <VoiceRecordingIndicator
+              key="recording"
+              durationMs={voiceRecorder.durationMs}
+              onStop={voiceRecorder.stopRecording}
+              onCancel={voiceRecorder.cancelRecording}
+            />
+          ) : (
+            <Textarea
+              ref={textareaRef}
+              value={safeInput}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={voiceRecorder.state === 'processing' ? 'Processing voice...' : 'Send a message...'}
+              disabled={voiceRecorder.state === 'processing'}
+              className="min-h-[60px] max-h-[200px] w-full resize-none rounded-3xl bg-transparent border-0 px-4 pt-4 pb-14 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+              rows={1}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Bottom toolbar - inside the input */}
-        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 border-t border-transparent">
-          {/* Left side: Attachment + Model Selector */}
+        <div className={[
+          'flex items-center justify-between px-3 py-2 border-t border-transparent',
+          voiceRecorder.state === 'recording' ? 'hidden' : 'absolute bottom-0 left-0 right-0',
+        ].join(' ')}>
+          {/* Left side: Attachment + Mic + Agent/Model Selector */}
           <div className="flex items-center gap-2">
             <Button
               type="button"
               variant="ghost"
               size="sm"
               className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-              disabled={isStreaming || uploadQueue.length > 0}
+              disabled={isStreaming || uploadQueue.length > 0 || voiceRecorder.state !== 'idle'}
               onClick={() => fileInputRef.current?.click()}
             >
               <Paperclip className="w-4 h-4" />
             </Button>
+
+            {/* Voice Mic Button */}
+            {voiceEnabled && (
+              <VoiceMicButton
+                state={voiceRecorder.state}
+                durationMs={voiceRecorder.durationMs}
+                onStartRecording={voiceRecorder.startRecording}
+                onStopRecording={voiceRecorder.stopRecording}
+                error={voiceRecorder.error}
+                disabled={isStreaming || voiceRecorder.state === 'processing'}
+              />
+            )}
 
             {/* PRD: Unified Agent-Chat System - Agent Selector */}
             {onAgentChange ? (

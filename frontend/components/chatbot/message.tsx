@@ -10,6 +10,7 @@ import remarkGfm from 'remark-gfm'
 import { CodeBlock } from './code-block'
 import { ImageGallery, type ChatImage } from './image-gallery'
 import { MessageActions } from './message-actions'
+import { VoiceMessage } from '@/components/voice/VoiceMessage'
 
 export interface MessageProps {
   chatId: string
@@ -208,6 +209,18 @@ export function Message({
                   </Badge>
                 </div>
               </button>
+            )
+          }
+
+          if (part.type === 'voice' && 'transcript' in part) {
+            return (
+              <VoiceMessage
+                key={index}
+                transcript={part.transcript}
+                audioUrl={'audioUrl' in part ? part.audioUrl : undefined}
+                isUser={isUser}
+                durationMs={'durationMs' in part ? part.durationMs : undefined}
+              />
             )
           }
 
