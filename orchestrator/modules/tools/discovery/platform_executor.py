@@ -80,6 +80,7 @@ class PlatformActionExecutor:
             "platform_assign_tool_to_agent": self._assign_tool_to_agent,
             "platform_assign_skill_to_agent": self._assign_skill_to_agent,
             "platform_assign_plugin_to_agent": self._assign_plugin_to_agent,
+            "platform_configure_agent_heartbeat": self._configure_agent_heartbeat,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -977,33 +978,28 @@ class PlatformActionExecutor:
             return {"success": False, "error": "Missing required parameter: content"}
 
         try:
-            import httpx
-            from config import config
+            import asyncio
+            from modules.memory.integrations.mem0_client import Mem0Client
 
-            mem0_url = config.MEM0_API_URL
-            if not mem0_url:
-                return {"success": False, "error": "Memory service not configured"}
+            client = Mem0Client()
+            if not client.api_url:
+                return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
 
-            headers = {}
-            if config.MEM0_API_KEY:
-                headers["Authorization"] = f"Bearer {config.MEM0_API_KEY}"
+            messages = [{"role": "user", "content": content}]
+            user_id = str(self.workspace_id)
 
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{mem0_url}/v1/memories/",
-                    json={
-                        "messages": [{"role": "user", "content": content}],
-                        "user_id": str(self.workspace_id),
-                    },
-                    headers=headers,
-                )
-                if resp.status_code in (200, 201):
-                    return {
-                        "success": True,
-                        "message": f"Stored in memory: '{content[:100]}...'",
-                    }
-                else:
-                    return {"success": False, "error": f"Memory API returned {resp.status_code}"}
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: client.add(messages=messages, user_id=user_id)
+            )
+
+            if result.get("error"):
+                return {"success": False, "error": result["error"]}
+            return {
+                "success": True,
+                "message": f"Stored in memory: '{content[:100]}...'",
+            }
         except Exception as e:
             logger.warning(f"[PlatformExecutor] Memory store failed: {e}")
             return {"success": False, "error": f"Memory service error: {e}"}
@@ -2578,4 +2574,92 @@ class PlatformActionExecutor:
             "agent": {"id": agent.id, "name": agent.name},
             "plugin": {"id": str(plugin.id), "slug": plugin.slug, "name": plugin.name},
             "message": f"Plugin '{plugin.name}' assigned to agent '{agent.name}'.",
+        }
+
+    # ══════════════════════════════════════════════════════════════════
+    # AGENT HEARTBEAT CONFIGURATION (PRD-71)
+    # ══════════════════════════════════════════════════════════════════
+
+    async def _configure_agent_heartbeat(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Configure or update the heartbeat schedule for an agent."""
+        from sqlalchemy.orm.attributes import flag_modified
+
+        agent, err = self._resolve_agent(params)
+        if err:
+            return err
+
+        # Read current configuration (immutable pattern — build new dict)
+        config = dict(agent.configuration or {})
+        hb = dict(config.get("heartbeat", {}))
+
+        changes = []
+
+        # Apply each provided field
+        if "enabled" in params:
+            hb["enabled"] = bool(params["enabled"])
+            changes.append(f"enabled → {hb['enabled']}")
+
+        if "interval_minutes" in params:
+            minutes = max(5, min(1440, int(params["interval_minutes"])))
+            hb["interval_minutes"] = minutes
+            changes.append(f"interval → {minutes}m")
+
+        if "prompt" in params:
+            hb["prompt"] = str(params["prompt"])[:2000]
+            changes.append("prompt updated")
+
+        if "auto_act" in params:
+            hb["auto_act"] = bool(params["auto_act"])
+            changes.append(f"auto_act → {hb['auto_act']}")
+
+        if "active_hours_start" in params:
+            hb["active_hours_start"] = str(params["active_hours_start"])
+            changes.append(f"active_hours_start → {hb['active_hours_start']}")
+
+        if "active_hours_end" in params:
+            hb["active_hours_end"] = str(params["active_hours_end"])
+            changes.append(f"active_hours_end → {hb['active_hours_end']}")
+
+        if "proactive_level" in params:
+            level = str(params["proactive_level"])
+            if level in ("silent", "notify", "act_notify", "autonomous"):
+                hb["proactive_level"] = level
+                changes.append(f"proactive_level → {level}")
+
+        if "notification_channel" in params:
+            hb["notification_channel"] = str(params["notification_channel"])
+            changes.append(f"notification_channel → {hb['notification_channel']}")
+
+        if "checklist" in params:
+            hb["checklist"] = str(params["checklist"])[:5000]
+            changes.append("checklist updated")
+
+        if not changes:
+            return {
+                "success": True,
+                "message": "No changes specified",
+                "current_heartbeat": hb,
+                "agent_id": agent.id,
+            }
+
+        # Write back (immutable: new dict, not mutation)
+        config["heartbeat"] = hb
+        agent.configuration = config
+        flag_modified(agent, "configuration")
+        self.db.flush()
+
+        logger.info(
+            "[PlatformExecutor] Configured heartbeat for agent '%s' (id=%d): %s",
+            agent.name, agent.id, ", ".join(changes),
+        )
+
+        # Note: heartbeat schedule will be picked up on next service reload.
+        # Live rescheduling requires the HeartbeatService singleton (future enhancement).
+
+        return {
+            "success": True,
+            "agent": {"id": agent.id, "name": agent.name},
+            "heartbeat": hb,
+            "changes": changes,
+            "message": f"Heartbeat for agent '{agent.name}' configured: {', '.join(changes)}",
         }

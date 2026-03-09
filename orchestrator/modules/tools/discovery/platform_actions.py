@@ -20,6 +20,10 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_self_management_actions(registry)
     _register_marketplace_actions(registry)
 
+    # Workspace tools (file I/O, grep, exec, git)
+    from .workspace_actions import register_workspace_actions
+    register_workspace_actions(registry)
+
 
 def _register_read_actions(registry: ActionRegistry) -> None:
     """Register read-only platform actions."""
@@ -1519,5 +1523,77 @@ def _register_marketplace_actions(registry: ActionRegistry) -> None:
             "assign the code review plugin to my dev agent",
             "add plugin testing to agent 5",
             "give the devops plugin to the deployment agent",
+        ],
+    ))
+
+    # ── Agent Heartbeat Configuration (write) ───────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_configure_agent_heartbeat",
+        description=(
+            "Configure or update the heartbeat schedule for an agent. Controls how often "
+            "the agent runs periodic checks, what it checks, active hours, and proactive "
+            "behavior. Set enabled=false to disable the heartbeat entirely."
+        ),
+        category="agents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "integer",
+                    "description": "ID of the agent to configure heartbeat for.",
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": "Name of the agent (alternative to agent_id).",
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Enable or disable the heartbeat. Defaults to true.",
+                },
+                "interval_minutes": {
+                    "type": "integer",
+                    "description": "How often the heartbeat runs, in minutes. Options: 15, 30, 60, 120, 240, 480 (8hr), 1440 (daily), 10080 (weekly). Defaults to 60.",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "What the agent should check on each heartbeat tick (e.g., 'Check calendar for upcoming events').",
+                },
+                "auto_act": {
+                    "type": "boolean",
+                    "description": "Whether the agent can take action on findings or just report. Defaults to false.",
+                },
+                "active_hours_start": {
+                    "type": "string",
+                    "description": "Start of active window in HH:MM format (e.g., '08:00'). Heartbeats only run within active hours.",
+                },
+                "active_hours_end": {
+                    "type": "string",
+                    "description": "End of active window in HH:MM format (e.g., '20:00').",
+                },
+                "proactive_level": {
+                    "type": "string",
+                    "enum": ["silent", "notify", "act_notify", "autonomous"],
+                    "description": "How proactive the agent should be. silent=log only, notify=report to user, act_notify=act and report, autonomous=act independently.",
+                },
+                "notification_channel": {
+                    "type": "string",
+                    "description": "Where to send heartbeat notifications (e.g., 'slack', 'email', 'in_app').",
+                },
+                "checklist": {
+                    "type": "string",
+                    "description": "Checklist of items for the agent to review each tick (newline-separated).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        tags=["agents", "heartbeat", "schedule", "configure"],
+        examples=[
+            "enable heartbeat for the communication agent every 30 minutes",
+            "set agent heartbeat to check calendar every hour",
+            "disable heartbeat for agent 5",
+            "configure sentinel to run every 15 minutes with auto_act",
+            "set active hours 9am to 6pm for the monitoring agent",
         ],
     ))

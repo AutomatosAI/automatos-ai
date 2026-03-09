@@ -184,6 +184,12 @@ try:
 except ImportError:
     channels_router = None
 
+# PRD-72: Activity Command Centre
+try:
+    from api.activity import router as activity_router
+except ImportError:
+    activity_router = None
+
 # PRD-71: community_skills router removed — skills now unified through marketplace pattern
 
 # Import Dashboard Integration (PRD-06)
@@ -201,11 +207,9 @@ from core.utils.logging_adapter import (
     request_id_var,
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure logging — ships to log-relay → Loki when LOG_RELAY_URL is set
+from core.monitoring.automatos_logging import setup_logging
+setup_logging(service="automatos-backend")
 logger = logging.getLogger(__name__)
 
 # API Tracking (in-memory, last 100 calls per endpoint)
@@ -806,6 +810,26 @@ if heartbeat_router is not None:
     app.include_router(heartbeat_router)
 if channels_router is not None:
     app.include_router(channels_router)
+if activity_router is not None:
+    app.include_router(activity_router)  # PRD-72: Activity Command Centre
+
+# PRD-73: Monitoring Stack Integration
+# Prometheus /metrics endpoint + request instrumentation
+try:
+    from core.monitoring.automatos_metrics import setup_metrics
+    setup_metrics(app, service_name="automatos-backend")
+    logger.info("Prometheus /metrics endpoint enabled")
+except Exception as e:
+    logger.warning(f"Prometheus metrics disabled: {e}")
+
+# AlertManager webhook ingest → infrastructure_alerts table
+try:
+    from core.monitoring.automatos_alerts import create_alerts_router
+    alerts_router = create_alerts_router(get_db)
+    app.include_router(alerts_router, prefix="/api")
+    logger.info("Alert ingest endpoint enabled at /api/alerts/ingest")
+except Exception as e:
+    logger.warning(f"Alert ingest disabled: {e}")
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

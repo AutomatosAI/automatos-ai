@@ -445,15 +445,29 @@ async def stream_chat(
             f"reasoning={complexity_assessment.reasoning}"
         )
 
-        if complexity_assessment.action == Action.RESPOND:
+        # Platform management is Auto's core job — never delegate it.
+        # When tool_hints include "platform", Auto handles directly with
+        # all its platform tools (create agents, read workspace, plan, etc.)
+        _platform_hints = "platform" in (complexity_assessment.tool_hints or [])
+
+        if complexity_assessment.action == Action.RESPOND or _platform_hints:
             # Auto handles directly — no routing, no delegation.
-            # Simple greetings, conversational messages, memory recalls.
             effective_agent_id = _fallback_agent_id
             use_system_llm = True
-            logger.info(
-                f"[Auto] Direct response (complexity={complexity_assessment.complexity.value}): "
-                f"agent_id={effective_agent_id} with orchestrator LLM"
-            )
+            if _platform_hints:
+                # Override action so we don't fall into the DELEGATE branch below
+                complexity_assessment.action = Action.RESPOND
+                logger.info(
+                    f"[Auto] Platform hint detected — Auto handles directly "
+                    f"(complexity={complexity_assessment.complexity.value}, "
+                    f"hints={complexity_assessment.tool_hints}): "
+                    f"agent_id={effective_agent_id} with orchestrator LLM"
+                )
+            else:
+                logger.info(
+                    f"[Auto] Direct response (complexity={complexity_assessment.complexity.value}): "
+                    f"agent_id={effective_agent_id} with orchestrator LLM"
+                )
         elif complexity_assessment.action == Action.WORKFLOW:
             # PRD-68 Phase 2: ORGAN/ORGANISM → workflow execution via chat.
             # Create transient workflow, execute through PRD-59 pipeline,

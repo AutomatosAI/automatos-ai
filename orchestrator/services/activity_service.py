@@ -159,6 +159,7 @@ class ActivityService:
             return items
         except Exception as e:
             logger.error("Failed to fetch chats for activity feed: %s", e, exc_info=True)
+            self.db.rollback()
             return []
 
     # ── Routine (Heartbeat) Fetching ──────────────────────────────
@@ -172,7 +173,9 @@ class ActivityService:
                            hr.tokens_used, hr.created_at,
                            a.name AS agent_name, a.marketplace_icon AS agent_icon
                     FROM heartbeat_results hr
-                    LEFT JOIN agents a ON hr.source_type = 'agent' AND a.id = CAST(hr.source_id AS INTEGER)
+                    LEFT JOIN agents a ON hr.source_type = 'agent'
+                        AND hr.source_id ~ '^\d+$'
+                        AND a.id = CAST(hr.source_id AS INTEGER)
                     WHERE hr.workspace_id = :ws_id
                       AND hr.source_type IN ('agent', 'orchestrator')
                       AND hr.created_at >= :since
@@ -218,6 +221,7 @@ class ActivityService:
             return items
         except Exception as e:
             logger.error("Failed to fetch routines for activity feed: %s", e, exc_info=True)
+            self.db.rollback()
             return []
 
     # ── Recipe Execution Fetching ─────────────────────────────────
@@ -301,6 +305,7 @@ class ActivityService:
             return items
         except Exception as e:
             logger.error("Failed to fetch recipes for activity feed: %s", e, exc_info=True)
+            self.db.rollback()
             return []
 
     # ── Stats Helpers ─────────────────────────────────────────────

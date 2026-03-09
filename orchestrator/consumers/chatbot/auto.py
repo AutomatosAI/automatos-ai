@@ -234,6 +234,11 @@ _PLATFORM_KEYWORDS = {
         "assign plugin to agent", "add plugin to agent",
         "give agent a plugin", "attach plugin to agent",
     ],
+    "platform_configure_agent_heartbeat": [
+        "configure heartbeat", "set heartbeat", "agent heartbeat",
+        "heartbeat schedule", "enable heartbeat", "disable heartbeat",
+        "heartbeat interval", "set active hours",
+    ],
     "platform_create_agent": [
         "create agent", "create an agent", "build agent", "build an agent",
         "make agent", "make an agent", "set up agent", "setup agent",
@@ -242,6 +247,32 @@ _PLATFORM_KEYWORDS = {
     "platform_update_agent": [
         "update agent", "modify agent", "change agent", "edit agent",
         "configure agent", "reconfigure agent",
+    ],
+    # Workspace tools (file I/O, exec, git)
+    "workspace_read_file": [
+        "read file", "show file", "open file", "cat file",
+        "view source", "read the code", "show me the code",
+    ],
+    "workspace_write_file": [
+        "write file", "create file", "save file", "update file",
+        "edit file", "modify file", "fix the code",
+    ],
+    "workspace_list_dir": [
+        "list files", "list directory", "show directory", "project structure",
+        "what files are there", "ls", "show files",
+    ],
+    "workspace_grep": [
+        "search code", "find in code", "grep", "search for",
+        "where is the function", "find definition",
+    ],
+    "workspace_exec": [
+        "run tests", "run command", "execute command", "npm test",
+        "pytest", "run the build", "run linter",
+    ],
+    "workspace_git": [
+        "git status", "git diff", "git commit", "git push",
+        "git log", "git pull", "check git", "commit changes",
+        "push changes",
     ],
 }
 
