@@ -188,6 +188,26 @@ _PLATFORM_KEYWORDS = {
         "recent activity", "activity feed", "what's been happening",
         "show activity", "what has been running", "activity log",
     ],
+    # PRD-73: Monitoring tools
+    "platform_query_loki_logs": [
+        "search logs", "query logs", "check logs", "show logs",
+        "error logs", "find in logs", "log search", "loki",
+        "what errors happened", "any errors in logs",
+        "backend logs", "worker logs", "service logs",
+    ],
+    "platform_query_prometheus": [
+        "check metrics", "prometheus", "service health",
+        "error rate", "response time", "latency",
+        "database connections", "redis memory", "redis usage",
+        "postgres health", "db health", "are services up",
+        "p95", "uptime", "prometheus metrics",
+    ],
+    "platform_get_alerts": [
+        "firing alerts", "active alerts", "any alerts",
+        "infrastructure alerts", "check alerts", "alert history",
+        "monitoring alerts", "system alerts", "what's broken",
+        "any issues", "infrastructure issues",
+    ],
     # Marketplace discovery & workspace inventory (PRD-71)
     "platform_browse_marketplace_plugins": [
         "marketplace plugins", "browse plugins", "search plugins",

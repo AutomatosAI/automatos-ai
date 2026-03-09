@@ -234,6 +234,13 @@ class Config:
     RAILWAY_ENVIRONMENT_ID: str = os.getenv("RAILWAY_ENVIRONMENT_ID", "")
 
     # =============================================================================
+    # MONITORING (PRD-73)
+    # =============================================================================
+    LOKI_URL: str = os.getenv("LOKI_URL", "http://loki.railway.internal:3100")
+    PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://prometheus.railway.internal:9090")
+    ALERTMANAGER_URL: str = os.getenv("ALERTMANAGER_URL", "http://alertmanager.railway.internal:9093")
+
+    # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
