@@ -178,6 +178,12 @@ try:
 except ImportError:
     channels_router = None
 
+# PRD-72: Activity Command Centre
+try:
+    from api.activity import router as activity_router
+except ImportError:
+    activity_router = None
+
 # PRD-71: community_skills router removed — skills now unified through marketplace pattern
 
 # Import Dashboard Integration (PRD-06)
@@ -794,6 +800,8 @@ if heartbeat_router is not None:
     app.include_router(heartbeat_router)
 if channels_router is not None:
     app.include_router(channels_router)
+if activity_router is not None:
+    app.include_router(activity_router)  # PRD-72: Activity Command Centre
 
 # PRD-73: Monitoring Stack Integration
 # Prometheus /metrics endpoint + request instrumentation
