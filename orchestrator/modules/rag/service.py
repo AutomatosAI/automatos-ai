@@ -286,12 +286,48 @@ class RAGService:
 
         # Use existing ContextOptimizer if available
         if self._context_optimizer:
-            return await self._optimize_with_context_optimizer(
+            result = await self._optimize_with_context_optimizer(
                 query, candidates, max_chunks, max_tokens, diversity
             )
         else:
             # Fallback to basic retrieval
-            return self._basic_retrieval(query, candidates, max_chunks, max_tokens)
+            result = self._basic_retrieval(query, candidates, max_chunks, max_tokens)
+
+        # Track document access for analytics (fire-and-forget)
+        if result.chunks and workspace_id:
+            self._track_document_access(result.chunks, workspace_id)
+
+        return result
+
+    def _track_document_access(self, chunks: List[Dict[str, Any]], workspace_id: str) -> None:
+        """Update last_accessed timestamp on documents retrieved via RAG."""
+        try:
+            from core.database.database import SessionLocal
+            from sqlalchemy import text
+            doc_ids = set()
+            for chunk in chunks:
+                meta = chunk.get("metadata", {})
+                doc_id = meta.get("document_id") or meta.get("doc_id")
+                if doc_id:
+                    doc_ids.add(str(doc_id))
+            if not doc_ids:
+                return
+            db = SessionLocal()
+            try:
+                db.execute(
+                    text("""
+                        UPDATE documents
+                        SET last_accessed = NOW(),
+                            rag_query_count = COALESCE(rag_query_count, 0) + 1
+                        WHERE id = ANY(:ids) AND workspace_id = :ws
+                    """),
+                    {"ids": list(doc_ids), "ws": workspace_id},
+                )
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.debug(f"Document access tracking failed: {e}")
     
     async def _multi_query_retrieval_with_rrf(
         self,

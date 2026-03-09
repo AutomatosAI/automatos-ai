@@ -286,7 +286,33 @@ class SmartMemoryManager:
         # Cache result
         self._cache[cache_key] = (time.time(), result)
 
+        # Track memory access for analytics (fire-and-forget)
+        try:
+            self._track_memory_access(workspace_id, len(memories) > 0)
+        except Exception:
+            pass
+
         return result
+
+    def _track_memory_access(self, workspace_id: str, had_results: bool) -> None:
+        """Record a memory search for hit-rate analytics."""
+        try:
+            from core.database.database import SessionLocal
+            from sqlalchemy import text
+            db = SessionLocal()
+            try:
+                db.execute(
+                    text("""
+                        INSERT INTO memory_access_log (workspace_id, had_results, created_at)
+                        VALUES (:ws, :hit, NOW())
+                    """),
+                    {"ws": workspace_id, "hit": had_results},
+                )
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.debug(f"[SmartMemory] Access tracking skipped: {e}")
 
     def _extract_user_context(self, memories: List[Dict]) -> UserContext:
         """

@@ -64,8 +64,8 @@ class ActivityService:
         want_all = types is None or len(types) == 0
         want_types = set(types) if types else set()
 
-        # NOTE: Chats excluded from feed — casual Q&A is not "activity".
-        # Only real work (routines, recipes, missions) belongs here.
+        if want_all or "chat" in want_types:
+            items.extend(self._fetch_chats(since, limit + offset))
 
         if want_all or "routine" in want_types:
             items.extend(self._fetch_routines(since, limit + offset))

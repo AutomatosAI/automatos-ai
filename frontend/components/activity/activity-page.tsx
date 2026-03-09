@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import {
   Activity,
@@ -60,6 +60,7 @@ const TAB_DEFS = [
 ]
 
 export function ActivityPage() {
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState('dashboard')
   const [period, setPeriod] = useState('1d')
 
@@ -76,6 +77,13 @@ export function ActivityPage() {
 
   // RecipesTab requires onUseRecipe — no-op in Activity context (full edit is in /workflows)
   const handleUseRecipe = useCallback(() => {}, [])
+
+  // Navigate to ExecutionKitchen when a recipe is cooked from the Recipes tab
+  const handleExecuteRecipe = useCallback((_workflowId: number, info?: { recipeExecutionId: string; recipeId: string }) => {
+    if (info) {
+      router.push(`/workflows?openExecution=${info.recipeExecutionId}&recipeId=${info.recipeId}`)
+    }
+  }, [router])
 
   // Switch to feed tab when "View All" is clicked in recent activity widget
   const handleViewAllActivity = useCallback(() => {
@@ -144,7 +152,7 @@ export function ActivityPage() {
           </TabsContent>
 
           <TabsContent value="recipes">
-            <RecipesTab onUseRecipe={handleUseRecipe} />
+            <RecipesTab onUseRecipe={handleUseRecipe} onExecuteRecipe={handleExecuteRecipe} />
           </TabsContent>
 
           <TabsContent value="missions">

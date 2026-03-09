@@ -37,12 +37,27 @@ export function AnalyticsOverview({ days }: OverviewProps) {
   const { data: chartPresets } = useChartPresets()
 
   // PRD-55: Heartbeat and Channel analytics
-  const [heartbeatStats, setHeartbeatStats] = useState<any>({ total_today: 0, findings: 0, actions: 0, tokens_used: 0, recent_events: [] })
+  const [heartbeatStats, setHeartbeatStats] = useState<any>({ total_heartbeats: 0, total_tokens: 0, successes: 0, errors: 0, recent_events: [] })
   const [channelStats, setChannelStats] = useState<any>({})
 
   useEffect(() => {
-    fetch('/api/heartbeat/analytics').then(r => r.json()).then(setHeartbeatStats).catch((err) => { console.warn('[Analytics] Heartbeat fetch failed:', err?.message || err) })
-    fetch('/api/channels/analytics').then(r => r.json()).then(data => setChannelStats(data.by_source || {})).catch((err) => { console.warn('[Analytics] Channel fetch failed:', err?.message || err) })
+    import('@/lib/api-client').then(({ apiClient }) => {
+      apiClient.request('/api/heartbeat/analytics')
+        .then((data: any) => {
+          setHeartbeatStats({
+            total_heartbeats: data.today?.total_heartbeats || 0,
+            total_tokens: data.today?.total_tokens || 0,
+            successes: data.today?.successes || 0,
+            errors: data.today?.errors || 0,
+            recent_events: data.recent_events || [],
+          })
+        })
+        .catch((err: any) => console.warn('[Analytics] Heartbeat fetch failed:', err?.message || err))
+
+      apiClient.request('/api/channels/analytics')
+        .then((data: any) => setChannelStats(data.today_by_source || {}))
+        .catch((err: any) => console.warn('[Analytics] Channel fetch failed:', err?.message || err))
+    })
   }, [days])
 
   const summaryCards = [
@@ -134,19 +149,19 @@ export function AnalyticsOverview({ days }: OverviewProps) {
           <CardContent>
             <div className="grid grid-cols-4 gap-4">
               <div className="text-center p-3 rounded-lg bg-muted/50">
-                <p className="text-xl font-bold">{heartbeatStats.total_today}</p>
+                <p className="text-xl font-bold">{heartbeatStats.total_heartbeats}</p>
                 <p className="text-xs text-muted-foreground">Today</p>
               </div>
               <div className="text-center p-3 rounded-lg bg-muted/50">
-                <p className="text-xl font-bold">{heartbeatStats.findings}</p>
-                <p className="text-xs text-muted-foreground">Findings</p>
+                <p className="text-xl font-bold">{heartbeatStats.successes}</p>
+                <p className="text-xs text-muted-foreground">Successes</p>
               </div>
               <div className="text-center p-3 rounded-lg bg-muted/50">
-                <p className="text-xl font-bold">{heartbeatStats.actions}</p>
-                <p className="text-xs text-muted-foreground">Actions</p>
+                <p className="text-xl font-bold">{heartbeatStats.errors}</p>
+                <p className="text-xs text-muted-foreground">Errors</p>
               </div>
               <div className="text-center p-3 rounded-lg bg-muted/50">
-                <p className="text-xl font-bold">{heartbeatStats.tokens_used}</p>
+                <p className="text-xl font-bold">{heartbeatStats.total_tokens?.toLocaleString() || 0}</p>
                 <p className="text-xs text-muted-foreground">Tokens</p>
               </div>
             </div>
@@ -185,29 +200,27 @@ export function AnalyticsOverview({ days }: OverviewProps) {
         </Card>
       </motion.div>
 
-      {/* AI-Generated Insights — only render if presets are available */}
-      {chartPresets && chartPresets.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.7 }}
-        >
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Sparkles className="w-4 h-4 text-purple-400" />
-                AI-Generated Insights
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <AnalyticsPandasChart presetId="cost-by-model" />
-                <AnalyticsPandasChart presetId="tokens-over-time" />
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+      {/* AI-Generated Insights */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.7 }}
+      >
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Sparkles className="w-4 h-4 text-purple-400" />
+              AI-Generated Insights
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <AnalyticsPandasChart presetId="cost-by-model" />
+              <AnalyticsPandasChart presetId="tokens-over-time" />
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
     </div>
   )
 }

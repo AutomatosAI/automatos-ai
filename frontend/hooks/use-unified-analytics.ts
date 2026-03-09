@@ -30,6 +30,11 @@ export const unifiedAnalyticsKeys = {
   composioApps: (days: number) => ['unified-analytics', wsScope(), 'composio', 'apps', days] as const,
   composioActions: (days: number) => ['unified-analytics', wsScope(), 'composio', 'actions', days] as const,
   composioAgentTools: (days: number) => ['unified-analytics', wsScope(), 'composio', 'agent-tools', days] as const,
+  composioExecStats: (days: number) => ['unified-analytics', wsScope(), 'composio', 'exec-stats', days] as const,
+  composioPerformance: (days: number) => ['unified-analytics', wsScope(), 'composio', 'performance', days] as const,
+  composioDailyVolume: (days: number) => ['unified-analytics', wsScope(), 'composio', 'daily-volume', days] as const,
+  composioRecentExecs: () => ['unified-analytics', wsScope(), 'composio', 'recent-execs'] as const,
+  composioErrors: (days: number) => ['unified-analytics', wsScope(), 'composio', 'errors', days] as const,
   chartPresets: () => ['unified-analytics', wsScope(), 'charts', 'presets'] as const,
   modelComparison: (modelIds: string[], period: string) => ['unified-analytics', wsScope(), 'llm', 'comparison', modelIds, period] as const,
   costProjections: (period: string) => ['unified-analytics', wsScope(), 'llm', 'projections', period] as const,
@@ -251,8 +256,7 @@ export function useDocumentAnalyticsUnified(days: number = 30) {
 
       const [documents, usage] = await Promise.all([
         safeRequest(() => apiClient.getDocuments(), []),
-        safeRequest(() => fetch(`/api/documents/analytics/usage?period=${period}`)
-          .then(r => r.ok ? r.json() : null), null),
+        safeRequest(() => apiClient.request<any>(`/api/documents/analytics/usage?period=${period}`), null),
       ])
 
       const docList = Array.isArray(documents) ? documents : []
@@ -437,10 +441,20 @@ export function useRecommendations() {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.recommendations(),
     queryFn: async () => {
-      // Build recommendations from data analysis
-      const agents = await apiClient.getAgents().catch(() => [])
-      const agentList = Array.isArray(agents) ? agents : []
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch((err) => {
+          console.warn('[Analytics] Recommendation fetch failed:', err?.message || err)
+          return fallback
+        })
 
+      // Fetch real data in parallel: backend LLM recommendations + agent list + LLM summary
+      const [backendRecs, agents, llmSummary] = await Promise.all([
+        safeRequest(() => apiClient.request<any[]>('/api/analytics/llm/recommendations'), []),
+        safeRequest(() => apiClient.getAgents(), []),
+        safeRequest(() => apiClient.request<any>('/api/analytics/llm/summary?period=30d'), null),
+      ])
+
+      const agentList = Array.isArray(agents) ? agents : []
       const recommendations: Array<{
         id: string
         type: 'cost' | 'performance' | 'document' | 'quota'
@@ -450,85 +464,80 @@ export function useRecommendations() {
         action?: string
       }> = []
 
-      // Analyze agent LLM usage
-      const totalCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
-      const totalTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
-      const totalRequests = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_requests || 0), 0)
-      const activeAgents = agentList.filter((a: any) => a.status === 'active').length
-      const unusedAgents = agentList.filter((a: any) => !a.model_usage_stats?.total_requests || a.model_usage_stats.total_requests === 0)
-
-      agentList.forEach((agent: any) => {
-        const model = agent.agent_model_config?.model_id || ''
-        const cost = agent.model_usage_stats?.total_cost || 0
-        const tokens = agent.model_usage_stats?.total_tokens || 0
-        const avgTokens = agent.model_usage_stats?.total_requests > 0
-          ? tokens / agent.model_usage_stats.total_requests
-          : 0
-
-        // Flag expensive models on simple tasks (low token usage = simple task)
-        if (avgTokens < 500 && avgTokens > 0 && (model.includes('gpt-4') || model.includes('opus') || model.includes('claude-3'))) {
-          recommendations.push({
-            id: `cost-${agent.id}`,
-            type: 'cost',
-            title: `${agent.name} could use a cheaper model`,
-            description: `This agent averages only ${Math.round(avgTokens)} tokens per request — it's handling simple tasks. Consider switching from ${model} to a more cost-effective model like gpt-4o-mini or claude-3-haiku.`,
-            impact: `Estimated savings: $${(cost * 0.7).toFixed(2)}/month`,
-          })
-        }
-
-        // Flag agents with low success rates
-        const successRate = agent.performance_metrics?.success_rate || 0
-        if (successRate > 0 && successRate < 80) {
-          recommendations.push({
-            id: `perf-${agent.id}`,
-            type: 'performance',
-            title: `${agent.name} has a low success rate (${successRate.toFixed(0)}%)`,
-            description: `This agent is failing on ${(100 - successRate).toFixed(0)}% of tasks. Check the error logs and consider adjusting the agent's configuration or skills.`,
-            impact: 'Improved reliability',
-          })
-        }
+      // Include backend LLM cost optimization recommendations
+      const backendRecList = Array.isArray(backendRecs) ? backendRecs : []
+      backendRecList.forEach((rec: any, idx: number) => {
+        if (rec.type === 'info') return // Skip "no suggestions" placeholder
+        const agentName = rec.affected_agent_ids?.[0]
+          ? agentList.find((a: any) => a.id === rec.affected_agent_ids[0])?.name || `Agent ${rec.affected_agent_ids[0]}`
+          : ''
+        recommendations.push({
+          id: `llm-${idx}`,
+          type: 'cost',
+          title: agentName ? rec.title.replace(`Agent ${rec.affected_agent_ids[0]}`, agentName) : rec.title,
+          description: rec.description,
+          impact: rec.potential_savings ? `Potential savings: $${rec.potential_savings}/month` : 'Cost optimization',
+        })
       })
 
-      // Summary insight: unused agents
-      if (unusedAgents.length > 0 && agentList.length > 1) {
+      // Real LLM summary stats
+      const totalCost = llmSummary?.total_cost || 0
+      const totalTokens = llmSummary?.total_tokens || 0
+      const totalRequests = llmSummary?.total_requests || 0
+      const activeAgents = agentList.filter((a: any) => a.status === 'active').length
+
+      // Agent-level insights from agent data
+      const agentsWithNoSkills = agentList.filter((a: any) => a.status === 'active' && (!a.skills || a.skills.length === 0))
+      const agentsWithNoTools = agentList.filter((a: any) => a.status === 'active' && (!a.tools || a.tools.length === 0))
+
+      if (agentsWithNoSkills.length > 0) {
         recommendations.push({
-          id: 'unused-agents',
+          id: 'no-skills',
           type: 'performance',
-          title: `${unusedAgents.length} agent${unusedAgents.length > 1 ? 's have' : ' has'} never been used`,
-          description: `${unusedAgents.map((a: any) => a.name).slice(0, 3).join(', ')}${unusedAgents.length > 3 ? ` and ${unusedAgents.length - 3} more` : ''} — consider assigning them to workflows or removing unused ones.`,
-          impact: 'Cleaner workspace',
+          title: `${agentsWithNoSkills.length} active agent${agentsWithNoSkills.length > 1 ? 's have' : ' has'} no skills assigned`,
+          description: `${agentsWithNoSkills.map((a: any) => a.name).slice(0, 3).join(', ')}${agentsWithNoSkills.length > 3 ? ` and ${agentsWithNoSkills.length - 3} more` : ''} — assign skills to improve routing accuracy.`,
+          impact: 'Better agent routing',
         })
       }
 
-      // Summary insight: total spend
+      if (agentsWithNoTools.length > 0 && agentsWithNoTools.length < agentList.length) {
+        recommendations.push({
+          id: 'no-tools',
+          type: 'performance',
+          title: `${agentsWithNoTools.length} agent${agentsWithNoTools.length > 1 ? 's have' : ' has'} no connected tools`,
+          description: `${agentsWithNoTools.map((a: any) => a.name).slice(0, 3).join(', ')} — connect Composio tools so agents can take real actions.`,
+          impact: 'Enable tool usage',
+        })
+      }
+
+      // Cost summary if available
       if (totalCost > 0) {
         const costPerRequest = totalRequests > 0 ? totalCost / totalRequests : 0
         recommendations.push({
           id: 'cost-summary',
           type: 'cost',
-          title: `$${totalCost.toFixed(2)} spent across ${totalRequests.toLocaleString()} requests`,
-          description: `Average cost per request: $${costPerRequest.toFixed(4)}. ${totalTokens.toLocaleString()} tokens used across ${activeAgents} active agent${activeAgents !== 1 ? 's' : ''}.`,
+          title: `$${totalCost.toFixed(2)} spent across ${totalRequests.toLocaleString()} LLM requests`,
+          description: `Average $${costPerRequest.toFixed(4)}/request. ${totalTokens.toLocaleString()} tokens used across ${activeAgents} active agent${activeAgents !== 1 ? 's' : ''}.`,
           impact: 'Cost overview',
         })
       }
 
-      // Insight: no usage data yet
+      // Getting started hint if no LLM usage
       if (totalRequests === 0 && agentList.length > 0) {
         recommendations.push({
           id: 'no-usage',
           type: 'quota',
-          title: `${agentList.length} agents configured but no LLM usage tracked yet`,
-          description: 'Start a chat conversation or run a recipe to begin tracking token usage and costs automatically.',
+          title: 'No LLM usage tracked yet',
+          description: `${agentList.length} agents configured. Chat with an agent or run a recipe to start tracking usage and costs.`,
           impact: 'Getting started',
         })
       }
 
-      // Sort: cost first, then performance, then others
       const typePriority: Record<string, number> = { cost: 0, performance: 1, document: 2, quota: 3 }
       recommendations.sort((a, b) => (typePriority[a.type] ?? 9) - (typePriority[b.type] ?? 9))
       return recommendations.slice(0, 5)
     },
-    staleTime: 24 * 60 * 60 * 1000, // Cache for 24 hours
+    staleTime: 5 * 60 * 1000, // 5 min (was 24h — too stale)
   })
 }
 
@@ -704,6 +713,106 @@ export function useComposioAgentTools(days: number = 30) {
       )
     },
     staleTime: 60000, // 1 minute
+  })
+}
+
+// ============= COMPOSIO API MONITORING =============
+
+export interface ComposioExecStats {
+  total_executions: number
+  success_count: number
+  error_count: number
+  timeout_count: number
+  success_rate: number
+  error_rate: number
+  avg_latency_ms: number
+  p50_latency_ms: number | null
+  p95_latency_ms: number | null
+  max_latency_ms: number | null
+  cache_hit_rate: number
+  unique_actions: number
+  unique_apps: number
+}
+
+export interface ComposioActionPerformance {
+  action_name: string
+  app_name: string
+  total_calls: number
+  success_count: number
+  error_count: number
+  error_rate: number
+  avg_latency_ms: number
+  max_latency_ms: number
+  cache_hit_rate: number
+  last_executed: string | null
+}
+
+export interface ComposioDailyVolume {
+  date: string
+  total: number
+  successes: number
+  errors: number
+  avg_latency_ms: number
+}
+
+export interface ComposioRecentExecution {
+  id: number
+  agent_name: string | null
+  app_name: string
+  action_name: string
+  status: string
+  execution_time_ms: number | null
+  error_message: string | null
+  cache_hit: boolean
+  executed_at: string | null
+}
+
+export interface ComposioErrorBreakdown {
+  error_code: string | null
+  error_message: string
+  count: number
+  last_seen: string | null
+  app_name: string
+  action_name: string
+}
+
+export function useComposioExecStats(days: number = 30) {
+  return useQuery<ComposioExecStats>({
+    queryKey: unifiedAnalyticsKeys.composioExecStats(days),
+    queryFn: () => apiClient.request<ComposioExecStats>(`/api/analytics/composio/execution-stats?days=${days}`),
+    staleTime: 60000,
+  })
+}
+
+export function useComposioPerformance(days: number = 30) {
+  return useQuery<ComposioActionPerformance[]>({
+    queryKey: unifiedAnalyticsKeys.composioPerformance(days),
+    queryFn: () => apiClient.request<ComposioActionPerformance[]>(`/api/analytics/composio/performance-by-action?days=${days}`),
+    staleTime: 60000,
+  })
+}
+
+export function useComposioDailyVolume(days: number = 30) {
+  return useQuery<ComposioDailyVolume[]>({
+    queryKey: unifiedAnalyticsKeys.composioDailyVolume(days),
+    queryFn: () => apiClient.request<ComposioDailyVolume[]>(`/api/analytics/composio/daily-volume?days=${days}`),
+    staleTime: 60000,
+  })
+}
+
+export function useComposioRecentExecs() {
+  return useQuery<ComposioRecentExecution[]>({
+    queryKey: unifiedAnalyticsKeys.composioRecentExecs(),
+    queryFn: () => apiClient.request<ComposioRecentExecution[]>('/api/analytics/composio/recent-executions?limit=20'),
+    staleTime: 30000, // 30s for live-ish monitoring
+  })
+}
+
+export function useComposioErrors(days: number = 30) {
+  return useQuery<ComposioErrorBreakdown[]>({
+    queryKey: unifiedAnalyticsKeys.composioErrors(days),
+    queryFn: () => apiClient.request<ComposioErrorBreakdown[]>(`/api/analytics/composio/error-breakdown?days=${days}`),
+    staleTime: 60000,
   })
 }
 

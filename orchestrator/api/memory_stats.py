@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, text
 from datetime import datetime, timedelta
 
 from core.database.database import get_db
@@ -85,11 +85,28 @@ async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_contex
         func.sum(MemoryItem.access_count)
     ).filter(ws_filter).scalar() or 0
 
-    # Hit rate: real calculation from access patterns
-    if total_memories > 0 and total_accesses > 0:
-        hit_rate = round(min(total_accesses / max(total_memories, 1), 1.0), 2)
-    else:
-        hit_rate = 0
+    # Hit rate: calculated from memory_access_log (real search-based metric)
+    hit_rate = 0
+    total_searches = 0
+    try:
+        access_stats = db.execute(
+            text("""
+                SELECT
+                    COUNT(*) as total_searches,
+                    SUM(CASE WHEN had_results THEN 1 ELSE 0 END) as hits
+                FROM memory_access_log
+                WHERE workspace_id = :ws_id
+            """),
+            {"ws_id": str(ctx.workspace_id)},
+        ).fetchone()
+        total_searches = access_stats.total_searches or 0
+        hits = access_stats.hits or 0
+        hit_rate = round(hits / max(total_searches, 1), 2) if total_searches > 0 else 0
+    except Exception as e:
+        logger.debug(f"memory_access_log query failed (table may not exist yet): {e}")
+        # Fallback to old calculation
+        if total_memories > 0 and total_accesses > 0:
+            hit_rate = round(min(total_accesses / max(total_memories, 1), 1.0), 2)
 
     return {
         "system_stats": {
@@ -100,7 +117,7 @@ async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_contex
             "source": "mem0" if mem0_available else "local_db",
         },
         "access_metrics": {
-            "total_accesses": total_accesses,
+            "total_accesses": total_searches,
             "hit_rate": hit_rate,
             "cache_utilization": min(100, (total_memories / 1000) * 100) if total_memories else 0,
         },

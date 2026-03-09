@@ -13,7 +13,9 @@ import {
   Clock,
   Zap,
   Eye,
+  MessageCircle,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -32,9 +34,10 @@ import { cn } from '@/lib/utils'
 // ─── Filter Chip Config ─────────────────────────────────
 
 const TYPE_CHIPS = [
-  { value: 'routine', label: 'Routines', icon: RefreshCw },
+  { value: 'chat', label: 'Chat', icon: Activity },
   { value: 'recipe', label: 'Recipes', icon: ChefHat },
-  { value: 'mission', label: 'Missions', icon: Rocket },
+  { value: 'routine', label: 'Routines', icon: RefreshCw },
+  { value: 'mission', label: 'Missions', icon: Rocket, comingSoon: true },
 ] as const
 
 const STATUS_OPTIONS = [
@@ -106,6 +109,7 @@ interface ActivityFeedProps {
 }
 
 export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }: ActivityFeedProps) {
+  const router = useRouter()
   const [activeTypes, setActiveTypes] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState('all')
   const [limit, setLimit] = useState(PAGE_SIZE)
@@ -203,8 +207,20 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   }, [])
 
   const handleViewItem = useCallback((item: ActivityFeedItem) => {
+    // Navigate to ExecutionKitchen for recipes (detailed live view)
+    if (item.type === 'recipe' && item.source_id) {
+      const execId = item.id.replace('recipe-', '')
+      router.push(`/workflows?openExecution=${execId}&recipeId=${item.source_id}`)
+      return
+    }
+    // For chats, navigate to the chat
+    if (item.type === 'chat' && item.source_id) {
+      router.push(`/chat/${item.source_id}`)
+      return
+    }
+    // Fallback to inline detail for routines
     setSelectedItem(item)
-  }, [])
+  }, [router])
 
   const handleCloseDetail = useCallback(() => {
     setSelectedItem(null)
@@ -560,20 +576,25 @@ function FilterBar({
 
       {TYPE_CHIPS.map((chip) => {
         const isActive = activeTypes.includes(chip.value)
-        const Icon = chip.icon
+        const Icon = chip.value === 'chat' ? MessageCircle : chip.icon
+        const isDisabled = 'comingSoon' in chip && chip.comingSoon
         return (
           <Button
             key={chip.value}
             variant={isActive ? 'secondary' : 'ghost'}
             size="sm"
-            onClick={() => onToggleType(chip.value)}
+            onClick={() => !isDisabled && onToggleType(chip.value)}
+            disabled={isDisabled}
             className={cn(
               'text-xs min-h-[44px] sm:min-h-0 sm:h-7 shrink-0 gap-1.5',
-              isActive && 'bg-secondary/80'
+              isActive && 'bg-secondary/80',
+              isDisabled && 'opacity-40 cursor-not-allowed'
             )}
           >
             <Icon className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">{chip.label}</span>
+            <span className="hidden xs:inline">
+              {chip.label}{isDisabled ? ' (soon)' : ''}
+            </span>
           </Button>
         )
       })}

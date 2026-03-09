@@ -10,15 +10,29 @@ import {
   ChevronRight,
   Bot,
   FileText,
+  Activity,
+  Clock,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Timer,
+  Gauge,
+  TrendingUp,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatsBar } from '@/components/shared/stats-bar'
+import { Progress } from '@/components/ui/progress'
 import {
   useComposioApps,
   useComposioActions,
   useComposioAgentTools,
+  useComposioExecStats,
+  useComposioPerformance,
+  useComposioDailyVolume,
+  useComposioRecentExecs,
+  useComposioErrors,
 } from '@/hooks/use-unified-analytics'
 
 interface Props {
@@ -79,6 +93,11 @@ export function AnalyticsComposio({ days }: Props) {
   const { data: apps, isLoading: appsLoading } = useComposioApps(days)
   const { data: actions, isLoading: actionsLoading } = useComposioActions(days)
   const { data: agentTools, isLoading: agentToolsLoading } = useComposioAgentTools(days)
+  const { data: execStats, isLoading: execStatsLoading } = useComposioExecStats(days)
+  const { data: perfByAction, isLoading: perfLoading } = useComposioPerformance(days)
+  const { data: dailyVolume } = useComposioDailyVolume(days)
+  const { data: recentExecs } = useComposioRecentExecs()
+  const { data: errors } = useComposioErrors(days)
   const [expandedAgents, setExpandedAgents] = useState<Set<number>>(new Set())
   const [sortKey, setSortKey] = useState<SortKey>('total_usage_count')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
@@ -146,6 +165,242 @@ export function AnalyticsComposio({ days }: Props) {
         { label: 'Most Used App', value: mostUsedApp?.total_actions_used ?? 0, change: mostUsedApp ? formatAppName(mostUsedApp.app_name) : 'No data', icon: Wrench, iconColor: 'text-[hsl(var(--info))]' },
         { label: 'Active Integrations', value: activeIntegrations, change: `of ${connectedAppsCount} total`, icon: Link2, iconColor: 'text-[hsl(var(--agent))]' },
       ]} loading={isLoading} />
+
+      {/* API Monitoring Overview */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="w-5 h-5 text-cyan-400" />
+            API Execution Monitor
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {execStatsLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-16" />)}
+            </div>
+          ) : !execStats || execStats.total_executions === 0 ? (
+            <div className="text-center py-8">
+              <Activity className="w-10 h-10 mx-auto mb-3 opacity-50 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">No tool executions recorded yet</p>
+              <p className="text-xs text-muted-foreground mt-1">Execute Composio tools through your agents to see metrics here</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="rounded-lg border border-border/30 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Gauge className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="text-xs text-muted-foreground">Total Calls</span>
+                  </div>
+                  <p className="text-xl font-bold">{execStats.total_executions.toLocaleString()}</p>
+                  <p className="text-[10px] text-muted-foreground">{execStats.unique_actions} actions across {execStats.unique_apps} apps</p>
+                </div>
+                <div className="rounded-lg border border-border/30 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                    <span className="text-xs text-muted-foreground">Success Rate</span>
+                  </div>
+                  <p className="text-xl font-bold">{execStats.success_rate}%</p>
+                  <Progress value={execStats.success_rate} className="h-1.5 mt-1" />
+                </div>
+                <div className="rounded-lg border border-border/30 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <XCircle className="w-3.5 h-3.5 text-red-400" />
+                    <span className="text-xs text-muted-foreground">Errors</span>
+                  </div>
+                  <p className="text-xl font-bold">{execStats.error_count}</p>
+                  <p className="text-[10px] text-muted-foreground">{execStats.timeout_count} timeouts</p>
+                </div>
+                <div className="rounded-lg border border-border/30 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Timer className="w-3.5 h-3.5 text-yellow-400" />
+                    <span className="text-xs text-muted-foreground">Avg Latency</span>
+                  </div>
+                  <p className="text-xl font-bold">{execStats.avg_latency_ms < 1000 ? `${execStats.avg_latency_ms}ms` : `${(execStats.avg_latency_ms / 1000).toFixed(1)}s`}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    p50: {execStats.p50_latency_ms != null ? `${execStats.p50_latency_ms}ms` : '—'} · p95: {execStats.p95_latency_ms != null ? `${execStats.p95_latency_ms}ms` : '—'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Cache Hit Rate */}
+              {execStats.cache_hit_rate > 0 && (
+                <div className="flex items-center gap-3 text-sm px-1">
+                  <span className="text-muted-foreground">Cache Hit Rate:</span>
+                  <Progress value={execStats.cache_hit_rate} className="h-1.5 flex-1 max-w-xs" />
+                  <span className="font-medium">{execStats.cache_hit_rate}%</span>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Daily Volume Chart */}
+      {dailyVolume && dailyVolume.length > 0 && (
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-indigo-400" />
+              Daily Execution Volume
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {(() => {
+                const maxVal = Math.max(...dailyVolume.map(d => d.total), 1)
+                return dailyVolume.slice(-14).map((d) => (
+                  <div key={d.date} className="flex items-center gap-3 text-xs">
+                    <span className="w-20 text-muted-foreground shrink-0">
+                      {new Date(d.date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    </span>
+                    <div className="flex-1 flex items-center gap-0.5 h-5">
+                      <div
+                        className="bg-green-500/70 h-full rounded-l"
+                        style={{ width: `${(d.successes / maxVal) * 100}%` }}
+                      />
+                      {d.errors > 0 && (
+                        <div
+                          className="bg-red-500/70 h-full rounded-r"
+                          style={{ width: `${(d.errors / maxVal) * 100}%` }}
+                        />
+                      )}
+                    </div>
+                    <span className="w-12 text-right font-medium tabular-nums">{d.total}</span>
+                    <span className="w-16 text-right text-muted-foreground tabular-nums">{d.avg_latency_ms}ms</span>
+                  </div>
+                ))
+              })()}
+              <div className="flex items-center gap-4 text-[10px] text-muted-foreground pt-2 px-1">
+                <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-green-500/70" /> Success</div>
+                <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-red-500/70" /> Error</div>
+                <div className="ml-auto">Rightmost column = avg latency</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Action Performance Breakdown */}
+      {perfByAction && perfByAction.length > 0 && (
+        <Card className="glass-card overflow-hidden">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-orange-400" />
+              Action Performance
+            </CardTitle>
+          </CardHeader>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border/50">
+                  <th className="text-left p-4 text-xs font-medium text-muted-foreground">Action</th>
+                  <th className="text-left p-4 text-xs font-medium text-muted-foreground">App</th>
+                  <th className="text-left p-4 text-xs font-medium text-muted-foreground">Calls</th>
+                  <th className="text-left p-4 text-xs font-medium text-muted-foreground">Success</th>
+                  <th className="text-left p-4 text-xs font-medium text-muted-foreground">Err %</th>
+                  <th className="text-left p-4 text-xs font-medium text-muted-foreground">Avg Latency</th>
+                  <th className="text-left p-4 text-xs font-medium text-muted-foreground">Max</th>
+                </tr>
+              </thead>
+              <tbody>
+                {perfByAction.map((a) => (
+                  <tr key={`${a.app_name}-${a.action_name}`} className="border-b border-border/30 hover:bg-secondary/20 transition-colors">
+                    <td className="p-4">
+                      <Badge variant="secondary" className="font-mono text-xs">{a.action_name}</Badge>
+                    </td>
+                    <td className="p-4 text-sm">{formatAppName(a.app_name)}</td>
+                    <td className="p-4 text-sm font-medium tabular-nums">{a.total_calls}</td>
+                    <td className="p-4 text-sm tabular-nums text-green-400">{a.success_count}</td>
+                    <td className="p-4 text-sm tabular-nums">
+                      <span className={a.error_rate > 10 ? 'text-red-400 font-medium' : a.error_rate > 0 ? 'text-yellow-400' : 'text-muted-foreground'}>
+                        {a.error_rate}%
+                      </span>
+                    </td>
+                    <td className="p-4 text-sm tabular-nums">
+                      <span className={a.avg_latency_ms > 2000 ? 'text-red-400' : a.avg_latency_ms > 500 ? 'text-yellow-400' : ''}>
+                        {a.avg_latency_ms < 1000 ? `${a.avg_latency_ms}ms` : `${(a.avg_latency_ms / 1000).toFixed(1)}s`}
+                      </span>
+                    </td>
+                    <td className="p-4 text-sm text-muted-foreground tabular-nums">
+                      {a.max_latency_ms < 1000 ? `${a.max_latency_ms}ms` : `${(a.max_latency_ms / 1000).toFixed(1)}s`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Recent Executions */}
+      {recentExecs && recentExecs.length > 0 && (
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-emerald-400" />
+              Recent Executions
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {recentExecs.slice(0, 15).map((exec) => (
+                <div key={exec.id} className="flex items-center gap-3 text-sm p-2 rounded bg-muted/30">
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${exec.status === 'success' ? 'bg-green-500' : exec.status === 'timeout' ? 'bg-yellow-500' : 'bg-red-500'}`} />
+                  <span className="text-muted-foreground shrink-0 w-16 text-xs">{formatAppName(exec.app_name)}</span>
+                  <Badge variant="secondary" className="font-mono text-[10px] shrink-0">{exec.action_name}</Badge>
+                  {exec.agent_name && <span className="text-xs text-muted-foreground truncate">by {exec.agent_name}</span>}
+                  <span className="flex-1" />
+                  {exec.execution_time_ms != null && (
+                    <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                      {exec.execution_time_ms < 1000 ? `${exec.execution_time_ms}ms` : `${(exec.execution_time_ms / 1000).toFixed(1)}s`}
+                    </span>
+                  )}
+                  {exec.cache_hit && <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">cached</Badge>}
+                  {exec.executed_at && (
+                    <span className="text-[10px] text-muted-foreground shrink-0">
+                      {new Date(exec.executed_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Error Breakdown */}
+      {errors && errors.length > 0 && (
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              Error Breakdown
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {errors.map((err, i) => (
+                <div key={i} className="rounded-lg border border-red-500/20 bg-red-500/5 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Badge variant="destructive" className="text-[10px]">{err.count}x</Badge>
+                    <span className="text-sm font-medium">{formatAppName(err.app_name)}</span>
+                    <Badge variant="secondary" className="font-mono text-[10px]">{err.action_name}</Badge>
+                    {err.error_code && <span className="text-xs text-muted-foreground">({err.error_code})</span>}
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{err.error_message}</p>
+                  {err.last_seen && (
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Last seen: {new Date(err.last_seen).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Connected Apps Grid */}
       <Card className="glass-card">
