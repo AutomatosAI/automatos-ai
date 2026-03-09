@@ -11,6 +11,7 @@ import { ToolLogo } from '@/components/ui/tool-logo'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { VoiceRecordingIndicator } from '@/components/voice/VoiceRecordingIndicator'
 import { useVoiceRecorder } from '@/hooks/use-voice-recorder'
+import { useAuth } from '@clerk/nextjs'
 import { sendVoiceMessage, checkVoiceHealth } from '@/lib/voice-client'
 import type { VisibilityType, AppUsage } from '@/types'
 import { apiClient } from '@/lib/api-client'
@@ -51,14 +52,17 @@ export function MultimodalInput({
   const [input, setInput] = useState('')
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
   const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const { getToken } = useAuth()
 
   // Voice recording — hook lifted here so both mic button and indicator can control it
   const handleVoiceComplete = useCallback(
     async (blob: Blob, durationMs: number) => {
       try {
+        const token = await getToken()
         const response = await sendVoiceMessage(blob, chatId, {
           agentId: selectedAgentId ?? undefined,
           responseFormat: 'both',
+          authToken: token,
         })
 
         // Build user voice message parts
@@ -80,7 +84,7 @@ export function MultimodalInput({
         toast.error(err?.message || 'Voice message failed')
       }
     },
-    [chatId, selectedAgentId, sendMessage]
+    [chatId, selectedAgentId, sendMessage, getToken]
   )
 
   const voiceRecorder = useVoiceRecorder({

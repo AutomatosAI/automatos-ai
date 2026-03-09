@@ -58,6 +58,7 @@ export async function sendVoiceMessage(
     responseFormat?: 'audio' | 'text' | 'both'
     language?: string
     voice?: string
+    authToken?: string | null
   }
 ): Promise<VoiceChatResponse> {
   const formData = new FormData()
@@ -79,7 +80,7 @@ export async function sendVoiceMessage(
 
   // Don't set Content-Type for FormData — browser sets it with boundary
   const headers: Record<string, string> = {}
-  const token = getAuthToken()
+  const token = options?.authToken ?? getAuthToken()
   const workspaceId = getWorkspaceId()
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (workspaceId) headers['X-Workspace-ID'] = workspaceId
