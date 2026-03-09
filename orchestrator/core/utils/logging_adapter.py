@@ -5,33 +5,65 @@ import uuid
 from typing import Optional
 from contextvars import ContextVar, Token
 
+# Import Phase 2 ContextVars from automatos_logging so both systems share
+# the same variables. The LogRelayHandler reads these directly.
+from core.monitoring.automatos_logging import (
+    request_id_var,
+    correlation_id_var,
+    workspace_id_var,
+    user_id_var,
+    agent_id_var,
+    workflow_id_var,
+    run_id_var,
+    tenant_id_var,
+    http_method_var,
+    http_path_var,
+)
 
-# Context variables used to enrich log records
-request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
-run_id_var: ContextVar[str] = ContextVar("run_id", default="-")
-agent_id_var: ContextVar[str] = ContextVar("agent_id", default="-")
-workflow_id_var: ContextVar[str] = ContextVar("workflow_id", default="-")
-tenant_id_var: ContextVar[str] = ContextVar("tenant_id", default="-")
+# Re-export for backwards compat (existing code imports from here)
+__all__ = [
+    "request_id_var",
+    "correlation_id_var",
+    "workspace_id_var",
+    "user_id_var",
+    "agent_id_var",
+    "workflow_id_var",
+    "run_id_var",
+    "tenant_id_var",
+    "http_method_var",
+    "http_path_var",
+    "ContextFilter",
+    "install_request_context_logging",
+    "set_request_id",
+    "clear_request_id",
+    "set_run_context",
+    "set_request_context",
+]
 
 
 class ContextFilter(logging.Filter):
-    """Logging filter that injects request/run context into records."""
+    """Logging filter that injects request/run context into records.
+
+    Ensures attributes always exist on LogRecord so format strings
+    like %(request_id)s never raise KeyError.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
-        # Ensure attributes always exist to avoid KeyError in formatters
-        record.request_id = request_id_var.get()
-        record.run_id = run_id_var.get()
-        record.agent_id = agent_id_var.get()
-        record.workflow_id = workflow_id_var.get()
-        record.tenant_id = tenant_id_var.get()
+        record.request_id = request_id_var.get("")
+        record.correlation_id = correlation_id_var.get("")
+        record.workspace_id = workspace_id_var.get("")
+        record.user_id = user_id_var.get("")
+        record.agent_id = agent_id_var.get("")
+        record.workflow_id = workflow_id_var.get("")
+        record.run_id = run_id_var.get("")
+        record.tenant_id = tenant_id_var.get("")
+        record.http_method = http_method_var.get("")
+        record.http_path = http_path_var.get("")
         return True
 
 
 def install_request_context_logging(format_with_context: Optional[str] = None) -> None:
-    """Attach the context filter to all handlers and optionally update formats.
-
-    If format_with_context is not provided, a reasonable default is used.
-    """
+    """Attach the context filter to all handlers and optionally update formats."""
     context_filter = ContextFilter()
     logger = logging.getLogger()
     for handler in logger.handlers:
@@ -42,7 +74,7 @@ def install_request_context_logging(format_with_context: Optional[str] = None) -
     if not format_with_context:
         default_fmt = (
             "%(asctime)s - %(name)s - %(levelname)s - "
-            "[req=%(request_id)s run=%(run_id)s agent=%(agent_id)s wf=%(workflow_id)s tenant=%(tenant_id)s] - %(message)s"
+            "[req=%(request_id)s ws=%(workspace_id)s agent=%(agent_id)s] - %(message)s"
         )
         for handler in logger.handlers:
             handler.setFormatter(logging.Formatter(default_fmt))
@@ -58,7 +90,14 @@ def clear_request_id(token: Token[str]) -> None:
     request_id_var.reset(token)
 
 
-def set_run_context(*, run_id: Optional[str] = None, agent_id: Optional[str] = None, workflow_id: Optional[str] = None, tenant_id: Optional[str] = None) -> None:
+def set_run_context(
+    *,
+    run_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    workflow_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> None:
+    """Set workflow/agent context for the current async context."""
     if run_id is not None:
         run_id_var.set(run_id)
     if agent_id is not None:
@@ -69,3 +108,32 @@ def set_run_context(*, run_id: Optional[str] = None, agent_id: Optional[str] = N
         tenant_id_var.set(tenant_id)
 
 
+def set_request_context(
+    *,
+    request_id: str = "",
+    workspace_id: str = "",
+    user_id: str = "",
+    method: str = "",
+    path: str = "",
+    correlation_id: str = "",
+    agent_id: str = "",
+) -> None:
+    """Set full request context for structured logging.
+
+    Call from FastAPI middleware to auto-enrich all logs
+    within the request lifecycle. No need to pass extra={} at call sites.
+    """
+    if request_id:
+        request_id_var.set(request_id)
+    if workspace_id:
+        workspace_id_var.set(workspace_id)
+    if user_id:
+        user_id_var.set(user_id)
+    if method:
+        http_method_var.set(method)
+    if path:
+        http_path_var.set(path)
+    if correlation_id:
+        correlation_id_var.set(correlation_id)
+    if agent_id:
+        agent_id_var.set(agent_id)
