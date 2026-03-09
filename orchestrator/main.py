@@ -196,8 +196,6 @@ try:
 except ImportError:
     chat_voice_router = None
 
-# PRD-71: community_skills router removed — skills now unified through marketplace pattern
-
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
     register_dashboard_routes,
@@ -644,7 +642,7 @@ async def add_security_headers(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = "camera=(), geolocation=()"
     response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     if config.ENVIRONMENT == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
@@ -865,6 +863,10 @@ try:
     logger.info("Loki log query API enabled at /api/logs/query")
 except Exception as e:
     logger.warning(f"Loki log query API disabled: {e}")
+
+# PRD-74: Voice Chat
+if chat_voice_router is not None:
+    app.include_router(chat_voice_router)
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
