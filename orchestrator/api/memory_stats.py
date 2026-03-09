@@ -34,7 +34,7 @@ def _get_mem0_client():
 
 def _mem0_user_id(workspace_id) -> str:
     """Build the scoped user_id that SmartMemoryManager uses."""
-    return f"ws_{workspace_id}_agent_global"
+    return f"ws_{workspace_id}"
 
 
 @router.get("/stats/real")

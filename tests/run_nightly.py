@@ -35,6 +35,9 @@ from dotenv import load_dotenv
 TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
 API_TESTS = TESTS_DIR / "api"
+EXTRA_REGRESSION_TESTS = [
+    REPO_ROOT / "orchestrator" / "tests" / "test_memory_fixes.py",
+]
 
 
 def _resolve_results_dir() -> Path:
@@ -67,9 +70,18 @@ def run_pytest() -> int:
     """Run pytest and return the exit code."""
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
+    test_targets = [str(API_TESTS)]
+    missing_regressions = [str(path) for path in EXTRA_REGRESSION_TESTS if not path.exists()]
+    if missing_regressions:
+        print("[runner] ERROR: required regression tests missing:")
+        for path in missing_regressions:
+            print(f"[runner]   - {path}")
+        return 2
+    test_targets.extend(str(path) for path in EXTRA_REGRESSION_TESTS)
+
     cmd = [
         sys.executable, "-m", "pytest",
-        str(API_TESTS),
+        *test_targets,
         "--json-report",
         f"--json-report-file={REPORT_FILE}",
         "-v",

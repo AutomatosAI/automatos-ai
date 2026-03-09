@@ -205,11 +205,12 @@ class Mem0Client:
         url = f"{self.api_url}/api/v1/memories/"
         params = {
             "user_id": user_id,
+            "search_query": query,
             "page": 1,
-            "size": 50,
+            "size": max(limit, 10),
         }
 
-        logger.debug("[Mem0] Fetching memories for user=%s", user_id)
+        logger.debug("[Mem0] Searching memories for user=%s query=%r", user_id, query)
 
         resp = self._request("GET", url, params=params)
         if resp is None:
@@ -242,7 +243,15 @@ class Mem0Client:
                 sample = [r.get("memory", "")[:40] for r in results[:3]]
                 logger.info("[Mem0] Sample memories: %s", sample)
 
-            results.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+            # Prefer semantic match score when Mem0 returns it, then fall back to recency.
+            results.sort(
+                key=lambda x: (
+                    x.get("score") is not None,
+                    x.get("score") or 0,
+                    x.get("created_at") or "",
+                ),
+                reverse=True,
+            )
             return results[:limit]
         else:
             logger.warning("[Mem0] Unexpected response format: %s", type(data))
