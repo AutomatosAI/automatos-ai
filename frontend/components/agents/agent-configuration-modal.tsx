@@ -681,7 +681,8 @@ export function AgentConfigurationModal({
           tags
         },
         skill_assignments: formData.assigned_skills,
-        tool_ids: (formData.assigned_tools || []).filter((id: any) => id != null)
+        tool_ids: (formData.assigned_tools || []).filter((id: any) => id != null),
+        voice_profile_id: selectedVoiceProfileId || null,
       }
 
       toast.loading('Saving configuration...', { id: 'agent-config-save' })
@@ -1922,26 +1923,9 @@ export function AgentConfigurationModal({
                             </SelectContent>
                           </Select>
 
-                          {selectedVoiceProfileId && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={async () => {
-                                if (!agentId || !selectedVoiceProfileId) return
-                                try {
-                                  await apiClient.request(`/api/agents/${agentId}`, {
-                                    method: 'PUT',
-                                    body: { voice_profile_id: selectedVoiceProfileId } as any,
-                                  })
-                                  toast.success('Voice profile assigned')
-                                } catch (err: any) {
-                                  toast.error(err?.message || 'Failed to assign voice')
-                                }
-                              }}
-                            >
-                              <Save className="w-3 h-3 mr-1" /> Save Voice Assignment
-                            </Button>
-                          )}
+                          <p className="text-xs text-muted-foreground">
+                            Voice profile will be saved when you click Save at the top.
+                          </p>
 
                           {voiceProfiles.length === 0 && (
                             <p className="text-xs text-muted-foreground">

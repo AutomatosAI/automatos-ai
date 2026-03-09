@@ -244,6 +244,33 @@ async def voice_chat(
         response_text = "I received your message but couldn't generate a response. Please try again."
 
     # 4. TTS: agent response -> audio
+    # Look up agent's voice profile for personalized TTS
+    tts_voice = voice or config.VOICE_TTS_DEFAULT_VOICE
+    tts_model = None
+    tts_reference_audio = None
+
+    if parsed_agent_id:
+        try:
+            from core.models.core import Agent
+            agent_row = db.query(Agent).filter(Agent.id == parsed_agent_id).first()
+            if agent_row and getattr(agent_row, 'voice_profile_id', None):
+                from core.models.voice_profiles import VoiceProfile
+                vp = db.query(VoiceProfile).filter(
+                    VoiceProfile.id == agent_row.voice_profile_id
+                ).first()
+                if vp:
+                    tts_voice = vp.voice_id
+                    tts_model = vp.provider
+                    tts_reference_audio = vp.reference_audio
+                    logger.info("voice_profile_resolved", extra={
+                        "agent_id": parsed_agent_id,
+                        "profile_id": str(vp.id),
+                        "provider": vp.provider,
+                        "voice_id": vp.voice_id,
+                    })
+        except Exception:
+            logger.warning("voice_profile_lookup_failed", exc_info=True)
+
     tts_latency_ms = 0.0
     audio_s3_key = None
 
@@ -251,7 +278,9 @@ async def voice_chat(
         try:
             tts_result = await _voice_client.synthesize(
                 text=response_text,
-                voice=voice or config.VOICE_TTS_DEFAULT_VOICE,
+                voice=tts_voice,
+                model=tts_model,
+                reference_audio=tts_reference_audio,
             )
             tts_latency_ms = tts_result.duration_ms
 
