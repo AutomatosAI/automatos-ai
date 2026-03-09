@@ -150,8 +150,8 @@ async def _collect_streaming_response(
 @router.post("/api/chat/voice")
 async def voice_chat(
     audio: UploadFile = File(...),
-    conversation_id: str = Form(...),
-    agent_id: Optional[int] = Form(None),
+    conversation_id: str = Form(""),
+    agent_id: Optional[str] = Form(None),
     response_format: str = Form("both"),
     language: Optional[str] = Form(None),
     voice: Optional[str] = Form(None),
@@ -168,6 +168,18 @@ async def voice_chat(
     4. Store audio in S3
     5. Return audio URL + transcript + agent text
     """
+    # Parse agent_id safely (form values are always strings)
+    parsed_agent_id: Optional[int] = None
+    if agent_id and agent_id.strip():
+        try:
+            parsed_agent_id = int(agent_id)
+        except (ValueError, TypeError):
+            pass
+
+    # Default conversation_id if empty
+    if not conversation_id or not conversation_id.strip():
+        conversation_id = str(uuid.uuid4())
+
     if not config.VOICE_ENABLED:
         raise HTTPException(status_code=503, detail="Voice features are disabled")
 
@@ -218,7 +230,7 @@ async def voice_chat(
             conversation_id=conversation_id,
             workspace_id=workspace_id,
             user_id=user_id,
-            agent_id=agent_id,
+            agent_id=parsed_agent_id,
         )
     except Exception as e:
         logger.error(
