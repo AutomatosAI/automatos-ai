@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, StopCircle, Paperclip } from 'lucide-react'
+import { Send, StopCircle, Paperclip, Phone } from 'lucide-react'
 import { useAuth } from '@clerk/nextjs'
 import { AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
@@ -13,9 +13,11 @@ import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { VoiceRecordingIndicator } from '@/components/voice/VoiceRecordingIndicator'
 import { useVoiceRecorder } from '@/hooks/use-voice-recorder'
 import { sendVoiceMessage, checkVoiceHealth } from '@/lib/voice-client'
+import { VoiceCallPanel } from '@/components/voice/VoiceCallPanel'
 import type { VisibilityType, AppUsage } from '@/types'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
+import { useWorkspace } from '@/components/workspace-provider'
 
 export interface MultimodalInputProps {
   chatId: string
@@ -52,7 +54,9 @@ export function MultimodalInput({
   const [input, setInput] = useState('')
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
   const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [showCallPanel, setShowCallPanel] = useState(false)
   const { getToken } = useAuth()
+  const { workspace } = useWorkspace()
 
   // Voice recording — hook lifted here so both mic button and indicator can control it
   const handleVoiceComplete = useCallback(
@@ -300,6 +304,26 @@ export function MultimodalInput({
               />
             )}
 
+            {/* Live Voice Call Button (Phase 3) */}
+            {voiceEnabled && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={[
+                  'h-8 w-8 p-0',
+                  showCallPanel
+                    ? 'text-green-500 hover:text-green-400'
+                    : 'text-muted-foreground hover:text-foreground',
+                ].join(' ')}
+                disabled={isStreaming || voiceRecorder.state !== 'idle'}
+                onClick={() => setShowCallPanel((prev) => !prev)}
+                title="Live voice call"
+              >
+                <Phone className="w-4 h-4" />
+              </Button>
+            )}
+
             {/* PRD: Unified Agent-Chat System - Agent Selector */}
             {onAgentChange ? (
               <AgentSelector
@@ -376,6 +400,19 @@ export function MultimodalInput({
           {usage.cost && <span>Cost: ${usage.cost.toFixed(4)}</span>}
         </div>
       )}
+
+      {/* Live Voice Call Panel (Phase 3) */}
+      <AnimatePresence>
+        {showCallPanel && workspace?.id && (
+          <VoiceCallPanel
+            workspaceId={workspace.id}
+            agentId={selectedAgentId}
+            conversationId={chatId}
+            agentName={activeAgent?.name ?? 'Auto'}
+            onClose={() => setShowCallPanel(false)}
+          />
+        )}
+      </AnimatePresence>
     </form>
   )
 }
