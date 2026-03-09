@@ -211,6 +211,9 @@ class Agent(Base):
     custom_persona_prompt = Column(Text, nullable=True)
     use_custom_persona = Column(Boolean, default=False, server_default='false')
 
+    # PRD-74: Voice profile assignment
+    voice_profile_id = Column(UUID(as_uuid=True), ForeignKey('voice_profiles.id'), nullable=True)
+
     # PRD-67: CTO Agent / System agents
     is_system_agent = Column(Boolean, default=False, server_default='false')  # Global, platform-seeded
     required_role = Column(String(50), nullable=True)  # If set, only visible to users with this system_role
@@ -264,6 +267,9 @@ class Agent(Base):
 
     # PRD-42: Persona relationship
     persona = relationship("Persona", foreign_keys=[persona_id])
+
+    # PRD-74: Voice profile relationship
+    voice_profile = relationship("VoiceProfile", foreign_keys=[voice_profile_id])
 
     # PRD-42: Plugin assignments (marketplace plugins assigned to this agent)
     assigned_plugins = relationship(

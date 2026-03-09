@@ -195,6 +195,11 @@ try:
     from api.chat_voice import router as chat_voice_router
 except ImportError:
     chat_voice_router = None
+# PRD-74 Phase 2: Voice Profiles
+try:
+    from api.voice_profiles import router as voice_profiles_router
+except ImportError:
+    voice_profiles_router = None
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -836,6 +841,9 @@ if activity_router is not None:
 # PRD-74: Voice Chat
 if chat_voice_router is not None:
     app.include_router(chat_voice_router)
+# PRD-74 Phase 2: Voice Profiles
+if voice_profiles_router is not None:
+    app.include_router(voice_profiles_router)
 
 # PRD-73: Monitoring Stack Integration
 # Prometheus /metrics endpoint + request instrumentation
@@ -864,9 +872,12 @@ try:
 except Exception as e:
     logger.warning(f"Loki log query API disabled: {e}")
 
-# PRD-74: Voice Chat
+# PRD-74: Voice Chat (duplicate guard — first registration above)
 if chat_voice_router is not None:
-    app.include_router(chat_voice_router)
+    pass  # already registered above
+# PRD-74 Phase 2: Voice Profiles (duplicate guard)
+if voice_profiles_router is not None:
+    pass  # already registered above
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

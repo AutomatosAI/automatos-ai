@@ -372,6 +372,9 @@ class Config:
     VOICE_ENABLED: bool = os.getenv("VOICE_ENABLED", "true").lower() == "true"
     VOICE_MAX_AUDIO_SIZE_MB: int = int(os.getenv("VOICE_MAX_AUDIO_SIZE_MB", "25"))
     VOICE_MAX_DURATION_SECONDS: int = int(os.getenv("VOICE_MAX_DURATION_SECONDS", "120"))
+    # Auto agent voice defaults (PRD-74 Phase 2)
+    AUTO_VOICE_ID: str = os.getenv("AUTO_VOICE_ID", "auto_default")
+    AUTO_VOICE_PROVIDER: str = os.getenv("AUTO_VOICE_PROVIDER", "chatterbox")
 
     def validate(self) -> bool:
         """
