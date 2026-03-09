@@ -1,7 +1,7 @@
 'use client'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings, Key, Shield, Webhook, KeyRound, Radio, Brain, FileText, Puzzle } from 'lucide-react'
+import { Settings, Key, Shield, Webhook, KeyRound, Radio, Brain, FileText, Puzzle, Volume2 } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import { CredentialAuditTab } from './CredentialAuditTab'
 import SystemSettingsTab from './SystemSettingsTab'
@@ -11,6 +11,7 @@ import { ApiKeysSettingsTab } from './ApiKeysSettingsTab'
 import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 import { SystemPromptsTab } from './SystemPromptsTab'
 import { ApiKeyManager } from './ApiKeyManager'
+import { VoiceProfilesSettingsTab } from './VoiceProfilesSettingsTab'
 
 export function SettingsPanel() {
 
@@ -57,6 +58,10 @@ export function SettingsPanel() {
             <FileText className="w-4 h-4 mr-1 shrink-0" />
             <span className="hidden sm:inline">System</span> Prompts
           </TabsTrigger>
+          <TabsTrigger value="voice-profiles">
+            <Volume2 className="w-4 h-4 mr-1 shrink-0" />
+            Voices
+          </TabsTrigger>
           <TabsTrigger value="widget-sdk">
             <Puzzle className="w-4 h-4 mr-1 shrink-0" />
             Widget SDK
@@ -101,6 +106,11 @@ export function SettingsPanel() {
         {/* PRD-58: System Prompts Tab */}
         <TabsContent value="prompts">
           <SystemPromptsTab />
+        </TabsContent>
+
+        {/* PRD-74: Voice Profiles */}
+        <TabsContent value="voice-profiles">
+          <VoiceProfilesSettingsTab />
         </TabsContent>
 
         {/* PRD-38.4: Widget SDK API Keys */}
