@@ -672,6 +672,58 @@ async def get_chat_messages(
     ]
 
 
+@router.get("/search")
+async def search_chat_history(
+    q: str,
+    limit: int = 20,
+    days: int = 30,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Search across all chat messages by keyword. Returns matching messages with chat context."""
+    from datetime import datetime, timedelta
+
+    user_id = get_user_id(db)
+    since = datetime.utcnow() - timedelta(days=min(days, 365))
+    search_term = f"%{q}%"
+
+    rows = db.execute(
+        text("""
+            SELECT m.id, m.chat_id, m.role, m.parts, m.created_at,
+                   c.title AS chat_title
+            FROM messages m
+            JOIN chats c ON c.id = m.chat_id
+            WHERE c.user_id = :user_id
+              AND m.created_at >= :since
+              AND EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(m.parts) AS p
+                  WHERE p->>'text' ILIKE :search
+              )
+            ORDER BY m.created_at DESC
+            LIMIT :lim
+        """),
+        {"user_id": user_id, "since": since, "search": search_term, "lim": min(limit, 100)},
+    ).fetchall()
+
+    results = []
+    for r in rows:
+        # Extract text content from parts
+        parts = r.parts if isinstance(r.parts, list) else []
+        text_content = " ".join(
+            p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
+        )
+        results.append({
+            "message_id": str(r.id),
+            "chat_id": str(r.chat_id),
+            "chat_title": r.chat_title,
+            "role": r.role,
+            "content": text_content[:500],
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    return {"query": q, "total": len(results), "results": results}
+
+
 @router.delete("/{chat_id}")
 async def delete_chat(
     chat_id: str,

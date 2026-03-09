@@ -17,6 +17,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_read_actions(registry)
     _register_write_actions(registry)
     _register_infra_actions(registry)
+    _register_chat_search_actions(registry)
     _register_monitoring_actions(registry)
     _register_self_management_actions(registry)
     _register_marketplace_actions(registry)
@@ -934,6 +935,47 @@ def _register_infra_actions(registry: ActionRegistry) -> None:
         examples=[
             "what services are running?",
             "list railway services",
+        ],
+    ))
+
+
+def _register_chat_search_actions(registry: ActionRegistry) -> None:
+    """Register chat history search tools."""
+
+    registry.register(ActionDefinition(
+        name="platform_search_chat_history",
+        description=(
+            "Search across all past chat conversations by keyword. Returns matching "
+            "messages with the chat title, role (user/assistant), content snippet, and "
+            "timestamp. Use when the user asks about previous conversations, wants to "
+            "find something they discussed before, or references past chats."
+        ),
+        category="chat",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Keyword or phrase to search for in chat messages.",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "How far back to search in days (default 30, max 365).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return (default 20, max 100).",
+                },
+            },
+            "required": ["query"],
+        },
+        permission_level="read",
+        tags=["chat", "history", "search", "conversation"],
+        examples=[
+            "what did we talk about yesterday?",
+            "search my chats for 'Jira'",
+            "find conversations about the deployment",
+            "did I mention anything about Redis?",
         ],
     ))
 

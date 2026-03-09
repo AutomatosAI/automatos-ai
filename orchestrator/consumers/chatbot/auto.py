@@ -188,6 +188,14 @@ _PLATFORM_KEYWORDS = {
         "recent activity", "activity feed", "what's been happening",
         "show activity", "what has been running", "activity log",
     ],
+    # Chat history search
+    "platform_search_chat_history": [
+        "search chat", "search conversations", "find in chat",
+        "what did we talk about", "what did i say about",
+        "chat history search", "find conversation",
+        "did i mention", "when did i say", "previous chat",
+        "search my chats", "look through chats",
+    ],
     # PRD-73: Monitoring tools
     "platform_query_loki_logs": [
         "search logs", "query logs", "check logs", "show logs",

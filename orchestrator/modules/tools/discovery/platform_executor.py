@@ -54,6 +54,8 @@ class PlatformActionExecutor:
             # Infrastructure / observability
             "platform_get_logs": self._get_logs,
             "platform_list_services": self._list_services,
+            # Chat history search
+            "platform_search_chat_history": self._search_chat_history,
             # PRD-73: Monitoring (Loki, Prometheus, Alerts)
             "platform_query_loki_logs": self._query_loki_logs,
             "platform_query_prometheus": self._query_prometheus,
@@ -1111,6 +1113,74 @@ class PlatformActionExecutor:
         except Exception as exc:
             logger.error("[PlatformExecutor] list_services failed: %s", exc, exc_info=True)
             return {"success": False, "error": f"Failed to list services: {exc}"}
+
+    # ══════════════════════════════════════════════════════════════════
+    # CHAT HISTORY SEARCH
+    # ══════════════════════════════════════════════════════════════════
+
+    async def _search_chat_history(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Search across all chat messages by keyword."""
+        from sqlalchemy import text
+
+        query = params.get("query", "").strip()
+        if not query:
+            return {"success": False, "error": "query parameter is required"}
+
+        days = min(params.get("days", 30), 365)
+        limit = min(params.get("limit", 20), 100)
+        search_term = f"%{query}%"
+
+        try:
+            rows = self.db.execute(
+                text("""
+                    SELECT m.id, m.chat_id, m.role, m.parts, m.created_at,
+                           c.title AS chat_title
+                    FROM messages m
+                    JOIN chats c ON c.id = m.chat_id
+                    WHERE c.user_id = (SELECT id FROM users LIMIT 1)
+                      AND m.created_at >= NOW() - INTERVAL ':days days'
+                      AND EXISTS (
+                          SELECT 1 FROM jsonb_array_elements(m.parts) AS p
+                          WHERE p->>'text' ILIKE :search
+                      )
+                    ORDER BY m.created_at DESC
+                    LIMIT :lim
+                """),
+                {"days": days, "search": search_term, "lim": limit},
+            ).fetchall()
+
+            results = []
+            for r in rows:
+                parts = r.parts if isinstance(r.parts, list) else []
+                text_content = " ".join(
+                    p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
+                )
+                results.append({
+                    "chat_title": r.chat_title,
+                    "role": r.role,
+                    "content": text_content[:300],
+                    "date": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else None,
+                    "chat_id": str(r.chat_id),
+                })
+
+            # Format for LLM
+            lines = [f"Found {len(results)} message(s) matching '{query}':\n"]
+            for i, r in enumerate(results, 1):
+                lines.append(
+                    f"{i}. [{r['date']}] ({r['role']}) in \"{r['chat_title']}\":\n"
+                    f"   {r['content']}\n"
+                )
+
+            return {
+                "success": True,
+                "query": query,
+                "total": len(results),
+                "results": results,
+                "formatted": "\n".join(lines),
+            }
+        except Exception as exc:
+            logger.error("[PlatformExecutor] Chat search failed: %s", exc, exc_info=True)
+            return {"success": False, "error": f"Chat search failed: {exc}"}
 
     # ══════════════════════════════════════════════════════════════════
     # PRD-73: MONITORING HANDLERS (Loki, Prometheus, Alerts)
