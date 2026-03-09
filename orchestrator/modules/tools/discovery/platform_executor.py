@@ -542,18 +542,25 @@ class PlatformActionExecutor:
                 .all()
             )
 
+            agent_scan_limit = 10
+            scanned_agents = agents[:agent_scan_limit]
+            partial = len(agents) > agent_scan_limit
             agent_stats = []
-            for agent_id, agent_name in agents[:10]:  # Cap at 10 to avoid slow queries
-                agent_user_id = f"ws_{ws_id}_agent_{agent_id}"
-                agent_mems = await loop.run_in_executor(
-                    None, lambda uid=agent_user_id: client.get_all(user_id=uid, limit=200)
+            agent_tasks = [
+                loop.run_in_executor(
+                    None,
+                    lambda uid=f"ws_{ws_id}_agent_{agent_id}": client.get_all(user_id=uid, limit=200),
                 )
+                for agent_id, _agent_name in scanned_agents
+            ]
+            agent_results = await asyncio.gather(*agent_tasks) if agent_tasks else []
+            for (agent_id, agent_name), agent_mems in zip(scanned_agents, agent_results):
                 if agent_mems:
                     agent_stats.append({
                         "agent_id": agent_id,
                         "agent_name": agent_name,
                         "memory_count": len(agent_mems),
-                        "sample": [m.get("memory") or m.get("content", "")[:80] for m in agent_mems[:3]],
+                        "sample": [(m.get("memory") or m.get("content", ""))[:80] for m in agent_mems[:3]],
                     })
 
             global_count = len(global_memories) if global_memories else 0
@@ -580,6 +587,9 @@ class PlatformActionExecutor:
                 "agent_memories": total_agent,
                 "total_memories": global_count + total_agent,
                 "agent_stats": agent_stats,
+                "partial": partial,
+                "scanned_agents": len(scanned_agents),
+                "total_agents": len(agents),
                 "formatted": "\n".join(lines),
             }
         except Exception as e:
@@ -1246,6 +1256,7 @@ class PlatformActionExecutor:
 
         agent_id = params.get("agent_id")
         limit = min(params.get("limit", 10), 50)
+        result_char_limit = 150
 
         try:
             client = Mem0Client()
@@ -1263,6 +1274,9 @@ class PlatformActionExecutor:
 
             # Search agent-specific if agent_id given, otherwise search all agents
             agent_results = []
+            partial = False
+            scanned_agents = 0
+            total_agents = 0
             if agent_id:
                 agent_user_id = f"ws_{ws_id}_agent_{agent_id}"
                 agent_results = await loop.run_in_executor(
@@ -1270,6 +1284,8 @@ class PlatformActionExecutor:
                 )
                 for m in agent_results:
                     m["_tier"] = f"agent-{agent_id}"
+                scanned_agents = 1
+                total_agents = 1
             else:
                 # Search top agents
                 from core.models.core import Agent
@@ -1279,11 +1295,22 @@ class PlatformActionExecutor:
                     .limit(5)
                     .all()
                 )
-                for (aid,) in agents:
-                    uid = f"ws_{ws_id}_agent_{aid}"
-                    res = await loop.run_in_executor(
-                        None, lambda u=uid: client.search(query=query, user_id=u, limit=5)
+                total_agents_query = (
+                    self.db.query(func.count(Agent.id))
+                    .filter(Agent.workspace_id == self.workspace_id)
+                    .scalar()
+                ) or 0
+                total_agents = int(total_agents_query)
+                scanned_agents = len(agents)
+                partial = total_agents > scanned_agents
+                agent_tasks = [
+                    loop.run_in_executor(
+                        None, lambda u=f"ws_{ws_id}_agent_{aid}": client.search(query=query, user_id=u, limit=5)
                     )
+                    for (aid,) in agents
+                ]
+                agent_batches = await asyncio.gather(*agent_tasks) if agent_tasks else []
+                for (aid,), res in zip(agents, agent_batches):
                     for m in (res or []):
                         m["_tier"] = f"agent-{aid}"
                     agent_results.extend(res or [])
@@ -1297,7 +1324,7 @@ class PlatformActionExecutor:
             # Format
             lines = [f"Memory search for '{query}': {len(all_results)} result(s)\n"]
             for i, m in enumerate(all_results[:limit], 1):
-                content = m.get("memory") or m.get("content", "")
+                content = (m.get("memory") or m.get("content", "") or "")[:result_char_limit]
                 tier = m.get("_tier", "unknown")
                 created = m.get("created_at", "")
                 lines.append(f"{i}. [{tier}] {content}")
@@ -1310,9 +1337,12 @@ class PlatformActionExecutor:
                 "total": len(all_results),
                 "global_count": len(global_results or []),
                 "agent_count": len(agent_results),
+                "partial": partial,
+                "scanned_agents": scanned_agents,
+                "total_agents": total_agents,
                 "results": [
                     {
-                        "memory": m.get("memory") or m.get("content", ""),
+                        "memory": (m.get("memory") or m.get("content", "") or "")[:result_char_limit],
                         "tier": m.get("_tier", "unknown"),
                         "created_at": m.get("created_at"),
                     }

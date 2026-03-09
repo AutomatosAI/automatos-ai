@@ -19,16 +19,16 @@ PRD-22 introduced Skills — Git-backed SKILL.md files that inject methodology i
 
 ### The Problem in One Sentence
 
-An agent with a "workspace-git" skill AND an "email" plugin silently loses ALL skill content because the codebase has a mutual exclusion bug: `if has_plugins → skip skills`.
+An agent with a "workspace-git" skill AND an "email" plugin silently loses ALL skill content because the codebase has a mutual exclusion bug: `if has_plugins → skip skills`. - NO NOTHING TO DO WITH THE PROBLEM 
 
 ### What Changes
 
 | Today | After PRD-71 |
 |-------|-------------|
 | Two concepts: Skills + Plugins | One concept: **Skills** |
-| Two distribution channels: Git import + Marketplace upload | One channel: **Marketplace** (admin uploads, security scans, user enables) |
-| Three injection points: agent_factory, chatbot/service, recipe_executor | One injection point: **Agent Factory** (at activation time) |
-| Runtime keyword matching to select which assigned skills to load | One rule: **Load ALL assigned skills** |
+| Two distribution channels: Git import + Marketplace upload | One channel: **Marketplace** (admin uploads, security scans, user enables) |  There is NO two channels, admin uploads to marketplace, user can add to workspace
+| Three injection points: agent_factory, chatbot/service, recipe_executor | One injection point: **Agent Factory** (at activation time) | 
+| Runtime keyword matching to select which assigned skills to load | One rule: **Load ALL assigned skills** | - Can this be ALL signed, but user can still load unassigned using the /command soa direct reference to a skill like claude?
 | Two security standards: 8 patterns (skills) vs 42 + LLM (plugins) | One standard: **42 patterns + LLM** for everything |
 | Skills and plugins mutually exclusive | Both always load |
 
@@ -105,6 +105,8 @@ This means: the user assigns skills to an agent, then at runtime the system seco
 | Plugins (Marketplace via PRD-42) | `static_scan()` + `llm_security_scan()` in plugin_security_scanner.py | 42 patterns (code + network + filesystem + prompt injection) | Yes (Claude Haiku) |
 
 Same type of content (text injected into agent prompts), wildly different security treatment. A prompt injection attack that would be caught in a plugin sails through the skill scanner.
+
+Have text on the assign page, advising user to just assign the skill that this agent needs, a Test Agent needs Tester Skill, JIra Admin needs the JIRA skill etc... Don't over load agent with skills they dont need.
 
 ### 1.5 Recipe Prompts Are Too Long
 

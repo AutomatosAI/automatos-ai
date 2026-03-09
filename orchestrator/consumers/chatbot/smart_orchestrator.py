@@ -225,6 +225,17 @@ class SmartChatOrchestrator:
         if memory_result and memory_result.memories:
             memory_strings = [m.get("memory", "") for m in memory_result.memories if m.get("memory")]
 
+        daily_logs = ""
+        try:
+            from config import config
+            if getattr(config, "INJECT_DAILY_LOGS", True):
+                daily_logs = await self.memory_manager.get_daily_logs(
+                    workspace_id=self.workspace_id,
+                    max_chars=2000,
+                )
+        except Exception as exc:
+            logger.debug("[Orchestrator] Daily logs skipped: %s", exc)
+
         tool_names = []
         if tool_result.filtered_tools:
             for t in tool_result.filtered_tools:
@@ -244,17 +255,11 @@ class SmartChatOrchestrator:
             orchestrator_settings=orch_settings,
         )
 
+        if daily_logs:
+            system_prompt = f"{system_prompt}\n\n## Recent Activity\n\n{daily_logs}"
+
         # 5. Convert messages to LLM format
         llm_messages = self._convert_messages(messages)
-
-        # Add memory context as a separate system message if we have specific context
-        if memory_result and memory_result.formatted_context:
-            memory_msg = {
-                "role": "system",
-                "content": f"## Current User Context\n\n{memory_result.formatted_context}"
-            }
-            # Insert after main system prompt
-            llm_messages.insert(1, memory_msg)
 
         # Add current datetime context
         now = datetime.utcnow()
@@ -371,7 +376,7 @@ class SmartChatOrchestrator:
         Returns:
             Success status
         """
-        return await self.memory_manager.store_conversation(
+        stored = await self.memory_manager.store_conversation(
             workspace_id=self.workspace_id,
             agent_id=self.agent_id,
             user_message=user_message,
@@ -379,6 +384,18 @@ class SmartChatOrchestrator:
             chat_id=chat_id,
             widget_mode=self.widget_mode
         )
+
+        try:
+            await self.memory_manager.store_daily_summary(
+                workspace_id=self.workspace_id,
+                user_message=user_message,
+                assistant_response=assistant_response,
+                agent_id=self.agent_id,
+            )
+        except Exception as exc:
+            logger.debug("[Orchestrator] Daily summary storage skipped: %s", exc)
+
+        return stored
 
     def get_user_name(self) -> Optional[str]:
         """Get the user's name if known."""

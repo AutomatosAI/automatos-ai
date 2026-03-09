@@ -328,6 +328,7 @@ class Config:
     # =============================================================================
     ENABLE_LLM_QUALITY_ASSESSMENT: bool = os.getenv("ENABLE_LLM_QUALITY_ASSESSMENT", "false").lower() == "true"
     ENABLE_CONTEXT_OPTIMIZATION: bool = os.getenv("ENABLE_CONTEXT_OPTIMIZATION", "false").lower() == "true"
+    INJECT_DAILY_LOGS: bool = os.getenv("INJECT_DAILY_LOGS", "true").lower() == "true"
     COMPLEXITY_CACHE_TTL_HOURS: int = int(os.getenv("COMPLEXITY_CACHE_TTL_HOURS", "24"))
 
     # =============================================================================
