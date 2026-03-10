@@ -175,7 +175,9 @@ class ActivityService:
                     FROM heartbeat_results hr
                     LEFT JOIN agents a ON hr.source_type = 'agent'
                         AND hr.source_id ~ '^\d+$'
-                        AND a.id = CAST(hr.source_id AS INTEGER)
+                        AND a.id = CASE WHEN hr.source_id ~ '^\d+$'
+                                        THEN CAST(hr.source_id AS INTEGER)
+                                        ELSE NULL END
                     WHERE hr.workspace_id = :ws_id
                       AND hr.source_type IN ('agent', 'orchestrator')
                       AND hr.created_at >= :since
