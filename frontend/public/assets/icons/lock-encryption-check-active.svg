@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="lock-encryption-check-active--lock-encryption-check-active-padlock-security-action">
+    <path id="Subtract" fill="url(#paint0_linear_15027_4424)" fill-rule="evenodd" d="M7 1.5C5.61929 1.5 4.5 2.61929 4.5 4v1h5V4c0-1.38071-1.11929-2.5-2.5-2.5M3 4v1h-.5C1.67157 5 1 5.67157 1 6.5v6c0 .8284.67157 1.5 1.5 1.5h9c.8284 0 1.5-.6716 1.5-1.5v-6c0-.82843-.6716-1.5-1.5-1.5H11V4c0-2.20914-1.79086-4-4-4S3 1.79086 3 4m6.75 3.875c.20711-.27614.15114-.66789-.125-.875s-.66789-.15114-.875.125l-2.60528 3.4737-.9946-.82884c-.26518-.22098-.65928-.18515-.88026.08002-.22098.26522-.18515.65932.08002.88022l1.5 1.25c.13161.1097.30247.1606.47263.1407s.3247-.1087.42749-.2458z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_4424" x1="12.959" x2="-2.219" y1="14.003" y2="6.684" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

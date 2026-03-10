@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Pathfinder-Square-Trim--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Pathfinder Square Trim Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Pathfinder/pathfinder-square-trim">
+    <path id="Union" fill="url(#paint0_linear_13603_11812)" fill-rule="evenodd" d="M8.5.5H2C1.17157.5.5 1.17157.5 2v6.5c0 .82843.67157 1.5 1.5 1.5h.75V5.5c0-1.51878 1.23122-2.75 2.75-2.75H10V2C10 1.17157 9.32843.5 8.5.5ZM5.5 4H12c.8284 0 1.5.67157 1.5 1.5V12c0 .8284-.6716 1.5-1.5 1.5H5.5c-.82843 0-1.5-.6716-1.5-1.5V5.5C4 4.67157 4.67157 4 5.5 4Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_11812" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

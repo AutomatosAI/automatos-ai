@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Contact-Book--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Contact Book Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Content/contact-book--contact-notebook-note">
+    <path id="Subtract" fill="url(#paint0_linear_13603_9447)" fill-rule="evenodd" d="M1.5 2.5C1.5 1.67157 2.17157 1 3 1h7c.8284 0 1.5.67157 1.5 1.5v9c0 .8284-.6716 1.5-1.5 1.5H3c-.82843 0-1.5-.6716-1.5-1.5v-.75H.75c-.414214 0-.75-.3358-.75-.75 0-.41421.335786-.75.75-.75h.75v-1.5H.75C.335786 7.75 0 7.41421 0 7s.335786-.75.75-.75h.75v-1.5H.75C.335786 4.75 0 4.41421 0 4s.335786-.75.75-.75h.75V2.5ZM14 3c0-.41421-.3358-.75-.75-.75s-.75.33579-.75.75v1c0 .41421.3358.75.75.75S14 4.41421 14 4V3Zm-.75 2.75c.4142 0 .75.33579.75.75v1c0 .41421-.3358.75-.75.75s-.75-.33579-.75-.75v-1c0-.41421.3358-.75.75-.75Zm-8-1.875c-.34518 0-.625.27982-.625.625s.27982.625.625.625h2.5c.34518 0 .625-.27982.625-.625s-.27982-.625-.625-.625h-2.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_9447" x1="15.213" x2="-1.631" y1="15.542" y2="1.582" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

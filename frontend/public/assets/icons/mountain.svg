@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Mountain--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Mountain Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Map Travel/Places/mountain--sun-landmark-mountain-place-travel-places">
+    <path id="Union" fill="url(#paint0_linear_13604_12629)" fill-rule="evenodd" d="M5.5 3c0 1.38071-1.11929 2.5-2.5 2.5S.5 4.38071.5 3 1.61929.5 3 .5 5.5 1.61929 5.5 3Zm3.46838.5c-.44517 0-.86734.19774-1.15233.53972L5.06561 7.34025l1.69813 1.36821L8.375 7.50001c.22222-.16666.52778-.16666.75 0l1.611 1.20827 1.7065-1.37661-2.2343-3.19186C9.92751 3.73882 9.46882 3.5 8.97935 3.5h-.01097ZM.615895 12.6799 4.26527 8.30066l2.0926 1.68604c.22258.1793.53846.1848.76713.0133L8.75 8.78126 10.375 10c.2288.1716.5448.166.7674-.01353l2.0186-1.62838.2486.35518c.0589.08404.0904.18414.0904.28673v4c0 .2761-.2239.5-.5.5H1.00001c-.194013 0-.370509-.1122-.452799-.2879-.08229-.1757-.055517-.3832.068684-.5322Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13604_12629" x1="14.627" x2="-2.908" y1="16.253" y2="3.798" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

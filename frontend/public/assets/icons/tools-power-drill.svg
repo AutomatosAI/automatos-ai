@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="tools-power-drill--tools-power-drill-machine-cordless-woodwork">
+    <path id="Union" fill="url(#paint0_linear_15030_7035)" fill-rule="evenodd" d="M0 4c0-1.65685 1.34315-3 3-3h4c.82843 0 1.5.67157 1.5 1.5v4C8.5 7.32843 7.82843 8 7 8H6v2.5h1c.27614 0 .5.2239.5.5v1.5c0 .2761-.22386.5-.5.5H1.5c-.27614 0-.5-.2239-.5-.5V11c0-.2761.22386-.5.5-.5h1V7.95852C1.08114 7.72048 0 6.4865 0 5zm2.875-1.375c-.34518 0-.625.27982-.625.625s.27982.625.625.625h3.5c.34518 0 .625-.27982.625-.625s-.27982-.625-.625-.625zM2.25 5.75c0-.34518.27982-.625.625-.625h3.5c.34518 0 .625.27982.625.625s-.27982.625-.625.625h-3.5c-.34518 0-.625-.27982-.625-.625M10 6.5h-.25v-4H10c.7432 0 1.3602.54057 1.4793 1.25H13.25c.4142 0 .75.33579.75.75s-.3358.75-.75.75h-1.7707C11.3602 5.95943 10.7432 6.5 10 6.5" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15030_7035" x1="15.508" x2="-1.842" y1="15.258" y2="1.932" gradientUnits="userSpaceOnUse">
+      <stop offset=".312" stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

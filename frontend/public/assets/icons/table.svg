@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Table--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Table Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Business/Office/table--money-payment-table-organize-organization-business">
+    <path id="Union" fill="url(#paint0_linear_13641_5742)" fill-rule="evenodd" d="M2 7V3.51562h2.75V7H2Zm0 1.5h2.75V12H2.17308C2.07749 12 2 11.9225 2 11.8269V8.5ZM6.25 12h2.5V8.5h-2.5V12Zm4 0h1.5769c.0956 0 .1731-.0775.1731-.1731V8.5h-1.75V12ZM12 7h-1.75V3.51562H12V7ZM8.75 3.51562h-2.5V7h2.5V3.51562ZM13.5 7.75V2.17308C13.5 1.24906 12.7509.5 11.8269.5H2.17308C1.24906.5.5 1.24906.5 2.17308v9.65382c0 .924.74906 1.6731 1.67308 1.6731h9.65382c.924 0 1.6731-.7491 1.6731-1.6731V7.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_5742" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

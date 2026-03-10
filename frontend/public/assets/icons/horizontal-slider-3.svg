@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Horizontal-Slider-3--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Horizontal Slider 3 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Setting/horizontal-slider-3">
+    <path id="Union" fill="url(#paint0_linear_13603_6132)" fill-rule="evenodd" d="M4.75 1.5c0-.41421-.33579-.75-.75-.75s-.75.33579-.75.75v.75H.75C.335786 2.25 0 2.58579 0 3s.335786.75.75.75h2.5v.75c0 .41421.33579.75.75.75s.75-.33579.75-.75v-3Zm0 8c0-.41421-.33579-.75-.75-.75s-.75.33579-.75.75v.75H.75c-.414214 0-.75.3358-.75.75s.335786.75.75.75h2.5v.75c0 .4142.33579.75.75.75s.75-.3358.75-.75v-3ZM10 4.75c-.41421 0-.75.33579-.75.75v3c0 .41421.33579.75.75.75.4142 0 .75-.33579.75-.75v-.75h2.5c.4142 0 .75-.33579.75-.75s-.3358-.75-.75-.75h-2.5V5.5c0-.41421-.3358-.75-.75-.75Zm3.25-1-6.5 0C6.33579 3.75 6 3.41422 6 3c0-.41421.33579-.75.75-.75h6.5c.4142 0 .75.33579.75.75s-.3358.75-.75.75ZM6 11c0 .4142.33579.75.75.75l6.5 0c.4142 0 .75-.3358.75-.75s-.3358-.75-.75-.75l-6.5 0c-.41421 0-.75.3358-.75.75ZM.75 7.75l6.5 0c.41421 0 .75-.33578.75-.75 0-.41421-.33579-.75-.75-.75l-6.5 0C.335787 6.25 0 6.58579 0 7s.335786.75.75.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_6132" x1=".538" x2="15.572" y1="1.76" y2="11.251" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

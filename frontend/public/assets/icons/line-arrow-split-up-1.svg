@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Line-Arrow-Split-Up-1--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Line Arrow Split Up 1 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Multiple Line arrow/line-arrow-split-up-1">
+    <path id="Union" fill="url(#paint0_linear_13641_9478)" fill-rule="evenodd" d="M3.78033.21967c-.29289-.2928933-.76777-.2928933-1.06066 0l-2.5 2.5c-.2928933.29289-.2928933.76777 0 1.06066.292893.29289.767767.29289 1.06066 0L2.5 2.56066V4.75c0 2.22975 1.62172 4.08072 3.75 4.43778V13.25c0 .4142.33579.75.75.75s.75-.3358.75-.75V9.18778C9.87828 8.83072 11.5 6.97975 11.5 4.75V2.56066l1.2197 1.21967c.2929.29289.7677.29289 1.0606 0 .2929-.29289.2929-.76777 0-1.06066l-2.5-2.5c-.2929-.2928933-.7677-.2928933-1.0606 0l-2.50003 2.5c-.29289.29289-.29289.76777 0 1.06066s.76777.29289 1.06066 0L10 2.56066V4.75c0 1.65685-1.34315 3-3 3s-3-1.34315-3-3V2.56066l1.21967 1.21967c.29289.29289.76777.29289 1.06066 0s.29289-.76777 0-1.06066l-2.5-2.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_9478" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Sd-Card-Check-Validate--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Sd Card Check Validate Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Chips/sd-card-check-validate--sd-card-check-validate-checkmark-success-device-chips">
+    <path id="Union" fill="url(#paint0_linear_13629_2863)" fill-rule="evenodd" d="M8.53733 0c1.197 0 2.19347.945205 2.19347 2.14286V8.1977L8.89934 10.487l-.44922-.3369c-.88366-.66277-2.13726-.48368-2.8.4-.43581.581-.5076 1.3221-.2544 1.9499H2.19344C.996439 12.5 0 11.5548 0 10.3571V3.76c0-.40803.166228-.79846.460362-1.08127L2.81088.418726C3.0903.150061 3.46288 0 3.85051 0h4.68682ZM5.08179 2.28027c.34518 0 .625.27983.625.625v1.49591c0 .34517-.27983.625-.625.625-.34518 0-.625-.27983-.625-.625V2.90527c0-.34517.27982-.625.625-.625Zm3.08081.625c0-.34517-.27982-.625-.625-.625s-.625.27983-.625.625v1.49591c0 .34517.27982.625.625.625s.625-.27983.625-.625V2.90527Zm5.6731 5.81328c.2588-.32345.2063-.79542-.1171-1.05417-.3235-.25876-.7954-.20632-1.0542.11713L9.1185 12.2139 7.70004 11.15c-.33137-.2485-.80147-.1813-1.05.15-.24852.3314-.18137.8015.15 1.05l2 1.5c.32408.2431.7826.1849 1.03566-.1315l4-4.99995Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_2863" x1="13.953" x2="-2.626" y1="14.003" y2="4.677" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

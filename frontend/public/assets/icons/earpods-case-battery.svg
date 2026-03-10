@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Earpods-Case-Battery--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Earpods Case Battery Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Entertainment/Radio Walkman/earpods-case-battery">
+    <path id="Union" fill="url(#paint0_linear_13641_2340)" fill-rule="evenodd" d="M0 3.5C0 1.567 1.567 0 3.5 0h5C10.433 0 12 1.567 12 3.5H9.41421c-.39782 0-.77935.15803-1.06066.43934l-.41421.41421c-.09377.09377-.22095.14645-.35355.14645H4.41421c-.1326 0-.25978-.05268-.35355-.14645l-.41421-.41421C3.36514 3.65804 2.98361 3.5 2.58579 3.5L0 3.5Zm0 1v4C0 10.433 1.567 12 3.5 12h4.25V9c0-.79986.41737-1.50224 1.04621-1.90123C8.97758 6.32565 9.67156 5.75 10.5 5.75H12V4.5H9.41421c-.13261 0-.25978.05268-.35355.14645l-.41421.41421c-.28131.2813-.66284.43934-1.06066.43934H4.41421c-.39782 0-.77935-.15803-1.06066-.43934l-.41421-.41421C2.84557 4.55268 2.71839 4.5 2.58579 4.5H0Zm6 2.25c.41421 0 .75.33579.75.75s-.33579.75-.75.75-.75-.33579-.75-.75.33579-.75.75-.75Zm4 .75c0-.27614.2239-.5.5-.5h2c.2761 0 .5.22386.5.5V8c.5523 0 1 .44772 1 1v4c0 .5523-.4477 1-1 1h-3c-.55229 0-1-.4477-1-1V9c0-.55228.44772-1 1-1v-.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_2340" x1="2.288" x2="13.596" y1="2.692" y2="8.957" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

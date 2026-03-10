@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Align-Margins-Horizontal--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Align Margins Horizontal Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Align/align-margins-horizontal">
+    <path id="Subtract" fill="url(#paint0_linear_13603_2776)" fill-rule="evenodd" d="M1.5 1h1.375v12H1.5c-.39783 0-.779355-.158-1.06066-.4393C.158035 12.2794 0 11.8978 0 11.5v-9c0-.39782.158036-.77936.43934-1.06066C.720645 1.15804 1.10218 1 1.5 1Zm11 12-8.375 0v-2.75H7c.55228 0 1-.44771 1-1v-1.5c0-.55228-.44772-1-1-1H4.125V1h4.75v4.5c0 .34518.27982.625.625.625H14V11.5c0 .3978-.158.7794-.4393 1.0607S12.8978 13 12.5 13Zm1.0821-8.125L10.125 1.41789V4.875l3.4571 0Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_2776" x1="15.213" x2="-1.631" y1="15.542" y2="1.582" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="taxi-hail--wayfinder-taxi-hail-wave-call-pull-over-stop">
+    <path id="Union" fill="url(#paint0_linear_15041_2062)" fill-rule="evenodd" d="M7 0C5.89543 0 5 .89543 5 2s.89543 2 2 2 2-.89543 2-2-.89543-2-2-2M5.75 5h2.5c1.24264 0 2.25-1.00736 2.25-2.25v-1c0-.41421.3358-.75.75-.75s.75.33579.75.75v1c0 1.81422-1.2883 3.32753-3 3.67499V13.25c0 .4142-.33579.75-.75.75s-.75-.3358-.75-.75V10.5h-1v2.75c0 .4142-.33579.75-.75.75S5 13.6642 5 13.25V6.51772c-.84807.12131-1.5.85066-1.5 1.73228 0 .41421-.33579.75-.75.75S2 8.66421 2 8.25C2 6.45507 3.45507 5 5.25 5zM2 10c-.55228 0-1 .4477-1 1v2c0 .5523.44772 1 1 1h1c.55228 0 1-.4477 1-1v-2c0-.5523-.44772-1-1-1z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15041_2062" x1="13.185" x2="-3.914" y1="16.634" y2="7.79" gradientUnits="userSpaceOnUse">
+      <stop offset=".263" stop-color="#ff9a23"></stop>
+      <stop offset=".902" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

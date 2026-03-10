@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="nightlife-karaoke-bar--place-nightlife-karaoke-bar-activity-entertainment-bar-pub-music">
+    <path id="Union" fill="url(#paint0_linear_15041_2642)" fill-rule="evenodd" d="M9.75.75c0-.414214.3358-.75.75-.75h.25C12.5449 0 14 1.45507 14 3.25c0 .41421-.3358.75-.75.75s-.75-.33579-.75-.75c0-.79276-.5271-1.46239-1.25-1.67753V5.25c0 .9665-.7835 1.75-1.75 1.75s-1.75-.7835-1.75-1.75S8.5335 3.5 9.5 3.5c.08488 0 .16835.00604.25.01772zM5.25041 2H8.5v.42071c-.58261.20592-1.08262.5867-1.43698 1.07929l-1.81261 0-3.74258 0L2.86624 5h3.64403c-.0068.08243-.01027.16581-.01027.25 0 .86367.36496 1.64209.94907 2.18947L6.00039 9.03916V12.5h1.75c.41421 0 .75.3358.75.75s-.33579.75-.75.75h-5c-.41422 0-.75-.3358-.75-.75s.33578-.75.75-.75h1.75V9.0391L.395994 4.50688C-.477211 3.54266.206981 2 1.50783 2z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15041_2642" x1="13.953" x2="-2.623" y1="14.003" y2="4.682" gradientUnits="userSpaceOnUse">
+      <stop offset=".345" stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

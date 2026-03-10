@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Gallery--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Gallery Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Images Photography/Pictures/gallery--pages-filter-picture-pagination-image">
+    <path id="Union" fill="url(#paint0_linear_13629_4066)" fill-rule="evenodd" d="M1.25 5v5.4793C.540572 10.3602 0 9.74325 0 9V2.5C0 1.67157.671573 1 1.5 1H10c.7432 0 1.3602.54057 1.4793 1.25H4C2.48122 2.25 1.25 3.48122 1.25 5Zm11.25 8c.8284 0 1.5-.6716 1.5-1.5V5c0-.82843-.6716-1.5-1.5-1.5H4c-.82843 0-1.5.67157-1.5 1.5v6.5c0 .2071.04198.4044.11788.5839.02662.0629.0574.1236.09201.1818C2.97141 12.7054 3.4513 13 4 13h7.1427l-.0037 0 1.361 0ZM9 7c0 .69036.55965 1.25 1.25 1.25.6904 0 1.25-.55964 1.25-1.25s-.5596-1.25-1.25-1.25C9.55965 5.75 9 6.30964 9 7Zm-3.71451-.35355L3.875 8.05693V11.25c0 .2071.1679.375.375.375h6.7211L5.9926 6.64645c-.19527-.19527-.51185-.19527-.70711 0Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_4066" x1="2.288" x2="12.712" y1="3.308" y2="10.045" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

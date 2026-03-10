@@ -812,7 +812,7 @@ class ApiClient {
       try {
         const token = await this.getClerkToken()
         if (token) headers['Authorization'] = `Bearer ${token}`
-      } catch (_) {}
+      } catch (_) { }
     }
     return headers
   }
@@ -988,7 +988,11 @@ class ApiClient {
   async updateSystemConfigKey(key: string, value: any) {
     return this.request(`/api/system/config/${key}`, {
       method: 'PUT',
-      body: JSON.stringify({ value })
+      body: JSON.stringify({
+        config_key: key,
+        config_value: value,
+        description: 'Updated via system configs interface'
+      })
     })
   }
 

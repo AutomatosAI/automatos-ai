@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Signage-5--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Signage 5 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Money Shopping/Building Store/signage-5--signage-sign-shops-stores-sale-rent">
+    <path id="Union" fill="url(#paint0_linear_13629_4713)" fill-rule="evenodd" d="M1.25.5C.835786.5.5.835786.5 1.25c0 .41421.335786.75.75.75H2v2C1.17157 4 .5 4.67157.5 5.5v4c0 .8284.67157 1.5 1.5 1.5h7.5c.8284 0 1.5-.6716 1.5-1.5v-4c0-.82843-.6716-1.5-1.5-1.5V2h1.25c.6904 0 1.25.55964 1.25 1.25v9.5c0 .4142.3358.75.75.75s.75-.3358.75-.75v-9.5C13.5 1.73122 12.2688.5 10.75.5h-9.5ZM8 2H3.5v2H8V2Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_4713" x1="14.627" x2="-2.908" y1="16.253" y2="3.798" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

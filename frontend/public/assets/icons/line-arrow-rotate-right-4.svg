@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Line-Arrow-Rotate-Right-4--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Line Arrow Rotate Right 4 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Rotation Sync Line arrow/line-arrow-rotate-right-4">
+    <path id="Union" fill="url(#paint0_linear_13641_6442)" fill-rule="evenodd" d="M7 2c2.76142 0 5 2.23858 5 5 0 1.39795-.5737 2.66291-1.5 3.571V9.5c0-.55229-.4477-1-1-1-.55228 0-1 .44771-1 1v2.9346c-.00032.0146-.00033.0293 0 .044V13c0 .5523.44771 1 1 1H13c.5523 0 1-.4477 1-1s-.4477-1-1-1h-1.1013C13.1948 10.73 14 8.95955 14 7c0-3.86599-3.134-7-7-7-3.86599 0-7 3.13401-7 7 0 3.2631 2.23181 6.0024 5.25074 6.7794.53485.1377 1.08003-.1843 1.2177-.7192.13766-.5348-.18433-1.08-.71918-1.2177C3.59251 11.2874 2 9.32843 2 7c0-2.76142 2.23858-5 5-5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_6442" x1="15.213" x2="-3.671" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

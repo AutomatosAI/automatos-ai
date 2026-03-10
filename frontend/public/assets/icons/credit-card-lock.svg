@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="credit-card-lock--credit-card-lock-payment-secure">
+    <path id="Union" fill="url(#paint0_linear_16033_4866)" d="M7.44629 8.125c.40401.38639.95054.625 1.55371.625h4v3.75c0 .8284-.6716 1.5-1.5 1.5h-10C.671573 14 0 13.3284 0 12.5V8.125zM8.5 10.25c-.41421 0-.75.3358-.75.75s.33579.75.75.75H10c.4142 0 .75-.3358.75-.75s-.3358-.75-.75-.75zM11 0c1.2426 0 2.25 1.00736 2.25 2.25v.78223c.4312.11107.75.50187.75.96777v2.5c0 .55229-.4477 1-1 1H9c-.55228 0-1-.44772-1-1V4c0-.4659.31878-.8567.75-.96777V2.25C8.75 1.00736 9.75736 0 11 0M6.75 6.5c0 .12794.01366.25289.03418.375H0V5.5C0 4.67157.671573 4 1.5 4h5.25zm4.25-5c-.4142 0-.75.33579-.75.75V3h1.5v-.75c0-.41421-.3358-.75-.75-.75"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_16033_4866" x1="12.966" x2="-2.389" y1="12.81" y2="4.334" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

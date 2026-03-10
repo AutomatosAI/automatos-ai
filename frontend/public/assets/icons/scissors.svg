@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Scissors--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Scissors Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Select Copy/scissors--clipboard-copy-cut-paste-right-scissors">
+    <path id="Union" fill="url(#paint0_linear_13603_10710)" fill-rule="evenodd" d="M2 3.49988c0 .82843.67157 1.5 1.5 1.5s1.5-.67157 1.5-1.5-.67157-1.5-1.5-1.5-1.5.67157-1.5 1.5Zm.66544 2.88239C1.41464 6.02076.5 4.86713.5 3.49988.5 1.84302 1.84315.499878 3.5.499878s3 1.343142 3 3.000002c0 1.03714-.5263 1.95137-1.3264 2.49016l.32054.16566 6.91156-3.57198c.3679-.19017.8204-.04604 1.0106.32194.1902.36797.046.82044-.322 1.01062L7.12768 6.99994l5.96662 3.08366c.368.1902.5122.6426.322 1.0106-.1902.368-.6427.5121-1.0106.322L5.49414 7.84418l-.32054.16566C5.9737 8.54863 6.5 9.46285 6.5 10.5c0 1.6569-1.34315 3-3 3s-3-1.3431-3-3c0-1.36725.91464-2.52088 2.16544-2.88239l1.19515-.61767-1.19515-.61767ZM2 10.5C2 9.67157 2.67157 9 3.5 9S5 9.67157 5 10.5c0 .8284-.67157 1.5-1.5 1.5S2 11.3284 2 10.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_10710" x1="13.456" x2="-1.939" y1="13.503" y2="4.843" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

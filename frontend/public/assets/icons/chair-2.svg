@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Chair-2--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Chair 2 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Money Shopping/Furnitures/chair-2--design-lounge-furniture-chair-interior-decorate-armchair-decoration-shopping">
+    <path id="Union" fill="url(#paint0_linear_13629_4596)" fill-rule="evenodd" d="M4 .5c-.82843 0-1.5.67157-1.5 1.5v.75h.25c.9665 0 1.75.7835 1.75 1.75v2.25h5V4.5c0-.9665.7835-1.75 1.75-1.75h.25V2c0-.82843-.6716-1.5-1.5-1.5H4ZM1.92308 4c-.39093 0-.7569.1686-1.020119.45375C.640983 4.73756.5 5.11452.5 5.5v4.25c0 .3855.140983.7624.402961 1.0462.263219.2852.629189.4538 1.020119.4538h1.14196l-.29718 1.3373c-.08986.4044.16509.805.56944.8948.40435.0899.80498-.1651.89484-.5694l.36949-1.6627h4.79674l.36949 1.6627c.08986.4043.49044.6593.89484.5694.4043-.0898.6593-.4904.5694-.8948L10.935 11.25h1.1419c.3909 0 .7569-.1686 1.0201-.4538.262-.2838.403-.6607.403-1.0462V5.5c0-.38548-.141-.76244-.403-1.04625C12.8338 4.1686 12.4678 4 12.0769 4H11.25c-.2761 0-.5.22386-.5.5v3c0 .27614-.2239.5-.5.5h-6.5c-.27614 0-.5-.22386-.5-.5v-3c0-.27614-.22386-.5-.5-.5h-.82692Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_4596" x1="13.456" x2="-1.939" y1="13.503" y2="4.843" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

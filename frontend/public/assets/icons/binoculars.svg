@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Binoculars--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Binoculars Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Edit/binoculars--binocular-binoculars-view-zoom">
+    <path id="Subtract" fill="url(#paint0_linear_13603_1162)" fill-rule="evenodd" d="M3.80217.5C3.09912.5 2.4904.988299 2.33789 1.6746L.559532 9.67722C.519963 9.85528.5 10.0371.5 10.2195V10.5c0 1.6569 1.34315 3 3 3s3-1.3431 3-3v-3h1v3c0 1.6569 1.34315 3 3 3 1.6569 0 3-1.3431 3-3v-.2805c0-.1824-.02-.36422-.0595-.54228L11.6621 1.6746C11.5096.988299 10.9009.5 10.1978.5H9c-.82843 0-1.5.67157-1.5 1.5v1.5h-1V2C6.5 1.17157 5.82843.5 5 .5H3.80217ZM3.5 12.25c.9665 0 1.75-.7835 1.75-1.75S4.4665 8.75 3.5 8.75s-1.75.7835-1.75 1.75.7835 1.75 1.75 1.75Zm8.75-1.75c0 .9665-.7835 1.75-1.75 1.75s-1.75-.7835-1.75-1.75.7835-1.75 1.75-1.75 1.75.7835 1.75 1.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_1162" x1="13.456" x2="-1.939" y1="13.503" y2="4.843" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

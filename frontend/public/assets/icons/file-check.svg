@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="File-Check--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    File Check Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Files Folders/file-check--file-common-check">
+    <path id="Subtract" fill="url(#paint0_linear_13603_7142)" fill-rule="evenodd" d="M1.43934.43934C1.72064.158035 2.10218 0 2.5 0H9c.13261 0 .25979.0526784.35355.146447L12.8536 3.64645C12.9473 3.74021 13 3.86739 13 4v8.5c0 .3978-.158.7794-.4393 1.0607S11.8978 14 11.5 14h-9c-.39783 0-.77936-.158-1.06066-.4393C1.15804 13.2794 1 12.8978 1 12.5v-11c0-.39782.15804-.779356.43934-1.06066ZM9.6 5.95c.24853-.33137.18137-.80147-.15-1.05-.33137-.24853-.80147-.18137-1.05.15L5.82569 8.48241l-.90966-.60645c-.34465-.22976-.8103-.13663-1.04007.20801-.22976.34465-.13663.8103.20801 1.04007l1.5.99996c.3312.2208.7772.1444 1.01603-.174l3-4Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_7142" x1="14.04" x2="-3.727" y1="16.965" y2="6.148" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

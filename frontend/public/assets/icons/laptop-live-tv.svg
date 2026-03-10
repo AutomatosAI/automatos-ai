@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="laptop-live-tv--laptop-live-tv-streaming-stream-online-boardcast">
+    <path id="Union" fill="url(#paint0_linear_15027_4317)" fill-rule="evenodd" d="M8.85771.062679c.15898-.0881128.35325-.0830119.50739.013322l4.4 2.749999c.1462.09137.235.25161.235.424 0 .1724-.0888.33263-.235.424l-4.4 2.75c-.15414.09633-.34841.10143-.50739.01332C8.69874 6.34921 8.6001 6.18176 8.6001 6V.5c0-.181762.09864-.349208.25761-.437321M3.25 4.5c-.13807 0-.25.11193-.25.25V9h8V7.5c0-.41421.3358-.75.75-.75s.75.33579.75.75v1.88197l1.3618 2.72363c.0909.1817.1382.3822.1382.5854 0 .7229-.5861 1.309-1.309 1.309H1.30902C.586067 14 0 13.4139 0 12.691c0-.2032.0473146-.4037.138197-.5854L1.5 9.38197V4.75C1.5 3.7835 2.2835 3 3.25 3H6.5c.41421 0 .75.33579.75.75s-.33579.75-.75.75z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_4317" x1="2.288" x2="13.596" y1="2.692" y2="8.957" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

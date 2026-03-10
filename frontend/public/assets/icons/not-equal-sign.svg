@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Not-Equal-Sign--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Not Equal Sign Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Mathematics/not-equal-sign--interface-math-not-equal-sign-mathematics">
+    <path id="Union" fill="url(#paint0_linear_13603_8458)" fill-rule="evenodd" d="M11.1293 1.47628c.263-.485616.0826-1.092528-.403-1.355572-.4856-.263044-1.09255-.0826107-1.35559.403009L7.75855 3.5H1c-.552285 0-1 .44772-1 1s.447715 1 1 1h5.67522l-1.625 3H1c-.552285 0-1 .44771-1 1 0 .5523.447715 1 1 1h2.96689l-1.09618 2.0237c-.26305.4856-.08261 1.0925.40301 1.3556.48562.263 1.09253.0826 1.35557-.403L6.24145 10.5H13c.5523 0 1-.4477 1-1 0-.55229-.4477-1-1-1H7.32478l1.625-3H13c.5523 0 1-.44772 1-1s-.4477-1-1-1h-2.9669l1.0962-2.02372Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_8458" x1=".538" x2="16.494" y1="1.131" y2="10.124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

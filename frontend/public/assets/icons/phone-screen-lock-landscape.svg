@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="phone-screen-lock-landscape--phone-screen-lock-landscape-prevent-no-rotating">
+    <path id="Union" fill="url(#paint0_linear_15041_3528)" fill-rule="evenodd" d="M12.5 0c.8284 0 1.5.671573 1.5 1.5v5.44621C13.3876 5.92979 12.2732 5.25 11 5.25c-1.933 0-3.5 1.567-3.5 3.5v.07319c-.34156.30552-.58929.71382-.69429 1.17681H1.5C.671572 10 0 9.32843 0 8.5v-7C0 .671572.671573 0 1.5 0zM3.75 4.5c0-.41421-.33579-.75-.75-.75s-.75.33579-.75.75v1c0 .41421.33579.75.75.75s.75-.33579.75-.75zM11 8c-.4142 0-.75.33579-.75.75v.75h1.5v-.75c0-.41421-.3358-.75-.75-.75m-2.25.75v.7815c-.43131.11102-.75.5025-.75.9685V13c0 .5523.44772 1 1 1h4c.5523 0 1-.4477 1-1v-2.5c0-.466-.3187-.85748-.75-.9685V8.75c0-1.24264-1.0074-2.25-2.25-2.25-1.24264 0-2.25 1.00736-2.25 2.25" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15041_3528" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

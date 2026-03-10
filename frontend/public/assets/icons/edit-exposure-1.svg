@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="edit-exposure-1--edit-exposure-square-image-adjustment-photography-lighting">
+    <path id="Union" fill="url(#paint0_linear_15027_5212)" fill-rule="evenodd" d="M.5 2.25C.5 1.2835 1.2835.5 2.25.5h9.5c.9665 0 1.75.7835 1.75 1.75v9.5c0 .9665-.7835 1.75-1.75 1.75h-9.5c-.9665 0-1.75-.7835-1.75-1.75zM2.25 12c-.06904 0-.13154-.028-.17678-.0732l9.85358-9.85358c.0452.04524.0732.10774.0732.17678v9.5c0 .1381-.1119.25-.25.25zm.125-7.5c0-.34518.27982-.625.625-.625h.875V3c0-.34518.27982-.625.625-.625s.625.27982.625.625v.875H6c.34518 0 .625.27982.625.625s-.27982.625-.625.625h-.875V6c0 .34518-.27982.625-.625.625S3.875 6.34518 3.875 6v-.875H3c-.34518 0-.625-.27982-.625-.625m8 5.75c.3452 0 .625-.27982.625-.625S10.7202 9 10.375 9h-2.75C7.27982 9 7 9.27982 7 9.625s.27982.625.625.625z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_5212" x1="14.9" x2="-2.969" y1="15.946" y2="4.182" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

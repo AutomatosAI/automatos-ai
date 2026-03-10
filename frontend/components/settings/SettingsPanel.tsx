@@ -12,6 +12,8 @@ import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 import { SystemPromptsTab } from './SystemPromptsTab'
 import { ApiKeyManager } from './ApiKeyManager'
 import { VoiceProfilesSettingsTab } from './VoiceProfilesSettingsTab'
+import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
+import { Palette } from 'lucide-react'
 
 export function SettingsPanel() {
 
@@ -62,6 +64,10 @@ export function SettingsPanel() {
             <Volume2 className="w-4 h-4 mr-1 shrink-0" />
             Voices
           </TabsTrigger>
+          <TabsTrigger value="system-icons">
+            <Palette className="w-4 h-4 mr-1 shrink-0" />
+            Icons
+          </TabsTrigger>
           <TabsTrigger value="widget-sdk">
             <Puzzle className="w-4 h-4 mr-1 shrink-0" />
             Widget SDK
@@ -111,6 +117,11 @@ export function SettingsPanel() {
         {/* PRD-74: Voice Profiles */}
         <TabsContent value="voice-profiles">
           <VoiceProfilesSettingsTab />
+        </TabsContent>
+
+        {/* Phase 1: System Icons */}
+        <TabsContent value="system-icons">
+          <SystemIconsSettingsTab />
         </TabsContent>
 
         {/* PRD-38.4: Widget SDK API Keys */}

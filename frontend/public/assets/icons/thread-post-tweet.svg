@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Thread-Post-Tweet--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Thread Post Tweet Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Content/thread-post-tweet">
+    <path id="Union" fill="url(#paint0_linear_13603_11271)" fill-rule="evenodd" d="M6.25.75C6.25.335786 5.91421 0 5.5 0s-.75.335786-.75.75v1h-3.5c-.414214 0-.75.33579-.75.75s.335786.75.75.75h.25v.66324l8 1.64706V3.25h.25c.4142 0 .75-.33579.75-.75s-.3358-.75-.75-.75h-3.5v-1ZM1.5 7.41324V5.18946l8 1.64706v.94846l3.3828.73539c.3373.07332.5513.4062.4779.7435-.0733.3373-.4062.55129-.7435.47797l-3.45421-.75092L1.5 7.41324Zm0 3.33676V8.68946l8 1.64704v.4135h.25c.4142 0 .75.3358.75.75s-.3358.75-.75.75h-3.5v1c0 .4142-.33579.75-.75.75s-.75-.3358-.75-.75v-1h-3.5c-.414214 0-.75-.3358-.75-.75s.335786-.75.75-.75h.25Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_11271" x1="2.605" x2="13.394" y1="2.692" y2="8.19" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

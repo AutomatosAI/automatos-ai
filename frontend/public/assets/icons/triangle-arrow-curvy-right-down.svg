@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Triangle-Arrow-Curvy-Right-Down--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Triangle Arrow Curvy Right Down Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Single Triangle arrow/triangle-arrow-curvy-right-down--snake-arrow-sideways-diagram-right">
+    <path id="Union" fill="url(#paint0_linear_13641_7794)" fill-rule="evenodd" d="M.5 1.5c0-.552285.447715-1 1-1h8.75c1.7949 0 3.25 1.45507 3.25 3.25S12.0449 7 10.25 7H4c-.82843 0-1.5.67157-1.5 1.5S3.17157 10 4 10h5.75V8.75c0-.30335.18273-.57682.463-.69291.2802-.11609.6028-.05192.8173.16258l2.25 2.25003c.2929.2929.2929.7677 0 1.0606l-2.25 2.25c-.2145.2145-.5371.2787-.8173.1626-.28027-.1161-.463-.3896-.463-.6929V12H4C2.067 12 .5 10.433.5 8.5S2.067 5 4 5h6.25c.6904 0 1.25-.55964 1.25-1.25s-.5596-1.25-1.25-1.25H1.5c-.552285 0-1-.44772-1-1Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_7794" x1="1" x2="16.08" y1="1.591" y2="9.776" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

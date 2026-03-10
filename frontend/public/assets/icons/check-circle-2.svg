@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Check-Circle-2--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Check Circle 2 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Validation/check-circle-2--checkmark-addition-circle-success-check-validation-add-form-tick">
+    <path id="Union" fill="url(#paint0_linear_13603_9286)" fill-rule="evenodd" d="M13.8357 1.21852c.2587-.323445.2063-.795414-.1172-1.054172-.3234-.2587568-.7954-.2063157-1.0542.117131L6.78512 7.63051 4.2 5.69167c-.33137-.24853-.80147-.18137-1.05.15-.24853.33137-.18137.80147.15 1.05l3.16667 2.375c.32407.24305.78259.18484 1.03565-.13148l6.33338-7.91667ZM1.5 7.5c0-2.76142 2.23858-5 5-5 .69817 0 1.36109.14266 1.96269.39971.3809.16275.82162-.01409.98437-.39499.16275-.3809-.0141-.82162-.395-.98437C8.26758 1.18516 7.40444 1 6.5 1 2.91015 1 0 3.91015 0 7.5 0 11.0899 2.91015 14 6.5 14c3.5899 0 6.5-2.9101 6.5-6.5 0-.46257-.0484-.91464-.1408-1.35116-.0857-.40524-.4837-.66426-.889-.57853-.4052.08572-.6642.48374-.5785.88898.0709.33506.1083.6831.1083 1.04071 0 2.7614-2.23858 5-5 5s-5-2.2386-5-5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_9286" x1="15.213" x2="-3.671" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

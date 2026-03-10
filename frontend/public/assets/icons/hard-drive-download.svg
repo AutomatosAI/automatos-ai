@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Hard-Drive-Download--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Hard Drive Download Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Storage/hard-drive-download--hard-drive-download-disk-device-electronics-storage-code-disk-programming">
+    <path id="Union" fill="url(#paint0_linear_13629_2961)" fill-rule="evenodd" d="M7 .5c.55228 0 1 .447715 1 1v2h1.5c.20223 0 .38455.12182.46194.30866.07736.18684.03461.40189-.10839.54489l-2.5 2.5c-.19526.19527-.51184.19527-.7071 0l-2.5-2.5c-.143-.143-.18578-.35805-.10839-.54489S4.29777 3.5 4.5 3.5H6v-2c0-.552285.44772-1 1-1ZM2 8C1.17157 8 .5 8.67157.5 9.5V12c0 .8284.67157 1.5 1.5 1.5h10c.8284 0 1.5-.6716 1.5-1.5V9.5c0-.82843-.6716-1.5-1.5-1.5H2Zm.375 2.75c0-.3452.27982-.625.625-.625h3c.34518 0 .625.2798.625.625s-.27982.625-.625.625H3c-.34518 0-.625-.2798-.625-.625Zm8.375.75c-.4142 0-.75-.3358-.75-.75s.3358-.75.75-.75.75.3358.75.75-.3358.75-.75.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_2961" x1="2.625" x2="13.125" y1="3" y2="8.818" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

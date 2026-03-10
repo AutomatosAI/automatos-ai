@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Plus-Minus-1--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Plus Minus 1 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Mathematics/plus-minus-1--interface-math-plus-minus-sign-mathematics">
+    <path id="Union" fill="url(#paint0_linear_13603_8396)" fill-rule="evenodd" d="M4.25 2.75v-1.5C4.25.835786 3.91421.5 3.5.5s-.75.335786-.75.75v1.5h-1.5c-.414214 0-.75.33579-.75.75s.335786.75.75.75h1.5v1.5c0 .41421.33579.75.75.75s.75-.33579.75-.75v-1.5h1.5c.41421 0 .75-.33579.75-.75s-.33579-.75-.75-.75h-1.5ZM8 10.5c0-.4142.33579-.75.75-.75h4c.4142 0 .75.3358.75.75s-.3358.75-.75.75h-4c-.41421 0-.75-.3358-.75-.75Zm5.2803-8.71967c.2929-.29289.2929-.76777 0-1.06066-.2929-.292893-.7677-.292893-1.0606 0L.71967 12.2197c-.292893.2929-.292893.7677 0 1.0606.29289.2929.76777.2929 1.06066 0L13.2803 1.78033Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_8396" x1="14.627" x2="-2.908" y1="16.253" y2="3.798" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

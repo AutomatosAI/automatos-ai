@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Film-Roll--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Film Roll Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Images Photography/Accessories/film-roll--photos-camera-shutter-picture-photography-pictures-photo-film-roll">
+    <path id="Union" fill="url(#paint0_linear_13629_3873)" fill-rule="evenodd" d="M.75 1h7.5c.41421 0 .75.33579.75.75s-.33579.75-.75.75H8l0 9h.25c.41421 0 .75.3358.75.75s-.33579.75-.75.75h-.7486L7.5 13l-.0014 0H1.51345L1.5 13.0002 1.48655 13H.75c-.414214 0-.75-.3358-.75-.75s.335786-.75.75-.75H1l0-9H.75C.335786 2.5 0 2.16421 0 1.75S.335786 1 .75 1ZM9 3.5c0-.27614.22386-.5.5-.5h4c.2761 0 .5.22386.5.5v3c0 .16718-.0836.32329-.2227.41603L12.5 7.76759V10.5c0 .2761-.2239.5-.5.5H9.5c-.27614 0-.5-.2239-.5-.5v-7Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_3873" x1=".538" x2="15.216" y1="1.97" y2="11.622" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

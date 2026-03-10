@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Give-Gift--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Give Gift Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Trophy Award/give-gift--reward-social-rating-media-queen-vip-gift">
+    <path id="Union" fill="url(#paint0_linear_13603_9793)" fill-rule="evenodd" d="M9.03033.21967c-.29289-.2928933-.76777-.2928933-1.06066 0-.29289.292893-.29289.767767 0 1.06066L8.68934 2H6.5c-.27614 0-.5.22386-.5.5v5c0 .27614.22386.5.5.5h2.875V3.5c0-.34518.27982-.625.625-.625.3452 0 .625.27982.625.625V8H13.5c.2761 0 .5-.22386.5-.5v-5c0-.27614-.2239-.5-.5-.5h-2.1893l.7196-.71967c.2929-.292893.2929-.767767 0-1.06066-.2929-.2928933-.7677-.2928933-1.0606 0L10 1.18934 9.03033.21967ZM1.84315 7H0v4l1.82843 1.8284C2.57857 13.5786 3.59599 14 4.65685 14H10.5c.8284 0 1.5-.6716 1.5-1.5s-.6716-1.5-1.5-1.5H7.72328c-.09648.3266-.27362.6345-.5314.8923-.82397.824-2.15989.824-2.98386 0l-1.45001-1.45c-.24408-.2441-.24408-.6398 0-.88388.24408-.24407.63981-.24407.88388 0l1.45002 1.44998c.33581.3359.88027.3359 1.21609 0 .30251-.3025.33251-.7743.08999-1.11041L4.67157 8.17157C3.92143 7.42143 2.90401 7 1.84315 7Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_9793" x1="15.213" x2="-3.671" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

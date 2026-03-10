@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Table-Lamp-2--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Table Lamp 2 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Lighting/table-lamp-2--lighting-light-incandescent-bulb-lights-table-lamp">
+    <path id="Union" fill="url(#paint0_linear_13603_8929)" fill-rule="evenodd" d="M3.11724 10h3.13274v2.5h-1.75c-.41422 0-.75.3358-.75.75s.33578.75.75.75h5c.41421 0 .75002-.3358.75002-.75s-.33581-.75-.75002-.75h-1.75V10h3.13272c.894 0 1.5896-.7771 1.4908-1.66565l-.7777-7C11.5114.574704 10.8693 0 10.1049 0H3.89502C3.1307 0 2.4886.574702 2.4042 1.33435l-.77778 7C1.52769 9.2229 2.22323 10 3.11724 10Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_8929" x1="13.316" x2="-3.512" y1="16.965" y2="7.773" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

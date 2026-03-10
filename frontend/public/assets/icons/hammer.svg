@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Hammer--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Hammer Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Setting/hammer--construction-hammer-mallet-tool-tools-setting-edit-adjust">
+    <path id="Union" fill="url(#paint0_linear_13603_6396)" fill-rule="evenodd" d="M3.46211 5.16067c-.58145-.58146-.58145-1.52419 0-2.10564L6.031.486142c.58145-.5814573 1.52418-.5814576 2.10564 0L13.513 5.86255c.5815.58146.5815 1.52419 0 2.10564l-2.5688 2.56891c-.5815.5814-1.52422.5814-2.10568 0L3.46211 5.16067Zm-.41574 8.27543 3.45015-3.45026-2.48153-2.48153L.564844 10.9546c-.685255.6852-.685254 1.7963 0 2.4815.685256.6853 1.796266.6853 2.481526 0Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_6396" x1="15.154" x2="-3.595" y1="16.894" y2="3.578" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

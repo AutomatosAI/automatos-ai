@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Recycle-Bin-Throw-2--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Recycle Bin Throw 2 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Add Remove Delete/recycle-bin-throw-2--remove-delete-empty-bin-trash-garbage">
+    <path id="Subtract" fill="url(#paint0_linear_13603_11966)" fill-rule="evenodd" d="M5.25 1.75c0-.13807.11193-.25.25-.25h3c.13807 0 .25.11193.25.25v1h-3.5v-1Zm-1.5 1h-2.5c-.414214 0-.75.33579-.75.75s.335786.75.75.75h.35691l1.39863 9.3242c.03671.2447.24697.4258.49446.4258h7c.2475 0 .4578-.1811.4945-.4258L12.3931 4.25h.3569c.4142 0 .75-.33579.75-.75s-.3358-.75-.75-.75h-2.5v-1C10.25.783502 9.4665 0 8.5 0h-3c-.9665 0-1.75.783502-1.75 1.75v1Zm3.60357 2.89645c-.19526-.19527-.51185-.19527-.70711 0l-2 2c-.143.143-.18578.35805-.10839.54489.0774.18684.25971.30866.46194.30866H6.25V11c0 .4142.33579.75.75.75s.75-.3358.75-.75V8.5h1.25002c.20223 0 .38454-.12182.46194-.30866.07739-.18684.03461-.40189-.10839-.54489l-2-2Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_11966" x1="14.627" x2="-3.758" y1="16.965" y2="4.839" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Drop-Down-List--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Drop Down List Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="drop-down-list--drop-down-list-form-web-choice">
+    <path id="Union" fill="url(#paint0_linear_13311_1996)" fill-rule="evenodd" d="M1 1.02525C.690703 1.34089.5 1.77317.5 2.25v9.5c0 .9665.7835 1.75 1.75 1.75h9.5c.9665 0 1.75-.7835 1.75-1.75v-9.5c0-.47683-.1907-.90911-.5-1.22475V1h-.0253C12.6591.690703 12.2268.5 11.75.5h-9.5c-.47683 0-.90911.190703-1.22475.5H1v.02525ZM2 5.5v6.25c0 .1381.11193.25.25.25h9.5c.1381 0 .25-.1119.25-.25V5.5H2Zm6.53806-3.06634C8.61545 2.24682 8.79777 2.125 9 2.125h2c.2022 0 .3845.12182.4619.30866.0774.18684.0347.40189-.1083.54489l-1 1c-.1953.19527-.51189.19527-.70715 0l-1-1c-.143-.143-.18578-.35805-.10839-.54489ZM3 7.5c0-.41421.33579-.75.75-.75h6.5c.4142 0 .75.33579.75.75s-.3358.75-.75.75h-6.5c-.41421 0-.75-.33579-.75-.75Zm.75 1.75c-.41421 0-.75.33579-.75.75 0 .4142.33579.75.75.75h3c.41421 0 .75-.3358.75-.75 0-.41421-.33579-.75-.75-.75h-3Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13311_1996" x1="13.456" x2="-1.939" y1="13.503" y2="4.843" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

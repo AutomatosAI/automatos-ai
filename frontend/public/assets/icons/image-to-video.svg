@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="image-to-video--image-to-video-moving-sequence">
+    <path id="Union" fill="url(#paint0_linear_15027_3008)" fill-rule="evenodd" d="M1.5 0C.671573 0 0 .671573 0 1.5v8c0 .8284.671573 1.5 1.5 1.5h4.25V9.5H1.5V5.36632L2.75112 4.1152c.19526-.19527.51185-.19527.70711 0l3.5808 3.58079c.14687-.04.30142-.06135.46097-.06135H11V1.5C11 .671573 10.3284 0 9.5 0zm8 3.75C9.5 2.7835 8.7165 2 7.75 2S6 2.7835 6 3.75 6.7835 5.5 7.75 5.5 9.5 4.7165 9.5 3.75m4.1338 5.94234-1.5184.67306 0-.98076c0-.27614-.2239-.5-.5-.5H7.5c-.27614 0-.5.22386-.5.5V13.5c0 .2762.22386.5.5.5h4.1154c.2761 0 .5-.2238.5-.5l0-.9807 1.5184.673c.1742.0672.3662-.0757.3662-.253V9.94541c0-.18787-.1893-.333-.3662-.25307" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_3008" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

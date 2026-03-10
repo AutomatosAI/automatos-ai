@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Move-Right--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Move Right Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Resize Move/move-right">
+    <path id="Union" fill="url(#paint0_linear_13603_12170)" fill-rule="evenodd" d="M14.0005.75c0-.414214-.3358-.75-.75-.75s-.75.335786-.75.75l0 12.5c0 .4142.3358.75.75.75s.75-.3358.75-.75l0-12.5ZM0 5.25c0-.82843.671573-1.5 1.5-1.5H5c.82843 0 1.5.67157 1.5 1.5v1h1.99951V5c0-.20223.12182-.38455.30866-.46194.18684-.07739.4019-.03461.5449.10839l2.00003 2c.1952.19526.1952.51184 0 .7071l-2.00003 2c-.143.143-.35806.18578-.5449.10839-.18684-.07739-.30866-.25971-.30866-.46194V7.75H6.5v.99951c0 .82843-.67157 1.49999-1.5 1.49999H1.5c-.828427 0-1.5-.67156-1.5-1.49999V5.25Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_12170" x1="13.953" x2="-2.626" y1="14.003" y2="4.676" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

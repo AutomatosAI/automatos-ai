@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Padlock-Circle-2--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Padlock Circle 2 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Lock Unlock/padlock-circle-2--combination-combo-lock-unlocked-padlock-secure-security-shield-keyhole">
+    <path id="Subtract" fill="url(#paint0_linear_13603_4573)" fill-rule="evenodd" d="M5.5 2c-.27614 0-.5.22386-.5.5v1.91604C5.61246 4.14845 6.2889 4 7 4c2.76142 0 5 2.23858 5 5 0 2.7614-2.23858 5-5 5s-5-2.2386-5-5c0-1.12582.37209-2.16474 1-3.00049V2.5C3 1.11929 4.11929 0 5.5 0h3c1.09008 0 2.0148.697109 2.3575 1.66675.184.52072-.0889 1.09204-.6096 1.27609-.52072.18405-1.09205-.08888-1.27609-.60959C8.90269 2.1377 8.71614 2 8.5 2h-3ZM7 10.25c.69036 0 1.25-.55964 1.25-1.25S7.69036 7.75 7 7.75 5.75 8.30964 5.75 9s.55964 1.25 1.25 1.25Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_4573" x1="12.867" x2="-3.273" y1="16.965" y2="8.776" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

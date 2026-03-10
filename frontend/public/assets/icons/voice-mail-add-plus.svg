@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Voice-Mail-Add-Plus--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Voice Mail Add Plus Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Voice Mail/voice-mail-add-plus--voice-mail-add-plus-join-message">
+    <path id="Union" fill="url(#paint0_linear_13629_3170)" fill-rule="evenodd" d="M5.57069 0c-1.6704 0-3.02453 1.35412-3.02453 3.02453v2.54709c0 1.67041 1.35413 3.02453 3.02453 3.02453 1.6704 0 3.02453-1.35412 3.02453-3.02452v-2.5471C8.59522 1.35413 7.24109 0 5.57069 0ZM.00146484 5.84375c0 2.81795 2.09910516 5.14445 4.81923516 5.51005v.8963c0 .4142.33579.75.75.75s.75-.3358.75-.75v-1.5893l.00003-.007c0-.4142-.33578-.74997-.75-.74997-2.24873 0-4.06927-1.81911-4.06927-4.06008 0-.41421-.33578-.75-.749995-.75-.414214 0-.75000016.33579-.75000016.75ZM11.5 8.25c0-.41421-.3358-.75-.75-.75s-.75.33579-.75.75V10H8.25003c-.41421 0-.75.3358-.75.75s.33579.75.75.75H10v1.75c0 .4142.3358.75.75.75s.75-.3358.75-.75V11.5h1.75c.4142 0 .75-.3358.75-.75s-.3358-.75-.75-.75H11.5V8.25Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_3170" x1="13.953" x2="-2.626" y1="14.003" y2="4.678" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

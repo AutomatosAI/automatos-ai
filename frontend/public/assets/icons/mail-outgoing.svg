@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Mail-Outgoing--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Mail Outgoing Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="mail-outgoing--inbox-envelope-email-message-up-arrow-outbox">
+    <path id="Union" fill="url(#paint0_linear_12103_25964)" fill-rule="evenodd" d="M7.00003 6.5c-.41421 0-.75-.33579-.75-.75l0-2.75-1.25001 0c-.20224 0-.38455-.12182-.46194-.30866-.0774-.18684-.03462-.40189.10838-.54489l2-2.000003c.19526-.1952626.51185-.1952626.70711 0l2 2.000003c.143.143.18578.35805.10839.54489C9.38456 2.87818 9.20225 3 9.00002 3L7.75003 3l0 2.75c0 .41421-.33579.75-.75.75Zm-1.99999-.75005v-.75H2.5c-.39782 0-.77936.15804-1.06066.43934-.12017.12017-.21785.25864-.29032.40885L7 9.74879l5.851-3.90065c-.0725-.15021-.1702-.28868-.2903-.40885-.2813-.2813-.6629-.43934-1.0607-.43934H9.00004v.75c0 1.10457-.89543 2-2 2s-2-.89543-2-2ZM1 7.25111V12.5c0 .3978.15804.7793.43934 1.0606S2.10217 14 2.5 14h9c.8284 0 1.5-.6716 1.5-1.5V7.25111L7.34669 11.02c-.20994.1399-.48344.1399-.69338 0L1 7.25111Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_12103_25964" x1="1.461" x2="16.073" y1="1.131" y2="8.19" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

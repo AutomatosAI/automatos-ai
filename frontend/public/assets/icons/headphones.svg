@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Headphones--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Headphones Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Entertainment/Radio Walkman/headphones--headphones-audio-music-wireless-headset-entertainment">
+    <path id="Union" fill="url(#paint0_linear_13641_1764)" fill-rule="evenodd" d="M3.9948 3.2448C4.79183 2.44777 5.87283 2 7 2c1.12717 0 2.20817.44777 3.0052 1.2448.797.79703 1.2448 1.87803 1.2448 3.0052V7.5h-.75C9.67157 7.5 9 8.17157 9 9v3c0 .8284.67157 1.5 1.5 1.5H12c.8284 0 1.5-.6716 1.5-1.5V9c0-.55521-.3016-1.03997-.75-1.29933V6.25c0-1.52499-.6058-2.98753-1.6841-4.06586C9.98753 1.1058 8.52499.5 7 .5c-1.52499 0-2.98753.6058-4.06586 1.68414C1.8558 3.26247 1.25 4.72501 1.25 6.25v1.45067C.801649 7.96003.5 8.44479.5 9v3c0 .8284.67157 1.5 1.5 1.5h1.5c.82843 0 1.5-.6716 1.5-1.5V9c0-.82843-.67157-1.5-1.5-1.5h-.75V6.25c0-1.12717.44777-2.20817 1.2448-3.0052Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_1764" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

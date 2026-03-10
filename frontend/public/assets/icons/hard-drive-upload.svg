@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Hard-Drive-Upload--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Hard Drive Upload Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Storage/hard-drive-upload--hard-drive-upload-disk-device-electronics-storage-code-disk-programming">
+    <path id="Union" fill="url(#paint0_linear_13629_2974)" fill-rule="evenodd" d="M7.00002 7c-.55229 0-1-.44772-1-1l0-2-1.5 0c-.20224 0-.38455-.12182-.46194-.30866-.0774-.18684-.03462-.40189.10838-.54489l2.5-2.500003c.19526-.195263.51185-.195262.70711 0l2.5 2.500003c.143.143.18573.35805.10839.54489C9.88456 3.87818 9.70225 4 9.50002 4l-1.5 0v2c0 .55229-.44772 1-1 1ZM2 8.00003c-.82843 0-1.5.67157-1.5 1.5V12c0 .8285.67157 1.5 1.5 1.5h10c.8284 0 1.5-.6715 1.5-1.5V9.50003c0-.82843-.6716-1.5-1.5-1.5H2ZM2.375 10.75c0-.3452.27982-.625.625-.625h3c.34518 0 .625.2798.625.625s-.27982.625-.625.625H3c-.34518 0-.625-.2798-.625-.625Zm8.375.75c-.4142 0-.75-.3358-.75-.75s.3358-.75.75-.75.75.3358.75.75-.3358.75-.75.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_2974" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

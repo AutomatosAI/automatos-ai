@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Left-Click--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Left Click Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Mouse/left-click">
+    <path id="Union" fill="url(#paint0_linear_13629_688)" fill-rule="evenodd" d="M5.23195.336018c.22868.345365.13409.810722-.21127 1.039402-1.23414.81717-2.15475 2.0677-2.5459 3.53192-.10691.40019-.51798.63793-.91816.53103-.40018-.10691-.637929-.51798-.53103-.91816C1.51338 2.69425 2.65956 1.1398 4.19255.124741c.34536-.228681.81072-.13408948 1.0394.211277ZM5 7.00004c0-1.99652 1.46273-3.65141 3.375-3.95146v3.70146c0 .20711-.16789.375-.375.375H5v-.125ZM5 10V8.37504h3c.89746 0 1.625-.72754 1.625-1.625V3.04858C11.5373 3.34863 13 5.00352 13 7.00004V10c0 2.2092-1.7909 4-4 4-2.20914 0-4-1.7908-4-4Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_688" x1="12.959" x2="-2.219" y1="14.003" y2="6.684" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

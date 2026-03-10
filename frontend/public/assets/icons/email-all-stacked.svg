@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="email-all-stacked--email-all-stacked-inbox-messages">
+    <path id="Union" fill="url(#paint0_linear_15027_3617)" fill-rule="evenodd" d="M4 10h9c.5523 0 1-.44772 1-1V4.54761l-5.19742 2.8743c-.18821.10409-.41672.10409-.60494 0L3 4.54748V9c0 .55228.44772 1 1 1m4.50011-3.83923L14 3.11919V3c0-.55228-.4477-1-1-1H4c-.55228 0-1 .44772-1 1v.11907zM1.5 5.75c0-.41421-.33579-.75-.75-.75-.414214 0-.75.33579-.75.75v5.5C0 12.2165.783502 13 1.75 13h8.5c.4142 0 .75-.3358.75-.75s-.3358-.75-.75-.75h-8.5c-.13807 0-.25-.1119-.25-.25z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_3617" x1=".538" x2="14.42" y1="2.889" y2="12.847" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>
