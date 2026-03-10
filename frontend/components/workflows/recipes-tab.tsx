@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
+import { PremiumIcon } from '@/components/shared'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
@@ -42,6 +43,7 @@ import {
   useRecipeSuggestions,
   useRecipeExecutions
 } from '@/hooks/use-recipe-api'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { useToast } from '@/hooks/use-toast'
 import { CreateRecipeModal } from './create-recipe-modal'
 import { ViewRecipeModal } from './view-recipe-modal'
@@ -97,6 +99,7 @@ export function RecipesTab({
   const [cookingRecipeId, setCookingRecipeId] = useState<string | null>(null)
   const [editRecipeData, setEditRecipeData] = useState<any>(null)
   const [editRecipeId, setEditRecipeId] = useState<string | null>(null)
+  const { data: iconMappings = {} } = useSystemIcons()
 
   // Sync external create modal open state
   useEffect(() => {
@@ -313,7 +316,14 @@ export function RecipesTab({
                 <CardContent className="p-3">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-lg">
-                      {recipe.icon || '🍳'}
+                      {(() => {
+                        const premiumIconName = iconMappings[recipe.marketplace_category] || null
+                        return premiumIconName ? (
+                          <PremiumIcon name={premiumIconName} size={20} className="text-primary" />
+                        ) : (
+                          recipe.icon || '🍳'
+                        )
+                      })()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -375,7 +385,14 @@ export function RecipesTab({
                   <CardHeader className="pb-3">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-xl">
-                        {recipe.icon || '🍳'}
+                        {(() => {
+                          const premiumIconName = iconMappings[recipe.marketplace_category] || null
+                          return premiumIconName ? (
+                            <PremiumIcon name={premiumIconName} size={24} className="text-primary" />
+                          ) : (
+                            recipe.icon || '🍳'
+                          )
+                        })()}
                       </div>
                       <div className="flex-1 min-w-0">
                         <CardTitle className="text-sm font-semibold leading-tight truncate">{recipe.name}</CardTitle>

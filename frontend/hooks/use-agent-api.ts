@@ -96,7 +96,7 @@ export function useAgents() {
       // Inject icon mapping based on category
       return agents.map((agent: any) => ({
         ...agent,
-        premium_icon: iconMappings[agent.category] || null
+        premium_icon: iconMappings[agent.marketplace_category] || iconMappings[agent.agent_type] || null
       }));
     },
     refetchInterval: false, // Disable automatic refetching
@@ -116,7 +116,7 @@ export function useAgent(agentId: string | null) {
       // Inject icon mapping based on category
       return {
         ...agent,
-        premium_icon: iconMappings[agent.category] || null
+        premium_icon: iconMappings[agent.marketplace_category] || iconMappings[agent.agent_type] || null
       };
     },
     enabled: !!agentId,

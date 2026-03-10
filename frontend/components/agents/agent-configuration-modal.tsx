@@ -746,7 +746,7 @@ export function AgentConfigurationModal({
             <CardTitle className="flex items-center space-x-3">
               {(() => {
                 const category = agent ? DB_TO_CATEGORY_MAP[(agent as any)?.agent_type || 'custom'] || 'Custom' : 'Custom'
-                const premiumIconName = iconMappings[category] || null
+                const premiumIconName = iconMappings[(agent as any)?.marketplace_category] || iconMappings[(agent as any)?.agent_type] || iconMappings[category] || null
                 return premiumIconName ? (
                   <PremiumIcon name={premiumIconName} size={28} className="text-primary" />
                 ) : (
