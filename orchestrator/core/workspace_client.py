@@ -73,7 +73,9 @@ class WorkspaceClient:
             resp = await client.get(url, params={"path": path})
             if resp.status_code != 200:
                 return {"success": False, "error": _parse_error(resp), "status_code": resp.status_code}
-            return resp.json()
+            data = resp.json()
+            data["success"] = True
+            return data
         except (httpx.ConnectError, httpx.TimeoutException) as err:
             return _connection_error("read_file", err)
 
