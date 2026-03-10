@@ -432,7 +432,19 @@ export function AgentConfigurationModal({
 
       // Initialize form data with real agent data
       const dbAgentType = (agent as any).agent_type || 'custom'
-      const categoryName = DB_TO_CATEGORY_MAP[dbAgentType] || 'Custom'
+      // Prefer marketplace_category (the actual UI category), fall back to configuration.category, then DB mapping
+      const categoryName = (agent as any).marketplace_category
+        || (agent as any).configuration?.category
+        || DB_TO_CATEGORY_MAP[dbAgentType]
+        || 'custom'
+      console.log('🏷️ Category resolution:', {
+        agentName: (agent as any).name,
+        marketplace_category: (agent as any).marketplace_category,
+        config_category: (agent as any).configuration?.category,
+        db_agent_type: dbAgentType,
+        db_mapped: DB_TO_CATEGORY_MAP[dbAgentType],
+        resolved: categoryName
+      })
       setOriginalAgentType(dbAgentType)
 
       setFormData({
@@ -656,9 +668,9 @@ export function AgentConfigurationModal({
       // Convert category name to database agent_type value.
       // If the user's selected category maps to 'Custom' and the original DB type
       // was a specialized type (e.g. 'security_expert'), preserve the original.
-      const selectedCategory = formData.agent_type || 'Custom'
+      const selectedCategory = formData.agent_type || 'custom'
       const mappedDbType = CATEGORY_TO_DB_MAP[selectedCategory] || 'custom'
-      const originalMapsToCategory = DB_TO_CATEGORY_MAP[originalAgentType] || 'Custom'
+      const originalMapsToCategory = DB_TO_CATEGORY_MAP[originalAgentType] || 'custom'
       const dbAgentType =
         (mappedDbType === 'custom' && originalMapsToCategory === selectedCategory)
           ? originalAgentType
@@ -668,8 +680,10 @@ export function AgentConfigurationModal({
         name: formData.name,
         description: formData.description,
         agent_type: dbAgentType,
+        marketplace_category: selectedCategory,
         tags,
         configuration: {
+          category: selectedCategory,
           priority_level: formData.priority_level,
           max_concurrent_tasks: formData.max_concurrent_tasks,
           auto_start: formData.auto_start,
@@ -746,7 +760,7 @@ export function AgentConfigurationModal({
             <CardTitle className="flex items-center space-x-3">
               {(() => {
                 const category = agent ? DB_TO_CATEGORY_MAP[(agent as any)?.agent_type || 'custom'] || 'Custom' : 'Custom'
-                const premiumIconName = iconMappings[(agent as any)?.marketplace_category] || iconMappings[(agent as any)?.agent_type] || iconMappings[category] || null
+                const premiumIconName = iconMappings[(agent as any)?.marketplace_category] || iconMappings[(agent as any)?.configuration?.category] || iconMappings[(agent as any)?.agent_type] || iconMappings[category] || null
                 return premiumIconName ? (
                   <PremiumIcon name={premiumIconName} size={28} className="text-primary" />
                 ) : (
@@ -878,7 +892,7 @@ export function AgentConfigurationModal({
                       <div className="space-y-2">
                         <Label>Category</Label>
                         <Select
-                          value={formData.agent_type || 'Custom'}
+                          value={formData.agent_type || 'custom'}
                           onValueChange={(value) => updateFormData('agent_type', value)}
                         >
                           <SelectTrigger>

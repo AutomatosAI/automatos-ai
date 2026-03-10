@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import {
   Plus,
@@ -44,6 +44,7 @@ import {
   useRecipeExecutions
 } from '@/hooks/use-recipe-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
+import { useAgents } from '@/hooks/use-agent-api'
 import { useToast } from '@/hooks/use-toast'
 import { CreateRecipeModal } from './create-recipe-modal'
 import { ViewRecipeModal } from './view-recipe-modal'
@@ -100,6 +101,16 @@ export function RecipesTab({
   const [editRecipeData, setEditRecipeData] = useState<any>(null)
   const [editRecipeId, setEditRecipeId] = useState<string | null>(null)
   const { data: iconMappings = {} } = useSystemIcons()
+  const { data: agents = [] } = useAgents()
+
+  // Build agent lookup by ID for recipe avatar icons
+  const agentMap = useMemo(() => {
+    const map = new Map<number, any>()
+    for (const agent of agents as any[]) {
+      map.set(Number(agent.id), agent)
+    }
+    return map
+  }, [agents])
 
   // Sync external create modal open state
   useEffect(() => {
@@ -477,14 +488,22 @@ export function RecipesTab({
                     {agentIds.length > 0 && (
                       <div className="flex items-center gap-1.5">
                         {agentIds.slice(0, 4).map((aid) => {
-                          const step = steps.find((s: any) => s.agent_id === aid)
+                          const agentInfo = agentMap.get(aid)
+                          const agentIconName = agentInfo?.premium_icon
+                            || iconMappings[agentInfo?.marketplace_category]
+                            || iconMappings[agentInfo?.agent_type]
+                            || null
                           return (
                             <div
                               key={aid}
                               className={`w-7 h-7 rounded-lg bg-gradient-to-br ${agentColor(aid)} flex items-center justify-center border border-border/10`}
-                              title={`Agent ${aid}`}
+                              title={agentInfo?.name || `Agent ${aid}`}
                             >
-                              <Bot className="w-3.5 h-3.5 text-foreground" />
+                              {agentIconName ? (
+                                <PremiumIcon name={agentIconName} size={14} className="text-foreground" />
+                              ) : (
+                                <Bot className="w-3.5 h-3.5 text-foreground" />
+                              )}
                             </div>
                           )
                         })}

@@ -628,6 +628,7 @@ class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     agent_type: Optional[str] = None  # Allow updating agent type/category
+    marketplace_category: Optional[str] = None  # UI category (Research, Marketing, etc.)
     status: Optional[AgentStatus] = None
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = None
@@ -659,6 +660,7 @@ class AgentResponse(BaseModel):
     is_system_agent: bool = False
     slug: Optional[str] = None
     required_role: Optional[str] = None
+    marketplace_category: Optional[str] = None  # UI category for icon mapping
     voice_profile_id: Optional[str] = None  # PRD-74
 
 class SkillCreate(BaseModel):

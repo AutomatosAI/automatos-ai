@@ -291,7 +291,7 @@ export function AgentRoster({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filteredAgents.map((agent) => {
             const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
-            const premiumIconName = agent.premium_icon || iconMappings[(agent as any).marketplace_category] || iconMappings[agent.agent_type] || null
+            const premiumIconName = agent.premium_icon || iconMappings[(agent as any).marketplace_category] || iconMappings[(agent as any).configuration?.category] || iconMappings[agent.agent_type] || null
             const AgentIcon = getAgentIcon(agent.agent_type || 'custom', (agent as any).marketplace_category)
             const iconColor = getAgentIconColor(agent.agent_type || 'custom', (agent as any).marketplace_category)
 
@@ -367,7 +367,7 @@ export function AgentRoster({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredAgents.map((agent, index) => {
             const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
-            const premiumIconName = agent.premium_icon || iconMappings[(agent as any).marketplace_category] || iconMappings[agent.agent_type] || null
+            const premiumIconName = agent.premium_icon || iconMappings[(agent as any).marketplace_category] || iconMappings[(agent as any).configuration?.category] || iconMappings[agent.agent_type] || null
             const AgentIcon = getAgentIcon(agent.agent_type || 'custom', (agent as any).marketplace_category)
             const iconColor = getAgentIconColor(agent.agent_type || 'custom', (agent as any).marketplace_category)
 

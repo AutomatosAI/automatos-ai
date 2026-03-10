@@ -76,5 +76,9 @@ export const DB_TO_CATEGORY_MAP: Record<string, string> = {
   security_expert: 'development',
   performance_optimizer: 'development',
   infrastructure_manager: 'development',
+  researcher: 'research',
+  worker: 'productivity',
+  specialized: 'custom',
+  'document generator': 'writing',
   custom: 'custom',
 }

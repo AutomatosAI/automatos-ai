@@ -214,6 +214,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         tool_ids: agentData.tools, // Agent app assignments (Composio apps)
         tags,
         configuration: {
+          category: agentData.category,
           specializations: agentData.specializations || [],
           tags
         }
