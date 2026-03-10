@@ -119,15 +119,26 @@ async def list_system_configs(
 
 @router.get("/config/{config_key}", response_model=SystemConfigResponse)
 async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
-    """Get system configuration by key"""
+    """Get system configuration by key. Returns empty default if not yet created."""
     try:
         config = db.query(SystemConfiguration).filter(
             SystemConfiguration.config_key == config_key
         ).first()
-        
+
         if not config:
-            raise HTTPException(status_code=404, detail="Configuration not found")
-        
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            return SystemConfigResponse(
+                id=0,
+                config_key=config_key,
+                config_value={},
+                description=config_key,
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+                updated_by=None,
+            )
+
         return SystemConfigResponse(
             id=config.id,
             config_key=config.config_key,
@@ -138,9 +149,7 @@ async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_r
             updated_at=config.updated_at,
             updated_by=config.updated_by
         )
-        
-    except HTTPException:
-        raise
+
     except Exception as e:
         logger.error(f"Error getting system config {config_key}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -152,19 +161,26 @@ async def update_system_config(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Update system configuration"""
+    """Update or create system configuration (upsert)."""
     try:
         config = db.query(SystemConfiguration).filter(
             SystemConfiguration.config_key == config_key
         ).first()
-        
-        if not config:
-            raise HTTPException(status_code=404, detail="Configuration not found")
-        
-        config.config_value = config_data.config_value
-        config.description = config_data.description
-        config.updated_by = "system"  # TODO: Get from auth context
-        
+
+        if config:
+            config.config_value = config_data.config_value
+            config.description = config_data.description
+            config.updated_by = "system"
+        else:
+            config = SystemConfiguration(
+                config_key=config_key,
+                config_value=config_data.config_value,
+                description=config_data.description or config_key,
+                is_active=True,
+                updated_by="system",
+            )
+            db.add(config)
+
         db.commit()
         db.refresh(config)
         
