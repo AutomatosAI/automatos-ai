@@ -356,6 +356,8 @@ class HeartbeatService:
             if _proactive_level != "silent":
                 await self._deliver_notification(result, hb_config)
 
+            await self._auto_create_orchestrator_report(workspace_id, result)
+
             logger.info(
                 "[Heartbeat] Orchestrator tick completed for ws=%s: %d findings, %d tokens",
                 workspace_id, len(result["findings"]), result.get("tokens_used", 0),
@@ -371,6 +373,7 @@ class HeartbeatService:
             await self._store_heartbeat_result(result)
             if _proactive_level != "silent":
                 await self._deliver_notification(result, hb_config)
+            await self._auto_create_orchestrator_report(workspace_id, result)
         finally:
             self._running_ticks.pop(tick_key, None)
 
@@ -1225,6 +1228,101 @@ class HeartbeatService:
             logger.warning(
                 "[Heartbeat] Failed to auto-create report for agent=%s: %s",
                 agent_id, e,
+            )
+
+    async def _auto_create_orchestrator_report(
+        self, workspace_id: str, result: dict
+    ):
+        """
+        Auto-create a report for orchestrator heartbeat ticks.
+        Uses agent_id=None with agent_name='Orchestrator'.
+        """
+        try:
+            from core.database.database import SessionLocal
+            from services.report_service import ReportService
+
+            findings = result.get("findings", [])
+            actions = result.get("actions_taken", [])
+            hb_status = result.get("status", "success")
+            tokens = result.get("tokens_used", 0)
+
+            lines = [
+                "# Orchestrator — Heartbeat Report",
+                f"**Status:** {hb_status}",
+                "",
+            ]
+
+            if findings:
+                lines.append("## Findings")
+                for f in findings:
+                    check = f.get("check", "unknown")
+                    detail = f.get("detail", "")
+                    lines.append(f"- **{check}:** {detail}")
+                lines.append("")
+
+            if actions:
+                lines.append("## Actions Taken")
+                for a in actions:
+                    if isinstance(a, dict):
+                        lines.append(f"- {a.get('tool', '')}({a.get('params', '')})")
+                    else:
+                        lines.append(f"- {a}")
+                lines.append("")
+
+            lines.append("## Metrics")
+            lines.append(f"- Tokens used: {tokens}")
+            lines.append(f"- Findings: {len(findings)}")
+            lines.append(f"- Actions: {len(actions)}")
+
+            content = "\n".join(lines)
+
+            report_status = "ok" if hb_status == "success" else "warning"
+            if any(f.get("check") == "error" for f in findings):
+                report_status = "critical"
+
+            summary = None
+            for f in findings:
+                detail = f.get("detail", "")
+                if detail and f.get("check") != "error":
+                    summary = detail[:497] + "..." if len(detail) > 497 else detail
+                    break
+
+            db = SessionLocal()
+            try:
+                svc = ReportService(db, workspace_id)
+                report_result = await svc.create_report(
+                    agent_id=None,
+                    agent_name="Orchestrator",
+                    title="Orchestrator Heartbeat",
+                    content=content,
+                    report_type="standup",
+                    status=report_status,
+                    summary=summary,
+                    metrics={
+                        "tokens_used": tokens,
+                        "findings_count": len(findings),
+                        "actions_count": len(actions),
+                    },
+                    heartbeat_result_id=result.get("_heartbeat_result_id"),
+                )
+
+                if report_result.get("success"):
+                    logger.info(
+                        "[Heartbeat] Auto-created orchestrator report %s for ws=%s",
+                        report_result.get("report_id"), workspace_id,
+                    )
+                else:
+                    logger.warning(
+                        "[Heartbeat] Orchestrator report creation failed for ws=%s: %s",
+                        workspace_id, report_result.get("error"),
+                    )
+            finally:
+                db.close()
+
+        except Exception as e:
+            logger.warning(
+                "[Heartbeat] Failed to auto-create orchestrator report for ws=%s: %s",
+                workspace_id, e,
             )
 
 
