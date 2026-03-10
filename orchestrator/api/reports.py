@@ -128,7 +128,7 @@ async def grade_report(
         report_id=report_id,
         grade=body.grade,
         grade_notes=body.grade_notes,
-        graded_by=ctx.user_id,
+        graded_by=ctx.user.id,
     )
 
     if not result.get("success"):

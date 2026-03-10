@@ -320,7 +320,7 @@ export function AgentDetailsModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="w-full justify-start gap-1 bg-secondary/50">
+                <TabsList className="w-full justify-start gap-1 bg-secondary/50 overflow-x-auto whitespace-nowrap scrollbar-hide">
                   <TabsTrigger value="overview" className="flex items-center space-x-2">
                     <Eye className="w-4 h-4" />
                     <span>Overview</span>

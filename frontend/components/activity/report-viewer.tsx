@@ -198,8 +198,10 @@ export function ReportViewer({ reportId, onClose }: ReportViewerProps) {
                         variant="ghost"
                         size="sm"
                         className="h-7 text-xs"
+                        disabled={!att.url && !att.file_path}
                         onClick={() => {
-                          if (att.url) window.open(att.url, '_blank')
+                          const href = att.url || att.file_path
+                          if (href) window.open(href, '_blank')
                         }}
                       >
                         <Download className="w-3 h-3 mr-1" /> Download

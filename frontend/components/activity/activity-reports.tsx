@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   FileText,
   Star,
@@ -110,6 +110,10 @@ interface ActivityReportsProps {
 export function ActivityReports({ period = '30d' }: ActivityReportsProps) {
   const [filters, setFilters] = useState<ReportFilters>({ period, limit: 20 })
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setFilters((prev) => ({ ...prev, period }))
+  }, [period])
 
   const { data, isLoading } = useReports(filters)
   const reports = data?.reports || []

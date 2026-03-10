@@ -58,8 +58,9 @@ class ReportService:
     ) -> Dict[str, Any]:
         """Create a report: write file to workspace + insert DB row."""
 
+        import uuid as _uuid
         now = datetime.now(timezone.utc)
-        date_str = now.strftime("%Y-%m-%d_%H%M")
+        date_str = now.strftime("%Y-%m-%d_%H%M%S") + "_" + _uuid.uuid4().hex[:6]
         title_slug = _slugify(title)
         agent_dir = _agent_slug(agent_name)
 
@@ -458,7 +459,11 @@ class ReportService:
             report_data["content"] = file_result.get("content", "")
         else:
             report_data["content"] = None
-            report_data["content_error"] = file_result.get("error", "Could not read file")
+            report_data["content_error"] = file_result.get("error", "Could not read report file")
+            logger.warning(
+                "[ReportService] Could not read report file %s: %s",
+                row.file_path, file_result.get("error"),
+            )
 
         return {"success": True, "report": report_data}
 

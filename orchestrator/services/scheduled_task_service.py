@@ -80,7 +80,14 @@ class ScheduledTaskService:
             except (ValueError, TypeError):
                 return {"success": False, "error": f"Invalid ISO datetime: {schedule}. Use format: 2026-03-11T09:00:00Z"}
         else:
-            if not _CRON_RE.match(schedule.strip()):
+            # Validate using the same CronTrigger the scheduler will use
+            try:
+                parts = schedule.strip().split()
+                if len(parts) != 5:
+                    raise ValueError("Expected 5 fields")
+                from apscheduler.triggers.cron import CronTrigger
+                CronTrigger(minute=parts[0], hour=parts[1], day=parts[2], month=parts[3], day_of_week=parts[4])
+            except Exception:
                 return {"success": False, "error": f"Invalid cron expression: {schedule}. Use 5-field format: '0 9 * * 1' (minute hour dom month dow)"}
 
         # Validate agents exist in workspace

@@ -3328,8 +3328,9 @@ class PlatformActionExecutor:
                 Agent.workspace_id == self.workspace_id,
                 func.lower(Agent.name) == agent_name.lower(),
             ).first()
-            if agent:
-                agent_id = agent.id
+            if not agent:
+                return {"success": False, "error": f"Agent '{agent_name}' not found in workspace"}
+            agent_id = agent.id
 
         svc = ScheduledTaskService(self.db, self.workspace_id)
         return await svc.list_tasks(
@@ -3354,6 +3355,8 @@ class PlatformActionExecutor:
 
     async def _browse_memories(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Browse/search memories via Mem0."""
+        import asyncio
+
         try:
             from modules.memory.integrations.mem0_client import Mem0Client
 
@@ -3362,10 +3365,15 @@ class PlatformActionExecutor:
             limit = params.get("limit", 20)
             query = params.get("query")
 
+            loop = asyncio.get_event_loop()
             if query:
-                results = client.search(query=query, user_id=user_id, limit=limit)
+                results = await loop.run_in_executor(
+                    None, lambda: client.search(query=query, user_id=user_id, limit=limit),
+                )
             else:
-                results = client.get_all(user_id=user_id, limit=limit)
+                results = await loop.run_in_executor(
+                    None, lambda: client.get_all(user_id=user_id, limit=limit),
+                )
 
             # Normalise to consistent format
             memories = []
@@ -3391,7 +3399,9 @@ class PlatformActionExecutor:
             return {"success": False, "error": f"Memory service unavailable: {str(e)[:200]}"}
 
     async def _delete_memory(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Delete a memory by ID."""
+        """Delete a memory by ID with workspace ownership check."""
+        import asyncio
+
         memory_id = params.get("memory_id")
         if not memory_id:
             return {"success": False, "error": "memory_id is required"}
@@ -3400,7 +3410,18 @@ class PlatformActionExecutor:
             from modules.memory.integrations.mem0_client import Mem0Client
 
             client = Mem0Client()
-            deleted = client.delete(memory_id)
+            user_id = f"ws_{self.workspace_id}"
+            loop = asyncio.get_event_loop()
+
+            # Ownership check
+            all_mems = await loop.run_in_executor(
+                None, lambda: client.get_all(user_id=user_id, limit=500),
+            )
+            owned_ids = {str(m.get("id", "")) for m in (all_mems if isinstance(all_mems, list) else [])}
+            if memory_id not in owned_ids:
+                return {"success": False, "error": "Memory not found or not owned by this workspace"}
+
+            deleted = await loop.run_in_executor(None, lambda: client.delete(memory_id))
 
             if deleted:
                 return {"success": True, "message": f"Memory {memory_id} deleted"}

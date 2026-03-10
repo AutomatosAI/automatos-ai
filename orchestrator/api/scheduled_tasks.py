@@ -55,5 +55,7 @@ async def update_task_status(
     svc = ScheduledTaskService(db, ctx.workspace_id)
     result = await svc.update_task_status(task_id, body.status)
     if not result.get("success"):
-        raise HTTPException(status_code=404, detail=result.get("error"))
+        error_msg = result.get("error", "")
+        status_code = 400 if "must be one of" in error_msg else 404
+        raise HTTPException(status_code=status_code, detail=error_msg)
     return result

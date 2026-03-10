@@ -234,10 +234,9 @@ async def get_recent_memories(
 
 @router.get("/browse")
 async def browse_memories(
-    query: str = None,
+    query: Optional[str] = None,
     limit: int = 20,
     ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
     Browse/search all memories — PRD-77 Memory Explorer.
@@ -289,7 +288,17 @@ async def delete_memory(
     if not mem0:
         return {"success": False, "error": "Memory service unavailable"}
 
+    user_id = _mem0_user_id(ctx.workspace_id)
+
     try:
+        # Ownership check: verify memory belongs to this workspace
+        all_mems = mem0.get_all(user_id=user_id, limit=500)
+        items = all_mems if isinstance(all_mems, list) else []
+        owned_ids = {str(m.get("id", "")) for m in items}
+
+        if memory_id not in owned_ids:
+            return {"success": False, "error": "Memory not found or not owned by this workspace"}
+
         deleted = mem0.delete(memory_id)
         if deleted:
             logger.info("Memory %s deleted by workspace %s", memory_id, ctx.workspace_id)
@@ -350,8 +359,8 @@ async def get_memory_health(
                 "hits": row.hits or 0,
                 "hit_rate": round((row.hits or 0) / max(row.total_searches, 1), 2),
             }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("memory_access_log query failed: %s", e)
 
     return {
         "success": True,

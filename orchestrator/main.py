@@ -388,11 +388,13 @@ async def lifespan(app: FastAPI):
                         from services.scheduled_task_service import ScheduledTaskService
                         from core.database.database import SessionLocal
                         _sched_db = SessionLocal()
-                        _sched_svc = ScheduledTaskService(_sched_db, workspace_id=None)
-                        await _sched_svc.load_active_tasks_to_scheduler()
-                        _sched_db.close()
+                        try:
+                            _sched_svc = ScheduledTaskService(_sched_db, workspace_id=None)
+                            await _sched_svc.load_active_tasks_to_scheduler()
+                        finally:
+                            _sched_db.close()
                     except Exception as _st_err:
-                        logger.warning(f"Could not load scheduled tasks: {_st_err}")
+                        logger.warning("Could not load scheduled tasks: %s", _st_err)
 
                     logger.info("Unified scheduler started (this worker owns it)")
                 except BlockingIOError:
@@ -852,8 +854,8 @@ except ImportError as e:
 try:
     from api.scheduled_tasks import router as scheduled_tasks_router
     app.include_router(scheduled_tasks_router)
-except Exception as e:
-    logger.warning(f"Could not load scheduled tasks router: {e}")
+except ImportError as e:
+    logger.warning("Could not load scheduled tasks router: %s", e)
 
 # PRD-55: Autonomous Assistant Platform
 if heartbeat_router is not None:
