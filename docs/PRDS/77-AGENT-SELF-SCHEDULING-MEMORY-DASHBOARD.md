@@ -1,6 +1,6 @@
 # PRD-77: Agent Self-Scheduling & Memory Dashboard
 
-**Status:** DRAFT
+**Status:** COMPLETE (Phase 1-4, fix-memory branch)
 **Priority:** P1
 **Author:** Auto-generated from Agent Zero research (2026-03-10)
 **Dependencies:** PRD-05 (Memory & Knowledge), PRD-55 (Heartbeat), PRD-72 (Activity Command Centre)
