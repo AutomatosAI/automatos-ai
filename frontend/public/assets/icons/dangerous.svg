@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Dangerous--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Dangerous Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="dangerous--dangerous-sign-octagon-cross-forbid-tresspassing">
+    <path id="Union" fill="url(#paint0_linear_13311_1068)" fill-rule="evenodd" d="M4.25.5c-.13261 0-.25979.052679-.35355.146447L.646445 3.89645c-.093768.09376-.146446.22094-.146446.35355l0 5.5c0 .13261.052678.2598.146447.3536l3.250004 3.25c.09376.0937.22094.1464.35355.1464l5.5 0c.13261 0 .2598-.0527.3536-.1464l3.25-3.25c.0937-.0938.1464-.22099.1464-.3536l0-5.5c0-.13261-.0527-.25978-.1464-.35355l-3.25-3.250003C10.0098.552678 9.88261.5 9.75.5l-5.5 0Zm5.69194 3.55806c.24406.24408.24406.6398 0 .88388L7.88388 7l2.05806 2.05806c.24406.24408.24406.6398 0 .88388-.24408.24406-.6398.24406-.88388 0L7 7.88388 4.94194 9.94194c-.24408.24406-.6398.24406-.88388 0-.24408-.24408-.24408-.6398 0-.88388L6.11612 7 4.05806 4.94194c-.24408-.24408-.24408-.6398 0-.88388.24408-.24408.6398-.24408.88388 0L7 6.11612l2.05806-2.05806c.24408-.24408.6398-.24408.88388 0Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13311_1068" x1="13.587" x2="-4.282" y1="14.956" y2="3.192" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

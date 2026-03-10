@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="door-open-house-exit-logout--door-open-house-exit-logout-emergency-escape-way-out-leave">
+    <path id="Union" fill="url(#paint0_linear_15027_759)" fill-rule="evenodd" d="M5.5 0C4.67157 0 4 .671573 4 1.5v2.75h1.25c.08488 0 .16835.00604.25.01772V1.5l3.78687 0-.79948.29072C7.8946 2.00628 7.5 2.56965 7.5 3.20041V10.5h-2V7.73228c-.08165.01168-.16512.01772-.25.01772L4 7.75v2.75c0 .8284.67157 1.5 1.5 1.5h2v.4589c0 1.041 1.03434 1.7655 2.01262 1.4097l3.49998-1.2727c.5928-.2156.9874-.7789.9874-1.4097l0-.6862V1.49999l-.0001-.01536C13.9917.663282 13.3233 0 12.5 0zM3 4v1.25h2.25c.41421 0 .75.33579.75.75s-.33579.75-.75.75L3 6.75V8c0 .20223-.12182.38455-.30866.46194s-.40189.03461-.54489-.10839l-2.000003-2c-.1952623-.19526-.1952623-.51184 0-.7071l2.000003-2c.143-.143.35805-.18578.54489-.10839S3 3.79777 3 4" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_759" x1="15.508" x2="-3.703" y1="16.587" y2="3.904" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

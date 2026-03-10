@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="door-open-house-enter-login--door-open-house-enter-login-entry-entrance-join">
+    <path id="Union" fill="url(#paint0_linear_15027_1019)" fill-rule="evenodd" d="M5.5 0C4.67157 0 4 .671573 4 1.5v1.08576c.20684.07307.39908.192.56066.35358L5.5 3.87868V1.5l3.78687 0-.79948.29072C7.8946 2.00628 7.5 2.56965 7.5 3.20041V10.5h-2V8.12132l-.93934.93934c-.16158.16158-.35382.2805-.56066.35358V10.5c0 .8284.67157 1.5 1.5 1.5h2v.4589c0 1.041 1.03434 1.7655 2.01262 1.4097l3.49998-1.2727c.5928-.2156.9874-.7789.9874-1.4097l0-.6862V1.49999l-.0001-.01536C13.9917.663282 13.3233 0 12.5 0zM3 4v1.25H.75C.335786 5.25 0 5.58579 0 6s.335786.75.75.75l2.25 0V8c0 .20223.12182.38455.30866.46194s.40189.03461.54489-.10839l2-2c.19527-.19526.19527-.51184 0-.7071l-2-2c-.143-.143-.35805-.18578-.54489-.10839S3 3.79777 3 4" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_1019" x1="13.953" x2="-2.604" y1="13.963" y2="4.623" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

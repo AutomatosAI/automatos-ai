@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Asterisk-Square-3--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Asterisk Square 3 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Keyboard/asterisk-square-3">
+    <path id="Subtract" fill="url(#paint0_linear_13629_3353)" fill-rule="evenodd" d="M.5 2C.5 1.17157 1.17157.5 2 .5h10c.8284 0 1.5.67157 1.5 1.5v10c0 .8284-.6716 1.5-1.5 1.5H2c-.82843 0-1.5-.6716-1.5-1.5V2Zm7.12492 1.5c0-.34518-.27983-.625-.625-.625-.34518 0-.625.27982-.625.625v3.05216l-2.6288-1.12663c-.31727-.13597-.6847.011-.82067.32827-.13597.31727.011.68469.32827.82067l2.72919 1.16965-1.96313 2.35578c-.22098.2652-.18515.6593.08002.8802.26517.221.65928.1852.88025-.08l2.01987-2.42382 2.01986 2.42382c.22098.2652.61508.301.88025.08.26517-.2209.30097-.615.08002-.8802L8.01692 7.74412l2.72918-1.16965c.3173-.13598.4643-.5034.3283-.82067-.136-.31727-.5034-.46424-.8207-.32827L7.62492 6.55216V3.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_3353" x1="2.625" x2="13.125" y1="3" y2="8.818" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

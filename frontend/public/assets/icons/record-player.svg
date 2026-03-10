@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Record-Player--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Record Player Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="record-player--music-audio-note-record-player-vinyl-disc-entertainment">
+    <path id="Union" fill="url(#paint0_linear_13865_56)" fill-rule="evenodd" d="M10.7512.749023c0-.276142.2238-.5.5-.5h2c.2761 0 .5.223858.5.5V3.74902c0 .27615-.2239.5-.5.5h-.25v4c0 .28408-.1605.54378-.4146.67082l-3 1.49996c-.37048.1853-.82099.0351-1.00623-.3354-.18524-.37045-.03507-.82096.33541-1.0062l2.58542-1.2927V4.24902h-.25c-.2762 0-.5-.22385-.5-.5V.749023Zm-.6905 6.638667c-.59334-2.09895-2.52302-3.63696-4.81192-3.63696-2.76142 0-5.000001 2.23858-5.000001 5 0 2.76147 2.238581 4.99997 5.000001 4.99997 1.75007 0 3.29014-.8991 4.18348-2.2606-.70385.0731-1.41117-.2881-1.74633-.9585-.43223-.86442-.08184-1.91559.78262-2.34782l1.59215-.79609ZM5.25117 9.7413c.54803 0 .9923-.44426.9923-.99229s-.44427-.9923-.9923-.9923c-.54802 0-.99229.44427-.99229.9923s.44427.99229.99229.99229Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13865_56" x1="2.456" x2="13.361" y1="2.846" y2="8.888" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#00f6e7"></stop>
+    </linearGradient>
+  </defs>
+</svg>

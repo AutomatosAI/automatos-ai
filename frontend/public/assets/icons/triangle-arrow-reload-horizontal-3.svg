@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Triangle-Arrow-Reload-Horizontal-3--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Triangle Arrow Reload Horizontal 3 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Multiple Triangle arrow/triangle-arrow-reload-horizontal-3">
+    <path id="Union" fill="url(#paint0_linear_13641_8388)" fill-rule="evenodd" d="M10 3.99996 10 4.5c0 .40446-.24364.7691-.61732.92388-.37367.15478-.80379.06922-1.08979-.21677l-1.5-1.5c-.39052-.39053-.39052-1.02369 0-1.41422l1.5-1.499997c.286-.285998.71612-.371554 1.08979-.216773C9.75636.730902 10 1.09554 10 1.5l0 .49996 1 0c1.6569 0 3 1.34315 3 3l0 4C14 10.6568 12.6569 12 11 12l-1 0c-.55228 0-1-.4478-1-1 0-.5523.44772-1.00004 1-1.00004l1 0c.5523 0 1-.44771 1-1l0-4c0-.55228-.4477-1-1-1l-1 0ZM7.20711 10.2929c.39052.3905.39052 1.0237 0 1.4142l-1.5 1.5c-.286.286-.71612.3715-1.08979.2168C4.24364 13.2691 4 12.9044 4 12.5l0-.5-1 0C1.34315 12 3.39e-8 10.6568 5.37e-8 8.99996l4.77e-8-4C1.21e-7 3.34311 1.34315 1.99996 3 1.99996l1 0c.55228 0 1 .44772 1 1 0 .55229-.44772 1-1 1l-1 0c-.55228 0-1 .44772-1 1l0 4c0 .55229.44772 1 1 1l1 0 0-.49999c0-.40446.24364-.7691.61732-.92388.37367-.15478.80379-.06922 1.08979.21677l1.5 1.50004Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_8388" x1="2.02" x2="7.275" y1="2.361" y2="13.374" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

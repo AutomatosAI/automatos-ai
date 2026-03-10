@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Folder-Search--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Folder Search Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Files Folders/folder-search">
+    <path id="Union" fill="url(#paint0_linear_13603_6647)" fill-rule="evenodd" d="M1.5 0C.671573 0 0 .671573 0 1.5v9c0 .8284.671573 1.5 1.5 1.5h3.57351C4.55298 11.2111 4.25 10.2659 4.25 9.25c0-2.76142 2.23858-5 5-5 2.2146 0 4.093 1.43981 4.75 3.43442V3.5c0-.82843-.6716-1.5-1.5-1.5H6.39039l-.21595-.8638C6.0075.468445 5.40753 0 4.71922 0H1.5Zm7.75 7C8.00736 7 7 8.00736 7 9.25c0 1.2426 1.00736 2.25 2.25 2.25 1.2426 0 2.25-1.0074 2.25-2.25C11.5 8.00736 10.4926 7 9.25 7ZM5.5 9.25c0-2.07107 1.67893-3.75 3.75-3.75C11.3211 5.5 13 7.17893 13 9.25c0 .7643-.2287 1.4752-.6213 2.068l1.4016 1.4017c.2929.2929.2929.7677 0 1.0606-.2929.2929-.7677.2929-1.0606 0l-1.4017-1.4016c-.5928.3926-1.3037.6213-2.068.6213-2.07107 0-3.75-1.6789-3.75-3.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_6647" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

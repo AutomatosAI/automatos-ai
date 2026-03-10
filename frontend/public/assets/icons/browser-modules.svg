@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Browser-Modules--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Browser Modules Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Programming/Modules/browser-modules--browser-module-apps-code-window-website-web">
+    <path id="Union" fill="url(#paint0_linear_13604_19078)" fill-rule="evenodd" d="M0 1.75C0 .783502.783502 0 1.75 0h9.5C12.2165 0 13 .783502 13 1.75v4.59183l-1.5-.69231V4h-10v6.25c0 .1381.11193.25.25.25h3.5V12h-3.5C.783501 12 0 11.2165 0 10.25v-8.5Zm10.4595 4.79602c-.1329-.06136-.2861-.06136-.419 0L6.98455 7.95644 10.25 9.45029l3.2654-1.49386-3.0559-1.41041ZM6.5 12V8.83445l3.25 1.48675v3.4987L6.79047 12.454C6.6134 12.3723 6.5 12.195 6.5 12Zm7.2095.454L10.75 13.8199v-3.4987L14 8.83441V12c0 .195-.1134.3723-.2905.454Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13604_19078" x1=".538" x2="16.394" y1="1.117" y2="10.17" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

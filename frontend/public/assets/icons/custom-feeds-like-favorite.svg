@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Custom-Feeds-Like-Favorite--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Custom Feeds Like Favorite Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Share/custom-feeds-like-favorite">
+    <path id="Union" fill="url(#paint0_linear_13603_2248)" fill-rule="evenodd" d="M2 .5C1.17157.5.5 1.17157.5 2v7c0 .82843.67157 1.5 1.5 1.5h.25V5c0-1.51878 1.23122-2.75 2.75-2.75h5.5V2c0-.82843-.67157-1.5-1.5-1.5H2Zm3 3c-.82843 0-1.5.67157-1.5 1.5v7c0 .8284.67157 1.5 1.5 1.5h7c.8284 0 1.5-.6716 1.5-1.5V5c0-.82843-.6716-1.5-1.5-1.5H5Zm3.16015 7.0028L6.18288 8.67051C4.88529 7.40381 6.75443 4.94767 8.5 6.92494c1.7456-1.97727 3.6147.47887 2.3171 1.74557L8.83985 10.5028c-.19173.1777-.48797.1777-.6797 0Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_2248" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

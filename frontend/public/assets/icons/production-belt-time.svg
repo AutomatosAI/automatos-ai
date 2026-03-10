@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Production-Belt-Time--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Production Belt Time Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Business/Production/production-belt-time--production-time-produce-box-clock-belt-factory">
+    <path id="Union" fill="url(#paint0_linear_13641_5837)" fill-rule="evenodd" d="M7.39999 3.3C7.39999 1.47746 8.87745 0 10.7 0 12.5225 0 14 1.47746 14 3.3c0 1.82254-1.4775 3.3-3.3 3.3-1.82255 0-3.30001-1.47746-3.30001-3.3Zm4.44191-.25796c.2441-.24408.2441-.63981 0-.88388-.244-.24408-.6398-.24408-.8838 0l-.7.7c-.2441.24407-.2441.6398 0 .88388.244.24408.6398.24408.8838 0l.7-.7ZM.5 8c-.276142 0-.5.22386-.5.5v5c0 .2761.223858.5.5.5H11c1.6761 0 3-1.3239 3-3 0-1.67614-1.3239-3-3-3H.5Zm2.25 2.25c.41421 0 .75.3358.75.75s-.33579.75-.75.75S2 11.4142 2 11s.33579-.75.75-.75Zm3.75 0c.41421 0 .75.3358.75.75s-.33579.75-.75.75-.75-.3358-.75-.75.33579-.75.75-.75Zm3.75 0c.4142 0 .75.3358.75.75s-.3358.75-.75.75c-.41421 0-.75-.3358-.75-.75s.33579-.75.75-.75ZM0 3.5c0-.27614.223858-.5.5-.5h3c.27614 0 .5.22386.5.5v3c0 .27614-.22386.5-.5.5h-3C.223858 7 0 6.77614 0 6.5v-3Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_5837" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

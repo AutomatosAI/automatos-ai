@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="button-power-switch-on--button-power-switch-on-lighting-state">
+    <path id="Union" fill="url(#paint0_linear_15041_811)" fill-rule="evenodd" d="M2 1.5C2 .671573 2.67157 0 3.5 0H9c.82843 0 1.5.671573 1.5 1.5v5.39018l2.299 4.98122c.4588.9939-.2672 2.1286-1.3619 2.1286H6.77966c-.97512 0-1.86126-.567-2.26989-1.4524L2.04602 7.20953C2.0157 7.14384 2 7.07235 2 7zm4.875 1c0-.34518-.27982-.625-.625-.625s-.625.27982-.625.625V5c0 .34518.27982.625.625.625s.625-.27982.625-.625zM8.125 9c-.82843 0-1.5.67157-1.5 1.5 0 .8284.67157 1.5 1.5 1.5s1.5-.6716 1.5-1.5c0-.82843-.67157-1.5-1.5-1.5m-4.52319 3.9667L2 9.49609V13.5c0 .2762.22386.5.5.5h1.83008c-.29839-.2923-.54692-.6404-.72827-1.0333" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15041_811" x1="2.42" x2="16.18" y1="1.131" y2="7.191" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="User-Protection-1--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    User Protection 1 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Security/user-protection-1--shield-secure-security-person">
+    <path id="Union" fill="url(#paint0_linear_13603_8870)" fill-rule="evenodd" d="M2 3c0-1.65685 1.34315-3 3-3s3 1.34315 3 3-1.34315 3-3 3-3-1.34315-3-3Zm-2 9c0-2.76142 2.23858-5 5-5 .32209 0 .63708.03046.94222.08864C5.81865 7.36724 5.75 7.6756 5.75 8v1.33772c0 1.35278.44329 2.62788 1.21241 3.66228H.5c-.276142 0-.5-.2239-.5-.5V12Zm7-4c0-.55228.44772-1 1-1h5c.5523 0 1 .44772 1 1v1.33772c0 2.10368-1.3461 3.97138-3.3419 4.63658-.1026.0343-.2136.0343-.3162 0C8.34614 13.3091 7 11.4414 7 9.33772V8Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_8870" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

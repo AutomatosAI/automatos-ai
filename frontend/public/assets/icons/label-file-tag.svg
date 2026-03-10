@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Label-File-Tag--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Label File Tag Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Files Folders/label-file-tag">
+    <path id="Union" fill="url(#paint0_linear_13603_6570)" fill-rule="evenodd" d="M3.5 0c-.39782 0-.77936.158035-1.06066.43934C2.15804.720644 2 1.10218 2 1.5v5.02513l1.26256-1.26257C3.59075 4.93437 4.03587 4.75 4.5 4.75h3c.9665 0 1.75.7835 1.75 1.75v3c0 .46413-.18437.9092-.51256 1.2374L5.47487 14H12.5c.3978 0 .7794-.158 1.0607-.4393S14 12.8978 14 12.5V4c0-.13261-.0527-.25979-.1464-.35355l-3.5-3.500003C10.2598.0526784 10.1326 0 10 0H3.5Zm1 6c-.13261 0-.25979.05268-.35355.14645L.146447 10.1464c-.1952625.1953-.1952625.5119 0 .7072l3.000003 3c.19526.1952.51184.1952.7071 0l4-4.00005C7.94732 9.75978 8 9.63261 8 9.5v-3c0-.27614-.22386-.5-.5-.5h-3Zm1.75 2.5c0 .41421-.33579.75-.75.75s-.75-.33579-.75-.75.33579-.75.75-.75.75.33579.75.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_6570" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="rj45-lan-cable--rj45-lan-cable-network-usb">
+    <path id="Union" fill="url(#paint0_linear_16033_4464)" d="M4.75 5.25c.27614 0 .5.22386.5.5v1h3.5v-1c0-.27614.22386-.5.5-.5h2.25c.2761 0 .5.22386.5.5V8c0 .15738-.0743.30596-.2002.40039L10 9.75V11c0 .2761-.22386.5-.5.5h-1v2c0 .2761-.22386.5-.5.5H6c-.27614 0-.5-.2239-.5-.5v-2h-1c-.27614 0-.5-.2239-.5-.5V9.75L2.2002 8.40039C2.07429 8.30596 2 8.15738 2 8V5.75c0-.27614.22386-.5.5-.5zm.08301-3.375c0 .34508.27996.62484.625.625.34518 0 .625-.27982.625-.625V0h1.83398v1.875c0 .34518.27982.625.625.625.34501-.0002.625-.27994.625-.625V0H10"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_16033_4464" x1="10.122" x2="-1.975" y1="14" y2="7.958" gradientUnits="userSpaceOnUse">
+      <stop offset=".088" stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

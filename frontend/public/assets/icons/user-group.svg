@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="User-Group--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    User Group Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="user-group--user-group-meeting-leader">
+    <path id="Union" fill="url(#paint0_linear_13308_343)" fill-rule="evenodd" d="M4.75 3.75C4.75 2.50736 5.75736 1.5 7 1.5s2.25 1.00736 2.25 2.25S8.24264 6 7 6 4.75 4.99264 4.75 3.75Zm8.75 2c0-.9665-.7835-1.75-1.75-1.75S10 4.7835 10 5.75s.7835 1.75 1.75 1.75 1.75-.7835 1.75-1.75ZM2 12c0 .1753.03008.3436.08535.5H.5c-.276142 0-.5-.2239-.5-.5v-1.25C0 9.50736 1.00736 8.5 2.25 8.5c.13607 0 .26932.01208.39873.03522C2.23579 9.26264 2 10.1038 2 11v1Zm9 0c0 .2761-.2239.5-.5.5h-7c-.27614 0-.5-.2239-.5-.5v-1c0-2.20914 1.79086-4 4-4s4 1.79086 4 4v1ZM.5 5.75C.5 4.7835 1.2835 4 2.25 4S4 4.7835 4 5.75 3.2165 7.5 2.25 7.5.5 6.7165.5 5.75ZM12 12c0 .1753-.0301.3436-.0854.5H13.5c.2761 0 .5-.2239.5-.5v-1.25c0-1.24264-1.0074-2.25-2.25-2.25-.1361 0-.2693.01208-.3987.03522C11.7642 9.26264 12 10.1038 12 11v1Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13308_343" x1=".538" x2="14.42" y1="2.389" y2="12.347" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

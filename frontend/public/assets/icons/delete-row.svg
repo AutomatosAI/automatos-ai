@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Delete-Row--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Delete Row Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Columns Rows/delete-row">
+    <path id="Union" fill="url(#paint0_linear_13603_10630)" fill-rule="evenodd" d="M10.5 0c.8284 0 1.5.671573 1.5 1.5v2.75l-12 0V1.5C0 .671572.671573 0 1.5 0h9ZM0 5.75V8.5C0 9.32843.671572 10 1.5 10h5.76449c-.43828-.7634-.33196-1.75442.31963-2.40754.78013-.78197 2.04646-.78346 2.82838-.00334l.7108.70912.7125-.71245c.0526-.05263.1075-.10172.1642-.14725V5.75l-12 0Zm13.7803 2.71967c.2929.29289.2929.76777 0 1.06066l-1.594 1.59407 1.5934 1.5896c.2933.2926.2938.7675.0013 1.0607-.2926.2932-.7675.2938-1.0607.0013l-1.5947-1.591-1.59527 1.5953c-.29289.2929-.76777.2929-1.06066 0s-.29289-.7677 0-1.0606l1.59403-1.5941-1.5934-1.58964c-.29324-.29255-.2938-.76742-.00126-1.06066.29255-.29324.76743-.2938 1.06066-.00125l1.5947 1.59095 1.5953-1.59533c.2929-.29289.7677-.29289 1.0606 0Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_10630" x1="15.213" x2="-3.671" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

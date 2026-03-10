@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Mouse-Move-Up--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Mouse Move Up Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Mouse/mouse-move-up">
+    <path id="Union" fill="url(#paint0_linear_13629_3328)" fill-rule="evenodd" d="M5.91204 2.89849c-.29289.29289-.76776.29289-1.06066 0-.29289-.2929-.29289-.76777 0-1.06066L6.46954.21967c.29289-.2928934.76777-.2928934 1.06066 0l1.61816 1.61816c.29289.29289.29289.76776 0 1.06066-.29289.29289-.76777.29289-1.06066 0L6.99987 1.81066 5.91204 2.89849ZM7 3.49999c-2.20914 0-4 1.79086-4 4v2.5C3 12.2091 4.79086 14 7 14s4-1.7909 4-4.00001v-2.5c0-2.20914-1.79086-4-4-4Zm0 1.75c.41421 0 .75.33579.75.75v1c0 .41422-.33579.75-.75.75s-.75-.33578-.75-.75v-1c0-.41421.33579-.75.75-.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_3328" x1="4.308" x2="11.983" y1="2.692" y2="5.122" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

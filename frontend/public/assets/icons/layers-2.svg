@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Layers-2--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Layers 2 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Align/layers-2--design-layer-layers-pile-stack-align">
+    <path id="Union" fill="url(#paint0_linear_13603_2985)" fill-rule="evenodd" d="M5 2.5C5 1.67157 5.67157 1 6.5 1h6c.8284 0 1.5.67157 1.5 1.5v4c0 .82843-.6716 1.5-1.5 1.5h-6C5.67157 8 5 7.32843 5 6.5v-4Zm-4.25 4c.41421 0 .75.33579.75.75v4c0 .1381.11193.25.25.25h6c.41421 0 .75.3358.75.75s-.33579.75-.75.75h-6C.783502 13 0 12.2165 0 11.25v-4c0-.41421.335786-.75.75-.75ZM4 4.75C4 4.33579 3.66421 4 3.25 4s-.75.33579-.75.75v4c0 .9665.7835 1.75 1.75 1.75h6c.4142 0 .75-.3358.75-.75 0-.41421-.3358-.75-.75-.75h-6C4.11193 9 4 8.88807 4 8.75v-4Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_2985" x1="13.953" x2="-1.302" y1="13.002" y2="2.991" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

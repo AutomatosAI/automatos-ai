@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Less-Than-Sign--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Less Than Sign Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Mathematics/less-than-sign--less-than-sign-mathematics-negative-compare">
+    <path id="Vector (Stroke)" fill="url(#paint0_linear_13603_8330)" fill-rule="evenodd" d="M1.57509 5.6364c-1.166689.53473-1.166689 2.19246 0 2.7272l11.00831 5.0455c.502.2301 1.0956.0096 1.3257-.4924.2301-.5021.0097-1.0957-.4924-1.3258L3.40011 7 13.4167 2.40906c.5021-.23011.7225-.82365.4924-1.32572-.2301-.502059-.8237-.722519-1.3257-.492407L1.57509 5.6364Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_8330" x1="16.817" x2="4.457" y1="14.627" y2="-3.175" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

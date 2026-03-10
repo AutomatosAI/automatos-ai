@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Layout-Window-13--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Layout Window 13 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Layout/layout-window-13--colums-layout-layouts-two">
+    <path id="Subtract" fill="url(#paint0_linear_13603_1583)" fill-rule="evenodd" d="M7.625.5H12c.8284 0 1.5.67157 1.5 1.5v10c0 .8284-.6716 1.5-1.5 1.5H7.625V.5Zm-1.25 13H2c-.82843 0-1.5-.6716-1.5-1.5V2C.5 1.17157 1.17157.5 2 .5h4.375v13Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_1583" x1="14.258" x2="3.863" y1="15.41" y2="-3.42" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

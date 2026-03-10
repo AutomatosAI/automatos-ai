@@ -68,14 +68,14 @@ export const agentQueryKeys = {
   agentLogs: (id: string) => ['agents', id, 'logs'] as const,
   agentMetrics: (id: string) => ['agents', id, 'metrics'] as const,
   agentPerformance: (id: string) => ['agents', id, 'performance'] as const,
-  
+
   // Skills
   skills: ['skills'] as const,
   agentSkills: (agentId: string) => ['agents', agentId, 'skills'] as const,
-  
+
   // Configuration
   agentConfig: (agentId: string) => ['agents', agentId, 'configuration'] as const,
-  
+
   // Coordination
   coordination: ['coordination'] as const,
   coordinationStatus: ['coordination', 'status'] as const,
@@ -83,11 +83,22 @@ export const agentQueryKeys = {
 
 // ============= QUERY HOOKS =============
 
+import { useSystemIcons } from './use-system-config-api'
+
 // Get all agents
 export function useAgents() {
+  const { data: iconMappings = {} } = useSystemIcons();
+
   return useQuery({
     queryKey: agentQueryKeys.agents,
-    queryFn: () => agentApiClient.getAgents(),
+    queryFn: async () => {
+      const agents = await agentApiClient.getAgents();
+      // Inject icon mapping based on category
+      return agents.map((agent: any) => ({
+        ...agent,
+        premium_icon: iconMappings[agent.category] || null
+      }));
+    },
     refetchInterval: false, // Disable automatic refetching
     staleTime: 30000, // Cache for 30 seconds, allows manual refresh
     refetchOnWindowFocus: false, // Don't refetch on window focus
@@ -96,9 +107,18 @@ export function useAgents() {
 
 // Get single agent
 export function useAgent(agentId: string | null) {
+  const { data: iconMappings = {} } = useSystemIcons();
+
   return useQuery({
     queryKey: agentQueryKeys.agent(agentId!),
-    queryFn: () => agentApiClient.getAgent(agentId!),
+    queryFn: async () => {
+      const agent = await agentApiClient.getAgent(agentId!);
+      // Inject icon mapping based on category
+      return {
+        ...agent,
+        premium_icon: iconMappings[agent.category] || null
+      };
+    },
     enabled: !!agentId,
     refetchInterval: 10000,
   })
@@ -125,9 +145,18 @@ export function useAgentTypes() {
 
 // Get all skills
 export function useSkills() {
+  const { data: iconMappings = {} } = useSystemIcons();
+
   return useQuery({
     queryKey: agentQueryKeys.skills,
-    queryFn: () => agentApiClient.getSkills(),
+    queryFn: async () => {
+      const skills = await agentApiClient.getSkills();
+      return skills.map((skill: any) => ({
+        ...skill,
+        // Assuming skills have a category or type field we can map
+        premium_icon: iconMappings[skill.category] || iconMappings[skill.type] || null
+      }));
+    },
     staleTime: 2 * 60 * 1000, // Skills don't change very often
   })
 }
@@ -185,7 +214,7 @@ export function useCoordinationStatus() {
 // Create agent
 export function useCreateAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (data) => agentApiClient.createAgent(data),
     onSuccess: (data) => {
@@ -205,9 +234,9 @@ export function useCreateAgent() {
 // Update agent
 export function useUpdateAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) => 
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
       agentApiClient.updateAgent(id, data),
     onSuccess: (data, variables) => {
       // Invalidate specific agent and list
@@ -227,7 +256,7 @@ export function useUpdateAgent() {
 // Delete agent
 export function useDeleteAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (id) => agentApiClient.deleteAgent(id),
     onSuccess: (data, agentId) => {
@@ -248,7 +277,7 @@ export function useDeleteAgent() {
 // Add skill to agent
 export function useAddSkillToAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: ({ agentId, skillId }: { agentId: string; skillId: string }) =>
       agentApiClient.addSkillToAgent(agentId, skillId),
@@ -268,7 +297,7 @@ export function useAddSkillToAgent() {
 // Remove skill from agent
 export function useRemoveSkillFromAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: ({ agentId, skillId }: { agentId: string; skillId: string }) =>
       agentApiClient.removeSkillFromAgent(agentId, skillId),
@@ -288,7 +317,7 @@ export function useRemoveSkillFromAgent() {
 // Update agent configuration
 export function useUpdateAgentConfig() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: ({ agentId, config }: { agentId: string; config: any }) =>
       agentApiClient.updateAgentConfig(agentId, config),
@@ -308,7 +337,7 @@ export function useUpdateAgentConfig() {
 // Agent coordination
 export function useCoordinateAgents() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (data) => agentApiClient.coordinateAgents(data),
     onSuccess: (data) => {
@@ -341,7 +370,7 @@ export function useCollaborativeReasoning() {
 // Agent execution control
 export function useStartAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (id) => agentApiClient.startAgent(id),
     onSuccess: (data, agentId) => {
@@ -359,7 +388,7 @@ export function useStartAgent() {
 
 export function useStopAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (id) => agentApiClient.stopAgent(id),
     onSuccess: (data, agentId) => {
@@ -377,7 +406,7 @@ export function useStopAgent() {
 
 export function usePauseAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (id) => agentApiClient.pauseAgent(id),
     onSuccess: (data, agentId) => {
@@ -397,7 +426,7 @@ export function usePauseAgent() {
 // Create skill
 export function useCreateSkill() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (skillData) => agentApiClient.createSkill(skillData),
     onSuccess: (data) => {
@@ -415,7 +444,7 @@ export function useCreateSkill() {
 // Create skills in bulk
 export function useCreateSkillsBulk() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (skillsData) => agentApiClient.createSkillsBulk(skillsData),
     onSuccess: (data) => {
@@ -433,7 +462,7 @@ export function useCreateSkillsBulk() {
 // Update a skill
 export function useUpdateSkill() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => agentApiClient.updateSkill(id, data),
     onSuccess: (data, variables) => {
@@ -452,7 +481,7 @@ export function useUpdateSkill() {
 // Delete a skill
 export function useDeleteSkill() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (skillId: string) => agentApiClient.deleteSkill(skillId),
     onSuccess: (data, skillId) => {

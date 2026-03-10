@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Distribute-Center-Vertical--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Distribute Center Vertical Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Align/distribute-center-vertical">
+    <path id="Union" fill="url(#paint0_linear_13603_2954)" fill-rule="evenodd" d="M5.5 1C4.67157 1 4 1.67157 4 2.5v.25H.75c-.414214 0-.75.33579-.75.75s.335786.75.75.75H4v.25C4 5.32843 4.67157 6 5.5 6h3c.82843 0 1.5-.67157 1.5-1.5v-.25h3.25c.4142 0 .75-.33579.75-.75s-.3358-.75-.75-.75H10V2.5C10 1.67157 9.32843 1 8.5 1h-3Zm-2 7C2.67157 8 2 8.67157 2 9.5v.25H.75c-.414214 0-.75.3358-.75.75s.335786.75.75.75H2v.25c0 .8284.67157 1.5 1.5 1.5h7c.8284 0 1.5-.6716 1.5-1.5v-.25h1.25c.4142 0 .75-.3358.75-.75s-.3358-.75-.75-.75H12V9.5c0-.82843-.6716-1.5-1.5-1.5h-7Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_2954" x1="2.288" x2="12.712" y1="3.308" y2="10.045" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

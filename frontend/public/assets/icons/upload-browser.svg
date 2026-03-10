@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Upload-Browser--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Upload Browser Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Upload Download/upload-browser--action-actions-computer-website-device-display-upload-monitor-screen">
+    <path id="Union" fill="url(#paint0_linear_13603_3168)" fill-rule="evenodd" d="M1.5 11.25V5h11v6.25c0 .1381-.1119.25-.25.25h-2c-.41421 0-.75.3358-.75.75s.33579.75.75.75h2c.9665 0 1.75-.7835 1.75-1.75v-8.5C14 1.7835 13.2165 1 12.25 1H1.75C.783502 1 0 1.7835 0 2.75v8.5C0 12.2165.783502 13 1.75 13h2c.41421 0 .75-.3358.75-.75s-.33579-.75-.75-.75h-2c-.13807 0-.25-.1119-.25-.25ZM7.00001 14c.41422 0 .75-.3358.75-.75V9H9c.20223 0 .38455-.12182.46194-.30866.07739-.18684.03461-.40189-.10839-.54489l-2-2c-.19526-.19527-.51184-.19527-.7071 0l-2 2c-.143.143-.18578.35805-.10839.54489S4.79777 9 5 9h1.25001v4.25c0 .4142.33579.75.75.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_3168" x1="15.213" x2="-2.71" y1="16.753" y2="3.042" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

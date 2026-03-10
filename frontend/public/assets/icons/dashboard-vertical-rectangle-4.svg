@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Dashboard-Vertical-Rectangle-4--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Dashboard Vertical Rectangle 4 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Dashboard/dashboard-vertical-rectangle-4">
+    <path id="Union" fill="url(#paint0_linear_13603_1831)" fill-rule="evenodd" d="M12 .5c.8284 0 1.5.67157 1.5 1.5l0 3c0 .82843-.6716 1.5-1.5 1.5l-1.875 0 0-6L12 .5ZM8.875.5l-.00001 6-3.75 0L5.125.5l3.75 0Zm-5 0L2 .499999C1.17157.499999.5 1.17157.5 2l0 3c0 .82843.67157 1.5 1.5 1.5l1.87499 0L3.875.5ZM13.5 9c0-.82843-.6716-1.5-1.5-1.5l-1.875 0 0 6 1.875 0c.8284 0 1.5-.6716 1.5-1.5l0-3ZM2 7.5l6.875 0 0 6L2 13.5c-.82843 0-1.500001-.6716-1.500001-1.5L.5 9c0-.82843.67157-1.5 1.5-1.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_1831" x1="14.42" x2="-4.41" y1="15.571" y2="5.176" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

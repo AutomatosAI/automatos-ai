@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Watch-Square-Heartbeat-Monitor-1--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Watch Square Heartbeat Monitor 1 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Smartwatch/watch-square-heartbeat-monitor-1--device-timepiece-watch-square-heart-beat-monitor-healthcare">
+    <path id="Union" fill="url(#paint0_linear_13629_2522)" fill-rule="evenodd" d="M5.5 0c-.39782 0-.77936.158035-1.06066.43934C4.15804.720644 4 1.10217 4 1.5V2h-.25C2.7835 2 2 2.7835 2 3.75v6.5c0 .9665.7835 1.75 1.75 1.75H4v.5c0 .3978.15804.7794.43934 1.0607S5.10217 14 5.5 14h3c.39783 0 .77936-.158 1.06066-.4393C9.84196 13.2794 10 12.8978 10 12.5V12h.25c.9665 0 1.75-.7835 1.75-1.75v-6.5C12 2.7835 11.2165 2 10.25 2H10v-.5c0-.39783-.15804-.779356-.43934-1.06066C9.27936.158035 8.89782 0 8.5 0h-3ZM3.75 3.5c-.13807 0-.25.11193-.25.25v6.5c0 .1381.11193.25.25.25h6.5c.1381 0 .25-.1119.25-.25v-6.5c0-.13807-.1119-.25-.25-.25h-6.5Zm3.25001 1.70776c-.37348-.35504-.76577-.53466-1.14704-.56132-.44565-.03116-.83862.14964-1.12073.4328-.55324.55527-.72238 1.56252-.01334 2.25468l-.00005.00006.00476.00442 2.10648 1.952c.09586.08883.24398.08883.33985 0l2.10647-1.952.00006.00006.00465-.00454c.70904-.69216.5399-1.69941-.01333-2.25468-.28211-.28316-.67509-.46396-1.12073-.4328-.38128.02666-.77356.20628-1.14705.56132Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_2522" x1="11.966" x2="-1.456" y1="14.003" y2="8.61" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Graph-Arrow-User-Increase--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Graph Arrow User Increase Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Money Shopping/Graphs/graph-arrow-user-increase--ascend-growth-up-arrow-stats-graph-right-grow-user">
+    <path id="Union" fill="url(#paint0_linear_13629_6135)" fill-rule="evenodd" d="M10.5 0c-.2023 0-.3846.121821-.462.308658-.07738.186837-.0346.401896.1084.544895l.9697.969667-.459.45895c-.2929.29289-.2929.76777 0 1.06066s.7678.29289 1.0607 0l.4589-.45895.9697.96967c.143.143.3581.18578.5449.10839C13.8781 3.88455 14 3.70223 14 3.5v-3c0-.276142-.2239-.5-.5-.5h-3ZM6.99996 1.25c-1.51879 0-2.75 1.23122-2.75 2.75s1.23121 2.75 2.75 2.75c1.51878 0 2.75-1.23122 2.75-2.75s-1.23122-2.75-2.75-2.75Zm-5 11.75c0-2.7614 2.23857-5 5-5C9.76138 8 12 10.2386 12 13v.5c0 .2761-.2239.5-.5.5H2.49996c-.27615 0-.5-.2239-.5-.5V13Zm1.02136-8.0313c-.29267-.2916-.76605-.2916-1.05872 0L.219892 6.70503c-.2934299.29235-.2943013.76722-.001946 1.06065.292355.29343.767228.29431 1.060654.00195l1.21336-1.20891.88583.88258c.29343.29236.7683.29149 1.06066-.00194.29235-.29343.29148-.76831-.00195-1.06066l-1.41518-1.41Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_6135" x1="15.213" x2="-3.671" y1="16.965" y2="3.55" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

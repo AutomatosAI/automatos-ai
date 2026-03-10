@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="car-auto-transmission--transportation-car-auto-transmission-gearbox-control">
+    <path id="Union" fill="url(#paint0_linear_15041_3546)" fill-rule="evenodd" d="M5 3c0 .83934.51704 1.55793 1.25 1.85462V6.25h-3.5V4.85462C3.48296 4.55793 4 3.83934 4 3c0-1.10457-.89543-2-2-2-1.104569 0-2 .89543-2 2 0 .83934.517042 1.55793 1.25 1.85462v4.29076C.517042 9.44207 0 10.1607 0 11c0 1.1046.895431 2 2 2 1.10457 0 2-.8954 2-2 0-.8393-.51704-1.55793-1.25-1.85462V7.75h3.5v1.39538C5.51704 9.44207 5 10.1607 5 11c0 1.1046.89543 2 2 2s2-.8954 2-2c0-.8393-.51704-1.55793-1.25-1.85462V7.75H10c1.5188 0 2.75-1.23122 2.75-2.75v-.14538C13.483 4.55793 14 3.83934 14 3c0-1.10457-.8954-2-2-2s-2 .89543-2 2c0 .83934.517 1.55793 1.25 1.85462V5c0 .69036-.5596 1.25-1.25 1.25H7.75V4.85462C8.48296 4.55793 9 3.83934 9 3c0-1.10457-.89543-2-2-2s-2 .89543-2 2" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15041_3546" x1="2.288" x2="12.712" y1="3.308" y2="10.045" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

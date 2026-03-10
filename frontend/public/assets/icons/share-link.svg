@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Share-Link--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Share Link Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Share/share-link--share-transmit">
+    <path id="Union" fill="url(#paint0_linear_13603_2432)" fill-rule="evenodd" d="M9 3.5C9 2.11929 10.1193 1 11.5 1S14 2.11929 14 3.5 12.8807 6 11.5 6c-.7891 0-1.4928-.36557-1.95094-.93657L4.99462 6.8346C4.99819 6.88927 5 6.94442 5 7c0 .05558-.00181.11073-.00538.16541l4.55444 1.77117C10.0072 8.36557 10.7109 8 11.5 8c1.3807 0 2.5 1.11929 2.5 2.5 0 1.3807-1.1193 2.5-2.5 2.5S9 11.8807 9 10.5c0-.0556.00181-.1107.00539-.1654L4.45094 8.56342C3.99276 9.13443 3.28907 9.5 2.5 9.5 1.11929 9.5 0 8.38071 0 7s1.11929-2.5 2.5-2.5c.78908 0 1.49277.36557 1.95095.93659l4.55444-1.77117C9.00181 3.61074 9 3.55558 9 3.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_2432" x1="2.288" x2="12.712" y1="3.308" y2="10.045" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

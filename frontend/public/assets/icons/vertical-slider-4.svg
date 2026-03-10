@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Vertical-Slider-4--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Vertical Slider 4 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Setting/vertical-slider-4">
+    <path id="Union" fill="url(#paint0_linear_13603_6042)" fill-rule="evenodd" d="M2.75 13.25c0 .4142.33579.75.75.75s.75-.3358.75-.75v-1.8645C5.26428 11.067 6 10.1194 6 9c0-1.11941-.73572-2.06698-1.75-2.38555l0-5.864451C4.25.335786 3.91421 0 3.5 0s-.75.335786-.75.749999l0 5.864451C1.73572 6.93302 1 7.88059 1 9c0 1.1194.73572 2.067 1.75 2.3855l0 1.8645Zm8.5-5.86445C12.2643 7.06698 13 6.11941 13 5c0-1.11941-.7357-2.06698-1.75-2.38555V.75c0-.414214-.3358-.75-.75-.75s-.75.335786-.75.75v1.86445C8.73572 2.93302 8 3.88059 8 5c0 1.11941.73572 2.06698 1.75 2.38555V13.25c0 .4142.3358.75.75.75s.75-.3358.75-.75V7.38555Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_6042" x1="14.04" x2="-3.727" y1="16.965" y2="6.148" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

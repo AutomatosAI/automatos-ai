@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Block-2--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Block 2 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Add Remove Delete/block-2--remove-circle-garbage-trash-delete-cross-x">
+    <path id="Union" fill="url(#paint0_linear_13603_9216)" fill-rule="evenodd" d="M7 2c-1.01908 0-1.96696.30488-2.75739.8284L7 5.58579 9.75739 2.8284C8.96696 2.30488 8.01908 2 7 2Zm4.1716 2.24261L8.41421 7l2.75739 2.75739C11.6951 8.96696 12 8.01908 12 7s-.3049-1.96696-.8284-2.75739ZM5.58579 7 2.8284 4.24261C2.30488 5.03304 2 5.98092 2 7s.30488 1.96696.8284 2.75739L5.58579 7Zm-1.34318 4.1716L7 8.41421l2.75739 2.75739C8.96696 11.6951 8.01908 12 7 12s-1.96696-.3049-2.75739-.8284ZM0 7c0-3.86599 3.13401-7 7-7 3.866 0 7 3.13401 7 7 0 3.866-3.134 7-7 7-3.86599 0-7-3.134-7-7Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_9216" x1="15.213" x2="-3.671" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

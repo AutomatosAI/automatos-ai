@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Multiple-Stars--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Multiple Stars Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Bookmark Favorite/multiple-stars--reward-rating-rate-social-star-media-favorite-like-stars-spark">
+    <path id="Union" fill="url(#paint0_linear_13603_7998)" fill-rule="evenodd" d="M1.80662.658257c.31916-.877677 1.56043-.877675 1.87959 0l.30623.842133.84213.30623c.87768.31916.87768 1.56043 0 1.87959l-.84213.30623-.30623.84213c-.31916.87768-1.56043.87768-1.87959 0l-.30623-.84213-.842133-.30623.158257-.43521-.158257.43521c-.877676-.31916-.877675-1.56043 0-1.87959l.842133-.30623.30623-.842133ZM10.5224 2.07717c-.3192-.87767-1.56047-.87768-1.87963 0L7.89094 4.1447l-2.06752.75183c-.87768.31915-.87768 1.56043 0 1.87958l2.06752.75183.75183 2.06753c.31916.87763 1.56043.87763 1.87963 0l.7518-2.06753 2.0675-.75183c.8777-.31915.8777-1.56043 0-1.87958l-2.0675-.75183-.7518-2.06753ZM4.54345 7.45095c-.31916-.87768-1.56043-.87767-1.87959 0l-.53483 1.47078-1.470773.53483c-.877676.31915-.877676 1.56044 0 1.87954l1.470773.5349.53483 1.4707c.31916.8777 1.56043.8777 1.87959 0l.53483-1.4707 1.47077-.5349c.87768-.3191.87768-1.56039 0-1.87954l-1.47077-.53483-.53483-1.47078Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_7998" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

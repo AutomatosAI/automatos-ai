@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Share-Lock--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Share Lock Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Share/share-lock--give-hand-lock-padlock-secure-security-transfer">
+    <path id="Union" fill="url(#paint0_linear_13603_2397)" fill-rule="evenodd" d="M11 1.5c-.4142 0-.75.33579-.75.75V3h1.5v-.75c0-.41421-.3358-.75-.75-.75Zm-2.25.75v.7815C8.31869 3.14252 8 3.53404 8 4v2.5c0 .55228.44772 1 1 1h4c.5523 0 1-.44771 1-1V4c0-.46596-.3187-.85748-.75-.9685V2.25C13.25 1.00736 12.2426 0 11 0 9.75736 0 8.75 1.00736 8.75 2.25ZM1.84315 7H0v4l1.82843 1.8284C2.57857 13.5786 3.59599 14 4.65685 14H10.5c.8284 0 1.5-.6716 1.5-1.5s-.6716-1.5-1.5-1.5H7.72318c-.09651.3265-.27361.6343-.5313.892-.82397.8239-2.15989.8239-2.98386 0l-1.45001-1.4501c-.24408-.244-.24408-.63976 0-.88384.24408-.24408.63981-.24408.88388 0l1.45002 1.45004c.33581.3358.88027.3358 1.21609 0 .30212-.3022.33243-.7732.09093-1.10917L4.67157 8.17157C3.92143 7.42143 2.90401 7 1.84315 7Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_2397" x1="15.213" x2="-3.671" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

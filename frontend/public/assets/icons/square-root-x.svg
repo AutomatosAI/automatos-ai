@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Square-Root-X--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Square Root X Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Mathematics/square-root-x--interface-math-square-root-sign-mathematics">
+    <path id="Union" fill="url(#paint0_linear_13603_8383)" fill-rule="evenodd" d="M5.75003 1.5c-.3407 0-.6386.22965-.72531.55913L2.81817 10.444 1.21855 9.16435c-.323448-.25876-.795417-.20632-1.054174.11713-.2587572.32345-.2063162.79542.11713 1.05422l2.500004 2c.19816.1585.46305.2061.70399.1264s.42525-.2758.48983-.5212L6.32819 3H13.25c.4142 0 .75-.33579.75-.75s-.3358-.75-.75-.75H5.75003Zm6.18357 3.63804c-.338-.23942-.8061-.1595-1.0455.17851l-1.38801 1.9595-1.38798-1.9595c-.23943-.33801-.70753-.41793-1.04553-.17851-.33801.23943-.41793.70753-.17851 1.04553L8.581 8.57359 6.63807 11.3165c-.23942.3381-.1595.8062.17851 1.0456.338.2394.8061.1595 1.04553-.1785l1.63798-2.31247 1.63801 2.31247c.2394.338.7075.4179 1.0455.1785.338-.2394.4179-.7075.1785-1.0456l-1.9429-2.74291 1.6929-2.39002c.2394-.338.1595-.8061-.1785-1.04553Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_8383" x1="13.953" x2="-.477" y1="12.502" y2="2.172" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

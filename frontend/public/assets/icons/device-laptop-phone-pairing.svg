@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="device-laptop-phone-pairing--device-laptop-phone-pairing-data-transfer-connection">
+    <path id="Union" fill="url(#paint0_linear_15030_6214)" fill-rule="evenodd" d="M3 1.75c0-.13807.11193-.25.25-.25h7.5c.1381 0 .25.11193.25.25V3.5c0 .41421.3358.75.75.75s.75-.33579.75-.75V1.75C12.5.783502 11.7165 0 10.75 0h-7.5C2.2835 0 1.5.783502 1.5 1.75v4.63197L.138197 9.10557C.0473146 9.28734 0 9.48776 0 9.69098 0 10.4139.586067 11 1.30902 11H6.75V7c0-.35279.06643-.69007.18747-1H3zm9.5 3.75c.8284 0 1.5.67157 1.5 1.5v5.5c0 .8284-.6716 1.5-1.5 1.5h-3c-.82843 0-1.5-.6716-1.5-1.5V7c0-.82843.67157-1.5 1.5-1.5zM12 12c0-.4142-.3358-.75-.75-.75h-.5c-.4142 0-.75.3358-.75.75s.3358.75.75.75h.5c.4142 0 .75-.3358.75-.75" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15030_6214" x1="15.508" x2="-3.736" y1="16.634" y2="3.965" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

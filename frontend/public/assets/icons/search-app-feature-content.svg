@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="search-app-feature-content--search-app-feature-content-interface-square-website-application">
+    <path id="Union" fill="url(#paint0_linear_15027_4612)" fill-rule="evenodd" d="M9.25 1.5C8.00736 1.5 7 2.50736 7 3.75S8.00736 6 9.25 6c1.2426 0 2.25-1.00736 2.25-2.25S10.4926 1.5 9.25 1.5M5.5 3.75C5.5 1.67893 7.17893 0 9.25 0 11.3211 0 13 1.67893 13 3.75c0 .76431-.2287 1.47522-.6213 2.06804l1.4016 1.40163c.2929.29289.2929.76777 0 1.06066s-.7677.29289-1.0606 0L11.318 6.8787c-.5928.39264-1.3037.6213-2.068.6213-2.07107 0-3.75-1.67893-3.75-3.75m-1.25 0c0-1.01591.30298-1.96105.82351-2.75H1.5C.671573 1 0 1.67157 0 2.5v10c0 .8284.671573 1.5 1.5 1.5l10 0c.8284 0 1.5-.6716 1.5-1.5V9.73441c-.4256-.05332-.8374-.24339-1.1642-.5702l-.7589-.75886C10.5104 8.62783 9.89369 8.75 9.25 8.75c-2.76142 0-5-2.23858-5-5" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_4612" x1="15.508" x2="-3.736" y1="16.634" y2="3.965" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

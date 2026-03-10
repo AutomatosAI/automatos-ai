@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="presentation-speaker-speech--presentation-speaker-speech-facilitator-press-conference">
+    <path id="Union" fill="url(#paint0_linear_15027_1493)" fill-rule="evenodd" d="M2 4c0-1.65685 1.34315-3 3-3 1.65686 0 3 1.34315 3 3S6.65686 7 5 7C3.34315 7 2 5.65685 2 4M.0304955 12.4451C.306912 9.94456 2.42603 8 5 8c2.32993 0 4.28717 1.5933 4.84238 3.75H12.75V9.20343c0-.36468-.1449-.71441-.4027-.97227l-.3462-.34617c-.5327.19754-1.1551.08228-1.5832-.34578l-.47853-.47855c-.58578-.58579-.58578-1.53553 0-2.12132.58583-.58579 1.53553-.58579 2.12133 0l.4785.47855c.4281.42807.5434 1.0505.3458 1.58323l.3462.34615c.4922.49228.7688 1.15996.7688 1.85616V12.375c0 .3452-.2798.625-.625.625H.527468c-.142173 0-.277623-.0605-.37247-.1664-.0948482-.1059-.1401237-.2472-.1245025-.3885" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_1493" x1="15.505" x2="-1.836" y1="15.258" y2="1.965" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

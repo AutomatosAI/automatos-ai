@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Quality-Hd--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Quality Hd Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="quality-hd--quality-hd-hign-defination-resolution-video">
+    <path id="Subtract" fill="url(#paint0_linear_13311_1343)" fill-rule="evenodd" d="M8.305e-7 3C9.03e-7 2.17157.671573 1.5 1.5 1.5l11 0c.8284 0 1.5.67157 1.5 1.5l0 8c0 .8284-.6716 1.5-1.5 1.5l-11 0C.671573 12.5 5.87e-8 11.8284 1.311e-7 11l6.994e-7-8ZM8.25 3.875c-.34518 0-.625.27982-.625.625l0 5c0 .34518.27982.625.625.625l1 0c1.4497 0 2.625-1.17525 2.625-2.625l0-1c0-1.44975-1.1753-2.625-2.625-2.625l-1 0Zm1 5-.375 0 0-3.75.375 0c.7594 0 1.375.61561 1.375 1.375l0 1c0 .75939-.6156 1.375-1.375 1.375Zm-6.5-5c.34518 0 .625.27982.625.625l0 1.875 1.75 0 0-1.875c0-.34518.27982-.625.625-.625s.625.27982.625.625l0 2.5 0 2.5c0 .34518-.27982.625-.625.625s-.625-.27982-.625-.625l0-1.875-1.75 0 0 1.875c0 .34518-.27982.625-.625.625s-.625-.27982-.625-.625l0-2.49945L2.125 7l0-.00055 0-2.49945c0-.34518.27982-.625.625-.625Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13311_1343" x1="14.858" x2="1.278" y1="14.382" y2="-1.825" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>
