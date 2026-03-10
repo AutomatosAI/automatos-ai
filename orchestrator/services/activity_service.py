@@ -284,7 +284,7 @@ class ActivityService:
 
                 items.append(
                     self._build_feed_item(
-                        id=f"recipe-{ex.id}",
+                        id=f"recipe-{exec_id}",
                         item_type="recipe",
                         name=recipe_name,
                         status=ex.status or "pending",
