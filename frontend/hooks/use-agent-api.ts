@@ -88,15 +88,16 @@ import { useSystemIcons } from './use-system-config-api'
 // Get all agents
 export function useAgents() {
   const { data: iconMappings = {} } = useSystemIcons();
+  const iconKeys = Object.keys(iconMappings).sort().join(',')
 
   return useQuery({
-    queryKey: agentQueryKeys.agents,
+    queryKey: [...agentQueryKeys.agents, iconKeys],
     queryFn: async () => {
       const agents = await agentApiClient.getAgents();
       // Inject icon mapping based on category
       return agents.map((agent: any) => ({
         ...agent,
-        premium_icon: iconMappings[agent.marketplace_category] || iconMappings[agent.agent_type] || null
+        premium_icon: iconMappings[agent.marketplace_category] || iconMappings[agent.configuration?.category] || iconMappings[agent.agent_type] || null
       }));
     },
     refetchInterval: false, // Disable automatic refetching
@@ -108,15 +109,16 @@ export function useAgents() {
 // Get single agent
 export function useAgent(agentId: string | null) {
   const { data: iconMappings = {} } = useSystemIcons();
+  const iconKeys = Object.keys(iconMappings).sort().join(',')
 
   return useQuery({
-    queryKey: agentQueryKeys.agent(agentId!),
+    queryKey: [...agentQueryKeys.agent(agentId!), iconKeys],
     queryFn: async () => {
       const agent = await agentApiClient.getAgent(agentId!);
       // Inject icon mapping based on category
       return {
         ...agent,
-        premium_icon: iconMappings[agent.marketplace_category] || iconMappings[agent.agent_type] || null
+        premium_icon: iconMappings[agent.marketplace_category] || iconMappings[agent.configuration?.category] || iconMappings[agent.agent_type] || null
       };
     },
     enabled: !!agentId,
