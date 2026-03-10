@@ -37,8 +37,12 @@ const DEFAULT_CATEGORIES = [
     { id: 'system', label: 'System & Infrastructure', type: 'skill' },
 
     // Global entity icons
-    { id: 'global_plugin', label: 'Plugins', type: 'global' },
-    { id: 'global_recipe', label: 'Recipes', type: 'global' },
+    { id: 'global_agent', label: 'Agents (default)', type: 'global' },
+    { id: 'global_skill', label: 'Skills / Capabilities', type: 'global' },
+    { id: 'global_plugin', label: 'Plugins / Widgets', type: 'global' },
+    { id: 'global_recipe', label: 'Recipes / Workflows', type: 'global' },
+    { id: 'global_store', label: 'Marketplace / Store', type: 'global' },
+    { id: 'global_featured', label: 'Featured / Trending', type: 'global' },
 ];
 
 export function SystemIconsSettingsTab() {

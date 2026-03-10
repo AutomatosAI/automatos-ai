@@ -232,7 +232,11 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
       {filteredAvailable.length === 0 && !loading ? (
         <div className="text-center py-12">
           <div className="w-16 h-16 rounded-lg bg-secondary/30 flex items-center justify-center mx-auto mb-4">
-            <Zap className="w-8 h-8 text-muted-foreground" />
+            {iconMappings['global_skill'] ? (
+              <PremiumIcon name={iconMappings['global_skill']} size={32} />
+            ) : (
+              <Zap className="w-8 h-8 text-muted-foreground" />
+            )}
           </div>
           <h3 className="text-lg font-semibold mb-2">No skills found</h3>
           <p className="text-muted-foreground mb-4">
@@ -250,7 +254,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
               isEnabled={false}
               isEnabling={enabling === skill.id}
               onEnable={() => enableSkill(skill.id, skill.name)}
-              iconName={skill.category ? iconMappings[skill.category] : null}
+              iconName={(skill.category && iconMappings[skill.category]) || iconMappings['global_skill'] || null}
             />
           ))}
         </div>
@@ -265,7 +269,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
                 isEnabled={false}
                 isEnabling={enabling === skill.id}
                 onEnable={() => enableSkill(skill.id, skill.name)}
-                iconName={skill.category ? iconMappings[skill.category] : null}
+                iconName={(skill.category && iconMappings[skill.category]) || iconMappings['global_skill'] || null}
               />
             ))}
           </AnimatePresence>
@@ -291,7 +295,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
                   isEnabled
                   isDisabling={disabling === skill.skill_id}
                   onDisable={() => disableSkill(skill.skill_id, skill.name)}
-                  iconName={skill.category ? iconMappings[skill.category] : null}
+                  iconName={(skill.category && iconMappings[skill.category]) || iconMappings['global_skill'] || null}
                 />
               ))}
             </div>
@@ -306,7 +310,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
                     isEnabled
                     isDisabling={disabling === skill.skill_id}
                     onDisable={() => disableSkill(skill.skill_id, skill.name)}
-                    iconName={skill.category ? iconMappings[skill.category] : null}
+                    iconName={(skill.category && iconMappings[skill.category]) || iconMappings['global_skill'] || null}
                   />
                 ))}
               </AnimatePresence>

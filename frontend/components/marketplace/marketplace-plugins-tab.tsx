@@ -36,6 +36,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
+import { PremiumIcon } from '@/components/shared'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { apiClient } from '@/lib/api-client'
@@ -92,6 +94,8 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
   const { toast } = useToast()
   const { user } = useUser()
   const [viewMode, setViewMode] = useViewMode('mp-plugins')
+  const { data: iconMappings = {} } = useSystemIcons()
+  const globalPluginIcon = iconMappings['global_plugin'] || null
 
   // Admin check (same pattern as agents tab)
   const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
@@ -470,6 +474,7 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
                 isEnabling={enablingId === plugin.id}
                 onEnable={() => handleEnable(plugin.id, plugin.name)}
                 onClick={() => setSelectedPluginId(plugin.id)}
+                globalIcon={globalPluginIcon}
               />
             ))}
           </div>
@@ -529,7 +534,11 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
       {filteredPlugins.length === 0 ? (
         <div className="text-center py-12">
           <div className="w-16 h-16 rounded-lg bg-secondary/30 flex items-center justify-center mx-auto mb-4">
-            <Sparkles className="w-8 h-8 text-muted-foreground" />
+            {globalPluginIcon ? (
+              <PremiumIcon name={globalPluginIcon} size={32} />
+            ) : (
+              <Sparkles className="w-8 h-8 text-muted-foreground" />
+            )}
           </div>
           <h3 className="text-lg font-semibold mb-2">No capabilities found</h3>
           <p className="text-muted-foreground mb-4">
@@ -558,7 +567,11 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
               >
                 <CardContent className="p-3">
                   <div className="flex items-center gap-3">
-                    <Sparkles className="w-9 h-9 text-primary shrink-0" />
+                    {globalPluginIcon ? (
+                      <PremiumIcon name={globalPluginIcon} size={36} className="shrink-0" />
+                    ) : (
+                      <Sparkles className="w-9 h-9 text-primary shrink-0" />
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-sm truncate">{plugin.name}</span>
@@ -613,6 +626,7 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
                 onApprove={() => handleApprove(plugin.id)}
                 onDeactivate={() => handleDeactivate(plugin.id)}
                 onDelete={() => handleDelete(plugin.id)}
+                globalIcon={globalPluginIcon}
               />
             ))}
           </AnimatePresence>
@@ -663,6 +677,7 @@ interface FeaturedPluginCardProps {
   isEnabling: boolean
   onEnable: () => void
   onClick: () => void
+  globalIcon?: string | null
 }
 
 function FeaturedPluginCard({
@@ -671,6 +686,7 @@ function FeaturedPluginCard({
   isEnabling,
   onEnable,
   onClick,
+  globalIcon,
 }: FeaturedPluginCardProps) {
   return (
     <Card
@@ -680,7 +696,11 @@ function FeaturedPluginCard({
       <CardContent className="p-4 space-y-3">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3 flex-1 min-w-0">
-            <Sparkles className="w-8 h-8 text-primary shrink-0" />
+            {globalIcon ? (
+              <PremiumIcon name={globalIcon} size={32} className="shrink-0" />
+            ) : (
+              <Sparkles className="w-8 h-8 text-primary shrink-0" />
+            )}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <h4 className="font-semibold text-foreground truncate">{plugin.name}</h4>
@@ -771,6 +791,7 @@ interface PluginCardProps {
   onApprove?: () => void
   onDeactivate?: () => void
   onDelete?: () => void
+  globalIcon?: string | null
 }
 
 function PluginCard({
@@ -787,6 +808,7 @@ function PluginCard({
   onApprove,
   onDeactivate,
   onDelete,
+  globalIcon,
 }: PluginCardProps) {
   const isPending = plugin.approval_status === 'pending'
 
@@ -804,7 +826,11 @@ function PluginCard({
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3 flex-1 min-w-0">
-              <Sparkles className="w-10 h-10 text-primary shrink-0" />
+              {globalIcon ? (
+                <PremiumIcon name={globalIcon} size={40} className="shrink-0" />
+              ) : (
+                <Sparkles className="w-10 h-10 text-primary shrink-0" />
+              )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <h3 className="font-semibold text-foreground line-clamp-1">
