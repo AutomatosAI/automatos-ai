@@ -26,6 +26,11 @@ from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
 
+
+def _is_admin(ctx: RequestContext) -> bool:
+    """Check if current user has admin role."""
+    return getattr(ctx.user, "system_role", "user") == "admin"
+
 router = APIRouter(prefix="/api/marketplace/plugins", tags=["Marketplace Plugins"])
 
 
@@ -96,6 +101,7 @@ class PluginDetailOut(BaseModel):
     enable_count: int = 0
     is_featured: bool = False
     is_active: bool = True
+    approval_status: Optional[str] = None
     security_status: Optional[str] = None
     source_type: Optional[str] = None
     source_url: Optional[str] = None
@@ -310,12 +316,12 @@ async def get_plugin_detail(
     try:
         from core.models.marketplace_plugins import MarketplacePlugin, PluginCategory
 
-        # Allow deactivated plugins to be fetched (so the detail modal can show
-        # a "deactivated" state), but still require approved status.
-        plugin = db.query(MarketplacePlugin).filter(
-            MarketplacePlugin.id == plugin_id,
-            MarketplacePlugin.approval_status == "approved",
-        ).first()
+        # Admins can view any plugin (pending, blocked, etc.) for review.
+        # Regular users only see approved plugins.
+        query = db.query(MarketplacePlugin).filter(MarketplacePlugin.id == plugin_id)
+        if not _is_admin(ctx):
+            query = query.filter(MarketplacePlugin.approval_status == "approved")
+        plugin = query.first()
 
         if not plugin:
             raise HTTPException(status_code=404, detail="Plugin not found")
@@ -357,6 +363,7 @@ async def get_plugin_detail(
             enable_count=plugin.enable_count or 0,
             is_featured=plugin.is_featured or False,
             is_active=plugin.is_active if plugin.is_active is not None else True,
+            approval_status=plugin.approval_status,
             security_status=plugin.security_status,
             source_type=plugin.source_type,
             source_url=plugin.source_url,

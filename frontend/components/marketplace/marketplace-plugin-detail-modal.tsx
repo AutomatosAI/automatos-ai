@@ -70,6 +70,7 @@ interface PluginDetail {
   enable_count: number
   is_featured: boolean
   is_active: boolean
+  approval_status: string | null
   security_status: string | null
   source_type: string | null
   source_url: string | null
@@ -92,6 +93,8 @@ interface MarketplacePluginDetailModalProps {
   isEnabling: boolean
   onEnable: () => void
   onDisable?: () => void
+  isAdmin?: boolean
+  onApproved?: () => void
 }
 
 // ===================================================================
@@ -106,11 +109,14 @@ export function MarketplacePluginDetailModal({
   isEnabling,
   onEnable,
   onDisable,
+  isAdmin,
+  onApproved,
 }: MarketplacePluginDetailModalProps) {
   const { toast } = useToast()
   const [plugin, setPlugin] = useState<PluginDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [adminActionLoading, setAdminActionLoading] = useState(false)
   const requestIdRef = useRef(0)
 
   const fetchPluginDetail = useCallback(async () => {
@@ -147,6 +153,36 @@ export function MarketplacePluginDetailModal({
     }
   }, [open, pluginId, fetchPluginDetail])
 
+  const handleAdminApprove = async () => {
+    if (!plugin) return
+    setAdminActionLoading(true)
+    try {
+      await apiClient.post(`/api/admin/plugins/${plugin.id}/approve`)
+      toast({ title: 'Plugin approved', description: `${plugin.name} is now available in the marketplace.` })
+      onApproved?.()
+      onClose()
+    } catch (err: any) {
+      toast({ title: 'Approve failed', description: err?.message || 'Could not approve plugin', variant: 'destructive' })
+    } finally {
+      setAdminActionLoading(false)
+    }
+  }
+
+  const handleAdminReject = async () => {
+    if (!plugin) return
+    setAdminActionLoading(true)
+    try {
+      await apiClient.post(`/api/admin/plugins/${plugin.id}/reject`)
+      toast({ title: 'Plugin rejected', description: `${plugin.name} has been rejected.` })
+      onApproved?.()
+      onClose()
+    } catch (err: any) {
+      toast({ title: 'Reject failed', description: err?.message || 'Could not reject plugin', variant: 'destructive' })
+    } finally {
+      setAdminActionLoading(false)
+    }
+  }
+
   if (!open) return null
 
   // Content lists come from enriched API fields (not raw manifest)
@@ -161,6 +197,13 @@ export function MarketplacePluginDetailModal({
           <Badge variant="outline" className="border-[hsl(var(--success))]/30 text-[hsl(var(--success))]">
             <ShieldCheck className="w-3 h-3 mr-1" />
             Verified Safe
+          </Badge>
+        )
+      case 'blocked':
+        return (
+          <Badge variant="outline" className="border-destructive/30 text-destructive">
+            <ShieldAlert className="w-3 h-3 mr-1" />
+            Blocked by Scanner
           </Badge>
         )
       case 'review_required':
@@ -179,6 +222,8 @@ export function MarketplacePluginDetailModal({
         )
     }
   }
+
+  const needsApproval = plugin?.approval_status && plugin.approval_status !== 'approved'
 
   return (
     <AnimatePresence>
@@ -263,6 +308,22 @@ export function MarketplacePluginDetailModal({
 
                   {/* Scrollable Body */}
                   <CardContent className="flex-1 overflow-y-auto pt-4 space-y-6">
+                    {/* Approval Status Banner (admin view for pending/blocked plugins) */}
+                    {isAdmin && needsApproval && (
+                      <div className="flex items-center gap-3 p-3 rounded-lg border border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/10">
+                        <AlertTriangle className="w-5 h-5 text-[hsl(var(--warning))] flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-[hsl(var(--warning))]">
+                            Status: <span className="capitalize">{plugin.approval_status}</span>
+                            {plugin.security_status === 'blocked' && ' — Security scanner flagged issues'}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            This plugin is not yet visible to users. Review and approve or reject below.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Security Status Badge */}
                     <div className="flex items-center gap-2">
                       {securityBadge(plugin.security_status)}
@@ -496,9 +557,33 @@ export function MarketplacePluginDetailModal({
                     )}
                   </CardContent>
 
-                  {/* Footer — Enable/Disable or Deactivated notice */}
+                  {/* Footer — Admin actions or Enable/Disable */}
                   <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur z-20 relative">
-                    {plugin.is_active === false ? (
+                    {isAdmin && needsApproval ? (
+                      <div className="flex gap-3">
+                        <Button
+                          onClick={handleAdminApprove}
+                          disabled={adminActionLoading}
+                          className="flex-1 bg-[hsl(var(--success))]/20 text-[hsl(var(--success))] border border-[hsl(var(--success))]/30 hover:bg-[hsl(var(--success))]/30"
+                        >
+                          {adminActionLoading ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                          )}
+                          Approve Plugin
+                        </Button>
+                        <Button
+                          onClick={handleAdminReject}
+                          disabled={adminActionLoading}
+                          variant="outline"
+                          className="flex-1 border-destructive/30 text-destructive hover:bg-destructive/10"
+                        >
+                          <X className="w-4 h-4 mr-2" />
+                          Reject Plugin
+                        </Button>
+                      </div>
+                    ) : plugin.is_active === false ? (
                       <div className="flex items-center justify-center gap-2 p-3 rounded-lg border border-[hsl(var(--destructive))]/30 bg-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))]">
                         <AlertTriangle className="w-5 h-5 flex-shrink-0" />
                         <span className="text-sm font-medium">This capability has been deactivated</span>
