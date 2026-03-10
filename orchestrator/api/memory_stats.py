@@ -29,7 +29,7 @@ def _get_mem0_client():
         from modules.memory.integrations.mem0_client import Mem0Client
         return Mem0Client()
     except Exception as e:
-        logger.debug(f"Mem0 client not available: {e}")
+        logger.warning("Mem0 client not available: %s", e)
         return None
 
 
