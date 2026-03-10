@@ -32,9 +32,9 @@ const actions = [
   },
   {
     label: 'Start Workflow',
-    href: '/workflows?action=create',
+    href: '/activity',
     icon: Play,
-    description: 'Create and run a new workflow',
+    description: 'View activity and recipes',
     type: 'link'
   },
   {

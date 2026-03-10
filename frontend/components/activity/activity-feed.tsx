@@ -27,7 +27,23 @@ import {
 import { useActivityFeed } from '@/hooks/use-activity-api'
 import type { ActivityFeedFilters, ActivityFeedItem } from '@/hooks/use-activity-api'
 import { ExecutionDetail } from './execution-detail'
+import dynamic from 'next/dynamic'
 import { cn } from '@/lib/utils'
+
+// Lazy-load ExecutionKitchen (heavy component with streaming, theater sub-components)
+const ExecutionKitchen = dynamic(
+  () => import('@/components/workflows/execution-kitchen').then((m) => m.ExecutionKitchen),
+  { ssr: false, loading: () => <KitchenSkeleton /> }
+)
+
+function KitchenSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-8 w-32 bg-secondary/30 rounded" />
+      <div className="h-[400px] bg-secondary/20 rounded-xl" />
+    </div>
+  )
+}
 
 // ─── Filter Chip Config ─────────────────────────────────
 
@@ -213,6 +229,28 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   // ─── Execution Detail Drill-Down ──────────────────
 
   if (selectedItem) {
+    // Recipes → full ExecutionKitchen (cooking theater with streaming logs, self-learning)
+    if (selectedItem.type === 'recipe') {
+      // Extract execution ID: source_url has ?openExecution=X or id is recipe-X
+      const execId =
+        selectedItem.source_url?.match(/openExecution=([^&]+)/)?.[1] ??
+        selectedItem.id.replace('recipe-', '')
+      const recipeId = selectedItem.source_id ?? selectedItem.source_url?.match(/recipeId=([^&]+)/)?.[1] ?? ''
+
+      return (
+        <ExecutionKitchen
+          workflowId={0}
+          onBack={handleCloseDetail}
+          autoStart={false}
+          executionType="recipe"
+          recipeExecutionId={execId}
+          recipeId={recipeId}
+          recipeSteps={[]}
+        />
+      )
+    }
+
+    // Non-recipes → standard detail view
     return <ExecutionDetail item={selectedItem} onClose={handleCloseDetail} />
   }
 
