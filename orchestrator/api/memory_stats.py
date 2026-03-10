@@ -6,8 +6,9 @@ Falls back to the local memory_items table if Mem0 is unavailable.
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text
 from datetime import datetime, timedelta
@@ -229,6 +230,253 @@ async def get_recent_memories(
         }
         for mem in recent
     ]
+
+
+@router.get("/browse")
+async def browse_memories(
+    query: Optional[str] = None,
+    limit: int = 20,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+) -> Dict[str, Any]:
+    """
+    Browse/search all memories — PRD-77 Memory Explorer.
+    If query is provided, performs vector similarity search.
+    Otherwise returns all memories sorted by recency.
+    """
+    mem0 = _get_mem0_client()
+    if not mem0:
+        return {"success": False, "error": "Memory service unavailable", "memories": []}
+
+    user_id = _mem0_user_id(ctx.workspace_id)
+
+    try:
+        if query:
+            results = mem0.search(query=query, user_id=user_id, limit=limit)
+        else:
+            results = mem0.get_all(user_id=user_id, limit=limit)
+
+        memories = []
+        for m in (results if isinstance(results, list) else []):
+            memories.append({
+                "id": str(m.get("id", "")),
+                "content": m.get("memory") or m.get("content", ""),
+                "score": m.get("score"),
+                "metadata": m.get("metadata") or m.get("metadata_"),
+                "created_at": m.get("created_at"),
+                "updated_at": m.get("updated_at"),
+            })
+
+        return {
+            "success": True,
+            "memories": memories,
+            "total": len(memories),
+            "source": "mem0",
+            "search_query": query,
+        }
+    except Exception as e:
+        logger.error("Memory browse failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)[:200], "memories": []}
+
+
+@router.delete("/{memory_id}")
+async def delete_memory(
+    memory_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+) -> Dict[str, Any]:
+    """Delete a specific memory by ID — PRD-77."""
+    mem0 = _get_mem0_client()
+    if not mem0:
+        return {"success": False, "error": "Memory service unavailable"}
+
+    user_id = _mem0_user_id(ctx.workspace_id)
+
+    try:
+        # Ownership check: verify memory belongs to this workspace
+        all_mems = mem0.get_all(user_id=user_id, limit=500)
+        items = all_mems if isinstance(all_mems, list) else []
+        owned_ids = {str(m.get("id", "")) for m in items}
+
+        if memory_id not in owned_ids:
+            return {"success": False, "error": "Memory not found or not owned by this workspace"}
+
+        deleted = mem0.delete(memory_id)
+        if deleted:
+            logger.info("Memory %s deleted by workspace %s", memory_id, ctx.workspace_id)
+            return {"success": True, "message": f"Memory {memory_id} deleted"}
+        return {"success": False, "error": f"Failed to delete memory {memory_id}"}
+    except Exception as e:
+        logger.error("Memory delete failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)[:200]}
+
+
+@router.get("/health")
+async def get_memory_health(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Memory health report — PRD-77.
+    Shows total count, staleness, and basic health indicators.
+    """
+    mem0 = _get_mem0_client()
+    user_id = _mem0_user_id(ctx.workspace_id)
+
+    total = 0
+    oldest_memory = None
+    newest_memory = None
+    mem0_available = False
+
+    if mem0:
+        try:
+            all_mems = mem0.get_all(user_id=user_id, limit=500)
+            items = all_mems if isinstance(all_mems, list) else []
+            total = len(items)
+            mem0_available = True
+
+            dates = [m.get("created_at") for m in items if m.get("created_at")]
+            if dates:
+                oldest_memory = min(dates)
+                newest_memory = max(dates)
+        except Exception as e:
+            logger.warning("Memory health check failed: %s", e)
+
+    # Search effectiveness from access log
+    search_stats = {"total_searches": 0, "hits": 0, "hit_rate": 0}
+    try:
+        row = db.execute(
+            text("""
+                SELECT
+                    COUNT(*) as total_searches,
+                    SUM(CASE WHEN had_results THEN 1 ELSE 0 END) as hits
+                FROM memory_access_log
+                WHERE workspace_id = :ws_id
+            """),
+            {"ws_id": str(ctx.workspace_id)},
+        ).fetchone()
+        if row and row.total_searches:
+            search_stats = {
+                "total_searches": row.total_searches,
+                "hits": row.hits or 0,
+                "hit_rate": round((row.hits or 0) / max(row.total_searches, 1), 2),
+            }
+    except Exception as e:
+        logger.debug("memory_access_log query failed: %s", e)
+
+    return {
+        "success": True,
+        "mem0_available": mem0_available,
+        "total_memories": total,
+        "oldest_memory": oldest_memory,
+        "newest_memory": newest_memory,
+        "search_effectiveness": search_stats,
+        "health_status": "healthy" if mem0_available and total > 0 else "degraded" if mem0_available else "unavailable",
+    }
+
+
+class ConsolidateRequest(BaseModel):
+    memory_ids: List[str]
+    strategy: str = "merge"  # "merge" | "summarise"
+
+
+@router.post("/consolidate")
+async def consolidate_memories(
+    body: ConsolidateRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+) -> Dict[str, Any]:
+    """
+    Consolidate multiple memories into one — PRD-77 Phase 3.
+    'merge' concatenates content; 'summarise' uses LLM to produce a summary.
+    Deletes originals after creating the merged entry.
+    """
+    if len(body.memory_ids) < 2:
+        return {"success": False, "error": "Need at least 2 memories to consolidate"}
+
+    if body.strategy not in ("merge", "summarise"):
+        return {"success": False, "error": "strategy must be 'merge' or 'summarise'"}
+
+    mem0 = _get_mem0_client()
+    if not mem0:
+        return {"success": False, "error": "Memory service unavailable"}
+
+    user_id = _mem0_user_id(ctx.workspace_id)
+
+    # Fetch all target memories
+    try:
+        all_mems = mem0.get_all(user_id=user_id, limit=500)
+        items = all_mems if isinstance(all_mems, list) else []
+
+        id_set = set(body.memory_ids)
+        targets = [
+            m for m in items
+            if str(m.get("id", "")) in id_set
+        ]
+
+        if len(targets) < 2:
+            return {"success": False, "error": f"Found only {len(targets)} of {len(body.memory_ids)} memories"}
+    except Exception as e:
+        logger.error("Failed to fetch memories for consolidation: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)[:200]}
+
+    # Build consolidated content
+    contents = [
+        m.get("memory") or m.get("content", "")
+        for m in targets
+    ]
+
+    if body.strategy == "merge":
+        merged_content = "\n\n".join(c for c in contents if c)
+    else:
+        # Summarise using LLM
+        try:
+            from config import config
+            import openai
+
+            client = openai.OpenAI(
+                api_key=config.OPENROUTER_API_KEY,
+                base_url=config.OPENROUTER_BASE_URL,
+            )
+            summary_resp = client.chat.completions.create(
+                model=config.LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": "Summarise the following memory entries into a single, concise memory. Preserve all key facts and preferences. Output only the consolidated memory text, no preamble."},
+                    {"role": "user", "content": "\n---\n".join(contents)},
+                ],
+                max_tokens=500,
+            )
+            merged_content = summary_resp.choices[0].message.content or "\n\n".join(contents)
+        except Exception as e:
+            logger.warning("LLM summarisation failed, falling back to merge: %s", e)
+            merged_content = "\n\n".join(c for c in contents if c)
+
+    # Store the consolidated memory
+    try:
+        mem0.add(
+            messages=[{"role": "system", "content": merged_content}],
+            user_id=user_id,
+            metadata={"source": "consolidation", "merged_from": len(targets)},
+        )
+    except Exception as e:
+        logger.error("Failed to store consolidated memory: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to store: {str(e)[:200]}"}
+
+    # Delete originals
+    deleted = 0
+    for m in targets:
+        mid = str(m.get("id", ""))
+        if mid and mem0.delete(mid):
+            deleted += 1
+
+    logger.info(
+        "Consolidated %d memories (strategy=%s, deleted=%d) for workspace %s",
+        len(targets), body.strategy, deleted, ctx.workspace_id,
+    )
+
+    return {
+        "success": True,
+        "deleted_count": deleted,
+        "strategy": body.strategy,
+        "message": f"Consolidated {len(targets)} memories into 1 ({body.strategy})",
+    }
 
 
 def _truncate(text: str, max_len: int = 120) -> str:

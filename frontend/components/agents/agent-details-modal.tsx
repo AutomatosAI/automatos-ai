@@ -53,6 +53,7 @@ import {
 import { useAgent, useAgentStats, useAgentLogs, useAgentPerformance } from '@/hooks/use-agent-api'
 import { apiClient } from '@/lib/api-client'
 import { useSubmitToMarketplace } from '@/hooks/use-marketplace-api'
+import { AgentReports as AgentReportsSection } from './agent-reports'
 
 interface AgentDetailsModalProps {
   agentId: number | null
@@ -319,7 +320,7 @@ export function AgentDetailsModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="w-full justify-start gap-1 bg-secondary/50">
+                <TabsList className="w-full justify-start gap-1 bg-secondary/50 overflow-x-auto whitespace-nowrap scrollbar-hide">
                   <TabsTrigger value="overview" className="flex items-center space-x-2">
                     <Eye className="w-4 h-4" />
                     <span>Overview</span>
@@ -335,6 +336,10 @@ export function AgentDetailsModal({
                   <TabsTrigger value="plugins" className="flex items-center space-x-2">
                     <Sparkles className="w-4 h-4" />
                     <span>Capabilities</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="reports" className="flex items-center space-x-2">
+                    <Database className="w-4 h-4" />
+                    <span>Reports</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -644,6 +649,10 @@ export function AgentDetailsModal({
                       )}
                     </CardContent>
                   </Card>
+                </TabsContent>
+
+                <TabsContent value="reports" className="space-y-6 mt-6">
+                  <AgentReportsSection agentId={agentId!} agentName={agent?.name} />
                 </TabsContent>
               </Tabs>
             )}
