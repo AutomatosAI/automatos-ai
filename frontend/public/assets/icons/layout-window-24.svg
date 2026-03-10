@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Layout-Window-24--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Layout Window 24 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Layout/layout-window-24--layout-layouts-window-rows-four">
+    <path id="Subtract" fill="url(#paint0_linear_13603_1450)" fill-rule="evenodd" d="M13.5 12c0 .8284-.6716 1.5-1.5 1.5l-.875 0 0-13L12 .5c.8284 0 1.5.67157 1.5 1.5l0 10ZM9.875.5 7.62501.5l-.00001 13 2.25 0 0-13Zm-3.5 13 .00001-13L4.125.5l.00001 13 2.24999 0Zm-3.49999 0L2.875.5 2 .499999C1.17157.499999.5 1.17157.5 2L.499999 12c0 .8284.671571 1.5 1.500001 1.5l.87501 0Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_1450" x1=".5" x2="9.343" y1="2.061" y2="13.221" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

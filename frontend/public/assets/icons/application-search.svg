@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Application-Search--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Application Search Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Programming/Applications/application-search--application-new-search-square">
+    <path id="Union" fill="url(#paint0_linear_13604_20185)" fill-rule="evenodd" d="M0 1.40909C0 .630871.630871 0 1.40909 0h3.18182C5.36913 0 6 .630871 6 1.40909v3.18182C6 5.36913 5.36913 6 4.59091 6H1.40909C.630871 6 0 5.36913 0 4.59091V1.40909Zm7 0C7 .630871 7.63087 0 8.40909 0h3.18181C12.3691 0 13 .630871 13 1.40909v3.18182C13 5.36913 12.3691 6 11.5909 6H8.40909C7.63087 6 7 5.36913 7 4.59091V1.40909Zm-7 7C0 7.63087.630871 7 1.40909 7h3.18182C5.36913 7 6 7.63087 6 8.40909v3.18181C6 12.3691 5.36913 13 4.59091 13H1.40909C.630871 13 0 12.3691 0 11.5909V8.40909ZM10.2501 8.5C9.28354 8.5 8.5 9.28354 8.5 10.2501c0 .9665.78354 1.7501 1.7501 1.7501.4815 0 .9176-.1945 1.234-.5091l.0036-.0037.0036-.0036c.3145-.3164.5089-.7523.5089-1.2337 0-.96656-.7836-1.7501-1.7501-1.7501Zm0 5.0002c.6258 0 1.2104-.1769 1.7063-.4835l.7636.7636c.2929.2929.7678.2929 1.0607 0 .2929-.2929.2929-.7677 0-1.0606l-.7637-.7637c.3064-.4959.4832-1.0802.4832-1.7059C13.5002 8.45511 12.0451 7 10.2501 7 8.45511 7 7 8.45511 7 10.2501c0 1.795 1.45511 3.2501 3.2501 3.2501Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13604_20185" x1="15.214" x2="-3.67" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

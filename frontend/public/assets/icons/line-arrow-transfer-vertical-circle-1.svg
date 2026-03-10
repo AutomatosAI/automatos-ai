@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Line-Arrow-Transfer-Vertical-Circle-1--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Line Arrow Transfer Vertical Circle 1 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Container Line arrow/line-arrow-transfer-vertical-circle-1--transfer-data-internet-arrow-vertical-network-circle">
+    <path id="Subtract" fill="url(#paint0_linear_13641_8568)" fill-rule="evenodd" d="M7 14c3.866 0 7-3.134 7-7 0-3.86599-3.134-7-7-7-3.86599 0-7 3.13401-7 7 0 3.866 3.13401 7 7 7ZM5.98918 3.42258c.23354.09673.38582.32463.38582.57742v6c0 .3452-.27982.625-.625.625s-.625-.2798-.625-.625V5.50888l-.93306.93306c-.24408.24408-.6398.24408-.88388 0-.24408-.24408-.24408-.6398 0-.88388l2-2c.17875-.17875.44757-.23222.68112-.13548ZM8.875 4c0-.34518-.27982-.625-.625-.625s-.625.27982-.625.625v6c0 .2528.15228.4807.38582.5774.23355.0968.50237.0433.68112-.1355l1.99996-1.99996c.2441-.24408.2441-.6398 0-.88388-.244-.24408-.6398-.24408-.88384 0l-.93306.93306V4Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_8568" x1="15.213" x2="-3.671" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

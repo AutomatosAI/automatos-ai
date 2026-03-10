@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="tags-labels-multiple--tags-labels-multiple-shopping-price-commercial">
+    <path id="Union" fill="url(#paint0_linear_15027_1257)" fill-rule="evenodd" d="M1 1c-.552285 0-1 .44772-1 1v7c0 .55229.447715 1 1 1h6.54421c.28953 0 .56485-.12549.75478-.34402L11.626 5.82799c.1634-.1881.1634-.46788 0-.65598l-3.32701-3.828C8.10906 1.12549 7.83374 1 7.54421 1zm6.54421 10.25H2.25146V12c0 .5523.44772 1 1 1h6.54422c.28952 0 .56482-.1255.75482-.344l3.3269-3.82804c.1635-.1881.1635-.46788 0-.65598l-1.3163-1.51451-3.31864 3.81843c-.42734.4917-1.04681.7741-1.69825.7741" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_1257" x1="15.508" x2="-1.842" y1="15.258" y2="1.932" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

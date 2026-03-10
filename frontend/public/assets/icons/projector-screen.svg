@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Projector-Screen--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Projector Screen Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Presentation/projector-screen--projector-screen-work-meeting-presentation">
+    <path id="Union" fill="url(#paint0_linear_13603_10013)" fill-rule="evenodd" d="M1.6.5C.992487.5.5.992487.5 1.6v.8c0 .5738.43935 1.04499 1 1.09552V10.25h-.25c-.414214 0-.75.3358-.75.75s.335786.75.75.75h5v1c0 .4142.33579.75.75.75s.75-.3358.75-.75v-1h5c.4142 0 .75-.3358.75-.75s-.3358-.75-.75-.75h-.25V3.49552c.5606-.05053 1-.52172 1-1.09552v-.8c0-.607513-.4925-1.1-1.1-1.1H1.6Zm9.4 9.75V3.5H3v6.75h8Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_10013" x1="14.627" x2="-2.908" y1="16.253" y2="3.798" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

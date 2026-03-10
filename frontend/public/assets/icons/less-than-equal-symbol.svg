@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="less-than-equal-symbol--less-than-equal-symbol-math">
+    <path id="Union" fill="url(#paint0_linear_16039_3108)" d="M12.25 12.5c.4142 0 .75.3358.75.75-.0001.4141-.3358.75-.75.75H1.75c-.41416 0-.74991-.3359-.75-.75 0-.4142.33579-.75.75-.75zM11.9277.0732358c.374-.1780848.821-.0194849.9991.3544922.1779.373948.0194.820962-.3545.999022L3.49316 5.74999l9.07914 4.32321.0673.0362c.3251.1972.4541.6122.2872.9629-.1671.3505-.5708.5127-.9288.3847l-.0703-.0302L1.42773 6.42675C1.16661 6.3024 1.00007 6.03921 1 5.74999c0-.28925.16659-.55237.42773-.67675z"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_16039_3108" x1="2.965" x2="15.761" y1="2.638" y2="8.98" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

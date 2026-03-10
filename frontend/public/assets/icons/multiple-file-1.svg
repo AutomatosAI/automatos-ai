@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Multiple-File-1--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Multiple File 1 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Files Folders/multiple-file-1--file-common-double">
+    <path id="Union" fill="url(#paint0_linear_13603_7117)" fill-rule="evenodd" d="M3.93928.43934C4.22058.158035 4.60211 0 4.99994 0h4.5c.13261 0 .25978.0526784.35355.146447L12.8535 3.14645c.0938.09376.1464.22094.1464.35355V10c0 .3978-.158.7794-.4393 1.0607s-.6628.4393-1.0607.4393H4.99994c-.39783 0-.77936-.158-1.06066-.4393-.28131-.2813-.43934-.6629-.43934-1.0607V1.5c0-.39783.15803-.779356.43934-1.06066ZM2.5 3.75c0-.41421-.33579-.75-.75-.75S1 3.33579 1 3.75v8C1 12.9926 2.00736 14 3.25 14h6.5c.4142 0 .75-.3358.75-.75s-.3358-.75-.75-.75h-6.5c-.41421 0-.75-.3358-.75-.75v-8Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_7117" x1="14.04" x2="-3.727" y1="16.965" y2="6.148" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

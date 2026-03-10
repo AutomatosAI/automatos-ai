@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Triangle-Arrow-Minimize-Window-4--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Triangle Arrow Minimize Window 4 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Container Triangle arrow/triangle-arrow-minimize-window-4--expand-retract-shrink-bigger-big-small-smaller">
+    <path id="Union" fill="url(#paint0_linear_13641_8834)" fill-rule="evenodd" d="M4.75.5c-.82843 0-1.5.67157-1.5 1.5v7.25c0 .57843.67157 1.5 1.5 1.5H12c.8284 0 1.5-.6716 1.5-1.5V2c0-.82843-.6716-1.5-1.5-1.5H4.75Zm4.23744 5.92678.79289.79289c.2145.2145.27867.53709.16258.81734C9.82682 8.31727 9.55335 8.5 9.25 8.5h-3c-.41421 0-.75-.33579-.75-.75v-3c0-.30335.18273-.57682.46299-.69291.28025-.11609.60284-.05192.81734.16258l.79289.79289 1.71967-1.71967c.39053-.39052 1.02371-.39052 1.41421 0 .3905.39053.3905 1.02369 0 1.41422L8.98744 6.42678ZM2 4.25c0-.41421-.33579-.75-.75-.75-.414214 0-.75.33579-.75.75v7.5c0 .9665.7835 1.75 1.75 1.75h7.5c.4142 0 .75-.3358.75-.75s-.3358-.75-.75-.75h-7.5c-.13807 0-.25-.1119-.25-.25v-7.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_8834" x1="14.627" x2="-2.908" y1="16.253" y2="3.798" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

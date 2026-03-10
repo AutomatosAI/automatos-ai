@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Shield-Cross--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Shield Cross Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Security/shield-cross--shield-secure-security-cross-add-plus">
+    <path id="Subtract" fill="url(#paint0_linear_13603_9185)" fill-rule="evenodd" d="M.5 2C.5 1.17157 1.17157.5 2 .5h10c.8284 0 1.5.67157 1.5 1.5v2.67544c0 3.99218-2.5546 7.53646-6.34189 8.79886-.10263.0343-.21359.0343-.31622 0C3.05457 12.2119.5 8.66762.5 4.67544V2Zm5.25 1.5c0-.27614.22386-.5.5-.5h1.5c.27614 0 .5.22386.5.5V5h1.5c.2761 0 .5.22386.5.5V7c0 .27614-.2239.5-.5.5h-1.5V9c0 .27614-.22386.5-.5.5h-1.5c-.27614 0-.5-.22386-.5-.5V7.5h-1.5c-.27614 0-.5-.22386-.5-.5V5.5c0-.27614.22386-.5.5-.5h1.5V3.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_9185" x1="14.627" x2="-2.908" y1="16.253" y2="3.798" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

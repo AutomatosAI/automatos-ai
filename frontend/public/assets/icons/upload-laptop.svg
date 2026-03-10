@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Upload-Laptop--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Upload Laptop Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Upload Download/upload-laptop--arrow-computer-download-internet-laptop-network-server-up-upload">
+    <path id="Union" fill="url(#paint0_linear_13603_3188)" fill-rule="evenodd" d="M7.75 6.75c0 .41421-.33579.75-.75.75s-.75-.33579-.75-.75V3H5.00001c-.20223 0-.38454-.12182-.46194-.30866-.07739-.18684-.03461-.40189.10839-.54489l2-2.000003c.19526-.1952627.51185-.1952627.70711 0l2 2.000003c.143.143.18577.35805.10838.54489C9.38456 2.87818 9.20225 3 9.00001 3H7.75v3.75ZM1.5 9.38197V4.75C1.5 3.7835 2.2835 3 3.25 3c.41421 0 .75.33579.75.75s-.33579.75-.75.75c-.13807 0-.25.11193-.25.25V9h8V4.75c0-.13807-.1119-.25-.25-.25-.4142 0-.75-.33579-.75-.75s.3358-.75.75-.75c.9665 0 1.75.7835 1.75 1.75v4.63197l1.3618 2.72363c.0909.1817.1382.3822.1382.5854 0 .7229-.5861 1.309-1.309 1.309H1.30902C.586067 14 0 13.4139 0 12.691c0-.2032.0473146-.4037.138197-.5854L1.5 9.38197Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_3188" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

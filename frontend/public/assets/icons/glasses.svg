@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Glasses--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Glasses Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Content/glasses--vision-sunglasses-protection-spectacles-correction-sun-eye-glasses">
+    <path id="Union" fill="url(#paint0_linear_13603_9466)" fill-rule="evenodd" d="M.5 3.25C.5 1.73122 1.73122.5 3.25.5h.5c.41421 0 .75.335786.75.75 0 .41421-.33579.75-.75.75h-.5C2.55964 2 2 2.55964 2 3.25V8h10V3.25C12 2.55964 11.4404 2 10.75 2h-.5c-.41421 0-.75-.33579-.75-.75 0-.414214.33579-.75.75-.75h.5c1.5188 0 2.75 1.23122 2.75 2.75v8.5c0 .9665-.7835 1.75-1.75 1.75h-2.5c-.9665 0-1.75-.7835-1.75-1.75V9.5h-1v2.25c0 .9665-.7835 1.75-1.75 1.75h-2.5c-.9665 0-1.75-.7835-1.75-1.75v-8.5ZM2 9.5v2.25c0 .1381.11193.25.25.25h2.5c.13807 0 .25-.1119.25-.25V9.5H2Zm7 2.25V9.5h3v2.25c0 .1381-.1119.25-.25.25h-2.5c-.13807 0-.25-.1119-.25-.25Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_9466" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Cap-Side--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Cap Side Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Money Shopping/Fashion/cap-side">
+    <path id="Union" fill="url(#paint0_linear_13629_4322)" fill-rule="evenodd" d="M3.25721 6.8383c.81054-2.56357 3.35233-4.14462 5.97399-3.78972-.52433.40432-1.09505.94205-1.60311 1.59941-.5797.75006-1.0898 1.67213-1.34571 2.74227l1.20836.32274c.20401-.87788.62404-1.65064 1.12639-2.30061.71617-.92663 1.57477-1.56992 2.12127-1.86835.0222-.01215.0434-.02546.0636-.0398 2.3917 1.09845 3.7149 3.79185 3.0108 6.41965-.0344.12811-.1182.23731-.233.30361-.1149.0663-.2513.0843-.3794.0499L8.52098 9.02361 3.93601 10.6611c-1.51913.5425-3.195334-.2134-3.794426-1.71109l-.1056926-.26423c-.1021241-.25531.0210793-.54517.2757756-.64882L3.25721 6.8383Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_4322" x1="2.289" x2="9.754" y1="4.506" y2="11.896" gradientUnits="userSpaceOnUse">
+      <stop offset=".048" stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

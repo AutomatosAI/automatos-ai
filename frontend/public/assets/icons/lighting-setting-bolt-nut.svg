@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Lighting-Setting-Bolt-Nut--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Lighting Setting Bolt Nut Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Lighting/lighting-setting-bolt-nut">
+    <path id="Union" fill="url(#paint0_linear_13603_8834)" fill-rule="evenodd" d="M5 0c.74865 0 1.45886.164535 2.09646.459417l-.47823.27897C6.08059 1.05201 5.75 1.62758 5.75 2.25v3c0 .62242.3306 1.19799.86823 1.51161l2.3016 1.34261c-.39087.49288-.87265.91026-1.41983 1.22676V10.5c0 .5523-.44772 1-1 1h-3c-.55228 0-1-.4477-1-1V9.33098C1.00636 8.46702 0 6.85144 0 5c0-2.76142 2.23858-5 5-5ZM3.25 12.5c-.41421 0-.75.3358-.75.75s.33579.75.75.75h3.5c.41421 0 .75-.3358.75-.75s-.33579-.75-.75-.75h-3.5ZM10.7519.0681106c-.1556-.0908141-.3482-.0908141-.5038 0L7.24806 1.81811C7.09446 1.90772 7 2.07217 7 2.25v3c0 .17783.09446.34228.24806.43189l3.00004 1.75c.1556.09081.3482.09081.5038 0l3-1.75C13.9055 5.59228 14 5.42783 14 5.25v-3c0-.17783-.0945-.34228-.2481-.43189l-3-1.7499994ZM11.75 3.75c0 .69036-.5596 1.25-1.25 1.25-.69036 0-1.25-.55964-1.25-1.25S9.80964 2.5 10.5 2.5c.6904 0 1.25.55964 1.25 1.25Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_8834" x1="13.953" x2="-2.626" y1="14.003" y2="4.677" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff44f8"></stop>
+      <stop offset="1" stop-color="#1b4dff"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Usb-Port--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Usb Port Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Connection/usb-port--cables-cable-device-port-electronics-cords-cord-usb-connection">
+    <path id="Union" fill="url(#paint0_linear_13629_2284)" fill-rule="evenodd" d="M7.32377.146447c-.19526-.1952625-.51185-.1952625-.70711 0l-1.75 1.750003c-.143.143-.18578.35805-.10838.54489.07739.18684.2597.30866.46193.30866h1l0 6.37633-.00013.01425.00013.01424v.52104c-1.07401-.21503-1.99376-.88323-2.55499-1.80897C4.16603 7.55901 4.5 7.006 4.5 6.375c0-.9665-.7835-1.75-1.75-1.75S1 5.4085 1 6.375c0 .71228.42553 1.32516 1.03624 1.5983.60517 1.40115 1.77428 2.5009 3.22091 2.9939-.18213.3015-.28694.6549-.28694 1.0328 0 1.1046.89544 2 2 2 1.10457 0 2-.8954 2-2 0-.8393-.51704-1.5579-1.25-1.8546v-.30746c1.82758-.25872 3.35529-1.44889 4.11569-3.07232H12.5c.2761 0 .5-.22385.5-.5v-2.5c0-.27614-.2239-.5-.5-.5H10c-.27614 0-.5.22386-.5.5v2.5c0 .27615.22386.5.5.5h.1047c-.56787.79117-1.41308 1.35638-2.38449 1.55087l0-5.56649h1.00001c.20223 0 .38454-.12182.46194-.30866.07739-.18684.03461-.40189-.10839-.54489l-1.75-1.750003Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_2284" x1="14.04" x2="-3.727" y1="16.965" y2="6.148" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

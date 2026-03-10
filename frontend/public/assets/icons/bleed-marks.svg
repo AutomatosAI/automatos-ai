@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Bleed-Marks--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Bleed Marks Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Print/bleed-marks">
+    <path id="Subtract" fill="url(#paint0_linear_13603_10133)" fill-rule="evenodd" d="M5.75 1.125C5.75.779822 5.47018.5 5.125.5S4.5.779822 4.5 1.125V2h-2c-.27614 0-.5.22386-.5.5v2h-.875C.779822 4.5.5 4.77982.5 5.125s.279822.625.625.625H2v2.5h-.875c-.345178 0-.625.27982-.625.625s.279822.625.625.625H2v2c0 .2761.22386.5.5.5h2v.875c0 .3452.27982.625.625.625s.625-.2798.625-.625V12h2.5v.875c0 .3452.27982.625.625.625s.625-.2798.625-.625V12h2c.2761 0 .5-.2239.5-.5v-2h.875c.3452 0 .625-.27982.625-.625s-.2798-.625-.625-.625H12v-2.5h.875c.3452 0 .625-.27982.625-.625s-.2798-.625-.625-.625H12v-2c0-.27614-.2239-.5-.5-.5h-2v-.875C9.5.779822 9.22018.5 8.875.5s-.625.279822-.625.625V2h-2.5v-.875ZM4.5 4.5V3.25h1.25v1.875c0 .34518-.27982.625-.625.625H3.25V4.5H4.5Zm.625 3.75H3.25V9.5H4.5v1.25h1.25V8.875c0-.34518-.27982-.625-.625-.625Zm3.125.625v1.875H9.5V9.5h1.25V8.25H8.875c-.34518 0-.625.27982-.625.625Zm.625-3.125h1.875V4.5H9.5V3.25H8.25v1.875c0 .34518.27982.625.625.625Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_10133" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

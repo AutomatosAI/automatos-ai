@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Credit-Card-Approved--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Credit Card Approved Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Money Shopping/ATM/credit-card-approved">
+    <path id="Union" fill="url(#paint0_linear_13629_5146)" fill-rule="evenodd" d="M13.8357 1.21855c.2588-.323448.2063-.795417-.1171-1.054174-.3235-.2587571-.7954-.2063161-1.0542.11713L9.1185 4.71387 7.70004 3.65003c-.33137-.24853-.80147-.18137-1.05.15-.24852.33137-.18137.80147.15 1.05l2 1.5c.32408.24305.7826.18484 1.03566-.13148l4-5ZM1.5 4h3.7654c-.08615.68899.18939 1.40356.78466 1.85001L7.41671 6.875H0V5.5C0 4.67157.671573 4 1.5 4ZM13 6.875h-2.0887l1.8038-2.25471c.1792.24713.2849.55108.2849.87971v1.375ZM0 12.5V8.125l13 0V12.5c0 .8284-.6716 1.5-1.5 1.5h-10C.671573 14 0 13.3284 0 12.5Zm8.5-2.25c-.41421 0-.75.3358-.75.75s.33579.75.75.75H10c.4142 0 .75-.3358.75-.75s-.3358-.75-.75-.75H8.5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_5146" x1="15.213" x2="-3.671" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

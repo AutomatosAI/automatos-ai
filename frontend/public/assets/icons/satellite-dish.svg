@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Satellite-Dish--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Satellite Dish Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Share/satellite-dish--broadcast-satellite-share-transmit-satellite">
+    <path id="Union" fill="url(#paint0_linear_13603_2328)" fill-rule="evenodd" d="M5.00008 0c.13261 0 .25978.0526784.35355.146447L8.57326 3.36608l1.39641-1.39641c.29293-.29289.76773-.29289 1.06063 0 .2929.29289.2929.76777 0 1.06066L9.63392 4.42674l3.21968 3.21971c.0938.09376.1465.22094.1465.35355 0 .13261-.0527.25978-.1465.35355l-.25.25c-2.2663 2.26635-5.94075 2.26635-8.20708 0-2.26632-2.26633-2.26633-5.94077 0-8.207103l.25-.25C4.74029.0526784 4.86747 0 5.00008 0ZM3.04127 8.96744 1.04602 13.2905c-.071453.1548-.059085.3354.03281.479.0919.1436.25066.2305.42117.2305h7c.1498 0 .2917-.0671.38667-.183.09497-.1158.133-.2682.10362-.415l-.36993-1.8497c-1.84498.0313-3.69988-.657-5.10772-2.06485-.16728-.16728-.3244-.34087-.47137-.52001Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_2328" x1="1.461" x2="16.073" y1="1.131" y2="8.19" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

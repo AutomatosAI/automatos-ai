@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Camera-Setting-Pin--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Camera Setting Pin Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Images Photography/Cameras/camera-setting-pin--photos-camera-map-photography-pictures-maps-settings-pin-photo">
+    <path id="Subtract" fill="url(#paint0_linear_13629_3845)" fill-rule="evenodd" d="M4.58397.72265C4.67671.583551 4.83282.5 5 .5h4c.16718 0 .32329.083551.41603.22265L10.7676 2.75H12c.3978 0 .7794.15804 1.0607.43934S13.5 3.85217 13.5 4.25v4.5c0 .39783-.158.77936-.4393 1.06066-.2813.28134-.6629.43934-1.0607.43934H9.7462l-2.34989 3.0549c-.09465.123-.24108.1951-.39631.1951s-.30166-.0721-.39631-.1951L4.2538 10.25H2c-.39783 0-.77936-.158-1.06066-.43934C.658035 9.52936.5 9.14783.5 8.75v-4.5c0-.39782.158035-.77936.43934-1.06066C1.22064 2.90804 1.60218 2.75 2 2.75h1.23241L4.58397.72265ZM4.75 6.25C4.75 5.00736 5.75736 4 7 4s2.25 1.00736 2.25 2.25S8.24264 8.5 7 8.5 4.75 7.49264 4.75 6.25Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_3845" x1="14.627" x2="-2.908" y1="16.253" y2="3.798" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

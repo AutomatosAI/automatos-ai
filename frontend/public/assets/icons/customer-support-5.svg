@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Customer-Support-5--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Customer Support 5 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Help/customer-support-5--customer-headset-help-phone-support">
+    <path id="Union" fill="url(#paint0_linear_13603_3071)" fill-rule="evenodd" d="M2 7c0-2.76142 2.23858-5 5-5s5 2.23858 5 5v1.5c0-.82843-.6716-1.5-1.5-1.5h-1C8.67157 7 8 7.67157 8 8.5V12c0 .8284.67157 1.5 1.5 1.5h1c.8284 0 1.5-.6716 1.5-1.5v-2c0 .4142.3358.75.75.75s.75-.3358.75-.75V7C13.5 3.41015 10.5899.5 7 .5 3.41015.5.5 3.41015.5 7v3c0 .4142.335786.75.75.75.41421 0 .75-.3358.75-.75v2c0 .8284.67157 1.5 1.5 1.5h1c.82843 0 1.5-.6716 1.5-1.5V8.5C6 7.67157 5.32843 7 4.5 7h-1C2.67157 7 2 7.67157 2 8.5V7Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_3071" x1="2.625" x2="13.125" y1="3" y2="8.818" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

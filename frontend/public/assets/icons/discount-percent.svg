@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Discount-Percent--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Discount Percent Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Money Shopping/Building Store/discount-percent--store-shop-shops-stores-discount-coupon">
+    <path id="Union" fill="url(#paint0_linear_13629_4965)" fill-rule="evenodd" d="M3 .5C1.61929.5.5 1.61929.5 3S1.61929 5.5 3 5.5 5.5 4.38071 5.5 3 4.38071.5 3 .5ZM8.5 11c0-1.38071 1.11929-2.5 2.5-2.5 1.3807 0 2.5 1.11929 2.5 2.5 0 1.3807-1.1193 2.5-2.5 2.5-1.38071 0-2.5-1.1193-2.5-2.5ZM11.0632.698651c.0976-.097632.2559-.097632.3535 0l1.8845 1.884499c.0977.09763.0977.25592 0 .35355L2.93652 13.3014c-.09764.0977-.25593.0977-.35356 0L.698467 11.4169c-.097631-.0976-.097631-.2559 0-.3535L11.0632.698651Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_4965" x1="14.627" x2="-2.908" y1="16.253" y2="3.798" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

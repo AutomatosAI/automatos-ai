@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Chat-Bubble-Square-Delete--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Chat Bubble Square Delete Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="chat-bubble-square-delete--messages-message-bubble-chat-square-delete-cross">
+    <path id="Subtract" fill="url(#paint0_linear_13909_6556)" fill-rule="evenodd" d="M.43934.43934C.720644.158035 1.10218 0 1.5 0h11c.3978 0 .7794.158035 1.0607.43934C13.842.720644 14 1.10217 14 1.5V10c0 .3978-.158.7794-.4393 1.0607S12.8978 11.5 12.5 11.5H6.79561l-2.98296 2.3902c-.15004.1202-.35574.1438-.52907.0605C3.11025 13.8675 3 13.6923 3 13.5v-2H1.5c-.39783 0-.779356-.158-1.06066-.4393C.158035 10.7794 0 10.3978 0 10V1.5C0 1.10218.158035.720644.43934.43934Zm9.34099 2.53033c.29287.29289.29287.76777 0 1.06066L8.06066 5.75l1.71967 1.71967c.29287.29289.29287.76777 0 1.06066-.29289.29289-.76777.29289-1.06066 0L7 6.81066 5.28033 8.53033c-.29289.29289-.76777.29289-1.06066 0s-.29289-.76777 0-1.06066L5.93934 5.75 4.21967 4.03033c-.29289-.29289-.29289-.76777 0-1.06066s.76777-.29289 1.06066 0L7 4.68934l1.71967-1.71967c.29289-.29289.76777-.29289 1.06066 0Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13909_6556" x1="15.508" x2="-3.736" y1="16.634" y2="3.965" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

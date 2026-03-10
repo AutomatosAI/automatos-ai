@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Ios-Ipados--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Ios Ipados Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Computer Devices/Screen/ios-ipados">
+    <path id="Union" fill="url(#paint0_linear_13629_2648)" fill-rule="evenodd" d="M3.5 2.25C3.5 1.2835 4.2835.5 5.25.5h6.5c.9665 0 1.75.7835 1.75 1.75v9.5c0 .9665-.7835 1.75-1.75 1.75H9c-.41421 0-.75-.3358-.75-.75S8.58579 12 9 12h2.75c.1381 0 .25-.1119.25-.25v-9.5c0-.13807-.1119-.25-.25-.25h-6.5c-.13807 0-.25.11193-.25.25 0 .41421-.33579.75-.75.75s-.75-.33579-.75-.75Zm-3 3.5C.5 4.7835 1.2835 4 2.25 4h3.5c.9665 0 1.75.7835 1.75 1.75v6c0 .9665-.7835 1.75-1.75 1.75h-3.5c-.9665 0-1.75-.7835-1.75-1.75v-6Zm1.75-.25c-.13807 0-.25.11193-.25.25v6c0 .1381.11193.25.25.25h3.5c.13807 0 .25-.1119.25-.25v-6c0-.13807-.11193-.25-.25-.25h-3.5Zm1.25 4.625c-.34518 0-.625.2798-.625.625s.27982.625.625.625h1c.34518 0 .625-.2798.625-.625s-.27982-.625-.625-.625h-1Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_2648" x1="2.625" x2="13.125" y1="3" y2="8.818" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

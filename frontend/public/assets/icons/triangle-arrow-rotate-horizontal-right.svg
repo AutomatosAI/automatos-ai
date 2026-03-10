@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Triangle-Arrow-Rotate-Horizontal-Right--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Triangle Arrow Rotate Horizontal Right Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Rotation Sync Triangle arrow/triangle-arrow-rotate-horizontal-right">
+    <path id="Union" fill="url(#paint0_linear_13641_7761)" fill-rule="evenodd" d="M12 6c0-.66619-.4051-1.39171-1.3121-1.99638C9.78793 3.40361 8.48697 3 7 3s-2.78793.40361-3.68794 1.00362C2.40506 4.60829 2 5.33381 2 6c0 .76924.55115 1.63117 1.76987 2.26635.48976.25525.67986.8592.42461 1.34896-.25525.48979-.85921.67989-1.34896.42459C1.25481 9.21088 0 7.79239 0 6c0-1.54295.938089-2.81743 2.20266-3.66048C3.47422 1.49182 5.17326 1 7 1s3.5258.49182 4.7973 1.33952C13.0619 3.18257 14 4.45705 14 6c0 1.54295-.9381 2.81743-2.2027 3.66048-.8534.56892-1.89938.97762-3.0473 1.18482V12c0 .3033-.18273.5768-.46299.6929-.28025.1161-.60284.0519-.81734-.1626l-2-2c-.29289-.2929-.29289-.76774 0-1.06063l2-2c.2145-.2145.53709-.27867.81734-.16258.28026.11609.46299.38956.46299.69291v.80391c.75366-.17528 1.4138-.4581 1.9379-.80753C11.5949 7.39171 12 6.66619 12 6Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_7761" x1="15.213" x2="-1.341" y1="15.239" y2="1.228" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

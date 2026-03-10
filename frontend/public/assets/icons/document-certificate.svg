@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Document-Certificate--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Document Certificate Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Money Shopping/Legal/document-certificate--document-contract-license-permission-award">
+    <path id="Union" fill="url(#paint0_linear_13629_5732)" fill-rule="evenodd" d="M1.5 0C.671573 0 0 .671573 0 1.5v8c0 .8284.671573 1.5 1.5 1.5h6.00342C7.02889 10.3142 6.75 9.48073 6.75 8.58374c0-2.34721 1.90279-4.25 4.25-4.25 1.171 0 2.2313.47356 3 1.2396V1.5c0-.828427-.6716-1.5-1.5-1.5h-11ZM3 2.40039c-.34518 0-.625.27982-.625.625s.27982.625.625.625h5.875c.34518 0 .625-.27982.625-.625s-.27982-.625-.625-.625H3Zm-.625 3.16663c0-.34518.27982-.625.625-.625h2.5c.34518 0 .625.27982.625.625 0 .34517-.27982.625-.625.625H3c-.34518 0-.625-.27983-.625-.625ZM8 8.58374c0-1.65685 1.34315-3 3-3 1.6569 0 3 1.34315 3 3 0 .81051-.3214 1.54596-.8438 2.08576V13.5c0 .1671-.0834.3231-.2223.4158-.139.0928-.315.11-.4693.046L11 13.3539l-1.46456.6079c-.15429.064-.33038.0468-.46932-.046-.13894-.0927-.22237-.2487-.22237-.4158v-2.8305C8.32142 10.1297 8 9.39425 8 8.58374Zm2.125 0c0 .48325.3918.875.875.875.4833 0 .875-.39175.875-.875s-.3917-.875-.875-.875c-.4832 0-.875.39175-.875.875Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_5732" x1=".538" x2="16.494" y1="1.131" y2="10.125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

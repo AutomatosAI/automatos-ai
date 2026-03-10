@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Personal-Hotspot--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Personal Hotspot Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Phone/Mode/personal-hotspot--presonal-hotspot-connection-mobile-phone-signal">
+    <path id="Union" fill="url(#paint0_linear_13641_2852)" fill-rule="evenodd" d="M1.5 5.25c0-1.51878 1.23122-2.75 2.75-2.75h3C8.76878 2.5 10 3.73122 10 5.25S8.76878 8 7.25 8H6c-.41421 0-.75.33579-.75.75s.33579.75.75.75h1.25c2.34721 0 4.25-1.90279 4.25-4.25S9.59721 1 7.25 1h-3C1.90279 1 0 2.90279 0 5.25c0 .76371.202112 1.48249.556292 2.10336.205244.35979.663298.48508 1.023078.27983.35979-.20524.48508-.66329.27983-1.02308C1.63077 6.20967 1.5 5.74624 1.5 5.25ZM4 8.75C4 7.23122 5.23122 6 6.75 6H8c.41421 0 .75-.33579.75-.75S8.41421 4.5 8 4.5H6.75C4.40279 4.5 2.5 6.40279 2.5 8.75 2.5 11.0972 4.40279 13 6.75 13h3C12.0972 13 14 11.0972 14 8.75c0-.76371-.2021-1.48249-.5563-2.10336-.2052-.35979-.6633-.48508-1.0231-.27983-.3598.20524-.485.66329-.2798 1.02308.2284.40044.3592.86387.3592 1.36011 0 1.5188-1.2312 2.75-2.75 2.75h-3C5.23122 11.5 4 10.2688 4 8.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_2852" x1="15.213" x2="-1.631" y1="15.542" y2="1.582" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

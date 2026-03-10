@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="User-Full-Body-Question-Query--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    User Full Body Question Query Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/User/user-full-body-question-query--actions-question-geometric-human-person-single-user">
+    <path id="Union" fill="url(#paint0_linear_13603_3476)" fill-rule="evenodd" d="M2 2c0-1.10457.89543-2 2-2s2 .89543 2 2-.89543 2-2 2-2-.89543-2-2ZM0 8.5c0-2.20914 1.79086-4 4-4 1.47346 0 2.76085.7967 3.45488 1.98282C7.32198 6.88103 7.25 7.30711 7.25 7.75c0 .6316.29277 1.19481.75 1.56134V9.75c0 .2761-.22386.5-.5.5H6.43776l-.44215 3.3161C5.96249 13.8145 5.7506 14 5.5 14h-3c-.2506 0-.46249-.1855-.49561-.4339L1.56224 10.25H.5c-.276142 0-.5-.2239-.5-.5V8.5Zm11.25-2c-.6904 0-1.25.55964-1.25 1.25 0 .41421-.33579.75-.75.75s-.75-.33579-.75-.75C8.5 6.23122 9.73122 5 11.25 5 12.7688 5 14 6.23122 14 7.75c0 1.25878-.8457 2.32-2 2.6465 0 .4142-.3358.75-.75.75s-.75-.3358-.75-.75V9.75c0-.41421.3358-.75.75-.75.6904 0 1.25-.55964 1.25-1.25s-.5596-1.25-1.25-1.25Zm1 6.5c0 .5523-.4477 1-1 1s-1-.4477-1-1 .4477-1 1-1 1 .4477 1 1Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_3476" x1="2.288" x2="13.596" y1="2.692" y2="8.957" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

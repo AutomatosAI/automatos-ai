@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="check-download-done-offline--check-download-done-offline-save-keep0underline">
+    <path id="Union" fill="url(#paint0_linear_15030_5496)" fill-rule="evenodd" d="M13.3106 1.77953c.2751-.30959.2473-.78364-.0623-1.058829-.3096-.275188-.7837-.247303-1.0589.062284L4.93384 8.94554 1.74388 6.15433c-.31173-.27277-.785551-.24118-1.058313.07055-.272761.31173-.241173.78555.070555 1.05831L4.50612 10.5644c.31001.2713.78077.2418 1.05444-.0661zM1 12c-.414214 0-.75.3358-.75.75s.335786.75.75.75h12c.4142 0 .75-.3358.75-.75S13.4142 12 13 12z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15030_5496" x1="15.204" x2="-2.895" y1="15.94" y2="3.537" gradientUnits="userSpaceOnUse">
+      <stop offset=".128" stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="lighting-decorative-ceiling-lamp--lighting-decorative-ceiling-lamp-hanging">
+    <path id="Union" fill="url(#paint0_linear_15041_998)" fill-rule="evenodd" d="M7 0c.41421 0 .75.335786.75.75v3.04642C10.7097 4.16549 13 6.69029 13 9.75c0 .5523-.4477 1-1 1H2c-.55228 0-1-.4477-1-1 0-3.05971 2.29027-5.58451 5.25-5.95358V.75C6.25.335786 6.58579 0 7 0m.00019 14c-1.30622 0-2.41746-.8348-2.82929-2h5.65859c-.41184 1.1652-1.52308 2-2.8293 2" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15041_998" x1="14.292" x2="-3.641" y1="16.634" y2="6.515" gradientUnits="userSpaceOnUse">
+      <stop offset=".234" stop-color="#ff9a23"></stop>
+      <stop offset=".875" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

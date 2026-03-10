@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Hair-Dryer--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Hair Dryer Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="hair-dryer--hair-dryer-blower-salon">
+    <path id="Union" fill="url(#paint0_linear_13311_1844)" fill-rule="evenodd" d="M8.99729 0c-.70056 0-1.39885.0795274-2.08147.237055L1.38757 1.5128C1.1607 1.56516 1 1.76717 1 2v3c0 .23283.1607.43484.38757.4872l5.52825 1.27575C7.59844 6.92047 8.29673 7 8.99729 7H9.5C11.433 7 13 5.433 13 3.5S11.433 0 9.5 0h-.50271ZM10.5 3.5C10.5 4.32843 9.82843 5 9 5s-1.5-.67157-1.5-1.5S8.17157 2 9 2s1.5.67157 1.5 1.5ZM7 7.80371c.6575.13054 1.32646.19635 1.99729.19635H9.5c.681 0 1.3267-.15128 1.9053-.42206l-1.1884 3.1009c-.0741.1934-.25979.3211-.4669.3211h-.50006v.25c0 .6904.55964 1.25 1.24996 1.25h1.75c.4143 0 .75.3358.75.75s-.3357.75-.75.75h-1.75c-1.51874 0-2.74996-1.2312-2.74996-2.75V11H7.5c-.27614 0-.5-.2238-.5-.5V7.80371Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13311_1844" x1="14.292" x2="-3.641" y1="16.634" y2="6.515" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

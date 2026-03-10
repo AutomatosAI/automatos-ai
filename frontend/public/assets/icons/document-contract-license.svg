@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="document-contract-license--document-contract-license-file-scroll">
+    <path id="Subtract" fill="url(#paint0_linear_15027_4747)" fill-rule="evenodd" d="M3.5 1.5c0-.552284.44772-1 1-1h8c.5523 0 1 .447715 1 1V12c0 .8284-.6716 1.5-1.5 1.5s-1.5-.6716-1.5-1.5v-1.5c0-1.10457-.89543-2-2-2h-5zM2 9.5h-.5c-.552285 0-1 .44772-1 1v1c0 1.1046.89543 2 2 2h7.49982C9.68597 13.0822 9.5 12.5628 9.5 12v-1.5c0-.55228-.44772-1-1-1zm4-7c-.34518 0-.625.27982-.625.625s.27982.625.625.625h5c.3452 0 .625-.27982.625-.625S11.3452 2.5 11 2.5zm-.625 3.375c0-.34518.27982-.625.625-.625h5c.3452 0 .625.27982.625.625S11.3452 6.5 11 6.5H6c-.34518 0-.625-.27982-.625-.625" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_4747" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

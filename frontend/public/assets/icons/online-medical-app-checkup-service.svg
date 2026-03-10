@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Online-Medical-App-Checkup-Service--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Online Medical App Checkup Service Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Health/Medical apps/online-medical-app-checkup-service">
+    <path id="Union" fill="url(#paint0_linear_13641_3333)" fill-rule="evenodd" d="M1.75 1.5c-.13807 0-.25.11193-.25.25v10.5c0 .1381.11193.25.25.25h6.5c.13807 0 .25-.1119.25-.25V10c0-.41421.33579-.75.75-.75s.75.33579.75.75v2.25c0 .9665-.7835 1.75-1.75 1.75h-6.5C.783502 14 0 13.2165 0 12.25V1.75C0 .783502.783502 0 1.75 0H6.5c.41421 0 .75.335786.75.75 0 .41421-.33579.75-.75.75H1.75Zm2 9.5c0-.4142.33579-.75.75-.75h1c.41421 0 .75.3358.75.75s-.33579.75-.75.75h-1c-.41421 0-.75-.3358-.75-.75ZM8.57281.543689C8.57281.243418 8.81623 0 9.1165 0h1.767c.3003 0 .5437.243418.5437.543689V2.57284h2.0291c.3003 0 .5437.24342.5437.54369v1.76699c0 .30027-.2434.54369-.5437.54369h-2.0291v2.0291c0 .30027-.2434.54369-.5437.54369h-1.767c-.30027 0-.54369-.24342-.54369-.54369v-2.0291H6.54369C6.24342 5.42721 6 5.18379 6 4.88352V3.11653c0-.30027.24342-.54369.54369-.54369l2.02912 0V.543689Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_3333" x1="2.288" x2="13.596" y1="2.692" y2="8.957" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Tailless-Line-Arrow-Expand-Horizontal-Sort--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Tailless Line Arrow Expand Horizontal Sort Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Tailless Line arrow/tailless-line-arrow-expand-horizontal-sort">
+    <path id="Union" fill="url(#paint0_linear_13641_8045)" fill-rule="evenodd" d="M8.29288 10.2929 11.5858 7 8.29288 3.70711c-.39052-.39053-.39052-1.02369 0-1.41422.39052-.39052 1.02369-.39052 1.41421 0l3.64641 3.64645c.5858.58579.5858 1.53553 0 2.12132L9.70709 11.7071c-.39052.3905-1.02369.3905-1.41421 0s-.39052-1.0237 0-1.4142Zm-4 1.4142c.39052.3905 1.02369.3905 1.41421 0 .39053-.3905.39053-1.0237 0-1.4142L2.4142 7l3.29289-3.29289c.39053-.39053.39053-1.02369 0-1.41422-.39052-.39052-1.02369-.39052-1.41421 0L.646432 5.93934c-.5857875.58579-.5857852 1.53553 0 2.12132L4.29288 11.7071Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_8045" x1=".729" x2="13.591" y1="2.808" y2="12.657" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Number-One-Hand--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Number One Hand Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Hand Gestures/number-one-hand">
+    <path id="Subtract" fill="url(#paint0_linear_13603_10784)" fill-rule="evenodd" d="M10.5 6.755V1.5C10.5.671573 9.82845 0 9.00002 0c-.82843 0-1.5.671572-1.5 1.5l0 4-2.63547.52709c-1.32997.266-2.22509 1.5187-2.04583 2.86311L3.50002 14H11.5l.9744-3.2478c.2975-.99193-.2114-2.04699-1.1729-2.43162l-.789-.31558H8.5c-.48325 0-.875.39175-.875.875s.39175.875.875.875h.97137c.0119-.0001.02376-.00009.03557.00004.34381.00382.61996.28466.61806.62846-.0019.3438-.28118.6215-.625.6215h-.02263c-.25907.004-.74232.1735-1.18997.5008-.21691.1586-.39298.3317-.5098.4979-.11848.1685-.1526.2953-.1526.3763 0 .3452-.27982.625-.625.625s-.625-.2798-.625-.625c0-.419.16787-.7934.38001-1.0952.16281-.2316.36585-.4412.58485-.6241C6.75893 10.2814 6.375 9.62553 6.375 8.88c0-1.1736.9514-2.125 2.125-2.125h2Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_10784" x1="3.171" x2="15.871" y1="1.131" y2="6.123" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

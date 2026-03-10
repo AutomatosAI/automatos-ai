@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="download-video--download-video-save-import-backup-cache-convertor">
+    <path id="Subtract" fill="url(#paint0_linear_15027_1721)" fill-rule="evenodd" d="M1.5 1.75c-.820809 0-1.5.67919-1.5 1.5v7.5c0 .8208.679191 1.5 1.5 1.5H9c.82081 0 1.5-.6792 1.5-1.5v-.98145l2.1097.93515c.0099.0046.02.0088.0302.0128.6507.2511 1.3626-.2398 1.3601-.9365V4.22c.0024-.69739-.7088-1.18778-1.3601-.93644-.0084.00324-.0166.00669-.0248.01033L10.5 4.23145V3.25c0-.82081-.67919-1.5-1.5-1.5zm4.62501 2.875c0-.34518-.27982-.625-.625-.625-.34517 0-.625.27982-.625.625V7h-1.375c-.20223 0-.38454.12182-.46194.30866-.07739.18684-.03461.40189.10839.54489l2 2c.19526.19525.51185.19525.70711 0l2-2c.143-.143.18577-.35805.10838-.54489S7.70225 7 7.50001 7h-1.375z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_15027_1721" x1="15.508" x2="-.072" y1="14.226" y2=".55" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -91,6 +91,25 @@ export function useSystemConfigKey(key: string | null) {
   })
 }
 
+// Get system icon mappings specifically
+export function useSystemIcons() {
+  return useQuery({
+    queryKey: systemConfigQueryKeys.configKey('system_icon_mappings'),
+    queryFn: async () => {
+      try {
+        const data = await apiClient.getSystemConfigKey('system_icon_mappings');
+        return data?.config_value || {};
+      } catch (err) {
+        // If it doesn't exist yet, just return empty mappings
+        console.warn('System icon mappings not configured yet');
+        return {};
+      }
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes (rarely changes)
+    refetchOnWindowFocus: false,
+  })
+}
+
 // Get system RAG
 export function useSystemRAG() {
   return useQuery({
@@ -186,7 +205,7 @@ export function useSystemAgentStats(agentId: string | null) {
 // Update system config
 export function useUpdateSystemConfig() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (data: any) => apiClient.updateSystemConfig(data),
     onSuccess: (data) => {
@@ -205,7 +224,7 @@ export function useUpdateSystemConfig() {
 // Update system config key
 export function useUpdateSystemConfigKey() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: ({ key, value }: { key: string; value: any }) =>
       apiClient.updateSystemConfigKey(key, value),
@@ -225,7 +244,7 @@ export function useUpdateSystemConfigKey() {
 // Update system RAG
 export function useUpdateSystemRAG() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (data: any) => apiClient.updateSystemRAG(data),
     onSuccess: (data) => {
@@ -273,7 +292,7 @@ export function useTestSystemRoute() {
 // Execute system agent
 export function useExecuteSystemAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: ({ agentId, data }: { agentId: string; data: any }) =>
       apiClient.executeSystemAgent(agentId, data),
@@ -293,7 +312,7 @@ export function useExecuteSystemAgent() {
 // Update system learning state
 export function useUpdateSystemLearningState() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (data: any) => apiClient.updateSystemLearningState(data),
     onSuccess: (data) => {
@@ -311,7 +330,7 @@ export function useUpdateSystemLearningState() {
 // Run system performance test
 export function useRunSystemPerformanceTest() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (data: any) => apiClient.runSystemPerformanceTest(data),
     onSuccess: (data) => {
@@ -344,7 +363,7 @@ export function useSystemPerformanceComparison() {
 // Save system config
 export function useSaveSystemConfig() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: ({ configKey, configValue, description }: { configKey: string; configValue: any; description?: string }) =>
       apiClient.saveSystemConfig(configKey, configValue, description),
@@ -363,7 +382,7 @@ export function useSaveSystemConfig() {
 // Start system agent
 export function useStartSystemAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (agentId: string) => apiClient.startAgent(agentId),
     onSuccess: (data, agentId) => {
@@ -382,7 +401,7 @@ export function useStartSystemAgent() {
 // Stop system agent
 export function useStopSystemAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (agentId: string) => apiClient.stopAgent(agentId),
     onSuccess: (data, agentId) => {
@@ -401,7 +420,7 @@ export function useStopSystemAgent() {
 // Pause system agent
 export function usePauseSystemAgent() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (agentId: string) => apiClient.pauseAgent(agentId),
     onSuccess: (data, agentId) => {

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Tailless-Triangle-Arrow-Down-2--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Tailless Triangle Arrow Down 2 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Tailless Triangle arrow/tailless-triangle-arrow-down-2--arrow-down-line-to-bottom">
+    <path id="Union" fill="url(#paint0_linear_13641_8053)" fill-rule="evenodd" d="M.292922 6.70711c-.28599776-.286-.3715535-.71612-.2167725-1.08979C.230931 5.24364.595567 5 1.00003 5L13 5c.4045 0 .7691.24364.9239.61732.1548.37367.0692.80379-.2168 1.08979L8.06069 12.3536c-.58579.5857-1.53553.5857-2.12132 0L.292922 6.70711ZM.0000291626 2.5c-2.42e-8.55228.4477148374 1 1.0000008374 1L13 3.5c.5523 0 1-.44771 1-1 0-.55228-.4477-1-1-1l-11.99997 0c-.552286 0-1.0000008133.44772-1.0000008374 1Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_8053" x1="16.965" x2="7.079" y1="13.772" y2="-3.482" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

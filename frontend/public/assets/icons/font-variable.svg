@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Font-Variable--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Font Variable Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Text Formatting/font-variable">
+    <path id="Union" fill="url(#paint0_linear_13603_5281)" fill-rule="evenodd" d="M.75.25C.335786.25 0 .585786 0 1v1.5c0 .41421.335786.75.75.75.41421 0 .75-.33579.75-.75v-.75H2v4.5h-.25c-.41421 0-.75.33579-.75.75s.33579.75.75.75h2c.41421 0 .75-.33579.75-.75s-.33579-.75-.75-.75H3.5v-4.5H4v.75c0 .41421.33579.75.75.75s.75-.33579.75-.75V1c0-.414214-.33579-.75-.75-.75h-4Zm7 0C7.33579.25 7 .585786 7 1v1.5c0 .41421.33579.75.75.75s.75-.33579.75-.75v-.75h1.25v4.5H9c-.41421 0-.75.33579-.75.75s.33579.75.75.75h3c.4142 0 .75-.33579.75-.75s-.3358-.75-.75-.75h-.75v-4.5h1.25v.75c0 .41421.3358.75.75.75s.75-.33579.75-.75V1c0-.414214-.3358-.75-.75-.75h-5.5ZM0 11.5c0-.4142.335786-.75.75-.75h2.39538C3.44207 10.017 4.16066 9.5 5 9.5s1.55793.517 1.85462 1.25H13.25c.4142 0 .75.3358.75.75s-.3358.75-.75.75H6.85462C6.55793 12.983 5.83934 13.5 5 13.5s-1.55793-.517-1.85462-1.25H.75c-.414214 0-.75-.3358-.75-.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_5281" x1=".538" x2="16.059" y1="1.321" y2="10.564" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

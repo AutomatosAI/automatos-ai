@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" height="24" width="24">
+  <g id="pencil-diagonal--pencil-diagonal-stationery-office-supply">
+    <path id="Subtract" fill="url(#paint0_linear_16039_3435)" d="m5.18737 13.0721-4.589846.918c-.163757.0326-.333056-.0187-.451172-.1367-.1180958-.1181-.1693082-.2874-.13671843-.4512L.927602 8.81237zM11.286 7.42077 6.29577 12.411 1.58874 7.70397l4.99023-4.99023zM8.85338.439321c.58578-.585773 1.53532-.58575 2.12112 0l2.5859 2.585939c.5856.5858.5857 1.53538 0 2.12109L12.1708 6.536 7.46374 1.82897z"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_16039_3435" x1="3.782" x2="13.677" y1="3.611" y2="9.648" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

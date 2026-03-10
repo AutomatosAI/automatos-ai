@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Triangle-Arrow-Move-Up-2--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Triangle Arrow Move Up 2 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Arrows/Movement Triangle arrow/triangle-arrow-move-up-2--move-up-arrows">
+    <path id="Union" fill="url(#paint0_linear_13641_6763)" fill-rule="evenodd" d="M2 13.5c-.82843 0-1.5-.6716-1.5-1.5l0-2c0-.82843.67157-1.5 1.5-1.5l10 0c.8284 0 1.5.67157 1.5 1.5l0 2c0 .8284-.6716 1.5-1.5 1.5l-10 0Zm2.05708-9.71299c-.11608-.28025-.05192-.60284.16258-.81734l2.25-2.250001c.29289-.292892.76777-.292892 1.06066 0l2.25 2.250001c.2145.2145.27868.53709.16258.81734-.11609.28026-.38956.46299-.69291.46299l-1.25 0 0 2.25c0 .55228-.44771 1-1 1-.55228 0-1-.44772-1-1l0-2.25-1.25 0c-.30335 0-.57682-.18273-.69291-.46299Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_6763" x1="15.41" x2="-3.42" y1="14.258" y2="3.863" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

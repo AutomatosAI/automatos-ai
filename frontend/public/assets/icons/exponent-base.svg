@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Exponent-Base--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Exponent Base Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Mathematics/exponent-base--interface-math-positive-exponents-sign-mathematics">
+    <path id="Union" fill="url(#paint0_linear_13603_8338)" fill-rule="evenodd" d="M9.31997.135518c.33933-.237535.80703-.1550094 1.04453.184328L11.5001 1.9421 12.6356.319846c.2376-.3393374.7052-.421863 1.0446-.184328.3393.237536.4218.705184.1843 1.044522l-1.6144 2.30632v2.26358c0 .41421-.3358.75-.75.75s-.75-.33579-.75-.75V3.48636L9.13564 1.18004C8.8981.840702 8.98063.373054 9.31997.135518ZM.237047 4.70285c.302184-.2833.776813-.26799 1.060113.0342L4.5 8.15342l3.20285-3.41637c.2833-.30219.75792-.3175 1.06011-.0342.30218.2833.31749.75792.0342 1.06011L5.52805 9.25l3.26911 3.487c.28329.3022.26798.7769-.0342 1.0602-.30219.2833-.77681.2679-1.06011-.0342L4.5 10.3466 1.29716 13.763c-.2833.3021-.757929.3175-1.060113.0342-.3021846-.2833-.3174952-.758-.034197-1.0602l3.2691-3.487-3.2691-3.48704c-.2832982-.30219-.2679876-.77681.034197-1.06011Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_8338" x1="2.288" x2="13.596" y1="2.692" y2="8.957" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Insert-Top-Left--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Insert Top Left Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Text Formatting/insert-top-left--alignment-wrap-formatting-paragraph-image-left-text">
+    <path id="Union" fill="url(#paint0_linear_13603_5889)" fill-rule="evenodd" d="M9.5.5c-.41421 0-.75.335786-.75.75 0 .41421.33579.75.75.75H13c.4142 0 .75-.33579.75-.75 0-.414214-.3358-.75-.75-.75H9.5Zm0 2.875c-.41421 0-.75.33579-.75.75s.33579.75.75.75H13c.4142 0 .75-.33579.75-.75s-.3358-.75-.75-.75H9.5ZM8.75 7c0-.41421.33579-.75.75-.75H13c.4142 0 .75.33579.75.75s-.3358.75-.75.75H9.5c-.41421 0-.75-.33579-.75-.75ZM1 12c-.414214 0-.75.3358-.75.75s.335786.75.75.75h12c.4142 0 .75-.3358.75-.75S13.4142 12 13 12H1ZM.25 9.875c0-.41421.335786-.75.75-.75h12c.4142 0 .75.33579.75.75 0 .4142-.3358.75-.75.75H1c-.414214 0-.75-.3358-.75-.75ZM.5 2C.5 1.17157 1.17157.5 2 .5h4c.82843 0 1.5.67157 1.5 1.5v4c0 .82843-.67157 1.5-1.5 1.5H2C1.17157 7.5.5 6.82843.5 6V2Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_5889" x1="2.457" x2="13.163" y1="3" y2="9.16" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffc700"></stop>
+      <stop offset="1" stop-color="#02be6f"></stop>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Store-Factory--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Store Factory Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Money Shopping/Building Store/store-factory--production-store-shop-shops-stores-factory">
+    <path id="Union" fill="url(#paint0_linear_13629_4903)" fill-rule="evenodd" d="M1.50002.5c-.26323 0-.48138.204092-.49889.46674L.615576 6.75H4.88446L4.49891.96674C4.4814.704092 4.26325.5 4.00002.5h-2.5ZM.50157 8.46009.532242 8H4.34862l4.37403-2.91602c.15343-.10229.3507-.11182.51328-.02481.16258.087.26407.25644.26407.44083v2l3.2-2.4c.1515-.11363.3542-.13191.5236-.04721.1694.0847.2764.25783.2764.44721V13c0 .2761-.2239.5-.5.5l-8.875 0v-2.25c0-.3452-.27982-.625-.625-.625s-.625.2798-.625.625v2.25L1 13.5c-.276142 0-.5-.2239-.5-.5l0-4.4995L.5 8.5c0-.01343.00053-.02674.00157-.03991Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_4903" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

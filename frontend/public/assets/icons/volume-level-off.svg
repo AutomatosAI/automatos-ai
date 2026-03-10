@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Volume-Level-Off--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Volume Level Off Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Entertainment/Volume Control/volume-level-off--volume-speaker-control-music-audio-entertainment">
+    <path id="Union" fill="url(#paint0_linear_13641_2070)" fill-rule="evenodd" d="M6.21492 1.26369c.98442-.683194 2.3085.0381 2.28508 1.22862v9.03299l-.00012 0c-.02626 1.1863-1.40141 1.8879-2.37496 1.2122-.02265-.0157-.04396-.0333-.06372-.0525L2.7968 9.50669H1.5c-.822238 0-1.5-.682-1.5-1.50304V5.99758c0-.82104.677761-1.50304 1.5-1.50304h1.30058l3.35531-3.18283c.01843-.01748.03817-.03354.05903-.04802Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13641_2070" x1="9.237" x2="-4.53" y1="15.543" y2="8.617" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

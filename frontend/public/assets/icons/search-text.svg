@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Search-Text--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Search Text Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Search/search-text--search-text-magnifier-paragraph-formatting">
+    <path id="Union" fill="url(#paint0_linear_13603_11461)" fill-rule="evenodd" d="M5.75 1.5C3.40279 1.5 1.5 3.40279 1.5 5.75S3.40279 10 5.75 10 10 8.09721 10 5.75 8.09721 1.5 5.75 1.5ZM0 5.75C0 2.57436 2.57436 0 5.75 0s5.75 2.57436 5.75 5.75c0 1.31751-.4431 2.53152-1.1884 3.50114l2.9687 2.96876c.2929.2929.2929.7677 0 1.0606-.2929.2929-.7678.2929-1.0607 0l-2.96873-2.9687c-.81445.6259-1.80131 1.0387-2.87709 1.1548l0 1.1584H7.25c.34518 0 .625.2798.625.625s-.27982.625-.625.625h-3c-.34518 0-.625-.2798-.625-.625s.27982-.625.625-.625h.87378l0-1.1587C2.24271 11.1543 0 8.71403 0 5.75Zm3.25-.875c-.34518 0-.625.27982-.625.625V7c0 .34518.27982.625.625.625s.625-.27982.625-.625v-.875h1.24878l0 2.5596c.20197.04288.41144.06545.62619.06545.2139 0 .42258-.02239.62381-.06495l0-2.5601H7.625V7c0 .34518.27982.625.625.625s.625-.27982.625-.625V5.5c0-.34518-.27982-.625-.625-.625h-5Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_11461" x1=".519" x2="16.105" y1="1.121" y2="9.669" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>

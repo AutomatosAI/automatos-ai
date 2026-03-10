@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Page-Break--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Page Break Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Interface Essential/Files Folders/page-break">
+    <path id="Union" fill="url(#paint0_linear_13603_6700)" fill-rule="evenodd" d="M2.5 0c-.39782 0-.77936.158035-1.06066.43934C1.15804.720644 1 1.10218 1 1.5v4h12V4c0-.13261-.0527-.25979-.1464-.35355L9.35355.146447C9.25978.0526784 9.13261 0 9 0H2.5ZM1 12.5v-3h12v3c0 .3978-.158.7794-.4393 1.0607S11.8978 14 11.5 14h-9c-.39782 0-.77936-.158-1.06066-.4393C1.15804 13.2794 1 12.8978 1 12.5Zm-1-5c0-.41421.335786-.75.75-.75h1.5c.41421 0 .75.33579.75.75s-.33579.75-.75.75H.75C.335786 8.25 0 7.91421 0 7.5Zm3.66669 0c0-.41421.33578-.75.75-.75h1.5c.41421 0 .75.33579.75.75s-.33579.75-.75.75h-1.5c-.41422 0-.75-.33579-.75-.75Zm4.41668-.75c-.41421 0-.75.33579-.75.75s.33579.75.75.75h1.5c.41422 0 .75003-.33579.75003-.75s-.33581-.75-.75003-.75h-1.5ZM11 7.5c0-.41421.3358-.75.75-.75h1.5c.4142 0 .75.33579.75.75s-.3358.75-.75.75h-1.5c-.4142 0-.75-.33579-.75-.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13603_6700" x1="15.213" x2="-3.671" y1="16.965" y2="3.551" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

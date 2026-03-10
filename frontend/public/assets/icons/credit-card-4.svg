@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="Credit-Card-4--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    Credit Card 4 Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Money Shopping/ATM/credit-card-4--credit-pay-payment-debit-card-finance-plastic-stack-atm">
+    <path id="Union" fill="url(#paint0_linear_13629_5415)" fill-rule="evenodd" d="M1.26923 1C.55609 1 0 1.58964 0 2.28947v5.92106C0 8.91036.55609 9.5 1.26923 9.5H1.75V5.78947C1.75 4.43376 2.83176 3.25 4.26923 3.25H11v-.96053C11 1.58964 10.4439 1 9.73077 1H1.26923ZM3 5.78947C3 5.08964 3.55609 4.5 4.26923 4.5h8.46157C13.4439 4.5 14 5.08964 14 5.78947v1.02785H3V5.78947Zm0 2.27785v3.64318C3 12.4104 3.55609 13 4.26923 13h8.46157C13.4439 13 14 12.4104 14 11.7105V8.06732H3Zm6.67316 2.31728c0-.41423.33574-.75002.75004-.75002h1.1538c.4142 0 .75.33579.75.75002 0 .4142-.3358.75-.75.75h-1.1538c-.4143 0-.75004-.3358-.75004-.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13629_5415" x1="15.213" x2="-1.631" y1="15.542" y2="1.582" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff9a23"></stop>
+      <stop offset="1" stop-color="#ff0843"></stop>
+    </linearGradient>
+  </defs>
+</svg>

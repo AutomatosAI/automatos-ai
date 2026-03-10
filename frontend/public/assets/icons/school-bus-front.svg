@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14" id="School-Bus-Front--Streamline-Core-Gradient" height="24" width="24">
+  <desc>
+    School Bus Front Streamline Icon: https://streamlinehq.com
+  </desc>
+  <g id="Map Travel/Transportation/school-bus-front">
+    <path id="Union" fill="url(#paint0_linear_13604_12871)" fill-rule="evenodd" d="M2.55001 2.5C2.78164 1.35888 3.79052.5 5 .5h4c1.2095 0 2.2184.85888 2.45 2h.3c.9665 0 1.75.7835 1.75 1.75v1c0 .41421-.3358.75-.75.75S12 5.66421 12 5.25v-1c0-.13807-.1119-.25-.25-.25h-.25v2.20802C12.383 6.5938 13 7.47484 13 8.5v2c0 .7432-.5406 1.3602-1.25 1.4793V12.5c0 .5523-.4477 1-1 1s-1-.4477-1-1V12h-5.5v.5c0 .5523-.44772 1-1 1s-1-.4477-1-1v-.5207C1.54057 11.8602 1 11.2432 1 10.5v-2c0-1.02516.61705-1.9062 1.5-2.29198V4h-.25c-.13807 0-.25.11193-.25.25v1c0 .41421-.33579.75-.75.75C.835786 6 .5 5.66421.5 5.25v-1c0-.9665.7835-1.75 1.75-1.75h.30001ZM10 3.5H4v3h6v-3ZM4.25 9.25c0-.41421-.33579-.75-.75-.75s-.75.33579-.75.75.33579.75.75.75.75-.33579.75-.75ZM6 8.625c-.34518 0-.625.27982-.625.625s.27982.625.625.625h2c.34518 0 .625-.27982.625-.625S8.34518 8.625 8 8.625H6Zm4.5-.125c.4142 0 .75.33579.75.75s-.3358.75-.75.75-.75-.33579-.75-.75.3358-.75.75-.75Z" clip-rule="evenodd"></path>
+  </g>
+  <defs>
+    <linearGradient id="paint0_linear_13604_12871" x1="1" x2="15.816" y1="1.551" y2="9.901" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00f6e7"></stop>
+      <stop offset="1" stop-color="#6d1fec"></stop>
+    </linearGradient>
+  </defs>
+</svg>
