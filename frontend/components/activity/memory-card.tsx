@@ -35,10 +35,11 @@ interface MemoryCardProps {
 export function MemoryCard({ memory, selected, onSelect, onDelete }: MemoryCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
-  const isLong = memory.content.length > 200
+  const content = memory.content || ''
+  const isLong = content.length > 200
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(memory.content)
+    navigator.clipboard.writeText(content)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
@@ -67,7 +68,7 @@ export function MemoryCard({ memory, selected, onSelect, onDelete }: MemoryCardP
           )}
           <div className="min-w-0">
             <p className={cn('text-sm leading-relaxed', !expanded && isLong && 'line-clamp-3')}>
-              {memory.content}
+              {content}
             </p>
             {isLong && (
               <button
