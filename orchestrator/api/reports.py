@@ -124,11 +124,22 @@ async def grade_report(
 ):
     """Submit a grade for a report."""
     svc = ReportService(db, ctx.workspace_id)
+
+    # Resolve integer user ID from Clerk user_id string
+    graded_by_id = None
+    if ctx.user.id:
+        from sqlalchemy import text as _text
+        row = db.execute(
+            _text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+            {"cid": ctx.user.id},
+        ).fetchone()
+        graded_by_id = row[0] if row else None
+
     result = await svc.grade_report(
         report_id=report_id,
         grade=body.grade,
         grade_notes=body.grade_notes,
-        graded_by=ctx.user.id,
+        graded_by=graded_by_id,
     )
 
     if not result.get("success"):
