@@ -437,14 +437,6 @@ export function AgentConfigurationModal({
         || (agent as any).configuration?.category
         || DB_TO_CATEGORY_MAP[dbAgentType]
         || 'custom'
-      console.log('🏷️ Category resolution:', {
-        agentName: (agent as any).name,
-        marketplace_category: (agent as any).marketplace_category,
-        config_category: (agent as any).configuration?.category,
-        db_agent_type: dbAgentType,
-        db_mapped: DB_TO_CATEGORY_MAP[dbAgentType],
-        resolved: categoryName
-      })
       setOriginalAgentType(dbAgentType)
 
       setFormData({

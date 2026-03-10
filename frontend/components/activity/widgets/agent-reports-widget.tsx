@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Loader2,
 } from 'lucide-react'
+import { PremiumIcon } from '@/components/shared'
 import { Button } from '@/components/ui/button'
 import {
   Popover,
@@ -46,7 +47,7 @@ function savePinnedAgents(ids: number[]) {
 interface SimpleAgent {
   id: number
   name: string
-  marketplace_icon?: string | null
+  premium_icon?: string | null
 }
 
 const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; color: string; label: string }> = {
@@ -56,7 +57,7 @@ const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; color: string; 
   error: { icon: XCircle, color: 'text-destructive', label: 'Error' },
 }
 
-function ReportCard({ report }: { report: AgentReport }) {
+function ReportCard({ report, premiumIconName }: { report: AgentReport; premiumIconName?: string | null }) {
   const router = useRouter()
   const statusConf = STATUS_CONFIG[report.status] || STATUS_CONFIG.no_data
   const StatusIcon = statusConf.icon
@@ -73,11 +74,11 @@ function ReportCard({ report }: { report: AgentReport }) {
   return (
     <div className="flex flex-col p-3 rounded-lg bg-secondary/30 border border-border/30 hover:border-border/60 transition-colors min-w-[200px]">
       <div className="flex items-center gap-2 mb-2">
-        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-          {report.agent_icon ? (
-            <span className="text-lg">{report.agent_icon}</span>
+        <div className="w-8 h-8 flex items-center justify-center shrink-0">
+          {premiumIconName ? (
+            <PremiumIcon name={premiumIconName} size={28} />
           ) : (
-            <Bot className="w-4 h-4 text-primary" />
+            <Bot className="w-5 h-5 text-primary" />
           )}
         </div>
         <div className="min-w-0 flex-1">
@@ -157,8 +158,8 @@ function PinSelector({ agents, pinnedIds, onToggle, isLoading }: PinSelectorProp
               isDisabled && 'opacity-40 cursor-not-allowed'
             )}
           >
-            {agent.marketplace_icon ? (
-              <span className="text-sm shrink-0">{agent.marketplace_icon}</span>
+            {agent.premium_icon ? (
+              <PremiumIcon name={agent.premium_icon} size={14} className="shrink-0" />
             ) : isPinned ? (
               <Pin className="w-3 h-3 text-primary shrink-0" />
             ) : (
@@ -192,7 +193,7 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
   const { data: rawAgents, isLoading: agentsLoading } = useAgents()
   // Map to SimpleAgent shape — useAgents returns full AgentResponse objects
   const allAgents: SimpleAgent[] | undefined = rawAgents
-    ? (rawAgents as any[]).map((a: any) => ({ id: a.id, name: a.name, marketplace_icon: a.marketplace_icon ?? null }))
+    ? (rawAgents as any[]).map((a: any) => ({ id: a.id, name: a.name, premium_icon: a.premium_icon ?? null }))
     : undefined
   const hasPinned = pinnedIds.length > 0
   const { data: reportsData, isLoading: reportsLoading } = useAgentReports(pinnedIds)
@@ -284,9 +285,12 @@ export function AgentReportsWidget({ className }: AgentReportsWidgetProps) {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {reports.map((report) => (
-              <ReportCard key={report.agent_id} report={report} />
-            ))}
+            {reports.map((report) => {
+              const agent = allAgents?.find(a => a.id === report.agent_id)
+              return (
+                <ReportCard key={report.agent_id} report={report} premiumIconName={agent?.premium_icon} />
+              )
+            })}
           </div>
         )}
       </div>

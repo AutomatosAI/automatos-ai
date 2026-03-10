@@ -328,7 +328,7 @@ export function RecipesTab({
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-lg">
                       {(() => {
-                        const premiumIconName = iconMappings[recipe.marketplace_category] || null
+                        const premiumIconName = iconMappings[recipe.marketplace_category] || iconMappings['global_recipe'] || null
                         return premiumIconName ? (
                           <PremiumIcon name={premiumIconName} size={20} className="text-primary" />
                         ) : (
@@ -397,7 +397,7 @@ export function RecipesTab({
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-xl">
                         {(() => {
-                          const premiumIconName = iconMappings[recipe.marketplace_category] || null
+                          const premiumIconName = iconMappings[recipe.marketplace_category] || iconMappings['global_recipe'] || null
                           return premiumIconName ? (
                             <PremiumIcon name={premiumIconName} size={24} className="text-primary" />
                           ) : (

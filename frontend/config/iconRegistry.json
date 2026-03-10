@@ -7461,5 +7461,18 @@
       "gradient"
     ],
     "name": "Wifi Signal Full"
+  },
+  {
+    "id": "recipe-cooking",
+    "filename": "recipe-cooking.svg",
+    "path": "/assets/icons/recipe-cooking.svg",
+    "tags": [
+      "recipe",
+      "cooking",
+      "workflow",
+      "streamline",
+      "gradient"
+    ],
+    "name": "Recipe Cooking"
   }
 ]

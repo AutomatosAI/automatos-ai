@@ -98,7 +98,12 @@ export function useSystemIcons() {
     queryFn: async () => {
       try {
         const data = await apiClient.getSystemConfigKey('system_icon_mappings');
-        return data?.config_value || {};
+        const mappings = data?.config_value || {};
+        // Migrate legacy key: communication_agent → communication
+        if (mappings['communication_agent'] && !mappings['communication']) {
+          mappings['communication'] = mappings['communication_agent'];
+        }
+        return mappings;
       } catch (err) {
         // If it doesn't exist yet, just return empty mappings
         console.warn('System icon mappings not configured yet');

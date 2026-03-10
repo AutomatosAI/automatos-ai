@@ -13,7 +13,7 @@ const DEFAULT_CATEGORIES = [
     // Agent Categories
     { id: 'analytics', label: 'Analytics', type: 'agent' },
     { id: 'business', label: 'Business', type: 'agent' },
-    { id: 'communication_agent', label: 'Communication', type: 'agent' },
+    { id: 'communication', label: 'Communication', type: 'agent' },
     { id: 'design', label: 'Design', type: 'agent' },
     { id: 'development', label: 'Development', type: 'agent' },
     { id: 'education', label: 'Education', type: 'agent' },
@@ -35,6 +35,10 @@ const DEFAULT_CATEGORIES = [
     { id: 'analytical', label: 'Analytical Skills', type: 'skill' },
     { id: 'creative', label: 'Creative Skills', type: 'skill' },
     { id: 'system', label: 'System & Infrastructure', type: 'skill' },
+
+    // Global entity icons
+    { id: 'global_plugin', label: 'Plugins', type: 'global' },
+    { id: 'global_recipe', label: 'Recipes', type: 'global' },
 ];
 
 export function SystemIconsSettingsTab() {
@@ -46,7 +50,13 @@ export function SystemIconsSettingsTab() {
 
     useEffect(() => {
         if (iconMappings) {
-            setMappings(iconMappings);
+            // Migrate legacy key: communication_agent → communication
+            const migrated = { ...iconMappings };
+            if (migrated['communication_agent'] && !migrated['communication']) {
+                migrated['communication'] = migrated['communication_agent'];
+            }
+            delete migrated['communication_agent'];
+            setMappings(migrated);
         }
     }, [iconMappings]);
 
@@ -87,6 +97,7 @@ export function SystemIconsSettingsTab() {
 
     const agentCategories = DEFAULT_CATEGORIES.filter(c => c.type === 'agent');
     const skillCategories = DEFAULT_CATEGORIES.filter(c => c.type === 'skill');
+    const globalCategories = DEFAULT_CATEGORIES.filter(c => c.type === 'global');
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -153,6 +164,27 @@ export function SystemIconsSettingsTab() {
                 </Card>
 
             </div>
+
+            {/* Global Entity Icons */}
+            <Card className="glass-card">
+                <CardHeader>
+                    <CardTitle className="text-lg">Global Entity Icons</CardTitle>
+                    <CardDescription>Default icons for platform-wide entities like plugins and recipes</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {globalCategories.map(cat => (
+                        <div key={cat.id} className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border border-border/30">
+                            <span className="font-medium text-sm">{cat.label}</span>
+                            <IconSelector
+                                value={mappings[cat.id] || null}
+                                onChange={(val) => handleIconChange(cat.id, val)}
+                                triggerLabel="Assign Icon"
+                                triggerClassName="w-[180px]"
+                            />
+                        </div>
+                    ))}
+                </CardContent>
+            </Card>
         </div>
     );
 }
