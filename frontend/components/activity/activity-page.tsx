@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   List,
   FileText,
+  Brain,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -22,6 +23,7 @@ import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ActivityMissions } from './activity-missions'
 import { ActivityFeed } from './activity-feed'
 import { ActivityReports } from './activity-reports'
+import { ActivityMemory } from './activity-memory'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
 import { cn } from '@/lib/utils'
@@ -56,6 +58,7 @@ const TAB_DEFS = [
   { value: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { value: 'feed', label: 'Feed', icon: List },
   { value: 'reports', label: 'Reports', icon: FileText },
+  { value: 'memory', label: 'Memory', icon: Brain },
   { value: 'missions', label: 'Missions', icon: Rocket },
 ]
 
@@ -144,6 +147,12 @@ export function ActivityPage() {
           <TabsContent value="reports">
             <div data-tour="activity-reports">
               <ActivityReports period={period} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="memory">
+            <div data-tour="activity-memory">
+              <ActivityMemory period={period} />
             </div>
           </TabsContent>
 
