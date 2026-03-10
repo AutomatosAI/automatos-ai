@@ -429,10 +429,15 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                                       {(() => {
                                         const selected = AGENT_CATEGORIES.find(c => c.id === agentData.category)
                                         if (!selected) return <SelectValue placeholder="Select category..." />
-                                        const Icon = selected.icon
+                                        const premiumName = iconMappings[selected.id]
+                                        const FallbackIcon = selected.icon
                                         return (
                                           <>
-                                            <Icon className={`w-4 h-4 ${selected.color}`} />
+                                            {premiumName ? (
+                                              <PremiumIcon name={premiumName} size={16} className={selected.color} />
+                                            ) : (
+                                              <FallbackIcon className={`w-4 h-4 ${selected.color}`} />
+                                            )}
                                             <span>{selected.name}</span>
                                           </>
                                         )
@@ -444,11 +449,16 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                                 </SelectTrigger>
                                 <SelectContent>
                                   {AGENT_CATEGORIES.map(cat => {
-                                    const Icon = cat.icon
+                                    const premiumName = iconMappings[cat.id]
+                                    const FallbackIcon = cat.icon
                                     return (
                                       <SelectItem key={cat.id} value={cat.id}>
                                         <div className="flex items-center gap-2">
-                                          <Icon className={`w-4 h-4 ${cat.color}`} />
+                                          {premiumName ? (
+                                            <PremiumIcon name={premiumName} size={16} className={cat.color} />
+                                          ) : (
+                                            <FallbackIcon className={`w-4 h-4 ${cat.color}`} />
+                                          )}
                                           <span>{cat.name}</span>
                                         </div>
                                       </SelectItem>
