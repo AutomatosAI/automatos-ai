@@ -50,9 +50,9 @@ function KitchenSkeleton() {
 // ─── Filter Chip Config ─────────────────────────────────
 
 const TYPE_CHIPS = [
-  { value: 'chat', label: 'Chat', icon: Activity },
-  { value: 'recipe', label: 'Recipes', icon: ChefHat },
+  { value: 'chat', label: 'Chats', icon: MessageCircle },
   { value: 'routine', label: 'Routines', icon: RefreshCw },
+  { value: 'recipe', label: 'Recipes', icon: ChefHat },
   { value: 'mission', label: 'Missions', icon: Rocket, comingSoon: true },
 ] as const
 
@@ -208,7 +208,8 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
   const toggleType = useCallback((type: string) => {
     setActiveTypes((prev) => {
       if (type === '__all__') return []
-      return prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+      // Exclusive selection: clicking active chip deselects, clicking another selects only that one
+      return prev.length === 1 && prev[0] === type ? [] : [type]
     })
     setLimit(PAGE_SIZE)
   }, [])
@@ -406,10 +407,10 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h4 className="font-semibold text-sm sm:text-base truncate">{item.name}</h4>
-            {isRecipe && (
-              <Badge className="text-xs bg-orange-500/20 text-orange-300 border-orange-500/30 shrink-0">
-                <Zap className="w-3 h-3 mr-1" />
-                Recipe
+            {item.type === 'chat' && (
+              <Badge className="text-xs bg-blue-500/20 text-blue-300 border-blue-500/30 shrink-0">
+                <MessageCircle className="w-3 h-3 mr-1" />
+                Chat
               </Badge>
             )}
             {isRoutine && (
@@ -418,8 +419,14 @@ function FeedRow({ item, index, isNew, onView }: FeedRowProps) {
                 Routine
               </Badge>
             )}
-            {!isRecipe && !isRoutine && (
-              <Badge className="text-xs bg-blue-500/20 text-blue-300 border-blue-500/30 shrink-0">
+            {isRecipe && (
+              <Badge className="text-xs bg-orange-500/20 text-orange-300 border-orange-500/30 shrink-0">
+                <Zap className="w-3 h-3 mr-1" />
+                Recipe
+              </Badge>
+            )}
+            {item.type === 'mission' && (
+              <Badge className="text-xs bg-cyan-500/20 text-cyan-300 border-cyan-500/30 shrink-0">
                 <Rocket className="w-3 h-3 mr-1" />
                 Mission
               </Badge>
@@ -614,7 +621,7 @@ function FilterBar({
 
       {TYPE_CHIPS.map((chip) => {
         const isActive = activeTypes.includes(chip.value)
-        const Icon = chip.value === 'chat' ? MessageCircle : chip.icon
+        const Icon = chip.icon
         const isDisabled = 'comingSoon' in chip && chip.comingSoon
         return (
           <Button
