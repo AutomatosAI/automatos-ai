@@ -67,7 +67,9 @@ export function RecentActivityWidget({ period, onViewAll, className }: RecentAct
     .slice(0, 5)
 
   const handleView = (item: ActivityFeedItem) => {
-    if (item.source_url) {
+    if (item.type === 'routine' && item.agent?.id) {
+      router.push(`/activity?tab=reports&agent_id=${item.agent.id}`)
+    } else if (item.source_url) {
       router.push(item.source_url)
     }
   }

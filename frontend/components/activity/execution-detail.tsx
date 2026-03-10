@@ -308,7 +308,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
     if (item.type === 'recipe' && item.source_id) {
       router.push('/activity')
     } else if (item.type === 'routine' && item.agent?.id) {
-      router.push(`/agents?agent=${item.agent.id}`)
+      router.push(`/agents?agent=${item.agent.id}&tab=heartbeat`)
     }
   }
 
@@ -490,7 +490,18 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
               {item.type === 'recipe' ? 'Edit Recipe' : 'Edit Routine'}
             </Button>
           )}
-          {item.source_url && (
+          {item.type === 'routine' && item.agent?.id && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(`/activity?tab=reports&agent_id=${item.agent?.id}`)}
+              className="text-xs min-h-[44px] sm:min-h-0 justify-center"
+            >
+              <FileText className="w-3.5 h-3.5 mr-1.5" />
+              View Report
+            </Button>
+          )}
+          {item.source_url && item.type !== 'routine' && (
             <Button
               variant="outline"
               size="sm"

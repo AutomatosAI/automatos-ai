@@ -45,7 +45,7 @@ class ReportService:
 
     async def create_report(
         self,
-        agent_id: int,
+        agent_id: Optional[int],
         agent_name: str,
         title: str,
         content: str,
@@ -99,12 +99,12 @@ class ReportService:
             result = self.db.execute(
                 text("""
                     INSERT INTO agent_reports
-                        (workspace_id, agent_id, heartbeat_result_id,
+                        (workspace_id, agent_id, agent_name, heartbeat_result_id,
                          report_type, title, summary, status,
                          file_path, file_type, file_size_bytes,
                          metrics, attachments, created_at, updated_at)
                     VALUES
-                        (:workspace_id, :agent_id, :heartbeat_result_id,
+                        (:workspace_id, :agent_id, :agent_name, :heartbeat_result_id,
                          :report_type, :title, :summary, :status,
                          :file_path, :file_type, :file_size_bytes,
                          :metrics, :attachments, NOW(), NOW())
@@ -113,6 +113,7 @@ class ReportService:
                 {
                     "workspace_id": str(self.workspace_id),
                     "agent_id": agent_id,
+                    "agent_name": agent_name,
                     "heartbeat_result_id": heartbeat_result_id,
                     "report_type": report_type,
                     "title": title,
@@ -198,7 +199,7 @@ class ReportService:
         # Fetch reports with agent info
         query = text(f"""
             SELECT
-                r.id, r.agent_id, a.name AS agent_name,
+                r.id, r.agent_id, COALESCE(r.agent_name, a.name, 'Orchestrator') AS agent_name,
                 r.heartbeat_result_id,
                 r.report_type, r.title, r.summary, r.status,
                 r.file_path, r.file_type, r.file_size_bytes,
@@ -206,7 +207,7 @@ class ReportService:
                 r.grade, r.grade_notes, r.graded_by, r.graded_at,
                 r.created_at
             FROM agent_reports r
-            JOIN agents a ON a.id = r.agent_id
+            LEFT JOIN agents a ON a.id = r.agent_id
             WHERE {where}
             ORDER BY r.created_at DESC
             LIMIT :limit OFFSET :offset
@@ -253,7 +254,8 @@ class ReportService:
         row = self.db.execute(
             text("""
                 SELECT
-                    r.id, r.workspace_id, r.agent_id, a.name AS agent_name,
+                    r.id, r.workspace_id, r.agent_id,
+                    COALESCE(r.agent_name, a.name, 'Orchestrator') AS agent_name,
                     r.heartbeat_result_id,
                     r.report_type, r.title, r.summary, r.status,
                     r.file_path, r.file_type, r.file_size_bytes,
@@ -261,7 +263,7 @@ class ReportService:
                     r.grade, r.grade_notes, r.graded_by, r.graded_at,
                     r.created_at
                 FROM agent_reports r
-                JOIN agents a ON a.id = r.agent_id
+                LEFT JOIN agents a ON a.id = r.agent_id
                 WHERE r.id = :report_id AND r.workspace_id = :workspace_id
             """),
             {"report_id": report_id, "workspace_id": str(self.workspace_id)},
@@ -423,11 +425,12 @@ class ReportService:
         row = self.db.execute(
             text(f"""
                 SELECT
-                    r.id, r.agent_id, a.name AS agent_name,
+                    r.id, r.agent_id,
+                    COALESCE(r.agent_name, a.name, 'Orchestrator') AS agent_name,
                     r.report_type, r.title, r.summary, r.status,
                     r.file_path, r.metrics, r.created_at
                 FROM agent_reports r
-                JOIN agents a ON a.id = r.agent_id
+                LEFT JOIN agents a ON a.id = r.agent_id
                 WHERE {where}
                 ORDER BY r.created_at DESC
                 LIMIT 1

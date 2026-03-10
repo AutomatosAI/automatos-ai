@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { useReport, useGradeReport } from '@/hooks/use-reports-api'
+import { apiClient } from '@/lib/api-client'
 import type { AgentReport } from '@/hooks/use-reports-api'
 import { ReportGradeForm } from './report-grade-form'
 
@@ -75,7 +76,14 @@ export function ReportViewer({ reportId, onClose }: ReportViewerProps) {
 
   const handleDownload = () => {
     if (!report) return
-    window.open(`/api/reports/${report.id}/download`, '_blank')
+    const content = report.content || report.summary || 'No content'
+    const blob = new Blob([content], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${report.title.replace(/\s+/g, '-').toLowerCase()}.md`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const handleGrade = (grade: number, notes?: string) => {

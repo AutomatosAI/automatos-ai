@@ -66,7 +66,7 @@ function ReportCard({ report }: { report: AgentReport }) {
 
   const handleViewReport = () => {
     if (report.agent_id) {
-      router.push(`/agents?agent=${report.agent_id}`)
+      router.push(`/activity?tab=reports&agent_id=${report.agent_id}`)
     }
   }
 

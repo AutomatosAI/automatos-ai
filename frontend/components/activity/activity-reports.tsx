@@ -17,7 +17,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { toast } from 'react-hot-toast'
 import { useReports, useReportStats } from '@/hooks/use-reports-api'
+import { apiClient } from '@/lib/api-client'
 import type { AgentReport, ReportFilters } from '@/hooks/use-reports-api'
 import { ReportCard } from './report-card'
 import { ReportViewer } from './report-viewer'
@@ -123,8 +125,22 @@ export function ActivityReports({ period = '30d' }: ActivityReportsProps) {
     setSelectedReportId(report.id)
   }, [])
 
-  const handleDownload = useCallback((report: AgentReport) => {
-    window.open(`/api/reports/${report.id}/download`, '_blank')
+  const handleDownload = useCallback(async (report: AgentReport) => {
+    try {
+      const res = await apiClient.request<{ success: boolean; report: AgentReport }>(
+        `/api/reports/${report.id}`
+      )
+      const content = res.report?.content || res.report?.summary || 'No content'
+      const blob = new Blob([content], { type: 'text/markdown' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${report.title.replace(/\s+/g, '-').toLowerCase()}.md`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Failed to download report')
+    }
   }, [])
 
   const handleLoadMore = useCallback(() => {
