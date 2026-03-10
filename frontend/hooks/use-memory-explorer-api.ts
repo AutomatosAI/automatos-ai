@@ -16,6 +16,7 @@ export interface MemoryItem {
   metadata: Record<string, any> | null
   created_at: string | null
   updated_at: string | null
+  tier?: 'global' | 'agent' | 'daily'
 }
 
 export interface MemoryBrowseResponse {

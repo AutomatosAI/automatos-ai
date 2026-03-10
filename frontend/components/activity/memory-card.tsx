@@ -96,6 +96,15 @@ export function MemoryCard({ memory, selected, onSelect, onDelete }: MemoryCardP
           </Badge>
         )}
 
+        {memory.tier && (
+          <Badge
+            variant={memory.tier === 'global' ? 'default' : 'secondary'}
+            className="text-[10px] px-1.5 py-0 capitalize"
+          >
+            {memory.tier}
+          </Badge>
+        )}
+
         {memory.metadata?.agent_name && (
           <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
             {memory.metadata.agent_name}

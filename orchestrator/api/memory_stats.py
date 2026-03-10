@@ -34,8 +34,32 @@ def _get_mem0_client():
 
 
 def _mem0_user_id(workspace_id) -> str:
-    """Build the scoped user_id that SmartMemoryManager uses."""
+    """Build the GLOBAL scoped user_id that SmartMemoryManager uses."""
     return f"ws_{workspace_id}"
+
+
+def _all_mem0_user_ids(workspace_id, db: Session) -> List[str]:
+    """
+    Build ALL user_id variants that SmartMemoryManager may have stored under.
+
+    SmartMemoryManager uses three tiers:
+      - Global:  ws_{workspace_id}
+      - Agent:   ws_{workspace_id}_agent_{agent_id}
+      - Daily:   ws_{workspace_id}_daily
+    """
+    ws = str(workspace_id)
+    user_ids = [f"ws_{ws}", f"ws_{ws}_daily"]
+
+    # Get all agent IDs in this workspace
+    try:
+        from core.models.core import Agent
+        agent_ids = db.query(Agent.id).filter(Agent.workspace_id == workspace_id).all()
+        for (aid,) in agent_ids:
+            user_ids.append(f"ws_{ws}_agent_{aid}")
+    except Exception as e:
+        logger.warning("Failed to fetch agent IDs for memory browse: %s", e)
+
+    return user_ids
 
 
 @router.get("/stats/real")
@@ -47,17 +71,21 @@ async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_contex
     mem0_total = 0
     mem0_available = False
 
-    # Try Mem0 for total count
+    # Try Mem0 for total count — query ALL tiers
     if mem0:
         try:
-            user_id = _mem0_user_id(ctx.workspace_id)
-            all_memories = mem0.get_all(user_id=user_id, limit=1000)
-            if isinstance(all_memories, list):
-                mem0_total = len(all_memories)
-                mem0_available = True
-            elif isinstance(all_memories, dict):
-                mem0_total = all_memories.get("total", len(all_memories.get("items", [])))
-                mem0_available = True
+            user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
+            seen_ids: set = set()
+            for uid in user_ids:
+                items_raw = mem0.get_all(user_id=uid, limit=1000)
+                if isinstance(items_raw, list):
+                    for m in items_raw:
+                        seen_ids.add(str(m.get("id", "")))
+                elif isinstance(items_raw, dict):
+                    for m in items_raw.get("items", []):
+                        seen_ids.add(str(m.get("id", "")))
+            mem0_total = len(seen_ids)
+            mem0_available = True
         except Exception as e:
             logger.warning(f"Mem0 stats query failed, falling back to local DB: {e}")
 
@@ -185,29 +213,42 @@ async def get_recent_memories(
     """
     Get most recent memories — Mem0 first, local DB fallback.
     """
-    # Try Mem0
+    # Try Mem0 — query ALL tiers
     mem0 = _get_mem0_client()
     if mem0:
         try:
-            user_id = _mem0_user_id(ctx.workspace_id)
-            results = mem0.get_all(user_id=user_id, limit=limit)
+            user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
+            all_items: List[Dict[str, Any]] = []
+            seen_ids: set = set()
 
-            items = results if isinstance(results, list) else results.get("items", [])
-            if items:
-                return [
-                    {
-                        "id": str(m.get("id", "")),
-                        "agent_id": None,
-                        "memory_type": "mem0",
-                        "memory_level": "long_term",
-                        "content": _truncate(m.get("content") or m.get("memory") or "", 120),
-                        "importance": m.get("score"),
-                        "access_count": None,
-                        "created_at": m.get("created_at"),
-                        "source": "mem0",
-                    }
-                    for m in items[:limit]
-                ]
+            for uid in user_ids:
+                results = mem0.get_all(user_id=uid, limit=limit)
+                items = results if isinstance(results, list) else results.get("items", []) if isinstance(results, dict) else []
+                for m in items:
+                    mid = str(m.get("id", ""))
+                    if mid and mid not in seen_ids:
+                        seen_ids.add(mid)
+                        tier = "global"
+                        if "_agent_" in uid:
+                            tier = "agent"
+                        elif uid.endswith("_daily"):
+                            tier = "daily"
+                        all_items.append({
+                            "id": mid,
+                            "agent_id": None,
+                            "memory_type": tier,
+                            "memory_level": "long_term",
+                            "content": _truncate(m.get("content") or m.get("memory") or "", 120),
+                            "importance": m.get("score"),
+                            "access_count": None,
+                            "created_at": m.get("created_at"),
+                            "source": "mem0",
+                        })
+
+            if all_items:
+                # Sort by created_at descending
+                all_items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+                return all_items[:limit]
         except Exception as e:
             logger.warning(f"Mem0 recent fetch failed, falling back to local: {e}")
 
@@ -237,9 +278,11 @@ async def browse_memories(
     query: Optional[str] = None,
     limit: int = 20,
     ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
     Browse/search all memories — PRD-77 Memory Explorer.
+    Queries ALL memory tiers (global, per-agent, daily) for the workspace.
     If query is provided, performs vector similarity search.
     Otherwise returns all memories sorted by recency.
     """
@@ -247,29 +290,50 @@ async def browse_memories(
     if not mem0:
         return {"success": False, "error": "Memory service unavailable", "memories": []}
 
-    user_id = _mem0_user_id(ctx.workspace_id)
+    user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
 
     try:
-        if query:
-            results = mem0.search(query=query, user_id=user_id, limit=limit)
-        else:
-            results = mem0.get_all(user_id=user_id, limit=limit)
+        all_results: List[Dict] = []
+        seen_ids: set = set()
 
-        memories = []
-        for m in (results if isinstance(results, list) else []):
-            memories.append({
-                "id": str(m.get("id", "")),
-                "content": m.get("memory") or m.get("content", ""),
-                "score": m.get("score"),
-                "metadata": m.get("metadata") or m.get("metadata_"),
-                "created_at": m.get("created_at"),
-                "updated_at": m.get("updated_at"),
-            })
+        for uid in user_ids:
+            if query:
+                results = mem0.search(query=query, user_id=uid, limit=limit)
+            else:
+                results = mem0.get_all(user_id=uid, limit=limit)
+
+            items = results if isinstance(results, list) else []
+            for m in items:
+                mid = str(m.get("id", ""))
+                if mid and mid not in seen_ids:
+                    seen_ids.add(mid)
+                    # Tag which tier this came from
+                    tier = "global"
+                    if "_agent_" in uid:
+                        tier = "agent"
+                    elif uid.endswith("_daily"):
+                        tier = "daily"
+                    all_results.append({
+                        "id": mid,
+                        "content": m.get("memory") or m.get("content", ""),
+                        "score": m.get("score"),
+                        "metadata": m.get("metadata") or m.get("metadata_"),
+                        "created_at": m.get("created_at"),
+                        "updated_at": m.get("updated_at"),
+                        "tier": tier,
+                    })
+
+        # Sort by created_at descending (newest first), then truncate
+        all_results.sort(
+            key=lambda x: x.get("created_at") or "",
+            reverse=True,
+        )
+        memories = all_results[:limit]
 
         return {
             "success": True,
             "memories": memories,
-            "total": len(memories),
+            "total": len(all_results),
             "source": "mem0",
             "search_query": query,
         }
@@ -282,19 +346,23 @@ async def browse_memories(
 async def delete_memory(
     memory_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Delete a specific memory by ID — PRD-77."""
     mem0 = _get_mem0_client()
     if not mem0:
         return {"success": False, "error": "Memory service unavailable"}
 
-    user_id = _mem0_user_id(ctx.workspace_id)
+    user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
 
     try:
-        # Ownership check: verify memory belongs to this workspace
-        all_mems = mem0.get_all(user_id=user_id, limit=500)
-        items = all_mems if isinstance(all_mems, list) else []
-        owned_ids = {str(m.get("id", "")) for m in items}
+        # Ownership check: verify memory belongs to this workspace (any tier)
+        owned_ids: set = set()
+        for uid in user_ids:
+            items_raw = mem0.get_all(user_id=uid, limit=500)
+            items = items_raw if isinstance(items_raw, list) else []
+            for m in items:
+                owned_ids.add(str(m.get("id", "")))
 
         if memory_id not in owned_ids:
             return {"success": False, "error": "Memory not found or not owned by this workspace"}
@@ -317,9 +385,10 @@ async def get_memory_health(
     """
     Memory health report — PRD-77.
     Shows total count, staleness, and basic health indicators.
+    Queries ALL memory tiers (global, per-agent, daily).
     """
     mem0 = _get_mem0_client()
-    user_id = _mem0_user_id(ctx.workspace_id)
+    user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
 
     total = 0
     oldest_memory = None
@@ -328,15 +397,26 @@ async def get_memory_health(
 
     if mem0:
         try:
-            all_mems = mem0.get_all(user_id=user_id, limit=500)
-            items = all_mems if isinstance(all_mems, list) else []
-            total = len(items)
+            all_dates: List[str] = []
+            seen_ids: set = set()
+
+            for uid in user_ids:
+                items_raw = mem0.get_all(user_id=uid, limit=500)
+                items = items_raw if isinstance(items_raw, list) else []
+                for m in items:
+                    mid = str(m.get("id", ""))
+                    if mid and mid not in seen_ids:
+                        seen_ids.add(mid)
+                        dt = m.get("created_at")
+                        if dt:
+                            all_dates.append(dt)
+
+            total = len(seen_ids)
             mem0_available = True
 
-            dates = [m.get("created_at") for m in items if m.get("created_at")]
-            if dates:
-                oldest_memory = min(dates)
-                newest_memory = max(dates)
+            if all_dates:
+                oldest_memory = min(all_dates)
+                newest_memory = max(all_dates)
         except Exception as e:
             logger.warning("Memory health check failed: %s", e)
 
@@ -382,6 +462,7 @@ class ConsolidateRequest(BaseModel):
 async def consolidate_memories(
     body: ConsolidateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
     Consolidate multiple memories into one — PRD-77 Phase 3.
@@ -398,18 +479,22 @@ async def consolidate_memories(
     if not mem0:
         return {"success": False, "error": "Memory service unavailable"}
 
-    user_id = _mem0_user_id(ctx.workspace_id)
-
-    # Fetch all target memories
+    # Fetch target memories across all tiers
     try:
-        all_mems = mem0.get_all(user_id=user_id, limit=500)
-        items = all_mems if isinstance(all_mems, list) else []
+        user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
 
         id_set = set(body.memory_ids)
-        targets = [
-            m for m in items
-            if str(m.get("id", "")) in id_set
-        ]
+        targets: List[Dict] = []
+        seen: set = set()
+
+        for uid in user_ids:
+            items_raw = mem0.get_all(user_id=uid, limit=500)
+            items = items_raw if isinstance(items_raw, list) else []
+            for m in items:
+                mid = str(m.get("id", ""))
+                if mid in id_set and mid not in seen:
+                    seen.add(mid)
+                    targets.append(m)
 
         if len(targets) < 2:
             return {"success": False, "error": f"Found only {len(targets)} of {len(body.memory_ids)} memories"}
@@ -448,11 +533,12 @@ async def consolidate_memories(
             logger.warning("LLM summarisation failed, falling back to merge: %s", e)
             merged_content = "\n\n".join(c for c in contents if c)
 
-    # Store the consolidated memory
+    # Store the consolidated memory under global tier
     try:
+        global_user_id = _mem0_user_id(ctx.workspace_id)
         mem0.add(
             messages=[{"role": "system", "content": merged_content}],
-            user_id=user_id,
+            user_id=global_user_id,
             metadata={"source": "consolidation", "merged_from": len(targets)},
         )
     except Exception as e:
