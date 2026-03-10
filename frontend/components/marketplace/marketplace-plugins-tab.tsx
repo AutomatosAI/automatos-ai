@@ -637,6 +637,8 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
             setSelectedPluginId(null)
           }
         }}
+        isAdmin={isAdmin}
+        onApproved={fetchAllPlugins}
       />
 
       {/* GitHub Import Modal (admin only) */}
