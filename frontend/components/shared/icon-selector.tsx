@@ -10,9 +10,8 @@ import { Button } from '@/components/ui/button';
 import { SearchInput, PremiumIcon } from '@/components/shared';
 import { Settings2, X } from 'lucide-react';
 
-// Using require to bypass complex async fetch configurations. 
-// Since it's a fixed local asset JSON, this works cleanly on the client.
-const iconRegistry = require('@/config/iconRegistry.json');
+// Import the statically generated JSON registry
+import iconRegistry from '@/config/iconRegistry.json';
 
 export interface IconSelectorProps {
     value?: string | null;
