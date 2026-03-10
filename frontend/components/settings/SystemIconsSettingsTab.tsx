@@ -34,7 +34,7 @@ const DEFAULT_CATEGORIES = [
     { id: 'communication_skill', label: 'Communication Skills', type: 'skill' },
     { id: 'analytical', label: 'Analytical Skills', type: 'skill' },
     { id: 'creative', label: 'Creative Skills', type: 'skill' },
-    { id: 'system', label: 'System \u0026 Infrastructure', type: 'skill' },
+    { id: 'system', label: 'System & Infrastructure', type: 'skill' },
 ];
 
 export function SystemIconsSettingsTab() {
