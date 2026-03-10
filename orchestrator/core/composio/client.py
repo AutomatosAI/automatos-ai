@@ -534,19 +534,44 @@ class ComposioClient:
                         or 0
                     )
 
+                # Logo: nested under meta (Pydantic model or dict)
+                logo_url = None
+                if hasattr(app, "meta") and app.meta is not None:
+                    if isinstance(app.meta, dict):
+                        logo_url = app.meta.get("logo")
+                    else:
+                        logo_url = getattr(app.meta, "logo", None)
+
+                # Categories: top-level List[str] on AppModel, fallback to meta
+                categories = getattr(app, "categories", None) or []
+                if not categories and hasattr(app, "meta"):
+                    meta_cats = (
+                        app.meta.get("categories", [])
+                        if isinstance(app.meta, dict)
+                        else getattr(app.meta, "categories", [])
+                    )
+                    categories = [
+                        (c.name if hasattr(c, "name") else str(c))
+                        for c in (meta_cats or [])
+                    ]
+                else:
+                    categories = [str(c) for c in categories]
+
                 results.append(
                     {
                         "name": app.slug,  # Use slug as the identifier (e.g. 'github')
                         "display_name": app.name,
                         "description": description,
-                        "logo_url": app.meta.logo if hasattr(app, "meta") else None,
-                        "categories": [c.name for c in app.meta.categories] if hasattr(app, "meta") and app.meta.categories else [],
+                        "logo_url": logo_url,
+                        "categories": categories,
                         "auth_schemes": app.auth_schemes or [],
                         "action_count": action_count,
                         "triggers": normalized_triggers,
                         "trigger_count": len(normalized_triggers),
                     }
                 )
+            logos_found = sum(1 for r in results if r.get("logo_url"))
+            logger.info(f"Composio apps: {len(results)} total, {logos_found} with logos")
             return results
         except Exception as e:
             logger.error(f"Failed to get available apps: {e}")

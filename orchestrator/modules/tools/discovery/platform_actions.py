@@ -17,6 +17,17 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_read_actions(registry)
     _register_write_actions(registry)
     _register_infra_actions(registry)
+    _register_chat_search_actions(registry)
+    _register_monitoring_actions(registry)
+    _register_self_management_actions(registry)
+    _register_marketplace_actions(registry)
+    _register_report_actions(registry)
+    _register_scheduling_actions(registry)
+    _register_memory_browse_actions(registry)
+
+    # Workspace tools (file I/O, grep, exec, git)
+    from .workspace_actions import register_workspace_actions
+    register_workspace_actions(registry)
 
 
 def _register_read_actions(registry: ActionRegistry) -> None:
@@ -300,6 +311,150 @@ def _register_read_actions(registry: ActionRegistry) -> None:
             "what apps are connected?",
             "list my integrations",
             "show connected services",
+        ],
+    ))
+
+    # ── Visibility / Discovery ─────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_list_tools",
+        description=(
+            "List all available tools — platform actions, Composio integrations, "
+            "and internal tools. Grouped by category with descriptions and connection "
+            "status. Use when the user asks what tools are available, what can be done, "
+            "or when Auto needs to discover capabilities for workflow design."
+        ),
+        category="discovery",
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["platform", "composio", "all"],
+                    "description": "Filter by tool type. Defaults to 'all'.",
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Fuzzy search across tool names and descriptions.",
+                },
+                "connected_only": {
+                    "type": "boolean",
+                    "description": "Only show tools with active connections. Defaults to false.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["tools", "discovery", "capabilities", "integrations"],
+        examples=[
+            "what tools can I use?",
+            "list my tools",
+            "what integrations are available?",
+            "show connected tools",
+            "search tools for github",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_llms",
+        description=(
+            "List available LLM models from the OpenRouter model cache with costs, "
+            "capabilities, and context windows. Filterable by capability (tools, vision, "
+            "reasoning) and tier (free, budget, mid, premium). Use when the user asks "
+            "about available models, pricing, or model capabilities."
+        ),
+        category="discovery",
+        parameters={
+            "type": "object",
+            "properties": {
+                "capability": {
+                    "type": "string",
+                    "enum": ["tools", "vision", "reasoning", "json_mode"],
+                    "description": "Filter by model capability.",
+                },
+                "tier": {
+                    "type": "string",
+                    "enum": ["free", "budget", "mid", "premium"],
+                    "description": "Filter by pricing tier.",
+                },
+                "sort_by": {
+                    "type": "string",
+                    "enum": ["cost", "context_length", "name"],
+                    "description": "Sort results. Defaults to 'cost'.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return. Defaults to 20, max 50.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["models", "llm", "discovery", "pricing", "openrouter"],
+        examples=[
+            "what models are available?",
+            "list LLMs",
+            "cheapest model with tool support",
+            "show models with vision capability",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_datasources",
+        description=(
+            "List all data sources — document collections (RAG knowledge base) and "
+            "database connections (NL2SQL). Shows document counts, chunk totals, file "
+            "types, and database connection details. Use when the user asks about their "
+            "data, documents, databases, or what knowledge is available."
+        ),
+        category="discovery",
+        parameters={
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["documents", "databases", "all"],
+                    "description": "Filter by data source type. Defaults to 'all'.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["data", "documents", "databases", "rag", "nl2sql", "discovery"],
+        examples=[
+            "what data sources do I have?",
+            "show my databases",
+            "what documents are indexed?",
+            "list datasources",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_workspace_stats",
+        description=(
+            "Get workspace usage statistics — LLM usage, top models, top agents, "
+            "routing distribution, and resource counts. Use when the user asks for "
+            "a dashboard view, usage summary, or platform health check."
+        ),
+        category="analytics",
+        parameters={
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string",
+                    "enum": ["today", "7d", "30d"],
+                    "description": "Time period for stats. Defaults to '7d'.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["stats", "analytics", "usage", "dashboard"],
+        examples=[
+            "show workspace stats",
+            "platform usage summary",
+            "what's been happening this week?",
+            "show me agent activity",
         ],
     ))
 
@@ -784,4 +939,1138 @@ def _register_infra_actions(registry: ActionRegistry) -> None:
             "what services are running?",
             "list railway services",
         ],
+    ))
+
+
+def _register_chat_search_actions(registry: ActionRegistry) -> None:
+    """Register chat history search tools."""
+
+    registry.register(ActionDefinition(
+        name="platform_search_chat_history",
+        description=(
+            "Search across all past chat conversations by keyword. Returns matching "
+            "messages with the chat title, role (user/assistant), content snippet, and "
+            "timestamp. Use when the user asks about previous conversations, wants to "
+            "find something they discussed before, or references past chats."
+        ),
+        category="chat",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Keyword or phrase to search for in chat messages.",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "How far back to search in days (default 30, max 365).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return (default 20, max 100).",
+                },
+            },
+            "required": ["query"],
+        },
+        permission_level="read",
+        tags=["chat", "history", "search", "conversation"],
+        examples=[
+            "what did we talk about yesterday?",
+            "search my chats for 'Jira'",
+            "find conversations about the deployment",
+            "did I mention anything about Redis?",
+        ],
+    ))
+
+
+    registry.register(ActionDefinition(
+        name="platform_search_memory",
+        description=(
+            "Search the agent's long-term memory (Mem0) for stored facts, preferences, "
+            "and past context. Searches both global workspace memories and per-agent "
+            "memories. Use when the user asks what the system remembers, or to look up "
+            "specific stored facts."
+        ),
+        category="memory",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to search for in memory.",
+                },
+                "agent_id": {
+                    "type": "integer",
+                    "description": "Optional: search memories for a specific agent only.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 10, max 50).",
+                },
+            },
+            "required": ["query"],
+        },
+        permission_level="read",
+        tags=["memory", "search", "recall", "context"],
+        examples=[
+            "what do you remember about me?",
+            "search memory for Slack channel",
+            "what's stored about the deployment?",
+            "do you remember my name?",
+        ],
+    ))
+
+
+def _register_monitoring_actions(registry: ActionRegistry) -> None:
+    """Register PRD-73 monitoring/observability tools (Loki, Prometheus, Alerts)."""
+
+    registry.register(ActionDefinition(
+        name="platform_query_loki_logs",
+        description=(
+            "Search application logs stored in Loki (the centralized log system). "
+            "Query by service, severity level, keyword, or time range. Returns structured "
+            "log entries with timestamps. Much more powerful than Railway deploy logs — "
+            "this searches ALL log history (7-day retention) across all services."
+        ),
+        category="monitoring",
+        parameters={
+            "type": "object",
+            "properties": {
+                "service": {
+                    "type": "string",
+                    "description": (
+                        "Service to query logs from: 'automatos-backend', 'agent-opt-worker', "
+                        "'log-relay', 'prometheus', 'grafana', 'loki', 'alertmanager'."
+                    ),
+                },
+                "level": {
+                    "type": "string",
+                    "description": "Filter by log level: debug, info, warning, error, critical.",
+                },
+                "search": {
+                    "type": "string",
+                    "description": (
+                        "Free-text search within log messages. "
+                        "Examples: 'timeout', 'agent_id=147', 'memory', 'heartbeat'."
+                    ),
+                },
+                "minutes": {
+                    "type": "integer",
+                    "description": "How far back to search in minutes (default 60, max 10080 = 7 days).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max log entries to return (default 100, max 500).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["logs", "monitoring", "loki", "observability", "debugging"],
+        examples=[
+            "show me error logs from the last hour",
+            "search logs for 'heartbeat' in the backend",
+            "get warning and error logs from agent-opt-worker",
+            "find logs mentioning agent 147",
+            "check for timeout errors in the last 30 minutes",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_query_prometheus",
+        description=(
+            "Query Prometheus metrics for real-time system health. Supports PromQL queries "
+            "or preset health checks. Use to check service uptime, error rates, response "
+            "times, database connections, Redis memory, and more."
+        ),
+        category="monitoring",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "PromQL query string OR a preset name. "
+                        "Presets: 'health' (all services up/down), 'error_rate' (HTTP 5xx rate), "
+                        "'latency' (p95 response time), 'postgres' (DB connections + cache hit), "
+                        "'redis' (memory + clients + latency), 'all' (full health dashboard). "
+                        "Or provide raw PromQL like 'rate(automatos_http_requests_total[5m])'."
+                    ),
+                },
+                "range_minutes": {
+                    "type": "integer",
+                    "description": "Time range for range queries in minutes (default 15).",
+                },
+            },
+            "required": ["query"],
+        },
+        permission_level="read",
+        tags=["metrics", "monitoring", "prometheus", "health", "observability"],
+        examples=[
+            "check if all services are healthy",
+            "what's the current error rate?",
+            "show me Redis memory usage",
+            "how many Postgres connections are active?",
+            "what's the p95 response time?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_get_alerts",
+        description=(
+            "Get infrastructure alerts from the monitoring system. Shows firing, "
+            "resolved, and recent alerts with severity, service, and details. "
+            "Use to understand current system health issues."
+        ),
+        category="monitoring",
+        parameters={
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "description": "Filter by alert status: 'firing', 'resolved', 'all' (default 'all').",
+                },
+                "severity": {
+                    "type": "string",
+                    "description": "Filter by severity: 'critical', 'warning', 'info'.",
+                },
+                "hours": {
+                    "type": "integer",
+                    "description": "Look back this many hours (default 24, max 168 = 7 days).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["alerts", "monitoring", "infrastructure", "health"],
+        examples=[
+            "are there any firing alerts?",
+            "show me critical alerts from the last 24 hours",
+            "what alerts fired this week?",
+            "any infrastructure issues right now?",
+        ],
+    ))
+
+
+def _register_self_management_actions(registry: ActionRegistry) -> None:
+    """Register self-management actions — execute recipes, manage docs, health, activity."""
+
+    # ── Recipe Execution ─────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_execute_recipe",
+        description=(
+            "Trigger a recipe run asynchronously. Returns an execution_id immediately "
+            "that can be used to check status later. Use when the user asks to run, "
+            "execute, or trigger a recipe or automation."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "ID of the recipe to execute.",
+                },
+                "recipe_name": {
+                    "type": "string",
+                    "description": "Name of the recipe to execute (alternative to ID).",
+                },
+                "input_data": {
+                    "type": "object",
+                    "description": "Input data to pass to the recipe (key-value pairs).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["recipes", "execute", "run", "write"],
+        examples=[
+            "run the daily digest recipe",
+            "execute recipe 5",
+            "trigger the bug triage automation",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_get_recipe_execution",
+        description=(
+            "Check the status and results of a recipe execution. Returns execution "
+            "status, step results summary, and timing. Use when the user asks about "
+            "a recipe run's status or results."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "execution_id": {
+                    "type": "string",
+                    "description": "The execution_id returned from platform_execute_recipe.",
+                },
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "Recipe ID to list recent executions for (if no execution_id).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["recipes", "execution", "status", "results"],
+        examples=[
+            "what's the status of that recipe run?",
+            "check recipe execution abc123",
+            "did the recipe run successfully?",
+        ],
+    ))
+
+    # ── System Health ────────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_get_system_health",
+        description=(
+            "Check system health — database, Redis, API, RAG pipeline, and server "
+            "metrics (CPU, memory, disk). Use when the user asks if the system is "
+            "healthy, working, or wants a status check."
+        ),
+        category="infrastructure",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        permission_level="read",
+        tags=["health", "status", "infrastructure", "monitoring"],
+        examples=[
+            "is the system healthy?",
+            "check system health",
+            "is everything working?",
+            "platform health check",
+        ],
+    ))
+
+    # ── Document Management ──────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_delete_document",
+        description=(
+            "Delete a document from the knowledge base. Cleans up the S3 file, "
+            "vector embeddings, and database record. This is permanent and cannot "
+            "be undone. Use when the user explicitly asks to delete a document."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "document_id": {
+                    "type": "integer",
+                    "description": "ID of the document to delete.",
+                },
+            },
+            "required": ["document_id"],
+        },
+        permission_level="destructive",
+        requires_confirmation=True,
+        tags=["documents", "delete", "destructive"],
+        examples=[
+            "delete document 5",
+            "remove that document from the knowledge base",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_reprocess_document",
+        description=(
+            "Re-process a document — regenerate chunks and vector embeddings. "
+            "Use when the user asks to re-embed, reindex, or reprocess a document "
+            "in the knowledge base."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "document_id": {
+                    "type": "integer",
+                    "description": "ID of the document to reprocess.",
+                },
+            },
+            "required": ["document_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["documents", "reprocess", "embed", "write"],
+        examples=[
+            "reprocess document 3",
+            "re-embed document 7",
+            "reindex that document",
+            "regenerate chunks for document 10",
+        ],
+    ))
+
+    # ── Recipe Deletion ──────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_delete_recipe",
+        description=(
+            "Delete a recipe with full cleanup — trigger subscriptions, scheduler, "
+            "and memory. System recipes cannot be deleted. This is permanent. "
+            "Use only when the user explicitly asks to delete a recipe."
+        ),
+        category="recipes",
+        parameters={
+            "type": "object",
+            "properties": {
+                "recipe_id": {
+                    "type": "integer",
+                    "description": "ID of the recipe to delete.",
+                },
+                "recipe_name": {
+                    "type": "string",
+                    "description": "Name of the recipe to delete (alternative to ID).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="destructive",
+        requires_confirmation=True,
+        tags=["recipes", "delete", "destructive"],
+        examples=[
+            "delete the test recipe",
+            "remove recipe 5",
+            "delete automation 3",
+        ],
+    ))
+
+    # ── Activity Feed ────────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_get_activity_feed",
+        description=(
+            "Get a unified activity feed — recent chats, recipe runs, and routines. "
+            "Shows what's been happening in the workspace. Use when the user asks "
+            "about recent activity, what's been running, or wants an activity log."
+        ),
+        category="analytics",
+        parameters={
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string",
+                    "enum": ["1d", "7d", "30d", "90d"],
+                    "description": "Time period to look back. Defaults to '7d'.",
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Comma-separated activity types: 'chat', 'recipe', 'routine'. Defaults to all.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of items to return. Defaults to 20, max 50.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["activity", "feed", "analytics", "history"],
+        examples=[
+            "what's been happening?",
+            "show recent activity",
+            "activity feed for the last week",
+            "what has been running?",
+        ],
+    ))
+
+
+# ══════════════════════════════════════════════════════════════════
+# MARKETPLACE DISCOVERY & WORKSPACE INVENTORY (PRD-71)
+# ══════════════════════════════════════════════════════════════════
+
+def _register_marketplace_actions(registry: ActionRegistry) -> None:
+    """Register marketplace discovery, workspace inventory, and install actions."""
+
+    # ── Marketplace Discovery (read) ────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_browse_marketplace_plugins",
+        description=(
+            "Browse or search the marketplace for approved plugins. Returns plugin name, "
+            "slug, description, category, skills count, and whether it's already enabled "
+            "in this workspace. Use when the user wants to discover new plugins."
+        ),
+        category="marketplace",
+        parameters={
+            "type": "object",
+            "properties": {
+                "search": {
+                    "type": "string",
+                    "description": "Search term to filter plugins by name or description.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Category slug to filter by (e.g., 'development', 'devops').",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return. Defaults to 20.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["marketplace", "plugins", "browse", "search"],
+        examples=[
+            "browse marketplace plugins",
+            "search plugins for code review",
+            "what plugins are available?",
+            "find a plugin for testing",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_browse_marketplace_skills",
+        description=(
+            "Browse or search the global skills catalog (marketplace skills). Returns "
+            "skill name, description, category, estimated token cost, and whether it's "
+            "already enabled in this workspace. Use when the user wants to discover skills."
+        ),
+        category="marketplace",
+        parameters={
+            "type": "object",
+            "properties": {
+                "search": {
+                    "type": "string",
+                    "description": "Search term to filter skills by name or description.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Category to filter by (e.g., 'cognitive', 'technical').",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return. Defaults to 20.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["marketplace", "skills", "browse", "search"],
+        examples=[
+            "browse marketplace skills",
+            "search skills for summarization",
+            "what skills are available?",
+            "find a skill for code review",
+        ],
+    ))
+
+    # ── Workspace Inventory (read) ──────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_list_workspace_plugins",
+        description=(
+            "List all plugins currently enabled for this workspace. Returns plugin name, "
+            "slug, description, category, skills count, and when it was enabled. "
+            "Use when the user asks what plugins they have installed."
+        ),
+        category="workspace",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        permission_level="read",
+        tags=["workspace", "plugins", "inventory", "list"],
+        examples=[
+            "what plugins do I have?",
+            "list my plugins",
+            "show enabled plugins",
+            "what plugins are installed?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_workspace_skills",
+        description=(
+            "List all skills currently enabled for this workspace. Returns skill name, "
+            "description, category, estimated token cost, and when it was enabled. "
+            "Use when the user asks what skills they have installed."
+        ),
+        category="workspace",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        permission_level="read",
+        tags=["workspace", "skills", "inventory", "list"],
+        examples=[
+            "what skills do I have?",
+            "list my skills",
+            "show enabled skills",
+            "what skills are installed?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_workspace_models",
+        description=(
+            "List all LLM models installed for this workspace, including default models. "
+            "Returns model ID, display name, provider, costs, context length, capabilities, "
+            "and source. Use when the user asks what models they have available."
+        ),
+        category="workspace",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        permission_level="read",
+        tags=["workspace", "models", "llm", "inventory", "list"],
+        examples=[
+            "what models do I have?",
+            "list my models",
+            "show installed models",
+            "what LLMs are available in my workspace?",
+        ],
+    ))
+
+    # ── Installation (write) ────────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_install_plugin",
+        description=(
+            "Enable a marketplace plugin for this workspace. Accepts plugin_id (UUID) "
+            "or plugin_slug. The plugin must be approved and active. Idempotent — "
+            "re-enabling an already-enabled plugin is a no-op."
+        ),
+        category="marketplace",
+        parameters={
+            "type": "object",
+            "properties": {
+                "plugin_id": {
+                    "type": "string",
+                    "description": "UUID of the plugin to install.",
+                },
+                "plugin_slug": {
+                    "type": "string",
+                    "description": "Slug of the plugin to install (alternative to plugin_id).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        tags=["marketplace", "plugins", "install", "enable"],
+        examples=[
+            "install the code review plugin",
+            "enable plugin code-review",
+            "add the testing plugin",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_install_skill",
+        description=(
+            "Enable a marketplace skill for this workspace. Accepts skill_id (int) "
+            "or skill_name. The skill must be a global marketplace skill (not workspace-specific) "
+            "and active. Idempotent — re-enabling an already-enabled skill is a no-op."
+        ),
+        category="marketplace",
+        parameters={
+            "type": "object",
+            "properties": {
+                "skill_id": {
+                    "type": "integer",
+                    "description": "ID of the skill to install.",
+                },
+                "skill_name": {
+                    "type": "string",
+                    "description": "Name of the skill to install (alternative to skill_id).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        tags=["marketplace", "skills", "install", "enable"],
+        examples=[
+            "install the summarization skill",
+            "enable skill code-review",
+            "add the analysis skill",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_install_model",
+        description=(
+            "Install an LLM model for this workspace from the OpenRouter catalog. "
+            "Accepts a model_id string (e.g., 'anthropic/claude-sonnet-4-20250514'). "
+            "Auto-creates the LLM registry entry from the OpenRouter cache if needed. "
+            "Idempotent — re-installing re-activates an inactive install."
+        ),
+        category="marketplace",
+        parameters={
+            "type": "object",
+            "properties": {
+                "model_id": {
+                    "type": "string",
+                    "description": "OpenRouter model ID (e.g., 'anthropic/claude-sonnet-4-20250514').",
+                },
+            },
+            "required": ["model_id"],
+        },
+        permission_level="write",
+        tags=["marketplace", "models", "llm", "install", "enable"],
+        examples=[
+            "install anthropic/claude-sonnet-4-20250514",
+            "add model google/gemini-2.5-pro",
+            "enable openai/gpt-4o",
+        ],
+    ))
+
+    # ── Agent Assignment (write) ────────────────────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_assign_tool_to_agent",
+        description=(
+            "Assign a Composio tool/app to an agent. The agent will then be able to "
+            "use this tool when processing requests. Accepts agent_id or agent_name, "
+            "and app_name (Composio app identifier). Idempotent — re-activates if "
+            "previously deactivated."
+        ),
+        category="agents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "integer",
+                    "description": "ID of the agent to assign the tool to.",
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": "Name of the agent (alternative to agent_id).",
+                },
+                "app_name": {
+                    "type": "string",
+                    "description": "Composio app name to assign (e.g., 'GMAIL', 'GITHUB', 'SLACK').",
+                },
+            },
+            "required": ["app_name"],
+        },
+        permission_level="write",
+        tags=["agents", "tools", "assign", "composio"],
+        examples=[
+            "assign GMAIL to my email agent",
+            "add GITHUB tool to the dev agent",
+            "give agent 5 access to SLACK",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_assign_skill_to_agent",
+        description=(
+            "Assign a skill to an agent. The skill must be enabled in the workspace "
+            "or be a global marketplace skill. Accepts agent_id or agent_name, and "
+            "skill_id or skill_name. Idempotent."
+        ),
+        category="agents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "integer",
+                    "description": "ID of the agent to assign the skill to.",
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": "Name of the agent (alternative to agent_id).",
+                },
+                "skill_id": {
+                    "type": "integer",
+                    "description": "ID of the skill to assign.",
+                },
+                "skill_name": {
+                    "type": "string",
+                    "description": "Name of the skill to assign (alternative to skill_id).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        tags=["agents", "skills", "assign"],
+        examples=[
+            "assign the summarization skill to my research agent",
+            "add code review skill to agent 3",
+            "give the analysis skill to the data agent",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_assign_plugin_to_agent",
+        description=(
+            "Assign a marketplace plugin to an agent. The plugin must be enabled in "
+            "the workspace first. Accepts agent_id or agent_name, and plugin_id or "
+            "plugin_slug. Idempotent."
+        ),
+        category="agents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "integer",
+                    "description": "ID of the agent to assign the plugin to.",
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": "Name of the agent (alternative to agent_id).",
+                },
+                "plugin_id": {
+                    "type": "string",
+                    "description": "UUID of the plugin to assign.",
+                },
+                "plugin_slug": {
+                    "type": "string",
+                    "description": "Slug of the plugin to assign (alternative to plugin_id).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        tags=["agents", "plugins", "assign"],
+        examples=[
+            "assign the code review plugin to my dev agent",
+            "add plugin testing to agent 5",
+            "give the devops plugin to the deployment agent",
+        ],
+    ))
+
+    # ── Agent Heartbeat Configuration (write) ───────────────────────
+
+    registry.register(ActionDefinition(
+        name="platform_configure_agent_heartbeat",
+        description=(
+            "Configure or update the heartbeat schedule for an agent. Controls how often "
+            "the agent runs periodic checks, what it checks, active hours, and proactive "
+            "behavior. Set enabled=false to disable the heartbeat entirely."
+        ),
+        category="agents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "integer",
+                    "description": "ID of the agent to configure heartbeat for.",
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": "Name of the agent (alternative to agent_id).",
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Enable or disable the heartbeat. Defaults to true.",
+                },
+                "interval_minutes": {
+                    "type": "integer",
+                    "description": "How often the heartbeat runs, in minutes. Options: 15, 30, 60, 120, 240, 480 (8hr), 1440 (daily), 10080 (weekly). Defaults to 60.",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "What the agent should check on each heartbeat tick (e.g., 'Check calendar for upcoming events').",
+                },
+                "auto_act": {
+                    "type": "boolean",
+                    "description": "Whether the agent can take action on findings or just report. Defaults to false.",
+                },
+                "active_hours_start": {
+                    "type": "string",
+                    "description": "Start of active window in HH:MM format (e.g., '08:00'). Heartbeats only run within active hours.",
+                },
+                "active_hours_end": {
+                    "type": "string",
+                    "description": "End of active window in HH:MM format (e.g., '20:00').",
+                },
+                "proactive_level": {
+                    "type": "string",
+                    "enum": ["silent", "notify", "act_notify", "autonomous"],
+                    "description": "How proactive the agent should be. silent=log only, notify=report to user, act_notify=act and report, autonomous=act independently.",
+                },
+                "notification_channel": {
+                    "type": "string",
+                    "description": "Where to send heartbeat notifications (e.g., 'slack', 'email', 'in_app').",
+                },
+                "checklist": {
+                    "type": "string",
+                    "description": "Checklist of items for the agent to review each tick (newline-separated).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        tags=["agents", "heartbeat", "schedule", "configure"],
+        examples=[
+            "enable heartbeat for the communication agent every 30 minutes",
+            "set agent heartbeat to check calendar every hour",
+            "disable heartbeat for agent 5",
+            "configure sentinel to run every 15 minutes with auto_act",
+            "set active hours 9am to 6pm for the monitoring agent",
+        ],
+    ))
+
+
+def _register_report_actions(registry: ActionRegistry) -> None:
+    """Register agent report actions (PRD-76)."""
+
+    registry.register(ActionDefinition(
+        name="platform_submit_report",
+        description=(
+            "Submit a report after completing a task or heartbeat cycle. Writes the "
+            "report file to workspace storage and records metadata for tracking. "
+            "Call this after every heartbeat run, research completion, or deliverable. "
+            "The report will be visible on the Activity page and the agent's profile."
+        ),
+        category="reports",
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Short title for the report (e.g. 'Platform Health Check', 'Weekly Newsletter Draft').",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full report content in markdown format.",
+                },
+                "report_type": {
+                    "type": "string",
+                    "enum": ["standup", "research", "incident", "summary", "delivery", "audit"],
+                    "description": "Category: standup (routine check), research (deep-dive), incident (problem), summary (rollup), delivery (completed work), audit (compliance).",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["ok", "warning", "critical", "info"],
+                    "description": "Overall status. ok=nothing to worry about, warning/critical=needs attention, info=informational.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "One-line summary shown in activity feed cards (auto-generated from content if omitted).",
+                },
+                "metrics": {
+                    "type": "object",
+                    "description": "Structured metrics relevant to this report (e.g. { errors_found: 2, services_checked: 5, cost: 0.003 }).",
+                },
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "file_path": {"type": "string", "description": "Relative workspace path to the attachment file."},
+                            "file_type": {"type": "string"},
+                        },
+                    },
+                    "description": "Additional files produced alongside this report (images, data files, etc.).",
+                },
+            },
+            "required": ["title", "content", "report_type", "status"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["reports", "write", "heartbeat", "standup"],
+        examples=[
+            "submit a health check report",
+            "file a status report after my heartbeat run",
+            "create an incident report about the API errors",
+            "submit research findings",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_get_latest_report",
+        description=(
+            "Get the most recent report from a specific agent. Returns the report "
+            "metadata and full content. Use to read another agent's latest output "
+            "before taking action (e.g. reading research before sending a newsletter)."
+        ),
+        category="reports",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_name": {
+                    "type": "string",
+                    "description": "Name of the agent whose report to fetch.",
+                },
+                "agent_id": {
+                    "type": "integer",
+                    "description": "ID of the agent (alternative to agent_name).",
+                },
+                "report_type": {
+                    "type": "string",
+                    "enum": ["standup", "research", "incident", "summary", "delivery", "audit"],
+                    "description": "Filter by report type (optional).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["reports", "read", "cross-agent"],
+        examples=[
+            "get the latest report from sentinel",
+            "what did the researcher find?",
+            "read the market researcher's latest research report",
+            "get the most recent standup from the monitoring agent",
+        ],
+    ))
+
+
+def _register_scheduling_actions(registry: ActionRegistry) -> None:
+    """Register agent self-scheduling actions (PRD-77)."""
+
+    registry.register(ActionDefinition(
+        name="platform_schedule_task",
+        description=(
+            "Schedule a follow-up task for yourself or another agent. "
+            "One-shot tasks run once at a specific time. Recurring tasks use "
+            "cron expressions (e.g. '0 9 * * 1' = every Monday at 9am). "
+            "Use this when you discover something that needs revisiting later."
+        ),
+        category="scheduling",
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_type": {
+                    "type": "string",
+                    "enum": ["one_shot", "recurring"],
+                    "description": "one_shot runs once at schedule time; recurring uses cron.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "What the task should accomplish. Be specific — this becomes the opening message to the target agent.",
+                },
+                "schedule": {
+                    "type": "string",
+                    "description": "ISO datetime for one_shot (e.g. '2026-03-11T09:00:00Z'), cron for recurring (e.g. '0 9 * * 1').",
+                },
+                "target_agent_name": {
+                    "type": "string",
+                    "description": "Name of the agent to run the task (defaults to yourself).",
+                },
+                "max_runs": {
+                    "type": "integer",
+                    "description": "For recurring: max number of executions before auto-cancel. Omit for unlimited.",
+                },
+            },
+            "required": ["task_type", "description", "schedule"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["scheduling", "write", "follow-up", "cron"],
+        examples=[
+            "schedule a follow-up check for tomorrow morning",
+            "remind me to review this in 3 days",
+            "set up a weekly check every Monday at 9am",
+            "schedule the researcher to update competitor data weekly",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_scheduled_tasks",
+        description=(
+            "List all scheduled tasks for the workspace. Shows pending, active, "
+            "and completed tasks with their schedules and run history."
+        ),
+        category="scheduling",
+        parameters={
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["active", "paused", "completed", "cancelled", "failed"],
+                    "description": "Filter by task status (optional).",
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": "Filter by agent name (optional).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["scheduling", "read"],
+        examples=[
+            "what tasks are scheduled",
+            "show my scheduled tasks",
+            "list active scheduled tasks",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_cancel_scheduled_task",
+        description="Cancel a scheduled task by ID.",
+        category="scheduling",
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "ID of the task to cancel.",
+                },
+            },
+            "required": ["task_id"],
+        },
+        permission_level="write",
+        requires_confirmation=True,
+        tags=["scheduling", "write", "destructive"],
+        examples=["cancel scheduled task 5", "stop that recurring task"],
+    ))
+
+
+def _register_memory_browse_actions(registry: ActionRegistry) -> None:
+    """Register memory browsing/management actions (PRD-77)."""
+
+    registry.register(ActionDefinition(
+        name="platform_browse_memories",
+        description=(
+            "Browse all stored memories for the workspace. Returns a paginated "
+            "list of memories with content, agent, creation date, and metadata."
+        ),
+        category="memory",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query for semantic search (optional).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return (default 20).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["memory", "read", "browse"],
+        examples=[
+            "show all memories",
+            "browse memories",
+            "what has been remembered",
+            "search memories for user preferences",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_delete_memory",
+        description="Delete a specific memory by ID.",
+        category="memory",
+        parameters={
+            "type": "object",
+            "properties": {
+                "memory_id": {
+                    "type": "string",
+                    "description": "ID of the memory to delete.",
+                },
+            },
+            "required": ["memory_id"],
+        },
+        permission_level="destructive",
+        requires_confirmation=True,
+        tags=["memory", "write", "destructive"],
+        examples=["delete memory abc-123", "remove that incorrect memory"],
     ))

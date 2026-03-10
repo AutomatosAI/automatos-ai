@@ -101,6 +101,53 @@ def validate_branch(branch: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+_COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def validate_commit_sha(sha: str) -> Tuple[bool, Optional[str]]:
+    """Validate a git commit SHA (7-40 hex chars).
+
+    Returns (True, None) on success or (False, reason) on failure.
+    """
+    if not sha or not isinstance(sha, str):
+        return False, "Commit SHA is required"
+    sha = sha.strip()
+    if not _COMMIT_SHA_PATTERN.match(sha):
+        return False, f"Invalid commit SHA format: {sha!r}"
+    return True, None
+
+
+def validate_skill_path(path: str, base_dir: str) -> Tuple[bool, Optional[str]]:
+    """Validate that a skill file path does not escape the base directory.
+
+    Prevents path traversal attacks (e.g. ../../../etc/passwd).
+
+    NOTE: Uses os.path.realpath which resolves symlinks via the filesystem.
+    For paths that may not exist on disk yet, this performs lexical
+    normalization only. Use this for LOCAL filesystem paths (git clones,
+    skill directories), NOT for S3 or remote paths.
+
+    Returns (True, None) on success or (False, reason) on failure.
+    """
+    import os
+    if not path or not isinstance(path, str):
+        return False, "Path is required"
+
+    # Reject obvious traversal patterns before hitting the filesystem
+    normalized = os.path.normpath(path)
+    if normalized.startswith("..") or os.sep + ".." + os.sep in normalized:
+        return False, f"Path contains traversal sequence: {path!r}"
+
+    # Resolve any symlinks / .. sequences
+    resolved = os.path.realpath(os.path.join(base_dir, path))
+    base_resolved = os.path.realpath(base_dir)
+
+    if not resolved.startswith(base_resolved + os.sep) and resolved != base_resolved:
+        return False, f"Path escapes base directory: {path!r}"
+
+    return True, None
+
+
 def build_git_clone_cmd(
     url: str,
     target_dir: str,

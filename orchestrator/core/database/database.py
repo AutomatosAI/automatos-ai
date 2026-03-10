@@ -85,6 +85,8 @@ engine = create_engine(
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,
+    pool_recycle=3600,  # Recycle connections every hour
+    pool_timeout=30,    # Wait up to 30 seconds for a connection
     echo=config.SQL_DEBUG
 )
 
@@ -128,82 +130,10 @@ def init_database():
         create_tables()
         
         with get_db_session() as db:
-            from core.models import SystemConfiguration, RAGConfiguration
+            # Initialize default data here
+            pass
             
-            # Create default system configurations
-            default_configs = [
-                {
-                    "config_key": "system.max_agents",
-                    "config_value": {"value": 100},
-                    "description": "Maximum number of agents allowed in the system"
-                },
-                {
-                    "config_key": "system.default_timeout",
-                    "config_value": {"value": 300},
-                    "description": "Default timeout for agent operations (seconds)"
-                },
-                {
-                    "config_key": "rag.default_model",
-                    "config_value": {"value": ""},
-                    "description": "Default embedding model for RAG (reads from system_settings.embedding_model at runtime)"
-                },
-                {
-                    "config_key": "workflow.max_concurrent",
-                    "config_value": {"value": 10},
-                    "description": "Maximum concurrent workflow executions"
-                }
-            ]
-            
-            for config_data in default_configs:
-                existing = db.query(SystemConfiguration).filter(
-                    SystemConfiguration.config_key == config_data["config_key"]
-                ).first()
-                
-                if not existing:
-                    config = SystemConfiguration(**config_data)
-                    db.add(config)
-            
-            # Create default RAG configuration
-            existing_rag = db.query(RAGConfiguration).filter(
-                RAGConfiguration.name == "default"
-            ).first()
-            
-            if not existing_rag:
-                default_rag = RAGConfiguration(
-                    name="default",
-                    embedding_model=None,  # Resolved from system_settings at runtime
-                    chunk_size=1000,
-                    chunk_overlap=200,
-                    retrieval_strategy="similarity",
-                    top_k=5,
-                    similarity_threshold=0.7,
-                    configuration={
-                        "max_tokens": 4000,
-                        "temperature": 0.7,
-                        "use_reranking": True
-                    },
-                    is_active=True,
-                    created_by="system"
-                )
-                db.add(default_rag)
-            
-            db.commit()
-
-            # PRD-58: Seed system prompts
-            try:
-                from core.seeds.seed_system_prompts import seed_system_prompts
-                seed_system_prompts(db)
-            except Exception as seed_err:
-                logger.warning(f"System prompt seeding skipped: {seed_err}")
-
-            logger.info("Database initialized with default data")
-            
+        logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         raise
-
-# Database event listeners for PostgreSQL
-# No special connection setup needed for PostgreSQL
-
-if __name__ == "__main__":
-    init_database()

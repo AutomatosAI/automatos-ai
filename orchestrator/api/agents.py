@@ -275,6 +275,7 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         is_system_agent=getattr(agent, 'is_system_agent', False) or False,
         slug=getattr(agent, 'slug', None),
         required_role=getattr(agent, 'required_role', None),
+        voice_profile_id=str(agent.voice_profile_id) if getattr(agent, 'voice_profile_id', None) else None,
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
@@ -675,6 +676,29 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestCont
         logger.error(f"Error adding agent skills: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@router.delete("/{agent_id}/skills/{skill_id}")
+async def remove_agent_skill(agent_id: int, skill_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
+    """Remove a single skill from an agent"""
+    try:
+        agent = db.query(Agent).options(joinedload(Agent.skills)).filter(
+            Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id
+        ).first()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        agent.skills = [s for s in agent.skills if s.id != skill_id]
+        db.commit()
+
+        _reindex_agent_embedding(agent, db)
+
+        return {"data": {"message": "Skill removed", "agent_id": agent_id, "skill_id": skill_id}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error removing skill from agent: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @router.put("/{agent_id}", response_model=AgentResponse)
 async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Update an existing agent"""
@@ -752,6 +776,14 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
                         )
                     )
         
+        # PRD-74: Voice profile assignment
+        if agent_update.voice_profile_id is not None:
+            from uuid import UUID as _UUID
+            try:
+                agent.voice_profile_id = _UUID(agent_update.voice_profile_id) if agent_update.voice_profile_id else None
+            except (ValueError, AttributeError):
+                agent.voice_profile_id = None
+
         db.commit()
         db.refresh(agent)
 

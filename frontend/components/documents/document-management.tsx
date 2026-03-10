@@ -35,6 +35,8 @@ import {
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PageHeader } from '@/components/shared/page-header'
+import { StatsBar } from '@/components/shared/stats-bar'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
 import { MultimodalKnowledgePanel } from '@/components/knowledge/MultimodalKnowledgePanel'
 import { DatabaseQueryExplorer } from '@/components/knowledge/DatabaseQueryExplorer'
@@ -381,28 +383,28 @@ export function DocumentManagement() {
         value: totalDocs.toString(),
         change: `+${Math.max(0, totalDocs - 2)} this month`,
         icon: FileText,
-        color: 'text-blue-400'
+        iconColor: 'text-[hsl(var(--info))]'
       },
       {
         label: 'Processed',
         value: processedDocs.toString(),
         change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
         icon: Database,
-        color: 'text-green-400'
+        iconColor: 'text-[hsl(var(--success))]'
       },
       {
         label: 'Storage Used',
         value: sizeDisplay,
         change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
         icon: FolderOpen,
-        color: 'text-orange-400'
+        iconColor: 'text-primary'
       },
       {
         label: 'Vector Chunks',
         value: typedDocuments.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
         change: '',
         icon: Database,
-        color: 'text-purple-400'
+        iconColor: 'text-[hsl(var(--agent))]'
       }
     ]
   }, [typedDocuments])
@@ -565,65 +567,26 @@ export function DocumentManagement() {
         className="hidden"
       />
       {/* Header */}
-      <motion.div
-        ref={ref}
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
-      >
-        <div>
-          <h1 data-testid="page-title" data-tour="documents-page-header" className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">
-            Knowledge <span className="gradient-text">Bases</span>
-          </h1>
-          <p className="text-muted-foreground text-sm md:text-lg">
-            Manage documents, code repositories, and knowledge sources
-          </p>
-        </div>
-
-        <Button
-          className="gradient-accent hover:opacity-90 transition-opacity shrink-0"
-          data-tour="documents-upload-btn"
-          onClick={() => setShowUploadModal(true)}
-          disabled={uploadDocumentMutation.isLoading}
-        >
-          <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
-          {uploadDocumentMutation.isLoading ? 'Uploading...' : 'Upload Documents'}
-        </Button>
-      </motion.div>
+      <div ref={ref}>
+        <PageHeader
+          title="Knowledge"
+          titleAccent="Bases"
+          subtitle="Manage documents, code repositories, and knowledge sources"
+          actions={
+            <Button
+              variant="outline"
+              onClick={() => setShowUploadModal(true)}
+              disabled={uploadDocumentMutation.isLoading}
+            >
+              <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
+              {uploadDocumentMutation.isLoading ? 'Uploading...' : 'Upload Documents'}
+            </Button>
+          }
+        />
+      </div>
 
       {/* Stats Overview */}
-      <motion.div
-        className="hidden md:grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={inView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.8, delay: 0.2 }}
-      >
-        {stats.map((stat, index) => (
-          <motion.div
-            key={stat.label}
-            className="glass-card p-4 card-glow hover:border-primary/20 transition-all duration-300"
-            initial={{ opacity: 0, y: 20 }}
-            animate={inView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.8, delay: index * 0.1 }}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
-                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-2xl font-bold leading-none">{stat.value}</div>
-                  <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
-                </div>
-              </div>
-              <div className="shrink-0 text-right text-xs text-green-400">
-                {stat.change}
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </motion.div>
+      <StatsBar stats={stats} />
 
       {/* Document Management Tabs */}
       <motion.div

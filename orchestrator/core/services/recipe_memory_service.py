@@ -138,10 +138,15 @@ class RecipeMemoryService:
             "errors": errors,
         }
 
-        logger.info(
-            f"Stored {len(stored_memories)} memories for execution {execution_id} "
-            f"({len(errors)} errors)"
-        )
+        if errors:
+            logger.warning(
+                f"Stored {len(stored_memories)} memories for execution {execution_id} "
+                f"({len(errors)} errors): {errors}"
+            )
+        else:
+            logger.info(
+                f"Stored {len(stored_memories)} memories for execution {execution_id}"
+            )
 
         return result
 
@@ -228,8 +233,15 @@ class RecipeMemoryService:
         text: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Store a memory in Mem0 via the client's add method."""
-        messages = [{"role": "assistant", "content": text}]
+        """Store a memory in Mem0 via the client's add method.
+
+        Uses a conversational User→Assistant format so the Mem0 LLM
+        can extract factual memories from the execution data.
+        """
+        messages = [
+            {"role": "user", "content": "Remember the following facts about this recipe execution."},
+            {"role": "assistant", "content": text},
+        ]
         return self.mem0.add(messages, user_id=user_id, metadata=metadata)
 
     def _build_recipe_memory(
@@ -238,50 +250,57 @@ class RecipeMemoryService:
         learnings: Optional[Dict[str, Any]],
         quality_data: Optional[Dict[str, Any]],
     ) -> str:
-        """Build a text summary of the execution for recipe-level memory storage."""
+        """Build a conversational summary of the execution for Mem0 fact extraction."""
         parts: List[str] = []
 
-        # Execution outcome
-        parts.append(f"Recipe execution {execution.execution_id}: status={execution.status}")
+        # Execution outcome as a fact
+        status = execution.status
+        parts.append(
+            f"The recipe execution {execution.execution_id} {status}"
+        )
 
         if execution.error_message:
-            parts.append(f"Error: {execution.error_message}")
+            parts.append(f"It failed with error: {execution.error_message}")
 
-        # Quality data
+        # Quality data as facts
         if quality_data:
-            score = quality_data.get("quality_score", "N/A")
-            grade = quality_data.get("grade", "N/A")
-            parts.append(f"Quality: score={score}, grade={grade}")
-
-            breakdown = quality_data.get("breakdown", {})
-            if breakdown:
-                dims = ", ".join(f"{k}={v}" for k, v in breakdown.items())
-                parts.append(f"Dimensions: {dims}")
+            score = quality_data.get("quality_score")
+            grade = quality_data.get("grade")
+            if score is not None:
+                parts.append(f"The quality score was {score} (grade {grade})")
 
             bottlenecks = quality_data.get("bottlenecks", [])
             if bottlenecks:
-                bn_descs = [b.get("description", "") for b in bottlenecks[:3]]
-                parts.append(f"Bottlenecks: {'; '.join(bn_descs)}")
+                bn_descs = [b.get("description", "") for b in bottlenecks[:3] if b.get("description")]
+                if bn_descs:
+                    parts.append(f"Bottlenecks identified: {'; '.join(bn_descs)}")
 
-        # Learnings
+        # Learnings as facts
         if learnings:
             patterns = learnings.get("patterns", [])
             if patterns:
-                pattern_descs = [p.get("description", "") for p in patterns[:5]]
-                parts.append(f"Patterns: {'; '.join(pattern_descs)}")
+                for p in patterns[:3]:
+                    desc = p.get("description", "")
+                    if desc:
+                        parts.append(desc)
 
             suggestions = learnings.get("suggestions", [])
             if suggestions:
-                sugg_descs = [s.get("description", "") for s in suggestions[:3]]
-                parts.append(f"Suggestions: {'; '.join(sugg_descs)}")
+                for s in suggestions[:2]:
+                    desc = s.get("description", "")
+                    if desc:
+                        parts.append(f"Suggestion: {desc}")
 
             perf = learnings.get("performance_metrics", {})
             if perf:
                 duration = perf.get("total_duration_ms", 0)
                 success_rate = perf.get("success_rate", 0)
-                parts.append(f"Performance: duration={duration}ms, success_rate={success_rate:.0%}")
+                parts.append(
+                    f"The execution took {duration / 1000:.1f} seconds "
+                    f"with a {success_rate:.0%} step success rate"
+                )
 
-        # Step summary
+        # Step summary as fact
         step_results = execution.step_results or []
         if step_results:
             completed = sum(
@@ -292,7 +311,10 @@ class RecipeMemoryService:
                 1 for sr in step_results
                 if isinstance(sr, dict) and sr.get("status") == "failed"
             )
-            parts.append(f"Steps: {len(step_results)} total, {completed} completed, {failed} failed")
+            parts.append(
+                f"Out of {len(step_results)} steps, {completed} completed "
+                f"and {failed} failed"
+            )
 
         return ". ".join(parts)
 
@@ -302,31 +324,32 @@ class RecipeMemoryService:
         step_result: Dict[str, Any],
         execution: RecipeExecution,
     ) -> str:
-        """Build a text summary of a single step for agent-scoped memory storage."""
+        """Build a conversational summary of a single step for Mem0 fact extraction."""
         parts: List[str] = []
 
         status = step_result.get("status", "unknown")
-        parts.append(f"Step {step_index + 1} in execution {execution.execution_id}: status={status}")
+        parts.append(
+            f"In execution {execution.execution_id}, step {step_index + 1} {status}"
+        )
 
         duration = step_result.get("duration_ms")
         if duration:
-            parts.append(f"Duration: {duration}ms")
+            parts.append(f"It took {duration / 1000:.1f} seconds")
 
         error = step_result.get("error")
         if error:
-            parts.append(f"Error: {error}")
+            parts.append(f"It failed with error: {error}")
 
         retries = step_result.get("retries", 0)
         if retries > 0:
-            parts.append(f"Required {retries} retries")
+            parts.append(f"It required {retries} retries before completing")
 
         output = step_result.get("output")
         if output:
-            # Store a truncated summary of the output
             output_str = str(output)
-            if len(output_str) > 200:
-                output_str = output_str[:200] + "..."
-            parts.append(f"Output: {output_str}")
+            if len(output_str) > 300:
+                output_str = output_str[:300] + "..."
+            parts.append(f"The step produced: {output_str}")
 
         return ". ".join(parts)
 

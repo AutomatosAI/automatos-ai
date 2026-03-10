@@ -16,6 +16,7 @@ from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
+from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class HeartbeatService:
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
+        self._owns_scheduler: bool = False  # True when we created our own scheduler (tests)
         self._running_ticks: Dict[str, bool] = {}  # track concurrent ticks
         self._max_concurrent_per_workspace = 5
 
@@ -38,24 +40,32 @@ class HeartbeatService:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self):
-        """Initialize scheduler and load all active heartbeat configs."""
-        jobstores = {"default": MemoryJobStore()}
+    async def start(self, scheduler: Optional[AsyncIOScheduler] = None):
+        """Initialize scheduler and load all active heartbeat configs.
 
-        # Try Redis if available, fall back to memory
-        try:
-            from config import config as app_config
+        Args:
+            scheduler: Shared APScheduler instance from UnifiedScheduler.
+                        If None, creates a local scheduler (useful for tests).
+        """
+        if scheduler:
+            self._scheduler = scheduler
+            self._owns_scheduler = False
+        else:
+            # Standalone mode (tests / backwards compat)
+            jobstores = {"default": MemoryJobStore()}
+            try:
+                from config import config as app_config
 
-            if app_config.REDIS_URL:
-                from apscheduler.jobstores.redis import RedisJobStore
+                if app_config.REDIS_URL:
+                    from apscheduler.jobstores.redis import RedisJobStore
 
-                jobstores["default"] = RedisJobStore(url=app_config.REDIS_URL)
-                logger.info("[Heartbeat] Using Redis job store")
-        except Exception:
-            logger.info("[Heartbeat] Using memory job store")
-
-        self._scheduler = AsyncIOScheduler(jobstores=jobstores)
-        self._scheduler.start()
+                    jobstores["default"] = RedisJobStore(url=app_config.REDIS_URL)
+                    logger.info("[Heartbeat] Using Redis job store (standalone)")
+            except Exception:
+                pass
+            self._scheduler = AsyncIOScheduler(jobstores=jobstores)
+            self._scheduler.start()
+            self._owns_scheduler = True
 
         # Load and schedule all active heartbeats
         await self._load_heartbeat_configs()
@@ -73,10 +83,11 @@ class HeartbeatService:
         logger.info("[Heartbeat] Service started (daily summary at 01:00 UTC)")
 
     async def stop(self):
-        """Gracefully stop scheduler, waiting for running ticks."""
-        if self._scheduler:
+        """Remove heartbeat jobs. Only shuts down scheduler if we own it."""
+        if self._scheduler and self._owns_scheduler:
             self._scheduler.shutdown(wait=True)
-            logger.info("[Heartbeat] Service stopped")
+            logger.info("[Heartbeat] Standalone scheduler stopped")
+        logger.info("[Heartbeat] Service stopped")
 
     # ------------------------------------------------------------------
     # Config loading
@@ -115,6 +126,40 @@ class HeartbeatService:
     # Scheduling
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _interval_to_cron_trigger(minutes: int) -> CronTrigger:
+        """Convert an interval in minutes to a CronTrigger firing at fixed times.
+
+        Examples:
+            15    → ``0,15,30,45 * * * *``
+            30    → ``0,30 * * * *``
+            60    → ``0 * * * *``  (top of every hour)
+            120   → ``0 */2 * * *``  (every 2 hours)
+            480   → ``0 */8 * * *``  (every 8 hours)
+            1440  → ``0 9 * * *``   (daily at 9am)
+            10080 → ``0 9 * * 1``   (weekly, Monday 9am)
+        """
+        if minutes <= 0:
+            minutes = 60
+
+        if minutes < 60:
+            # Sub-hour: distribute evenly within the hour
+            offsets = list(range(0, 60, minutes))
+            minute_field = ",".join(str(o) for o in offsets)
+            return CronTrigger(minute=minute_field)
+        elif minutes >= 10080:
+            # Weekly: Monday at 9am
+            return CronTrigger(minute="0", hour="9", day_of_week="mon")
+        elif minutes >= 1440:
+            # Daily: at 9am
+            return CronTrigger(minute="0", hour="9")
+        else:
+            # Hourly or multi-hour
+            hours = minutes // 60
+            if hours == 1:
+                return CronTrigger(minute="0")
+            return CronTrigger(minute="0", hour=f"*/{hours}")
+
     def schedule_orchestrator_heartbeat(
         self, workspace_id: str, hb_config: dict
     ):
@@ -125,19 +170,21 @@ class HeartbeatService:
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
 
+        trigger = self._interval_to_cron_trigger(interval_minutes)
+
         self._scheduler.add_job(
             self._orchestrator_tick,
-            "interval",
-            minutes=interval_minutes,
+            trigger,
             id=job_id,
             args=[workspace_id, hb_config],
             replace_existing=True,
             max_instances=1,
         )
         logger.info(
-            "[Heartbeat] Scheduled orchestrator heartbeat for ws=%s every %dm",
+            "[Heartbeat] Scheduled orchestrator heartbeat for ws=%s every %dm (cron: %s)",
             workspace_id,
             interval_minutes,
+            trigger,
         )
 
     def schedule_agent_heartbeat(
@@ -150,19 +197,21 @@ class HeartbeatService:
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
 
+        trigger = self._interval_to_cron_trigger(interval_minutes)
+
         self._scheduler.add_job(
             self._agent_tick,
-            "interval",
-            minutes=interval_minutes,
+            trigger,
             id=job_id,
             args=[agent_id, workspace_id, hb_config],
             replace_existing=True,
             max_instances=1,
         )
         logger.info(
-            "[Heartbeat] Scheduled agent heartbeat for agent=%s every %dm",
+            "[Heartbeat] Scheduled agent heartbeat for agent=%s every %dm (cron: %s)",
             agent_id,
             interval_minutes,
+            trigger,
         )
 
     def unschedule_heartbeat(self, job_id: str):
@@ -175,19 +224,61 @@ class HeartbeatService:
     # Active-hours guard
     # ------------------------------------------------------------------
 
-    async def _is_within_active_hours(self, hb_config: dict) -> bool:
-        """Check if current time is within the heartbeat's active hours."""
+    async def _is_within_active_hours(
+        self, hb_config: dict, workspace_id: str = ""
+    ) -> bool:
+        """Check if current time is within the heartbeat's active hours.
+
+        When ``inherit_active_hours`` is True in *hb_config*, the active-hours
+        window and timezone are loaded from the **orchestrator** workspace
+        settings instead of the agent's own config.
+        """
         import pytz
 
-        tz_name = hb_config.get("timezone", "UTC")
+        active_cfg = dict(hb_config)
+
+        # If inheriting, load orchestrator-level active hours
+        if hb_config.get("inherit_active_hours") and workspace_id:
+            try:
+                from core.database.database import SessionLocal
+                from core.models.workspaces import Workspace
+
+                db = SessionLocal()
+                try:
+                    ws = db.query(Workspace).get(workspace_id)
+                    if ws:
+                        orch = (ws.settings or {}).get("orchestrator", {})
+                        orch_hb = orch.get("heartbeat", {})
+                        if orch_hb.get("active_hours_start"):
+                            active_cfg["active_hours_start"] = orch_hb["active_hours_start"]
+                        if orch_hb.get("active_hours_end"):
+                            active_cfg["active_hours_end"] = orch_hb["active_hours_end"]
+                        if orch_hb.get("timezone"):
+                            active_cfg["timezone"] = orch_hb["timezone"]
+                        logger.debug(
+                            "[Heartbeat] Inherited active hours from orchestrator: %s–%s (%s)",
+                            active_cfg.get("active_hours_start"),
+                            active_cfg.get("active_hours_end"),
+                            active_cfg.get("timezone"),
+                        )
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.warning(
+                    "[Heartbeat] Failed to inherit orchestrator active hours for ws=%s: %s — assuming within hours",
+                    workspace_id, e,
+                )
+                return True  # fail open: if we can't check, let the tick run
+
+        tz_name = active_cfg.get("timezone", "UTC")
         try:
             tz = pytz.timezone(tz_name)
         except pytz.UnknownTimeZoneError:
             tz = pytz.UTC
 
         now = datetime.now(tz)
-        start_str = hb_config.get("active_hours_start", "08:00")
-        end_str = hb_config.get("active_hours_end", "20:00")
+        start_str = active_cfg.get("active_hours_start", "08:00")
+        end_str = active_cfg.get("active_hours_end", "20:00")
 
         def _to_minutes(s: str) -> int:
             h, m = map(int, s.split(":"))
@@ -207,7 +298,7 @@ class HeartbeatService:
     # ------------------------------------------------------------------
 
     async def _orchestrator_tick(self, workspace_id: str, hb_config: dict) -> Dict[str, Any]:
-        """Execute an orchestrator heartbeat tick. Returns result dict."""
+        """Execute an LLM-powered orchestrator heartbeat tick."""
         tick_key = f"orch_{workspace_id}"
         if self._running_ticks.get(tick_key):
             logger.debug(
@@ -216,7 +307,7 @@ class HeartbeatService:
             )
             return {"status": "skipped", "reason": "already_running"}
 
-        if not await self._is_within_active_hours(hb_config):
+        if not await self._is_within_active_hours(hb_config, workspace_id):
             logger.debug(
                 "[Heartbeat] Outside active hours for ws=%s, skipping",
                 workspace_id,
@@ -234,72 +325,241 @@ class HeartbeatService:
             "tokens_used": 0,
         }
 
+        # Resolve proactive_level once for both success and error paths
+        try:
+            from consumers.chatbot.personality import load_orchestrator_settings as _load_orch
+            _orch = _load_orch(workspace_id)
+            _proactive_level = hb_config.get("proactive_level") or _orch.get("proactive_level", "notify")
+        except Exception:
+            _proactive_level = "notify"
+
         try:
             logger.info(
                 "[Heartbeat] Orchestrator tick starting for ws=%s", workspace_id
             )
 
-            from core.database.database import SessionLocal
-            from core.models import Agent
-
-            db = SessionLocal()
+            # Try LLM-powered tick; fall back to shallow analysis on failure
             try:
-                agents = (
-                    db.query(Agent)
-                    .filter(Agent.workspace_id == workspace_id)
-                    .all()
+                await self._orchestrator_tick_llm(workspace_id, hb_config, result)
+            except Exception as llm_err:
+                logger.warning(
+                    "[Heartbeat] LLM tick failed for ws=%s, falling back to shallow: %s",
+                    workspace_id, llm_err, exc_info=True,
                 )
-                active_agents = [a for a in agents if a.status == "active"]
-                inactive_agents = [a for a in agents if a.status != "active"]
-
                 result["findings"].append(
-                    {
-                        "check": "agent_health",
-                        "detail": (
-                            f"{len(active_agents)} active, "
-                            f"{len(inactive_agents)} inactive agents"
-                        ),
-                    }
+                    {"check": "llm_error", "detail": f"LLM unavailable: {str(llm_err)[:200]}"}
                 )
-
-                # Execute checklist items if provided
-                checklist = hb_config.get("checklist", "")
-                if checklist:
-                    items = [
-                        line.strip().lstrip("- ")
-                        for line in checklist.split("\n")
-                        if line.strip()
-                    ]
-                    result["findings"].append(
-                        {
-                            "check": "checklist",
-                            "items": items,
-                            "detail": f"Reviewed {len(items)} checklist items",
-                        }
-                    )
-            finally:
-                db.close()
+                await self._orchestrator_tick_shallow(workspace_id, hb_config, result)
 
             await self._store_heartbeat_result(result)
+
+            if _proactive_level != "silent":
+                await self._deliver_notification(result, hb_config)
+
             logger.info(
-                "[Heartbeat] Orchestrator tick completed for ws=%s: %d findings",
-                workspace_id,
-                len(result["findings"]),
+                "[Heartbeat] Orchestrator tick completed for ws=%s: %d findings, %d tokens",
+                workspace_id, len(result["findings"]), result.get("tokens_used", 0),
             )
 
         except Exception as e:
             logger.error(
                 "[Heartbeat] Orchestrator tick failed for ws=%s: %s",
-                workspace_id,
-                e,
+                workspace_id, e, exc_info=True,
             )
             result["status"] = "error"
             result["findings"].append({"check": "error", "detail": str(e)})
             await self._store_heartbeat_result(result)
+            if _proactive_level != "silent":
+                await self._deliver_notification(result, hb_config)
         finally:
             self._running_ticks.pop(tick_key, None)
 
         return result
+
+    async def _orchestrator_tick_llm(
+        self, workspace_id: str, hb_config: dict, result: Dict[str, Any],
+    ) -> None:
+        """Run the LLM-powered orchestrator heartbeat with tool loop."""
+        from consumers.chatbot.personality import load_orchestrator_settings
+        from core.llm.manager import LLMManager
+        from modules.tools.discovery.action_registry import get_action_registry
+        from modules.tools.discovery.platform_executor import PlatformActionExecutor
+        from core.database.database import SessionLocal
+
+        # 1. Load personality settings
+        orch_settings = load_orchestrator_settings(workspace_id)
+        personality_mode = orch_settings.get("personality_mode", "friendly")
+        communication_style = orch_settings.get("communication_style", "balanced")
+        proactive_level = hb_config.get("proactive_level") or orch_settings.get("proactive_level", "notify")
+
+        # 2. Build tools based on proactive_level
+        registry = get_action_registry()
+        if proactive_level in ("silent", "notify"):
+            platform_tools = registry.to_openai_tools(permission_filter="read")
+        elif proactive_level == "act_notify":
+            # read + write (exclude destructive)
+            platform_tools = [
+                a.to_openai_schema()
+                for a in registry.get_all()
+                if a.permission_level in ("read", "write")
+            ]
+        else:  # autonomous
+            platform_tools = registry.to_openai_tools()
+
+        # 3. Build proactive_level instruction
+        level_instructions = {
+            "silent": "Report findings only. Do NOT take any corrective actions.",
+            "notify": "Report findings only. Do NOT take any corrective actions.",
+            "act_notify": "Take corrective action if needed using your tools. Report what you did.",
+            "autonomous": "Act independently to resolve any issues you find. Report a summary of actions taken.",
+        }
+        level_instruction = level_instructions.get(proactive_level, level_instructions["notify"])
+
+        # 4. Build communication style suffix
+        style_suffix = {
+            "concise": " Keep your response extremely short and direct.",
+            "balanced": "",
+            "detailed": " Provide thorough analysis with specifics.",
+        }.get(communication_style, "")
+
+        # 5. Build checklist
+        checklist = hb_config.get("checklist", "")
+        checklist_block = ""
+        if checklist and checklist.strip():
+            checklist_block = f"\n\nChecklist to review:\n{checklist}"
+
+        # 6. Build system prompt
+        system_prompt = (
+            f"You are the Automatos orchestrator performing a scheduled health check.\n"
+            f"Personality: {personality_mode}.\n\n"
+            f"Your task: Analyze your workspace using the tools provided.{checklist_block}\n\n"
+            f"{level_instruction}{style_suffix}\n\n"
+            f"Reply with a SHORT plain-text summary (max 500 chars). No markdown."
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Run the scheduled heartbeat check now. Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"},
+        ]
+
+        # 7. Create LLM manager (maps to orchestrator_llm settings)
+        llm = LLMManager(
+            service_name="heartbeat",
+            workspace_id=workspace_id,
+            request_type="heartbeat",
+        )
+
+        # 8. Tool loop (max 5 iterations)
+        max_iterations = 5
+        total_tokens = 0
+        db = SessionLocal()
+        try:
+            executor = PlatformActionExecutor(db, workspace_id)
+
+            for iteration in range(max_iterations):
+                response = await llm.generate_response(messages, tools=platform_tools if platform_tools else None)
+
+                # Track tokens
+                usage = getattr(response, "usage", None) or {}
+                total_tokens += usage.get("total_tokens", 0) or (
+                    (usage.get("prompt_tokens", 0) or 0) + (usage.get("completion_tokens", 0) or 0)
+                )
+
+                # Check for tool calls
+                tool_calls = getattr(response, "tool_calls", None) or []
+                if not tool_calls:
+                    # No more tool calls — capture final response
+                    content = getattr(response, "content", "") or ""
+                    if content:
+                        result["findings"].append(
+                            {"check": "llm_analysis", "detail": str(content)[:1000]}
+                        )
+                    break
+
+                # Build assistant message with all tool calls, then execute each
+                assistant_msg = {"role": "assistant", "content": getattr(response, "content", "") or None, "tool_calls": []}
+                tool_results_msgs = []
+                for tc in tool_calls:
+                    func = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", {})
+                    tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+                    fn_name = func.get("name", "") if isinstance(func, dict) else getattr(func, "name", "")
+                    fn_args_raw = func.get("arguments", "{}") if isinstance(func, dict) else getattr(func, "arguments", "{}")
+
+                    assistant_msg["tool_calls"].append({
+                        "id": tc_id,
+                        "type": "function",
+                        "function": {"name": fn_name, "arguments": fn_args_raw},
+                    })
+
+                    try:
+                        fn_args = json.loads(fn_args_raw) if isinstance(fn_args_raw, str) else fn_args_raw
+                        tool_result = await executor.execute(fn_name, fn_args)
+                        result["actions_taken"].append({"tool": fn_name, "params": fn_args})
+                    except Exception as tool_err:
+                        tool_result = {"error": str(tool_err)[:500]}
+                        logger.warning("[Heartbeat] Tool %s failed: %s", fn_name, tool_err)
+
+                    tool_results_msgs.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": json.dumps(tool_result, default=str)[:4000],
+                    })
+
+                messages.append(assistant_msg)
+                messages.extend(tool_results_msgs)
+            else:
+                # Max iterations reached
+                result["findings"].append(
+                    {"check": "llm_analysis", "detail": "Heartbeat analysis completed (max tool iterations reached)."}
+                )
+        finally:
+            db.close()
+
+        result["tokens_used"] = total_tokens
+
+    async def _orchestrator_tick_shallow(
+        self, workspace_id: str, hb_config: dict, result: Dict[str, Any],
+    ) -> None:
+        """Shallow fallback when LLM is unavailable — counts agents and parses checklist."""
+        from core.database.database import SessionLocal
+        from core.models import Agent
+
+        db = SessionLocal()
+        try:
+            agents = (
+                db.query(Agent)
+                .filter(Agent.workspace_id == workspace_id)
+                .all()
+            )
+            active_agents = [a for a in agents if a.status == "active"]
+            inactive_agents = [a for a in agents if a.status != "active"]
+
+            result["findings"].append(
+                {
+                    "check": "agent_health",
+                    "detail": (
+                        f"{len(active_agents)} active, "
+                        f"{len(inactive_agents)} inactive agents"
+                    ),
+                }
+            )
+
+            checklist = hb_config.get("checklist", "")
+            if checklist:
+                items = [
+                    line.strip().lstrip("- ")
+                    for line in checklist.split("\n")
+                    if line.strip()
+                ]
+                result["findings"].append(
+                    {
+                        "check": "checklist",
+                        "items": items,
+                        "detail": f"Reviewed {len(items)} checklist items (shallow mode — LLM unavailable)",
+                    }
+                )
+        finally:
+            db.close()
 
     async def _agent_tick(
         self, agent_id: int, workspace_id: str, hb_config: dict
@@ -313,7 +573,11 @@ class HeartbeatService:
             )
             return {"status": "skipped", "reason": "already_running"}
 
-        if not await self._is_within_active_hours(hb_config):
+        if not await self._is_within_active_hours(hb_config, workspace_id):
+            logger.info(
+                "[Heartbeat] Outside active hours for agent=%s (ws=%s), skipping",
+                agent_id, workspace_id,
+            )
             return {"status": "skipped", "reason": "outside_active_hours"}
 
         self._running_ticks[tick_key] = True
@@ -352,88 +616,67 @@ class HeartbeatService:
                 auto_act = hb_config.get("auto_act", False)
 
                 prompt = (
-                    f"You are {agent.name}, running a scheduled heartbeat check.\n\n"
-                    f"Your task: {heartbeat_prompt}\n\n"
-                    f"Current time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
-                    "Review your domain and report any findings. Be concise.\n"
+                    f"Scheduled heartbeat check. {heartbeat_prompt}\n"
+                    f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n"
+                    "Use your tools to check. Reply with a SHORT plain-text summary (max 500 chars), no markdown.\n"
                     + (
                         "You may take action if needed."
                         if auto_act
-                        else "Report findings only, do not take action."
+                        else "Report findings only."
                     )
                 )
 
-                # Use the codebase LLM manager for the call
+                # Execute through AgentFactory so the agent has its full toolset
                 try:
-                    from core.llm import create_llm_manager
+                    from modules.agents.factory.agent_factory import AgentFactory
 
-                    model_config = (
-                        agent.configuration.get("model_config", {})
-                        if agent.configuration
-                        else {}
-                    )
-                    provider = model_config.get("provider")
-                    model = model_config.get("model_id")
-
-                    llm = create_llm_manager(
-                        service_name="heartbeat",
-                        provider=provider,
-                        model=model,
+                    factory = AgentFactory(db_session=db)
+                    exec_result = await factory.execute_with_prompt(
+                        agent=agent_id,
+                        prompt=prompt,
+                        context={"source": "heartbeat", "workspace_id": workspace_id},
+                        use_memory=False,  # keep context lean
                     )
 
-                    messages = [
-                        {"role": "system", "content": prompt},
-                        {
-                            "role": "user",
-                            "content": "Run your heartbeat check now.",
-                        },
-                    ]
-
-                    response = await llm.generate_response(messages)
-
-                    # Flag if fallback model was used (primary model dead)
-                    if getattr(response, "_used_fallback", False):
-                        failed_model = getattr(response, "_failed_model", "unknown")
-                        fallback_model = getattr(response, "_fallback_model", "unknown")
-                        result["findings"].append({
-                            "check": "model_fallback",
-                            "detail": (
-                                f"Primary model '{failed_model}' is unavailable. "
-                                f"Used fallback '{fallback_model}'. "
-                                f"Update model in Settings > Orchestrator."
-                            ),
-                        })
-
-                    llm_text = (
-                        response.content
-                        if hasattr(response, "content")
-                        else str(response)
-                    )
-                    result["findings"].append(
-                        {"check": "llm_analysis", "detail": llm_text}
-                    )
-
-                    if hasattr(response, "usage") and response.usage:
-                        result["tokens_used"] = response.usage.get(
-                            "total_tokens", 0
+                    # Extract the actual text from nested result
+                    llm_text = ""
+                    if isinstance(exec_result, dict):
+                        llm_text = (
+                            exec_result.get("result")
+                            or exec_result.get("response")
+                            or exec_result.get("output")
+                            or exec_result.get("content")
+                            or ""
                         )
+                        # Handle nested dict in result
+                        if isinstance(llm_text, dict):
+                            llm_text = llm_text.get("result") or llm_text.get("response") or str(llm_text)
+                    if not llm_text:
+                        llm_text = str(exec_result)[:500]
 
-                except Exception as llm_err:
+                    result["findings"].append(
+                        {"check": "llm_analysis", "detail": str(llm_text)[:1000]}
+                    )
+                    result["tokens_used"] = exec_result.get("tokens_used", 0) if isinstance(exec_result, dict) else 0
+
+                except Exception as exec_err:
                     logger.warning(
-                        "[Heartbeat] LLM call failed for agent=%s: %s",
+                        "[Heartbeat] Agent execution failed for agent=%s: %s",
                         agent_id,
-                        llm_err,
+                        exec_err,
                     )
                     result["findings"].append(
                         {
-                            "check": "llm_error",
-                            "detail": f"LLM call failed: {str(llm_err)[:200]}",
+                            "check": "exec_error",
+                            "detail": f"Agent execution failed: {str(exec_err)[:200]}",
                         }
                     )
             finally:
                 db.close()
 
             await self._store_heartbeat_result(result)
+            await self._deliver_notification(result, hb_config)
+            await self._auto_create_report(agent_id, workspace_id, result)
             logger.info(
                 "[Heartbeat] Agent tick completed for agent=%s", agent_id
             )
@@ -445,6 +688,8 @@ class HeartbeatService:
             result["status"] = "error"
             result["findings"].append({"check": "error", "detail": str(e)})
             await self._store_heartbeat_result(result)
+            await self._deliver_notification(result, hb_config)
+            await self._auto_create_report(agent_id, workspace_id, result)
         finally:
             self._running_ticks.pop(tick_key, None)
 
@@ -534,15 +779,15 @@ class HeartbeatService:
     # Persistence
     # ------------------------------------------------------------------
 
-    async def _store_heartbeat_result(self, result: dict):
-        """Store heartbeat result in the database."""
+    async def _store_heartbeat_result(self, result: dict) -> Optional[int]:
+        """Store heartbeat result in the database. Returns the row ID."""
         try:
             from core.database.database import SessionLocal
             from sqlalchemy import text
 
             db = SessionLocal()
             try:
-                db.execute(
+                row = db.execute(
                     text(
                         """
                         INSERT INTO heartbeat_results
@@ -551,6 +796,7 @@ class HeartbeatService:
                         VALUES
                             (:source_type, :source_id, :workspace_id, :status,
                              :findings, :actions_taken, :tokens_used, NOW())
+                        RETURNING id
                         """
                     ),
                     {
@@ -562,12 +808,236 @@ class HeartbeatService:
                         "actions_taken": json.dumps(result["actions_taken"]),
                         "tokens_used": result.get("tokens_used", 0),
                     },
-                )
+                ).fetchone()
                 db.commit()
+                hb_id = row[0] if row else None
+                result["_heartbeat_result_id"] = hb_id
+                return hb_id
             finally:
                 db.close()
         except Exception as e:
             logger.error("[Heartbeat] Failed to store result: %s", e)
+            return None
+
+    # ------------------------------------------------------------------
+    # Notification delivery
+    # ------------------------------------------------------------------
+
+    async def _deliver_notification(self, result: dict, hb_config: dict):
+        """Deliver heartbeat result to the configured destination.
+
+        report_to values:
+          - "orchestrator"  → DB only (no extra delivery)
+          - "direct"        → no-op for now (result is in DB, frontend polls)
+          - "telegram"      → push via workspace Telegram bot integration
+          - "slack"         → push via workspace Slack bot integration
+          - "webhook"       → HTTP POST to webhook_url
+        """
+        report_to = hb_config.get("report_to") or hb_config.get("notification_channel", "orchestrator")
+        # Map frontend values to backend values
+        _CHANNEL_MAP = {"in_app": "direct"}
+        report_to = _CHANNEL_MAP.get(report_to, report_to)
+
+        if report_to in ("orchestrator", "direct"):
+            return
+
+        message = self._format_heartbeat_message(result)
+        workspace_id = result.get("workspace_id")
+
+        if report_to == "telegram":
+            await self._send_via_integration(workspace_id, "telegram", message, hb_config)
+        elif report_to == "slack":
+            await self._send_via_integration(workspace_id, "slack", message, hb_config)
+        elif report_to == "webhook":
+            webhook_url = hb_config.get("webhook_url")
+            if webhook_url:
+                await self._send_via_webhook(webhook_url, result, message)
+            else:
+                logger.warning("[Heartbeat] report_to=webhook but no webhook_url configured")
+
+    def _format_heartbeat_message(self, result: dict) -> str:
+        """Format heartbeat result as a clean notification message."""
+        status = result.get("status", "unknown")
+        status_icon = "OK" if status == "success" else "ERROR"
+
+        # Extract the main analysis text from findings
+        findings = result.get("findings", [])
+        analysis = ""
+        for f in findings:
+            if f.get("check") == "llm_analysis":
+                analysis = f.get("detail", "")
+                break
+
+        if analysis:
+            return f"[Heartbeat {status_icon}]\n{analysis[:2000]}"
+
+        # Fallback: summarize all findings
+        lines = [f"[Heartbeat {status_icon}]"]
+        for f in findings:
+            detail = f.get("detail", "")
+            if detail:
+                lines.append(detail[:300])
+
+        return "\n".join(lines) if len(lines) > 1 else f"[Heartbeat {status_icon}] No findings."
+
+    async def _send_via_integration(
+        self, workspace_id: str, platform: str, message: str, hb_config: dict
+    ):
+        """Send notification through workspace integration (Telegram, Slack, etc.)."""
+        try:
+            from core.database.database import SessionLocal
+            from core.models.workspaces import Workspace
+
+            db = SessionLocal()
+            try:
+                ws = db.query(Workspace).get(workspace_id)
+                if not ws:
+                    logger.warning("[Heartbeat] Workspace %s not found for notification", workspace_id)
+                    return
+
+                integrations = (ws.settings or {}).get("integrations", {})
+
+                # Also check channel_connections for bot tokens
+                from sqlalchemy import text as sql_text
+                channel_config = {}
+                try:
+                    row = db.execute(
+                        sql_text(
+                            "SELECT config FROM channel_connections "
+                            "WHERE workspace_id = :ws AND platform = :plat "
+                            "ORDER BY created_at DESC LIMIT 1"
+                        ),
+                        {"ws": workspace_id, "plat": platform},
+                    ).fetchone()
+                    if row and row.config:
+                        channel_config = row.config if isinstance(row.config, dict) else json.loads(row.config)
+                except Exception as e:
+                    logger.debug("[Heartbeat] Could not load channel_connections for %s: %s", platform, e)
+
+                if platform == "telegram":
+                    token = (
+                        integrations.get("telegram_bot_token")
+                        or channel_config.get("bot_token")
+                    )
+                    if not token:
+                        logger.warning("[Heartbeat] No telegram bot token found for ws=%s", workspace_id)
+                        return
+
+                    raw_channel_id = hb_config.get("channel_id") or ""
+                    # Guard: ignore if someone accidentally saved a bot token as chat_id
+                    chat_id = (
+                        (raw_channel_id if raw_channel_id and ":" not in raw_channel_id else "")
+                        or integrations.get("telegram_default_chat_id")
+                        or channel_config.get("default_chat_id")
+                    )
+                    # Auto-resolve chat_id from Telegram API if not stored
+                    if not chat_id:
+                        chat_id = await self._resolve_telegram_chat_id(token)
+                    if not chat_id:
+                        logger.warning("[Heartbeat] Could not resolve Telegram chat_id for ws=%s", workspace_id)
+                        return
+
+                    from api.webhooks import _send_telegram_reply
+                    ok = await _send_telegram_reply(int(chat_id), message, token)
+                    if ok:
+                        logger.info("[Heartbeat] Telegram notification sent to chat %s", chat_id)
+                    else:
+                        logger.warning("[Heartbeat] Telegram send failed for chat %s", chat_id)
+
+                elif platform == "slack":
+                    token = (
+                        integrations.get("slack_bot_token")
+                        or channel_config.get("bot_token")
+                    )
+                    channel = (
+                        hb_config.get("channel_id")
+                        or integrations.get("slack_default_channel")
+                        or channel_config.get("default_channel")
+                    )
+                    if not token:
+                        logger.warning("[Heartbeat] No slack bot token found for ws=%s", workspace_id)
+                        return
+                    if not channel:
+                        logger.warning("[Heartbeat] No channel for Slack notification (ws=%s)", workspace_id)
+                        return
+
+                    from api.webhooks import _send_slack_reply
+                    ok = await _send_slack_reply(channel, message, token)
+                    if ok:
+                        logger.info("[Heartbeat] Slack notification sent to %s", channel)
+                    else:
+                        logger.warning("[Heartbeat] Slack send failed for %s", channel)
+
+                else:
+                    logger.warning("[Heartbeat] Unknown integration platform: %s", platform)
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error("[Heartbeat] Integration notification failed (%s): %s", platform, e)
+
+    async def _resolve_telegram_chat_id(self, bot_token: str) -> Optional[str]:
+        """Get the most recent chat_id from the Telegram Bot API."""
+        try:
+            import aiohttp
+
+            url = f"https://api.telegram.org/bot{bot_token}/getUpdates?limit=1&offset=-1"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json()
+                    results = data.get("result", [])
+                    if not results:
+                        return None
+                    # Extract chat_id from the most recent update
+                    update = results[0]
+                    msg = update.get("message") or update.get("channel_post") or {}
+                    chat = msg.get("chat", {})
+                    chat_id = chat.get("id")
+                    if chat_id:
+                        logger.info("[Heartbeat] Auto-resolved Telegram chat_id=%s", chat_id)
+                        return str(chat_id)
+        except Exception as e:
+            logger.debug("[Heartbeat] Failed to resolve Telegram chat_id: %s", e)
+        return None
+
+    async def _send_via_webhook(self, url: str, result: dict, message: str):
+        """POST heartbeat result to a webhook URL (with SSRF validation)."""
+        from core.security.url_validator import validate_webhook_url
+
+        is_valid, reason = validate_webhook_url(url)
+        if not is_valid:
+            logger.warning("[Heartbeat] Webhook URL blocked (%s): %s", reason, url)
+            return
+
+        try:
+            import aiohttp
+
+            payload = {
+                "source_type": result.get("source_type"),
+                "source_id": result.get("source_id"),
+                "status": result.get("status"),
+                "message": message,
+                "findings": result.get("findings", []),
+                "tokens_used": result.get("tokens_used", 0),
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status < 300:
+                        logger.info("[Heartbeat] Webhook delivered to %s (status %s)", url, resp.status)
+                    else:
+                        body = await resp.text()
+                        logger.warning(
+                            "[Heartbeat] Webhook %s returned %s: %s",
+                            url, resp.status, body[:200],
+                        )
+        except Exception as e:
+            logger.error("[Heartbeat] Webhook delivery failed to %s: %s", url, e)
 
     # ------------------------------------------------------------------
     # Public API (manual triggers)
@@ -596,6 +1066,7 @@ class HeartbeatService:
             **hb_config,
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
+            "inherit_active_hours": False,  # manual runs always execute
         }
         return await self._orchestrator_tick(workspace_id, hb_config_override)
 
@@ -618,6 +1089,7 @@ class HeartbeatService:
             **hb_config,
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
+            "inherit_active_hours": False,  # manual runs always execute
         }
         return await self._agent_tick(agent_id, workspace_id, hb_config_override)
 
@@ -647,6 +1119,113 @@ class HeartbeatService:
             "jobs": jobs,
             "running_ticks": list(self._running_ticks.keys()),
         }
+
+    # ------------------------------------------------------------------
+    # PRD-76: Auto-create report from heartbeat result
+    # ------------------------------------------------------------------
+
+    async def _auto_create_report(
+        self, agent_id: int, workspace_id: str, result: dict
+    ):
+        """
+        Auto-create a report row from heartbeat result data.
+        Ensures every heartbeat run has a corresponding report —
+        even if the agent didn't call platform_submit_report.
+        """
+        try:
+            from core.database.database import SessionLocal
+            from core.models import Agent
+            from services.report_service import ReportService
+
+            db = SessionLocal()
+            try:
+                agent = db.query(Agent).get(agent_id)
+                agent_name = agent.name if agent else f"agent-{agent_id}"
+
+                # Build markdown content from findings
+                findings = result.get("findings", [])
+                actions = result.get("actions_taken", [])
+                hb_status = result.get("status", "success")
+                tokens = result.get("tokens_used", 0)
+
+                lines = [
+                    f"# {agent_name} — Heartbeat Report",
+                    f"**Status:** {hb_status}",
+                    "",
+                ]
+
+                if findings:
+                    lines.append("## Findings")
+                    for f in findings:
+                        check = f.get("check", "unknown")
+                        detail = f.get("detail", "")
+                        lines.append(f"- **{check}:** {detail}")
+                    lines.append("")
+
+                if actions:
+                    lines.append("## Actions Taken")
+                    for a in actions:
+                        if isinstance(a, dict):
+                            lines.append(f"- {a.get('action', '')} → {a.get('result', '')}")
+                        else:
+                            lines.append(f"- {a}")
+                    lines.append("")
+
+                lines.append("## Metrics")
+                lines.append(f"- Tokens used: {tokens}")
+                lines.append(f"- Findings: {len(findings)}")
+                lines.append(f"- Actions: {len(actions)}")
+
+                content = "\n".join(lines)
+
+                # Map heartbeat status to report status
+                report_status = "ok" if hb_status == "success" else "warning"
+                if any(f.get("check") == "error" for f in findings):
+                    report_status = "critical"
+
+                # Summary from first finding detail
+                summary = None
+                for f in findings:
+                    detail = f.get("detail", "")
+                    if detail and f.get("check") != "error":
+                        summary = detail[:497] + "..." if len(detail) > 497 else detail
+                        break
+
+                svc = ReportService(db, workspace_id)
+                report_result = await svc.create_report(
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    title=f"{agent_name} Heartbeat",
+                    content=content,
+                    report_type="standup",
+                    status=report_status,
+                    summary=summary,
+                    metrics={
+                        "tokens_used": tokens,
+                        "findings_count": len(findings),
+                        "actions_count": len(actions),
+                    },
+                    heartbeat_result_id=result.get("_heartbeat_result_id"),
+                )
+
+                if report_result.get("success"):
+                    logger.info(
+                        "[Heartbeat] Auto-created report %s for agent=%s",
+                        report_result.get("report_id"), agent_id,
+                    )
+                else:
+                    logger.warning(
+                        "[Heartbeat] Auto-report creation failed for agent=%s: %s",
+                        agent_id, report_result.get("error"),
+                    )
+            finally:
+                db.close()
+
+        except Exception as e:
+            logger.warning(
+                "[Heartbeat] Failed to auto-create report for agent=%s: %s",
+                agent_id, e,
+            )
 
 
 # ------------------------------------------------------------------

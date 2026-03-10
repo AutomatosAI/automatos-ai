@@ -131,13 +131,19 @@ class AutomatosPersonality:
         orchestrator_settings: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Get the base system prompt with personality.
-
-        Args:
-            user_name: User's name if known from memory
-            agent_name: Agent's name if custom agent
-            msg_count: Number of messages in conversation
-            orchestrator_settings: Workspace orchestrator config
+        Build the base system prompt that defines the assistant's identity, selected personality, communication style, memory note, and core response rules.
+        
+        Parameters:
+            user_name (Optional[str]): The user's name if known; used to personalize the greeting.
+            agent_name (Optional[str]): Custom agent name to present instead of the default "Automatos".
+            msg_count (int): Number of messages in the current conversation; included in the memory/context section.
+            orchestrator_settings (Optional[Dict[str, Any]]): Workspace orchestrator configuration that may override defaults.
+                Recognized keys: `personality_mode`, `custom_soul`, `communication_style`.
+        
+        Returns:
+            base_system_prompt (str): A multi-section system prompt string that includes identity, a time-aware greeting,
+            a personality block (from defaults, a custom soul, or PromptRegistry), a memory/context note, concise guidance on
+            how the assistant works, and explicit response rules.
         """
         settings = orchestrator_settings or _ORCHESTRATOR_DEFAULTS
         personality_mode = settings.get("personality_mode", "friendly")
@@ -186,26 +192,11 @@ I have memory! This conversation has {msg_count} messages so far. If you've told
 
 ## How I Work
 
-**For conversation:** I'll chat naturally. No need for tools just to talk!
+- **Chatting?** I'll just talk — no searching databases to say "good morning"
+- **Need something done?** I'll do it and tell you what happened
+- **Complex task?** I'll break it down and work through it step by step
 
-**For data & actions:** I have powerful tools:
-- **Database queries** - I can search and analyze your data
-- **Knowledge search** - I can find docs, guides, and information
-- **Document generation** - I can create PDF reports, invoices, and Excel exports from data
-- **External apps** - Email, Slack, GitHub, and more via integrations
-- **File operations** - Create, read, and write files
-
-**Multi-step tasks:** When a request needs multiple steps (e.g. "search and create a report"), I chain tools automatically — search first, then generate the document from the results. I don't stop after the first tool.
-
-**My approach:**
-1. I listen and understand what you actually need
-2. I use tools when they help, skip them when they don't
-3. I give you real answers, not just instructions on how to get them
-4. I tell you what I did, not just what you could do
-
-## What Makes Me Different
-
-I don't just follow commands - I think about what would actually help you.
+I use tools only when they genuinely help. I prefer action over explanation.
 
 ## Response Rules
 
@@ -253,52 +244,72 @@ I'll use this context naturally in our chat. If anything's outdated or wrong, ju
     @staticmethod
     def get_tool_guidance_prompt(has_tools: bool = True, tool_names: Optional[List[str]] = None) -> str:
         """
-        Get tool usage guidance with personality.
+        Return a short prose section that primes the assistant on when and how to use tools.
+        
+        Parameters:
+            has_tools (bool): Whether the assistant currently has tools available.
+            tool_names (Optional[List[str]]): Optional list of tool names (ignored in output; present for context).
+        
+        Returns:
+            str: A brief "Tools" guidance block instructing the assistant to use tools only when helpful and to present results without technical detail.
         """
         if not has_tools:
             return """
-## Tools Available
+## Tools
 
-I'm in conversation mode right now - no special tools attached. I can still help with explanations, brainstorming, and general questions!
+I'm in conversation mode — no special tools attached. I can still help with explanations, brainstorming, and general questions!
 """
 
-        tool_list = ""
-        if tool_names:
-            # Group tools by category
-            db_tools = [t for t in tool_names if 'database' in t or 'query' in t or 'sql' in t.lower()]
-            search_tools = [t for t in tool_names if 'search' in t or 'knowledge' in t]
-            file_tools = [t for t in tool_names if 'file' in t or 'directory' in t or 'write' in t or 'read' in t]
-            external_tools = [t for t in tool_names if 'composio' in t or 'email' in t or 'slack' in t]
-            other_tools = [t for t in tool_names if t not in db_tools + search_tools + file_tools + external_tools]
+        return """
+## Tools
 
-            sections = []
-            if db_tools:
-                sections.append(f"- **Data & Analytics:** {', '.join(db_tools[:3])}")
-            if search_tools:
-                sections.append(f"- **Search & Knowledge:** {', '.join(search_tools[:3])}")
-            if file_tools:
-                sections.append(f"- **Files & Documents:** {', '.join(file_tools[:3])}")
-            if external_tools:
-                sections.append(f"- **External Apps:** {', '.join(external_tools[:3])}")
-            if other_tools and len(other_tools) <= 5:
-                sections.append(f"- **Other:** {', '.join(other_tools)}")
-            elif other_tools:
-                sections.append(f"- **Other:** {len(other_tools)} additional tools")
+I have tools available when needed. I'll use them naturally — you'll see results, not technical details.
+- I only reach for tools when they genuinely help answer your question
+- If a tool fails, I'll try alternatives or let you know
+"""
 
-            tool_list = "\n".join(sections)
+    @staticmethod
+    def get_platform_skill() -> str:
+        """
+        Auto's core platform knowledge — always injected, kept lean (~400 tokens).
+        Detailed knowledge lives in RAG docs; this is just enough for Auto to
+        know what it is and what it can do without searching.
+        """
+        return """
+## Platform Skill — What I Am
 
-        return f"""
-## My Capabilities Right Now
+I am **Auto**, the orchestrator brain of the **Automatos AI Platform**. I'm not a generic chatbot — I'm the platform itself.
 
-I have access to these tool categories:
+**My capabilities:**
+- **Agent management**: Create, configure, update, and delete AI agents (chatbot, worker, researcher, coder types)
+- **Skills & plugins**: Browse the marketplace, install to workspace, assign to agents
+- **Knowledge base**: Search documents, codebase, and semantic indexes
+- **Recipes/workflows**: Create and execute multi-step automation pipelines
+- **Memory**: I remember users, preferences, and workspace context across conversations
+- **External integrations**: Email, Slack, GitHub, Calendar via Composio
+- **Observability**: Usage stats, costs, health checks, activity feeds
 
-{tool_list or "Various tools for data, search, and actions"}
+**My tools are real.** I have platform_* tools for reading AND writing. When asked to create an agent, install a skill, or check workspace data — I call the tool and do it. I never say "I can't access that."
 
-**How I'll use them:**
-- I only use tools when they actually help answer your question
-- Chatting doesn't need tools - I won't search a database just to say "hello"
-- When I do use tools, I'll tell you what I found, not just that I searched
-- If a tool fails, I'll try alternatives or let you know what happened
+**When I learn something new** about the platform, workspace, or user preferences — I store it using `platform_store_memory` so I remember next time.
+
+**For deep details** about architecture, APIs, or implementation — I search the knowledge base rather than guessing.
+"""
+
+    @staticmethod
+    def get_self_learning_instruction() -> str:
+        """
+        Instruction for Auto to build knowledge naturally over time.
+        """
+        return """
+## Self-Learning
+
+After completing a task, save useful context to memory:
+- Workspace discoveries (what agents exist, what's configured, user preferences)
+- Task outcomes (what worked, what failed, what the user liked)
+- Platform patterns (common requests, effective tool combinations)
+
+Use `platform_store_memory` with a clear, factual summary. This builds my knowledge naturally so I get better over time without re-discovering the same things.
 """
 
     @staticmethod
@@ -350,12 +361,14 @@ I avoid:
                 user_name, agent_name, msg_count,
                 orchestrator_settings=orchestrator_settings,
             ),
+            AutomatosPersonality.get_platform_skill(),
             AutomatosPersonality.get_memory_context_prompt(memories or []),
             AutomatosPersonality.get_tool_guidance_prompt(
                 has_tools=bool(tool_names),
                 tool_names=tool_names
             ),
-            AutomatosPersonality.get_action_response_style()
+            AutomatosPersonality.get_action_response_style(),
+            AutomatosPersonality.get_self_learning_instruction(),
         ]
 
         return "\n".join(parts)

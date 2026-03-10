@@ -1,27 +1,29 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import {
   Activity,
   RefreshCw,
-  ChefHat,
   Rocket,
   CheckCircle2,
   AlertTriangle,
   Radio,
   LayoutDashboard,
   List,
+  FileText,
+  Brain,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
-import { RecipesTab } from '@/components/workflows/recipes-tab'
 import { ActivityMissions } from './activity-missions'
 import { ActivityFeed } from './activity-feed'
+import { ActivityReports } from './activity-reports'
+import { ActivityMemory } from './activity-memory'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
 import { cn } from '@/lib/utils'
@@ -55,11 +57,13 @@ const PERIOD_OPTIONS = [
 const TAB_DEFS = [
   { value: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { value: 'feed', label: 'Feed', icon: List },
-  { value: 'recipes', label: 'Recipes', icon: ChefHat },
+  { value: 'reports', label: 'Reports', icon: FileText },
+  { value: 'memory', label: 'Memory', icon: Brain },
   { value: 'missions', label: 'Missions', icon: Rocket },
 ]
 
 export function ActivityPage() {
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState('dashboard')
   const [period, setPeriod] = useState('1d')
 
@@ -73,9 +77,6 @@ export function ActivityPage() {
       setActiveTab('feed')
     }
   }, [openExecution])
-
-  // RecipesTab requires onUseRecipe — no-op in Activity context (full edit is in /workflows)
-  const handleUseRecipe = useCallback(() => {}, [])
 
   // Switch to feed tab when "View All" is clicked in recent activity widget
   const handleViewAllActivity = useCallback(() => {
@@ -143,8 +144,16 @@ export function ActivityPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="recipes">
-            <RecipesTab onUseRecipe={handleUseRecipe} />
+          <TabsContent value="reports">
+            <div data-tour="activity-reports">
+              <ActivityReports period={period} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="memory">
+            <div data-tour="activity-memory">
+              <ActivityMemory period={period} />
+            </div>
           </TabsContent>
 
           <TabsContent value="missions">

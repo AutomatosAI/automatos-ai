@@ -204,7 +204,7 @@ function CollapsibleSection({
   const [isOpen, setIsOpen] = useState(defaultOpen)
 
   return (
-    <div className="border border-white/5 rounded-xl overflow-hidden">
+    <div className="border border-border/30 rounded-xl overflow-hidden">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center gap-2 p-3 text-left hover:bg-white/5 transition-colors"
@@ -328,7 +328,7 @@ function LearnSection({ data }: { data: LearningData }) {
             {suggestions.map((suggestion, i) => (
               <div
                 key={i}
-                className="rounded-lg border border-white/5 bg-black/20 p-2.5"
+                className="rounded-lg border border-border/30 bg-black/20 p-2.5"
               >
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-orange-400">
@@ -374,7 +374,7 @@ function LearnSection({ data }: { data: LearningData }) {
           defaultOpen={false}
         >
           <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-lg border border-white/5 bg-black/20 p-2.5">
+            <div className="rounded-lg border border-border/30 bg-black/20 p-2.5">
               <div className="text-[10px] uppercase text-muted-foreground mb-0.5">
                 Total Duration
               </div>
@@ -382,7 +382,7 @@ function LearnSection({ data }: { data: LearningData }) {
                 {formatDuration(performance_metrics.total_duration_ms)}
               </div>
             </div>
-            <div className="rounded-lg border border-white/5 bg-black/20 p-2.5">
+            <div className="rounded-lg border border-border/30 bg-black/20 p-2.5">
               <div className="text-[10px] uppercase text-muted-foreground mb-0.5">
                 Success Rate
               </div>
@@ -392,7 +392,7 @@ function LearnSection({ data }: { data: LearningData }) {
                   : '—'}
               </div>
             </div>
-            <div className="rounded-lg border border-white/5 bg-black/20 p-2.5">
+            <div className="rounded-lg border border-border/30 bg-black/20 p-2.5">
               <div className="text-[10px] uppercase text-muted-foreground mb-0.5">
                 Total Retries
               </div>
@@ -400,7 +400,7 @@ function LearnSection({ data }: { data: LearningData }) {
                 {performance_metrics.total_retries ?? 0}
               </div>
             </div>
-            <div className="rounded-lg border border-white/5 bg-black/20 p-2.5">
+            <div className="rounded-lg border border-border/30 bg-black/20 p-2.5">
               <div className="text-[10px] uppercase text-muted-foreground mb-0.5">
                 Errors
               </div>
@@ -522,7 +522,7 @@ function QualitySection({ data }: { data: QualityData }) {
             {bottlenecks.map((bottleneck, i) => (
               <div
                 key={i}
-                className="flex items-start gap-2 rounded-lg border border-white/5 bg-black/20 p-2.5"
+                className="flex items-start gap-2 rounded-lg border border-border/30 bg-black/20 p-2.5"
               >
                 {getBottleneckIcon(bottleneck.type)}
                 <div className="min-w-0 flex-1">
@@ -563,7 +563,7 @@ function MemorySection({ data }: { data: MemoryData }) {
     <div className="space-y-3">
       {/* Summary stats */}
       <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-lg border border-white/5 bg-black/20 p-2.5">
+        <div className="rounded-lg border border-border/30 bg-black/20 p-2.5">
           <div className="text-[10px] uppercase text-muted-foreground mb-0.5">
             Memories Stored
           </div>
@@ -572,7 +572,7 @@ function MemorySection({ data }: { data: MemoryData }) {
             {stored_memories}
           </div>
         </div>
-        <div className="rounded-lg border border-white/5 bg-black/20 p-2.5">
+        <div className="rounded-lg border border-border/30 bg-black/20 p-2.5">
           <div className="text-[10px] uppercase text-muted-foreground mb-0.5">
             Scopes Used
           </div>
@@ -592,7 +592,7 @@ function MemorySection({ data }: { data: MemoryData }) {
             {memories.map((entry, i) => (
               <div
                 key={i}
-                className="flex items-center gap-2 rounded-lg border border-white/5 bg-black/20 p-2 text-xs"
+                className="flex items-center gap-2 rounded-lg border border-border/30 bg-black/20 p-2 text-xs"
               >
                 {entry.type === 'recipe_execution' ? (
                   <Target className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />

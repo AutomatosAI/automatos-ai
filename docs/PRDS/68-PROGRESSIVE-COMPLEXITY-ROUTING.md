@@ -95,7 +95,7 @@ Delete before building. Clean house.
 **Why:** `FieldManager`, `CoordinationManager`, and 7 mock methods (`update_field_context`, `propagate_field_influence`, etc.) all return `{"status": "legacy_mock"}`.
 
 **Steps:**
-1. Delete lines ~298-347 (legacy class stubs and mock methods)
+1. Delete lines ~298-347 (legacy class stubs and mock methods)push
 2. Keep `EnhancedOrchestratorService` class itself — it's still imported by `api/orchestrator.py` for the task decomposition endpoint
 
 ### DELETE: `stream_response_aisdk()` in `consumers/chatbot/service.py`

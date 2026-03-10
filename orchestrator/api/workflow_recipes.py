@@ -414,11 +414,12 @@ async def create_workflow_recipe(
             )
 
         # Apply execution_config defaults if not provided
+        # Timeouts in seconds (executor normalises legacy ms values automatically)
         execution_config = recipe_data.get('execution_config') or {
             'mode': 'sequential',
             'max_retries': 1,
-            'timeout_per_step': 120000,
-            'total_timeout': 600000,
+            'timeout_per_step': 300,
+            'total_timeout': 600,
             'auto_learning': True,
         }
 
@@ -827,9 +828,6 @@ async def execute_recipe(
     - input_data: Dict matching the recipe's inputs schema
     """
     try:
-        import asyncio
-        from api.recipe_executor import execute_recipe_direct
-
         logger.info(f"[execute_recipe] Starting direct execution for recipe_id={recipe_id}, workspace={ctx.workspace_id}")
 
         # Fetch recipe and validate ownership
@@ -882,14 +880,13 @@ async def execute_recipe(
 
         logger.info(f"[execute_recipe] Created execution {recipe_execution_id}, launching direct executor")
 
-        # Launch direct executor as async task
-        asyncio.create_task(
-            execute_recipe_direct(
-                recipe_execution_id=recipe_execution_id,
-                recipe_id=recipe.id,
-                workspace_id=ctx.workspace_id,
-                input_data=input_data,
-            )
+        # Launch direct executor as async task (crash-safe)
+        from api.recipe_executor import launch_recipe_task
+        launch_recipe_task(
+            recipe_execution_id=recipe_execution_id,
+            recipe_id=recipe.id,
+            workspace_id=ctx.workspace_id,
+            input_data=input_data,
         )
 
         return {
@@ -940,11 +937,17 @@ async def get_recipe_execution_detail(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        # Get execution
+        # Get execution — try execution_id string first, fall back to numeric DB id
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id,
             RecipeExecution.recipe_id == recipe.id
         ).first()
+
+        if not execution and execution_id.isdigit():
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.id == int(execution_id),
+                RecipeExecution.recipe_id == recipe.id
+            ).first()
 
         if not execution:
             raise HTTPException(
@@ -1019,11 +1022,17 @@ async def get_step_full_logs(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        # Validate execution
+        # Validate execution — try execution_id string first, fall back to numeric DB id
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id,
             RecipeExecution.recipe_id == recipe.id
         ).first()
+
+        if not execution and execution_id.isdigit():
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.id == int(execution_id),
+                RecipeExecution.recipe_id == recipe.id
+            ).first()
 
         if not execution:
             raise HTTPException(
@@ -1114,11 +1123,17 @@ async def analyze_execution_learning(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        # Validate execution belongs to this recipe
+        # Validate execution — try execution_id string first, fall back to numeric DB id
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id,
             RecipeExecution.recipe_id == recipe.id
         ).first()
+
+        if not execution and execution_id.isdigit():
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.id == int(execution_id),
+                RecipeExecution.recipe_id == recipe.id
+            ).first()
 
         if not execution:
             raise HTTPException(
@@ -1173,11 +1188,17 @@ async def assess_execution_quality(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        # Validate execution belongs to this recipe
+        # Validate execution — try execution_id string first, fall back to numeric DB id
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id,
             RecipeExecution.recipe_id == recipe.id
         ).first()
+
+        if not execution and execution_id.isdigit():
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.id == int(execution_id),
+                RecipeExecution.recipe_id == recipe.id
+            ).first()
 
         if not execution:
             raise HTTPException(
@@ -1644,9 +1665,7 @@ async def recipe_webhook(
     - Any JSON payload — passed as input_data to the recipe executor.
     - Also accepts form-encoded payloads (GitHub ping events).
     """
-    import asyncio
     import json as _json
-    from api.recipe_executor import execute_recipe_direct
 
     # Parse body from any content type
     content_type = request.headers.get("content-type", "")
@@ -1722,13 +1741,12 @@ async def recipe_webhook(
     logger.info("[webhook] Recipe %d (%s) triggered via webhook %s, execution=%s",
                 recipe.id, recipe.name, webhook_id, execution_id)
 
-    asyncio.create_task(
-        execute_recipe_direct(
-            recipe_execution_id=execution_id,
-            recipe_id=recipe.id,
-            workspace_id=recipe.workspace_id,
-            input_data=body,
-        )
+    from api.recipe_executor import launch_recipe_task
+    launch_recipe_task(
+        recipe_execution_id=execution_id,
+        recipe_id=recipe.id,
+        workspace_id=recipe.workspace_id,
+        input_data=body,
     )
 
     return {

@@ -55,10 +55,10 @@ export default function ApiDiagnosticsPage() {
       <h1 className="text-2xl font-bold mb-6">API Diagnostics</h1>
       
       <div className="mb-6">
-        <button 
+        <button
           onClick={testAll}
           disabled={loading}
-          className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50"
+          className="px-4 py-2 border border-border rounded-md hover:bg-secondary transition-colors text-foreground disabled:opacity-50"
         >
           {loading ? 'Testing...' : 'Test All Endpoints'}
         </button>

@@ -131,3 +131,60 @@ export function useToggleHeartbeat() {
     },
   })
 }
+
+// ============= ORCHESTRATOR HEARTBEAT HOOKS =============
+
+export interface OrchestratorHeartbeatResult {
+  id: number
+  status: string
+  findings: Array<{ check: string; detail?: string }>
+  actions_taken: Array<{ tool: string; params?: Record<string, unknown> }>
+  tokens_used: number
+  created_at: string
+}
+
+export interface OrchestratorHeartbeatHistoryResponse {
+  results: OrchestratorHeartbeatResult[]
+  total: number
+}
+
+export const orchestratorHeartbeatKeys = {
+  history: (limit: number) => ['orchestrator-heartbeat', 'history', limit] as const,
+}
+
+/**
+ * Fetch orchestrator heartbeat history.
+ */
+export function useOrchestratorHeartbeatHistory(limit: number = 1) {
+  return useQuery<OrchestratorHeartbeatHistoryResponse>({
+    queryKey: orchestratorHeartbeatKeys.history(limit),
+    queryFn: () =>
+      apiClient.request<OrchestratorHeartbeatHistoryResponse>(
+        `/api/heartbeat/orchestrator/history?limit=${limit}`
+      ),
+    staleTime: 15000,
+    refetchInterval: 60000,
+  })
+}
+
+/**
+ * Manually trigger an orchestrator heartbeat tick.
+ */
+export function useRunOrchestratorHeartbeat() {
+  const queryClient = useQueryClient()
+
+  return useMutation<Record<string, unknown>, Error, void>({
+    mutationFn: () =>
+      apiClient.request<Record<string, unknown>>(
+        '/api/heartbeat/orchestrator/run',
+        { method: 'POST' }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orchestrator-heartbeat'] })
+      toast.success('Orchestrator heartbeat executed')
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Failed to run orchestrator heartbeat')
+    },
+  })
+}

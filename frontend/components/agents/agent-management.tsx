@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { Badge } from '@/components/ui/badge'
@@ -12,7 +12,7 @@ import {
   BarChart,
   Users,
   Zap,
-
+  ChefHat,
   RefreshCw
 } from 'lucide-react'
 
@@ -29,7 +29,7 @@ import { AgentRoster } from './agent-roster'
 
 import { AgentConfiguration } from './agent-configuration'
 import { AgentCoordination } from './agent-coordination'
-// AgentPerformance removed — analytics consolidated into /analytics
+import { RecipesTab } from '@/components/workflows/recipes-tab'
 import { CreateAgentModal } from './create-agent-modal'
 import { AgentDetailsModal } from './agent-details-modal'
 
@@ -116,12 +116,18 @@ export function AgentManagement() {
     }
   }
 
+  // Navigate to ExecutionKitchen when a recipe is cooked
+  const handleExecuteRecipe = useCallback((_workflowId: number, info?: { recipeExecutionId: string; recipeId: string }) => {
+    if (info) {
+      window.location.href = `/activity?openExecution=${info.recipeExecutionId}&recipeId=${info.recipeId}`
+    }
+  }, [])
+
   const tabDefs = [
     { value: 'roster', label: 'Agent Roster', icon: Users },
-
     { value: 'configuration', label: 'Configuration', icon: Settings },
     { value: 'coordination', label: 'Coordination', icon: Users },
-    { value: 'performance', label: 'Performance', icon: BarChart },
+    { value: 'recipes', label: 'Recipes', icon: ChefHat },
   ]
 
   return (
@@ -257,6 +263,10 @@ export function AgentManagement() {
               agents={agents as any[]}
               selectedAgentId={selectedAgentId}
             />
+          </TabsContent>
+
+          <TabsContent value="recipes" className="space-y-6">
+            <RecipesTab onUseRecipe={() => {}} onExecuteRecipe={handleExecuteRecipe} />
           </TabsContent>
         </FilterTabs>
       </motion.div>

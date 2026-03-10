@@ -103,6 +103,12 @@ from api.rag_feedback import router as rag_feedback_router
 
 # PRD-72: Activity Command Centre
 from api.activity import router as activity_router
+from api.reports import router as reports_router  # PRD-76
+
+# PRD-74: Voice Chat
+from api.chat_voice import router as chat_voice_router
+# PRD-74 Phase 2: Voice Profiles
+from api.voice_profiles import router as voice_profiles_router
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -445,6 +451,9 @@ app.include_router(tasks_router)  # PRD-56: Workspace task management
 app.include_router(workspace_files_router)  # PRD-66: Workspace file browser + terminal exec
 app.include_router(rag_feedback_router)  # PRD-60: RAG v3 Feedback
 app.include_router(activity_router)  # PRD-72: Activity Command Centre
+app.include_router(reports_router)  # PRD-76: Agent Reports
+app.include_router(chat_voice_router)  # PRD-74: Voice Chat
+app.include_router(voice_profiles_router)  # PRD-74 Phase 2: Voice Profiles
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

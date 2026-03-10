@@ -70,9 +70,15 @@ class Mem0Client:
 
     def __init__(self, api_url: Optional[str] = None, api_key: Optional[str] = None):
         from config import config
-        self.api_url = api_url or config.MEM0_API_URL
+        self.api_url = (api_url or config.MEM0_API_URL or "").strip()
         self.api_key = api_key or config.MEM0_API_KEY
         self.timeout = _DEFAULT_TIMEOUT
+
+        if not self.api_url:
+            logger.warning("[Mem0] No API URL configured (MEM0_API_URL). Memory storage disabled.")
+            self.api_url = ""
+            self.headers = {}
+            return
 
         # Ensure URL has correct format
         if not self.api_url.startswith("http"):
@@ -89,8 +95,13 @@ class Mem0Client:
         """
         Make an HTTP request with retry + circuit breaker.
 
+        Returns None early if api_url is not configured.
         Returns the response or None if all attempts fail.
         """
+        if not self.api_url:
+            logger.debug("[Mem0] No API URL configured — skipping request")
+            return None
+
         if not _breaker.allow_request():
             logger.debug("[Mem0] Circuit breaker open — skipping request")
             return None
@@ -160,13 +171,18 @@ class Mem0Client:
             return {"success": False, "error": "Mem0 unavailable (circuit breaker or timeout)"}
 
         if resp.status_code >= 400:
-            logger.error("[Mem0] Add failed: status=%s", resp.status_code)
-            return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+            body_preview = (resp.text or "")[:300]
+            logger.error("[Mem0] Add failed: status=%s body=%s", resp.status_code, body_preview)
+            return {"error": f"HTTP {resp.status_code}: {body_preview}"}
 
         normalized = (resp.text or "").strip().lower()
         if normalized == "" or normalized == "null":
-            logger.warning("[Mem0] Empty/null response — memory may not have been stored")
-            return {"success": False, "error": "Empty response from Mem0"}
+            logger.info(
+                "[Mem0] No facts extracted (status=%s) for user_id=%s — "
+                "LLM found nothing to remember from the input text.",
+                resp.status_code, user_id,
+            )
+            return {"success": True, "facts_extracted": 0}
 
         try:
             result = resp.json()
@@ -186,16 +202,16 @@ class Mem0Client:
         Returns:
             List of memory items
         """
-        url = f"{self.api_url}/api/v1/memories/"
-        params = {
+        url = f"{self.api_url}/api/v1/memories/search/"
+        payload = {
+            "query": query,
             "user_id": user_id,
-            "page": 1,
-            "size": 50,
+            "limit": limit,
         }
 
-        logger.debug("[Mem0] Fetching memories for user=%s", user_id)
+        logger.debug("[Mem0] Searching memories for user=%s query=%r", user_id, query)
 
-        resp = self._request("GET", url, params=params)
+        resp = self._request("POST", url, json=payload)
         if resp is None:
             return []
 
@@ -208,29 +224,43 @@ class Mem0Client:
         except Exception:
             return []
 
+        # Search endpoint returns a list of results (with scores) or a
+        # dict wrapper with "results" key depending on Mem0 version.
         if isinstance(data, dict):
-            items = data.get("items", [])
-            logger.info("[Mem0] Found %d memories (total: %s)", len(items), data.get("total", "?"))
-
-            results = []
-            for m in items:
-                results.append({
-                    "id": m.get("id"),
-                    "memory": m.get("content"),
-                    "score": m.get("score"),
-                    "metadata": m.get("metadata_"),
-                    "created_at": m.get("created_at"),
-                })
-
-            if results:
-                sample = [r.get("memory", "")[:40] for r in results[:3]]
-                logger.info("[Mem0] Sample memories: %s", sample)
-
-            results.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-            return results[:limit]
+            items = data.get("results", data.get("items", []))
+        elif isinstance(data, list):
+            items = data
         else:
-            logger.warning("[Mem0] Unexpected response format: %s", type(data))
+            logger.warning("[Mem0] Unexpected search response format: %s", type(data))
             return []
+
+        logger.info("[Mem0] Search returned %d results", len(items))
+
+        results = []
+        for m in items:
+            results.append({
+                "id": m.get("id"),
+                "memory": m.get("memory") or m.get("content"),
+                "score": m.get("score"),
+                "metadata": m.get("metadata") or m.get("metadata_"),
+                "created_at": m.get("created_at"),
+            })
+
+        if results:
+            sample = [f"{r.get('memory', '')[:40]} (score={r.get('score')})" for r in results[:3]]
+            logger.info("[Mem0] Top results: %s", sample)
+
+        # Results from search endpoint are pre-ranked by similarity score.
+        # Re-sort as fallback in case scores are missing.
+        results.sort(
+            key=lambda x: (
+                x.get("score") is not None,
+                x.get("score") or 0,
+                x.get("created_at") or "",
+            ),
+            reverse=True,
+        )
+        return results[:limit]
 
     def get_all(self, user_id: str, limit: int = 100) -> List[Dict]:
         """Get all memories for a user."""

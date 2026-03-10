@@ -152,7 +152,7 @@ export function AnalyticsWorkflows({ days }: Props) {
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Activity className="w-5 h-5 text-blue-400" />
+              <Activity className="w-5 h-5 text-[hsl(var(--info))]" />
               Execution Trend
             </CardTitle>
           </CardHeader>
@@ -218,7 +218,7 @@ export function AnalyticsWorkflows({ days }: Props) {
                     </td>
                     <td className="p-4">{wf.totalRuns}</td>
                     <td className="p-4">
-                      <span className={wf.successRate < 80 && wf.successRate > 0 ? 'text-red-400' : ''}>
+                      <span className={wf.successRate < 80 && wf.successRate > 0 ? 'text-[hsl(var(--destructive))]' : ''}>
                         {wf.successRate > 0 ? `${wf.successRate.toFixed(0)}%` : '-'}
                       </span>
                     </td>
@@ -229,8 +229,8 @@ export function AnalyticsWorkflows({ days }: Props) {
                     </td>
                     <td className="p-4 hidden md:table-cell">
                       <Badge variant="outline" className={
-                        wf.status === 'active' ? 'text-green-400 border-green-400/30' :
-                        wf.status === 'failed' ? 'text-red-400 border-red-400/30' : ''
+                        wf.status === 'active' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' :
+                        wf.status === 'failed' ? 'text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/30' : ''
                       }>
                         {wf.status || 'idle'}
                       </Badge>
@@ -246,12 +246,12 @@ export function AnalyticsWorkflows({ days }: Props) {
       {/* ===== RECIPES SECTION ===== */}
       <div className="pt-2">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <ChefHat className="w-5 h-5 text-orange-400" />
+          <ChefHat className="w-5 h-5 text-primary" />
           Recipes
         </h3>
 
         <StatsBar stats={[
-          { label: 'Total Recipes', value: data?.recipeSummary?.totalRecipes || 0, icon: ChefHat, iconColor: 'text-orange-400' },
+          { label: 'Total Recipes', value: data?.recipeSummary?.totalRecipes || 0, icon: ChefHat, iconColor: 'text-primary' },
           { label: 'Executions', value: data?.recipeSummary?.totalExecutions || 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]' },
           { label: 'Avg Quality', value: `${((data?.recipeSummary?.avgQualityScore || 0) * 100).toFixed(0)}%`, icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]' },
           { label: 'Avg Success Rate', value: `${(data?.recipeSummary?.avgSuccessRate || 0).toFixed(0)}%`, icon: Zap, iconColor: 'text-[hsl(var(--agent))]' },
@@ -292,14 +292,14 @@ export function AnalyticsWorkflows({ days }: Props) {
                         <div className="flex items-center gap-2">
                           {expandedRecipe === recipe.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                           <span className="font-medium">{recipe.name}</span>
-                          {recipe.isSystem && <Shield className="w-3.5 h-3.5 text-blue-400" />}
-                          {recipe.isFeatured && <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />}
+                          {recipe.isSystem && <Shield className="w-3.5 h-3.5 text-[hsl(var(--info))]" />}
+                          {recipe.isFeatured && <Star className="w-3.5 h-3.5 text-[hsl(var(--warning))] fill-[hsl(var(--warning))]" />}
                         </div>
                       </td>
                       <td className="p-4 text-muted-foreground">{recipe.stepsCount}</td>
                       <td className="p-4">{recipe.useCount}</td>
                       <td className="p-4">
-                        <span className={recipe.successRate < 80 && recipe.successRate > 0 ? 'text-red-400' : ''}>
+                        <span className={recipe.successRate < 80 && recipe.successRate > 0 ? 'text-[hsl(var(--destructive))]' : ''}>
                           {recipe.successRate > 0 ? `${recipe.successRate.toFixed(0)}%` : '-'}
                         </span>
                       </td>
@@ -355,12 +355,12 @@ export function AnalyticsWorkflows({ days }: Props) {
                                 )}
                                 <div className="flex gap-2">
                                   {recipe.isSystem && (
-                                    <Badge variant="outline" className="text-blue-400 border-blue-400/30 text-xs">
+                                    <Badge variant="outline" className="text-[hsl(var(--info))] border-[hsl(var(--info))]/30 text-xs">
                                       <Shield className="w-3 h-3 mr-1" /> System
                                     </Badge>
                                   )}
                                   {recipe.isFeatured && (
-                                    <Badge variant="outline" className="text-yellow-400 border-yellow-400/30 text-xs">
+                                    <Badge variant="outline" className="text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30 text-xs">
                                       <Star className="w-3 h-3 mr-1" /> Featured
                                     </Badge>
                                   )}

@@ -474,6 +474,64 @@ class StreamingChatService:
         self.agent_factory = AgentFactory(db_session=db)
         logger.info("StreamingChatService initialized with AgentFactory integration")
 
+    def _resolve_file_parts(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Resolve document:// file parts to inline text content.
+
+        When users attach files in chat, parts contain {type: "file", url: "document://<id>", filename: "..."}.
+        This method fetches the document content from chunks and converts file parts to text parts
+        so the LLM can actually read the uploaded content.
+        """
+        from sqlalchemy import text as sa_text
+
+        resolved = []
+        for msg in messages:
+            parts = msg.get("parts")
+            if not parts:
+                resolved.append(msg)
+                continue
+
+            new_parts = []
+            for part in parts:
+                if part.get("type") == "file" and part.get("url", "").startswith("document://"):
+                    doc_id_str = part["url"].replace("document://", "")
+                    filename = part.get("filename", "uploaded file")
+                    try:
+                        doc_id = int(doc_id_str)
+                        result = self.db.execute(
+                            sa_text(
+                                "SELECT content FROM document_chunks "
+                                "WHERE document_id = :doc_id ORDER BY chunk_index"
+                            ),
+                            {"doc_id": doc_id}
+                        )
+                        chunks = result.fetchall()
+                        if chunks:
+                            content = "\n\n".join(row.content for row in chunks)
+                            new_parts.append({
+                                "type": "text",
+                                "text": f"[Attached file: {filename}]\n{content}"
+                            })
+                            logger.info(f"[file-resolve] Injected document {doc_id} ({filename}, {len(chunks)} chunks) into chat context")
+                        else:
+                            # Document exists but no chunks yet (still processing?)
+                            new_parts.append({
+                                "type": "text",
+                                "text": f"[Attached file: {filename} — document is still being processed, content not yet available]"
+                            })
+                            logger.warning(f"[file-resolve] Document {doc_id} has no chunks yet")
+                    except Exception as e:
+                        logger.error(f"[file-resolve] Failed to resolve document {doc_id_str}: {e}")
+                        new_parts.append({
+                            "type": "text",
+                            "text": f"[Attached file: {filename} — could not load content]"
+                        })
+                else:
+                    new_parts.append(part)
+
+            resolved.append({**msg, "parts": new_parts})
+
+        return resolved
+
     def _resolve_workspace_id(self, agent_id: int) -> Optional[str]:
         logger.info(f"[chat] resolve_workspace_id current={self.workspace_id} agent={agent_id}")
         if self.workspace_id:
@@ -501,23 +559,21 @@ class StreamingChatService:
         complexity_assessment: Optional[Any] = None,
     ) -> AsyncGenerator[str, None]:
         """
-        Stream chat response using a specialized agent from AgentFactory.
-
-        PRD: Unified Agent-Chat System
-        - Activates agent from factory
-        - Uses agent's LLM manager, skills, and tools
-        - Builds system prompt from agent's skills
-        - Uses shared user-level memory
-
-        Args:
-            chat_id: Chat session ID
-            messages: Chat messages
-            agent_id: ID of agent to use
-            user_id: User ID for memory
-            use_system_llm: Use orchestrator LLM settings instead of agent's model
-
-        Yields:
-            AI SDK formatted response chunks
+        Stream a chat response produced by the specified agent, yielding AISDK-formatted chunks for frontend consumption.
+        
+        Activates the agent runtime, prepares and orchestrates context (persona, memory, tools, and prompts), invokes the agent LLM, handles any tool calls and image uploads, persists the assistant message and relevant metrics, and emits memory/usage/finish or error events during the streaming session.
+        
+        Parameters:
+            chat_id (str): Identifier for the chat session.
+            messages (List[Dict[str, Any]]): Conversation history to use as context (ordered).
+            agent_id (int): ID of the agent to activate and run.
+            user_id (int): ID of the requesting user (used for memory and telemetry).
+            use_system_llm (bool): If true, prefer the orchestrator/system LLM configuration over the agent's default.
+            skip_composio (bool): If true, disable Composio-based per-action tool discovery and injection.
+            complexity_assessment (Optional[Any]): Optional complexity/hint structure (e.g., tool_hints and complexity level) used to select ATOM vs full pipeline.
+        
+        Returns:
+            Yields AISDK-formatted strings representing streamed events and text chunks (including memory-injected, tool events, usage, finish, or error payloads).
         """
         import asyncio
         
@@ -589,9 +645,8 @@ class StreamingChatService:
                 widget_mode=self.widget_mode
             )
 
-            # Load agent context: persona, description, skill tools
-            agent_ctx = await self._load_agent_context(agent_runtime)
-            skill_tools = agent_ctx["skill_tools"]
+            # ── Resolve file attachments to inline text ──
+            messages = self._resolve_file_parts(messages)
 
             # ── PRD-68: Branch on complexity level ──
             from consumers.chatbot.auto import Complexity
@@ -602,12 +657,46 @@ class StreamingChatService:
             )
 
             if _complexity == Complexity.ATOM:
-                # ATOM: No tools, no memory, no SmartChatIntegration.
-                # Minimal system prompt + conversation → LLM. Fastest path.
-                logger.info("[PRD-68] ATOM path — skipping tools, memory, orchestration")
+                # ATOM: No tools, no orchestration — but still retrieve memory
+                # so the agent knows who the user is and remembers past context.
+                logger.info("[PRD-68] ATOM path — skipping tools/orchestration, retrieving memory")
+                from datetime import datetime as _dt
+                _now = _dt.utcnow()
+                _time_ctx = (
+                    "Good morning" if _now.hour < 12
+                    else "Good afternoon" if _now.hour < 18
+                    else "Good evening"
+                )
+
+                # Lightweight memory retrieval (cached, ~200ms first call)
+                _memory_block = ""
+                try:
+                    _user_msg = next(
+                        (m.get("content", "") for m in reversed(messages)
+                         if isinstance(m, dict) and m.get("role") == "user"),
+                        ""
+                    )
+                    if _user_msg and smart_chat.orchestrator and smart_chat.orchestrator.memory_manager:
+                        _mem_result = await smart_chat.orchestrator.memory_manager.retrieve_memories(
+                            workspace_id=str(self.workspace_id),
+                            agent_id=agent_id,
+                            query=_user_msg if len(_user_msg) > 5 else "user context",
+                            widget_mode=self.widget_mode,
+                        )
+                        if _mem_result and _mem_result.formatted_context:
+                            _memory_block = f"\n\n## What you remember about this user:\n{_mem_result.formatted_context}\n"
+                            logger.info(
+                                f"[PRD-68] ATOM memory: {len(_mem_result.memories)} memories injected"
+                            )
+                except Exception as _mem_err:
+                    logger.debug(f"[PRD-68] ATOM memory retrieval skipped: {_mem_err}")
+
                 _atom_prompt = (
-                    f"You are {agent_runtime.metadata.name}, a friendly AI assistant. "
-                    "Respond naturally and conversationally. Keep it brief."
+                    f"You are {agent_runtime.metadata.name}, a warm and helpful AI assistant "
+                    f"on the Automatos platform. {_time_ctx}! "
+                    "Respond naturally and conversationally — be friendly, be brief. "
+                    "You're chatting, not executing tasks."
+                    f"{_memory_block}"
                 )
                 llm_messages = self.prompt_analyzer.convert_to_llm_messages(
                     messages, system_prompt=_atom_prompt, available_tools=None
@@ -616,6 +705,10 @@ class StreamingChatService:
                 orchestrated = None
             else:
                 # MOLECULE / CELL / ORGAN / ORGANISM: Full pipeline
+                # Load agent context only when needed (persona, skills, tools)
+                agent_ctx = await self._load_agent_context(agent_runtime)
+                skill_tools = agent_ctx["skill_tools"]
+
                 from consumers.chatbot.tool_router import get_chat_tools
                 all_tools = get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
                 if skill_tools:
@@ -799,24 +892,8 @@ class StreamingChatService:
             except Exception as exc:
                 logger.warning(f"Composio tool injection failed for agent {agent_id}: {exc}")
 
-            # PRD-64: Inject platform tool scope message so LLM knows to call them
-            if use_tools:
-                platform_tool_names = [
-                    t.get("function", {}).get("name")
-                    for t in use_tools
-                    if isinstance(t, dict) and t.get("function", {}).get("name", "").startswith("platform_")
-                ]
-                if platform_tool_names:
-                    llm_messages.insert(2, {
-                        "role": "system",
-                        "content": (
-                            "You have platform introspection tools available. "
-                            "When the user asks about their agents, recipes, workflows, documents, "
-                            "workspace, usage, costs, integrations, or memory — ALWAYS call the "
-                            "appropriate platform_* tool to get real data. Never guess or say you "
-                            "can't — use the tools."
-                        ),
-                    })
+            # Platform tool guidance is now part of the personality system prompt
+            # (AutomatosPersonality.get_platform_skill) — no separate injection needed.
 
             # Context Window Guard — auto-compact if approaching context limit
             from core.context_guard import ContextGuard
@@ -992,12 +1069,21 @@ class StreamingChatService:
                 )
             # Persist task counter to DB so dashboard shows it
             try:
+                from core.models import Agent as AgentModel
                 agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
                 if agent_row:
                     metrics = dict(agent_row.performance_metrics or {})
-                    metrics["total_tasks_executed"] = metrics.get("total_tasks_executed", 0) + 1
-                    metrics["tasks_completed"] = metrics["total_tasks_executed"]
+                    from sqlalchemy.orm.attributes import flag_modified
+                    total = metrics.get("total_tasks_executed", 0) + 1
+                    successes = metrics.get("success_count", 0) + 1
+                    metrics["total_tasks_executed"] = total
+                    metrics["tasks_completed"] = total
+                    metrics["success_count"] = successes
+                    metrics["success_rate"] = round(successes / total, 4) if total > 0 else 0
+                    metrics["last_task_at"] = datetime.now(timezone.utc).isoformat()
+                    metrics["last_task_success"] = True
                     agent_row.performance_metrics = metrics
+                    flag_modified(agent_row, "performance_metrics")
                     self.db.commit()
             except Exception as metric_err:
                 logger.warning(f"Failed to persist agent task counter: {metric_err}")
@@ -1028,6 +1114,7 @@ class StreamingChatService:
         
         try:
             llm_manager = create_llm_manager(service_name="chatbot")
+            messages = self._resolve_file_parts(messages)
             latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
             if self.prompt_analyzer.is_fresh_start_request(latest_text):
                 messages = [m for m in messages if m.get("role") == "user"][-1:]
@@ -1145,16 +1232,36 @@ class StreamingChatService:
         return provider, model
     async def _load_agent_context(self, agent_runtime) -> dict:
         """
-        Load agent-specific context: persona, description, plugins/skills, tool schemas.
+        Load agent-specific context: persona, description, skills/plugins, tool schemas.
+
+        PRD-71: Uses the pre-built system prompt from AgentRuntime (built once at
+        activation by agent_factory). Falls back to DB query only if the runtime
+        has no pre-built prompt (backwards compat for non-factory activations).
 
         Returns a dict with keys:
-            - persona: str (agent's persona/communication style prompt)
-            - description: str (agent name + type + description)
+            - persona: str (empty — persona is already in system_prompt)
+            - description: str (empty — identity is already in system_prompt)
+            - extra_context: str (the pre-built system prompt from agent_factory)
             - skill_tools: list (tool schemas from skills)
         """
-        from core.models import Skill
+        # PRD-71: If AgentRuntime has a pre-built system_prompt, use it directly
+        if getattr(agent_runtime, 'system_prompt', None):
+            return {
+                "persona": "",
+                "description": "",
+                "extra_context": agent_runtime.system_prompt,
+                "skill_tools": getattr(agent_runtime, 'skill_tool_schemas', []),
+            }
 
-        # Load persona from agent's DB record
+        # Fallback: build context from DB (backwards compat for old callers)
+        # This path means the AgentRuntime was created without going through
+        # agent_factory.activate_agent(). Skills/plugins will NOT be loaded.
+        logger.error(
+            "Agent %s has no pre-built system_prompt on AgentRuntime — "
+            "skills and plugins will be missing from this conversation. "
+            "Ensure activate_agent() is called before using the agent.",
+            agent_runtime.agent_id,
+        )
         persona = ""
         try:
             from core.models import Agent as AgentModel
@@ -1162,74 +1269,22 @@ class StreamingChatService:
             if db_agent:
                 if getattr(db_agent, "use_custom_persona", False) and getattr(db_agent, "custom_persona_prompt", None):
                     persona = db_agent.custom_persona_prompt
-                    logger.info(f"Loaded custom persona for agent {agent_runtime.agent_id}")
                 elif getattr(db_agent, "persona_id", None) and getattr(db_agent, "persona", None):
                     persona = db_agent.persona.system_prompt or ""
-                    logger.info(f"Loaded persona '{db_agent.persona.name}' for agent {agent_runtime.agent_id}")
         except Exception as e:
             logger.warning(f"Failed to load persona for agent {agent_runtime.agent_id}: {e}")
 
-        # Agent description
         description = (
             f"You are {agent_runtime.metadata.name}, "
             f"a specialized {agent_runtime.metadata.agent_type} agent.\n"
             f"{agent_runtime.metadata.description or ''}"
         )
 
-        # Load plugins OR skills for additional context
-        extra_context = ""
-        has_plugins = False
-        try:
-            from core.services.plugin_context_service import PluginContextService
-            plugin_svc = PluginContextService(self.db)
-            plugin_rows = plugin_svc.get_assigned_plugins(agent_runtime.agent_id)
-            if plugin_rows:
-                has_plugins = True
-                tier1 = plugin_svc.build_tier1_summary(plugin_rows)
-                tier2 = await plugin_svc.build_tier2_content(
-                    plugin_rows,
-                    task_context=agent_runtime.metadata.description,
-                )
-                extra_context = f"\n{tier1}\n{tier2}" if tier2 else f"\n{tier1}"
-                logger.info(
-                    "Loaded plugin context for agent %s (%d plugins)",
-                    agent_runtime.agent_id, len(plugin_rows),
-                )
-        except Exception as e:
-            logger.warning(f"Failed to load plugins for agent {agent_runtime.agent_id}: {e}")
-
-        if not has_plugins and agent_runtime.metadata.skills:
-            skills = self.db.query(Skill).filter(
-                Skill.name.in_(agent_runtime.metadata.skills),
-                Skill.is_active.is_(True),
-            ).all()
-            parts = []
-            for skill in skills:
-                if skill.prompt_template:
-                    parts.append(skill.prompt_template)
-                elif skill.description:
-                    parts.append(f"- {skill.name}: {skill.description}")
-            if parts:
-                extra_context = "\n".join(parts)
-
-        # Extract tool schemas from skills
-        tool_schemas = []
-        if not has_plugins and agent_runtime.metadata.skills:
-            skills = self.db.query(Skill).filter(
-                Skill.name.in_(agent_runtime.metadata.skills),
-                Skill.is_active == True,  # noqa: E712
-            ).all()
-            for skill in skills:
-                if skill.content and isinstance(skill.content, dict):
-                    schemas = skill.content.get("tools_schema", [])
-                    if schemas:
-                        tool_schemas.extend(schemas)
-
         return {
             "persona": persona,
             "description": description,
-            "extra_context": extra_context,
-            "skill_tools": tool_schemas,
+            "extra_context": "",
+            "skill_tools": [],
         }
     
     async def _handle_tool_calls_aisdk(

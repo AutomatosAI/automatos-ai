@@ -241,7 +241,7 @@ interface SkillCardProps {
 function SkillCard({ skill, onClick, selected, compact }: SkillCardProps) {
   return (
     <Card
-      className={`cursor-pointer transition-all hover:shadow-lg ${
+      className={`cursor-pointer transition-all duration-300 hover:border-primary/20 ${
         selected ? 'ring-2 ring-primary' : ''
       } ${compact ? 'flex items-start' : ''}`}
       onClick={onClick}

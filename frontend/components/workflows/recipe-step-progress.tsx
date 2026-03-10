@@ -110,7 +110,7 @@ export function RecipeStepProgress({
       items.push({
         order: i + 1,
         stepId: stepDef?.step_id || result?.step_id || `step-${i + 1}`,
-        prompt: stepDef?.prompt_template || '',
+        prompt: stepDef?.prompt_template || result?.prompt_template || '',
         agentName: result?.agent_name || `Agent ${stepDef?.agent_id || '?'}`,
         agentId: stepDef?.agent_id || result?.agent_id || 0,
         status: result?.status || (i + 1 < currentStep ? 'success' : i + 1 === currentStep && status === 'running' ? 'running' : 'pending'),
@@ -194,7 +194,7 @@ export function RecipeStepProgress({
                   step.status === 'running' && 'border-orange-400/30 bg-orange-400/5 ring-1 ring-orange-400/20',
                   step.status === 'success' && 'border-emerald-400/20 bg-emerald-400/5',
                   step.status === 'failed' && 'border-red-400/20 bg-red-400/5',
-                  step.status === 'pending' && 'border-white/5 bg-white/[0.02]',
+                  step.status === 'pending' && 'border-border/30 bg-white/[0.02]',
                 )}
               >
                 {/* Step header */}
@@ -276,7 +276,7 @@ export function RecipeStepProgress({
                       exit={{ height: 0, opacity: 0 }}
                       className="overflow-hidden"
                     >
-                      <div className="px-3 pb-3 space-y-2 border-t border-white/5 pt-2">
+                      <div className="px-3 pb-3 space-y-2 border-t border-border/30 pt-2">
                         {/* Error message */}
                         {step.result.error && (
                           <div className="bg-red-400/10 border border-red-400/20 rounded-lg p-2 text-xs text-red-400">

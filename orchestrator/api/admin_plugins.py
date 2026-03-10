@@ -240,10 +240,23 @@ async def approve_plugin(
         db.add(history)
         db.commit()
 
+        # PRD-71: Materialize SKILL.md files from the plugin into Skill records
+        materialized_ids = []
+        try:
+            from core.services.skill_materializer import SkillMaterializer
+            materializer = SkillMaterializer(db)
+            materialized_ids = await materializer.materialize_plugin(plugin)
+        except Exception as mat_err:
+            logger.warning(
+                "Skill materialization failed for plugin %s (non-blocking): %s",
+                plugin.slug, mat_err,
+            )
+
         return {
             "success": True,
             "message": f"Plugin '{plugin.name}' approved",
             "plugin_id": str(plugin.id),
+            "materialized_skill_ids": materialized_ids,
         }
 
     except HTTPException:
@@ -499,10 +512,11 @@ async def import_github(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Import plugins from a GitHub repo URL.
+    """Import plugins AND/OR standalone skills from a GitHub repo URL.
 
-    Clones the repo, discovers plugins, bridges manifests, uploads through
-    the standard pipeline, and auto-approves safe plugins.
+    Clones the repo, discovers plugins (manifest.json) and standalone
+    SKILL.md files. Plugins go through the standard pipeline; standalone
+    skills are imported directly as Skill DB records.
     """
     _assert_admin(ctx)
 
@@ -544,74 +558,84 @@ async def import_github(
         if not clone_repo(repo_url, repo_dir):
             raise HTTPException(status_code=400, detail=f"Failed to clone repository: {url}")
 
+        # --- Phase 1: Discover plugins (manifest-based packages) ---
         all_plugins = discover_plugins(repo_dir, repo_name)
-        if not all_plugins:
-            raise HTTPException(status_code=400, detail="No plugins discovered in this repository")
 
-        s3_service = MarketplaceS3Service()
-        scan_service = PluginScanService(db)
-        upload_service = PluginUploadService(db, s3_service, scan_service)
-        uploaded_by = str(getattr(ctx.user, "id", "admin"))
+        if all_plugins:
+            s3_service = MarketplaceS3Service()
+            scan_service = PluginScanService(db)
+            upload_service = PluginUploadService(db, s3_service, scan_service)
+            uploaded_by = str(getattr(ctx.user, "id", "admin"))
 
-        for plugin in all_plugins:
-            slug = plugin.slug
+            for plugin in all_plugins:
+                slug = plugin.slug
 
-            # Check existing
-            existing = db.query(MarketplacePlugin).filter(
-                MarketplacePlugin.slug == slug,
-            ).first()
-            if existing:
-                results.append(GitHubImportResult(
-                    slug=slug,
-                    plugin_id=str(existing.id),
-                    security_status=existing.security_status,
-                    approval_status=existing.approval_status,
-                    status="already_exists",
-                ))
-                continue
+                # Check existing
+                existing = db.query(MarketplacePlugin).filter(
+                    MarketplacePlugin.slug == slug,
+                ).first()
+                if existing:
+                    results.append(GitHubImportResult(
+                        slug=slug,
+                        plugin_id=str(existing.id),
+                        security_status=existing.security_status,
+                        approval_status=existing.approval_status,
+                        status="already_exists",
+                    ))
+                    continue
 
-            try:
-                manifest = bridge_to_manifest(
-                    plugin.source_manifest, plugin.content_dir, slug
-                )
-                zip_bytes = create_plugin_zip(
-                    plugin.content_dir, manifest, plugin.source_manifest
-                )
-
-                base_url = url.rstrip("/").replace(".git", "")
-                plugin_record = await upload_service.upload_plugin(
-                    zip_bytes=zip_bytes,
-                    source_type="github",
-                    source_url=base_url,
-                    uploaded_by=uploaded_by,
-                )
-
-                # Auto-approve safe plugins
-                if plugin_record.security_status == "safe":
-                    plugin_record.approval_status = "approved"
-                    plugin_record.approved_by = uploaded_by
-                    plugin_record.approved_at = datetime.utcnow()
-                    db.commit()
-
-                results.append(GitHubImportResult(
-                    slug=slug,
-                    plugin_id=str(plugin_record.id),
-                    security_status=plugin_record.security_status,
-                    approval_status=plugin_record.approval_status,
-                    status="uploaded",
-                ))
-
-            except Exception as e:
-                logger.error("Failed to import plugin %s: %s", slug, e)
                 try:
-                    db.rollback()
-                except Exception:
-                    pass
-                results.append(GitHubImportResult(
-                    slug=slug,
-                    status="error",
-                    error="Plugin import failed",
-                ))
+                    manifest = bridge_to_manifest(
+                        plugin.source_manifest, plugin.content_dir, slug
+                    )
+                    zip_bytes = create_plugin_zip(
+                        plugin.content_dir, manifest, plugin.source_manifest
+                    )
+
+                    base_url = url.rstrip("/").replace(".git", "")
+                    plugin_record = await upload_service.upload_plugin(
+                        zip_bytes=zip_bytes,
+                        source_type="github",
+                        source_url=base_url,
+                        uploaded_by=uploaded_by,
+                    )
+
+                    # Auto-approve safe plugins
+                    if plugin_record.security_status == "safe":
+                        plugin_record.approval_status = "approved"
+                        plugin_record.approved_by = uploaded_by
+                        plugin_record.approved_at = datetime.utcnow()
+                        db.commit()
+
+                    results.append(GitHubImportResult(
+                        slug=slug,
+                        plugin_id=str(plugin_record.id),
+                        security_status=plugin_record.security_status,
+                        approval_status=plugin_record.approval_status,
+                        status="uploaded",
+                    ))
+
+                except Exception as e:
+                    logger.error("Failed to import plugin %s: %s", slug, e)
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    results.append(GitHubImportResult(
+                        slug=slug,
+                        status="error",
+                        error="Plugin import failed",
+                    ))
+
+        # --- Phase 2: Discover standalone SKILL.md files ---
+        skill_results = _import_standalone_skills(repo_dir, repo_name, url, db)
+        results.extend(skill_results)
+
+        if not results:
+            raise HTTPException(
+                status_code=400,
+                detail="No plugins or skills discovered in this repository",
+            )
 
         return {
             "plugins": [r.model_dump() for r in results],
@@ -625,6 +649,124 @@ async def import_github(
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _import_standalone_skills(
+    repo_dir: Path,
+    repo_name: str,
+    source_url: str,
+    db: Session,
+) -> List[GitHubImportResult]:
+    """Discover and import standalone SKILL.md files from a cloned repo.
+
+    Creates Skill records directly (workspace_id=NULL for marketplace).
+    Uses the skill_loader's parse + security scan logic.
+    """
+    from modules.agents.services.skill_loader import (
+        parse_yaml_frontmatter,
+        scan_for_dangerous_patterns,
+    )
+    from core.models.core import Skill
+
+    skill_files = list(repo_dir.rglob("SKILL.md"))
+    if not skill_files:
+        return []
+
+    results: List[GitHubImportResult] = []
+    source_tag = f"github:{repo_name}"
+
+    for skill_file in skill_files:
+        try:
+            content = skill_file.read_text(encoding="utf-8")
+            yaml_data, markdown_body = parse_yaml_frontmatter(content)
+
+            if not yaml_data:
+                logger.warning("Skipping %s — no YAML frontmatter", skill_file)
+                continue
+
+            skill_name = yaml_data.get("name")
+            description = yaml_data.get("description", "")
+            if not skill_name:
+                logger.warning("Skipping %s — missing 'name' in frontmatter", skill_file)
+                continue
+
+            # Security scan
+            is_safe, dangerous_matches = scan_for_dangerous_patterns(content)
+            if not is_safe:
+                logger.warning(
+                    "Skill %s blocked — dangerous patterns: %s",
+                    skill_name, dangerous_matches,
+                )
+                results.append(GitHubImportResult(
+                    slug=skill_name,
+                    status="error",
+                    error=f"Security scan failed: {dangerous_matches}",
+                ))
+                continue
+
+            # Upsert: match on name + source
+            existing = db.query(Skill).filter(
+                Skill.name == skill_name,
+                Skill.skill_source == source_tag,
+            ).first()
+
+            if existing:
+                existing.description = description
+                existing.skill_version = yaml_data.get("version", "1.0.0")
+                existing.prompt_template = markdown_body
+                existing.tags = yaml_data.get("tags", [])
+                existing.skill_metadata = yaml_data
+                existing.workspace_id = None  # marketplace/global
+                skill = existing
+                status = "updated"
+            else:
+                skill = Skill(
+                    name=skill_name,
+                    description=description,
+                    skill_type=yaml_data.get("skill_type", "custom"),
+                    category=yaml_data.get("category", "general"),
+                    skill_version=yaml_data.get("version", "1.0.0"),
+                    skill_source=source_tag,
+                    prompt_template=markdown_body,
+                    tags=yaml_data.get("tags", []),
+                    skill_metadata=yaml_data,
+                    is_active=True,
+                    workspace_id=None,  # marketplace/global
+                )
+                db.add(skill)
+                status = "uploaded"
+
+            db.flush()
+
+            results.append(GitHubImportResult(
+                slug=skill_name,
+                plugin_id=str(skill.id),
+                security_status="safe",
+                approval_status="approved",
+                status=status,
+            ))
+
+        except Exception as e:
+            logger.error("Failed to import skill from %s: %s", skill_file, e, exc_info=True)
+            results.append(GitHubImportResult(
+                slug=str(skill_file.stem),
+                status="error",
+                error=str(e),
+            ))
+
+    if results:
+        try:
+            db.commit()
+        except Exception as e:
+            logger.error("Failed to commit skill imports: %s", e)
+            db.rollback()
+
+    logger.info(
+        "Imported %d standalone skills from %s",
+        sum(1 for r in results if r.status in ("uploaded", "updated")),
+        repo_name,
+    )
+    return results
 
 
 @router.delete("/{plugin_id}")

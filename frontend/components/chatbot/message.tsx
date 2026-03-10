@@ -10,6 +10,7 @@ import remarkGfm from 'remark-gfm'
 import { CodeBlock } from './code-block'
 import { ImageGallery, type ChatImage } from './image-gallery'
 import { MessageActions } from './message-actions'
+import { VoiceMessage } from '@/components/voice/VoiceMessage'
 
 export interface MessageProps {
   chatId: string
@@ -211,6 +212,18 @@ export function Message({
             )
           }
 
+          if (part.type === 'voice' && 'transcript' in part) {
+            return (
+              <VoiceMessage
+                key={index}
+                transcript={part.transcript}
+                audioUrl={'audioUrl' in part ? part.audioUrl : undefined}
+                isUser={isUser}
+                durationMs={'durationMs' in part ? part.durationMs : undefined}
+              />
+            )
+          }
+
           return null
         })}
       </div>
@@ -267,15 +280,16 @@ export function Message({
 
     return (
       <div className="flex flex-wrap items-center gap-2">
-        {runningTools.map((tc) => (
-          <div
-            key={tc.toolCallId}
-            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-orange-500/10 border border-orange-500/30 text-orange-300"
-          >
+        {runningTools.length > 0 && (
+          <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-orange-500/10 border border-orange-500/30 text-orange-300">
             <Loader2 className="w-3 h-3 animate-spin" />
-            <span>{formatToolName(tc.toolName)}</span>
+            <span>
+              {runningTools.length === 1
+                ? formatToolName(runningTools[0].toolName)
+                : `Working (${runningTools.length} tools)`}
+            </span>
           </div>
-        ))}
+        )}
         {errorTools.map((tc) => (
           <div
             key={tc.toolCallId}

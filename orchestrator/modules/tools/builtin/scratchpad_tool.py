@@ -1,13 +1,18 @@
 """
-Scratchpad Write Tool
-=====================
+Scratchpad Tools
+================
 
-Built-in tool injected ONLY during recipe step execution.
-Allows agents to store named values in the shared recipe scratchpad
-for downstream steps to use.
+Built-in tools injected ONLY during recipe step execution.
+- scratchpad_write: store named values for downstream steps
+- scratchpad_read: retrieve values written by earlier steps
 """
 
-# OpenAI function-call schema — injected into the tools list
+import json
+
+# ---------------------------------------------------------------------------
+# scratchpad_write
+# ---------------------------------------------------------------------------
+
 SCRATCHPAD_WRITE_TOOL_DEF = {
     "type": "function",
     "function": {
@@ -37,7 +42,10 @@ SCRATCHPAD_WRITE_TOOL_DEF = {
     },
 }
 
-SCRATCHPAD_TOOL_NAME = "scratchpad_write"
+SCRATCHPAD_WRITE_NAME = "scratchpad_write"
+
+# Keep old alias for backward compat with existing imports
+SCRATCHPAD_TOOL_NAME = SCRATCHPAD_WRITE_NAME
 
 
 def handle_scratchpad_write(
@@ -46,10 +54,69 @@ def handle_scratchpad_write(
     scratchpad,
     step_order: int,
 ) -> str:
-    """
-    Execute the scratchpad_write action.
-
-    Returns a confirmation string for the LLM tool-call response.
-    """
+    """Execute the scratchpad_write action."""
     scratchpad.write_export(step_order, key, value)
     return f"Stored '{key}' in scratchpad."
+
+
+# ---------------------------------------------------------------------------
+# scratchpad_read
+# ---------------------------------------------------------------------------
+
+SCRATCHPAD_READ_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "scratchpad_read",
+        "description": (
+            "Read values from the shared recipe scratchpad that were written "
+            "by earlier steps. Use this to retrieve data like test reports, "
+            "analysis results, URLs, or any values exported by previous steps."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "The key to read. Use '*' or omit to read all "
+                        "available exports. Otherwise provide the exact "
+                        "snake_case key used by the writing step."
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+SCRATCHPAD_READ_NAME = "scratchpad_read"
+
+
+def handle_scratchpad_read(
+    key: str,
+    scratchpad,
+) -> str:
+    """
+    Execute the scratchpad_read action.
+
+    If key is '*' or empty, returns all exports as JSON.
+    Otherwise returns the value for a specific key, or an error message.
+    """
+    exports = scratchpad.get_exports()
+
+    if not key or key == "*":
+        if not exports:
+            return "Scratchpad is empty — no exports from previous steps."
+        return json.dumps(exports, indent=2)
+
+    value = exports.get(key)
+    if value is not None:
+        return value
+
+    available = list(exports.keys())
+    if available:
+        return (
+            f"Key '{key}' not found in scratchpad. "
+            f"Available keys: {', '.join(available)}"
+        )
+    return f"Key '{key}' not found — scratchpad is empty."

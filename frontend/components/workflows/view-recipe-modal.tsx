@@ -527,8 +527,9 @@ export function ViewRecipeModal({
                 {onExecute && (
                   <Button
                     size="lg"
+                    variant="outline"
                     onClick={onExecute}
-                    className="bg-primary hover:bg-primary/90 text-foreground shadow-lg shadow-primary/20 px-6"
+                    className="px-6"
                   >
                     <Download className="w-4 h-4 mr-2" />
                     Add to Workspace

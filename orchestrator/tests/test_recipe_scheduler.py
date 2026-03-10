@@ -104,8 +104,8 @@ class TestSchedulerLifecycle:
     """Tests for start() and stop() methods."""
 
     @pytest.mark.asyncio
-    async def test_start_initializes_scheduler(self):
-        """start() creates AsyncIOScheduler, calls _load_cron_recipes."""
+    async def test_start_standalone_creates_own_scheduler(self):
+        """start() without shared scheduler creates AsyncIOScheduler."""
         svc = RecipeSchedulerService()
 
         mock_sched_instance = MagicMock()
@@ -117,19 +117,50 @@ class TestSchedulerLifecycle:
             await svc.start()
 
         assert svc._scheduler is mock_sched_instance
+        assert svc._owns_scheduler is True
         mock_sched_instance.start.assert_called_once()
         mock_load.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_stop_shuts_down_scheduler(self):
-        """stop() calls scheduler.shutdown()."""
+    async def test_start_with_shared_scheduler(self):
+        """start(scheduler=X) uses shared scheduler, does not create its own."""
+        svc = RecipeSchedulerService()
+
+        shared_sched = MagicMock()
+        mock_load = AsyncMock()
+        svc._load_cron_recipes = mock_load
+
+        await svc.start(scheduler=shared_sched)
+
+        assert svc._scheduler is shared_sched
+        assert svc._owns_scheduler is False
+        # Should NOT have called start on the shared scheduler (UnifiedScheduler handles that)
+        shared_sched.start.assert_not_called()
+        mock_load.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_stop_shuts_down_owned_scheduler(self):
+        """stop() calls scheduler.shutdown() only when we own it."""
         svc = RecipeSchedulerService()
         mock_sched = MagicMock()
         svc._scheduler = mock_sched
+        svc._owns_scheduler = True
 
         await svc.stop()
 
         mock_sched.shutdown.assert_called_once_with(wait=False)
+
+    @pytest.mark.asyncio
+    async def test_stop_shared_scheduler_no_shutdown(self):
+        """stop() does NOT shutdown the shared scheduler."""
+        svc = RecipeSchedulerService()
+        mock_sched = MagicMock()
+        svc._scheduler = mock_sched
+        svc._owns_scheduler = False
+
+        await svc.stop()
+
+        mock_sched.shutdown.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stop_no_scheduler_is_noop(self):
@@ -252,29 +283,28 @@ class TestFireRecipe:
 
     @pytest.mark.asyncio
     async def test_fire_recipe_success(self, mock_recipe):
-        """Re-fetches recipe, creates RecipeExecution, calls execute_recipe_direct."""
+        """Re-fetches recipe, creates RecipeExecution, calls launch_recipe_task."""
         svc = RecipeSchedulerService()
         mock_sched = MagicMock()
         svc._scheduler = mock_sched
 
         mock_db, db_module = _make_db_mock(first_result=mock_recipe)
-        mock_exec_direct = AsyncMock()
+        mock_launch = MagicMock()
         mock_execution_cls = MagicMock()
 
         extra = {
             "core.models.core": MagicMock(RecipeExecution=mock_execution_cls),
-            "api.recipe_executor": MagicMock(execute_recipe_direct=mock_exec_direct),
+            "api.recipe_executor": MagicMock(launch_recipe_task=mock_launch),
         }
 
-        with patch.dict(sys.modules, _lazy_import_patches(db_module, extra)), \
-             patch("asyncio.create_task") as mock_create_task:
+        with patch.dict(sys.modules, _lazy_import_patches(db_module, extra)):
             await svc._fire_recipe(mock_recipe.id, str(mock_recipe.workspace_id))
 
         # Should have added a RecipeExecution to the DB
         mock_db.add.assert_called_once()
         mock_db.commit.assert_called_once()
-        # Should have created a task for execution
-        mock_create_task.assert_called_once()
+        # Should have launched the recipe task
+        mock_launch.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_fire_recipe_deleted(self, mock_recipe):

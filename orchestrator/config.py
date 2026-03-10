@@ -202,6 +202,7 @@ class Config:
     ROUTING_LLM_CONFIDENCE_THRESHOLD: float = float(os.getenv("ROUTING_LLM_CONFIDENCE_THRESHOLD", "0.5"))
 
     # GitHub
+    GITHUB_PAT: str = os.getenv("GITHUB", "")  # Personal Access Token for git push
     GITHUB_REPO_OWNER: str = os.getenv("GITHUB_REPO_OWNER", "")
     GITHUB_REPO_NAME: str = os.getenv("GITHUB_REPO_NAME", "")
     GITHUB_DEFAULT_BRANCH: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
@@ -231,6 +232,13 @@ class Config:
     RAILWAY_API_TOKEN: str = os.getenv("RAILWAY_API_TOKEN", "")
     RAILWAY_PROJECT_ID: str = os.getenv("RAILWAY_PROJECT_ID", "")
     RAILWAY_ENVIRONMENT_ID: str = os.getenv("RAILWAY_ENVIRONMENT_ID", "")
+
+    # =============================================================================
+    # MONITORING (PRD-73)
+    # =============================================================================
+    LOKI_URL: str = os.getenv("LOKI_URL", "http://loki.railway.internal:3100")
+    PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://prometheus.railway.internal:9090")
+    ALERTMANAGER_URL: str = os.getenv("ALERTMANAGER_URL", "http://alertmanager.railway.internal:9093")
 
     # =============================================================================
     # FEATURE FLAGS
@@ -320,6 +328,7 @@ class Config:
     # =============================================================================
     ENABLE_LLM_QUALITY_ASSESSMENT: bool = os.getenv("ENABLE_LLM_QUALITY_ASSESSMENT", "false").lower() == "true"
     ENABLE_CONTEXT_OPTIMIZATION: bool = os.getenv("ENABLE_CONTEXT_OPTIMIZATION", "false").lower() == "true"
+    INJECT_DAILY_LOGS: bool = os.getenv("INJECT_DAILY_LOGS", "true").lower() == "true"
     COMPLEXITY_CACHE_TTL_HOURS: int = int(os.getenv("COMPLEXITY_CACHE_TTL_HOURS", "24"))
 
     # =============================================================================
@@ -360,6 +369,21 @@ class Config:
         except Exception:
             return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
     
+    # =============================================================================
+    # VOICE SERVICE (PRD-74)
+    # =============================================================================
+    VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://voice-service.railway.internal:8300")
+    VOICE_SERVICE_TIMEOUT: int = int(os.getenv("VOICE_SERVICE_TIMEOUT", "30"))
+    VOICE_STT_MODEL: str = os.getenv("VOICE_STT_MODEL", "Systran/faster-whisper-large-v3")
+    VOICE_TTS_MODEL: str = os.getenv("VOICE_TTS_MODEL", "kokoro")
+    VOICE_TTS_DEFAULT_VOICE: str = os.getenv("VOICE_TTS_DEFAULT_VOICE", "af_heart")
+    VOICE_ENABLED: bool = os.getenv("VOICE_ENABLED", "true").lower() == "true"
+    VOICE_MAX_AUDIO_SIZE_MB: int = int(os.getenv("VOICE_MAX_AUDIO_SIZE_MB", "25"))
+    VOICE_MAX_DURATION_SECONDS: int = int(os.getenv("VOICE_MAX_DURATION_SECONDS", "120"))
+    # Auto agent voice defaults (PRD-74 Phase 2)
+    AUTO_VOICE_ID: str = os.getenv("AUTO_VOICE_ID", "auto_default")
+    AUTO_VOICE_PROVIDER: str = os.getenv("AUTO_VOICE_PROVIDER", "chatterbox")
+
     def validate(self) -> bool:
         """
         Validate required configuration

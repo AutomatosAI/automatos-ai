@@ -3,13 +3,16 @@ Plugin Context Service
 ======================
 
 Shared service for loading plugin context into agent system prompts.
-Used by chatbot, recipe executor, and agent factory prompt builders.
+Used by agent factory prompt builder (single injection point).
 
 Two-tier architecture:
 - Tier 1: Plugin summaries from DB fields only (~200 tokens/plugin)
 - Tier 2: Full SKILL.md content from S3 via Redis cache (~2000 tokens/plugin)
 
-Agents with assigned plugins skip skill loading entirely.
+PRD-71: Skills and plugins now coexist in the same prompt. Plugins that
+have been materialized into Skill records are skipped (their content is
+already loaded via the skills path). Non-materialized plugins are loaded
+via this service.
 """
 
 import asyncio

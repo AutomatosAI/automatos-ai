@@ -54,7 +54,7 @@ function AgentExpandedPanel({ agent }: { agent: any }) {
       {/* Memory Column */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <Brain className="w-4 h-4 text-purple-400" />
+          <Brain className="w-4 h-4 text-[hsl(var(--agent))]" />
           Memory
         </div>
         {hasMemory ? (
@@ -103,7 +103,7 @@ function AgentExpandedPanel({ agent }: { agent: any }) {
       {/* Usage Details Column */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <Zap className="w-4 h-4 text-blue-400" />
+          <Zap className="w-4 h-4 text-[hsl(var(--info))]" />
           Usage Details
         </div>
         <div className="flex items-center justify-between text-sm">
@@ -135,7 +135,7 @@ function AgentExpandedPanel({ agent }: { agent: any }) {
       {/* Activity Column */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <Activity className="w-4 h-4 text-green-400" />
+          <Activity className="w-4 h-4 text-[hsl(var(--success))]" />
           Activity
         </div>
         <div className="flex items-center justify-between text-sm">
@@ -205,7 +205,7 @@ export function AnalyticsAgents({ days }: Props) {
     if (agent.successRate > 0 && agent.successRate < 80)
       return <Badge variant="destructive" className="text-xs">Low success</Badge>
     if (agent.tokensUsed > 0 && agent.cost > (data?.summary?.totalCost || 0) * 0.3)
-      return <Badge className="text-xs bg-yellow-500/20 text-yellow-400 border-yellow-500/30">High cost</Badge>
+      return <Badge className="text-xs bg-[hsl(var(--warning))]/20 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30">High cost</Badge>
     return null
   }
 
@@ -288,12 +288,12 @@ export function AnalyticsAgents({ days }: Props) {
                           </div>
                         </td>
                         <td className="p-4 hidden md:table-cell">
-                          <Badge variant="outline" className={agent.status === 'active' ? 'text-green-400 border-green-400/30' : 'text-gray-400'}>
+                          <Badge variant="outline" className={agent.status === 'active' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' : 'text-gray-400'}>
                             {agent.status}
                           </Badge>
                         </td>
                         <td className="p-4">
-                          <span className={agent.successRate < 80 && agent.successRate > 0 ? 'text-red-400' : ''}>
+                          <span className={agent.successRate < 80 && agent.successRate > 0 ? 'text-[hsl(var(--destructive))]' : ''}>
                             {agent.successRate > 0 ? `${agent.successRate.toFixed(0)}%` : '-'}
                           </span>
                         </td>

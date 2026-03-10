@@ -211,6 +211,9 @@ class Agent(Base):
     custom_persona_prompt = Column(Text, nullable=True)
     use_custom_persona = Column(Boolean, default=False, server_default='false')
 
+    # PRD-74: Voice profile assignment
+    voice_profile_id = Column(UUID(as_uuid=True), ForeignKey('voice_profiles.id'), nullable=True)
+
     # PRD-67: CTO Agent / System agents
     is_system_agent = Column(Boolean, default=False, server_default='false')  # Global, platform-seeded
     required_role = Column(String(50), nullable=True)  # If set, only visible to users with this system_role
@@ -265,6 +268,9 @@ class Agent(Base):
     # PRD-42: Persona relationship
     persona = relationship("Persona", foreign_keys=[persona_id])
 
+    # PRD-74: Voice profile relationship
+    voice_profile = relationship("VoiceProfile", foreign_keys=[voice_profile_id])
+
     # PRD-42: Plugin assignments (marketplace plugins assigned to this agent)
     assigned_plugins = relationship(
         "AgentAssignedPlugin",
@@ -294,7 +300,11 @@ class Skill(Base):
     created_by = Column(String(255))
 
     # PRD-37: Workspace isolation for multi-tenant SaaS
-    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
+    # PRD-71: nullable — NULL = marketplace/global skill, UUID = workspace-specific
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=True)
+
+    # PRD-71: Plugin materialization — tracks which plugin package this skill came from
+    package_slug = Column(String(100), nullable=True)
 
     # PRD-22: New fields for Git-backed skills
     prompt_template = Column(Text, nullable=True)  # Core skill content (Level 2 progressive disclosure)
@@ -623,6 +633,7 @@ class AgentUpdate(BaseModel):
     skill_ids: Optional[List[int]] = None
     tool_ids: Optional[List[int]] = None  # NEW: Allow updating tool assignments
     tags: Optional[List[str]] = None
+    voice_profile_id: Optional[str] = None  # PRD-74: Voice profile UUID or null
 
 class AgentResponse(BaseModel):
     id: int
@@ -648,6 +659,7 @@ class AgentResponse(BaseModel):
     is_system_agent: bool = False
     slug: Optional[str] = None
     required_role: Optional[str] = None
+    voice_profile_id: Optional[str] = None  # PRD-74
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)

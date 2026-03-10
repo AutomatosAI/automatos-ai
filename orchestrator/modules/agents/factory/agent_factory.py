@@ -473,6 +473,9 @@ class AgentRuntime:
     is_byok: bool = False
     resolved_provider: str = ""
     workspace_id: Optional[Any] = None
+    # PRD-71: Pre-built system prompt (built once at activation, consumed by chatbot/recipe_executor)
+    system_prompt: Optional[str] = None
+    skill_tool_schemas: List[Dict[str, Any]] = field(default_factory=list)
     
     def update_metrics(self, execution_time: float, tokens_used: int, success: bool):
         """Update agent performance metrics"""
@@ -1060,11 +1063,13 @@ Available Shell Tools:
             AgentRuntime if successful, None if agent not found or activation failed
         """
         try:
-            # Check if already active
+            # Check if already active — return cached runtime (prompt is pre-built)
+            # PRD-71: Callers that need a fresh prompt after skill/plugin changes
+            # should call deactivate_agent() first, or use force_refresh.
             if agent_id in self.active_agents:
                 self.logger.info(f"Agent {agent_id} already active in runtime")
                 return self.active_agents[agent_id]
-            
+
             # Load from database
             db_agent = self.db_session.query(Agent).filter(Agent.id == agent_id).first()
             if not db_agent:
@@ -1156,6 +1161,12 @@ Available Shell Tools:
             # Load agent's tools
             agent_tools = await self._load_agent_tools(agent_id)
 
+            # PRD-71: Build system prompt at activation time (single injection point)
+            system_prompt, skill_tool_schemas = self._build_agent_system_prompt(
+                agent=db_agent,
+                db=self.db_session,
+            )
+
             # Create runtime
             agent_runtime = AgentRuntime(
                 agent_id=agent_id,
@@ -1168,23 +1179,51 @@ Available Shell Tools:
                 is_byok=resolved.is_byok if resolved else False,
                 resolved_provider=resolved.provider if resolved else provider_str,
                 workspace_id=db_agent.workspace_id,
+                system_prompt=system_prompt,
+                skill_tool_schemas=skill_tool_schemas,
             )
-            
+
             # Add to active agents
             self.active_agents[agent_id] = agent_runtime
-            
+
             # Update database status
             db_agent.status = AgentLifecycle.ACTIVE.value
             self.db_session.commit()
-            
+
             self.logger.info(f"✅ Activated agent {agent_id} ({db_agent.name}) with {llm_config_dict.get('model')}")
-            
+
             return agent_runtime
             
         except Exception as e:
             self.logger.error(f"Failed to activate agent {agent_id}: {str(e)}")
             return None
-    
+
+    def refresh_agent_prompt(self, agent_id: int) -> bool:
+        """
+        PRD-71: Rebuild the system prompt for an already-active agent.
+
+        Call this after changing an agent's skills or plugins to ensure the
+        cached AgentRuntime has up-to-date prompt content.
+
+        Returns True if the prompt was refreshed, False if agent not active.
+        """
+        runtime = self.active_agents.get(agent_id)
+        if not runtime:
+            return False
+
+        db_agent = self.db_session.query(Agent).filter(Agent.id == agent_id).first()
+        if not db_agent:
+            return False
+
+        system_prompt, skill_tool_schemas = self._build_agent_system_prompt(
+            agent=db_agent,
+            db=self.db_session,
+        )
+        runtime.system_prompt = system_prompt
+        runtime.skill_tool_schemas = skill_tool_schemas
+        self.logger.info(f"Refreshed system prompt for agent {agent_id}")
+        return True
+
     async def execute_with_prompt(
         self,
         agent: Union[int, AgentRuntime],
@@ -1268,22 +1307,22 @@ Available Shell Tools:
             
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
+            elif getattr(agent_runtime, 'system_prompt', None):
+                # PRD-71: Use pre-built prompt from AgentRuntime (single injection point)
+                messages.append({"role": "system", "content": agent_runtime.system_prompt})
+                skill_tool_schemas_from_prompt = getattr(agent_runtime, 'skill_tool_schemas', [])
             else:
-                # Get database agent for skill loading
+                # Fallback: build from scratch (backwards compat)
                 db_agent = self.db_session.query(Agent).filter_by(id=agent_runtime.agent_id).first()
                 if db_agent:
-                    # This NOW returns (prompt_text, skill_tools) tuple!
                     built_system_prompt, skill_tool_schemas_from_prompt = self._build_agent_system_prompt(
                         agent=db_agent,
-                        task_context=prompt,  # Use the task prompt for skill selection
+                        task_context=prompt,
                         db=self.db_session,
                         required_tools=required_tools,
-                        enable_smart_skill_selection=True
                     )
                     messages.append({"role": "system", "content": built_system_prompt})
-                    self.logger.info(f"✨ Built system prompt with intelligent skill selection for agent {agent_runtime.agent_id}")
-                    if skill_tool_schemas_from_prompt:
-                        self.logger.info(f"🦸 PRD-22: Extracted {len(skill_tool_schemas_from_prompt)} skill tools from prompt building")
+                    self.logger.info(f"Built system prompt for agent {agent_runtime.agent_id}")
             
             # Add short-term memory if enabled
             if use_memory and agent_runtime.memory:
@@ -1965,158 +2004,7 @@ To use actions, respond with JSON blocks like:
         return tool_schemas, msg
 
     # ======================================================================
-    # PRD-22: Intelligent skill selection helper
-    # ======================================================================
-    def _estimate_skill_tokens(self, skill_name: str) -> int:
-        """Estimate token count for a skill based on typical sizes"""
-        # Averages based on actual PRD-22 skills
-        skill_sizes = {
-            'pdf': 1682,
-            'docx': 2424,
-            'xlsx': 2523,
-            'pptx': 6293,
-            'writing-skills': 5117,
-            'writing-plans': 784
-        }
-        return skill_sizes.get(skill_name.lower(), 3000)  # Default 3K tokens
-    
-    def _calculate_max_skills(
-        self,
-        context_window: int,
-        agent_skills: List,
-        task_size_estimate: int = 2000
-    ) -> int:
-        """
-        Dynamically calculate how many skills can fit in context window.
-        
-        Args:
-            context_window: Total context window size
-            agent_skills: List of agent skills
-            task_size_estimate: Estimated tokens for task/prompt
-            
-        Returns:
-            Maximum number of skills that can fit
-        """
-        # Reserve tokens for: task, system prompt, response buffer
-        reserved = task_size_estimate + 1000 + 2000  # task + overhead + response
-        available = context_window - reserved
-        
-        if available < 1000:
-            self.logger.warning(f"Very limited context space: {available} tokens available")
-            return 1  # At least try to load 1 skill
-        
-        # Sort skills by estimated size to pack efficiently
-        skill_sizes = [(skill, self._estimate_skill_tokens(skill.name)) for skill in agent_skills]
-        skill_sizes.sort(key=lambda x: x[1])  # Smallest first
-        
-        # Greedily pack skills
-        total_tokens = 0
-        max_skills = 0
-        for _, size in skill_sizes:
-            if total_tokens + size <= available:
-                total_tokens += size
-                max_skills += 1
-            else:
-                break
-        
-        self.logger.info(f"📊 Context analysis: {context_window}K window, can fit up to {max_skills}/{len(agent_skills)} skills")
-        return max(1, max_skills)  # At least 1 skill
-    
-    def _select_relevant_skills(
-        self,
-        agent_skills: List,
-        task_context: Optional[str] = None,
-        context_window: int = 8192
-    ) -> List:
-        """
-        Intelligently select the most relevant skills for the current task.
-        
-        NEW: Dynamically calculates max skills based on context window size.
-        Uses enhanced keyword matching against both skill names and descriptions.
-        
-        Args:
-            agent_skills: List of all agent skills
-            task_context: The task description to match against
-            context_window: Available context window (from model config)
-            
-        Returns:
-            List of selected skills
-        """
-        if not agent_skills:
-            return []
-        
-        if not task_context:
-            # No context - return limited skills
-            return agent_skills[:1]
-        
-        # Calculate dynamic max based on context window
-        max_skills = self._calculate_max_skills(context_window, agent_skills)
-        
-        task_lower = task_context.lower()
-        
-        # 🎯 INTELLIGENT SKILL MATCHING - Pure database-driven, NO hard-coding!
-        # Extract keywords from:
-        # 1. Skill name (e.g., "pdf" → ["pdf"])
-        # 2. Skill description (extract meaningful words)
-        # 3. Tool names from tools_schema (e.g., "create_pdf" → ["create", "pdf"])
-        
-        skill_scores = []
-        for skill in agent_skills:
-            # Build dynamic keyword list from skill metadata
-            keywords = []
-            
-            # 1. Skill name keywords (split on hyphens, underscores, camelCase)
-            skill_name = skill.name.lower()
-            keywords.append(skill_name)
-            keywords.extend(skill_name.replace('-', ' ').replace('_', ' ').split())
-            
-            # 2. Description keywords (if available)
-            if hasattr(skill, 'description') and skill.description:
-                description_lower = skill.description.lower()
-                # Extract meaningful words (>3 chars) from description
-                desc_words = [w for w in description_lower.split() if len(w) > 3]
-                keywords.extend(desc_words[:10])  # Top 10 words from description
-            
-            # 3. Tool names from tools_schema (if available)
-            if hasattr(skill, 'tools_schema') and skill.tools_schema and isinstance(skill.tools_schema, dict):
-                tools = skill.tools_schema.get('tools', [])
-                for tool in tools:
-                    tool_name = tool.get('name', '')
-                    if tool_name:
-                        # "create_pdf" → ["create", "pdf"]
-                        tool_keywords = tool_name.replace('_', ' ').split()
-                        keywords.extend(tool_keywords)
-            
-            # Calculate relevance score by checking keywords against task
-            score = 0
-            for keyword in keywords:
-                if keyword in task_lower:
-                    # Longer matches get higher scores
-                    score += len(keyword.split())
-            
-            skill_scores.append((skill, score))
-            if score > 0:
-                self.logger.debug(f"  Skill '{skill.name}': score={score} (keywords: {keywords[:5]})")
-        
-        # Sort by relevance score (descending)
-        skill_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        # Take top N with positive scores
-        selected = [skill for skill, score in skill_scores[:max_skills] if score > 0]
-        
-        # If no skills matched keywords, use ALL assigned skills (up to max)
-        # Rationale: If user assigned skills to agent, they're ALL relevant
-        if not selected:
-            self.logger.info(f"ℹ️  No exact keyword matches - using all {len(agent_skills)} assigned skills (user knows best!)")
-            selected = agent_skills[:max_skills]
-        
-        skill_names = [s.name for s in selected]
-        self.logger.info(f"✅ Selected {len(selected)}/{len(agent_skills)} skills: {skill_names} (max: {max_skills})")
-        
-        return selected
-
-    # ======================================================================
-    # PRD-22: Build agent system prompt with progressive skill injection
+    # PRD-71: Build agent system prompt — unified skills + plugins
     # ======================================================================
     def _build_agent_system_prompt(
         self,
@@ -2124,23 +2012,20 @@ To use actions, respond with JSON blocks like:
         task_context: Optional[str] = None,
         db: Optional[Session] = None,
         required_tools: Optional[List[str]] = None,
-        enable_smart_skill_selection: bool = True
     ) -> Tuple[str, List[Dict]]:
         """
         Build the agent system prompt AND extract skill tool schemas.
 
-        - Loads core content for each assigned skill via SkillLoader (progressive disclosure)
-        - Extracts tools_schema from skills for function calling
-        - Falls back to skill.description for legacy/seed skills without filesystem content
-        - NEW: Intelligently selects relevant skills based on context window and task relevance
-        
+        PRD-71: Single injection point — loads ALL assigned skills AND plugin
+        content (no mutual exclusion). Plugins that have been materialized into
+        skills are skipped to avoid duplicate content.
+
         Args:
             agent: The agent to build prompt for
             task_context: Optional task description for context
             db: Database session
             required_tools: List of tool categories to include
-            enable_smart_skill_selection: If True, dynamically selects skills (default: True)
-            
+
         Returns:
             Tuple of (system_prompt_string, skill_tool_schemas_list)
         """
@@ -2171,8 +2056,68 @@ To use actions, respond with JSON blocks like:
         if task_context:
             sections.append("\n## Task Context\n" + str(task_context))
 
-        # PRD-42: Load plugins — if present, skip skills entirely
-        has_plugins = False
+        # ------------------------------------------------------------------
+        # PRD-71: Load ALL assigned skills (no filtering, no mutual exclusion)
+        # ------------------------------------------------------------------
+        if getattr(agent, 'skills', None):
+            active_skills = [s for s in agent.skills if s.is_active]
+            if active_skills:
+                sections.append("\n## Your Specialized Skills\n")
+                loader = get_skill_loader(db) if db is not None else None
+                loaded_skill_ids: set = set()
+
+                for skill in active_skills:
+                    if skill.id in loaded_skill_ids:
+                        self.logger.debug("Skipping duplicate skill %s (id=%s)", skill.name, skill.id)
+                        continue
+                    loaded_skill_ids.add(skill.id)
+                    self.logger.info(f"Loading skill: {skill.name}")
+                    sections.append(f"### {skill.name}")
+
+                    # Load prompt content
+                    core_content = None
+                    if loader is not None:
+                        try:
+                            core_content = loader.load_skill_core(skill.name, db=db)
+                            if core_content:
+                                self.logger.info(f"  Loaded {len(core_content)} chars of core content for '{skill.name}'")
+                        except Exception as e:
+                            self.logger.warning(f"  Failed to load core content for '{skill.name}': {e}")
+                            core_content = None
+
+                    if core_content and isinstance(core_content, str) and core_content.strip():
+                        sections.append(core_content)
+                    else:
+                        fallback = skill.prompt_template or skill.description or ""
+                        if fallback:
+                            self.logger.info(f"  Using fallback content for '{skill.name}' ({len(str(fallback))} chars)")
+                            sections.append(str(fallback))
+                        else:
+                            self.logger.warning(f"  No content available for skill '{skill.name}'")
+
+                    # Extract tool schemas from skills
+                    if hasattr(skill, 'tools_schema') and skill.tools_schema and isinstance(skill.tools_schema, dict):
+                        try:
+                            tools = skill.tools_schema.get('tools', [])
+                            for tool_def in tools:
+                                tool_name = tool_def.get("name")
+                                skill_tool_schemas.append({
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_name,
+                                        "description": tool_def.get("description", ""),
+                                        "parameters": tool_def.get("parameters", {})
+                                    }
+                                })
+                                self.logger.info(f"  Extracted tool: {tool_name}")
+                        except Exception as e:
+                            self.logger.warning(f"  Failed to extract tools from skill '{skill.name}': {e}")
+
+                self.logger.info(f"Loaded {len(active_skills)} skill(s) for agent {agent.id}")
+
+        # ------------------------------------------------------------------
+        # PRD-71: Load plugin content for non-materialized plugins only
+        # ------------------------------------------------------------------
         try:
             from core.services.plugin_context_service import PluginContextService
 
@@ -2180,89 +2125,37 @@ To use actions, respond with JSON blocks like:
             if plugin_svc:
                 plugin_rows = plugin_svc.get_assigned_plugins(agent.id)
                 if plugin_rows:
-                    has_plugins = True
-                    tier1 = plugin_svc.build_tier1_summary(plugin_rows)
-                    if tier1:
-                        sections.append(tier1)
-                    tier2 = plugin_svc.build_tier2_content_sync(
-                        plugin_rows,
-                        task_context=task_context,
-                    )
-                    if tier2:
-                        sections.append(tier2)
-                    self.logger.info(
-                        "Loaded plugin context for agent %s (%d plugins)",
-                        agent.id, len(plugin_rows),
-                    )
+                    # Filter out plugins that have been materialized into skills
+                    # plugin_rows is List[Tuple[AgentAssignedPlugin, MarketplacePlugin]]
+                    non_materialized = []
+                    for row in plugin_rows:
+                        _aap, plugin = row if isinstance(row, tuple) else (row, getattr(row, 'plugin', row))
+                        materialized_ids = getattr(plugin, 'materialized_skill_ids', None) or []
+                        if materialized_ids:
+                            self.logger.info(
+                                "Skipping materialized plugin '%s' (skill_ids=%s)",
+                                getattr(plugin, 'slug', '?'), materialized_ids,
+                            )
+                        else:
+                            non_materialized.append(row)
+
+                    if non_materialized:
+                        tier1 = plugin_svc.build_tier1_summary(non_materialized)
+                        if tier1:
+                            sections.append(tier1)
+                        tier2 = plugin_svc.build_tier2_content_sync(
+                            non_materialized,
+                            task_context=task_context,
+                        )
+                        if tier2:
+                            sections.append(tier2)
+                        self.logger.info(
+                            "Loaded plugin context for agent %s (%d plugins, %d skipped as materialized)",
+                            agent.id, len(non_materialized),
+                            len(plugin_rows) - len(non_materialized),
+                        )
         except Exception as e:
             self.logger.warning(f"Failed to load plugins for agent {agent.id}: {e}")
-
-        # Skills (progressive disclosure with intelligent selection) — skipped when plugins are present
-        if not has_plugins and getattr(agent, 'skills', None):
-            sections.append("\n## Your Specialized Skills\n")
-            loader = get_skill_loader(db) if db is not None else None
-
-            # Get agent's context window for intelligent selection
-            agent_config = agent.configuration or {}
-            llm_config = agent_config.get('llm_config') or agent.model_config or {}
-            context_window = llm_config.get('context_window', 8192)
-
-            # Intelligently select relevant skills to prevent context overflow
-            skills_to_load = agent.skills
-            if enable_smart_skill_selection and len(agent.skills) > 1:
-                skills_to_load = self._select_relevant_skills(
-                    agent.skills,
-                    task_context,
-                    context_window=context_window  # Dynamic based on model
-                )
-
-            for skill in skills_to_load:
-                self.logger.info(f"Loading skill: {skill.name}")
-                sections.append(f"### {skill.name}")
-
-                # Load prompt content
-                core_content = None
-                if loader is not None:
-                    try:
-                        # Level 2: core content from SKILL.md body or prompt_template
-                        core_content = loader.load_skill_core(skill.name, db=db)
-                        if core_content:
-                            self.logger.info(f"  Loaded {len(core_content)} chars of core content for '{skill.name}'")
-                    except Exception as e:
-                        self.logger.warning(f"  Failed to load core content for '{skill.name}': {e}")
-                        core_content = None
-
-                if core_content and isinstance(core_content, str) and core_content.strip():
-                    sections.append(core_content)
-                else:
-                    # Fallback for legacy/seed skills
-                    fallback = skill.prompt_template or skill.description or ""
-                    if fallback:
-                        self.logger.info(f"  Using fallback content for '{skill.name}' ({len(str(fallback))} chars)")
-                        sections.append(str(fallback))
-                    else:
-                        self.logger.warning(f"  No content available for skill '{skill.name}'")
-
-                # PRD-22: Extract tool schemas from skills
-                if hasattr(skill, 'tools_schema') and skill.tools_schema:
-                    try:
-                        tools = skill.tools_schema.get('tools', [])
-                        for tool_def in tools:
-                            tool_name = tool_def.get("name")
-                            # Convert to OpenAI function calling format
-                            skill_tool_schemas.append({
-                                "type": "function",
-                                "function": {
-                                    "name": tool_name,
-                                    "description": tool_def.get("description", ""),
-                                    "parameters": tool_def.get("parameters", {})
-                                }
-                            })
-                            self.logger.info(f"  Extracted tool: {tool_name}")
-                        if tools:
-                            self.logger.info(f"  Total: {len(tools)} tool(s) from skill '{skill.name}'")
-                    except Exception as e:
-                        self.logger.warning(f"  Failed to extract tools from skill '{skill.name}': {e}")
 
         # Optional tools section (kept minimal; main tool wiring remains elsewhere)
         if required_tools:

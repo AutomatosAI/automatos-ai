@@ -143,7 +143,7 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
 
   return (
     <div className="h-full flex flex-col glass-panel rounded-2xl overflow-hidden">
-      <div className="flex items-center justify-between p-4 border-b border-white/5">
+      <div className="flex items-center justify-between p-4 border-b border-border/30">
         <div className="flex items-center gap-3">
           <Activity className="w-5 h-5 text-primary" />
           <h3 className="font-semibold">Execution Log</h3>
@@ -206,7 +206,7 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                             className="overflow-hidden"
                           >
                             {log.fullResponse && (
-                              <div className="mt-3 p-3 bg-black/30 rounded-lg border border-white/5">
+                              <div className="mt-3 p-3 bg-black/30 rounded-lg border border-border/30">
                                 <div className="text-xs text-primary/60 uppercase mb-2 flex items-center gap-2">
                                   <FileText className="w-3 h-3" />
                                   Full Response
@@ -218,7 +218,7 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                             )}
 
                             {log.details && !log.fullResponse && (
-                              <div className="mt-3 p-3 bg-black/30 rounded-lg border border-white/5">
+                              <div className="mt-3 p-3 bg-black/30 rounded-lg border border-border/30">
                                 <div className="text-xs text-primary/60 uppercase mb-2">Details</div>
                                 <pre className="text-sm text-foreground/90 font-mono-logs whitespace-pre-wrap break-words">
                                   {log.details}
@@ -239,7 +239,7 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                       </AnimatePresence>
 
                       {((log.tokens && log.tokens > 0) || (log.duration && log.duration > 0)) && (
-                        <div className="flex items-center gap-4 mt-3 pt-2 border-t border-white/5 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-4 mt-3 pt-2 border-t border-border/30 text-xs text-muted-foreground">
                           {log.tokens && log.tokens > 0 && <span className="flex items-center gap-1"><Sparkles className="w-3 h-3 text-primary" />{log.tokens.toLocaleString()} tokens</span>}
                           {log.duration && log.duration > 0 && <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-emerald-400" />{(log.duration / 1000).toFixed(2)}s</span>}
                         </div>
@@ -1075,7 +1075,7 @@ export function ExecutionKitchen({
   return (
     <div className={cn("h-screen flex flex-col theater-bg", isFullscreen && "fixed inset-0 z-50")}>
       {/* Header */}
-      <div className="glass-panel-light border-b border-white/5">
+      <div className="glass-panel-light border-b border-border/30">
         <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="sm" onClick={onBack} className="gap-2"><ArrowLeft className="w-4 h-4" />Back</Button>
@@ -1276,7 +1276,7 @@ export function ExecutionKitchen({
                       onClick={() => setUseAISDK(false)}
                       className={cn(
                         "px-3 py-1 text-xs rounded-md transition-all",
-                        !useAISDK ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
+                        !useAISDK ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
                       )}
                     >
                       Detailed Logs
@@ -1285,7 +1285,7 @@ export function ExecutionKitchen({
                       onClick={() => setUseAISDK(true)}
                       className={cn(
                         "px-3 py-1 text-xs rounded-md transition-all",
-                        useAISDK ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
+                        useAISDK ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
                       )}
                     >
                       AI SDK Stream

@@ -191,6 +191,68 @@ async def update_agent_plugins(
             )
             db.add(assignment)
 
+        # PRD-71: Auto-assign materialized skills from assigned plugins
+        from core.models.core import Skill, agent_skills as agent_skills_table
+        from core.models.marketplace_plugins import WorkspaceEnabledSkill
+
+        # Collect candidate skill IDs from plugins, then validate against Skill table
+        candidate_skill_ids: set = set()
+        if unique_plugin_ids:
+            plugins = db.query(MarketplacePlugin).filter(
+                MarketplacePlugin.id.in_(unique_plugin_ids),
+            ).all()
+            for plugin in plugins:
+                for sid in (plugin.materialized_skill_ids or []):
+                    candidate_skill_ids.add(sid)
+
+        if candidate_skill_ids:
+            # Resolve to only IDs that actually exist in the skills table
+            valid_skill_ids = {
+                row[0] for row in db.query(Skill.id).filter(
+                    Skill.id.in_(candidate_skill_ids),
+                ).all()
+            }
+            if len(valid_skill_ids) < len(candidate_skill_ids):
+                stale = candidate_skill_ids - valid_skill_ids
+                logger.warning(
+                    "Skipping %d stale materialized_skill_ids: %s",
+                    len(stale), stale,
+                )
+
+            if valid_skill_ids:
+                # Idempotent upsert: WorkspaceEnabledSkill has composite PK
+                # (workspace_id, skill_id) so ON CONFLICT DO NOTHING works
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                for sid in valid_skill_ids:
+                    stmt = pg_insert(WorkspaceEnabledSkill).values(
+                        workspace_id=workspace_id,
+                        skill_id=sid,
+                    ).on_conflict_do_nothing()
+                    db.execute(stmt)
+
+                # agent_skills has no unique constraint — bulk check then insert
+                from sqlalchemy import select as sa_select
+                existing_skill_ids = {
+                    row[0] for row in db.execute(
+                        sa_select(agent_skills_table.c.skill_id).where(
+                            agent_skills_table.c.agent_id == agent_id,
+                        )
+                    ).fetchall()
+                }
+                new_ids = valid_skill_ids - existing_skill_ids
+                for sid in new_ids:
+                    db.execute(
+                        agent_skills_table.insert().values(
+                            agent_id=agent_id, skill_id=sid,
+                        )
+                    )
+
+                logger.info(
+                    "Auto-assigned %d materialized skill(s) to agent %s",
+                    len(valid_skill_ids), agent_id,
+                )
+
         db.commit()
 
         return {
@@ -198,6 +260,7 @@ async def update_agent_plugins(
             "message": f"Agent plugins updated ({len(unique_plugin_ids)} assigned)",
             "agent_id": agent_id,
             "plugin_ids": [str(pid) for pid in unique_plugin_ids],
+            "materialized_skill_ids": sorted(int(sid) for sid in valid_skill_ids) if candidate_skill_ids else [],
         }
 
     except HTTPException:

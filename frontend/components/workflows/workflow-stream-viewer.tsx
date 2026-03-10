@@ -229,7 +229,7 @@ export function WorkflowStreamViewer({
 
     return (
         <Card className={cn('w-full h-[600px] flex flex-col', className)}>
-            <CardHeader className="flex flex-row items-center justify-between py-3 border-b border-white/5">
+            <CardHeader className="flex flex-row items-center justify-between py-3 border-b border-border/30">
                 <div className="flex items-center gap-3">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
                         <Zap className="h-4 w-4 text-primary" />
@@ -289,7 +289,7 @@ export function WorkflowStreamViewer({
                         {messages.map((m) => (
                             <div
                                 key={m.id}
-                                className="text-sm font-mono whitespace-pre-wrap p-2 rounded-lg bg-white/5 border border-white/5"
+                                className="text-sm font-mono whitespace-pre-wrap p-2 rounded-lg bg-white/5 border border-border/30"
                             >
                                 {m.content}
                             </div>
@@ -344,7 +344,7 @@ export function WorkflowStreamViewer({
                                 return (
                                     <div
                                         key={i}
-                                        className="text-xs p-2 rounded-lg bg-white/5 border border-white/5"
+                                        className="text-xs p-2 rounded-lg bg-white/5 border border-border/30"
                                     >
                                         <div className="flex items-center gap-2">
                                             <span className={cn('font-bold', statusColor)}>{statusIcon}</span>

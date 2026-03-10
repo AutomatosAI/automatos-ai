@@ -38,6 +38,7 @@ apscheduler>=3.10
 
 # Network & async
 aiofiles==23.2.1
+aiohttp>=3.9.0
 
 # Configuration
 python-dotenv==1.0.0
@@ -94,7 +95,7 @@ cryptography>=43.0.0
 slowapi>=0.1.9
 
 # PRD-36: Composio Integration (500+ tools, Tool Router, Triggers)
-composio-core==0.7.0
+# composio-core removed — deprecated, replaced by composio (pulled by composio-openai)
 composio-openai==0.11.1
 
 # PRD-42: Cloud Document Sync with S3 Vectors
@@ -105,3 +106,4 @@ weasyprint>=62.0
 docxtpl>=0.18.0
 xlsxwriter>=3.2.0
 gotenberg-client>=0.8.0
+prometheus-client>=0.20.0

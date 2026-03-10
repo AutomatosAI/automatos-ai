@@ -182,7 +182,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
                             {filteredActions.map((action) => (
                                 <div
                                     key={action.name}
-                                    className="flex items-center justify-between p-3 rounded-lg border border-white/5 bg-secondary/10 hover:bg-secondary/20 transition-colors"
+                                    className="flex items-center justify-between p-3 rounded-lg border border-border/30 bg-secondary/10 hover:bg-secondary/20 transition-colors"
                                 >
                                     <div className="flex-1 min-w-0 mr-4">
                                         <div className="font-medium text-sm truncate">{action.display_name}</div>

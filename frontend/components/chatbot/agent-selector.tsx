@@ -15,8 +15,6 @@ import { apiClient } from '@/lib/api-client'
 
 import { useWorkspace } from '@/components/workspace-provider'
 
-import { ToolLogo } from '@/components/ui/tool-logo'
-import { Badge } from '@/components/ui/badge'
 
 export interface Agent {
   id: number
@@ -63,6 +61,12 @@ const getModelDisplayName = (modelId?: string): string => {
     'claude-3-haiku-20240307': 'Claude 3 Haiku',
   }
 
+  // Clean up provider/model format like "deepseek/deepseek" → "DeepSeek"
+  if (modelId.includes('/')) {
+    const parts = modelId.split('/')
+    const provider = parts[0].charAt(0).toUpperCase() + parts[0].slice(1)
+    return provider
+  }
   return modelNames[modelId] || modelId.split('-')[0].toUpperCase()
 }
 
@@ -218,49 +222,13 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <div className="font-medium text-sm">{agent.name}</div>
-                    <span className="text-[10px] text-muted-foreground/70 bg-secondary/30 px-1.5 py-0.5 rounded border border-white/5">
+                    <span className="text-[10px] text-muted-foreground/70 bg-secondary/30 px-1.5 py-0.5 rounded border border-border/30">
                       {getModelDisplayName(agent.agent_model_config?.model_id || agent.model_config?.model_id)}
                     </span>
                   </div>
                   <div className="text-xs text-muted-foreground truncate">
                     {agent.description}
                   </div>
-
-                  {agent.skills && agent.skills.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {agent.skills.slice(0, 3).map((skill: any) => (
-                        <Badge key={skill.id} variant="secondary" className="text-[10px] px-1 h-5 font-normal bg-orange-500/5 text-orange-300 border-orange-500/10">
-                          {skill.name ? skill.name.replace('_', ' ') : 'Unknown'}
-                        </Badge>
-                      ))}
-                      {agent.skills.length > 3 && (
-                        <Badge variant="secondary" className="text-[10px] px-1 h-5 font-normal bg-secondary/30 text-muted-foreground">
-                          +{agent.skills.length - 3}
-                        </Badge>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Tools Preview */}
-                  {agent.tools && agent.tools.length > 0 && (
-                    <div className="flex items-center gap-1 mt-2 pt-2 border-t border-white/5">
-                      {agent.tools.slice(0, 5).map((tool) => (
-                        <ToolLogo
-                          key={tool.id}
-                          name={tool.name}
-                          logo={tool.icon}
-                          size={14}
-                          showBackground={true}
-                          className="bg-secondary/30 border border-white/5 opacity-70 hover:opacity-100 transition-opacity"
-                        />
-                      ))}
-                      {agent.tools.length > 5 && (
-                        <span className="text-[10px] text-muted-foreground ml-1">
-                          +{agent.tools.length - 5}
-                        </span>
-                      )}
-                    </div>
-                  )}
                 </div>
                 {isSelected && (
                   <Check className="w-4 h-4 text-orange-400 ml-2 flex-shrink-0" />

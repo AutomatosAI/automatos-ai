@@ -82,6 +82,7 @@ except ImportError:
     admin_prompts_router = None
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
+from api.workspace_skills import router as workspace_skills_router  # PRD-71: Workspace Skill Enablement
 from api.agent_plugins import router as agent_plugins_router  # PRD-42: Agent Plugin Assignment
 from api.personas import router as personas_router  # PRD-42: Persona API
 from api.generated_images import router as generated_images_router  # Generated image serving
@@ -182,10 +183,23 @@ try:
     from api.channels import router as channels_router
 except ImportError:
     channels_router = None
+
+# PRD-72: Activity Command Centre
 try:
-    from api.community_skills import router as community_skills_router
+    from api.activity import router as activity_router
 except ImportError:
-    community_skills_router = None
+    activity_router = None
+
+# PRD-74: Voice Chat
+try:
+    from api.chat_voice import router as chat_voice_router
+except ImportError:
+    chat_voice_router = None
+# PRD-74 Phase 2: Voice Profiles
+try:
+    from api.voice_profiles import router as voice_profiles_router
+except ImportError:
+    voice_profiles_router = None
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -199,14 +213,17 @@ from core.utils.logging_adapter import (
     install_request_context_logging,
     set_request_id,
     clear_request_id,
+    set_request_context,
     request_id_var,
+    workspace_id_var,
+    user_id_var,
+    http_method_var,
+    http_path_var,
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure logging — ships to log-relay → Loki when LOG_RELAY_URL is set
+from core.monitoring.automatos_logging import setup_logging
+setup_logging(service="automatos-backend")
 logger = logging.getLogger(__name__)
 
 # API Tracking (in-memory, last 100 calls per endpoint)
@@ -340,25 +357,51 @@ async def lifespan(app: FastAPI):
         await startup_dashboard(app)
         logger.info("Dashboard services initialized successfully")
 
-        # PRD-55: Start HeartbeatService
-        if config.HEARTBEAT_ENABLED:
+        # Unified Scheduler: single fcntl lock guards heartbeat + recipe schedulers
+        # Only one uvicorn worker acquires the lock — prevents 4x duplicate executions
+        if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED:
             try:
-                from services.heartbeat_service import get_heartbeat_service
-                heartbeat_svc = get_heartbeat_service()
-                await heartbeat_svc.start()
-                logger.info("HeartbeatService started successfully")
-            except Exception as e:
-                logger.warning(f"HeartbeatService failed to start (non-fatal): {e}")
+                import fcntl
+                lock_path = "/tmp/automatos_scheduler.lock"
+                lock_file = open(lock_path, "w")
+                try:
+                    fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    # We got the lock — this worker owns ALL scheduled services
+                    from services.scheduler import get_unified_scheduler
+                    unified = get_unified_scheduler()
+                    unified.start()
+                    shared_sched = unified.apscheduler
+                    app.state.scheduler_lock = lock_file  # keep file open to hold lock
 
-        # Recipe Cron Scheduler
-        if config.RECIPE_SCHEDULER_ENABLED:
-            try:
-                from services.recipe_scheduler import get_recipe_scheduler
-                recipe_sched = get_recipe_scheduler()
-                await recipe_sched.start()
-                logger.info("RecipeSchedulerService started successfully")
+                    if config.HEARTBEAT_ENABLED:
+                        from services.heartbeat_service import get_heartbeat_service
+                        await get_heartbeat_service().start(scheduler=shared_sched)
+                        logger.info("HeartbeatService started on unified scheduler")
+
+                    if config.RECIPE_SCHEDULER_ENABLED:
+                        from services.recipe_scheduler import get_recipe_scheduler
+                        await get_recipe_scheduler().start(scheduler=shared_sched)
+                        logger.info("RecipeSchedulerService started on unified scheduler")
+
+                    # PRD-77: Load agent-scheduled tasks into APScheduler
+                    try:
+                        from services.scheduled_task_service import ScheduledTaskService
+                        from core.database.database import SessionLocal
+                        _sched_db = SessionLocal()
+                        try:
+                            _sched_svc = ScheduledTaskService(_sched_db, workspace_id=None)
+                            await _sched_svc.load_active_tasks_to_scheduler()
+                        finally:
+                            _sched_db.close()
+                    except Exception as _st_err:
+                        logger.warning("Could not load scheduled tasks: %s", _st_err)
+
+                    logger.info("Unified scheduler started (this worker owns it)")
+                except BlockingIOError:
+                    lock_file.close()
+                    logger.info("Unified scheduler: another worker owns it, skipping")
             except Exception as e:
-                logger.warning(f"RecipeSchedulerService failed to start (non-fatal): {e}")
+                logger.warning(f"Unified scheduler failed to start (non-fatal): {e}")
 
         # PRD-55: Start ChannelManager
         if config.CHANNELS_ENABLED:
@@ -379,21 +422,12 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Automotas AI API Server...")
 
-    # PRD-55: Stop HeartbeatService
-    if config.HEARTBEAT_ENABLED:
+    # Stop unified scheduler (shuts down all heartbeat + recipe jobs at once)
+    if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED:
         try:
-            from services.heartbeat_service import get_heartbeat_service
-            await get_heartbeat_service().stop()
-            logger.info("HeartbeatService stopped")
-        except Exception:
-            pass
-
-    # Stop RecipeSchedulerService
-    if config.RECIPE_SCHEDULER_ENABLED:
-        try:
-            from services.recipe_scheduler import get_recipe_scheduler
-            await get_recipe_scheduler().stop()
-            logger.info("RecipeSchedulerService stopped")
+            from services.scheduler import get_unified_scheduler
+            get_unified_scheduler().stop()
+            logger.info("Unified scheduler stopped")
         except Exception:
             pass
 
@@ -626,7 +660,7 @@ async def add_security_headers(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = "camera=(), geolocation=()"
     response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     if config.ENVIRONMENT == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
@@ -639,9 +673,20 @@ install_request_context_logging()
 async def add_request_id_middleware(request, call_next):
     inbound = request.headers.get("X-Request-ID")
     token = set_request_id(inbound or uuid.uuid4().hex[:12])
+
+    # PRD-73 Phase 2: Enrich logs with request context (workspace, user, method, path)
+    # ContextVars are captured automatically by LogRelayHandler — zero cost at call sites
+    http_method_var.set(request.method)
+    http_path_var.set(request.url.path)
+
+    # Extract workspace_id and user_id from auth headers (best-effort, pre-auth)
+    ws_header = request.headers.get("x-workspace-id", "") or request.headers.get("x-workspace", "")
+    if ws_header and ws_header != "__all__":
+        workspace_id_var.set(ws_header)
+
     try:
         response = await call_next(request)
-        response.headers["X-Request-ID"] = request.headers.get("X-Request-ID") or request_id_var.get()
+        response.headers["X-Request-ID"] = request.headers.get("X-Request-ID") or request_id_var.get("")
         return response
     finally:
         clear_request_id(token)
@@ -775,6 +820,7 @@ app.include_router(composio_analytics_router)  # PRD-54: Composio Analytics
 app.include_router(analytics_charts_router)  # PRD-54: PandasAI Charts
 app.include_router(user_api_keys_router)  # PRD-54: BYOK API Key Management
 app.include_router(workspace_plugins_router)  # PRD-42: Workspace Plugin Enablement
+app.include_router(workspace_skills_router)  # PRD-71: Workspace Skill Enablement
 app.include_router(agent_plugins_router)  # PRD-42: Agent Plugin Assignment
 app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
@@ -797,13 +843,68 @@ if evaluation_router is not None:
 if activity_router is not None:
     app.include_router(activity_router)
 
+# PRD-76: Agent Reports
+try:
+    from api.reports import router as reports_router
+    app.include_router(reports_router)
+except ImportError as e:
+    logger.warning("Could not load reports router: %s", e)
+
+# PRD-77: Agent Self-Scheduling
+try:
+    from api.scheduled_tasks import router as scheduled_tasks_router
+    app.include_router(scheduled_tasks_router)
+except ImportError as e:
+    logger.warning("Could not load scheduled tasks router: %s", e)
+
 # PRD-55: Autonomous Assistant Platform
 if heartbeat_router is not None:
     app.include_router(heartbeat_router)
 if channels_router is not None:
     app.include_router(channels_router)
-if community_skills_router is not None:
-    app.include_router(community_skills_router)
+if activity_router is not None:
+    app.include_router(activity_router)  # PRD-72: Activity Command Centre
+
+# PRD-74: Voice Chat
+if chat_voice_router is not None:
+    app.include_router(chat_voice_router)
+# PRD-74 Phase 2: Voice Profiles
+if voice_profiles_router is not None:
+    app.include_router(voice_profiles_router)
+
+# PRD-73: Monitoring Stack Integration
+# Prometheus /metrics endpoint + request instrumentation
+try:
+    from core.monitoring.automatos_metrics import setup_metrics
+    setup_metrics(app, service_name="automatos-backend")
+    logger.info("Prometheus /metrics endpoint enabled")
+except Exception as e:
+    logger.warning(f"Prometheus metrics disabled: {e}")
+
+# AlertManager webhook ingest → infrastructure_alerts table
+try:
+    from core.monitoring.automatos_alerts import create_alerts_router
+    alerts_router = create_alerts_router(get_db)
+    app.include_router(alerts_router, prefix="/api")
+    logger.info("Alert ingest endpoint enabled at /api/alerts/ingest")
+except Exception as e:
+    logger.warning(f"Alert ingest disabled: {e}")
+
+# PRD-73 Phase 2: Loki log query API for SENTINEL investigation
+try:
+    from core.monitoring.automatos_logs_api import create_logs_router
+    logs_router = create_logs_router()
+    app.include_router(logs_router, prefix="/api")
+    logger.info("Loki log query API enabled at /api/logs/query")
+except Exception as e:
+    logger.warning(f"Loki log query API disabled: {e}")
+
+# PRD-74: Voice Chat (duplicate guard — first registration above)
+if chat_voice_router is not None:
+    pass  # already registered above
+# PRD-74 Phase 2: Voice Profiles (duplicate guard)
+if voice_profiles_router is not None:
+    pass  # already registered above
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

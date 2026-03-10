@@ -28,6 +28,7 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     "admin_action": (20, 60),     # 20 per minute
     "skill_import": (3, 3600),    # 3 per hour
     "plugin_import": (3, 3600),   # 3 per hour
+    "platform_write": (10, 60),   # 10 write/destructive actions per minute
 }
 
 

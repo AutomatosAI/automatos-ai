@@ -3,8 +3,9 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { User, Settings, LogOut, ChevronDown, Sparkles } from 'lucide-react'
+import { User, Settings, LogOut, ChevronDown, Sparkles, Map, RotateCcw, ChevronRight } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { usePathname } from 'next/navigation'
 
 /**
  * Profile Menu Component
@@ -20,7 +21,14 @@ export function ProfileMenu() {
     const router = useRouter()
     const { user, isLoaded } = useUser()
     const { signOut } = useClerk()
+    const pathname = usePathname()
     const [open, setOpen] = useState(false)
+
+    // Derive current page name for "Tour this page" label
+    const currentPage = (() => {
+        const segment = pathname?.split('/').filter(Boolean)[0] || 'dashboard'
+        return segment.charAt(0).toUpperCase() + segment.slice(1)
+    })()
 
     const handleSignOut = async () => {
         await signOut()
@@ -122,23 +130,75 @@ export function ProfileMenu() {
                         <span>Settings</span>
                     </DropdownMenu.Item>
 
-                    <DropdownMenu.Item
-                        className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 cursor-pointer outline-none transition-colors"
-                        onSelect={() => {
-                            setOpen(false)
-                            // Small delay so the dropdown closes first
-                            setTimeout(async () => {
-                                if (user) {
-                                    const { createWelcomeTour } = await import('@/lib/shepherd/tours/welcome-tour')
-                                    const tour = createWelcomeTour(user.id)
-                                    tour.start()
-                                }
-                            }, 150)
-                        }}
-                    >
-                        <Sparkles className="w-4 h-4 text-orange-400" />
-                        <span>Start Tour</span>
-                    </DropdownMenu.Item>
+                    <DropdownMenu.Sub>
+                        <DropdownMenu.SubTrigger className="flex items-center justify-between px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 cursor-pointer outline-none transition-colors">
+                            <span className="flex items-center space-x-3">
+                                <Sparkles className="w-4 h-4 text-orange-400" />
+                                <span>Tours</span>
+                            </span>
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
+                        </DropdownMenu.SubTrigger>
+                        <DropdownMenu.Portal>
+                            <DropdownMenu.SubContent
+                                className="min-w-[200px] bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-xl shadow-2xl p-2 animate-in fade-in-0 zoom-in-95"
+                                sideOffset={8}
+                            >
+                                <DropdownMenu.Item
+                                    className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 cursor-pointer outline-none transition-colors"
+                                    onSelect={() => {
+                                        setOpen(false)
+                                        setTimeout(async () => {
+                                            if (user) {
+                                                const { createWelcomeTour } = await import('@/lib/shepherd/tours/welcome-tour')
+                                                const tour = createWelcomeTour(user.id)
+                                                tour.start()
+                                            }
+                                        }, 150)
+                                    }}
+                                >
+                                    <Map className="w-4 h-4 text-orange-400" />
+                                    <span>Welcome Orientation</span>
+                                </DropdownMenu.Item>
+
+                                <DropdownMenu.Item
+                                    className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 cursor-pointer outline-none transition-colors"
+                                    onSelect={() => {
+                                        setOpen(false)
+                                        setTimeout(async () => {
+                                            if (user) {
+                                                // Page-specific tours can be added later;
+                                                // for now re-launch the main tour
+                                                const { createWelcomeTour } = await import('@/lib/shepherd/tours/welcome-tour')
+                                                const tour = createWelcomeTour(user.id)
+                                                tour.start()
+                                            }
+                                        }, 150)
+                                    }}
+                                >
+                                    <Sparkles className="w-4 h-4 text-orange-400" />
+                                    <span>Tour this page</span>
+                                    <span className="ml-auto text-xs text-slate-500">{currentPage}</span>
+                                </DropdownMenu.Item>
+
+                                <DropdownMenu.Separator className="h-px bg-slate-700/50 my-1.5" />
+
+                                <DropdownMenu.Item
+                                    className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 cursor-pointer outline-none transition-colors"
+                                    onSelect={() => {
+                                        if (user) {
+                                            import('@/lib/shepherd/tour-storage').then(({ resetOnboarding }) => {
+                                                resetOnboarding(user.id)
+                                            })
+                                        }
+                                        setOpen(false)
+                                    }}
+                                >
+                                    <RotateCcw className="w-4 h-4" />
+                                    <span>Reset All Tours</span>
+                                </DropdownMenu.Item>
+                            </DropdownMenu.SubContent>
+                        </DropdownMenu.Portal>
+                    </DropdownMenu.Sub>
 
                     <DropdownMenu.Separator className="h-px bg-slate-700/50 my-2" />
 

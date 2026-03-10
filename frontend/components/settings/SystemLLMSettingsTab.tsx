@@ -23,7 +23,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import {
   Save, RotateCcw, Brain, Zap, Settings, Heart, Sparkles,
   ChevronDown, Clock, MessageSquare, AlertCircle, Loader2,
-  Database, Eye
+  Database, Eye, Play
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -71,6 +71,7 @@ interface OrchestratorConfig {
     timezone: string
     checklist: string
     notification_channel: string
+    channel_id?: string
   }
 }
 
@@ -134,6 +135,11 @@ export default function SystemLLMSettingsTab({
   const [soulOpen, setSoulOpen] = useState(true)
   const [heartbeatOpen, setHeartbeatOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
+
+  // Heartbeat: connected channels, run now, last result
+  const [connectedChannels, setConnectedChannels] = useState<Array<{ key: string; platform: string }>>([])
+  const [heartbeatRunning, setHeartbeatRunning] = useState(false)
+  const [lastHeartbeatResult, setLastHeartbeatResult] = useState<any>(null)
 
   // Load workspace-installed models (same catalog agents use)
   const { data: allModels = [], isLoading: modelsLoading } = useWorkspaceModels()
@@ -232,6 +238,44 @@ export default function SystemLLMSettingsTab({
     loadMemoryStats()
   }, [])
 
+  // Load connected channels for notification dropdown + last heartbeat result
+  useEffect(() => {
+    // Connected channels
+    Promise.all([
+      apiClient.request<any>('/api/workspaces/current/integrations').catch(() => ({})),
+      apiClient.request<any>('/api/channels').catch(() => []),
+    ]).then(([integrations, channels]) => {
+      const found: Array<{ key: string; platform: string }> = []
+      const seen = new Set<string>()
+      const platformMap: Record<string, string> = { telegram_bot_token: 'telegram', slack_bot_token: 'slack' }
+      if (integrations) {
+        for (const [key, val] of Object.entries(integrations)) {
+          const platform = platformMap[key]
+          if (platform && (val as any)?.configured && !seen.has(platform)) {
+            found.push({ key, platform })
+            seen.add(platform)
+          }
+        }
+      }
+      if (Array.isArray(channels)) {
+        for (const ch of channels) {
+          if (!seen.has(ch.platform)) {
+            found.push({ key: `channel:${ch.id}`, platform: ch.platform })
+            seen.add(ch.platform)
+          }
+        }
+      }
+      setConnectedChannels(found)
+    })
+
+    // Last heartbeat result
+    apiClient.request<any>('/api/heartbeat/orchestrator/history?limit=1')
+      .then((data) => {
+        if (data?.results?.[0]) setLastHeartbeatResult(data.results[0])
+      })
+      .catch(() => {})
+  }, [])
+
   const handleInputChange = (key: string, value: string) => {
     setFormData(prev => ({ ...prev, [key]: value }))
   }
@@ -247,6 +291,22 @@ export default function SystemLLMSettingsTab({
       ...orchConfig,
       heartbeat: { ...orchConfig.heartbeat, [key]: value },
     })
+  }
+
+  const runHeartbeatNow = async () => {
+    setHeartbeatRunning(true)
+    try {
+      const result = await apiClient.request<any>('/api/heartbeat/orchestrator/run', {
+        method: 'POST',
+      })
+      setLastHeartbeatResult(result)
+      toast.success('Orchestrator heartbeat executed')
+    } catch (err) {
+      console.error('Failed to run orchestrator heartbeat:', err)
+      toast.error('Failed to run orchestrator heartbeat')
+    } finally {
+      setHeartbeatRunning(false)
+    }
   }
 
   const handleSaveLLM = async () => {
@@ -281,9 +341,24 @@ export default function SystemLLMSettingsTab({
     if (!orchConfig) return
     try {
       setOrchSaving(true)
+      // Parse channel key to extract platform + channel_id for heartbeat delivery
+      const hb = { ...orchConfig.heartbeat }
+      const channelKey = hb.notification_channel
+      if (channelKey?.startsWith('channel:')) {
+        const channelId = channelKey.replace('channel:', '')
+        const found = connectedChannels.find(ch => ch.key === channelKey)
+        hb.notification_channel = found?.platform || channelKey
+        hb.channel_id = channelId
+      } else if (channelKey === 'in_app' || channelKey === 'webhook') {
+        // Built-in channels, no channel_id needed
+      } else {
+        // Direct platform name (e.g. "telegram" from workspace integrations)
+        hb.notification_channel = channelKey
+      }
+      const payload = { ...orchConfig, heartbeat: hb }
       await apiClient.request('/api/workspaces/current/orchestrator', {
         method: 'PUT',
-        body: JSON.stringify(orchConfig),
+        body: JSON.stringify(payload),
       })
       toast.success('Orchestrator settings saved')
     } catch (err) {
@@ -758,6 +833,10 @@ export default function SystemLLMSettingsTab({
                               <SelectItem value="30">Every 30 minutes</SelectItem>
                               <SelectItem value="60">Every hour</SelectItem>
                               <SelectItem value="120">Every 2 hours</SelectItem>
+                              <SelectItem value="240">Every 4 hours</SelectItem>
+                              <SelectItem value="480">Every 8 hours</SelectItem>
+                              <SelectItem value="1440">Daily</SelectItem>
+                              <SelectItem value="10080">Weekly</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -807,7 +886,11 @@ export default function SystemLLMSettingsTab({
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="in_app">In-App Notification</SelectItem>
-                              <SelectItem value="email">Email</SelectItem>
+                              {connectedChannels.map((ch) => (
+                                <SelectItem key={ch.key} value={ch.key}>
+                                  {ch.platform.charAt(0).toUpperCase() + ch.platform.slice(1)}
+                                </SelectItem>
+                              ))}
                               <SelectItem value="webhook">Webhook URL</SelectItem>
                             </SelectContent>
                           </Select>
@@ -828,6 +911,42 @@ export default function SystemLLMSettingsTab({
                           What should the orchestrator check each heartbeat? One item per line.
                         </p>
                       </div>
+
+                      {/* Run Now & Last Result */}
+                      <div className="flex gap-2 pt-4 border-t border-border/30">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={runHeartbeatNow}
+                          disabled={heartbeatRunning}
+                        >
+                          {heartbeatRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+                          Run Now
+                        </Button>
+                      </div>
+
+                      {lastHeartbeatResult && (
+                        <div className="space-y-2 pt-4 border-t border-border/30">
+                          <Label className="text-xs">Last Heartbeat Result</Label>
+                          <div className="p-3 rounded-lg bg-secondary/30 text-sm">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className={`h-2 w-2 rounded-full ${lastHeartbeatResult.status === 'success' ? 'bg-green-500' : 'bg-red-500'}`} />
+                              <span className="font-medium text-xs">{lastHeartbeatResult.status}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {lastHeartbeatResult.created_at ? new Date(lastHeartbeatResult.created_at).toLocaleString() : ''}
+                              </span>
+                              {lastHeartbeatResult.tokens_used > 0 && (
+                                <Badge variant="outline" className="text-xs ml-auto">{lastHeartbeatResult.tokens_used} tokens</Badge>
+                              )}
+                            </div>
+                            <p className="text-xs whitespace-pre-wrap">
+                              {lastHeartbeatResult.findings?.find((f: any) => f.check === 'llm_analysis')?.detail
+                                || lastHeartbeatResult.findings?.[0]?.detail
+                                || 'No details available'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </>
                   )}
                 </>
