@@ -726,7 +726,7 @@ export function Chat({
   const quickLinks = [
     { label: 'Create an Agent', href: '/agents', icon: Bot },
     { label: 'Knowledge Base', href: '/documents', icon: Database },
-    { label: 'Create a Workflow', href: '/workflows', icon: GitBranch },
+    { label: 'Recipes', href: '/activity', icon: GitBranch },
     { label: 'Edit Tools', href: '/tools', icon: Wrench },
   ] as const
 

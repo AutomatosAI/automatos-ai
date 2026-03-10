@@ -306,7 +306,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
 
   const handleEdit = () => {
     if (item.type === 'recipe' && item.source_id) {
-      router.push(`/workflows?recipe=${item.source_id}`)
+      router.push('/activity')
     } else if (item.type === 'routine' && item.agent?.id) {
       router.push(`/agents?agent=${item.agent.id}`)
     }

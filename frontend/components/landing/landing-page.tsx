@@ -477,7 +477,7 @@ export function LandingPage() {
                   Get Started Now
                 </Button>
               </Link>
-              <Link href="/workflows">
+              <Link href="/activity">
                 <Button variant="outline" size="lg" className="text-lg px-12 py-4">
                   <Workflow className="w-5 h-5 mr-2" />
                   Explore Workflows

@@ -91,7 +91,7 @@ export default function WebhooksSettingsTab() {
         </CardHeader>
         <CardContent>
           <a
-            href="/workflows"
+            href="/activity"
             className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
           >
             Go to Recipes
