@@ -144,7 +144,7 @@ export function ActivityReports({ period = '30d' }: ActivityReportsProps) {
   return (
     <div className="space-y-4">
       {/* Stats */}
-      <ReportStatsBar period={period} />
+      <ReportStatsBar period={filters.period || period} />
 
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2">

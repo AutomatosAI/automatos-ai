@@ -1192,7 +1192,7 @@ class HeartbeatService:
                         break
 
                 svc = ReportService(db, workspace_id)
-                await svc.create_report(
+                report_result = await svc.create_report(
                     agent_id=agent_id,
                     agent_name=agent_name,
                     title=f"{agent_name} Heartbeat",
@@ -1208,10 +1208,16 @@ class HeartbeatService:
                     heartbeat_result_id=result.get("_heartbeat_result_id"),
                 )
 
-                logger.info(
-                    "[Heartbeat] Auto-created report for agent=%s heartbeat",
-                    agent_id,
-                )
+                if report_result.get("success"):
+                    logger.info(
+                        "[Heartbeat] Auto-created report %s for agent=%s",
+                        report_result.get("report_id"), agent_id,
+                    )
+                else:
+                    logger.warning(
+                        "[Heartbeat] Auto-report creation failed for agent=%s: %s",
+                        agent_id, report_result.get("error"),
+                    )
             finally:
                 db.close()
 

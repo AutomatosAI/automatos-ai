@@ -36,6 +36,7 @@ export function ReportGradeForm({
           <button
             key={s}
             type="button"
+            aria-label={`Rate ${s} out of 5`}
             className="p-0.5 hover:scale-110 transition-transform"
             onMouseEnter={() => setHoveredStar(s)}
             onMouseLeave={() => setHoveredStar(0)}

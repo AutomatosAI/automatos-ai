@@ -94,11 +94,16 @@ async def download_report(
         raise HTTPException(status_code=404, detail="Report not found")
 
     report = result["report"]
-    content = report.get("content", "")
+    content = report.get("content")
+    if content is None:
+        raise HTTPException(
+            status_code=502,
+            detail=report.get("content_error", "Report file could not be read from storage"),
+        )
     filename = report["file_path"].split("/")[-1]
 
     return Response(
-        content=content.encode("utf-8") if content else b"",
+        content=content.encode("utf-8"),
         media_type="text/markdown",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

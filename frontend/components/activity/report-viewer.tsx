@@ -194,7 +194,14 @@ export function ReportViewer({ reportId, onClose }: ReportViewerProps) {
                         <span>{att.title}</span>
                         <span className="text-xs text-muted-foreground">({att.file_type})</span>
                       </div>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          if (att.url) window.open(att.url, '_blank')
+                        }}
+                      >
                         <Download className="w-3 h-3 mr-1" /> Download
                       </Button>
                     </div>

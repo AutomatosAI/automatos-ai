@@ -440,24 +440,27 @@ class ReportService:
         # Fetch content
         ws_client = WorkspaceClient(str(self.workspace_id))
         file_result = await ws_client.read_file(row.file_path)
-        content = file_result.get("content", "") if file_result.get("success") else None
 
-        return {
-            "success": True,
-            "report": {
-                "id": str(row.id),
-                "agent_id": row.agent_id,
-                "agent_name": row.agent_name,
-                "report_type": row.report_type,
-                "title": row.title,
-                "summary": row.summary,
-                "status": row.status,
-                "file_path": row.file_path,
-                "metrics": row.metrics if isinstance(row.metrics, dict) else json.loads(row.metrics or "{}"),
-                "content": content,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-            },
+        report_data = {
+            "id": str(row.id),
+            "agent_id": row.agent_id,
+            "agent_name": row.agent_name,
+            "report_type": row.report_type,
+            "title": row.title,
+            "summary": row.summary,
+            "status": row.status,
+            "file_path": row.file_path,
+            "metrics": row.metrics if isinstance(row.metrics, dict) else json.loads(row.metrics or "{}"),
+            "created_at": row.created_at.isoformat() if row.created_at else None,
         }
+
+        if file_result.get("success"):
+            report_data["content"] = file_result.get("content", "")
+        else:
+            report_data["content"] = None
+            report_data["content_error"] = file_result.get("error", "Could not read file")
+
+        return {"success": True, "report": report_data}
 
 
 def _parse_period(period: str) -> Optional[int]:
