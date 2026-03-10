@@ -676,6 +676,7 @@ class HeartbeatService:
 
             await self._store_heartbeat_result(result)
             await self._deliver_notification(result, hb_config)
+            await self._auto_create_report(agent_id, workspace_id, result)
             logger.info(
                 "[Heartbeat] Agent tick completed for agent=%s", agent_id
             )
@@ -688,6 +689,7 @@ class HeartbeatService:
             result["findings"].append({"check": "error", "detail": str(e)})
             await self._store_heartbeat_result(result)
             await self._deliver_notification(result, hb_config)
+            await self._auto_create_report(agent_id, workspace_id, result)
         finally:
             self._running_ticks.pop(tick_key, None)
 
@@ -777,15 +779,15 @@ class HeartbeatService:
     # Persistence
     # ------------------------------------------------------------------
 
-    async def _store_heartbeat_result(self, result: dict):
-        """Store heartbeat result in the database."""
+    async def _store_heartbeat_result(self, result: dict) -> Optional[int]:
+        """Store heartbeat result in the database. Returns the row ID."""
         try:
             from core.database.database import SessionLocal
             from sqlalchemy import text
 
             db = SessionLocal()
             try:
-                db.execute(
+                row = db.execute(
                     text(
                         """
                         INSERT INTO heartbeat_results
@@ -794,6 +796,7 @@ class HeartbeatService:
                         VALUES
                             (:source_type, :source_id, :workspace_id, :status,
                              :findings, :actions_taken, :tokens_used, NOW())
+                        RETURNING id
                         """
                     ),
                     {
@@ -805,12 +808,16 @@ class HeartbeatService:
                         "actions_taken": json.dumps(result["actions_taken"]),
                         "tokens_used": result.get("tokens_used", 0),
                     },
-                )
+                ).fetchone()
                 db.commit()
+                hb_id = row[0] if row else None
+                result["_heartbeat_result_id"] = hb_id
+                return hb_id
             finally:
                 db.close()
         except Exception as e:
             logger.error("[Heartbeat] Failed to store result: %s", e)
+            return None
 
     # ------------------------------------------------------------------
     # Notification delivery
@@ -1112,6 +1119,107 @@ class HeartbeatService:
             "jobs": jobs,
             "running_ticks": list(self._running_ticks.keys()),
         }
+
+    # ------------------------------------------------------------------
+    # PRD-76: Auto-create report from heartbeat result
+    # ------------------------------------------------------------------
+
+    async def _auto_create_report(
+        self, agent_id: int, workspace_id: str, result: dict
+    ):
+        """
+        Auto-create a report row from heartbeat result data.
+        Ensures every heartbeat run has a corresponding report —
+        even if the agent didn't call platform_submit_report.
+        """
+        try:
+            from core.database.database import SessionLocal
+            from core.models import Agent
+            from services.report_service import ReportService
+
+            db = SessionLocal()
+            try:
+                agent = db.query(Agent).get(agent_id)
+                agent_name = agent.name if agent else f"agent-{agent_id}"
+
+                # Build markdown content from findings
+                findings = result.get("findings", [])
+                actions = result.get("actions_taken", [])
+                hb_status = result.get("status", "success")
+                tokens = result.get("tokens_used", 0)
+
+                lines = [
+                    f"# {agent_name} — Heartbeat Report",
+                    f"**Status:** {hb_status}",
+                    "",
+                ]
+
+                if findings:
+                    lines.append("## Findings")
+                    for f in findings:
+                        check = f.get("check", "unknown")
+                        detail = f.get("detail", "")
+                        lines.append(f"- **{check}:** {detail}")
+                    lines.append("")
+
+                if actions:
+                    lines.append("## Actions Taken")
+                    for a in actions:
+                        if isinstance(a, dict):
+                            lines.append(f"- {a.get('action', '')} → {a.get('result', '')}")
+                        else:
+                            lines.append(f"- {a}")
+                    lines.append("")
+
+                lines.append("## Metrics")
+                lines.append(f"- Tokens used: {tokens}")
+                lines.append(f"- Findings: {len(findings)}")
+                lines.append(f"- Actions: {len(actions)}")
+
+                content = "\n".join(lines)
+
+                # Map heartbeat status to report status
+                report_status = "ok" if hb_status == "success" else "warning"
+                if any(f.get("check") == "error" for f in findings):
+                    report_status = "critical"
+
+                # Summary from first finding detail
+                summary = None
+                for f in findings:
+                    detail = f.get("detail", "")
+                    if detail and f.get("check") != "error":
+                        summary = detail[:497] + "..." if len(detail) > 497 else detail
+                        break
+
+                svc = ReportService(db, workspace_id)
+                await svc.create_report(
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    title=f"{agent_name} Heartbeat",
+                    content=content,
+                    report_type="standup",
+                    status=report_status,
+                    summary=summary,
+                    metrics={
+                        "tokens_used": tokens,
+                        "findings_count": len(findings),
+                        "actions_count": len(actions),
+                    },
+                    heartbeat_result_id=result.get("_heartbeat_result_id"),
+                )
+
+                logger.info(
+                    "[Heartbeat] Auto-created report for agent=%s heartbeat",
+                    agent_id,
+                )
+            finally:
+                db.close()
+
+        except Exception as e:
+            logger.warning(
+                "[Heartbeat] Failed to auto-create report for agent=%s: %s",
+                agent_id, e,
+            )
 
 
 # ------------------------------------------------------------------

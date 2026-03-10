@@ -309,6 +309,16 @@ _PLATFORM_KEYWORDS = {
         "git log", "git pull", "check git", "commit changes",
         "push changes",
     ],
+    # PRD-76: Agent Reports
+    "platform_submit_report": [
+        "submit report", "file report", "create report",
+        "write report", "status report", "save report",
+    ],
+    "platform_get_latest_report": [
+        "latest report", "agent report", "get report",
+        "read report", "show report", "what did the agent find",
+        "sentinel report", "agent standup", "last report",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]

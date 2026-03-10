@@ -830,6 +830,13 @@ if evaluation_router is not None:
 if activity_router is not None:
     app.include_router(activity_router)
 
+# PRD-76: Agent Reports
+try:
+    from api.reports import router as reports_router
+    app.include_router(reports_router)
+except Exception as e:
+    logger.warning(f"Could not load reports router: {e}")
+
 # PRD-55: Autonomous Assistant Platform
 if heartbeat_router is not None:
     app.include_router(heartbeat_router)

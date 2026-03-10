@@ -6,22 +6,22 @@ import dynamic from 'next/dynamic'
 import {
   Activity,
   RefreshCw,
-  ChefHat,
   Rocket,
   CheckCircle2,
   AlertTriangle,
   Radio,
   LayoutDashboard,
   List,
+  FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
-import { RecipesTab } from '@/components/workflows/recipes-tab'
 import { ActivityMissions } from './activity-missions'
 import { ActivityFeed } from './activity-feed'
+import { ActivityReports } from './activity-reports'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
 import { cn } from '@/lib/utils'
@@ -55,7 +55,7 @@ const PERIOD_OPTIONS = [
 const TAB_DEFS = [
   { value: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { value: 'feed', label: 'Feed', icon: List },
-  { value: 'recipes', label: 'Recipes', icon: ChefHat },
+  { value: 'reports', label: 'Reports', icon: FileText },
   { value: 'missions', label: 'Missions', icon: Rocket },
 ]
 
@@ -74,16 +74,6 @@ export function ActivityPage() {
       setActiveTab('feed')
     }
   }, [openExecution])
-
-  // RecipesTab requires onUseRecipe — no-op in Activity context (full edit is in /workflows)
-  const handleUseRecipe = useCallback(() => {}, [])
-
-  // Navigate to ExecutionKitchen when a recipe is cooked from the Recipes tab
-  const handleExecuteRecipe = useCallback((_workflowId: number, info?: { recipeExecutionId: string; recipeId: string }) => {
-    if (info) {
-      router.push(`/workflows?openExecution=${info.recipeExecutionId}&recipeId=${info.recipeId}`)
-    }
-  }, [router])
 
   // Switch to feed tab when "View All" is clicked in recent activity widget
   const handleViewAllActivity = useCallback(() => {
@@ -151,8 +141,10 @@ export function ActivityPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="recipes">
-            <RecipesTab onUseRecipe={handleUseRecipe} onExecuteRecipe={handleExecuteRecipe} />
+          <TabsContent value="reports">
+            <div data-tour="activity-reports">
+              <ActivityReports period={period} />
+            </div>
           </TabsContent>
 
           <TabsContent value="missions">
