@@ -22,17 +22,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Slider } from '@/components/ui/slider'
 import { useTools } from '@/hooks/use-tools-api'
+import { PremiumIcon } from '@/components/shared'
 
 // API hooks
 import { useCreateAgent } from '@/hooks/use-agent-api'
 import { useTourTabBridge } from '@/hooks/use-tour-tab-bridge'
 import { useModels, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { ModelSelector } from './model-selector'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { apiClient } from '@/lib/api-client'
@@ -105,6 +104,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   const availableTools = toolsResponse?.data || []
   const { data: models = [], isLoading: modelsLoading } = useModels()
   const updateModelConfigMutation = useUpdateAgentModelConfig()
+  const { data: iconMappings = {} } = useSystemIcons()
 
   // Allow Shepherd tour to drive which tab is active
   useTourTabBridge(setStep)
@@ -361,7 +361,14 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
             <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
                 <CardTitle className="flex items-center space-x-3">
-                  <Bot className="w-6 h-6 text-primary" />
+                  {(() => {
+                    const premiumIconName = agentData.category ? iconMappings[agentData.category] : null
+                    return premiumIconName ? (
+                      <PremiumIcon name={premiumIconName} size={28} className="text-primary" />
+                    ) : (
+                      <Bot className="w-6 h-6 text-primary" />
+                    )
+                  })()}
                   <div>
                     <span className="text-xl">Create New <span className="gradient-text">Agent</span></span>
                     <p className="text-sm text-muted-foreground font-normal">
@@ -404,122 +411,122 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         </p>
                       </CardHeader>
                       <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-4">
-                        <div>
-                          <Label htmlFor="agent-category">Category <span className="text-[hsl(var(--destructive))]">*</span></Label>
-                          <Select
-                            value={agentData.category}
-                            onValueChange={(value) => setAgentData(prev => ({ ...prev, category: value }))}
-                          >
-                            <SelectTrigger id="agent-category" data-tour="agent-category-select" className="bg-secondary/50">
-                              {agentData.category ? (
-                                <div className="flex items-center gap-2">
-                                  {(() => {
-                                    const selected = AGENT_CATEGORIES.find(c => c.id === agentData.category)
-                                    if (!selected) return <SelectValue placeholder="Select category..." />
-                                    const Icon = selected.icon
-                                    return (
-                                      <>
-                                        <Icon className={`w-4 h-4 ${selected.color}`} />
-                                        <span>{selected.name}</span>
-                                      </>
-                                    )
-                                  })()}
-                                </div>
-                              ) : (
-                                <SelectValue placeholder="Select category..." />
-                              )}
-                            </SelectTrigger>
-                            <SelectContent>
-                              {AGENT_CATEGORIES.map(cat => {
-                                const Icon = cat.icon
-                                return (
-                                  <SelectItem key={cat.id} value={cat.id}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-4">
+                            <div>
+                              <Label htmlFor="agent-category">Category <span className="text-[hsl(var(--destructive))]">*</span></Label>
+                              <Select
+                                value={agentData.category}
+                                onValueChange={(value) => setAgentData(prev => ({ ...prev, category: value }))}
+                              >
+                                <SelectTrigger id="agent-category" data-tour="agent-category-select" className="bg-secondary/50">
+                                  {agentData.category ? (
                                     <div className="flex items-center gap-2">
-                                      <Icon className={`w-4 h-4 ${cat.color}`} />
-                                      <span>{cat.name}</span>
+                                      {(() => {
+                                        const selected = AGENT_CATEGORIES.find(c => c.id === agentData.category)
+                                        if (!selected) return <SelectValue placeholder="Select category..." />
+                                        const Icon = selected.icon
+                                        return (
+                                          <>
+                                            <Icon className={`w-4 h-4 ${selected.color}`} />
+                                            <span>{selected.name}</span>
+                                          </>
+                                        )
+                                      })()}
                                     </div>
-                                  </SelectItem>
-                                )
-                              })}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                                  ) : (
+                                    <SelectValue placeholder="Select category..." />
+                                  )}
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {AGENT_CATEGORIES.map(cat => {
+                                    const Icon = cat.icon
+                                    return (
+                                      <SelectItem key={cat.id} value={cat.id}>
+                                        <div className="flex items-center gap-2">
+                                          <Icon className={`w-4 h-4 ${cat.color}`} />
+                                          <span>{cat.name}</span>
+                                        </div>
+                                      </SelectItem>
+                                    )
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            </div>
 
-                        <div>
-                          <Label htmlFor="agent-name">Agent Name <span className="text-[hsl(var(--destructive))]">*</span></Label>
-                          <Input
-                            id="agent-name"
-                            data-tour="agent-name-input"
-                            placeholder="Enter agent name..."
-                            value={agentData.name}
-                            onChange={(e) => setAgentData(prev => ({ ...prev, name: e.target.value }))}
-                            className="bg-secondary/50"
-                          />
-                        </div>
+                            <div>
+                              <Label htmlFor="agent-name">Agent Name <span className="text-[hsl(var(--destructive))]">*</span></Label>
+                              <Input
+                                id="agent-name"
+                                data-tour="agent-name-input"
+                                placeholder="Enter agent name..."
+                                value={agentData.name}
+                                onChange={(e) => setAgentData(prev => ({ ...prev, name: e.target.value }))}
+                                className="bg-secondary/50"
+                              />
+                            </div>
 
-                        <div>
-                          <Label htmlFor="agent-description">Description</Label>
-                          <Textarea
-                            id="agent-description"
-                            data-tour="agent-description-input"
-                            placeholder="Describe the agent's purpose and capabilities..."
-                            value={agentData.description}
-                            onChange={(e) => setAgentData(prev => ({ ...prev, description: e.target.value }))}
-                            className="bg-secondary/50 min-h-[100px]"
-                          />
-                        </div>
+                            <div>
+                              <Label htmlFor="agent-description">Description</Label>
+                              <Textarea
+                                id="agent-description"
+                                data-tour="agent-description-input"
+                                placeholder="Describe the agent's purpose and capabilities..."
+                                value={agentData.description}
+                                onChange={(e) => setAgentData(prev => ({ ...prev, description: e.target.value }))}
+                                className="bg-secondary/50 min-h-[100px]"
+                              />
+                            </div>
 
-                        <div>
-                          <Label htmlFor="agent-tags">Tags (comma separated)</Label>
-                          <Input
-                            id="agent-tags"
-                            placeholder="e.g. writing, pdf, research"
-                            value={agentData.tags}
-                            onChange={(e) => setAgentData(prev => ({ ...prev, tags: e.target.value }))}
-                            className="bg-secondary/50"
-                          />
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Lightweight keywords that describe the agent's strengths.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        {/* US-006: Marketplace Sharing */}
-                        <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <Label htmlFor="share-marketplace" className="text-base font-medium">
-                            Share to <span className="text-primary">Marketplace</span>
-                          </Label>
-                          <p className="text-sm text-muted-foreground">
-                            Make this agent available for others to discover and install
-                          </p>
-                        </div>
-                        <Switch
-                          id="share-marketplace"
-                          checked={agentData.shareToMarketplace}
-                          onCheckedChange={(checked) => setAgentData(prev => ({ ...prev, shareToMarketplace: checked }))}
-                        />
-                      </div>
-
-                      {agentData.shareToMarketplace && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="mt-4"
-                        >
-                          <div className="bg-primary/10 border border-primary/30 rounded-lg p-3">
-                            <p className="text-sm text-primary">
-                              <strong>Note:</strong> Your agent will be submitted to the approval queue using the same name, description, category, and tags. Trusted users' submissions are auto-published.
-                            </p>
+                            <div>
+                              <Label htmlFor="agent-tags">Tags (comma separated)</Label>
+                              <Input
+                                id="agent-tags"
+                                placeholder="e.g. writing, pdf, research"
+                                value={agentData.tags}
+                                onChange={(e) => setAgentData(prev => ({ ...prev, tags: e.target.value }))}
+                                className="bg-secondary/50"
+                              />
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Lightweight keywords that describe the agent's strengths.
+                              </p>
+                            </div>
                           </div>
-                        </motion.div>
-                      )}
-                      </div>
-                    </div>
+
+                          <div className="space-y-4">
+                            {/* US-006: Marketplace Sharing */}
+                            <div className="flex items-center justify-between mb-4">
+                              <div>
+                                <Label htmlFor="share-marketplace" className="text-base font-medium">
+                                  Share to <span className="text-primary">Marketplace</span>
+                                </Label>
+                                <p className="text-sm text-muted-foreground">
+                                  Make this agent available for others to discover and install
+                                </p>
+                              </div>
+                              <Switch
+                                id="share-marketplace"
+                                checked={agentData.shareToMarketplace}
+                                onCheckedChange={(checked) => setAgentData(prev => ({ ...prev, shareToMarketplace: checked }))}
+                              />
+                            </div>
+
+                            {agentData.shareToMarketplace && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="mt-4"
+                              >
+                                <div className="bg-primary/10 border border-primary/30 rounded-lg p-3">
+                                  <p className="text-sm text-primary">
+                                    <strong>Note:</strong> Your agent will be submitted to the approval queue using the same name, description, category, and tags. Trusted users' submissions are auto-published.
+                                  </p>
+                                </div>
+                              </motion.div>
+                            )}
+                          </div>
+                        </div>
                       </CardContent>
                     </Card>
                   </TabsContent>
@@ -535,204 +542,200 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       </CardHeader>
                       <CardContent className="space-y-6">
 
-                    {/* Persona Mode Selection */}
-                    <div className="grid grid-cols-3 gap-3">
-                      <motion.div
-                        className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
-                          personaMode === 'none'
-                            ? 'border-primary bg-primary/10'
-                            : 'border-border/50 hover:border-primary/30'
-                        }`}
-                        onClick={() => {
-                          setPersonaMode('none')
-                          setSelectedPersonaId(null)
-                          setCustomPersonaPrompt('')
-                        }}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Bot className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
-                        <div className="font-medium text-sm">No Persona</div>
-                        <div className="text-xs text-muted-foreground mt-1">Default behavior</div>
-                      </motion.div>
+                        {/* Persona Mode Selection */}
+                        <div className="grid grid-cols-3 gap-3">
+                          <motion.div
+                            className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${personaMode === 'none'
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border/50 hover:border-primary/30'
+                              }`}
+                            onClick={() => {
+                              setPersonaMode('none')
+                              setSelectedPersonaId(null)
+                              setCustomPersonaPrompt('')
+                            }}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                          >
+                            <Bot className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                            <div className="font-medium text-sm">No Persona</div>
+                            <div className="text-xs text-muted-foreground mt-1">Default behavior</div>
+                          </motion.div>
 
-                      <motion.div
-                        className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
-                          personaMode === 'predefined'
-                            ? 'border-primary bg-primary/10'
-                            : 'border-border/50 hover:border-primary/30'
-                        }`}
-                        onClick={() => setPersonaMode('predefined')}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <User className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
-                        <div className="font-medium text-sm">Predefined</div>
-                        <div className="text-xs text-muted-foreground mt-1">Choose a persona</div>
-                      </motion.div>
+                          <motion.div
+                            className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${personaMode === 'predefined'
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border/50 hover:border-primary/30'
+                              }`}
+                            onClick={() => setPersonaMode('predefined')}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                          >
+                            <User className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                            <div className="font-medium text-sm">Predefined</div>
+                            <div className="text-xs text-muted-foreground mt-1">Choose a persona</div>
+                          </motion.div>
 
-                      <motion.div
-                        className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
-                          personaMode === 'custom'
-                            ? 'border-primary bg-primary/10'
-                            : 'border-border/50 hover:border-primary/30'
-                        }`}
-                        onClick={() => setPersonaMode('custom')}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <PenLine className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
-                        <div className="font-medium text-sm">Custom</div>
-                        <div className="text-xs text-muted-foreground mt-1">Write your own</div>
-                      </motion.div>
-                    </div>
+                          <motion.div
+                            className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${personaMode === 'custom'
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border/50 hover:border-primary/30'
+                              }`}
+                            onClick={() => setPersonaMode('custom')}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                          >
+                            <PenLine className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                            <div className="font-medium text-sm">Custom</div>
+                            <div className="text-xs text-muted-foreground mt-1">Write your own</div>
+                          </motion.div>
+                        </div>
 
-                    {/* Predefined Persona Selection */}
-                    {personaMode === 'predefined' && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="space-y-4"
-                      >
-                        {/* Persona list — auto-filtered by agentData.category from Config tab */}
-                        {agentData.category && (
-                          <div className="text-xs text-muted-foreground">
-                            Showing personas for <strong>{agentData.category}</strong> category.
-                          </div>
-                        )}
-                        {personasLoading ? (
-                          <div className="space-y-2">
-                            {[1, 2, 3].map(i => (
-                              <div key={i} className="h-16 bg-secondary/20 animate-pulse rounded-lg" />
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
-                            {personas
-                              .filter(p => !agentData.category || agentData.category === 'custom' || p.category?.toLowerCase() === agentData.category.toLowerCase())
-                              .map(persona => (
-                                <motion.div
-                                  key={persona.id}
-                                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                                    selectedPersonaId === persona.id
-                                      ? 'border-primary bg-primary/10'
-                                      : 'border-border/50 hover:border-primary/30'
-                                  }`}
-                                  onClick={() => setSelectedPersonaId(persona.id)}
-                                  whileHover={{ scale: 1.01 }}
-                                  whileTap={{ scale: 0.99 }}
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-medium">{persona.name}</span>
-                                        {persona.category && (
-                                          <Badge variant="outline" className="text-xs">{persona.category}</Badge>
-                                        )}
-                                      </div>
-                                      {persona.voice_description && (
-                                        <p className="text-xs text-muted-foreground mt-1 truncate">
-                                          {persona.voice_description}
-                                        </p>
-                                      )}
-                                      <p className="text-xs text-muted-foreground mt-0.5">
-                                        Temperature: {persona.suggested_temperature}
-                                      </p>
-                                    </div>
-                                    <div className="flex items-center gap-2 ml-2">
-                                      {selectedPersonaId === persona.id && (
-                                        <Badge className="bg-primary text-primary-foreground">Selected</Badge>
-                                      )}
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          setExpandedPersonaId(
-                                            expandedPersonaId === persona.id ? null : persona.id
-                                          )
-                                        }}
-                                      >
-                                        {expandedPersonaId === persona.id ? (
-                                          <ChevronUp className="w-4 h-4" />
-                                        ) : (
-                                          <ChevronDown className="w-4 h-4" />
-                                        )}
-                                      </Button>
-                                    </div>
-                                  </div>
-
-                                  {/* Expandable System Prompt Preview */}
-                                  {expandedPersonaId === persona.id && persona.system_prompt && (
-                                    <motion.div
-                                      initial={{ opacity: 0, height: 0 }}
-                                      animate={{ opacity: 1, height: 'auto' }}
-                                      className="mt-3 pt-3 border-t border-border/30"
-                                    >
-                                      <Label className="text-xs">System Prompt</Label>
-                                      <pre className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap bg-secondary/30 rounded p-2 max-h-[150px] overflow-y-auto">
-                                        {persona.system_prompt}
-                                      </pre>
-                                    </motion.div>
-                                  )}
-                                </motion.div>
-                              ))}
-                            {personas.filter(p => !agentData.category || agentData.category === 'custom' || p.category?.toLowerCase() === agentData.category.toLowerCase()).length === 0 && (
-                              <div className="text-center py-6 text-muted-foreground">
-                                No personas found{agentData.category ? ` for "${agentData.category}" category` : ''}.
+                        {/* Predefined Persona Selection */}
+                        {personaMode === 'predefined' && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="space-y-4"
+                          >
+                            {/* Persona list — auto-filtered by agentData.category from Config tab */}
+                            {agentData.category && (
+                              <div className="text-xs text-muted-foreground">
+                                Showing personas for <strong>{agentData.category}</strong> category.
                               </div>
                             )}
+                            {personasLoading ? (
+                              <div className="space-y-2">
+                                {[1, 2, 3].map(i => (
+                                  <div key={i} className="h-16 bg-secondary/20 animate-pulse rounded-lg" />
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
+                                {personas
+                                  .filter(p => !agentData.category || agentData.category === 'custom' || p.category?.toLowerCase() === agentData.category.toLowerCase())
+                                  .map(persona => (
+                                    <motion.div
+                                      key={persona.id}
+                                      className={`p-3 rounded-lg border cursor-pointer transition-all ${selectedPersonaId === persona.id
+                                        ? 'border-primary bg-primary/10'
+                                        : 'border-border/50 hover:border-primary/30'
+                                        }`}
+                                      onClick={() => setSelectedPersonaId(persona.id)}
+                                      whileHover={{ scale: 1.01 }}
+                                      whileTap={{ scale: 0.99 }}
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-medium">{persona.name}</span>
+                                            {persona.category && (
+                                              <Badge variant="outline" className="text-xs">{persona.category}</Badge>
+                                            )}
+                                          </div>
+                                          {persona.voice_description && (
+                                            <p className="text-xs text-muted-foreground mt-1 truncate">
+                                              {persona.voice_description}
+                                            </p>
+                                          )}
+                                          <p className="text-xs text-muted-foreground mt-0.5">
+                                            Temperature: {persona.suggested_temperature}
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center gap-2 ml-2">
+                                          {selectedPersonaId === persona.id && (
+                                            <Badge className="bg-primary text-primary-foreground">Selected</Badge>
+                                          )}
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setExpandedPersonaId(
+                                                expandedPersonaId === persona.id ? null : persona.id
+                                              )
+                                            }}
+                                          >
+                                            {expandedPersonaId === persona.id ? (
+                                              <ChevronUp className="w-4 h-4" />
+                                            ) : (
+                                              <ChevronDown className="w-4 h-4" />
+                                            )}
+                                          </Button>
+                                        </div>
+                                      </div>
+
+                                      {/* Expandable System Prompt Preview */}
+                                      {expandedPersonaId === persona.id && persona.system_prompt && (
+                                        <motion.div
+                                          initial={{ opacity: 0, height: 0 }}
+                                          animate={{ opacity: 1, height: 'auto' }}
+                                          className="mt-3 pt-3 border-t border-border/30"
+                                        >
+                                          <Label className="text-xs">System Prompt</Label>
+                                          <pre className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap bg-secondary/30 rounded p-2 max-h-[150px] overflow-y-auto">
+                                            {persona.system_prompt}
+                                          </pre>
+                                        </motion.div>
+                                      )}
+                                    </motion.div>
+                                  ))}
+                                {personas.filter(p => !agentData.category || agentData.category === 'custom' || p.category?.toLowerCase() === agentData.category.toLowerCase()).length === 0 && (
+                                  <div className="text-center py-6 text-muted-foreground">
+                                    No personas found{agentData.category ? ` for "${agentData.category}" category` : ''}.
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Tip: Switch to custom to pre-fill */}
+                            {selectedPersonaId && (
+                              <p className="text-xs text-muted-foreground italic">
+                                Tip: Select a predefined persona and switch to &quot;Custom&quot; to pre-fill for editing.
+                              </p>
+                            )}
+                          </motion.div>
+                        )}
+
+                        {/* Custom Persona */}
+                        {personaMode === 'custom' && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="space-y-3"
+                          >
+                            <div>
+                              <Label htmlFor="custom-persona">Custom Persona Prompt</Label>
+                              <Textarea
+                                id="custom-persona"
+                                placeholder="Describe the agent's personality, communication style, expertise, and behavioral guidelines..."
+                                value={customPersonaPrompt}
+                                onChange={(e) => setCustomPersonaPrompt(e.target.value)}
+                                className="bg-secondary/50 min-h-[200px] font-mono text-sm"
+                              />
+                              <p className="text-xs text-muted-foreground mt-1">
+                                This prompt will be prepended to the agent&apos;s system message.
+                              </p>
+                            </div>
+                          </motion.div>
+                        )}
+
+                        {/* Summary */}
+                        <div className="flex justify-between items-center pt-4 border-t border-border/30">
+                          <div>
+                            <p className="font-medium">
+                              {personaMode === 'none' && 'No persona selected'}
+                              {personaMode === 'predefined' && (selectedPersonaId
+                                ? `Persona: ${personas.find(p => p.id === selectedPersonaId)?.name || 'Selected'}`
+                                : 'Select a persona above')}
+                              {personaMode === 'custom' && (customPersonaPrompt
+                                ? `Custom persona (${customPersonaPrompt.length} chars)`
+                                : 'Write a custom persona above')}
+                            </p>
                           </div>
-                        )}
-
-                        {/* Tip: Switch to custom to pre-fill */}
-                        {selectedPersonaId && (
-                          <p className="text-xs text-muted-foreground italic">
-                            Tip: Select a predefined persona and switch to &quot;Custom&quot; to pre-fill for editing.
-                          </p>
-                        )}
-                      </motion.div>
-                    )}
-
-                    {/* Custom Persona */}
-                    {personaMode === 'custom' && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="space-y-3"
-                      >
-                        <div>
-                          <Label htmlFor="custom-persona">Custom Persona Prompt</Label>
-                          <Textarea
-                            id="custom-persona"
-                            placeholder="Describe the agent's personality, communication style, expertise, and behavioral guidelines..."
-                            value={customPersonaPrompt}
-                            onChange={(e) => setCustomPersonaPrompt(e.target.value)}
-                            className="bg-secondary/50 min-h-[200px] font-mono text-sm"
-                          />
-                          <p className="text-xs text-muted-foreground mt-1">
-                            This prompt will be prepended to the agent&apos;s system message.
-                          </p>
                         </div>
-                      </motion.div>
-                    )}
-
-                    {/* Summary */}
-                    <div className="flex justify-between items-center pt-4 border-t border-border/30">
-                      <div>
-                        <p className="font-medium">
-                          {personaMode === 'none' && 'No persona selected'}
-                          {personaMode === 'predefined' && (selectedPersonaId
-                            ? `Persona: ${personas.find(p => p.id === selectedPersonaId)?.name || 'Selected'}`
-                            : 'Select a persona above')}
-                          {personaMode === 'custom' && (customPersonaPrompt
-                            ? `Custom persona (${customPersonaPrompt.length} chars)`
-                            : 'Write a custom persona above')}
-                        </p>
-                      </div>
-                    </div>
                       </CardContent>
                     </Card>
                   </TabsContent>
@@ -748,118 +751,118 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       </CardHeader>
                       <CardContent className="space-y-6">
 
-                    <ModelSelector
-                      value={modelConfig.model_id}
-                      onChange={(modelId) => {
-                        const model = (models as any)?.find((m: any) => m.model_id === modelId)
-                        handleModelConfigChange('model_id', modelId)
-                        if (model) {
-                          handleModelConfigChange('provider', model.provider)
-                        }
-                      }}
-                      agentType={agentData.category}
-                    />
+                        <ModelSelector
+                          value={modelConfig.model_id}
+                          onChange={(modelId) => {
+                            const model = (models as any)?.find((m: any) => m.model_id === modelId)
+                            handleModelConfigChange('model_id', modelId)
+                            if (model) {
+                              handleModelConfigChange('provider', model.provider)
+                            }
+                          }}
+                          agentType={agentData.category}
+                        />
 
-                    <div className="space-y-4 pt-4 border-t">
-                      <h4 className="font-medium">Model Parameters</h4>
+                        <div className="space-y-4 pt-4 border-t">
+                          <h4 className="font-medium">Model Parameters</h4>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Temperature: {modelConfig.temperature.toFixed(2)}</Label>
-                          <Slider
-                            min={0}
-                            max={2}
-                            step={0.01}
-                            value={[modelConfig.temperature]}
-                            onValueChange={([value]) => handleModelConfigChange('temperature', value)}
-                            className="bg-secondary/50"
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Controls randomness: 0 is focused, 2 is creative
-                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>Temperature: {modelConfig.temperature.toFixed(2)}</Label>
+                              <Slider
+                                min={0}
+                                max={2}
+                                step={0.01}
+                                value={[modelConfig.temperature]}
+                                onValueChange={([value]) => handleModelConfigChange('temperature', value)}
+                                className="bg-secondary/50"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Controls randomness: 0 is focused, 2 is creative
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Max Output Tokens: {modelConfig.max_tokens}</Label>
+                              <Slider
+                                min={100}
+                                max={8000}
+                                step={100}
+                                value={[modelConfig.max_tokens]}
+                                onValueChange={([value]) => handleModelConfigChange('max_tokens', value)}
+                                className="bg-secondary/50"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Top P: {modelConfig.top_p.toFixed(2)}</Label>
+                              <Slider
+                                min={0}
+                                max={1}
+                                step={0.01}
+                                value={[modelConfig.top_p]}
+                                onValueChange={([value]) => handleModelConfigChange('top_p', value)}
+                                className="bg-secondary/50"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Nucleus sampling threshold
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Frequency Penalty: {modelConfig.frequency_penalty.toFixed(2)}</Label>
+                              <Slider
+                                min={-2}
+                                max={2}
+                                step={0.01}
+                                value={[modelConfig.frequency_penalty]}
+                                onValueChange={([value]) => handleModelConfigChange('frequency_penalty', value)}
+                                className="bg-secondary/50"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Reduces repetition of token sequences
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Presence Penalty: {modelConfig.presence_penalty.toFixed(2)}</Label>
+                              <Slider
+                                min={-2}
+                                max={2}
+                                step={0.01}
+                                value={[modelConfig.presence_penalty]}
+                                onValueChange={([value]) => handleModelConfigChange('presence_penalty', value)}
+                                className="bg-secondary/50"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Encourages new topics
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Fallback Model (Optional)</Label>
+                              <Select
+                                value={modelConfig.fallback_model_id || 'none'}
+                                onValueChange={(value) => handleModelConfigChange('fallback_model_id', value === 'none' ? null : value)}
+                              >
+                                <SelectTrigger className="bg-secondary/50">
+                                  <SelectValue placeholder="No fallback" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">No fallback</SelectItem>
+                                  {(models as any)?.filter((m: any) => m.model_id !== modelConfig.model_id).map((model: any) => (
+                                    <SelectItem key={model.model_id} value={model.model_id}>
+                                      {model.display_name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <p className="text-xs text-muted-foreground">
+                                Model to use if primary fails
+                              </p>
+                            </div>
+                          </div>
                         </div>
-
-                        <div className="space-y-2">
-                          <Label>Max Output Tokens: {modelConfig.max_tokens}</Label>
-                          <Slider
-                            min={100}
-                            max={8000}
-                            step={100}
-                            value={[modelConfig.max_tokens]}
-                            onValueChange={([value]) => handleModelConfigChange('max_tokens', value)}
-                            className="bg-secondary/50"
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Top P: {modelConfig.top_p.toFixed(2)}</Label>
-                          <Slider
-                            min={0}
-                            max={1}
-                            step={0.01}
-                            value={[modelConfig.top_p]}
-                            onValueChange={([value]) => handleModelConfigChange('top_p', value)}
-                            className="bg-secondary/50"
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Nucleus sampling threshold
-                          </p>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Frequency Penalty: {modelConfig.frequency_penalty.toFixed(2)}</Label>
-                          <Slider
-                            min={-2}
-                            max={2}
-                            step={0.01}
-                            value={[modelConfig.frequency_penalty]}
-                            onValueChange={([value]) => handleModelConfigChange('frequency_penalty', value)}
-                            className="bg-secondary/50"
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Reduces repetition of token sequences
-                          </p>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Presence Penalty: {modelConfig.presence_penalty.toFixed(2)}</Label>
-                          <Slider
-                            min={-2}
-                            max={2}
-                            step={0.01}
-                            value={[modelConfig.presence_penalty]}
-                            onValueChange={([value]) => handleModelConfigChange('presence_penalty', value)}
-                            className="bg-secondary/50"
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Encourages new topics
-                          </p>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Fallback Model (Optional)</Label>
-                          <Select
-                            value={modelConfig.fallback_model_id || 'none'}
-                            onValueChange={(value) => handleModelConfigChange('fallback_model_id', value === 'none' ? null : value)}
-                          >
-                            <SelectTrigger className="bg-secondary/50">
-                              <SelectValue placeholder="No fallback" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">No fallback</SelectItem>
-                              {(models as any)?.filter((m: any) => m.model_id !== modelConfig.model_id).map((model: any) => (
-                                <SelectItem key={model.model_id} value={model.model_id}>
-                                  {model.display_name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <p className="text-xs text-muted-foreground">
-                            Model to use if primary fails
-                          </p>
-                        </div>
-                      </div>
-                    </div>
                       </CardContent>
                     </Card>
                   </TabsContent>
@@ -875,52 +878,52 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       </CardHeader>
                       <CardContent>
 
-                    {toolsLoading ? (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="h-10 bg-secondary/20 animate-pulse rounded" />
-                        <div className="h-10 bg-secondary/20 animate-pulse rounded" />
-                      </div>
-                    ) : availableTools.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        No active tools found. Enable tools in the Tools Dashboard first.
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {(availableTools as any[]).map((tool: any) => {
-                          const actualToolId = tool.id
+                        {toolsLoading ? (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="h-10 bg-secondary/20 animate-pulse rounded" />
+                            <div className="h-10 bg-secondary/20 animate-pulse rounded" />
+                          </div>
+                        ) : availableTools.length === 0 ? (
+                          <div className="text-center py-8 text-muted-foreground">
+                            No active tools found. Enable tools in the Tools Dashboard first.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {(availableTools as any[]).map((tool: any) => {
+                              const actualToolId = tool.id
 
-                          return (
-                            <motion.div
-                              key={tool.id}
-                              className={`p-3 rounded-lg border cursor-pointer flex items-center justify-between transition-all ${agentData.tools.includes(actualToolId)
-                                ? 'border-primary bg-primary/10'
-                                : 'border-border/50 hover:border-primary/30'
-                                }`}
-                              onClick={() => handleToolToggle(actualToolId)}
-                              whileHover={{ scale: 1.01 }}
-                              whileTap={{ scale: 0.99 }}
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className="flex items-center justify-center">
-                                  <ToolLogo
-                                    name={tool.name}
-                                    logo={tool.icon}
-                                    size={32}
-                                  />
-                                </div>
-                                <div>
-                                  <div className="font-medium">{tool.name}</div>
-                                  <div className="text-xs text-muted-foreground">{tool.provider}</div>
-                                </div>
-                              </div>
-                              {agentData.tools.includes(actualToolId) && (
-                                <Badge className="bg-primary text-primary-foreground">Selected</Badge>
-                              )}
-                            </motion.div>
-                          )
-                        })}
-                      </div>
-                    )}
+                              return (
+                                <motion.div
+                                  key={tool.id}
+                                  className={`p-3 rounded-lg border cursor-pointer flex items-center justify-between transition-all ${agentData.tools.includes(actualToolId)
+                                    ? 'border-primary bg-primary/10'
+                                    : 'border-border/50 hover:border-primary/30'
+                                    }`}
+                                  onClick={() => handleToolToggle(actualToolId)}
+                                  whileHover={{ scale: 1.01 }}
+                                  whileTap={{ scale: 0.99 }}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex items-center justify-center">
+                                      <ToolLogo
+                                        name={tool.name}
+                                        logo={tool.icon}
+                                        size={32}
+                                      />
+                                    </div>
+                                    <div>
+                                      <div className="font-medium">{tool.name}</div>
+                                      <div className="text-xs text-muted-foreground">{tool.provider}</div>
+                                    </div>
+                                  </div>
+                                  {agentData.tools.includes(actualToolId) && (
+                                    <Badge className="bg-primary text-primary-foreground">Selected</Badge>
+                                  )}
+                                </motion.div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   </TabsContent>
@@ -936,87 +939,86 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       </CardHeader>
                       <CardContent>
 
-                    {pluginsLoading ? (
-                      <div className="space-y-2">
-                        {[1, 2, 3].map((i) => (
-                          <div key={i} className="h-20 bg-secondary/20 animate-pulse rounded-lg" />
-                        ))}
-                      </div>
-                    ) : workspacePlugins.length > 0 ? (
-                      <div className="space-y-3">
-                        {workspacePlugins.map((plugin: any) => {
-                          const isSelected = agentData.plugins.includes(plugin.plugin_id)
-                          return (
-                            <motion.div
-                              key={plugin.plugin_id}
-                              className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                                isSelected
-                                  ? 'border-orange-500/50 bg-orange-500/5'
-                                  : 'border-border/50 hover:border-primary/30'
-                              }`}
-                              onClick={() => handlePluginToggle(plugin.plugin_id)}
-                              whileHover={{ scale: 1.01 }}
-                              whileTap={{ scale: 0.99 }}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <Sparkles className="w-5 h-5 text-orange-400 shrink-0" />
-                                  <span className="font-medium truncate">{plugin.name}</span>
-                                  <Badge variant="outline" className="text-xs shrink-0">
-                                    v{plugin.version}
-                                  </Badge>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {plugin.security_status === 'safe' && (
-                                    <Badge variant="secondary" className="text-xs text-green-400 border-green-500/30">
-                                      <Shield className="w-3 h-3 mr-1" />
-                                      Verified
-                                    </Badge>
-                                  )}
-                                  {isSelected && (
-                                    <Badge className="bg-primary text-primary-foreground">Selected</Badge>
-                                  )}
-                                </div>
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                                {plugin.description || 'No description available'}
-                              </p>
-                              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                                <span className="flex items-center gap-1">
-                                  <Terminal className="w-3 h-3" />
-                                  {plugin.skills_count} skills
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Zap className="w-3 h-3" />
-                                  {plugin.commands_count} commands
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Coins className="w-3 h-3" />
-                                  ~{(plugin.token_estimate || 0).toLocaleString()} tokens
-                                </span>
-                              </div>
-                            </motion.div>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <Sparkles className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                        <h3 className="text-lg font-semibold mb-2">No Capabilities Available</h3>
-                        <p className="text-muted-foreground">
-                          No capabilities are enabled for this workspace yet. You can assign capabilities later.
-                        </p>
-                      </div>
-                    )}
+                        {pluginsLoading ? (
+                          <div className="space-y-2">
+                            {[1, 2, 3].map((i) => (
+                              <div key={i} className="h-20 bg-secondary/20 animate-pulse rounded-lg" />
+                            ))}
+                          </div>
+                        ) : workspacePlugins.length > 0 ? (
+                          <div className="space-y-3">
+                            {workspacePlugins.map((plugin: any) => {
+                              const isSelected = agentData.plugins.includes(plugin.plugin_id)
+                              return (
+                                <motion.div
+                                  key={plugin.plugin_id}
+                                  className={`p-3 rounded-lg border cursor-pointer transition-all ${isSelected
+                                    ? 'border-orange-500/50 bg-orange-500/5'
+                                    : 'border-border/50 hover:border-primary/30'
+                                    }`}
+                                  onClick={() => handlePluginToggle(plugin.plugin_id)}
+                                  whileHover={{ scale: 1.01 }}
+                                  whileTap={{ scale: 0.99 }}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <Sparkles className="w-5 h-5 text-orange-400 shrink-0" />
+                                      <span className="font-medium truncate">{plugin.name}</span>
+                                      <Badge variant="outline" className="text-xs shrink-0">
+                                        v{plugin.version}
+                                      </Badge>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      {plugin.security_status === 'safe' && (
+                                        <Badge variant="secondary" className="text-xs text-green-400 border-green-500/30">
+                                          <Shield className="w-3 h-3 mr-1" />
+                                          Verified
+                                        </Badge>
+                                      )}
+                                      {isSelected && (
+                                        <Badge className="bg-primary text-primary-foreground">Selected</Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                    {plugin.description || 'No description available'}
+                                  </p>
+                                  <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                    <span className="flex items-center gap-1">
+                                      <Terminal className="w-3 h-3" />
+                                      {plugin.skills_count} skills
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <Zap className="w-3 h-3" />
+                                      {plugin.commands_count} commands
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <Coins className="w-3 h-3" />
+                                      ~{(plugin.token_estimate || 0).toLocaleString()} tokens
+                                    </span>
+                                  </div>
+                                </motion.div>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="text-center py-8">
+                            <Sparkles className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                            <h3 className="text-lg font-semibold mb-2">No Capabilities Available</h3>
+                            <p className="text-muted-foreground">
+                              No capabilities are enabled for this workspace yet. You can assign capabilities later.
+                            </p>
+                          </div>
+                        )}
 
-                    <div className="flex justify-between items-center pt-6 border-t border-border/30">
-                      <div>
-                        <p className="font-medium">Selected Capabilities: {agentData.plugins.length}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Agent will be created with these capabilities
-                        </p>
-                      </div>
-                    </div>
+                        <div className="flex justify-between items-center pt-6 border-t border-border/30">
+                          <div>
+                            <p className="font-medium">Selected Capabilities: {agentData.plugins.length}</p>
+                            <p className="text-sm text-muted-foreground">
+                              Agent will be created with these capabilities
+                            </p>
+                          </div>
+                        </div>
                       </CardContent>
                     </Card>
                   </TabsContent>

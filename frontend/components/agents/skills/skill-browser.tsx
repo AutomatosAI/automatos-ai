@@ -34,8 +34,10 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Search, Grid, List, Filter, Tag, Package } from 'lucide-react';
+import { Search, Grid, List, Filter, Tag, Package, Zap } from 'lucide-react';
 import { useSkillsApi } from '@/hooks/use-skills-api';
+import { useSystemIcons } from '@/hooks/use-system-config-api';
+import { PremiumIcon } from '@/components/shared';
 import { Skill } from '@/types/skills';
 import { SkillDetailModal } from './skill-detail-modal';
 
@@ -46,14 +48,14 @@ interface SkillBrowserProps {
   hideUnknownSource?: boolean;
 }
 
-export function SkillBrowser({ 
-  onSkillSelect, 
+export function SkillBrowser({
+  onSkillSelect,
   selectionMode = false,
   selectedSkillIds = [],
   hideUnknownSource = false,
 }: SkillBrowserProps) {
   const { listSkills, loading } = useSkillsApi();
-  
+
   const [skills, setSkills] = useState<Skill[]>([]);
   const [filteredSkills, setFilteredSkills] = useState<Skill[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -61,6 +63,8 @@ export function SkillBrowser({
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
+
+  const { data: iconMappings = {} } = useSystemIcons();
 
   // Load skills on mount
   useEffect(() => {
@@ -213,6 +217,7 @@ export function SkillBrowser({
               onClick={() => handleSkillClick(skill)}
               selected={selectedSkillIds.includes(skill.id)}
               compact={viewMode === 'list'}
+              iconName={skill.category ? iconMappings[skill.category] : null}
             />
           ))}
         </div>
@@ -236,33 +241,42 @@ interface SkillCardProps {
   onClick: () => void;
   selected?: boolean;
   compact?: boolean;
+  iconName?: string | null;
 }
 
-function SkillCard({ skill, onClick, selected, compact }: SkillCardProps) {
+function SkillCard({ skill, onClick, selected, compact, iconName }: SkillCardProps) {
   return (
     <Card
-      className={`cursor-pointer transition-all duration-300 hover:border-primary/20 ${
-        selected ? 'ring-2 ring-primary' : ''
-      } ${compact ? 'flex items-start' : ''}`}
+      className={`cursor-pointer transition-all duration-300 hover:border-primary/20 ${selected ? 'ring-2 ring-primary' : ''
+        } ${compact ? 'flex items-start' : ''}`}
       onClick={onClick}
     >
       <CardHeader className={compact ? 'pb-2' : ''}>
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <CardTitle className="text-lg">{skill.name}</CardTitle>
-            {skill.skill_version && (
-              <p className="text-xs text-muted-foreground mt-1">
-                v{skill.skill_version}
-              </p>
-            )}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 flex gap-3">
+            <div className="mt-1">
+              {iconName ? (
+                <PremiumIcon name={iconName} size={24} className="text-primary shrink-0" />
+              ) : (
+                <Zap className="w-6 h-6 text-primary shrink-0" />
+              )}
+            </div>
+            <div>
+              <CardTitle className="text-lg">{skill.name}</CardTitle>
+              {skill.skill_version && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  v{skill.skill_version}
+                </p>
+              )}
+            </div>
           </div>
-          <Badge variant="secondary">{skill.category}</Badge>
+          <Badge variant="secondary" className="shrink-0">{skill.category}</Badge>
         </div>
         <CardDescription className="line-clamp-2">
           {skill.description || 'No description available'}
         </CardDescription>
       </CardHeader>
-      
+
       {!compact && (
         <CardContent>
           <div className="flex flex-wrap gap-2">
@@ -280,7 +294,7 @@ function SkillCard({ skill, onClick, selected, compact }: SkillCardProps) {
           </div>
         </CardContent>
       )}
-      
+
       <CardFooter className="text-xs text-muted-foreground">
         <div className="flex items-center justify-between w-full">
           <span>Source: {skill.skill_source || 'Unknown'}</span>

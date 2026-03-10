@@ -13,9 +13,10 @@ import {
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { StatusBadge } from '@/components/shared'
+import { StatusBadge, PremiumIcon } from '@/components/shared'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
 
@@ -64,6 +65,8 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
   const [enabling, setEnabling] = useState<number | null>(null)
   const [disabling, setDisabling] = useState<number | null>(null)
   const [localSearch, setLocalSearch] = useState('')
+
+  const { data: iconMappings = {} } = useSystemIcons()
 
   const fetchEnabled = useCallback(async () => {
     if (!workspaceId) return
@@ -247,6 +250,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
               isEnabled={false}
               isEnabling={enabling === skill.id}
               onEnable={() => enableSkill(skill.id, skill.name)}
+              iconName={skill.category ? iconMappings[skill.category] : null}
             />
           ))}
         </div>
@@ -261,6 +265,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
                 isEnabled={false}
                 isEnabling={enabling === skill.id}
                 onEnable={() => enableSkill(skill.id, skill.name)}
+                iconName={skill.category ? iconMappings[skill.category] : null}
               />
             ))}
           </AnimatePresence>
@@ -286,6 +291,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
                   isEnabled
                   isDisabling={disabling === skill.skill_id}
                   onDisable={() => disableSkill(skill.skill_id, skill.name)}
+                  iconName={skill.category ? iconMappings[skill.category] : null}
                 />
               ))}
             </div>
@@ -300,6 +306,7 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
                     isEnabled
                     isDisabling={disabling === skill.skill_id}
                     onDisable={() => disableSkill(skill.skill_id, skill.name)}
+                    iconName={skill.category ? iconMappings[skill.category] : null}
                   />
                 ))}
               </AnimatePresence>
@@ -322,9 +329,10 @@ interface SkillListCardProps {
   isDisabling?: boolean
   onEnable?: () => void
   onDisable?: () => void
+  iconName?: string | null
 }
 
-function SkillListCard({ skill, isEnabled, isEnabling, isDisabling, onEnable, onDisable }: SkillListCardProps) {
+function SkillListCard({ skill, isEnabled, isEnabling, isDisabling, onEnable, onDisable, iconName }: SkillListCardProps) {
   const name = skill.name
   const tokens = skill.estimated_tokens
 
@@ -332,7 +340,11 @@ function SkillListCard({ skill, isEnabled, isEnabling, isDisabling, onEnable, on
     <Card className="glass-card hover:border-primary/20 transition-all">
       <CardContent className="p-3">
         <div className="flex items-center gap-3">
-          <Zap className="w-9 h-9 text-primary shrink-0" />
+          {iconName ? (
+            <PremiumIcon name={iconName} size={36} className="text-primary shrink-0" />
+          ) : (
+            <Zap className="w-9 h-9 text-primary shrink-0" />
+          )}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-sm truncate">{name}</span>
@@ -391,9 +403,10 @@ interface SkillGridCardProps {
   isDisabling?: boolean
   onEnable?: () => void
   onDisable?: () => void
+  iconName?: string | null
 }
 
-function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEnable, onDisable }: SkillGridCardProps) {
+function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEnable, onDisable, iconName }: SkillGridCardProps) {
   const name = skill.name
   const tokens = skill.estimated_tokens
   const version = skill.skill_version
@@ -409,7 +422,11 @@ function SkillGridCard({ skill, index, isEnabled, isEnabling, isDisabling, onEna
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3 flex-1 min-w-0">
-              <Zap className="w-10 h-10 text-primary shrink-0" />
+              {iconName ? (
+                <PremiumIcon name={iconName} size={40} className="text-primary shrink-0" />
+              ) : (
+                <Zap className="w-10 h-10 text-primary shrink-0" />
+              )}
               <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-foreground line-clamp-1">{name}</h3>
                 <p className="text-xs text-muted-foreground">

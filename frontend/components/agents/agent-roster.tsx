@@ -33,7 +33,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { StatusBadge } from '@/components/shared'
+import { StatusBadge, PremiumIcon } from '@/components/shared'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import {
@@ -143,6 +143,7 @@ interface AgentWithPerformance {
   specializations?: string[]
   lastActive?: string
   avatar?: string
+  premium_icon?: string | null
   agent_model_config?: {
     provider?: string
   }
@@ -297,13 +298,17 @@ export function AgentRoster({
                 onClick={() => onViewDetails(agent.id.toString())}
               >
                 <div className="flex items-center gap-3">
-                  <AgentIcon className={`w-9 h-9 ${iconColor} shrink-0`} />
+                  {agent.premium_icon ? (
+                    <PremiumIcon name={agent.premium_icon} size={36} className={`shrink-0 ${iconColor}`} />
+                  ) : (
+                    <AgentIcon className={`w-9 h-9 ${iconColor} shrink-0`} />
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-sm truncate">{agent.name || 'Unknown Agent'}</span>
                       <StatusBadge size="sm" status={
                         agent.status === 'idle' ? 'warning' :
-                        agent.status === 'maintenance' ? 'error' : 'success'
+                          agent.status === 'maintenance' ? 'error' : 'success'
                       }>
                         <StatusIcon className="w-2.5 h-2.5 mr-0.5" />
                         {agent.status || 'active'}
@@ -354,206 +359,210 @@ export function AgentRoster({
           })}
         </div>
       ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredAgents.map((agent, index) => {
-          const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
-          const AgentIcon = getAgentIcon(agent.agent_type || 'custom', (agent as any).marketplace_category)
-          const iconColor = getAgentIconColor(agent.agent_type || 'custom', (agent as any).marketplace_category)
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filteredAgents.map((agent, index) => {
+            const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
+            const AgentIcon = getAgentIcon(agent.agent_type || 'custom', (agent as any).marketplace_category)
+            const iconColor = getAgentIconColor(agent.agent_type || 'custom', (agent as any).marketplace_category)
 
-          return (
-            <motion.div
-              key={agent.id}
-              data-testid="agent-card"
-              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 flex flex-col h-full"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center space-x-3">
-                  <AgentIcon className={`w-10 h-10 ${iconColor} shrink-0`} />
-                  <div>
-                    <h3 className="font-semibold">{agent.name || 'Unknown Agent'}</h3>
-                    <p className="text-xs text-muted-foreground">{agent.agent_type ? agent.agent_type.replace('_', ' ') : 'Unknown Type'}</p>
+            return (
+              <motion.div
+                key={agent.id}
+                data-testid="agent-card"
+                className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 flex flex-col h-full"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: index * 0.1 }}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-3">
+                    {agent.premium_icon ? (
+                      <PremiumIcon name={agent.premium_icon} size={40} className={`shrink-0 ${iconColor}`} />
+                    ) : (
+                      <AgentIcon className={`w-10 h-10 ${iconColor} shrink-0`} />
+                    )}
+                    <div>
+                      <h3 className="font-semibold">{agent.name || 'Unknown Agent'}</h3>
+                      <p className="text-xs text-muted-foreground">{agent.agent_type ? agent.agent_type.replace('_', ' ') : 'Unknown Type'}</p>
+                    </div>
+                  </div>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" data-tour="agent-card-menu">
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={(e) => {
+                        e.stopPropagation(); // Prevent card click
+                        handleViewDetails(agent.id.toString());
+                      }}>
+                        <Eye className="w-4 h-4 mr-2" />
+                        View Details
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => {
+                        e.stopPropagation(); // Prevent card click
+                        handleConfigure(agent.id);
+                      }}>
+                        <Settings className="w-4 h-4 mr-2" />
+                        Configure
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => {
+                        e.stopPropagation(); // Prevent card click
+                        handleToggleStatus(agent.id, agent.status);
+                      }}>
+                        {agent.status === 'active' ? (
+                          <>
+                            <Pause className="w-4 h-4 mr-2" />
+                            Pause Agent
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-4 h-4 mr-2" />
+                            Start Agent
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation(); // Prevent card click
+                          handleDelete(agent.id);
+                        }}
+                        className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {/* Status & Model */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <StatusBadge size="sm" status={
+                      agent.status === 'idle' ? 'warning' :
+                        agent.status === 'maintenance' ? 'error' : 'success'
+                    }>
+                      <StatusIcon className="w-2.5 h-2.5 mr-0.5" />
+                      {agent.status || 'active'}
+                    </StatusBadge>
+                    {/* PRD-15: Model Badge */}
+                    <StatusBadge size="sm" status={
+                      (() => {
+                        const p = agent.agent_model_config?.provider?.toLowerCase()
+                        if (p === 'anthropic') return 'purple' as const
+                        if (p === 'openai') return 'success' as const
+                        if (p === 'google' || p === 'azure') return 'info' as const
+                        if (p === 'huggingface') return 'warning' as const
+                        if (p === 'aws_bedrock' || p === 'bedrock') return 'primary' as const
+                        return 'info' as const
+                      })()
+                    }>
+                      <Bot className="w-2.5 h-2.5 mr-0.5" />
+                      {getModelDisplayName(agent.agent_model_config?.model_id)}
+                    </StatusBadge>
                   </div>
                 </div>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" data-tour="agent-card-menu">
-                      <MoreVertical className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation(); // Prevent card click
-                      handleViewDetails(agent.id.toString());
-                    }}>
-                      <Eye className="w-4 h-4 mr-2" />
-                      View Details
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation(); // Prevent card click
-                      handleConfigure(agent.id);
-                    }}>
-                      <Settings className="w-4 h-4 mr-2" />
-                      Configure
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation(); // Prevent card click
-                      handleToggleStatus(agent.id, agent.status);
-                    }}>
-                      {agent.status === 'active' ? (
-                        <>
-                          <Pause className="w-4 h-4 mr-2" />
-                          Pause Agent
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-4 h-4 mr-2" />
-                          Start Agent
-                        </>
-                      )}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation(); // Prevent card click
-                        handleDelete(agent.id);
+                {/* Performance Bar */}
+                <div className="mb-4">
+                  <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                    <span>Success Rate</span>
+                    <span>
+                      {agent.performance_metrics?.success_rate != null ?
+                        `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` :
+                        'N/A'
+                      }
+                    </span>
+                  </div>
+                  <div className="w-full bg-secondary rounded-full h-2">
+                    <div
+                      className="bg-gradient-to-r from-primary to-[hsl(var(--destructive))] h-2 rounded-full transition-all duration-300"
+                      style={{
+                        width: `${agent.performance_metrics?.success_rate != null ?
+                          agent.performance_metrics.success_rate * 100 : 0}%`
                       }}
-                      className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+                    />
+                  </div>
+                </div>
 
-              {/* Status & Model */}
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <StatusBadge size="sm" status={
-                    agent.status === 'idle' ? 'warning' :
-                    agent.status === 'maintenance' ? 'error' : 'success'
-                  }>
-                    <StatusIcon className="w-2.5 h-2.5 mr-0.5" />
-                    {agent.status || 'active'}
-                  </StatusBadge>
-                  {/* PRD-15: Model Badge */}
-                  <StatusBadge size="sm" status={
-                    (() => {
-                      const p = agent.agent_model_config?.provider?.toLowerCase()
-                      if (p === 'anthropic') return 'purple' as const
-                      if (p === 'openai') return 'success' as const
-                      if (p === 'google' || p === 'azure') return 'info' as const
-                      if (p === 'huggingface') return 'warning' as const
-                      if (p === 'aws_bedrock' || p === 'bedrock') return 'primary' as const
-                      return 'info' as const
-                    })()
-                  }>
-                    <Bot className="w-2.5 h-2.5 mr-0.5" />
-                    {getModelDisplayName(agent.agent_model_config?.model_id)}
-                  </StatusBadge>
+                {/* Stats */}
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <p className="text-lg font-bold">
+                      {agent.performance_metrics?.tasks_completed || 0}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Tasks Completed</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold">{(agent.plugins?.length || 0) + (agent.skills?.length || 0)}</p>
+                    <p className="text-xs text-muted-foreground">Capabilities</p>
+                  </div>
                 </div>
-              </div>
 
-              {/* Performance Bar */}
-              <div className="mb-4">
-                <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                  <span>Success Rate</span>
-                  <span>
-                    {agent.performance_metrics?.success_rate != null ?
-                      `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` :
-                      'N/A'
-                    }
-                  </span>
-                </div>
-                <div className="w-full bg-secondary rounded-full h-2">
-                  <div
-                    className="bg-gradient-to-r from-primary to-[hsl(var(--destructive))] h-2 rounded-full transition-all duration-300"
-                    style={{
-                      width: `${agent.performance_metrics?.success_rate != null ?
-                        agent.performance_metrics.success_rate * 100 : 0}%`
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Stats */}
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <p className="text-lg font-bold">
-                    {agent.performance_metrics?.tasks_completed || 0}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Tasks Completed</p>
-                </div>
-                <div>
-                  <p className="text-lg font-bold">{(agent.plugins?.length || 0) + (agent.skills?.length || 0)}</p>
-                  <p className="text-xs text-muted-foreground">Capabilities</p>
-                </div>
-              </div>
-
-              {/* Plugins Preview */}
-              <div className="mb-4">
-                <p className="text-xs text-muted-foreground mb-2">Capabilities</p>
-                <div className="flex flex-wrap gap-1">
-                  {((agent.plugins?.length || 0) + (agent.skills?.length || 0)) > 0 ? (
-                    <>
-                      {agent.skills?.slice(0, 3).map((skill: any) => (
-                        <Badge key={`skill-${skill.id}`} variant="secondary" className="text-xs">
-                          {skill.name}
-                        </Badge>
-                      ))}
-                      {agent.plugins?.slice(0, Math.max(0, 3 - (agent.skills?.length || 0))).map((plugin: any) => (
-                        <Badge key={`plugin-${plugin.plugin_id}`} variant="secondary" className="text-xs">
-                          {plugin.name}
-                        </Badge>
-                      ))}
-                      {(agent.plugins?.length || 0) + (agent.skills?.length || 0) > 3 && (
-                        <Badge variant="secondary" className="text-xs">
-                          +{(agent.plugins?.length || 0) + (agent.skills?.length || 0) - 3} more
-                        </Badge>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-xs text-muted-foreground italic">No capabilities assigned</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Tools Preview */}
-              {agent.tools && agent.tools.length > 0 && (
-                <div className="mb-4 pt-3 border-t border-border/50">
-                  <div className="flex flex-wrap gap-2">
-                    {agent.tools.slice(0, 5).map((tool: any) => (
-                      <div key={tool.id} title={tool.name}>
-                        <ToolLogo
-                          name={tool.name}
-                          logo={tool.icon}
-                          size={24}
-                          showBackground={true}
-                          className="bg-secondary/30 border border-border/50"
-                        />
-                      </div>
-                    ))}
-                    {agent.tools.length > 5 && (
-                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-border/50 text-[10px] text-muted-foreground">
-                        +{agent.tools.length - 5}
-                      </div>
+                {/* Plugins Preview */}
+                <div className="mb-4">
+                  <p className="text-xs text-muted-foreground mb-2">Capabilities</p>
+                  <div className="flex flex-wrap gap-1">
+                    {((agent.plugins?.length || 0) + (agent.skills?.length || 0)) > 0 ? (
+                      <>
+                        {agent.skills?.slice(0, 3).map((skill: any) => (
+                          <Badge key={`skill-${skill.id}`} variant="secondary" className="text-xs">
+                            {skill.name}
+                          </Badge>
+                        ))}
+                        {agent.plugins?.slice(0, Math.max(0, 3 - (agent.skills?.length || 0))).map((plugin: any) => (
+                          <Badge key={`plugin-${plugin.plugin_id}`} variant="secondary" className="text-xs">
+                            {plugin.name}
+                          </Badge>
+                        ))}
+                        {(agent.plugins?.length || 0) + (agent.skills?.length || 0) > 3 && (
+                          <Badge variant="secondary" className="text-xs">
+                            +{(agent.plugins?.length || 0) + (agent.skills?.length || 0) - 3} more
+                          </Badge>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">No capabilities assigned</span>
                     )}
                   </div>
                 </div>
-              )}
 
-              {/* Created Date */}
-              <p className="text-xs text-muted-foreground mt-auto pt-3">
-                Created: {agent.created_at ? new Date(agent.created_at).toLocaleDateString() : 'Unknown'}
-              </p>
-            </motion.div>
-          )
-        })}
-      </div>
+                {/* Tools Preview */}
+                {agent.tools && agent.tools.length > 0 && (
+                  <div className="mb-4 pt-3 border-t border-border/50">
+                    <div className="flex flex-wrap gap-2">
+                      {agent.tools.slice(0, 5).map((tool: any) => (
+                        <div key={tool.id} title={tool.name}>
+                          <ToolLogo
+                            name={tool.name}
+                            logo={tool.icon}
+                            size={24}
+                            showBackground={true}
+                            className="bg-secondary/30 border border-border/50"
+                          />
+                        </div>
+                      ))}
+                      {agent.tools.length > 5 && (
+                        <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-border/50 text-[10px] text-muted-foreground">
+                          +{agent.tools.length - 5}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Created Date */}
+                <p className="text-xs text-muted-foreground mt-auto pt-3">
+                  Created: {agent.created_at ? new Date(agent.created_at).toLocaleDateString() : 'Unknown'}
+                </p>
+              </motion.div>
+            )
+          })}
+        </div>
       )}
 
       {filteredAgents.length === 0 && (
