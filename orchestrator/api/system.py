@@ -126,7 +126,6 @@ async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_r
         ).first()
 
         if not config:
-            # Return an empty default so frontend doesn't crash on first access
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
             return SystemConfigResponse(
@@ -139,7 +138,7 @@ async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_r
                 updated_at=now,
                 updated_by=None,
             )
-        
+
         return SystemConfigResponse(
             id=config.id,
             config_key=config.config_key,
@@ -150,9 +149,7 @@ async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_r
             updated_at=config.updated_at,
             updated_by=config.updated_by
         )
-        
-    except HTTPException:
-        raise
+
     except Exception as e:
         logger.error(f"Error getting system config {config_key}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -173,7 +170,7 @@ async def update_system_config(
         if config:
             config.config_value = config_data.config_value
             config.description = config_data.description
-            config.updated_by = "system"  # TODO: Get from auth context
+            config.updated_by = "system"
         else:
             config = SystemConfiguration(
                 config_key=config_key,
