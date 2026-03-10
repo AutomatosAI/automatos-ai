@@ -4,27 +4,41 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { IconSelector } from '@/components/shared';
-import { Save, Loader2 } from 'lucide-react';
+import { Save, Loader2, Palette } from 'lucide-react';
 import { useSystemIcons, useUpdateSystemConfigKey } from '@/hooks/use-system-config-api';
+import { useToast } from '@/components/ui/use-toast';
 
-// Define the default categories we want to map icons to
+// Updated categories from user screenshots
 const DEFAULT_CATEGORIES = [
-    { id: 'marketing', label: 'Marketing & Sales', type: 'agent' },
-    { id: 'development', label: 'Software Development', type: 'agent' },
-    { id: 'data', label: 'Data & Analytics', type: 'agent' },
-    { id: 'design', label: 'Design & Creative', type: 'agent' },
-    { id: 'hr', label: 'HR & Recruiting', type: 'agent' },
-    { id: 'legal', label: 'Legal & Compliance', type: 'agent' },
-    { id: 'finance', label: 'Finance & Accounting', type: 'agent' },
-    { id: 'product', label: 'Product & Strategy', type: 'agent' },
-    { id: 'support', label: 'Customer Support', type: 'agent' },
+    // Agent Categories
+    { id: 'analytics', label: 'Analytics', type: 'agent' },
+    { id: 'business', label: 'Business', type: 'agent' },
+    { id: 'communication_agent', label: 'Communication', type: 'agent' },
+    { id: 'design', label: 'Design', type: 'agent' },
+    { id: 'development', label: 'Development', type: 'agent' },
+    { id: 'education', label: 'Education', type: 'agent' },
+    { id: 'general', label: 'General', type: 'agent' },
+    { id: 'hr', label: 'HR', type: 'agent' },
+    { id: 'legal', label: 'Legal', type: 'agent' },
+    { id: 'marketing', label: 'Marketing', type: 'agent' },
+    { id: 'productivity', label: 'Productivity', type: 'agent' },
+    { id: 'research', label: 'Research', type: 'agent' },
+    { id: 'sales', label: 'Sales', type: 'agent' },
+    { id: 'support', label: 'Support', type: 'agent' },
+    { id: 'writing', label: 'Writing', type: 'agent' },
+    { id: 'custom', label: 'Custom', type: 'agent' },
+
+    // Skill Categories
     { id: 'cognitive', label: 'Cognitive Skills', type: 'skill' },
     { id: 'technical', label: 'Technical Skills', type: 'skill' },
-    { id: 'communication', label: 'Communication Skills', type: 'skill' },
-    { id: 'system', label: 'System & Infrastructure', type: 'agent' },
+    { id: 'communication_skill', label: 'Communication Skills', type: 'skill' },
+    { id: 'analytical', label: 'Analytical Skills', type: 'skill' },
+    { id: 'creative', label: 'Creative Skills', type: 'skill' },
+    { id: 'system', label: 'System \u0026 Infrastructure', type: 'skill' },
 ];
 
 export function SystemIconsSettingsTab() {
+    const { toast } = useToast();
     const [mappings, setMappings] = useState<Record<string, string | null>>({});
 
     const { data: iconMappings, isLoading } = useSystemIcons();
@@ -42,8 +56,17 @@ export function SystemIconsSettingsTab() {
                 key: 'system_icon_mappings',
                 value: mappings
             });
+            toast({
+                title: 'Success',
+                description: 'System icon mappings saved successfully.',
+            });
         } catch (error) {
             console.error('Failed to save mappings', error);
+            toast({
+                title: 'Error',
+                description: 'Failed to save system icon mappings.',
+                variant: 'destructive'
+            });
         }
     };
 
@@ -62,7 +85,6 @@ export function SystemIconsSettingsTab() {
         );
     }
 
-    // Group categories for UI
     const agentCategories = DEFAULT_CATEGORIES.filter(c => c.type === 'agent');
     const skillCategories = DEFAULT_CATEGORIES.filter(c => c.type === 'skill');
 
@@ -91,7 +113,7 @@ export function SystemIconsSettingsTab() {
                 {/* Agent Categories */}
                 <Card className="glass-card">
                     <CardHeader>
-                        <CardTitle className="text-lg">Agent Personas & Job Roles</CardTitle>
+                        <CardTitle className="text-lg">Agent Personas \u0026 Categories</CardTitle>
                         <CardDescription>Default icons for agent avatar generation</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">

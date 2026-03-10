@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { PremiumIcon } from '@/components/shared'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import {
@@ -19,6 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { useMarketplaceItems, useInstallMarketplaceItem } from '@/hooks/use-marketplace-api'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { MarketplaceItemModal } from './marketplace-item-modal'
 import { useUser } from '@clerk/nextjs'
 import { toast } from 'sonner'
@@ -101,6 +103,9 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
     limit: 100
   })
 
+  // Get system icons
+  const { data: iconMappings = {} } = useSystemIcons()
+
   // Install agent mutation using our marketplace hook
   const installMutation = useInstallMarketplaceItem()
 
@@ -160,11 +165,10 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
               variant={selectedCategory === category.id ? 'default' : 'outline'}
               size="sm"
               onClick={() => setSelectedCategory(category.id)}
-              className={`whitespace-nowrap flex-shrink-0 ${
-                selectedCategory === category.id
-                  ? 'bg-secondary border-primary/50 text-foreground font-semibold'
-                  : 'border-secondary text-muted-foreground hover:bg-secondary'
-              }`}
+              className={`whitespace-nowrap flex-shrink-0 ${selectedCategory === category.id
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
+                : 'border-secondary text-muted-foreground hover:bg-secondary'
+                }`}
             >
               {category.name}
             </Button>
@@ -188,15 +192,16 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
             ))}
           </div>
         )
-      ) : agents.length === 0 ? (
+      ) : (agents as MarketplaceAgent[]).length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>No agents found. Try adjusting your search or filters.</p>
         </div>
       ) : viewMode === 'list' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {agents.map((agent: MarketplaceAgent) => {
+          {(agents as MarketplaceAgent[]).map((agent: MarketplaceAgent) => {
             const IconComponent = getCategoryIcon(agent.category)
+            const premiumIconName = iconMappings[agent.category] || null
             return (
               <Card
                 key={agent.id}
@@ -205,7 +210,11 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
               >
                 <CardContent className="p-3">
                   <div className="flex items-center gap-3">
-                    <IconComponent className="w-9 h-9 text-primary shrink-0" />
+                    {premiumIconName ? (
+                      <PremiumIcon name={premiumIconName} size={36} className="text-primary shrink-0" />
+                    ) : (
+                      <IconComponent className="w-9 h-9 text-primary shrink-0" />
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-sm truncate">{agent.name}</span>
@@ -248,7 +257,12 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     {(() => {
                       const IconComponent = getCategoryIcon(agent.category)
-                      return <IconComponent className="w-10 h-10 text-primary shrink-0" />
+                      const premiumIconName = iconMappings[agent.category] || null
+                      return premiumIconName ? (
+                        <PremiumIcon name={premiumIconName} size={40} className="text-primary shrink-0" />
+                      ) : (
+                        <IconComponent className="w-10 h-10 text-primary shrink-0" />
+                      )
                     })()}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">

@@ -40,6 +40,7 @@ import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { ToolLogo } from '@/components/ui/tool-logo'
+import { PremiumIcon } from '@/components/shared'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Select,
@@ -54,6 +55,7 @@ import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { useTools } from '@/hooks/use-tools-api'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'react-hot-toast'
 
@@ -107,6 +109,9 @@ export function AgentConfigurationModal({
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
   const { data: agentConfig } = useAgentConfig(agentId?.toString() || '')
   const updateConfigMutation = useUpdateAgentConfig()
+
+  // Get system icons
+  const { data: iconMappings = {} } = useSystemIcons()
 
   // PRD-15: Model configuration hooks
   const { data: agentModelConfig } = useAgentModelConfig(agentId)
@@ -187,39 +192,39 @@ export function AgentConfigurationModal({
   useEffect(() => {
     if (!open || !agentId) return
     let mounted = true
-    ;(async () => {
-      setPluginsLoading(true)
-      try {
-        const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
-        if (!workspaceId) {
+      ; (async () => {
+        setPluginsLoading(true)
+        try {
+          const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+          if (!workspaceId) {
+            if (mounted) setPluginsLoading(false)
+            return
+          }
+
+          // Fetch workspace-enabled plugins and agent's assigned plugins in parallel
+          const [wpRes, apRes] = await Promise.all([
+            apiClient.request<any>(`/api/workspaces/${workspaceId}/plugins`, { method: 'GET' }),
+            apiClient.request<any>(`/api/agents/${agentId}/plugins`, { method: 'GET' }),
+          ])
+
+          if (!mounted) return
+
+          const wpItems = wpRes?.items || wpRes || []
+          const apItems = apRes?.items || apRes || []
+          setWorkspacePlugins(Array.isArray(wpItems) ? wpItems : [])
+          setAssignedPluginIds(new Set(
+            (Array.isArray(apItems) ? apItems : []).map((p: any) => p.plugin_id)
+          ))
+        } catch (err) {
+          console.error('Failed to fetch plugins:', err)
+          if (mounted) {
+            setWorkspacePlugins([])
+            setAssignedPluginIds(new Set())
+          }
+        } finally {
           if (mounted) setPluginsLoading(false)
-          return
         }
-
-        // Fetch workspace-enabled plugins and agent's assigned plugins in parallel
-        const [wpRes, apRes] = await Promise.all([
-          apiClient.request<any>(`/api/workspaces/${workspaceId}/plugins`, { method: 'GET' }),
-          apiClient.request<any>(`/api/agents/${agentId}/plugins`, { method: 'GET' }),
-        ])
-
-        if (!mounted) return
-
-        const wpItems = wpRes?.items || wpRes || []
-        const apItems = apRes?.items || apRes || []
-        setWorkspacePlugins(Array.isArray(wpItems) ? wpItems : [])
-        setAssignedPluginIds(new Set(
-          (Array.isArray(apItems) ? apItems : []).map((p: any) => p.plugin_id)
-        ))
-      } catch (err) {
-        console.error('Failed to fetch plugins:', err)
-        if (mounted) {
-          setWorkspacePlugins([])
-          setAssignedPluginIds(new Set())
-        }
-      } finally {
-        if (mounted) setPluginsLoading(false)
-      }
-    })()
+      })()
     return () => { mounted = false }
   }, [open, agentId])
 
@@ -227,38 +232,38 @@ export function AgentConfigurationModal({
   useEffect(() => {
     if (!open || !agentId) return
     let mounted = true
-    ;(async () => {
-      setSkillsLoading(true)
-      try {
-        const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
-        if (!workspaceId) {
+      ; (async () => {
+        setSkillsLoading(true)
+        try {
+          const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+          if (!workspaceId) {
+            if (mounted) setSkillsLoading(false)
+            return
+          }
+
+          const [wsRes, asRes] = await Promise.all([
+            apiClient.request<any>(`/api/workspaces/${workspaceId}/skills`, { method: 'GET' }),
+            apiClient.request<any>(`/api/agents/${agentId}/skills`, { method: 'GET' }),
+          ])
+
+          if (!mounted) return
+
+          const wsItems = wsRes?.items || []
+          const agentSkills = asRes?.data || asRes || []
+          setWorkspaceSkills(Array.isArray(wsItems) ? wsItems : [])
+          setAssignedSkillIds(new Set(
+            (Array.isArray(agentSkills) ? agentSkills : []).map((s: any) => s.id)
+          ))
+        } catch (err) {
+          console.error('Failed to fetch skills:', err)
+          if (mounted) {
+            setWorkspaceSkills([])
+            setAssignedSkillIds(new Set())
+          }
+        } finally {
           if (mounted) setSkillsLoading(false)
-          return
         }
-
-        const [wsRes, asRes] = await Promise.all([
-          apiClient.request<any>(`/api/workspaces/${workspaceId}/skills`, { method: 'GET' }),
-          apiClient.request<any>(`/api/agents/${agentId}/skills`, { method: 'GET' }),
-        ])
-
-        if (!mounted) return
-
-        const wsItems = wsRes?.items || []
-        const agentSkills = asRes?.data || asRes || []
-        setWorkspaceSkills(Array.isArray(wsItems) ? wsItems : [])
-        setAssignedSkillIds(new Set(
-          (Array.isArray(agentSkills) ? agentSkills : []).map((s: any) => s.id)
-        ))
-      } catch (err) {
-        console.error('Failed to fetch skills:', err)
-        if (mounted) {
-          setWorkspaceSkills([])
-          setAssignedSkillIds(new Set())
-        }
-      } finally {
-        if (mounted) setSkillsLoading(false)
-      }
-    })()
+      })()
     return () => { mounted = false }
   }, [open, agentId])
 
@@ -353,14 +358,14 @@ export function AgentConfigurationModal({
           setHeartbeatConfig(prev => ({ ...prev, ...data }))
         }
       })
-      .catch(() => {})
+      .catch(() => { })
     // Load last heartbeat result
     apiClient.request<any>(`/api/heartbeat/agents/${agentId}/last`)
       .then((data) => {
         if (!mounted) return
         if (data) setLastHeartbeatResult(data)
       })
-      .catch(() => {})
+      .catch(() => { })
     // Load connected messaging platforms for Report To dropdown
     // Check both workspace integrations AND channel_connections
     Promise.all([
@@ -739,7 +744,15 @@ export function AgentConfigurationModal({
         <Card className="glass-card card-glow w-full max-w-5xl max-h-[90vh] overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
             <CardTitle className="flex items-center space-x-3">
-              <Settings className="w-6 h-6 text-primary" />
+              {(() => {
+                const category = agent ? DB_TO_CATEGORY_MAP[(agent as any)?.agent_type || 'custom'] || 'Custom' : 'Custom'
+                const premiumIconName = iconMappings[category] || null
+                return premiumIconName ? (
+                  <PremiumIcon name={premiumIconName} size={28} className="text-primary" />
+                ) : (
+                  <Settings className="w-6 h-6 text-primary" />
+                )
+              })()}
               <div>
                 <span className="text-xl">Agent <span className="gradient-text">Configuration</span></span>
                 <p className="text-sm text-muted-foreground font-normal">
@@ -925,11 +938,10 @@ export function AgentConfigurationModal({
                           type="button"
                           role="radio"
                           aria-checked={personaMode === 'none'}
-                          className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
-                            personaMode === 'none'
-                              ? 'border-primary bg-primary/10'
-                              : 'border-border/50 hover:border-primary/30'
-                          }`}
+                          className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${personaMode === 'none'
+                            ? 'border-primary bg-primary/10'
+                            : 'border-border/50 hover:border-primary/30'
+                            }`}
                           onClick={() => {
                             setPersonaMode('none')
                             setSelectedPersonaId(null)
@@ -945,11 +957,10 @@ export function AgentConfigurationModal({
                           type="button"
                           role="radio"
                           aria-checked={personaMode === 'predefined'}
-                          className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
-                            personaMode === 'predefined'
-                              ? 'border-primary bg-primary/10'
-                              : 'border-border/50 hover:border-primary/30'
-                          }`}
+                          className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${personaMode === 'predefined'
+                            ? 'border-primary bg-primary/10'
+                            : 'border-border/50 hover:border-primary/30'
+                            }`}
                           onClick={() => setPersonaMode('predefined')}
                         >
                           <User className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
@@ -961,11 +972,10 @@ export function AgentConfigurationModal({
                           type="button"
                           role="radio"
                           aria-checked={personaMode === 'custom'}
-                          className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
-                            personaMode === 'custom'
-                              ? 'border-primary bg-primary/10'
-                              : 'border-border/50 hover:border-primary/30'
-                          }`}
+                          className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${personaMode === 'custom'
+                            ? 'border-primary bg-primary/10'
+                            : 'border-border/50 hover:border-primary/30'
+                            }`}
                           onClick={() => setPersonaMode('custom')}
                         >
                           <PenLine className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
@@ -1010,11 +1020,10 @@ export function AgentConfigurationModal({
                                 .map((persona: any) => (
                                   <div
                                     key={persona.id}
-                                    className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                                      selectedPersonaId === persona.id
-                                        ? 'border-primary bg-primary/10'
-                                        : 'border-border/50 hover:border-primary/30'
-                                    }`}
+                                    className={`p-3 rounded-lg border cursor-pointer transition-all ${selectedPersonaId === persona.id
+                                      ? 'border-primary bg-primary/10'
+                                      : 'border-border/50 hover:border-primary/30'
+                                      }`}
                                     onClick={() => setSelectedPersonaId(persona.id)}
                                   >
                                     <div className="flex items-center justify-between">
@@ -1274,11 +1283,10 @@ export function AgentConfigurationModal({
                             return (
                               <div
                                 key={plugin.plugin_id}
-                                className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${
-                                  isAssigned
-                                    ? 'bg-primary/5 border-primary/30'
-                                    : 'bg-background/50 border-border/50'
-                                }`}
+                                className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${isAssigned
+                                  ? 'bg-primary/5 border-primary/30'
+                                  : 'bg-background/50 border-border/50'
+                                  }`}
                               >
                                 <Checkbox
                                   id={`plugin-${plugin.plugin_id}`}
@@ -1391,11 +1399,10 @@ export function AgentConfigurationModal({
                             return (
                               <div
                                 key={skill.skill_id}
-                                className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${
-                                  isAssigned
-                                    ? 'bg-primary/5 border-primary/30'
-                                    : 'bg-background/50 border-border/50'
-                                }`}
+                                className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${isAssigned
+                                  ? 'bg-primary/5 border-primary/30'
+                                  : 'bg-background/50 border-border/50'
+                                  }`}
                               >
                                 <Checkbox
                                   id={`skill-${skill.skill_id}`}

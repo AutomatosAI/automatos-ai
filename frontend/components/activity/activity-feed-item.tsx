@@ -21,8 +21,10 @@ import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import type { StatusVariant } from '@/components/shared/status-badge'
+import { PremiumIcon } from '@/components/shared'
 import { cn } from '@/lib/utils'
 import type { ActivityFeedItem } from '@/hooks/use-activity-api'
+import { useAgents } from '@/hooks/use-agent-api'
 
 // ─── Type Config ─────────────────────────────────────────
 
@@ -215,6 +217,11 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
   const configureUrl = getConfigureUrl(item)
   const isRunning = item.status === 'running'
 
+  // Cross-reference with standard agents to get premium_icon mapping
+  const { data: agents = [] } = useAgents()
+  const agentDetails = item.agent?.id ? agents.find((a: any) => a.id === item.agent?.id) : null
+  const premiumIconName = agentDetails?.premium_icon || null
+
   // Recipes navigate to ExecutionKitchen via /workflows URL params.
   // Routines drill down inline. Chats navigate to /chat.
   const handleView = (e: React.MouseEvent) => {
@@ -253,9 +260,8 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
     >
       <div
         onClick={handleCardClick}
-        className={`glass-card card-glow border-l-[3px] ${typeConfig.borderColor} hover:border-primary/20 transition-all duration-300 p-3 sm:p-4 space-y-2 ${
-          onViewItem && (item.type === 'recipe' || item.type === 'routine') ? 'cursor-pointer' : ''
-        }`}
+        className={`glass-card card-glow border-l-[3px] ${typeConfig.borderColor} hover:border-primary/20 transition-all duration-300 p-3 sm:p-4 space-y-2 ${onViewItem && (item.type === 'recipe' || item.type === 'routine') ? 'cursor-pointer' : ''
+          }`}
       >
         {/* Row 1: Type + Name + Time */}
         <div className="flex items-center justify-between gap-2">
@@ -282,7 +288,11 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
           {item.agent && (
             <span className="flex items-center gap-1 text-muted-foreground">
-              <User className="w-3 h-3" />
+              {premiumIconName ? (
+                <PremiumIcon name={premiumIconName} size={12} className="shrink-0 grayscale opacity-70" />
+              ) : (
+                <User className="w-3 h-3 shrink-0" />
+              )}
               {item.agent.name}
             </span>
           )}

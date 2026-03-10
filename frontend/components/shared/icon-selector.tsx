@@ -9,8 +9,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { SearchInput, PremiumIcon } from '@/components/shared';
 import { Settings2, X } from 'lucide-react';
-
-// Import the statically generated JSON registry
 import iconRegistry from '@/config/iconRegistry.json';
 
 export interface IconSelectorProps {
@@ -73,7 +71,8 @@ export function IconSelector({
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => {
+                                onClick={(e) => {
+                                    e.stopPropagation();
                                     onChange(null);
                                     setOpen(false);
                                 }}
