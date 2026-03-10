@@ -937,11 +937,17 @@ async def get_recipe_execution_detail(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        # Get execution
+        # Get execution — try execution_id string first, fall back to numeric DB id
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id,
             RecipeExecution.recipe_id == recipe.id
         ).first()
+
+        if not execution and execution_id.isdigit():
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.id == int(execution_id),
+                RecipeExecution.recipe_id == recipe.id
+            ).first()
 
         if not execution:
             raise HTTPException(
@@ -1016,11 +1022,17 @@ async def get_step_full_logs(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        # Validate execution
+        # Validate execution — try execution_id string first, fall back to numeric DB id
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id,
             RecipeExecution.recipe_id == recipe.id
         ).first()
+
+        if not execution and execution_id.isdigit():
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.id == int(execution_id),
+                RecipeExecution.recipe_id == recipe.id
+            ).first()
 
         if not execution:
             raise HTTPException(
@@ -1111,11 +1123,17 @@ async def analyze_execution_learning(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        # Validate execution belongs to this recipe
+        # Validate execution — try execution_id string first, fall back to numeric DB id
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id,
             RecipeExecution.recipe_id == recipe.id
         ).first()
+
+        if not execution and execution_id.isdigit():
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.id == int(execution_id),
+                RecipeExecution.recipe_id == recipe.id
+            ).first()
 
         if not execution:
             raise HTTPException(
@@ -1170,11 +1188,17 @@ async def assess_execution_quality(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        # Validate execution belongs to this recipe
+        # Validate execution — try execution_id string first, fall back to numeric DB id
         execution = db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id,
             RecipeExecution.recipe_id == recipe.id
         ).first()
+
+        if not execution and execution_id.isdigit():
+            execution = db.query(RecipeExecution).filter(
+                RecipeExecution.id == int(execution_id),
+                RecipeExecution.recipe_id == recipe.id
+            ).first()
 
         if not execution:
             raise HTTPException(
