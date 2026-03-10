@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import {
-  Loader2, Download, Bot, Check, Trash2, Zap, MoreVertical,
-  UserCircle, Headphones, Terminal, Share2, Calculator, ShoppingBag, PenTool, Users, BarChart3, Wrench
+  Loader2, Download, Bot, Check, Trash2, Zap, MoreVertical
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -21,43 +20,28 @@ import {
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { useMarketplaceItems, useInstallMarketplaceItem } from '@/hooks/use-marketplace-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
+import { AGENT_CATEGORIES as UNIFIED_CATEGORIES, LEGACY_CATEGORY_MAP } from '@/lib/agent-constants'
 import { MarketplaceItemModal } from './marketplace-item-modal'
 import { useUser } from '@clerk/nextjs'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 
-// Agent categories matching US-006
-const AGENT_CATEGORIES = [
+// Unified agent categories from shared constants + "All" filter
+const MARKETPLACE_CATEGORIES = [
   { id: 'all', name: 'All Categories' },
-  { id: 'Personal Assistant', name: 'Personal Assistant' },
-  { id: 'Customer Support', name: 'Customer Support' },
-  { id: 'DevOps', name: 'DevOps' },
-  { id: 'Social Media', name: 'Social Media' },
-  { id: 'Accounting', name: 'Accounting' },
-  { id: 'E-commerce', name: 'E-commerce' },
-  { id: 'Content Creation', name: 'Content Creation' },
-  { id: 'HR', name: 'HR' },
-  { id: 'Data Analysis', name: 'Data Analysis' },
-  { id: 'Custom', name: 'Custom' },
+  ...UNIFIED_CATEGORIES.map(c => ({ id: c.id, name: c.name })),
 ]
 
-// Category to icon mapping - SIMPLE clean icons only!
-const getCategoryIcon = (category: string) => {
-  const iconMap: Record<string, any> = {
-    'Personal Assistant': UserCircle,
-    'Customer Support': Headphones,
-    'DevOps': Terminal,
-    'Social Media': Share2,
-    'Accounting': Calculator,
-    'E-commerce': ShoppingBag,
-    'Content Creation': PenTool,
-    'HR': Users,
-    'Data Analysis': BarChart3,
-    'Custom': Bot,  // Simple bot, no jellyfish!
-    'specialized': Bot,
-    'general': Wrench,
-  }
-  return iconMap[category] || Bot  // Default to simple Bot
+/**
+ * Normalize a marketplace agent's category to the unified system.
+ * Handles legacy Title Case categories and unknown values.
+ */
+const normalizeCategory = (category: string | null | undefined): string => {
+  if (!category) return 'custom'
+  // Already a unified ID?
+  if (UNIFIED_CATEGORIES.some(c => c.id === category)) return category
+  // Legacy mapping?
+  return LEGACY_CATEGORY_MAP[category] || 'custom'
 }
 
 interface MarketplaceAgent {
@@ -95,13 +79,19 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
   // Check if user is admin (you can adjust this check based on your admin logic)
   const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
 
-  // Fetch marketplace agents using our marketplace hook
-  const { data: agents = [], isLoading, refetch } = useMarketplaceItems({
+  // Fetch all marketplace agents (filter client-side by unified category)
+  const { data: rawAgents = [], isLoading, refetch } = useMarketplaceItems({
     type: 'agent',
-    category: selectedCategory !== 'all' ? selectedCategory : undefined,
     search: searchQuery || undefined,
     limit: 100
   })
+
+  // Client-side category filtering using normalized categories
+  const agents = selectedCategory === 'all'
+    ? rawAgents
+    : (rawAgents as MarketplaceAgent[]).filter((a: MarketplaceAgent) =>
+        normalizeCategory(a.category) === selectedCategory
+      )
 
   // Get system icons
   const { data: iconMappings = {} } = useSystemIcons()
@@ -159,20 +149,24 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
       {/* Category Filter Buttons */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent flex-1">
-          {AGENT_CATEGORIES.map((category) => (
-            <Button
-              key={category.id}
-              variant={selectedCategory === category.id ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setSelectedCategory(category.id)}
-              className={`whitespace-nowrap flex-shrink-0 ${selectedCategory === category.id
-                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
-                : 'border-secondary text-muted-foreground hover:bg-secondary'
-                }`}
-            >
-              {category.name}
-            </Button>
-          ))}
+          {MARKETPLACE_CATEGORIES.map((category) => {
+            const premiumName = iconMappings[category.id]
+            return (
+              <Button
+                key={category.id}
+                variant={selectedCategory === category.id ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSelectedCategory(category.id)}
+                className={`whitespace-nowrap flex-shrink-0 gap-1.5 ${selectedCategory === category.id
+                  ? 'bg-secondary border-primary/50 text-foreground font-semibold'
+                  : 'border-secondary text-muted-foreground hover:bg-secondary'
+                  }`}
+              >
+                {premiumName && <PremiumIcon name={premiumName} size={14} />}
+                {category.name}
+              </Button>
+            )
+          })}
         </div>
         <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
@@ -200,8 +194,9 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
       ) : viewMode === 'list' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {(agents as MarketplaceAgent[]).map((agent: MarketplaceAgent) => {
-            const IconComponent = getCategoryIcon(agent.category)
-            const premiumIconName = iconMappings[agent.category] || null
+            const normalized = normalizeCategory(agent.category)
+            const premiumIconName = iconMappings[normalized] || iconMappings[agent.category] || null
+            const catDef = UNIFIED_CATEGORIES.find(c => c.id === normalized)
             return (
               <Card
                 key={agent.id}
@@ -211,9 +206,9 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                 <CardContent className="p-3">
                   <div className="flex items-center gap-3">
                     {premiumIconName ? (
-                      <PremiumIcon name={premiumIconName} size={36} className="text-primary shrink-0" />
+                      <PremiumIcon name={premiumIconName} size={36} className="shrink-0" />
                     ) : (
-                      <IconComponent className="w-9 h-9 text-primary shrink-0" />
+                      <Bot className="w-9 h-9 text-primary shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -225,7 +220,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                         )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                        <span>{agent.category}</span>
+                        <span>{catDef?.name || agent.category}</span>
                         <span>&middot;</span>
                         <span>{formatInstallCount(agent.install_count)} installs</span>
                       </div>
@@ -256,12 +251,12 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     {(() => {
-                      const IconComponent = getCategoryIcon(agent.category)
-                      const premiumIconName = iconMappings[agent.category] || null
+                      const normalized = normalizeCategory(agent.category)
+                      const premiumIconName = iconMappings[normalized] || iconMappings[agent.category] || null
                       return premiumIconName ? (
-                        <PremiumIcon name={premiumIconName} size={40} className="text-primary shrink-0" />
+                        <PremiumIcon name={premiumIconName} size={40} className="shrink-0" />
                       ) : (
-                        <IconComponent className="w-10 h-10 text-primary shrink-0" />
+                        <Bot className="w-10 h-10 text-primary shrink-0" />
                       )
                     })()}
                     <div className="flex-1 min-w-0">
@@ -320,7 +315,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                 {/* Category badge */}
                 <div className="flex flex-col gap-2">
                   <Badge variant="outline" className="text-xs border-border text-muted-foreground w-fit">
-                    {agent.category}
+                    {UNIFIED_CATEGORIES.find(c => c.id === normalizeCategory(agent.category))?.name || agent.category}
                   </Badge>
                   {agent.metadata.model_id && (
                     <Badge className="text-xs bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))] border-[hsl(var(--agent))]/30 w-fit">

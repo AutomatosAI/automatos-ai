@@ -84,6 +84,7 @@ export const agentQueryKeys = {
 // ============= QUERY HOOKS =============
 
 import { useSystemIcons } from './use-system-config-api'
+import { LEGACY_CATEGORY_MAP } from '@/lib/agent-constants'
 
 // Get all agents
 export function useAgents() {
@@ -94,11 +95,15 @@ export function useAgents() {
     queryKey: [...agentQueryKeys.agents, iconKeys],
     queryFn: async () => {
       const agents = await agentApiClient.getAgents();
-      // Inject icon mapping based on category
-      return agents.map((agent: any) => ({
-        ...agent,
-        premium_icon: iconMappings[agent.marketplace_category] || iconMappings[agent.configuration?.category] || iconMappings[agent.agent_type] || null
-      }));
+      // Inject icon mapping based on category (normalize legacy Title Case categories)
+      return agents.map((agent: any) => {
+        const cat = agent.marketplace_category || agent.configuration?.category || agent.agent_type
+        const normalized = LEGACY_CATEGORY_MAP[cat] || cat
+        return {
+          ...agent,
+          premium_icon: iconMappings[normalized] || iconMappings[cat] || null
+        }
+      });
     },
     refetchInterval: false, // Disable automatic refetching
     staleTime: 30000, // Cache for 30 seconds, allows manual refresh
@@ -115,10 +120,11 @@ export function useAgent(agentId: string | null) {
     queryKey: [...agentQueryKeys.agent(agentId!), iconKeys],
     queryFn: async () => {
       const agent = await agentApiClient.getAgent(agentId!);
-      // Inject icon mapping based on category
+      const cat = agent.marketplace_category || agent.configuration?.category || agent.agent_type
+      const normalized = LEGACY_CATEGORY_MAP[cat] || cat
       return {
         ...agent,
-        premium_icon: iconMappings[agent.marketplace_category] || iconMappings[agent.configuration?.category] || iconMappings[agent.agent_type] || null
+        premium_icon: iconMappings[normalized] || iconMappings[cat] || null
       };
     },
     enabled: !!agentId,

@@ -65,6 +65,26 @@ export const CATEGORY_TO_DB_MAP: Record<string, string> = {
 }
 
 /**
+ * Maps legacy marketplace category names (Title Case) to unified category IDs (lowercase).
+ * Used for backwards-compat when reading old marketplace_category values.
+ */
+export const LEGACY_CATEGORY_MAP: Record<string, string> = {
+  'Personal Assistant': 'general',
+  'Customer Support': 'support',
+  'DevOps': 'development',
+  'Social Media': 'marketing',
+  'Accounting': 'business',
+  'E-commerce': 'sales',
+  'Content Creation': 'writing',
+  'HR': 'hr',
+  'Data Analysis': 'analytics',
+  'Custom': 'custom',
+  'Operations': 'productivity',
+  'Productivity': 'productivity',
+  'Research': 'research',
+}
+
+/**
  * Maps database agent_type values back to UI category names.
  */
 export const DB_TO_CATEGORY_MAP: Record<string, string> = {

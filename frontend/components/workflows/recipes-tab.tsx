@@ -491,19 +491,24 @@ export function RecipesTab({
                           const agentInfo = agentMap.get(aid)
                           const agentIconName = agentInfo?.premium_icon
                             || iconMappings[agentInfo?.marketplace_category]
+                            || iconMappings[agentInfo?.configuration?.category]
                             || iconMappings[agentInfo?.agent_type]
                             || null
-                          return (
+                          return agentIconName ? (
+                            <div
+                              key={aid}
+                              className="w-7 h-7 flex items-center justify-center shrink-0"
+                              title={agentInfo?.name || `Agent ${aid}`}
+                            >
+                              <PremiumIcon name={agentIconName} size={24} />
+                            </div>
+                          ) : (
                             <div
                               key={aid}
                               className={`w-7 h-7 rounded-lg bg-gradient-to-br ${agentColor(aid)} flex items-center justify-center border border-border/10`}
                               title={agentInfo?.name || `Agent ${aid}`}
                             >
-                              {agentIconName ? (
-                                <PremiumIcon name={agentIconName} size={14} className="text-foreground" />
-                              ) : (
-                                <Bot className="w-3.5 h-3.5 text-foreground" />
-                              )}
+                              <Bot className="w-3.5 h-3.5 text-foreground" />
                             </div>
                           )
                         })}
