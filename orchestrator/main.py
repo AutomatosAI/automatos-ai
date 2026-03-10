@@ -383,6 +383,17 @@ async def lifespan(app: FastAPI):
                         await get_recipe_scheduler().start(scheduler=shared_sched)
                         logger.info("RecipeSchedulerService started on unified scheduler")
 
+                    # PRD-77: Load agent-scheduled tasks into APScheduler
+                    try:
+                        from services.scheduled_task_service import ScheduledTaskService
+                        from core.database.database import SessionLocal
+                        _sched_db = SessionLocal()
+                        _sched_svc = ScheduledTaskService(_sched_db, workspace_id=None)
+                        await _sched_svc.load_active_tasks_to_scheduler()
+                        _sched_db.close()
+                    except Exception as _st_err:
+                        logger.warning(f"Could not load scheduled tasks: {_st_err}")
+
                     logger.info("Unified scheduler started (this worker owns it)")
                 except BlockingIOError:
                     lock_file.close()
@@ -834,8 +845,15 @@ if activity_router is not None:
 try:
     from api.reports import router as reports_router
     app.include_router(reports_router)
+except ImportError as e:
+    logger.warning("Could not load reports router: %s", e)
+
+# PRD-77: Agent Self-Scheduling
+try:
+    from api.scheduled_tasks import router as scheduled_tasks_router
+    app.include_router(scheduled_tasks_router)
 except Exception as e:
-    logger.warning(f"Could not load reports router: {e}")
+    logger.warning(f"Could not load scheduled tasks router: {e}")
 
 # PRD-55: Autonomous Assistant Platform
 if heartbeat_router is not None:

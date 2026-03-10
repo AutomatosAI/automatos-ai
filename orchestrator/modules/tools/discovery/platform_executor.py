@@ -91,6 +91,13 @@ class PlatformActionExecutor:
             # PRD-76: Agent Reports
             "platform_submit_report": self._submit_report,
             "platform_get_latest_report": self._get_latest_report,
+            # PRD-77: Agent Self-Scheduling
+            "platform_schedule_task": self._schedule_task,
+            "platform_list_scheduled_tasks": self._list_scheduled_tasks,
+            "platform_cancel_scheduled_task": self._cancel_scheduled_task,
+            # PRD-77: Memory Browsing
+            "platform_browse_memories": self._browse_memories,
+            "platform_delete_memory": self._delete_memory,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -3229,7 +3236,9 @@ class PlatformActionExecutor:
                 Agent.id == agent_id,
                 Agent.workspace_id == self.workspace_id,
             ).first()
-            agent_name = agent.name if agent else "unknown"
+            if not agent:
+                return {"success": False, "error": f"Agent {agent_id} not found in workspace"}
+            agent_name = agent.name
 
         svc = ReportService(self.db, self.workspace_id)
         return await svc.create_report(
@@ -3262,3 +3271,140 @@ class PlatformActionExecutor:
             agent_id=agent_id,
             report_type=report_type,
         )
+
+    # ------------------------------------------------------------------
+    # PRD-77: Agent Self-Scheduling
+    # ------------------------------------------------------------------
+
+    async def _schedule_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Schedule a follow-up task for self or another agent."""
+        from services.scheduled_task_service import ScheduledTaskService
+
+        task_type = params.get("task_type")
+        description = params.get("description")
+        schedule = params.get("schedule")
+
+        if not task_type or not description or not schedule:
+            return {"success": False, "error": "task_type, description, and schedule are required"}
+
+        # Resolve calling agent
+        created_by_agent_id = params.get("_agent_id")
+        if not created_by_agent_id:
+            return {"success": False, "error": "Could not determine calling agent"}
+
+        # Resolve target agent (default: self)
+        target_agent_id = created_by_agent_id
+        target_name = params.get("target_agent_name")
+        if target_name:
+            from core.models import Agent
+            target = self.db.query(Agent).filter(
+                Agent.workspace_id == self.workspace_id,
+                func.lower(Agent.name) == target_name.lower(),
+            ).first()
+            if not target:
+                return {"success": False, "error": f"Agent '{target_name}' not found in workspace"}
+            target_agent_id = target.id
+
+        svc = ScheduledTaskService(self.db, self.workspace_id)
+        return await svc.create_task(
+            created_by_agent_id=created_by_agent_id,
+            target_agent_id=target_agent_id,
+            task_type=task_type,
+            description=description,
+            schedule=schedule,
+            max_runs=params.get("max_runs"),
+        )
+
+    async def _list_scheduled_tasks(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """List scheduled tasks for the workspace."""
+        from services.scheduled_task_service import ScheduledTaskService
+
+        # Resolve optional agent_name to agent_id
+        agent_id = None
+        agent_name = params.get("agent_name")
+        if agent_name:
+            from core.models import Agent
+            agent = self.db.query(Agent).filter(
+                Agent.workspace_id == self.workspace_id,
+                func.lower(Agent.name) == agent_name.lower(),
+            ).first()
+            if agent:
+                agent_id = agent.id
+
+        svc = ScheduledTaskService(self.db, self.workspace_id)
+        return await svc.list_tasks(
+            agent_id=agent_id,
+            status=params.get("status"),
+        )
+
+    async def _cancel_scheduled_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Cancel a scheduled task by ID."""
+        from services.scheduled_task_service import ScheduledTaskService
+
+        task_id = params.get("task_id")
+        if not task_id:
+            return {"success": False, "error": "task_id is required"}
+
+        svc = ScheduledTaskService(self.db, self.workspace_id)
+        return await svc.update_task_status(task_id, "cancelled")
+
+    # ------------------------------------------------------------------
+    # PRD-77: Memory Browsing
+    # ------------------------------------------------------------------
+
+    async def _browse_memories(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Browse/search memories via Mem0."""
+        try:
+            from modules.memory.integrations.mem0_client import Mem0Client
+
+            client = Mem0Client()
+            user_id = f"ws_{self.workspace_id}"
+            limit = params.get("limit", 20)
+            query = params.get("query")
+
+            if query:
+                results = client.search(query=query, user_id=user_id, limit=limit)
+            else:
+                results = client.get_all(user_id=user_id, limit=limit)
+
+            # Normalise to consistent format
+            memories = []
+            for m in results:
+                if isinstance(m, dict):
+                    memories.append({
+                        "id": m.get("id"),
+                        "content": m.get("memory") or m.get("content", ""),
+                        "score": m.get("score"),
+                        "metadata": m.get("metadata") or m.get("metadata_"),
+                        "created_at": m.get("created_at"),
+                    })
+
+            return {
+                "success": True,
+                "memories": memories,
+                "total": len(memories),
+                "source": "mem0",
+                "search_query": query,
+            }
+        except Exception as e:
+            logger.error("[PlatformExecutor] browse_memories failed: %s", e, exc_info=True)
+            return {"success": False, "error": f"Memory service unavailable: {str(e)[:200]}"}
+
+    async def _delete_memory(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Delete a memory by ID."""
+        memory_id = params.get("memory_id")
+        if not memory_id:
+            return {"success": False, "error": "memory_id is required"}
+
+        try:
+            from modules.memory.integrations.mem0_client import Mem0Client
+
+            client = Mem0Client()
+            deleted = client.delete(memory_id)
+
+            if deleted:
+                return {"success": True, "message": f"Memory {memory_id} deleted"}
+            return {"success": False, "error": f"Failed to delete memory {memory_id}"}
+        except Exception as e:
+            logger.error("[PlatformExecutor] delete_memory failed: %s", e, exc_info=True)
+            return {"success": False, "error": f"Memory service unavailable: {str(e)[:200]}"}

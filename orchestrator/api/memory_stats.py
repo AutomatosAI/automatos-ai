@@ -231,6 +231,138 @@ async def get_recent_memories(
     ]
 
 
+@router.get("/browse")
+async def browse_memories(
+    query: str = None,
+    limit: int = 20,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Browse/search all memories — PRD-77 Memory Explorer.
+    If query is provided, performs vector similarity search.
+    Otherwise returns all memories sorted by recency.
+    """
+    mem0 = _get_mem0_client()
+    if not mem0:
+        return {"success": False, "error": "Memory service unavailable", "memories": []}
+
+    user_id = _mem0_user_id(ctx.workspace_id)
+
+    try:
+        if query:
+            results = mem0.search(query=query, user_id=user_id, limit=limit)
+        else:
+            results = mem0.get_all(user_id=user_id, limit=limit)
+
+        memories = []
+        for m in (results if isinstance(results, list) else []):
+            memories.append({
+                "id": str(m.get("id", "")),
+                "content": m.get("memory") or m.get("content", ""),
+                "score": m.get("score"),
+                "metadata": m.get("metadata") or m.get("metadata_"),
+                "created_at": m.get("created_at"),
+                "updated_at": m.get("updated_at"),
+            })
+
+        return {
+            "success": True,
+            "memories": memories,
+            "total": len(memories),
+            "source": "mem0",
+            "search_query": query,
+        }
+    except Exception as e:
+        logger.error("Memory browse failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)[:200], "memories": []}
+
+
+@router.delete("/{memory_id}")
+async def delete_memory(
+    memory_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+) -> Dict[str, Any]:
+    """Delete a specific memory by ID — PRD-77."""
+    mem0 = _get_mem0_client()
+    if not mem0:
+        return {"success": False, "error": "Memory service unavailable"}
+
+    try:
+        deleted = mem0.delete(memory_id)
+        if deleted:
+            logger.info("Memory %s deleted by workspace %s", memory_id, ctx.workspace_id)
+            return {"success": True, "message": f"Memory {memory_id} deleted"}
+        return {"success": False, "error": f"Failed to delete memory {memory_id}"}
+    except Exception as e:
+        logger.error("Memory delete failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)[:200]}
+
+
+@router.get("/health")
+async def get_memory_health(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Memory health report — PRD-77.
+    Shows total count, staleness, and basic health indicators.
+    """
+    mem0 = _get_mem0_client()
+    user_id = _mem0_user_id(ctx.workspace_id)
+
+    total = 0
+    oldest_memory = None
+    newest_memory = None
+    mem0_available = False
+
+    if mem0:
+        try:
+            all_mems = mem0.get_all(user_id=user_id, limit=500)
+            items = all_mems if isinstance(all_mems, list) else []
+            total = len(items)
+            mem0_available = True
+
+            dates = [m.get("created_at") for m in items if m.get("created_at")]
+            if dates:
+                oldest_memory = min(dates)
+                newest_memory = max(dates)
+        except Exception as e:
+            logger.warning("Memory health check failed: %s", e)
+
+    # Search effectiveness from access log
+    search_stats = {"total_searches": 0, "hits": 0, "hit_rate": 0}
+    try:
+        row = db.execute(
+            text("""
+                SELECT
+                    COUNT(*) as total_searches,
+                    SUM(CASE WHEN had_results THEN 1 ELSE 0 END) as hits
+                FROM memory_access_log
+                WHERE workspace_id = :ws_id
+            """),
+            {"ws_id": str(ctx.workspace_id)},
+        ).fetchone()
+        if row and row.total_searches:
+            search_stats = {
+                "total_searches": row.total_searches,
+                "hits": row.hits or 0,
+                "hit_rate": round((row.hits or 0) / max(row.total_searches, 1), 2),
+            }
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "mem0_available": mem0_available,
+        "total_memories": total,
+        "oldest_memory": oldest_memory,
+        "newest_memory": newest_memory,
+        "search_effectiveness": search_stats,
+        "health_status": "healthy" if mem0_available and total > 0 else "degraded" if mem0_available else "unavailable",
+    }
+
+
 def _truncate(text: str, max_len: int = 120) -> str:
     if not text:
         return ""

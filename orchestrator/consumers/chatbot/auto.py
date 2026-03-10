@@ -319,6 +319,32 @@ _PLATFORM_KEYWORDS = {
         "read report", "show report", "what did the agent find",
         "sentinel report", "agent standup", "last report",
     ],
+    # PRD-77: Agent Self-Scheduling
+    "platform_schedule_task": [
+        "schedule a task", "schedule follow-up", "remind me",
+        "check again later", "schedule for tomorrow", "set up recurring",
+        "schedule weekly", "schedule daily", "create a scheduled task",
+        "follow up on this", "come back to this",
+    ],
+    "platform_list_scheduled_tasks": [
+        "scheduled tasks", "what tasks are scheduled", "show scheduled",
+        "list scheduled tasks", "pending tasks", "my scheduled tasks",
+        "upcoming tasks",
+    ],
+    "platform_cancel_scheduled_task": [
+        "cancel scheduled task", "stop scheduled task",
+        "remove scheduled task", "cancel recurring task",
+    ],
+    # PRD-77: Memory Browsing
+    "platform_browse_memories": [
+        "browse memories", "show all memories", "list memories",
+        "what has been remembered", "view memories",
+        "memory explorer", "show memory contents",
+    ],
+    "platform_delete_memory": [
+        "delete memory", "remove memory", "forget this",
+        "erase memory", "clear memory",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]
