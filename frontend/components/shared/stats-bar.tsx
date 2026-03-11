@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { LucideIcon } from 'lucide-react'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 
 export interface StatItem {
   label: string
@@ -11,6 +12,8 @@ export interface StatItem {
   change?: string
   icon: LucideIcon
   iconColor?: string
+  /** Tooltip ID matching tooltips.json (e.g., "agents.roster.stats.total_agents") */
+  tooltipId?: string
 }
 
 export interface StatsBarProps {
@@ -56,7 +59,10 @@ export function StatsBar({ stats, loading = false, glow = true, className }: Sta
                       </span>
                     )}
                   </div>
-                  <div className="text-sm text-muted-foreground truncate mt-1">{stat.label}</div>
+                  <div className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
+                    <span className="truncate">{stat.label}</span>
+                    {stat.tooltipId && <InlineHelp id={stat.tooltipId} size="sm" />}
+                  </div>
                 </div>
               </div>
             </CardContent>

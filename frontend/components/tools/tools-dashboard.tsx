@@ -657,6 +657,7 @@ export function ToolsDashboard() {
             change: 'Active',
             icon: CheckCircle,
             iconColor: 'text-[hsl(var(--success))]',
+            tooltipId: 'tools.stats.connected',
           },
           {
             label: 'In Workspace',
@@ -671,6 +672,7 @@ export function ToolsDashboard() {
             change: 'Actions',
             icon: Wrench,
             iconColor: 'text-[hsl(var(--agent))]',
+            tooltipId: 'tools.stats.available',
           },
           {
             label: 'Triggers',

@@ -68,6 +68,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       icon: Bot,
       color: 'text-orange-400',
       bgColor: 'from-orange-500/20 to-orange-500/5',
+      tooltipId: 'agents.roster.stats.total_agents',
     },
     {
       label: 'Workflows',
@@ -84,6 +85,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       icon: FileText,
       color: 'text-green-400',
       bgColor: 'from-green-500/20 to-green-500/5',
+      tooltipId: 'knowledge.library.stats.total_documents',
     },
     {
       label: 'Monthly Cost',
@@ -97,6 +99,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       trend: overview?.cost.previousPeriod
         ? overview.cost.currentPeriod <= overview.cost.previousPeriod ? 'down' : 'up'
         : undefined,
+      tooltipId: 'analytics.costs.total_cost',
     },
   ]
 
@@ -111,6 +114,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
           .replace('text-purple-400', 'text-[hsl(var(--info))]')
           .replace('text-green-400', 'text-[hsl(var(--success))]')
           .replace('text-blue-400', 'text-[hsl(var(--agent))]'),
+        tooltipId: card.tooltipId,
       }))} loading={isLoading} />
 
       {/* Plan Usage */}

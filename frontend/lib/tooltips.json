@@ -1,663 +1,561 @@
 {
-  "dashboard": {
+  "activity": {
     "page": {
-      "title": "Dashboard Overview",
-      "description": "Your command center showing system health, active workflows, and agent status at a glance."
+      "title": "Command Centre",
+      "description": "Your AI workforce at a glance — schedules, live tasks, and agent reports."
     },
-    "health_cards": {
-      "active_workflows": {
-        "text": "Workflows currently executing or queued. High number indicates busy system.",
-        "docLink": "/docs/user-guides/USER_GUIDE_DASHBOARD#system-health-cards"
+    "dashboard": {
+      "working_now": {
+        "text": "Agents actively processing tasks right now.",
+        "docLink": "/activity/dashboard"
       },
-      "total_agents": {
-        "text": "All agents created in your system. Active agents can execute tasks immediately.",
-        "docLink": "/docs/user-guides/USER_GUIDE_DASHBOARD#system-health-cards"
+      "channels_live": {
+        "text": "Active communication channels (Slack, email, etc.) currently connected.",
+        "docLink": "/activity/dashboard"
       },
-      "documents_indexed": {
-        "text": "Documents in knowledge base. Searchable by all agents via RAG and semantic search.",
-        "docLink": "/docs/user-guides/USER_GUIDE_DASHBOARD#system-health-cards"
+      "completed_today": {
+        "text": "Total tasks finished by all agents in the last 24 hours.",
+        "docLink": "/activity/dashboard"
       },
-      "system_status": {
-        "text": "Overall platform health. Green = all systems operational. Check component status for details.",
-        "docLink": "/docs/user-guides/USER_GUIDE_DASHBOARD#system-health-cards"
+      "needs_attention": {
+        "text": "Items that need your review — failed tasks, low-quality reports, or expiring connections.",
+        "docLink": "/activity/dashboard"
+      },
+      "schedule": {
+        "text": "Upcoming automated routines. Created through Recipes with cron triggers. Click any item to view or edit.",
+        "docLink": "/activity/dashboard"
+      },
+      "active_now": {
+        "text": "Tasks currently in progress with real-time progress bars. Shows agent, step count, and elapsed time.",
+        "docLink": "/activity/dashboard"
       }
     },
-    "quick_actions": {
-      "create_agent": {
-        "text": "Open agent creation wizard. Fastest way to create a new specialized AI agent.",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#creating-agents"
+    "reports": {
+      "view_report": {
+        "text": "Open the full report submitted by this agent. Reports include findings, actions taken, and referenced files.",
+        "docLink": "/activity/reports"
       },
-      "create_workflow": {
-        "text": "Start new workflow. Pre-filled with defaults for quick execution.",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#creating-workflows"
+      "grade": {
+        "text": "Rate this report's quality (1-5 stars). Grading helps track agent performance over time.",
+        "docLink": "/activity/reports"
+      }
+    },
+    "memory": {
+      "search": {
+        "text": "Search across all stored agent memories using natural language. Uses vector similarity for semantic matching.",
+        "docLink": "/activity/memory"
       },
-      "upload_document": {
-        "text": "Add document to knowledge base. Drag-drop or browse files.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#upload-tab"
+      "delete": {
+        "text": "Permanently remove this memory. The agent will no longer recall this information.",
+        "docLink": "/activity/memory"
       }
     }
   },
-  
+
   "agents": {
     "page": {
       "title": "Agent Management",
-      "description": "Create, configure, and monitor AI agents. Each agent is a specialized AI entity with skills, tools, and performance tracking."
+      "description": "Create, configure, and monitor your AI workforce."
     },
     "roster": {
       "stats": {
         "total_agents": {
-          "text": "Total number of agents you've created. Each agent is a specialized AI entity with its own model, skills, and tools.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#agent-roster-tab"
+          "text": "Total agents in your workspace. Each agent is a specialised AI worker with its own model, skills, and tools.",
+          "docLink": "/agents/roster"
         },
         "active_agents": {
-          "text": "Agents currently ready to execute tasks. Inactive agents need to be started manually.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#agent-roster-tab"
+          "text": "Agents currently online and ready to process tasks. Idle agents are configured but not actively running.",
+          "docLink": "/agents/roster"
         },
-        "agent_types": {
-          "text": "Different agent specializations (Code Architect, Security Expert, etc.). Templates with pre-configured skills.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#agent-roster-tab"
+        "categories": {
+          "text": "Distinct agent types in your workspace (code_architect, security_expert, custom, etc.).",
+          "docLink": "/agents/roster"
         },
         "avg_performance": {
-          "text": "Average success rate across all agents based on task completion quality. Target: >90%",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#agent-roster-tab"
+          "text": "Average success rate across all agents. Target: >90%. Based on task completion without errors.",
+          "docLink": "/agents/roster"
         }
       },
       "search": {
-        "text": "Search agents by name, type, or description. Filters list in real-time.",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#search-and-filter"
+        "text": "Filter agents by name, type, or capabilities. Results update in real-time as you type.",
+        "docLink": "/agents/roster"
       },
       "status_filter": {
-        "text": "Filter agents by their current status (Active, Idle, Learning, etc.)",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#search-and-filter"
-      },
-      "type_filter": {
-        "text": "Filter by agent specialization (Code Architect, Security Expert, etc.)",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#search-and-filter"
+        "text": "Toggle between Active (online, processing) and Idle (configured but not running) agents.",
+        "docLink": "/agents/roster"
       },
       "create_button": {
-        "text": "Open 4-step agent creation wizard. Choose template, configure model, assign skills and tools.",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#creating-agents"
-      }
-    },
-    "skills": {
-      "all_skills": {
-        "text": "Complete library of available skills. Add these to agents to enhance their capabilities.",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#skills-tab"
-      },
-      "agent_skills": {
-        "text": "View and manage skills for a specific agent. Add or remove skills to customize agent expertise.",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#skills-tab"
-      },
-      "categories": {
-        "text": "Skills organized by domain (Development, Security, Data, etc.). Browse to find relevant capabilities.",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#skills-tab"
-      },
-      "proficiency": {
-        "text": "Skill expertise level calculated from historical performance. More stars = better performance with this skill.",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#skills-tab"
-      }
-    },
-    "configuration": {
-      "agent_selector": {
-        "text": "Choose an agent to view and modify its configuration",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#configuration-tab"
-      },
-      "edit_button": {
-        "text": "Opens detailed configuration modal with 5 tabs for fine-tuning agent behavior",
-        "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#agent-configuration-modal"
+        "text": "Create a new agent. Choose from templates (Code Reviewer, Sentinel, etc.) or start from scratch.",
+        "docLink": "/agents/creating"
       }
     },
     "create_modal": {
       "step1": {
         "template_selection": {
-          "text": "Choose a template or start from scratch. Templates come pre-configured with recommended skills and settings.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-1-agent-type"
+          "text": "Templates come pre-configured with a system prompt, recommended model, and skills. You can customise everything after creation.",
+          "docLink": "/agents/creating"
         }
       },
       "step2": {
         "name": {
-          "text": "Give your agent a descriptive name. Examples: 'Python Security Reviewer', 'API Documentation Expert'",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-2-configuration"
+          "text": "A descriptive name helps the router match messages to this agent. Be specific: 'JavaScript Code Reviewer' beats 'Reviewer'.",
+          "docLink": "/agents/creating"
         },
-        "priority": {
-          "text": "When multiple agents need resources, higher priority agents execute first. High = Critical, Medium = Standard, Low = Background",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-2-configuration"
-        },
-        "max_concurrent": {
-          "text": "Maximum tasks this agent can handle simultaneously. Higher = more parallel execution. Range: 1-10, Recommended: 3-5",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-2-configuration"
-        },
-        "auto_start": {
-          "text": "Automatically activate this agent when platform starts. Recommended for critical agents.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-2-configuration"
+        "description": {
+          "text": "The Universal Router uses this description to decide when to send messages to this agent. Be clear about what it handles.",
+          "docLink": "/agents/creating"
         }
       },
       "step3": {
         "model_selection": {
-          "text": "Select the LLM that powers this agent. GPT-4 Turbo recommended for code, Claude 3 Opus for analysis. See model comparison for guidance.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-3-model-selection"
+          "text": "The LLM that powers this agent. Different models have different strengths, speeds, and costs.",
+          "docLink": "/agents/creating"
         },
         "temperature": {
-          "text": "Controls randomness. Lower (0.0-0.5) = focused/consistent. Higher (0.7-2.0) = creative/varied. Recommended: 0.7 for most tasks.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-3-model-selection"
+          "text": "Controls creativity. 0 = deterministic and focused. 1 = creative and varied. Most agents work well at 0.7.",
+          "docLink": "/agents/creating"
         },
         "max_tokens": {
-          "text": "Maximum length of agent responses. Higher = longer responses but more expensive. Range: 100-4096. Recommended: 2000-3000.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-3-model-selection"
-        },
-        "fallback_model": {
-          "text": "Backup model used if primary model fails or hits rate limits. Ensures reliability. Common: GPT-3.5 Turbo as fallback for GPT-4.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-3-model-selection"
+          "text": "Maximum response length. Higher = longer responses but more expensive. 2000-3000 works for most tasks.",
+          "docLink": "/agents/creating"
         }
       },
       "step4": {
         "skills": {
-          "text": "Choose expertise areas for this agent. Skills enhance prompts with domain knowledge. Recommended: 3-7 skills per agent.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-4-skills--tools"
+          "text": "Skills give agents domain expertise. They enhance the system prompt with specialised knowledge. 3-7 skills per agent is typical.",
+          "docLink": "/agents/creating"
         },
         "tools": {
-          "text": "External integrations this agent can use (GitHub, Slack, databases, etc.). Tools are provided by the integrations catalog.",
-          "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-4-skills--tools"
+          "text": "External app integrations (GitHub, Slack, Jira). Only assigned tools can be used by this agent.",
+          "docLink": "/agents/creating"
         }
+      }
+    },
+    "details": {
+      "success_rate": {
+        "text": "Percentage of tasks completed without errors over the last 30 days.",
+        "docLink": "/agents/details"
+      },
+      "tasks_completed": {
+        "text": "Total number of tasks this agent has handled since creation.",
+        "docLink": "/agents/details"
+      }
+    },
+    "configuration": {
+      "edit_button": {
+        "text": "Modify this agent's model, prompt, persona, or tool assignments. Changes take effect immediately.",
+        "docLink": "/agents/configuration"
+      }
+    },
+    "coordination": {
+      "delegation": {
+        "text": "Controls whether this agent can pass tasks to other agents. Auto-delegate is faster but less controlled.",
+        "docLink": "/agents/coordination"
+      }
+    },
+    "recipes": {
+      "create": {
+        "text": "Create a multi-step workflow that chains multiple agents together. Define steps, inputs, and schedule.",
+        "docLink": "/agents/recipes"
+      },
+      "schedule": {
+        "text": "Set a cron schedule to run this recipe automatically. E.g., daily at 23:00 for nightly reviews.",
+        "docLink": "/agents/recipes"
       }
     }
   },
-  
-  "workflows": {
-    "page": {
-      "title": "Workflow Management",
-      "description": "Orchestrate complex automation with intelligent multi-agent workflows"
+
+  "chat": {
+    "input": {
+      "text": "Type your message and press Enter. The Universal Router automatically sends it to the best agent.",
+      "docLink": "/chat"
     },
-    "active": {
-      "stats": {
-        "active_workflows": {
-          "text": "Workflows currently executing. Includes running and queued workflows.",
-          "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#active-tab"
-        },
-        "completed_today": {
-          "text": "Successfully completed workflows in the last 24 hours",
-          "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#active-tab"
-        },
-        "avg_duration": {
-          "text": "Average time from start to completion. Helps estimate new workflows.",
-          "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#active-tab"
-        },
-        "agent_utilization": {
-          "text": "Percentage of agents currently working on workflows. Higher = busier system. Optimal: 60-80%",
-          "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#active-tab"
-        }
-      },
-      "progress_bar": {
-        "text": "Visual progress through workflow stages. Each segment represents a task or agent. Percentage shows overall completion.",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#workflow-cards"
-      }
+    "auto_mode": {
+      "text": "Auto mode routes messages to the best agent automatically using cache, rules, semantic matching, and LLM classification.",
+      "docLink": "/chat/routing"
     },
-    "templates": {
-      "text": "Pre-built workflow templates for common automation patterns. One-click creation with your custom settings.",
-      "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#templates-tab"
+    "agent_selector": {
+      "text": "Override auto-routing by selecting a specific agent. Your message goes directly to that agent.",
+      "docLink": "/chat/routing"
     },
-    "create_modal": {
-      "goal": {
-        "text": "The high-level objective. The orchestrator uses this to decompose tasks. Be specific and clear about desired outcome.",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#step-1-details"
+    "quick_actions": {
+      "code": {
+        "text": "Start a coding task. Routes to code-focused agents like Code Reviewer or QA Engineer.",
+        "docLink": "/chat/quick-actions"
       },
-      "auto_select": {
-        "text": "Let the orchestrator choose optimal agents based on skills and availability. Uses LLM reasoning for intelligent selection.",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#step-2-configuration--policy"
+      "create_agent": {
+        "text": "Launch the agent creation flow without leaving chat.",
+        "docLink": "/chat/quick-actions"
       },
-      "execution_mode": {
-        "text": "Parallel = run independent tasks simultaneously (faster). Sequential = one at a time (safer). Optimized = smart mix (recommended).",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#step-2-configuration--policy"
+      "knowledge_base": {
+        "text": "Ask questions about your uploaded documents. Uses RAG to find relevant answers.",
+        "docLink": "/chat/quick-actions"
       },
-      "error_handling": {
-        "text": "Stop on Error = halt if any task fails. Continue = skip failed tasks. Retry = auto-retry failures 1-5 times.",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#step-2-configuration--policy"
-      }
-    },
-    "execution": {
-      "phase_decomposition": {
-        "text": "LLM analyzes the goal and breaks it into subtasks with dependencies and priorities.",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#executing-workflows"
+      "recipes": {
+        "text": "Browse and trigger multi-step workflows that coordinate multiple agents.",
+        "docLink": "/chat/quick-actions"
       },
-      "phase_selection": {
-        "text": "Optimal agents chosen using 4D matching (skills, availability, history, tools). LLM provides reasoning for selections.",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#executing-workflows"
-      },
-      "phase_context": {
-        "text": "Building optimal prompts for each agent using RAG and memory retrieval. Applies MMR and knapsack optimization.",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#executing-workflows"
-      },
-      "phase_execution": {
-        "text": "Agents executing their assigned tasks. Progress updates in real-time. Tools called as needed.",
-        "docLink": "/docs/user-guides/USER_GUIDE_WORKFLOWS#executing-workflows"
+      "edit_tools": {
+        "text": "Quick access to manage tool assignments for your agents.",
+        "docLink": "/chat/quick-actions"
       }
     }
   },
-  
-  "knowledge": {
-    "page": {
-      "title": "Knowledge Base & Documents",
-      "description": "Manage your organization's knowledge - documents, code, and multimodal content"
-    },
-    "library": {
-      "stats": {
-        "total_documents": {
-          "text": "Total number of documents uploaded and processed in your knowledge base",
-          "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#library-tab"
-        },
-        "processed": {
-          "text": "Documents fully processed and searchable. Processing includes text extraction, chunking, and embedding generation.",
-          "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#library-tab"
-        },
-        "processing": {
-          "text": "Documents currently being processed. Typically takes 30-60 seconds per document.",
-          "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#library-tab"
-        },
-        "failed": {
-          "text": "Documents that failed processing. Click to see errors and retry. Common causes: unsupported format, corrupted file.",
-          "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#library-tab"
-        }
-      },
-      "search": {
-        "text": "Search documents by filename, content, or tags. Real-time filtering as you type.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#search-and-filter"
-      },
-      "category_filter": {
-        "text": "Filter by document category (auto-detected or manually assigned). Helps organize large document libraries.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#search-and-filter"
-      }
-    },
-    "search": {
-      "semantic_mode": {
-        "text": "Finds conceptually similar content even with different words. Best for understanding-based search. Uses AI embeddings.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#search-tab"
-      },
-      "keyword_mode": {
-        "text": "Traditional exact-match search. Fast but less intelligent. Good for finding specific terms.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#search-tab"
-      },
-      "similarity_score": {
-        "text": "Relevance of result to your query. 90-100% = excellent, 70-89% = good, 50-69% = moderate, <50% = weak match",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#search-results"
-      }
-    },
-    "upload": {
-      "drag_drop": {
-        "text": "Easiest upload method. Drag multiple files at once for batch upload. Supports PDF, Word, Markdown, code files, and more.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#upload-tab"
-      },
-      "supported_formats": {
-        "text": "Supported: PDF, DOCX, MD, TXT, code files (.py, .js, .ts, etc.), CSV, JSON. Max size: 50MB per file.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#upload-methods"
-      }
-    },
-    "processing": {
-      "queue_status": {
-        "text": "Documents waiting to be processed. FIFO order unless priority set. Monitor active processing and completion.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#processing-tab"
-      },
-      "stages": {
-        "extraction": {
-          "text": "Extracting text from PDF/Word. Also extracts tables, images, and formulas for multimodal support.",
-          "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#active-processing"
-        },
-        "chunking": {
-          "text": "Splitting text into searchable chunks. Overlap ensures context preservation. Default: 512 tokens with 50 token overlap.",
-          "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#active-processing"
-        },
-        "embedding": {
-          "text": "Creating vector embeddings for semantic search. Uses AI model to convert text to numbers.",
-          "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#active-processing"
-        },
-        "indexing": {
-          "text": "Storing in PostgreSQL with pgvector. Makes content searchable via similarity queries.",
-          "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#active-processing"
-        }
-      }
-    },
-    "codegraph": {
-      "projects_indexed": {
-        "text": "Code repositories indexed and searchable. Each project is a separate codebase.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#codegraph-tab"
-      },
-      "files_analyzed": {
-        "text": "Total code files across all projects. Includes classes, functions, and relationships.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#codegraph-tab"
-      },
-      "relationships": {
-        "text": "Code relationships mapped (imports, calls, dependencies). Enables dependency graphs and call tracing.",
-        "docLink": "/docs/user-guides/USER_GUIDE_KNOWLEDGE#codegraph-tab"
-      }
-    }
-  },
-  
-  "context": {
-    "page": {
-      "title": "Context Engineering",
-      "description": "Optimize AI performance through intelligent context management and RAG"
-    },
-    "performance": {
-      "context_queries": {
-        "text": "Total number of context/RAG queries executed. Higher = more agent activity and knowledge base usage.",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#performance-tab"
-      },
-      "retrieval_success": {
-        "text": "Percentage of queries that returned relevant results. Target: >90%. Low rate indicates missing content.",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#performance-tab"
-      },
-      "avg_response_time": {
-        "text": "Average time to retrieve and optimize context. Lower = faster agent execution. Target: <1000ms",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#performance-tab"
-      },
-      "vector_embeddings": {
-        "text": "Total embeddings in vector database. Each chunk has an embedding for semantic search. Higher = more searchable content.",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#performance-tab"
-      }
-    },
-    "query_analysis": {
-      "confidence_score": {
-        "text": "Result confidence: >85% = high (excellent results), 60-85% = medium (good), <60% = low (poor results, refine query)",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#query-analysis-tab"
-      },
-      "latency": {
-        "text": "Query response time. Breakdown shows which stage is slow (embedding, search, optimization). Target: <1 second total.",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#query-analysis-tab"
-      }
-    },
-    "patterns": {
-      "rag_config": {
-        "text": "RAG configs control how documents are retrieved and optimized. Different strategies for different use cases (precision, recall, speed).",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#patterns-tab"
-      },
-      "retrieval_method": {
-        "text": "Algorithm for finding relevant documents. Cosine similarity (default, fast), Re-ranking (slower, higher quality).",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#rag-configuration-cards"
-      },
-      "top_k": {
-        "text": "Number of chunks to retrieve before optimization. More = better coverage but slower. Recommended: 5-10",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#rag-configuration-cards"
-      }
-    },
-    "optimization": {
-      "recommendations": {
-        "text": "AI-powered suggestions based on your actual usage patterns. Apply to improve performance, reduce costs, or increase quality.",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#optimization-tab"
-      }
-    },
-    "rag_context": {
-      "max_chunks": {
-        "text": "Maximum number of document chunks to retrieve. More = more context but higher cost. Range: 1-20, Default: 5",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#query-input"
-      },
-      "max_tokens": {
-        "text": "Token budget for context. System optimizes to stay within this limit. Range: 500-8000, Default: 2000",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#query-input"
-      },
-      "diversity_lambda": {
-        "text": "Balance between relevance and diversity. λ=1 is pure relevance, λ=0 is pure diversity. Recommended: 0.7 (balanced)",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#query-input"
-      },
-      "pipeline": {
-        "search": {
-          "text": "Vector similarity search in database. Finds top 50 candidates based on query embedding.",
-          "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#pipeline-visualization"
-        },
-        "diversity": {
-          "text": "Maximal Marginal Relevance (MMR) optimization. Balances similarity and diversity to avoid redundant results.",
-          "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#pipeline-visualization"
-        },
-        "budget": {
-          "text": "Knapsack optimization. Maximizes information value within token limit. Ensures staying under budget.",
-          "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#pipeline-visualization"
-        },
-        "format": {
-          "text": "Assembling final context with structure and formatting for LLM consumption.",
-          "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#pipeline-visualization"
-        }
-      },
-      "information_density": {
-        "text": "Percentage of tokens that are relevant to query. Higher = better. Target: >0.75. Excellent: >0.85",
-        "docLink": "/docs/user-guides/USER_GUIDE_CONTEXT#final-context-preview"
-      }
-    }
-  },
-  
+
   "tools": {
     "page": {
-      "title": "Tools Management",
-      "description": "Browse, configure, and assign integrations to agents"
+      "title": "Tools & Integrations",
+      "description": "Connect external apps and assign them to agents."
     },
     "stats": {
-      "available_tools": {
-        "text": "Total tools in registry. 400+ integrations available across 12 categories.",
-        "docLink": "/docs/user-guides/USER_GUIDE_TOOLS#tools-dashboard"
+      "connected": {
+        "text": "Apps currently authenticated and available for agent use.",
+        "docLink": "/tools"
       },
-      "active_assignments": {
-        "text": "Tool-agent connections currently active. Shows how many integrations are being used.",
-        "docLink": "/docs/user-guides/USER_GUIDE_TOOLS#tools-dashboard"
-      },
-      "usage_this_week": {
-        "text": "Tool calls made by agents this week. Higher = more integration activity.",
-        "docLink": "/docs/user-guides/USER_GUIDE_TOOLS#tools-dashboard"
+      "available": {
+        "text": "Total integrations available through Composio. 500+ apps across all categories.",
+        "docLink": "/tools"
       }
     },
     "categories": {
       "developer": {
-        "text": "Developer tools: GitHub, GitLab, Bitbucket, Jira. For code management and project tracking.",
-        "docLink": "/docs/user-guides/USER_GUIDE_TOOLS#developer-tools"
+        "text": "GitHub, GitLab, Bitbucket, Linear — code repos, issues, PRs, and project management.",
+        "docLink": "/tools/connecting-apps"
       },
       "communication": {
-        "text": "Communication tools: Slack, Discord, Email, Teams. For notifications and messaging.",
-        "docLink": "/docs/user-guides/USER_GUIDE_TOOLS#communication-tools"
+        "text": "Slack, Microsoft Teams, Discord — messaging, channels, and notifications.",
+        "docLink": "/tools/connecting-apps"
       },
-      "cloud": {
-        "text": "Cloud services: AWS, Azure, GCP, DigitalOcean. For infrastructure management.",
-        "docLink": "/docs/user-guides/USER_GUIDE_TOOLS#cloud-services"
-      },
-      "database": {
-        "text": "Database tools: PostgreSQL, MySQL, MongoDB, Redis. For data operations.",
-        "docLink": "/docs/user-guides/USER_GUIDE_TOOLS#database-tools"
+      "crm": {
+        "text": "Salesforce, HubSpot, Pipedrive — customer data and sales workflows.",
+        "docLink": "/tools/connecting-apps"
       }
     },
     "assignment": {
       "permissions": {
-        "text": "Control what operations agent can perform. Read = query, Write = modify, Execute = admin actions. Use least privilege principle.",
-        "docLink": "/docs/user-guides/USER_GUIDE_TOOLS#agent-tool-assignment-modal"
+        "text": "Control what this agent can do. Full access = read and write. Read only = fetch data but not modify. Start with read-only for new agents.",
+        "docLink": "/tools/assigning"
       },
       "credential": {
-        "text": "Which credential to use for authentication. Must be configured in Settings → Credentials first.",
-        "docLink": "/docs/user-guides/USER_GUIDE_TOOLS#agent-tool-assignment-modal"
+        "text": "Which API credential to use for authentication. Configure credentials in Settings first.",
+        "docLink": "/settings/credentials"
+      }
+    },
+    "security": {
+      "connection_health": {
+        "text": "Shows whether the OAuth token or API key is valid. Expired connections need re-authentication.",
+        "docLink": "/tools/security"
       }
     }
   },
-  
+
+  "knowledge": {
+    "page": {
+      "title": "Knowledge Bases",
+      "description": "Documents, databases, and code repositories your agents can search."
+    },
+    "library": {
+      "stats": {
+        "total_documents": {
+          "text": "Total files uploaded and processed in your knowledge base.",
+          "docLink": "/knowledge/documents"
+        },
+        "processed": {
+          "text": "Files fully chunked, embedded, and searchable. Processing includes text extraction, semantic chunking, and vector embedding.",
+          "docLink": "/knowledge/documents"
+        },
+        "storage_used": {
+          "text": "Total storage consumed in S3 for your workspace's documents.",
+          "docLink": "/knowledge/documents"
+        },
+        "vector_chunks": {
+          "text": "Number of searchable embedding chunks. Each document is split into multiple chunks for precise retrieval.",
+          "docLink": "/knowledge/documents"
+        }
+      },
+      "search": {
+        "text": "Search documents by filename, content, or tags. Filters the library in real-time.",
+        "docLink": "/knowledge/documents"
+      }
+    },
+    "search": {
+      "semantic_mode": {
+        "text": "Finds conceptually similar content even with different words. Uses AI embeddings for understanding-based search.",
+        "docLink": "/knowledge/documents"
+      },
+      "similarity_score": {
+        "text": "How relevant this result is to your query. 90-100% = excellent, 70-89% = good, below 50% = weak match.",
+        "docLink": "/knowledge/documents"
+      }
+    },
+    "upload": {
+      "drag_drop": {
+        "text": "Drag files here or click to browse. Supports PDF, DOCX, MD, TXT, code files, CSV, and JSON.",
+        "docLink": "/knowledge/documents"
+      }
+    },
+    "processing": {
+      "stages": {
+        "extraction": {
+          "text": "Extracting text from the file format. Also handles tables, images (OCR), and embedded content.",
+          "docLink": "/knowledge/documents"
+        },
+        "chunking": {
+          "text": "Splitting into semantic segments for search. Uses content boundaries, not arbitrary character counts.",
+          "docLink": "/knowledge/documents"
+        },
+        "embedding": {
+          "text": "Converting text chunks into vector embeddings for semantic search. Uses the configured embedding model.",
+          "docLink": "/knowledge/documents"
+        },
+        "indexing": {
+          "text": "Storing embeddings in the vector database. Once indexed, the content is searchable by all agents.",
+          "docLink": "/knowledge/documents"
+        }
+      }
+    },
+    "cloud_sync": {
+      "status": {
+        "text": "Shows how many files have been downloaded, processed, and indexed from your cloud folder.",
+        "docLink": "/knowledge/cloud-sync"
+      },
+      "sync_button": {
+        "text": "Trigger an incremental sync — only new or modified files are downloaded and processed.",
+        "docLink": "/knowledge/cloud-sync"
+      }
+    },
+    "codegraph": {
+      "projects_indexed": {
+        "text": "Code repositories indexed as a knowledge graph. Agents can search code semantically.",
+        "docLink": "/knowledge/codegraph"
+      },
+      "relationships": {
+        "text": "Code relationships mapped — imports, function calls, class inheritance. Enables dependency and impact analysis.",
+        "docLink": "/knowledge/codegraph"
+      }
+    }
+  },
+
+  "marketplace": {
+    "page": {
+      "title": "Community Marketplace",
+      "description": "Discover and install agents, recipes, tools, LLMs, and capability packages."
+    },
+    "stats": {
+      "total_items": {
+        "text": "All items available across all marketplace tabs.",
+        "docLink": "/marketplace"
+      },
+      "categories": {
+        "text": "Distinct categories of marketplace items.",
+        "docLink": "/marketplace"
+      },
+      "featured": {
+        "text": "Curated and highlighted items recommended for your workspace.",
+        "docLink": "/marketplace"
+      },
+      "total_installs": {
+        "text": "Items you've installed into your workspace. Installed items are copies — safe to customise.",
+        "docLink": "/marketplace"
+      }
+    },
+    "applications": {
+      "tool_count": {
+        "text": "Number of actions this app provides. E.g., GitHub has 50+ actions (create issue, review PR, search code).",
+        "docLink": "/marketplace/applications"
+      },
+      "added": {
+        "text": "This app is already connected to your workspace. Go to Tools to manage it.",
+        "docLink": "/tools"
+      }
+    },
+    "agents": {
+      "install": {
+        "text": "Install this agent into your workspace. It comes pre-configured with a tuned prompt, model recommendation, and skill set.",
+        "docLink": "/marketplace/agents"
+      }
+    },
+    "llms": {
+      "pricing": {
+        "text": "Cost per million tokens (input/output). Actual costs depend on usage — track them in Analytics → LLM & Costs.",
+        "docLink": "/analytics/llm-costs"
+      },
+      "context_window": {
+        "text": "Maximum token capacity for a single request. Larger windows handle more context but cost more.",
+        "docLink": "/marketplace/llms"
+      }
+    },
+    "capabilities": {
+      "plugins": {
+        "text": "Bundled packages containing skills, commands, and agent configurations. Install once to get everything.",
+        "docLink": "/marketplace/capabilities"
+      },
+      "skills": {
+        "text": "Individual capability modules loaded from git repositories. Give agents specific domain expertise.",
+        "docLink": "/marketplace/capabilities"
+      }
+    }
+  },
+
+  "team": {
+    "page": {
+      "title": "Team Management",
+      "description": "Manage workspace members and access control."
+    },
+    "invite": {
+      "text": "Send an email invitation to join this workspace. They'll sign in via Clerk and get a fresh workspace context.",
+      "docLink": "/team/inviting"
+    },
+    "role": {
+      "text": "Admin = full access including settings and team management. Member = create and use agents. Viewer = read-only.",
+      "docLink": "/team/roles"
+    },
+    "remove": {
+      "text": "Revoke this person's access to the workspace. Their data (chat history, reports) is retained.",
+      "docLink": "/team"
+    }
+  },
+
+  "analytics": {
+    "page": {
+      "title": "Analytics",
+      "description": "Performance metrics, cost tracking, and optimisation insights."
+    },
+    "overview": {
+      "success_rate": {
+        "text": "Percentage of tasks completed without errors. Target: >90%. Green = >90%, Yellow = 80-90%, Red = <80%.",
+        "docLink": "/analytics/overview"
+      },
+      "total_executions": {
+        "text": "Total agent tasks completed in the selected time period.",
+        "docLink": "/analytics/overview"
+      },
+      "avg_response_time": {
+        "text": "Mean time from request to response across all agents.",
+        "docLink": "/analytics/overview"
+      }
+    },
+    "agents": {
+      "utilization": {
+        "text": "How busy are your agents? 60-80% is optimal. Below 40% = underutilised, above 90% = overloaded.",
+        "docLink": "/analytics/agents"
+      }
+    },
+    "costs": {
+      "total_cost": {
+        "text": "Total LLM spend for the selected period across all providers and models.",
+        "docLink": "/analytics/llm-costs"
+      },
+      "total_tokens": {
+        "text": "Input + output tokens consumed. Input tokens are your prompts, output tokens are model responses.",
+        "docLink": "/analytics/llm-costs"
+      },
+      "cost_per_request": {
+        "text": "Average cost per API call. Varies by model — check the By Model breakdown to optimise.",
+        "docLink": "/analytics/llm-costs"
+      },
+      "top_spender": {
+        "text": "The agent or model consuming the most budget. Investigate if one agent dominates costs.",
+        "docLink": "/analytics/llm-costs"
+      },
+      "cost_projection": {
+        "text": "Projected monthly cost based on recent usage patterns. Estimate only — actual costs depend on usage changes.",
+        "docLink": "/analytics/llm-costs"
+      }
+    },
+    "tools": {
+      "error_rate": {
+        "text": "Percentage of failed tool calls. High rates usually mean an expired connection or rate limiting.",
+        "docLink": "/analytics/tools"
+      }
+    }
+  },
+
   "settings": {
     "page": {
-      "title": "Settings & Configuration",
-      "description": "Configure platform settings, manage credentials, and review security audit logs"
+      "title": "Settings",
+      "description": "System configuration, credentials, and audit logs."
     },
     "credentials": {
       "create": {
         "name": {
-          "text": "Descriptive name for this credential. Examples: 'Production OpenAI', 'Dev Database', 'Slack Engineering'",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#creating-a-credential"
-        },
-        "environment": {
-          "text": "Separate credentials by environment for safety. Use different credentials for Production vs Development.",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#creating-a-credential"
+          "text": "A label to identify this credential. E.g., 'Production OpenRouter', 'Dev Composio Key'.",
+          "docLink": "/settings/credentials"
         },
         "test_connection": {
-          "text": "Verify credential works before saving. Highly recommended to catch issues early!",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#creating-a-credential"
+          "text": "Verify the key is valid before saving. Catches typos and expired keys early.",
+          "docLink": "/settings/credentials"
         }
       },
       "types": {
-        "text": "Pre-configured credential schemas for every major service. Don't create from scratch - use these templates!",
-        "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#credential-types-tab"
+        "text": "Pre-configured credential schemas for each provider. Select the type, then paste your key.",
+        "docLink": "/settings/credentials"
       },
       "audit": {
-        "text": "Every credential access logged for compliance and security. SOC2, GDPR compliant audit trail.",
-        "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#audit-logs-tab"
+        "text": "Every credential access is logged. View who used what and when in the audit trail.",
+        "docLink": "/settings/audit-logs"
+      }
+    },
+    "models": {
+      "default_model": {
+        "text": "The fallback model used when an agent doesn't specify one. OpenRouter gives access to 100+ models through one key.",
+        "docLink": "/settings/models"
+      },
+      "embedding_model": {
+        "text": "Model used for document chunking and semantic search. Changing this requires re-processing all documents.",
+        "docLink": "/settings/models"
+      }
+    },
+    "general": {
+      "workspace_name": {
+        "text": "Display name for your workspace, shown to all team members.",
+        "docLink": "/settings/general"
+      },
+      "feature_flags": {
+        "text": "Toggle platform features on or off. E.g., agent memory, cloud sync, workspace execution.",
+        "docLink": "/settings/general"
       }
     },
     "system": {
       "orchestrator_llm": {
         "provider": {
-          "text": "LLM provider for orchestrator reasoning. Separate from agent models. Used for task decomposition and agent selection.",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#sub-tab-2-orchestrator-llm"
+          "text": "LLM provider for the orchestrator (separate from agent models). Used for routing and task decomposition.",
+          "docLink": "/settings/models"
         },
         "temperature": {
-          "text": "Orchestrator creativity. Lower = more consistent decomposition. Recommended: 0.3 for deterministic behavior.",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#sub-tab-2-orchestrator-llm"
-        },
-        "llm_driven": {
-          "text": "Orchestrator uses reasoning to select agents. Higher quality but slower. Disable for algorithmic fallback.",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#sub-tab-2-orchestrator-llm"
-        }
-      },
-      "codegraph": {
-        "max_file_size": {
-          "text": "Maximum file size to index (larger files skipped). Prevents indexing huge binary files. Recommended: 1MB",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#sub-tab-3-codegraph"
-        },
-        "exclude_patterns": {
-          "text": "Glob patterns to skip during indexing. Standard: node_modules, __pycache__, venv, .git",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#sub-tab-3-codegraph"
-        },
-        "auto_reindex": {
-          "text": "Automatically re-index on code changes (via webhooks). Enable for active projects, disable for archived.",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#sub-tab-3-codegraph"
+          "text": "Orchestrator creativity. Lower = more consistent routing. Recommended: 0.3.",
+          "docLink": "/settings/models"
         }
       },
       "rate_limiting": {
         "api_limit": {
-          "text": "Maximum API calls per minute (all users combined). Protects against overload. Default: 1,000 req/min",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#sub-tab-5-rate-limiting"
-        },
-        "workflow_limit": {
-          "text": "Maximum workflows created per hour. Prevents runaway automation. Default: 100/hour",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#sub-tab-5-rate-limiting"
-        },
-        "llm_limit": {
-          "text": "Limit to stay within provider tier limits and control costs. Based on your OpenAI/Anthropic tier.",
-          "docLink": "/docs/user-guides/USER_GUIDE_SETTINGS#sub-tab-5-rate-limiting"
+          "text": "Maximum API calls per minute across all users. Protects against overload. Default: 1,000 req/min.",
+          "docLink": "/settings/general"
         }
       }
     }
   },
-  
-  "analytics": {
-    "page": {
-      "title": "Performance Analytics",
-      "description": "Data-driven insights into platform performance and optimization opportunities"
-    },
-    "performance": {
-      "success_rate": {
-        "text": "Percentage of successful executions. Target: >90%. Green = >90%, Yellow = 80-90%, Red = <80%",
-        "docLink": "/docs/user-guides/USER_GUIDE_ANALYTICS#performance-dashboard"
-      },
-      "quality_score": {
-        "text": "Average quality rating of outputs. Range: 0.0-1.0. Target: >0.85. Based on multiple quality dimensions.",
-        "docLink": "/docs/user-guides/USER_GUIDE_ANALYTICS#performance-dashboard"
-      },
-      "response_time": {
-        "text": "Average time from task start to completion. Target: <5 seconds for most tasks.",
-        "docLink": "/docs/user-guides/USER_GUIDE_ANALYTICS#performance-dashboard"
-      }
-    },
-    "agent": {
-      "utilization": {
-        "text": "How busy are agents? 60-80% is optimal - agents working but not overloaded. <40% = underutilized, >90% = need more agents",
-        "docLink": "/docs/user-guides/USER_GUIDE_ANALYTICS#agent-analytics"
-      },
-      "efficiency": {
-        "text": "Combined metric: (Success Rate × Quality Score) / (Avg Time × Avg Cost). Stars: ⭐ (Poor) to ⭐⭐⭐⭐⭐ (Excellent)",
-        "docLink": "/docs/user-guides/USER_GUIDE_ANALYTICS#agent-analytics"
-      }
-    },
-    "cost": {
-      "total_spend": {
-        "text": "Total platform spend across all LLM providers. Includes OpenAI, Anthropic, and embeddings.",
-        "docLink": "/docs/user-guides/USER_GUIDE_ANALYTICS#cost-analytics"
-      },
-      "optimization": {
-        "text": "AI-powered cost optimization suggestions. Click 'Apply' to auto-apply safe optimizations.",
-        "docLink": "/docs/user-guides/USER_GUIDE_ANALYTICS#cost-optimization"
-      }
-    }
-  },
-  
-  "chatbot": {
-    "interface": {
-      "input": {
-        "text": "Type your question or message. Press Enter to send, Shift+Enter for new line. Ask naturally!",
-        "docLink": "/docs/user-guides/USER_GUIDE_CHATBOT#chat-interface"
-      },
-      "code_references": {
-        "text": "Code snippets from your indexed repositories. Click to see full file or copy code.",
-        "docLink": "/docs/user-guides/USER_GUIDE_CHATBOT#code-snippets"
-      },
-      "document_references": {
-        "text": "Documents referenced in response. Click to view full document or specific page.",
-        "docLink": "/docs/user-guides/USER_GUIDE_CHATBOT#document-references"
-      }
-    }
-  },
-  
-  "playbooks": {
-    "page": {
-      "title": "Playbooks",
-      "description": "Automatically discovered patterns from successful workflows. Reuse proven strategies with 1-click."
-    },
-    "discovery": {
-      "confidence": {
-        "text": "Statistical confidence in discovered pattern. Higher = more reliable. Based on consistency across multiple executions.",
-        "docLink": "/docs/user-guides/USER_GUIDE_PLAYBOOKS#discovered-playbooks"
-      },
-      "support": {
-        "text": "How many workflows match this pattern. Higher = more common pattern. Minimum: 5 for discovery.",
-        "docLink": "/docs/user-guides/USER_GUIDE_PLAYBOOKS#discovered-playbooks"
-      },
-      "mine_patterns": {
-        "text": "Analyze workflow history to discover new patterns. Uses FP-Growth algorithm. Runs automatically nightly or on-demand.",
-        "docLink": "/docs/user-guides/USER_GUIDE_PLAYBOOKS#mining-new-patterns"
-      }
-    },
-    "usage": {
-      "create_workflow": {
-        "text": "Create workflow from this playbook. Pre-configured with proven agent selections, tools, and settings.",
-        "docLink": "/docs/user-guides/USER_GUIDE_PLAYBOOKS#creating-workflows-from-playbooks"
-      }
-    }
-  },
-  
+
   "common": {
     "filters": {
       "time_range": {
-        "text": "Filter by date range to narrow results. Options: Last 24 hours, 7 days, 30 days, 90 days, or custom range.",
-        "docLink": "/docs/user-guides/USER_GUIDE.md"
+        "text": "Filter by date range. Options: 24 hours, 7 days, 30 days, or custom.",
+        "docLink": "/"
       },
       "search": {
-        "text": "Search by name, description, or tags. Case-insensitive, real-time filtering.",
-        "docLink": "/docs/user-guides/USER_GUIDE.md"
+        "text": "Search by name, description, or tags. Case-insensitive, updates in real-time.",
+        "docLink": "/"
       }
     },
     "actions": {
       "refresh": {
-        "text": "Reload data from server. Use if data seems stale. Most pages auto-refresh every 30-60 seconds.",
-        "docLink": "/docs/user-guides/USER_GUIDE.md"
+        "text": "Reload data from the server. Use if data seems stale.",
+        "docLink": "/"
       },
       "export": {
-        "text": "Export data to CSV, JSON, or PDF for external analysis or reporting.",
-        "docLink": "/docs/user-guides/USER_GUIDE.md"
-      }
-    },
-    "modals": {
-      "close": {
-        "text": "Close this modal. Press Esc key or click outside to close. Changes not saved unless you clicked Save.",
-        "docLink": "/docs/user-guides/USER_GUIDE.md"
+        "text": "Export data as CSV for external analysis or reporting.",
+        "docLink": "/"
       }
     }
   }
 }
-

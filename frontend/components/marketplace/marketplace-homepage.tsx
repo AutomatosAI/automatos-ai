@@ -107,12 +107,14 @@ export function MarketplaceHomepage() {
             value: stats.totalItems.toString(),
             icon: Store,
             iconColor: 'text-primary',
+            tooltipId: 'marketplace.stats.total_items',
           },
           {
             label: 'Categories',
             value: stats.categories.toString(),
             icon: Grid3X3,
             iconColor: 'text-[hsl(var(--info))]',
+            tooltipId: 'marketplace.stats.categories',
           },
           {
             label: 'Featured',
@@ -120,6 +122,7 @@ export function MarketplaceHomepage() {
             change: 'Curated',
             icon: TrendingUp,
             iconColor: 'text-[hsl(var(--warning))]',
+            tooltipId: 'marketplace.stats.featured',
           },
           {
             label: 'Total Installs',
@@ -128,6 +131,7 @@ export function MarketplaceHomepage() {
               : stats.totalInstalls.toString(),
             icon: Download,
             iconColor: 'text-[hsl(var(--success))]',
+            tooltipId: 'marketplace.stats.total_installs',
           },
         ] satisfies StatItem[]}
       />
