@@ -152,14 +152,24 @@ class Mem0Client:
         """
         url = f"{self.api_url}/memories/"
 
+        # OpenMemory API expects {"text": "...", "user_id": "..."}
+        # Convert messages list to a single text string
+        text_parts = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if content:
+                text_parts.append(f"{role}: {content}" if role != "user" else content)
+        text = "\n".join(text_parts)
+
         payload: Dict[str, Any] = {
-            "messages": messages,
+            "text": text,
             "user_id": user_id,
         }
         if metadata:
             payload["metadata"] = metadata
 
-        logger.debug("[Mem0] Adding memory for user_id=%s (messages=%d)", user_id, len(messages))
+        logger.debug("[Mem0] Adding memory for user_id=%s (text_len=%d)", user_id, len(text))
 
         resp = self._request("POST", url, json=payload)
         if resp is None:
@@ -201,7 +211,7 @@ class Mem0Client:
         payload = {
             "query": query,
             "user_id": user_id,
-            "limit": limit,
+            "top_k": limit,
         }
 
         logger.debug("[Mem0] Searching memories for user=%s query=%r", user_id, query)
