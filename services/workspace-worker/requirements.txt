@@ -14,3 +14,6 @@ python-dotenv>=1.0.0,<2.0.0
 # Database (task status updates)
 sqlalchemy>=2.0.0,<3.0.0
 psycopg2-binary>=2.9.0,<3.0.0
+
+# Observability
+prometheus_client>=0.20.0,<1.0.0

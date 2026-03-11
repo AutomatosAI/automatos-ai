@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Worker code
+# Worker code (includes automatos_logging.py + automatos_metrics.py for observability)
 COPY . .
 
 # Non-root user (created at build time; entrypoint drops to this user)
