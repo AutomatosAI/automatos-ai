@@ -1911,7 +1911,7 @@ class PlatformActionExecutor:
         # Resource counts
         agent_count = (
             self.db.query(func.count(Agent.id))
-            .filter(Agent.workspace_id == self.workspace_id, Agent.is_active == True)
+            .filter(Agent.workspace_id == self.workspace_id, Agent.status == "active")
             .scalar()
         ) or 0
         doc_count = (
