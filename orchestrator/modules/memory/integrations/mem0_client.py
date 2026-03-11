@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Circuit breaker settings
 _CB_FAILURE_THRESHOLD = 5      # Open circuit after 5 consecutive failures
 _CB_COOLDOWN_SECONDS = 60      # Stay open for 60 seconds before retrying
-_DEFAULT_TIMEOUT = 10           # Seconds (was 15 — tighter to fail faster)
+_DEFAULT_TIMEOUT = 15           # Seconds — Mem0 calls OpenAI for fact extraction, needs headroom
 _MAX_RETRIES = 1                # One retry with backoff
 
 
