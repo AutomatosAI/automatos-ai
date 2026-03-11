@@ -924,29 +924,6 @@ class StreamingChatService:
                 tools=use_tools
             )
 
-            # Emit warning if LLM fell back to a different model (dead primary)
-            if getattr(response, '_used_fallback', False):
-                failed_model = getattr(response, '_failed_model', 'unknown')
-                fallback_model = getattr(response, '_fallback_model', 'unknown')
-                logger.warning(
-                    "Chat response used fallback model '%s' (primary '%s' is dead). "
-                    "User should update Settings > Orchestrator.",
-                    fallback_model, failed_model,
-                )
-                yield self.streaming_handler.format_aisdk_data(
-                    "model-warning",
-                    {
-                        "message": (
-                            f"Your configured model ({failed_model}) is unavailable. "
-                            f"Using {fallback_model} as fallback. "
-                            f"Please update your model in Settings > Orchestrator."
-                        ),
-                        "failedModel": failed_model,
-                        "fallbackModel": fallback_model,
-                    },
-                )
-                await asyncio.sleep(0)
-
             # DEBUG: Log LLM response to understand why tools aren't being called
             logger.info(f"🔍 Agent LLM Response - has_tool_calls: {bool(response.tool_calls)}, content_length: {len(response.content or '')}, finish_reason: {getattr(response, 'finish_reason', 'unknown')}")
             if response.tool_calls:

@@ -140,36 +140,14 @@ class OpenAIProvider(BaseLLMProvider):
             try:
                 response = await loop.run_in_executor(None, _call)
             except Exception as e:
-                # Retry once on context-length errors by lowering max_tokens.
                 msg = str(e)
                 if "context_length_exceeded" in msg or "maximum context length" in msg:
-                    logger.warning(f"OpenAI context length exceeded; retrying with lower max_tokens. Error: {e}")
-                    def _retry_call():
-                        kwargs = {
-                            "model": self.config.model,
-                            "messages": messages,
-                            "temperature": self.config.temperature,
-                            "max_tokens": 512,
-                        }
-                        if tools:
-                            kwargs["tools"] = self._sanitize_tools(tools, keep_strict=True)
-                            # Check if tool results already exist
-                            has_tool_results = any(
-                                m.get("role") == "tool" for m in (messages or [])
-                            )
-                            if has_tool_results:
-                                kwargs["tool_choice"] = "auto"
-                            else:
-                                # Only force tool use when explicitly required
-                                force_tool_choice = any(
-                                    (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
-                                    for m in (messages or [])
-                                )
-                                kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
-                        return self.client.chat.completions.create(**kwargs)
-                    response = await loop.run_in_executor(None, _retry_call)
-                else:
-                    raise
+                    raise ValueError(
+                        f"Your model ({self.config.model}) does not have enough context "
+                        f"for this conversation. Please select a model with a larger "
+                        f"context window in Settings or start a new chat."
+                    ) from e
+                raise
             
             # PRD-17: Extract tool calls if present
             tool_calls = None
