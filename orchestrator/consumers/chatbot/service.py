@@ -900,13 +900,14 @@ class StreamingChatService:
             _guard = ContextGuard()
             _model_name = getattr(agent_runtime.llm_manager, 'config', None)
             _model_name = getattr(_model_name, 'model', config.LLM_MODEL) if _model_name else config.LLM_MODEL
-            llm_messages, _was_compacted = await _guard.check_and_compact(
+            llm_messages, _was_compacted, use_tools = await _guard.check_and_compact(
                 messages=llm_messages,
                 model_name=_model_name,
                 llm_manager=agent_runtime.llm_manager,
                 workspace_id=str(self.workspace_id) if self.workspace_id else None,
                 agent_id=agent_id,
                 db_session=self.db,
+                tools=use_tools,
             )
             if _was_compacted:
                 logger.info("[ContextGuard] Messages compacted before LLM call")
