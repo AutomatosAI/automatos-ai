@@ -116,6 +116,7 @@ export function ActivityReports({ period = '30d', agentId }: ActivityReportsProp
 
   useEffect(() => {
     setFilters((prev) => ({ ...prev, period, agent_id: agentId }))
+    setSelectedReportId(null)
   }, [period, agentId])
 
   const { data, isLoading } = useReports(filters)
