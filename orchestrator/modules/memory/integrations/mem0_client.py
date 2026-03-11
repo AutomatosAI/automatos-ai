@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Circuit breaker settings
 _CB_FAILURE_THRESHOLD = 5      # Open circuit after 5 consecutive failures
 _CB_COOLDOWN_SECONDS = 60      # Stay open for 60 seconds before retrying
-_DEFAULT_TIMEOUT = 10           # Seconds (was 15 — tighter to fail faster)
+_DEFAULT_TIMEOUT = 15           # Seconds — Mem0 calls OpenAI for fact extraction, needs headroom
 _MAX_RETRIES = 1                # One retry with backoff
 
 
@@ -85,6 +85,10 @@ class Mem0Client:
             self.api_url = f"https://{self.api_url}"
 
         self.api_url = self.api_url.rstrip("/")
+
+        # OpenMemory API mounts routes under /api/v1 prefix
+        if "/api/v1" not in self.api_url:
+            self.api_url = f"{self.api_url}/api/v1"
         self.headers = {}
         if self.api_key:
             self.headers["Authorization"] = f"Token {self.api_key}"
@@ -146,25 +150,26 @@ class Mem0Client:
         Returns:
             Response dict from server
         """
-        url = f"{self.api_url}/api/v1/memories/"
+        url = f"{self.api_url}/memories/"
 
-        # Convert messages to text format for OpenMemory API
+        # OpenMemory API expects {"text": "...", "user_id": "..."}
+        # Convert messages list to a single text string
         text_parts = []
         for msg in messages:
-            role = msg.get("role", "user").capitalize()
+            role = msg.get("role", "user")
             content = msg.get("content", "")
-            text_parts.append(f"{role}: {content}")
-        text_content = "\n".join(text_parts)
+            if content:
+                text_parts.append(f"{role}: {content}" if role != "user" else content)
+        text = "\n".join(text_parts)
 
-        payload = {
+        payload: Dict[str, Any] = {
+            "text": text,
             "user_id": user_id,
-            "text": text_content,
-            "infer": True,
         }
         if metadata:
             payload["metadata"] = metadata
 
-        logger.debug("[Mem0] Adding memory for user_id=%s (text_len=%d)", user_id, len(text_content))
+        logger.debug("[Mem0] Adding memory for user_id=%s (text_len=%d)", user_id, len(text))
 
         resp = self._request("POST", url, json=payload)
         if resp is None:
@@ -175,19 +180,19 @@ class Mem0Client:
             logger.error("[Mem0] Add failed: status=%s body=%s", resp.status_code, body_preview)
             return {"error": f"HTTP {resp.status_code}: {body_preview}"}
 
-        normalized = (resp.text or "").strip().lower()
-        if normalized == "" or normalized == "null":
-            logger.info(
-                "[Mem0] No facts extracted (status=%s) for user_id=%s — "
-                "LLM found nothing to remember from the input text.",
-                resp.status_code, user_id,
-            )
-            return {"success": True, "facts_extracted": 0}
-
+        # OpenMemory server returns 200 with null/empty body on success —
+        # processing happens server-side (OpenAI extraction + pgvector storage).
+        # A 200 means the memory was accepted and processed.
         try:
             result = resp.json()
-            return result if result else {"success": True}
         except Exception:
+            result = None
+
+        if result:
+            logger.info("[Mem0] Memory stored for user_id=%s: %s", user_id, str(result)[:200])
+            return result
+        else:
+            logger.info("[Mem0] Memory accepted (status=%s) for user_id=%s", resp.status_code, user_id)
             return {"success": True}
 
     def search(self, query: str, user_id: str, limit: int = 5) -> List[Dict]:
@@ -202,11 +207,12 @@ class Mem0Client:
         Returns:
             List of memory items
         """
-        url = f"{self.api_url}/api/v1/memories/search/"
+        # OpenMemory API uses /memories/filter for searching
+        url = f"{self.api_url}/memories/filter"
         payload = {
-            "query": query,
             "user_id": user_id,
-            "limit": limit,
+            "search_query": query,
+            "size": limit,
         }
 
         logger.debug("[Mem0] Searching memories for user=%s query=%r", user_id, query)
@@ -264,7 +270,7 @@ class Mem0Client:
 
     def get_all(self, user_id: str, limit: int = 100) -> List[Dict]:
         """Get all memories for a user."""
-        url = f"{self.api_url}/api/v1/memories/"
+        url = f"{self.api_url}/memories/"
         params = {"user_id": user_id}
 
         resp = self._request("GET", url, params=params)
@@ -294,7 +300,7 @@ class Mem0Client:
 
     def delete(self, memory_id: str) -> bool:
         """Delete a specific memory."""
-        url = f"{self.api_url}/api/v1/memories/{memory_id}"
+        url = f"{self.api_url}/memories/{memory_id}/"
 
         resp = self._request("DELETE", url)
         if resp is None:

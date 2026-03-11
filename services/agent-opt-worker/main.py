@@ -29,10 +29,15 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("futureagi-worker")
+from automatos_logging import setup_logging
+from automatos_metrics import add_fastapi_metrics
+setup_logging(service="agent-opt-worker")
+logger = logging.getLogger("agent-opt-worker")
 
 app = FastAPI(title="FutureAGI Worker", version="3.0.0")
+
+# Prometheus metrics endpoint + request tracking
+add_fastapi_metrics(app, service="agent-opt-worker")
 
 # ---------------------------------------------------------------------------
 # Shared helpers

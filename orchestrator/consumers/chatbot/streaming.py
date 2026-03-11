@@ -5,7 +5,7 @@ Streaming Handler - SSE Response Formatting
 Handles:
 - Formatting SSE chunks for legacy format
 - Formatting AI SDK Data Stream format
-- Chunking text for smooth streaming
+- Word-boundary-aware chunking for smooth streaming
 - Widget-related SSE events (memory, workflow)
 """
 
@@ -23,11 +23,11 @@ class StreamingHandler:
     Handles SSE formatting for chat responses.
     Supports both legacy SSE format and AI SDK Data Stream format.
     """
-    
+
     # ==========================================================================
     # LEGACY SSE FORMAT (data: {json}\n\n)
     # ==========================================================================
-    
+
     def format_sse_chunk(self, chunk: Dict[str, Any]) -> str:
         """Format chunk as SSE data (legacy format)."""
         if chunk.get('type') == 'text':
@@ -54,33 +54,33 @@ class StreamingHandler:
             }
         else:
             data = chunk
-        
+
         return f"data: {json.dumps(data)}\n\n"
-    
+
     def format_sse_tool_data(self, tool_data: Dict[str, Any]) -> str:
         """Format tool data for SSE."""
         return f"data: {json.dumps({'type': 'tool-data', 'data': tool_data})}\n\n"
-    
+
     def format_sse_text_start(self, message_id: str) -> str:
         """Format text-start event."""
         return f"data: {json.dumps({'type': 'text-start', 'id': message_id})}\n\n"
-    
+
     def format_sse_text_delta(self, message_id: str, delta: str) -> str:
         """Format text-delta event."""
         return f"data: {json.dumps({'type': 'text-delta', 'id': message_id, 'delta': delta})}\n\n"
-    
+
     def format_sse_text_end(self, message_id: str) -> str:
         """Format text-end event."""
         return f"data: {json.dumps({'type': 'text-end', 'id': message_id})}\n\n"
-    
+
     def format_sse_done(self) -> str:
         """Format done event."""
         return f"data: {json.dumps({'type': 'done'})}\n\n"
-    
+
     def format_sse_error(self, error: str) -> str:
         """Format error event."""
         return f"data: {json.dumps({'type': 'error', 'error': error})}\n\n"
-    
+
     async def stream_text_legacy(
         self,
         text: str,
@@ -88,36 +88,36 @@ class StreamingHandler:
     ) -> AsyncGenerator[str, None]:
         """Stream text word-by-word in legacy SSE format."""
         message_id = message_id or str(uuid.uuid4())
-        
+
         yield self.format_sse_text_start(message_id)
-        
+
         words = text.split(' ')
         for i, word in enumerate(words):
             chunk_text = word + (' ' if i < len(words) - 1 else '')
             yield self.format_sse_text_delta(message_id, chunk_text)
-        
+
         yield self.format_sse_text_end(message_id)
-    
+
     # ==========================================================================
     # AI SDK DATA STREAM FORMAT (0:"text"\n, d:{json}\n, e:{json}\n)
     # ==========================================================================
-    
+
     def format_aisdk_text(self, text: str) -> str:
         """Format text chunk for AI SDK Data Stream."""
         escaped = json.dumps(text)
         return f'0:{escaped}\n'
-    
+
     def format_aisdk_data(self, event_type: str, data: Dict[str, Any] = None) -> str:
         """Format data event for AI SDK Data Stream."""
         payload = {"type": event_type}
         if data:
             payload["data"] = data
         return f'd:{json.dumps(payload)}\n'
-    
+
     def format_aisdk_chat_id(self, chat_id: str) -> str:
         """Format chat-id data event."""
         return f'd:{{"type":"chat-id","chatId":"{chat_id}"}}\n'
-    
+
     def format_aisdk_tool_data(self, tool_data: Dict[str, Any]) -> str:
         """Format tool-data event for AI SDK."""
         return f'd:{{"type":"tool-data","data":{json.dumps(tool_data)}}}\n'
@@ -157,7 +157,7 @@ class StreamingHandler:
         if duration_ms is not None:
             payload["durationMs"] = int(duration_ms)
         return self.format_aisdk_data("tool-end", payload)
-    
+
     def format_aisdk_usage(self, prompt_tokens: int, completion_tokens: int, total_tokens: int) -> str:
         """Format usage data event."""
         usage_data = {
@@ -166,15 +166,15 @@ class StreamingHandler:
             "totalTokens": total_tokens
         }
         return f'd:{{"type":"usage","data":{json.dumps(usage_data)}}}\n'
-    
+
     def format_aisdk_finish(self, reason: str = "stop") -> str:
         """Format finish event."""
         return f'd:{{"type":"finish","finishReason":"{reason}"}}\n'
-    
+
     def format_aisdk_error(self, error: str) -> str:
         """Format error event for AI SDK."""
         return f'e:{json.dumps({"message": error})}\n'
-    
+
     # ==========================================================================
     # WIDGET SSE EVENTS (US-015)
     # ==========================================================================
@@ -184,16 +184,7 @@ class StreamingHandler:
         memories: List[Dict[str, Any]],
         total_matched: int,
     ) -> str:
-        """
-        Format memory-injected event for AI SDK Data Stream.
-
-        Emitted when memories are retrieved and injected into the LLM context
-        so the frontend can display them in a memory widget.
-
-        Args:
-            memories: List of memory objects that were injected.
-            total_matched: Total number of memories matched before truncation.
-        """
+        """Format memory-injected event for AI SDK Data Stream."""
         return self.format_aisdk_data(
             "memory-injected",
             {
@@ -207,16 +198,7 @@ class StreamingHandler:
         memory: Dict[str, Any],
         reason: str,
     ) -> str:
-        """
-        Format memory-stored event for AI SDK Data Stream.
-
-        Emitted after a conversation exchange is persisted to memory
-        so the frontend can update a memory widget in real time.
-
-        Args:
-            memory: The memory object that was stored.
-            reason: Why this memory was stored (e.g. "conversation", "user-fact").
-        """
+        """Format memory-stored event for AI SDK Data Stream."""
         return self.format_aisdk_data(
             "memory-stored",
             {
@@ -232,18 +214,7 @@ class StreamingHandler:
         current_step: Optional[str] = None,
         progress: Optional[float] = None,
     ) -> str:
-        """
-        Format workflow-update event for AI SDK Data Stream.
-
-        Emitted when a workflow execution changes state so the frontend
-        can render a live workflow progress widget.
-
-        Args:
-            workflow_id: The workflow execution or definition ID.
-            status: Current status (e.g. "running", "completed", "failed").
-            current_step: Name/description of the step currently executing.
-            progress: Completion ratio 0.0 - 1.0 (optional).
-        """
+        """Format workflow-update event for AI SDK Data Stream."""
         payload: Dict[str, Any] = {
             "workflowId": workflow_id,
             "status": status,
@@ -260,19 +231,68 @@ class StreamingHandler:
         chunk_size: int = 10
     ) -> AsyncGenerator[str, None]:
         """
-        Stream text in AI SDK format with smooth chunking.
+        Stream text in AI SDK format with smooth word-boundary-aware chunking.
 
-        Images are now stored in S3 and referenced by small URLs,
-        so no special base64 handling is needed.
+        Produces natural typewriter output by grouping 3-8 words per chunk
+        with variable pacing: shorter delays for common words, tiny pauses
+        at sentence boundaries for natural reading rhythm.
 
         Args:
             text: Full text to stream
-            chunk_size: Characters per chunk
+            chunk_size: Ignored (kept for backward compat). Word-based chunking is used instead.
         """
-        for i in range(0, len(text), chunk_size):
-            chunk = text[i:i + chunk_size]
-            yield self.format_aisdk_text(chunk)
-            await asyncio.sleep(0.01)
+        if not text:
+            return
+
+        # Split into words preserving whitespace boundaries
+        words = text.split(' ')
+        if not words:
+            return
+
+        # Sentence-ending punctuation for rhythm pauses
+        _SENTENCE_END = {'.', '!', '?'}
+
+        # Target 3-8 words per chunk for natural feel
+        _MIN_WORDS = 3
+        _MAX_WORDS = 8
+
+        idx = 0
+        total = len(words)
+
+        while idx < total:
+            # Determine chunk size: 3-8 words
+            # Use shorter chunks near sentence boundaries for rhythm
+            chunk_words = []
+            words_in_chunk = 0
+
+            while idx < total and words_in_chunk < _MAX_WORDS:
+                word = words[idx]
+                chunk_words.append(word)
+                words_in_chunk += 1
+                idx += 1
+
+                # Break at sentence boundaries once we have minimum words
+                if words_in_chunk >= _MIN_WORDS and word and word[-1] in _SENTENCE_END:
+                    break
+
+            # Reconstruct chunk text with spaces
+            chunk_text = ' '.join(chunk_words)
+            # Add trailing space unless this is the last chunk
+            if idx < total:
+                chunk_text += ' '
+
+            yield self.format_aisdk_text(chunk_text)
+
+            # Variable delay for natural pacing
+            if chunk_words and chunk_words[-1] and chunk_words[-1][-1] in _SENTENCE_END:
+                # Sentence boundary: slightly longer pause
+                await asyncio.sleep(0.025)
+            elif words_in_chunk <= 3:
+                # Short chunk: minimal delay
+                await asyncio.sleep(0.008)
+            else:
+                # Normal chunk
+                await asyncio.sleep(0.012)
 
 
 # Module-level instance
@@ -284,4 +304,3 @@ def get_streaming_handler() -> StreamingHandler:
     if _streaming_handler is None:
         _streaming_handler = StreamingHandler()
     return _streaming_handler
-

@@ -35,10 +35,8 @@ from uuid import UUID
 # Add orchestrator to path so we can import shared code
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "orchestrator"))
 
-logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO"),
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
+from automatos_logging import setup_logging
+setup_logging(service="workspace-worker")
 logger = logging.getLogger("workspace-worker")
 
 # Redis key patterns (must match queued.py)
@@ -511,7 +509,12 @@ class WorkspaceWorker:
                     return web.json_response({"error": "Unauthorized"}, status=401)
             return await handler(request)
 
+        from automatos_metrics import add_aiohttp_metrics
+
         app = web.Application(middlewares=[internal_auth_middleware])
+
+        # Prometheus metrics endpoint + request tracking
+        add_aiohttp_metrics(app, service="workspace-worker")
 
         async def health_handler(request):
             return web.json_response({

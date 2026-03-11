@@ -505,11 +505,31 @@ class HeartbeatService:
                     tool_results_msgs.append({
                         "role": "tool",
                         "tool_call_id": tc_id,
-                        "content": json.dumps(tool_result, default=str)[:4000],
+                        "content": json.dumps(tool_result, default=str)[:2000],
                     })
 
                 messages.append(assistant_msg)
                 messages.extend(tool_results_msgs)
+
+                # Trim older tool exchanges if context is growing too large.
+                # IMPORTANT: Trim at exchange boundaries — each exchange is
+                # an assistant msg (with tool_calls) followed by N tool result msgs.
+                # Slicing arbitrarily orphans tool results from their assistant msg.
+                if len(messages) > 10:
+                    preamble = messages[:2]  # system + user
+                    exchanges = messages[2:]  # assistant+tool groups
+
+                    # Walk backwards to find complete exchange boundaries
+                    # Each exchange starts with role=assistant
+                    exchange_starts = [
+                        i for i, m in enumerate(exchanges)
+                        if m.get("role") == "assistant"
+                    ]
+
+                    # Keep last 2 complete exchanges
+                    if len(exchange_starts) > 2:
+                        keep_from = exchange_starts[-2]
+                        messages = preamble + exchanges[keep_from:]
             else:
                 # Max iterations reached
                 result["findings"].append(

@@ -78,6 +78,13 @@ def count_message_tokens(messages: List[Dict[str, Any]]) -> int:
     return total
 
 
+def count_tool_tokens(tools: Optional[List[Dict[str, Any]]]) -> int:
+    """Estimate tokens consumed by the tools/functions parameter."""
+    if not tools:
+        return 0
+    return count_tokens(json.dumps(tools))
+
+
 # ---------------------------------------------------------------------------
 # Model context window lookup
 # ---------------------------------------------------------------------------
@@ -191,9 +198,10 @@ class ContextGuard:
         workspace_id: Optional[str] = None,
         agent_id: Optional[int] = None,
         db_session=None,
-    ) -> Tuple[List[Dict[str, Any]], bool]:
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[List[Dict[str, Any]], bool, Optional[List[Dict[str, Any]]]]:
         """
-        Check if messages fit within context window; compact if needed.
+        Check if messages + tools fit within context window; compact if needed.
 
         Args:
             messages: LLM-formatted messages (system + user/assistant/tool)
@@ -202,27 +210,40 @@ class ContextGuard:
             workspace_id: For memory flush
             agent_id: For memory flush
             db_session: Optional DB session for model registry lookup
+            tools: Optional list of tool schemas (counted toward context budget)
 
         Returns:
-            (messages, was_compacted) — possibly shortened message list
+            (messages, was_compacted, tools) — tools may be None if they don't fit
         """
         context_window = get_context_window(model_name, db_session)
+        tool_tokens = count_tool_tokens(tools)
         current_tokens = count_message_tokens(messages)
+        total_tokens = current_tokens + tool_tokens
         threshold = int(context_window * COMPACT_THRESHOLD)
 
         logger.debug(
-            "[ContextGuard] tokens=%d / %d (%.0f%% of %d window)",
-            current_tokens, threshold,
-            (current_tokens / context_window) * 100, context_window,
+            "[ContextGuard] tokens=%d (msgs=%d tools=%d) / %d (%.0f%% of %d window)",
+            total_tokens, current_tokens, tool_tokens, threshold,
+            (total_tokens / context_window) * 100, context_window,
         )
 
-        if current_tokens <= threshold:
-            return messages, False
+        # If tools alone exceed 60% of context, drop them entirely
+        if tools and tool_tokens > int(context_window * 0.6):
+            logger.warning(
+                "[ContextGuard] Tools alone use %d tokens (%.0f%% of %d context) — "
+                "dropping tools to fit within context window",
+                tool_tokens, (tool_tokens / context_window) * 100, context_window,
+            )
+            tools = None
+            total_tokens = current_tokens
+
+        if total_tokens <= threshold:
+            return messages, False, tools
 
         logger.info(
             "[ContextGuard] Context at %d/%d tokens (%.0f%%) — compacting",
-            current_tokens, context_window,
-            (current_tokens / context_window) * 100,
+            total_tokens, context_window,
+            (total_tokens / context_window) * 100,
         )
 
         compacted = await self._compact(
@@ -238,7 +259,7 @@ class ContextGuard:
             current_tokens, new_tokens, current_tokens - new_tokens,
         )
 
-        return compacted, True
+        return compacted, True, tools
 
     async def _compact(
         self,

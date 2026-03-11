@@ -1630,6 +1630,11 @@ class PlatformActionExecutor:
                 "formatted": "\n".join(formatted_lines),
             }
         except Exception as exc:
+            # Recover the DB session so subsequent queries don't cascade-fail
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
             # Table might not exist yet
             if "infrastructure_alerts" in str(exc) and ("does not exist" in str(exc) or "UndefinedTable" in str(exc)):
                 return {
@@ -1911,7 +1916,7 @@ class PlatformActionExecutor:
         # Resource counts
         agent_count = (
             self.db.query(func.count(Agent.id))
-            .filter(Agent.workspace_id == self.workspace_id, Agent.is_active == True)
+            .filter(Agent.workspace_id == self.workspace_id, Agent.status == "active")
             .scalar()
         ) or 0
         doc_count = (
@@ -2360,7 +2365,7 @@ class PlatformActionExecutor:
                     if config.MEM0_API_KEY:
                         headers["Authorization"] = f"Bearer {config.MEM0_API_KEY}"
                     await client.delete(
-                        f"{mem0_url}/v1/memories/",
+                        f"{mem0_url}/api/v1/memories/",
                         params={"user_id": f"recipe-{recipe.id}"},
                         headers=headers,
                     )

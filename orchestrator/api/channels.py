@@ -323,10 +323,10 @@ async def get_channel_analytics(
         # Messages by source from routing_decisions
         by_source = db.execute(
             text("""
-                SELECT source_channel, COUNT(*) as count
+                SELECT source, COUNT(*) as count
                 FROM routing_decisions
                 WHERE workspace_id = :ws_id AND created_at >= :start
-                GROUP BY source_channel
+                GROUP BY source
             """),
             {"ws_id": ws_id, "start": today_start},
         ).fetchall()
@@ -343,7 +343,7 @@ async def get_channel_analytics(
         ).fetchall()
 
         return {
-            "today_by_source": {r.source_channel: r.count for r in by_source} if by_source else {},
+            "today_by_source": {r.source: r.count for r in by_source} if by_source else {},
             "channels": [
                 {
                     "platform": r.platform,

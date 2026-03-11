@@ -450,7 +450,7 @@ async def create_workflow_recipe(
             preview_image=recipe_data.get('preview_image'),
             documentation_url=recipe_data.get('documentation_url'),
             version=recipe_data.get('version', '1.0'),
-            created_by=recipe_data.get('created_by', ctx.user.email if ctx.user else "anonymous")
+            created_by=recipe_data.get('created_by', ctx.user.email if ctx.user and ctx.user.email else "anonymous")
         )
 
         # Validate steps structure
