@@ -30,6 +30,7 @@ import {
   Play,
   Volume2,
 } from 'lucide-react'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -1570,7 +1571,7 @@ export function AgentConfigurationModal({
                       {/* Temperature */}
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                          <Label htmlFor="temperature">Temperature</Label>
+                          <Label htmlFor="temperature" className="flex items-center gap-1">Temperature <InlineHelp id="agents.config.model.temperature" size="sm" /></Label>
                           <span className="text-sm text-muted-foreground">
                             {formData.model_config?.temperature?.toFixed(2) || '0.70'}
                           </span>
@@ -1592,7 +1593,7 @@ export function AgentConfigurationModal({
                       {/* Max Tokens */}
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                          <Label htmlFor="max-tokens">Max Output Tokens</Label>
+                          <Label htmlFor="max-tokens" className="flex items-center gap-1">Max Output Tokens <InlineHelp id="agents.config.model.max_tokens" size="sm" /></Label>
                           <span className="text-sm text-muted-foreground">
                             {formData.model_config?.max_tokens || 2000}
                           </span>
@@ -1618,7 +1619,7 @@ export function AgentConfigurationModal({
                         {/* Top P */}
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
-                            <Label htmlFor="top-p" className="text-xs">Top P (Nucleus Sampling)</Label>
+                            <Label htmlFor="top-p" className="text-xs flex items-center gap-1">Top P (Nucleus Sampling) <InlineHelp id="agents.config.model.top_p" size="sm" /></Label>
                             <span className="text-xs text-muted-foreground">
                               {formData.model_config?.top_p?.toFixed(2) || '1.00'}
                             </span>
@@ -1637,7 +1638,7 @@ export function AgentConfigurationModal({
                         {/* Frequency Penalty */}
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
-                            <Label htmlFor="frequency-penalty" className="text-xs">Frequency Penalty</Label>
+                            <Label htmlFor="frequency-penalty" className="text-xs flex items-center gap-1">Frequency Penalty <InlineHelp id="agents.config.model.frequency_penalty" size="sm" /></Label>
                             <span className="text-xs text-muted-foreground">
                               {formData.model_config?.frequency_penalty?.toFixed(2) || '0.00'}
                             </span>
@@ -1656,7 +1657,7 @@ export function AgentConfigurationModal({
                         {/* Presence Penalty */}
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
-                            <Label htmlFor="presence-penalty" className="text-xs">Presence Penalty</Label>
+                            <Label htmlFor="presence-penalty" className="text-xs flex items-center gap-1">Presence Penalty <InlineHelp id="agents.config.model.presence_penalty" size="sm" /></Label>
                             <span className="text-xs text-muted-foreground">
                               {formData.model_config?.presence_penalty?.toFixed(2) || '0.00'}
                             </span>
@@ -1675,7 +1676,7 @@ export function AgentConfigurationModal({
 
                       {/* Fallback Model */}
                       <div className="space-y-2">
-                        <Label htmlFor="fallback-model">Fallback Model (Optional)</Label>
+                        <Label htmlFor="fallback-model" className="flex items-center gap-1">Fallback Model (Optional) <InlineHelp id="agents.config.model.fallback_model" size="sm" /></Label>
                         <Select
                           value={formData.model_config?.fallback_model_id || 'none'}
                           onValueChange={(value) => updateModelConfig('fallback_model_id', value === 'none' ? null : value)}
@@ -1713,7 +1714,7 @@ export function AgentConfigurationModal({
                       {/* Enable Heartbeat */}
                       <div className="flex items-center justify-between">
                         <div>
-                          <Label>Enable Heartbeat</Label>
+                          <Label className="flex items-center gap-1">Enable Heartbeat <InlineHelp id="agents.config.heartbeat.enable" size="sm" /></Label>
                           <p className="text-xs text-muted-foreground">Agent will periodically wake up and check its environment</p>
                         </div>
                         <Switch
@@ -1726,7 +1727,7 @@ export function AgentConfigurationModal({
                         <>
                           {/* Interval */}
                           <div className="space-y-2">
-                            <Label>Interval</Label>
+                            <Label className="flex items-center gap-1">Interval <InlineHelp id="agents.config.heartbeat.interval" size="sm" /></Label>
                             <Select
                               value={String(heartbeatConfig.interval_minutes)}
                               onValueChange={(v) => setHeartbeatConfig(prev => ({ ...prev, interval_minutes: Number(v) }))}
@@ -1748,7 +1749,7 @@ export function AgentConfigurationModal({
                           {/* Active Hours */}
                           <div className="space-y-3">
                             <div className="flex items-center justify-between">
-                              <Label>Active Hours</Label>
+                              <Label className="flex items-center gap-1">Active Hours <InlineHelp id="agents.config.heartbeat.active_hours" size="sm" /></Label>
                               <div className="flex items-center gap-2">
                                 <Checkbox
                                   id="inherit-hours"
@@ -1782,7 +1783,7 @@ export function AgentConfigurationModal({
 
                           {/* Heartbeat Prompt */}
                           <div className="space-y-2">
-                            <Label>Heartbeat Prompt</Label>
+                            <Label className="flex items-center gap-1">Heartbeat Prompt <InlineHelp id="agents.config.heartbeat.prompt" size="sm" /></Label>
                             <Textarea
                               value={heartbeatConfig.prompt}
                               onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, prompt: e.target.value }))}
@@ -1794,7 +1795,7 @@ export function AgentConfigurationModal({
                           {/* Auto-Act */}
                           <div className="flex items-center justify-between">
                             <div>
-                              <Label>Auto-Act on Findings</Label>
+                              <Label className="flex items-center gap-1">Auto-Act on Findings <InlineHelp id="agents.config.heartbeat.auto_act" size="sm" /></Label>
                               <p className="text-xs text-muted-foreground">Agent can take action based on heartbeat results</p>
                             </div>
                             <Switch
@@ -1805,7 +1806,7 @@ export function AgentConfigurationModal({
 
                           {/* Report To */}
                           <div className="space-y-2">
-                            <Label>Report To</Label>
+                            <Label className="flex items-center gap-1">Report To <InlineHelp id="agents.config.heartbeat.report_to" size="sm" /></Label>
                             <Select
                               value={heartbeatConfig.report_to}
                               onValueChange={(v) => setHeartbeatConfig(prev => ({ ...prev, report_to: v }))}

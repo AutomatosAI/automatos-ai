@@ -384,7 +384,7 @@ export function DocumentManagement() {
         change: `+${Math.max(0, totalDocs - 2)} this month`,
         icon: FileText,
         iconColor: 'text-[hsl(var(--info))]',
-        tooltipId: 'knowledge.library.stats.total_documents',
+
       },
       {
         label: 'Processed',
@@ -392,7 +392,7 @@ export function DocumentManagement() {
         change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
         icon: Database,
         iconColor: 'text-[hsl(var(--success))]',
-        tooltipId: 'knowledge.library.stats.processed',
+
       },
       {
         label: 'Storage Used',
@@ -400,7 +400,7 @@ export function DocumentManagement() {
         change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
         icon: FolderOpen,
         iconColor: 'text-primary',
-        tooltipId: 'knowledge.library.stats.storage_used',
+
       },
       {
         label: 'Vector Chunks',
@@ -408,7 +408,7 @@ export function DocumentManagement() {
         change: '',
         icon: Database,
         iconColor: 'text-[hsl(var(--agent))]',
-        tooltipId: 'knowledge.library.stats.vector_chunks',
+
       }
     ]
   }, [typedDocuments])

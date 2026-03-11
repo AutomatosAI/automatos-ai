@@ -21,6 +21,7 @@ import {
   Terminal,
   Coins
 } from 'lucide-react'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -1095,7 +1096,7 @@ export function AgentConfiguration({
           {/* Temperature */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label>Temperature</Label>
+              <Label className="flex items-center gap-1">Temperature <InlineHelp id="agents.config.model.temperature" size="sm" /></Label>
               <span className="text-sm text-muted-foreground">
                 {modelConfigData?.temperature?.toFixed(2) || '0.70'}
               </span>
@@ -1116,7 +1117,7 @@ export function AgentConfiguration({
           {/* Max Tokens */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label>Max Output Tokens</Label>
+              <Label className="flex items-center gap-1">Max Output Tokens <InlineHelp id="agents.config.model.max_tokens" size="sm" /></Label>
               <span className="text-sm text-muted-foreground">
                 {modelConfigData?.max_tokens || 2000}
               </span>
@@ -1141,7 +1142,7 @@ export function AgentConfiguration({
             {/* Top P */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Top P (Nucleus Sampling)</Label>
+                <Label className="flex items-center gap-1">Top P (Nucleus Sampling) <InlineHelp id="agents.config.model.top_p" size="sm" /></Label>
                 <span className="text-sm text-muted-foreground">
                   {modelConfigData?.top_p?.toFixed(2) || '1.00'}
                 </span>
@@ -1159,7 +1160,7 @@ export function AgentConfiguration({
             {/* Frequency Penalty */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Frequency Penalty</Label>
+                <Label className="flex items-center gap-1">Frequency Penalty <InlineHelp id="agents.config.model.frequency_penalty" size="sm" /></Label>
                 <span className="text-sm text-muted-foreground">
                   {modelConfigData?.frequency_penalty?.toFixed(2) || '0.00'}
                 </span>
@@ -1177,7 +1178,7 @@ export function AgentConfiguration({
             {/* Presence Penalty */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Presence Penalty</Label>
+                <Label className="flex items-center gap-1">Presence Penalty <InlineHelp id="agents.config.model.presence_penalty" size="sm" /></Label>
                 <span className="text-sm text-muted-foreground">
                   {modelConfigData?.presence_penalty?.toFixed(2) || '0.00'}
                 </span>

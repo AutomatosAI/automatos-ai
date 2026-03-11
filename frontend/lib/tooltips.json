@@ -141,6 +141,67 @@
         "docLink": "/agents/details"
       }
     },
+    "config": {
+      "model": {
+        "temperature": {
+          "text": "Controls how random or creative the agent's responses are. 0 = always picks the most likely word (deterministic, good for code and data). 1+ = more varied and creative (good for writing and brainstorming). Most agents work well at 0.5-0.7.",
+          "docLink": "/agents/configuration",
+          "example": "Code review → 0.2 | Marketing copy → 0.9 | General assistant → 0.7"
+        },
+        "max_tokens": {
+          "text": "The maximum number of tokens (roughly words) the agent can generate in a single response. Higher values allow longer answers but cost more. 1 token ≈ 0.75 words.",
+          "docLink": "/agents/configuration",
+          "example": "Quick answers → 500 | Detailed reports → 3000 | Code generation → 4000"
+        },
+        "top_p": {
+          "text": "Nucleus sampling — limits the model to choosing from the top P% most likely tokens. Lower values make output more focused. Usually leave at 1.0 unless you need very constrained output. Adjusting both temperature and Top P at once can produce unpredictable results.",
+          "docLink": "/agents/configuration",
+          "example": "0.1 = very narrow (only top 10% of tokens) | 1.0 = full vocabulary"
+        },
+        "frequency_penalty": {
+          "text": "Penalises tokens that have already appeared in the response, reducing word-for-word repetition. Higher values make the agent avoid repeating the same phrases. 0 = no penalty, 2 = strong penalty.",
+          "docLink": "/agents/configuration",
+          "example": "0.0 = allow repetition | 0.5 = mild variety | 1.5 = strongly avoid repeating words"
+        },
+        "presence_penalty": {
+          "text": "Encourages the agent to talk about new topics rather than staying on the same subject. Unlike frequency penalty, this applies equally whether a token appeared once or many times. Higher values push for more diverse content.",
+          "docLink": "/agents/configuration",
+          "example": "0.0 = stay focused | 0.6 = balanced | 1.5 = explore many topics"
+        },
+        "fallback_model": {
+          "text": "A backup model that kicks in if the primary model is unavailable, rate-limited, or returns an error. Useful for reliability — pick a cheaper, faster model as fallback.",
+          "docLink": "/agents/configuration"
+        }
+      },
+      "heartbeat": {
+        "enable": {
+          "text": "Heartbeats let your agent wake up on a schedule and autonomously check its environment — monitor inboxes, review dashboards, scan for changes. Think of it as a cron job for your AI agent.",
+          "docLink": "/agents/heartbeat"
+        },
+        "interval": {
+          "text": "How often the agent wakes up and runs its heartbeat task. Shorter intervals catch issues faster but use more tokens. Start with hourly and adjust based on need.",
+          "docLink": "/agents/heartbeat",
+          "example": "Monitoring bot → 15 min | Daily digest → 1440 min (daily)"
+        },
+        "active_hours": {
+          "text": "Restrict heartbeats to specific hours. Useful to avoid unnecessary runs overnight. 'Inherit from orchestrator' uses your workspace's global active hours setting.",
+          "docLink": "/agents/heartbeat"
+        },
+        "prompt": {
+          "text": "Instructions the agent follows during each heartbeat. Be specific about what to check, what actions to take, and what to report back. This is the agent's autonomous task definition.",
+          "docLink": "/agents/heartbeat",
+          "example": "Check the GitHub repo for new PRs, summarise changes, and flag any security concerns."
+        },
+        "auto_act": {
+          "text": "When enabled, the agent can take action based on what it finds (e.g., send a Slack message, create an issue). When disabled, it only observes and reports — safer for new setups.",
+          "docLink": "/agents/heartbeat"
+        },
+        "report_to": {
+          "text": "Where heartbeat results are delivered. 'Orchestrator' stores in the database (visible in Activity → Reports). 'Direct' shows in chat. Channel options send to your connected integrations.",
+          "docLink": "/agents/heartbeat"
+        }
+      }
+    },
     "configuration": {
       "edit_button": {
         "text": "Modify this agent's model, prompt, persona, or tool assignments. Changes take effect immediately.",
