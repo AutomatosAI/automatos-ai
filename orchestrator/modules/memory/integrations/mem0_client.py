@@ -207,11 +207,12 @@ class Mem0Client:
         Returns:
             List of memory items
         """
-        url = f"{self.api_url}/memories/search/"
+        # OpenMemory API uses /memories/filter for searching
+        url = f"{self.api_url}/memories/filter"
         payload = {
-            "query": query,
             "user_id": user_id,
-            "top_k": limit,
+            "search_query": query,
+            "size": limit,
         }
 
         logger.debug("[Mem0] Searching memories for user=%s query=%r", user_id, query)
