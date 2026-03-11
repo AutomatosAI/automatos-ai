@@ -212,6 +212,15 @@
       "delegation": {
         "text": "Controls whether this agent can pass tasks to other agents. Auto-delegate is faster but less controlled.",
         "docLink": "/agents/coordination"
+      },
+      "strategy": {
+        "text": "How agents work together on a task. Sequential = one at a time in order. Parallel = all work simultaneously. Hierarchical = lead agent delegates. Mesh = all communicate freely. Adaptive = switches strategy based on the task.",
+        "docLink": "/agents/coordination",
+        "example": "Code review → Sequential (reviewer then approver) | Research → Parallel (multiple experts) | Complex project → Hierarchical (PM delegates)"
+      },
+      "reasoning": {
+        "text": "How the group reaches a final answer when multiple agents contribute. Majority Vote = most common answer wins. Weighted Consensus = agents with higher success rates have more influence. Expert Selection = picks the best single response.",
+        "docLink": "/agents/coordination"
       }
     },
     "recipes": {
@@ -383,6 +392,30 @@
       "sync_button": {
         "text": "Trigger an incremental sync — only new or modified files are downloaded and processed.",
         "docLink": "/knowledge/cloud-sync"
+      }
+    },
+    "rag": {
+      "retrieval_strategy": {
+        "text": "How documents are searched. Similarity = pure vector search (fast, semantic). BM25 = keyword matching (good for exact terms). Hybrid = combines both for best accuracy at slight speed cost.",
+        "docLink": "/knowledge/documents",
+        "example": "General Q&A → Similarity | Legal/medical terms → BM25 | Production → Hybrid"
+      },
+      "top_k": {
+        "text": "Maximum number of document chunks returned per query. More chunks = more context but slower and more expensive. 3-5 is typical for focused answers, 10+ for research tasks.",
+        "docLink": "/knowledge/documents"
+      },
+      "similarity_threshold": {
+        "text": "Minimum similarity score (0-1) for a chunk to be included in results. Higher = only very relevant matches. Lower = more results but some may be weak matches.",
+        "docLink": "/knowledge/documents",
+        "example": "0.8 = strict (fewer, highly relevant) | 0.5 = loose (more results, some noise)"
+      },
+      "hybrid_weight": {
+        "text": "Balance between vector search and keyword search in hybrid mode. 0.7 = 70% vector + 30% keyword. Higher vector weight favours semantic meaning; higher keyword weight favours exact term matching.",
+        "docLink": "/knowledge/documents"
+      },
+      "graph_hops": {
+        "text": "In knowledge graph retrieval, how many relationship levels to traverse from the initial match. 1 hop = direct connections only. 2+ hops = follows chains of relationships (broader but slower).",
+        "docLink": "/knowledge/codegraph"
       }
     },
     "codegraph": {
@@ -593,6 +626,217 @@
           "text": "Maximum API calls per minute across all users. Protects against overload. Default: 1,000 req/min.",
           "docLink": "/settings/general"
         }
+      }
+    },
+    "llm": {
+      "provider": {
+        "text": "The AI company whose models power your orchestrator. OpenRouter recommended — gives access to 100+ models from all providers through a single API key.",
+        "docLink": "/settings/models"
+      },
+      "model": {
+        "text": "The specific AI model the orchestrator uses for routing, task decomposition, and chat. Larger models reason better but cost more and respond slower.",
+        "docLink": "/settings/models"
+      },
+      "thinking_level": {
+        "text": "Controls how much 'thinking time' the model gets before responding. Higher levels produce better reasoning but use more tokens. Off = instant responses, High = deep analysis with chain-of-thought.",
+        "docLink": "/settings/models",
+        "example": "Quick chat → Off or Minimal | Complex tasks → Medium or High"
+      },
+      "temperature": {
+        "text": "Controls randomness in the orchestrator's responses. 0 = always picks the most likely answer (best for routing). Higher values add variety. This is separate from individual agent temperatures.",
+        "docLink": "/settings/models"
+      },
+      "max_tokens": {
+        "text": "Maximum length of the orchestrator's response. The orchestrator mainly routes and summarises, so 2000-4000 is usually enough. Higher values cost more per request.",
+        "docLink": "/settings/models"
+      },
+      "timeout": {
+        "text": "How long to wait for the LLM to respond before giving up. Increase for complex queries or slow providers. Too low = frequent timeouts; too high = users wait unnecessarily.",
+        "docLink": "/settings/models",
+        "example": "Fast models (GPT-4o) → 30s | Slow models (Claude Opus) → 120s"
+      },
+      "retry_attempts": {
+        "text": "How many times to retry a failed LLM call before returning an error. Handles transient network issues and rate limits. 3 retries is a good default.",
+        "docLink": "/settings/models"
+      },
+      "concurrent_requests": {
+        "text": "Maximum parallel API calls to the LLM provider. Higher = faster multi-agent workflows but risks hitting rate limits. Start low and increase if you see bottlenecks.",
+        "docLink": "/settings/models",
+        "example": "1 = safest | 5 = balanced | 10 = max throughput"
+      },
+      "cache_ttl": {
+        "text": "How long (in seconds) to cache identical LLM responses. Saves money on repeated queries. 0 = no caching. 300 (5 min) is a good default. Set higher for stable content.",
+        "docLink": "/settings/models"
+      },
+      "top_p": {
+        "text": "Nucleus sampling for the orchestrator. Limits token selection to the top P% most likely tokens. Usually leave at 1.0 unless you need very constrained routing decisions.",
+        "docLink": "/settings/models"
+      },
+      "frequency_penalty": {
+        "text": "Reduces word-for-word repetition in orchestrator responses. 0 = no penalty. Higher values force more varied phrasing. Usually 0 is fine for the orchestrator.",
+        "docLink": "/settings/models"
+      },
+      "presence_penalty": {
+        "text": "Encourages the orchestrator to cover new topics. 0 = stay focused on the task. Higher values push for broader responses. Usually 0 for routing tasks.",
+        "docLink": "/settings/models"
+      },
+      "stop_sequences": {
+        "text": "Tokens that tell the model to stop generating. Comma-separated. Useful for structured output formats. Most users don't need to change this.",
+        "docLink": "/settings/models",
+        "example": "\\n\\n = stop at double newline | ### = stop at section break"
+      }
+    },
+    "soul": {
+      "personality_mode": {
+        "text": "Pre-built personality templates that shape how the AI communicates. Friendly = casual and warm. Professional = formal and precise. Technical = detailed and code-focused. Custom = write your own.",
+        "docLink": "/settings/personality"
+      },
+      "custom_soul": {
+        "text": "Free-form instructions that define the AI's personality, tone, and behaviour. This is injected into every orchestrator call as a system prompt. Keep it concise — each token costs money on every request.",
+        "docLink": "/settings/personality"
+      },
+      "communication_style": {
+        "text": "Controls response length. Concise = short, direct answers. Balanced = moderate detail. Detailed = thorough explanations with examples. Affects all orchestrator responses.",
+        "docLink": "/settings/personality"
+      },
+      "proactive_level": {
+        "text": "What the AI does when its heartbeat discovers something. Silent = just logs it. Notify = alerts you. Act & Notify = takes action and tells you. Autonomous = acts without asking.",
+        "docLink": "/settings/personality",
+        "example": "New users → Notify | Trusted setup → Act & Notify | Full auto → Autonomous"
+      }
+    },
+    "heartbeat": {
+      "enable": {
+        "text": "The orchestrator heartbeat is a global check-in that monitors your entire workspace — agent health, pending tasks, channel status. Individual agent heartbeats are separate.",
+        "docLink": "/settings/heartbeat"
+      },
+      "interval": {
+        "text": "How often the orchestrator runs its health check. Shorter = more responsive but uses more tokens. Daily is fine for most setups; hourly for production workloads.",
+        "docLink": "/settings/heartbeat"
+      },
+      "active_hours": {
+        "text": "Restrict heartbeats to business hours to save tokens. The orchestrator won't wake up outside these hours. Times are in your local timezone.",
+        "docLink": "/settings/heartbeat"
+      },
+      "checklist": {
+        "text": "A multi-line checklist of things the orchestrator should check during each heartbeat. One item per line. Be specific about what to monitor and what action to take.",
+        "docLink": "/settings/heartbeat",
+        "example": "Check all agent heartbeat statuses\\nReview failed tasks from last hour\\nVerify Slack connection is healthy"
+      },
+      "notification_channel": {
+        "text": "Where heartbeat results are sent. In-app = visible in Activity dashboard. Telegram/Slack = push to your connected channel. Useful for monitoring outside the platform.",
+        "docLink": "/settings/heartbeat"
+      }
+    },
+    "embedding": {
+      "provider": {
+        "text": "Service that converts text into vector embeddings for semantic search. OpenRouter recommended — access to 20+ models through one API key with parallel batch processing.",
+        "docLink": "/settings/embeddings",
+        "example": "OpenRouter (best value) | OpenAI (direct) | HuggingFace Local (free, slow)"
+      },
+      "model": {
+        "text": "The specific model used to create embeddings. Higher dimensions = more nuanced understanding but more storage. Changing this requires re-processing ALL documents.",
+        "docLink": "/settings/embeddings",
+        "example": "Qwen3 8B (4096d, $0.01/M) — best value | Gemini (3072d) — top quality"
+      },
+      "vector_dimensions": {
+        "text": "Number of dimensions in each embedding vector. Auto-set based on your model choice. Higher dimensions capture more meaning but use more storage and compute.",
+        "docLink": "/settings/embeddings"
+      },
+      "vector_store_type": {
+        "text": "Where vector embeddings are stored and searched. PgVector uses your existing PostgreSQL database. Other options require separate infrastructure.",
+        "docLink": "/settings/embeddings",
+        "example": "PgVector (recommended, no extra setup) | Pinecone (managed, scalable) | FAISS (in-memory, fast)"
+      },
+      "max_seq_length": {
+        "text": "Maximum number of tokens the embedding model processes per chunk. Longer sequences capture more context per chunk but take longer to process. Must match your model's limit.",
+        "docLink": "/settings/embeddings"
+      },
+      "chunk_size": {
+        "text": "How many tokens each document chunk contains. Smaller chunks = more precise search results but more storage. Larger chunks = more context per result but less precision.",
+        "docLink": "/settings/embeddings",
+        "example": "256 = precise, many chunks | 512 = balanced | 1000+ = broad context"
+      },
+      "chunk_overlap": {
+        "text": "How many tokens overlap between adjacent chunks. Prevents important information from being split across chunk boundaries. 10-20% of chunk size is typical.",
+        "docLink": "/settings/embeddings",
+        "example": "Chunk size 512 → overlap 50-100"
+      },
+      "max_context_length": {
+        "text": "Maximum total tokens injected into the LLM prompt from retrieved documents. Higher = more context for the agent but costs more tokens per request.",
+        "docLink": "/settings/embeddings",
+        "example": "2000 = concise answers | 4000 = detailed context | 8000 = max depth"
+      }
+    },
+    "reranking": {
+      "enable": {
+        "text": "Reranking uses a cross-encoder model to re-score search results after vector search. Improves retrieval precision by 15-30% at ~$0.002 per query. Requires a Cohere API key.",
+        "docLink": "/settings/embeddings"
+      },
+      "model": {
+        "text": "Which Cohere reranking model to use. rerank-v3.5 is the latest and highest quality. Multilingual version works across languages.",
+        "docLink": "/settings/embeddings"
+      }
+    },
+    "environment": {
+      "environment": {
+        "text": "Controls logging verbosity, error display, and debug features. Development = verbose logging + debug tools. Staging = moderate. Production = minimal logging, no debug.",
+        "docLink": "/settings/general"
+      },
+      "log_level": {
+        "text": "Minimum severity level for log output. DEBUG = everything (verbose). INFO = normal operations. WARNING = potential issues. ERROR = failures only. CRITICAL = system-breaking only.",
+        "docLink": "/settings/general",
+        "example": "Development → DEBUG | Production → WARNING"
+      }
+    }
+  },
+
+  "recipes": {
+    "schedule": {
+      "type": {
+        "text": "How this recipe gets triggered. Manual = click to run. Scheduled = runs on a timer (cron). Triggered = fires when an external webhook hits the recipe's URL.",
+        "docLink": "/agents/recipes",
+        "example": "Daily reports → Scheduled | CI/CD → Triggered | Ad-hoc → Manual"
+      },
+      "cron_expression": {
+        "text": "A 5-field cron expression that defines when the recipe runs. Format: minute hour day-of-month month day-of-week. Use the quick picks for common schedules or write your own.",
+        "docLink": "/agents/recipes",
+        "example": "0 9 * * 1-5 = weekdays at 9am | 0 */4 * * * = every 4 hours | 30 23 * * * = daily at 11:30pm"
+      },
+      "webhook": {
+        "text": "A unique URL that triggers this recipe when it receives a POST request. The JSON body is passed as input data to the first step. Use this to integrate with GitHub webhooks, Jira, Slack, etc.",
+        "docLink": "/agents/recipes"
+      }
+    },
+    "execution": {
+      "mode": {
+        "text": "Sequential runs steps one after another — each step can use the previous step's output. Parallel runs all steps at once — faster but steps must be independent (no shared data between them).",
+        "docLink": "/agents/recipes"
+      },
+      "max_retries": {
+        "text": "How many times to retry a failed step before giving up. 0 = no retries, fail immediately. Higher values add resilience against transient LLM errors or rate limits.",
+        "docLink": "/agents/recipes"
+      },
+      "step_timeout": {
+        "text": "Maximum time (in milliseconds) a single step can run before being killed. Prevents runaway agents. 60000ms = 1 minute. Complex tasks may need 5-10 minutes.",
+        "docLink": "/agents/recipes",
+        "example": "Quick lookup → 30,000ms | Code generation → 120,000ms | Research → 300,000ms"
+      },
+      "total_timeout": {
+        "text": "Maximum time for the entire recipe execution. If this limit is reached, all remaining steps are cancelled. Should be greater than step_timeout × number_of_steps.",
+        "docLink": "/agents/recipes"
+      },
+      "auto_learning": {
+        "text": "When enabled, the platform analyses each execution to find patterns — which steps fail, which are slow, which produce the best results. Uses this data to suggest optimisations.",
+        "docLink": "/agents/recipes"
+      },
+      "parallel_limit": {
+        "text": "Maximum number of steps that can run simultaneously in parallel mode. Lower = less resource contention. Higher = faster execution. Only applies when execution mode is Parallel.",
+        "docLink": "/agents/recipes"
+      },
+      "memory_isolation": {
+        "text": "Shared = all steps access the same conversation memory (step 2 sees step 1's output). Isolated = each step starts fresh with no knowledge of other steps. Use shared for pipelines, isolated for independent tasks.",
+        "docLink": "/agents/recipes"
       }
     }
   },

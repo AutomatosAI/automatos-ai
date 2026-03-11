@@ -4,6 +4,7 @@ import * as React from 'react'
 import { useFormContext } from 'react-hook-form'
 import { Play, Clock, Webhook, Copy, Check } from 'lucide-react'
 import { Label } from '@/components/ui/label'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import type { RecipeFormValues } from './create-recipe-modal'
@@ -210,7 +211,7 @@ export function RecipeScheduleConfig({ webhookId }: RecipeScheduleConfigProps) {
 
           {/* Cron Expression */}
           <div>
-            <Label className="text-xs text-muted-foreground">Cron Expression</Label>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1">Cron Expression <InlineHelp id="recipes.schedule.cron_expression" size="sm" /></Label>
             <Input
               value={scheduleConfig.cron_expression || ''}
               onChange={(e) => {
