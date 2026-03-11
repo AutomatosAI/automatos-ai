@@ -2,10 +2,13 @@
 
 import { useState, useCallback } from 'react'
 import { DragDropContext, type DropResult } from '@hello-pangea/dnd'
+import { Plus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { BoardColumn } from './board-column'
 import { BoardAgentSidebar } from './board-agent-sidebar'
 import { BoardFiltersBar } from './board-filters'
 import { BoardTaskViewer } from './board-task-viewer'
+import { CreateTaskDialog } from './create-task-dialog'
 import { useBoardTasks, useUpdateTaskStatus, type BoardFilters } from '@/hooks/use-board-tasks'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { cn } from '@/lib/utils'
@@ -20,6 +23,7 @@ export function BoardView({ period, className }: BoardViewProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [openTask, setOpenTask] = useState<BoardTask | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [createOpen, setCreateOpen] = useState(false)
 
   // Merge agent filter from sidebar
   const activeFilters = { ...filters, agent_id: selectedAgentId }
@@ -54,16 +58,25 @@ export function BoardView({ period, className }: BoardViewProps) {
 
   return (
     <div className={cn('space-y-3', className)}>
-      {/* Filters */}
-      <BoardFiltersBar
-        filters={filters}
-        onFiltersChange={setFilters}
-        agentCount={columns.reduce((acc, c) => {
-          const agents = new Set(c.tasks.filter(t => t.assignee).map(t => t.assignee!.agent_id))
-          return acc + agents.size
-        }, 0)}
-        taskCount={totalTasks}
-      />
+      {/* Filters + Create */}
+      <div className="flex items-center gap-2">
+        <BoardFiltersBar
+          filters={filters}
+          onFiltersChange={setFilters}
+          agentCount={columns.reduce((acc, c) => {
+            const agents = new Set(c.tasks.filter(t => t.assignee).map(t => t.assignee!.agent_id))
+            return acc + agents.size
+          }, 0)}
+          taskCount={totalTasks}
+          className="flex-1"
+        />
+        <Button size="sm" onClick={() => setCreateOpen(true)} className="shrink-0">
+          <Plus className="w-3.5 h-3.5 mr-1.5" />
+          Create Task
+        </Button>
+      </div>
+
+      <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} />
 
       {/* Board layout */}
       <div className="flex gap-0 overflow-hidden rounded-xl border border-border/30">

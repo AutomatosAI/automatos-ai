@@ -91,6 +91,8 @@ class PlatformActionExecutor:
             # PRD-76: Agent Reports
             "platform_submit_report": self._submit_report,
             "platform_get_latest_report": self._get_latest_report,
+            # PRD-72: Board Tasks
+            "platform_create_task": self._create_board_task,
             # PRD-77: Agent Self-Scheduling
             "platform_schedule_task": self._schedule_task,
             "platform_list_scheduled_tasks": self._list_scheduled_tasks,
@@ -3281,6 +3283,55 @@ class PlatformActionExecutor:
             agent_id=agent_id,
             report_type=report_type,
         )
+
+    # ------------------------------------------------------------------
+    # PRD-72: Board Tasks
+    # ------------------------------------------------------------------
+
+    async def _create_board_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a board task (called by agents via platform_create_task)."""
+        from core.models.core import BoardTask
+
+        title = params.get("title")
+        description = params.get("description")
+        if not title or not description:
+            return {"success": False, "error": "title and description are required"}
+
+        # Resolve assigned agent by name
+        assigned_agent_id = None
+        agent_name = params.get("assigned_agent_name")
+        if agent_name:
+            from core.models import Agent
+            from sqlalchemy import func as sa_func
+            agent = self.db.query(Agent).filter(
+                Agent.workspace_id == self.workspace_id,
+                sa_func.lower(Agent.name) == agent_name.lower(),
+            ).first()
+            if agent:
+                assigned_agent_id = agent.id
+
+        task = BoardTask(
+            workspace_id=self.workspace_id,
+            title=title,
+            description=description,
+            priority=params.get("priority", "medium"),
+            assigned_agent_id=assigned_agent_id,
+            status="assigned" if assigned_agent_id else "inbox",
+            created_by_type="agent",
+            created_by_id=str(params.get("_agent_id", "")),
+            parent_task_id=params.get("parent_task_id"),
+            tags=params.get("tags", []),
+        )
+        self.db.add(task)
+        self.db.commit()
+        self.db.refresh(task)
+
+        return {
+            "success": True,
+            "task_id": task.id,
+            "status": task.status,
+            "title": task.title,
+        }
 
     # ------------------------------------------------------------------
     # PRD-77: Agent Self-Scheduling

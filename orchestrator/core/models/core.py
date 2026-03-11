@@ -1459,3 +1459,63 @@ class RecipeExecution(Base):
             'attempt_count': self.attempt_count,
             'retry_of': self.retry_of,
         }
+
+
+# ===================================================================
+# PRD-72: Board Tasks (Lightweight Task Board)
+# ===================================================================
+
+class BoardTask(Base):
+    """
+    Lightweight task board item. Tasks follow a Kanban lifecycle:
+    inbox -> assigned -> in_progress -> review -> done.
+    Agents pick up assigned tasks during heartbeats.
+    """
+    __tablename__ = 'board_tasks'
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(UUID, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    raw_prompt = Column(Text)
+    status = Column(String(20), nullable=False, default='inbox', server_default='inbox')
+    priority = Column(String(10), nullable=False, default='medium', server_default='medium')
+    review_mode = Column(String(10), nullable=False, default='auto', server_default='auto')
+    assigned_agent_id = Column(Integer, ForeignKey('agents.id', ondelete='SET NULL'), nullable=True)
+    created_by_type = Column(String(20), nullable=False, default='user', server_default='user')
+    created_by_id = Column(String(255), nullable=True)
+    parent_task_id = Column(Integer, ForeignKey('board_tasks.id', ondelete='SET NULL'), nullable=True)
+    tags = Column(JSONB, default=list)
+    result = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    planning_data = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = {'extend_existing': True}
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "workspace_id": str(self.workspace_id) if self.workspace_id else None,
+            "title": self.title,
+            "description": self.description,
+            "raw_prompt": self.raw_prompt,
+            "status": self.status,
+            "priority": self.priority,
+            "review_mode": self.review_mode,
+            "assigned_agent_id": self.assigned_agent_id,
+            "created_by_type": self.created_by_type,
+            "created_by_id": self.created_by_id,
+            "parent_task_id": self.parent_task_id,
+            "tags": self.tags or [],
+            "result": self.result,
+            "error_message": self.error_message,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "planning_data": self.planning_data,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

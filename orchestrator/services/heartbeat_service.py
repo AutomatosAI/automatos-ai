@@ -623,6 +623,49 @@ class HeartbeatService:
                 )
                 auto_act = hb_config.get("auto_act", False)
 
+                # --- PRD-72: Scan for assigned board tasks ---
+                assigned_tasks = []
+                task_context = ""
+                try:
+                    from core.models.core import BoardTask
+                    assigned_tasks = (
+                        db.query(BoardTask)
+                        .filter(
+                            BoardTask.assigned_agent_id == agent_id,
+                            BoardTask.status == "assigned",
+                            BoardTask.workspace_id == workspace_id,
+                        )
+                        .order_by(BoardTask.priority.desc(), BoardTask.created_at.asc())
+                        .limit(3)
+                        .all()
+                    )
+                    if assigned_tasks:
+                        task_lines = []
+                        for t in assigned_tasks:
+                            t.status = "in_progress"
+                            t.started_at = datetime.utcnow()
+                            task_lines.append(
+                                f"- [TASK-{t.id}] {t.title}: {t.description or ''}"
+                            )
+                        db.commit()
+                        task_context = (
+                            "\n\n## ASSIGNED TASKS (Priority Work)\n"
+                            "You have tasks assigned to you. Complete them and report results.\n"
+                            + "\n".join(task_lines)
+                            + "\n\nAfter completing each task, use platform_submit_report or respond with results."
+                        )
+                        logger.info(
+                            "[Heartbeat] Agent %s picked up %d assigned tasks",
+                            agent_id,
+                            len(assigned_tasks),
+                        )
+                except Exception as task_err:
+                    logger.warning(
+                        "[Heartbeat] Failed to scan board tasks for agent=%s: %s",
+                        agent_id,
+                        task_err,
+                    )
+
                 prompt = (
                     f"Scheduled heartbeat check. {heartbeat_prompt}\n"
                     f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n"
@@ -632,6 +675,7 @@ class HeartbeatService:
                         if auto_act
                         else "Report findings only."
                     )
+                    + task_context
                 )
 
                 # Execute through AgentFactory so the agent has its full toolset
@@ -666,6 +710,29 @@ class HeartbeatService:
                         {"check": "llm_analysis", "detail": str(llm_text)[:1000]}
                     )
                     result["tokens_used"] = exec_result.get("tokens_used", 0) if isinstance(exec_result, dict) else 0
+
+                    # PRD-72: Auto-complete board tasks after successful execution
+                    if assigned_tasks:
+                        try:
+                            from core.models.core import BoardTask as BT
+                            for t in assigned_tasks:
+                                t_fresh = db.query(BT).get(t.id)
+                                if t_fresh and t_fresh.status == "in_progress":
+                                    t_fresh.status = "done" if t_fresh.review_mode == "auto" else "review"
+                                    t_fresh.completed_at = datetime.utcnow()
+                                    t_fresh.result = str(llm_text)[:2000]
+                            db.commit()
+                            logger.info(
+                                "[Heartbeat] Agent %s completed %d tasks",
+                                agent_id,
+                                len(assigned_tasks),
+                            )
+                        except Exception as tc_err:
+                            logger.warning(
+                                "[Heartbeat] Failed to complete board tasks for agent=%s: %s",
+                                agent_id,
+                                tc_err,
+                            )
 
                 except Exception as exec_err:
                     logger.warning(

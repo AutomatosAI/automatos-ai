@@ -23,6 +23,9 @@ from .personas import *  # PRD-42: Agent Personas
 from .system_prompts import *  # PRD-58: System Prompt Management
 from .voice_profiles import *  # PRD-74: Voice Profiles
 
+# PRD-72: Board Tasks — explicit import so `from core.models import BoardTask` works
+from .core import BoardTask  # noqa: F811
+
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:
     from .sdk_api_keys import *

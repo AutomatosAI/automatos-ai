@@ -858,6 +858,13 @@ try:
 except ImportError as e:
     logger.warning("Could not load reports router: %s", e)
 
+# PRD-72: Board Tasks
+try:
+    from api.board_tasks import router as board_tasks_router
+    app.include_router(board_tasks_router)
+except ImportError as e:
+    logger.warning("Could not load board tasks router: %s", e)
+
 # PRD-77: Agent Self-Scheduling
 try:
     from api.scheduled_tasks import router as scheduled_tasks_router
