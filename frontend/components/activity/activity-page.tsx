@@ -6,14 +6,15 @@ import dynamic from 'next/dynamic'
 import {
   Activity,
   RefreshCw,
-  Rocket,
   CheckCircle2,
   AlertTriangle,
-  Radio,
+  Users,
+  ListTodo,
   LayoutDashboard,
-  List,
-  FileText,
+  Columns3,
+  Calendar,
   Brain,
+  FolderKanban,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -22,7 +23,6 @@ import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ActivityMissions } from './activity-missions'
 import { ActivityFeed } from './activity-feed'
-import { ActivityReports } from './activity-reports'
 import { ActivityMemory } from './activity-memory'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
@@ -55,44 +55,50 @@ const PERIOD_OPTIONS = [
 ]
 
 const TAB_DEFS = [
-  { value: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { value: 'feed', label: 'Feed', icon: List },
-  { value: 'reports', label: 'Reports', icon: FileText },
+  { value: 'summary', label: 'Summary', icon: LayoutDashboard },
+  { value: 'board', label: 'Board', icon: Columns3 },
+  { value: 'calendar', label: 'Calendar', icon: Calendar },
   { value: 'memory', label: 'Memory', icon: Brain },
-  { value: 'missions', label: 'Missions', icon: Rocket },
+  { value: 'projects', label: 'Projects', icon: FolderKanban },
 ]
 
 export function ActivityPage() {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState('dashboard')
+  const [activeTab, setActiveTab] = useState('summary')
   const [period, setPeriod] = useState('1d')
 
-  // Deep-link: /activity?tab=reports&agent_id=184 or /activity?openExecution=X&recipeId=Y
+  // Deep-link: /activity?tab=board&task_id=123 or /activity?openExecution=X&recipeId=Y
   const searchParams = useSearchParams()
   const openExecution = searchParams.get('openExecution')
   const deepLinkRecipeId = searchParams.get('recipeId')
   const tabParam = searchParams.get('tab')
   const agentIdParam = searchParams.get('agent_id')
+  const taskIdParam = searchParams.get('task_id')
 
   useEffect(() => {
     if (tabParam && TAB_DEFS.some((t) => t.value === tabParam)) {
       setActiveTab(tabParam)
     } else if (openExecution) {
-      setActiveTab('feed')
+      setActiveTab('board')
     }
   }, [tabParam, openExecution])
 
-  // Switch to feed tab when "View All" is clicked in recent activity widget
+  // Navigate to Board tab from Summary widgets
   const handleViewAllActivity = useCallback(() => {
-    setActiveTab('feed')
+    setActiveTab('board')
+  }, [])
+
+  // Navigate to Calendar tab from Schedule widget
+  const handleViewCalendar = useCallback(() => {
+    setActiveTab('calendar')
   }, [])
 
   const { data: liveStats } = useActivityStats(period)
 
   const stats: StatItem[] = [
     { label: 'Working Now', value: liveStats?.working_now ?? 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_activity' },
-    { label: 'Channels Live', value: liveStats?.channels_live ?? 0, icon: Radio, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_channel' },
-    { label: 'Completed Today', value: liveStats?.completed_today ?? 0, icon: CheckCircle2, iconColor: 'text-[hsl(var(--success))]' },
+    { label: 'Agents Active', value: liveStats?.agents_active ?? 0, icon: Users, iconColor: 'text-[hsl(var(--agent))]' },
+    { label: 'Tasks in Queue', value: liveStats?.tasks_in_queue ?? 0, icon: ListTodo, iconColor: 'text-[hsl(var(--info))]' },
     { label: 'Needs Attention', value: liveStats?.needs_attention ?? 0, icon: AlertTriangle, iconColor: 'text-destructive' },
   ]
 
@@ -133,24 +139,31 @@ export function ActivityPage() {
 
       <div data-tour="activity-tabs">
         <FilterTabs tabs={TAB_DEFS} value={activeTab} onValueChange={setActiveTab}>
-          <TabsContent value="dashboard">
-            <div data-tour="activity-dashboard">
+          <TabsContent value="summary">
+            <div data-tour="activity-summary">
               <CommandCentreDashboard
                 period={period}
                 onViewAllActivity={handleViewAllActivity}
+                onViewCalendar={handleViewCalendar}
               />
             </div>
           </TabsContent>
 
-          <TabsContent value="feed">
-            <div data-tour="activity-content">
+          <TabsContent value="board">
+            <div data-tour="activity-board">
+              {/* Board (Kanban) — Phase 3 PR. Fallback to Feed for now. */}
               <ActivityFeed period={period} openExecution={openExecution} deepLinkRecipeId={deepLinkRecipeId} />
             </div>
           </TabsContent>
 
-          <TabsContent value="reports">
-            <div data-tour="activity-reports">
-              <ActivityReports period={period} agentId={agentIdParam ? Number(agentIdParam) : undefined} />
+          <TabsContent value="calendar">
+            <div data-tour="activity-calendar">
+              {/* Calendar — Phase 5 PR. Placeholder for now. */}
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                <Calendar className="w-12 h-12 mb-3 opacity-30" />
+                <p className="text-sm font-medium">Calendar</p>
+                <p className="text-xs mt-1">Full scheduler view coming in the next update</p>
+              </div>
             </div>
           </TabsContent>
 
@@ -160,8 +173,10 @@ export function ActivityPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="missions">
-            <ActivityMissions />
+          <TabsContent value="projects">
+            <div data-tour="activity-projects">
+              <ActivityMissions />
+            </div>
           </TabsContent>
         </FilterTabs>
       </div>

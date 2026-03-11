@@ -1,65 +1,87 @@
-# PRD-72: Activity Command Centre
+# PRD-72: Activity Command Centre v2
 
-**Version:** 1.0
+**Version:** 2.0
 **Status:** Draft
 **Priority:** P1
 **Author:** Gar Kavanagh + Auto CTO
 **Created:** 2026-03-07
-**Updated:** 2026-03-07
-**Dependencies:** PRD-10 (Workflow Engine — COMPLETE), PRD-55 (Agent Heartbeats — COMPLETE), PRD-06 (Monitoring & Analytics — COMPLETE)
-**Branch:** `feat/activity-command-centre`
+**Updated:** 2026-03-11
+**Dependencies:** PRD-10 (Workflow Engine — COMPLETE), PRD-55 (Agent Heartbeats — COMPLETE), PRD-06 (Monitoring & Analytics — COMPLETE), PRD-76 (Agent Reporting — COMPLETE), PRD-77 (Agent Self-Scheduling — IN PROGRESS)
+**Branch:** `feat/activity-command-centre-v2`
+**Inspiration:** [crshdn/mission-control](https://github.com/crshdn/mission-control) — Kanban patterns, `@hello-pangea/dnd`, SSE real-time
 
 ---
 
 ## Executive Summary
 
-Automatos has four execution modes — chat conversations, agent heartbeat routines, recipe executions, and complex dynamic missions — but users have no single place to see all of them. The Workflow Management page only shows recipes and "cooking" (running executions). Agent heartbeats are invisible. Chat history is buried. There's no way to answer the simplest question: **"What is my AI workforce doing right now?"**
+The Activity page is the nerve centre of Automatos — but v1 was a list-based feed that required clicking through multiple pages to understand what's happening. Users couldn't track task progress, manage workload, review agent output, or see their schedule without navigating 3-4 different views.
 
-This PRD replaces `/workflows` with `/activity` — the **Activity Command Centre**. One page, four tabs, unified feed. Non-technical users see their workforce in action. Power users drill into any execution, configure the source, or replay runs.
+v2 rebuilds Activity as a **five-tab operational dashboard** that replaces the need for Jira, combines Feed + Reports into a Kanban board, adds a Calendar for scheduled tasks, enhances Memory with a daily journal view, and introduces a Projects page for multi-agent initiatives.
 
-### What We're Building
+### What's Changing
 
-1. **Unified Activity Feed** — a real-time timeline showing all execution types (chats, routines, recipes, missions) with status, duration, agents involved, and drill-down links
-2. **Routines Tab** — surfaces agent heartbeats (currently invisible) as manageable recurring tasks with pause/resume/edit
-3. **Enhanced Recipes Tab** — keeps existing recipe management, adds run history inline
-4. **Missions Tab** — placeholder for complex multi-agent workflows (future PRD), with a "Coming Soon" state that explains the concept
+| v1 Tab | v2 Tab | What Changed |
+|---|---|---|
+| Dashboard | **Summary** | Rename + new analytics widgets (status donut, priority breakdown, workload, types of work) |
+| Feed | **Board** | List → Kanban board with drag-and-drop, agent sidebar, unified task viewer |
+| Reports | *(merged into Board)* | Reports are now viewable inside task cards at Review/Done stages |
+| Memory | **Memory** | Enhanced: two-panel layout, daily journal, organized by day/agent/type |
+| Missions | **Projects** | Evolved from placeholder into project cards with progress tracking |
+| *(new)* | **Calendar** | Full scheduler view: always-running tasks, week grid, next-up list |
+
+### What's New (Cross-Cutting)
+
+- **Global Search** (Cmd+K) — spotlight-style overlay searching tasks, memories, documents, agents
+- **SSE real-time updates** — Board receives live task status changes via Server-Sent Events instead of polling
+- **Unified Task Viewer** — one slide-over component replaces separate Feed detail, Reports viewer, and Execution detail
 
 ### What We're NOT Building
 
 - New execution engine (existing recipe executor + heartbeat service are sufficient)
-- Analytics replacement (Activity is operational monitoring; Analytics stays for cost/performance trends)
-- Chat page changes (Chat remains at `/chat`, but chat executions appear in the Activity feed)
+- Agent Zero / Orchestrator rename (separate effort, out of scope)
+- Chat entries on the Board (chat history stays at `/chat`)
+- Analytics replacement (Analytics page stays for cost/performance trends)
 
 ---
 
 ## 1. Naming Convention
 
-All user-facing terminology follows this model:
+### User-Facing Terminology
+
+UI displays "Task" — backend remains "Recipe". No backend rename.
 
 | Technical Concept | User-Facing Name | Icon | Description |
 |---|---|---|---|
-| Chat + tool calls | **Chat** | `MessageCircle` | "Just ask" — conversations with AI agents |
-| Agent heartbeat | **Routine** | `RefreshCw` | "Keep checking this" — recurring background tasks |
-| Recipe execution (single/multi-step) | **Recipe** | `ChefHat` / `CookingPot` | "Follow these steps" — defined automations |
-| Complex dynamic workflow | **Mission** | `Rocket` | "Go handle this" — multi-agent projects (future) |
+| Recipe execution (single/multi-step) | **Task** | `CheckSquare` | A unit of work — one step or many |
+| Agent heartbeat | **Routine** | `RefreshCw` | Recurring background check |
+| Complex dynamic workflow | **Project** | `FolderKanban` | Multi-task initiative with progress tracking |
+| Chat + tool calls | **Chat** | `MessageCircle` | Conversations (not shown on Board) |
 
-### Status Labels
+### Task Status Labels (Board Columns)
 
-| Technical | User-Facing | Badge Colour | CSS Variable |
+| Status | Column | Badge Colour | CSS Variable |
 |---|---|---|---|
-| `pending` | Waiting | `--muted` | `bg-muted/10 text-muted-foreground` |
-| `running` | Working... | `--info` | `bg-[hsl(var(--info))]/10 text-[hsl(var(--info))]` |
-| `completed` | Done | `--success` | `bg-[hsl(var(--success))]/10 text-[hsl(var(--success))]` |
-| `failed` | Needs Attention | `--destructive` | `bg-destructive/10 text-destructive` |
-| `cancelled` | Cancelled | `--muted` | `bg-muted/10 text-muted-foreground` |
-| `scheduled` | Upcoming | `--agent` | `bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))]` |
-| `paused` | Paused | `--warning` | `bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]` |
+| `inbox` | Inbox | `--muted` | `bg-muted/10 text-muted-foreground` |
+| `assigned` | Assigned | `--agent` | `bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))]` |
+| `in_progress` | In Progress | `--info` | `bg-[hsl(var(--info))]/10 text-[hsl(var(--info))]` |
+| `review` | Review | `--warning` | `bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]` |
+| `done` | Done | `--success` | `bg-[hsl(var(--success))]/10 text-[hsl(var(--success))]` |
+| `failed` | Done (with error) | `--destructive` | `bg-destructive/10 text-destructive` |
+
+### Priority Levels
+
+| Priority | Colour | Indicator |
+|---|---|---|
+| `urgent` | `--destructive` | Red dot / border |
+| `high` | `--warning` | Amber badge |
+| `medium` | `--info` | Blue badge |
+| `low` | `--muted` | Gray badge |
 
 ---
 
 ## 2. Design System Compliance
 
-All components must follow the established Automatos design language from `globals.css`. No custom colours or one-off styling.
+All components follow the established Automatos design language from `globals.css`. No custom colours or one-off styling.
 
 ### Required Patterns
 
@@ -69,17 +91,15 @@ All components must follow the established Automatos design language from `globa
 | Stat cards | `<StatsBar>` shared component | 4-up hero stats, `glass-card` + `card-glow` |
 | Tab navigation | `<FilterTabs>` shared component | Icon + label tabs, `bg-secondary/40 backdrop-blur` |
 | Content cards | `glass-card` class | All card surfaces |
-| Drill-down panels | `glass-panel` class | Execution detail views |
-| Time period toggle | `PeriodToggle` (from analytics-costs) | `1D / 7D / 30D / 90D` pill selector |
+| Drill-down panels | `glass-panel` class | Task viewer slide-over |
 | Status badges | Semantic `Badge` variants | Using CSS variable palette above |
-| Charts | Recharts with `MODEL_COLORS` palette | Area/Line charts for trend data |
+| Charts | Recharts with `MODEL_COLORS` palette | Donut, bar charts on Summary |
 | Motion | `framer-motion` staggered entrance | `initial → animate` with `delay: index * 0.08` |
 | Empty states | Centered icon + two-line text | Muted icon (30% opacity) + description |
-| Tables | `glass-card overflow-hidden` wrapper | `[11px] uppercase tracking-wider` headers |
 | Loading | `<Skeleton>` matching card layout | Skeleton grid matching real content shape |
 | Mobile | Reduced `backdrop-blur(8px)` | Per `globals.css` `@media (max-width: 767px)` |
 
-### Typography Scale (from existing pages)
+### Typography Scale
 
 - Page title: `text-2xl md:text-3xl font-bold`
 - Stat value: `text-2xl font-bold leading-none`
@@ -95,9 +115,9 @@ All components must follow the established Automatos design language from `globa
 Primary/Orange:  hsl(var(--primary))       — active states, CTAs, accents
 Success/Green:   hsl(var(--success))        — completed, healthy
 Info/Blue:       hsl(var(--info))           — running, in-progress
-Warning/Amber:   hsl(var(--warning))        — paused, attention
+Warning/Amber:   hsl(var(--warning))        — review, attention
 Destructive/Red: hsl(var(--destructive))    — failed, errors
-Agent/Purple:    hsl(var(--agent))          — agent-related, scheduled
+Agent/Purple:    hsl(var(--agent))          — agent-related, assigned
 Muted:           hsl(var(--muted-foreground)) — inactive, secondary text
 ```
 
@@ -105,20 +125,13 @@ Muted:           hsl(var(--muted-foreground)) — inactive, secondary text
 
 ## 3. Page Layout
 
-### Route Change
+### Route
 
 ```
-/workflows  →  /activity
+/activity (unchanged from v1)
 ```
 
-Sidebar navigation item rename:
-- Label: `Workflow Management` → `Activity`
-- Icon: `GitBranch` → `Activity` (from lucide-react)
-- `href`: `/workflows` → `/activity`
-
-301 redirect from `/workflows` → `/activity` for bookmarks.
-
-### Page Structure
+### Tab Structure
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -131,494 +144,1213 @@ Sidebar navigation item rename:
 ├──────────────────────────────────────────────────────────────┤
 │  <StatsBar stats={[                                           │
 │    { label: "Working Now", value: "3", icon: Activity }       │
-│    { label: "Channels Live", value: "3", icon: Radio }        │
-│    { label: "Completed Today", value: "24", icon: CheckCircle}│
+│    { label: "Agents Active", value: "11", icon: Users }       │
+│    { label: "Tasks in Queue", value: "35", icon: ListTodo }   │
 │    { label: "Needs Attention", value: "1", icon: AlertTriangle│
 │  ]} />                                                        │
 ├──────────────────────────────────────────────────────────────┤
 │  <FilterTabs tabs={[                                          │
-│    { value: "feed", label: "Feed", icon: Activity }           │
-│    { value: "routines", label: "Routines", icon: RefreshCw }  │
-│    { value: "recipes", label: "Recipes", icon: CookingPot }   │
-│    { value: "missions", label: "Missions", icon: Rocket }     │
+│    { value: "summary",  label: "Summary",  icon: LayoutDashboard }│
+│    { value: "board",    label: "Board",    icon: Columns3 }   │
+│    { value: "calendar", label: "Calendar", icon: Calendar }   │
+│    { value: "memory",   label: "Memory",   icon: Brain }      │
+│    { value: "projects", label: "Projects", icon: FolderKanban }│
 │  ]}>                                                          │
-│    <TabsContent value="feed">      → Section 4              │
-│    <TabsContent value="routines">  → Section 5              │
-│    <TabsContent value="recipes">   → Section 6              │
-│    <TabsContent value="missions">  → Section 7              │
+│    <TabsContent value="summary">   → Section 4              │
+│    <TabsContent value="board">     → Section 5              │
+│    <TabsContent value="calendar">  → Section 6              │
+│    <TabsContent value="memory">    → Section 7              │
+│    <TabsContent value="projects">  → Section 8              │
 │  </FilterTabs>                                                │
 └──────────────────────────────────────────────────────────────┘
 ```
 
+Deep-link support: `?tab=board&task_id=123` opens Board with task viewer for that task.
+
 ---
 
-## 4. Feed Tab (Default)
+## 4. Summary Tab (Default)
 
-The unified timeline. Shows all execution types, most recent first. This is what the user sees when they click "Activity" in the sidebar.
+Renamed from "Dashboard". Draggable widget grid using `react-grid-layout` (already installed).
 
-### 4.0 Channels Live Stat Card
+### 4.1 Existing Widgets (Keep)
 
-The "Channels Live" stat card shows the count of connected channels (Telegram, WhatsApp, Slack, email, webchat) that are actively receiving messages. Data comes from Settings > Channels config via `/api/activity/stats`.
-
-- **Click action:** Navigates to `/settings?tab=channels`
-- **Icon:** `Radio` (lucide-react) — matches Settings > Channels tab icon
-- **Colour:** `text-[hsl(var(--info))]` (blue) — indicates connectivity
-- **"Needs Attention" includes:** Any channel marked as connected but not receiving messages for >1h (stale) gets counted in the "Needs Attention" stat alongside failed executions
-
-### 4.1 Data Sources
-
-| Type | Source | Polling |
+| Widget | Component | Description |
 |---|---|---|
-| Chat | `GET /api/chats?workspace_id=X&limit=20` | On mount + 30s interval |
-| Routine | `GET /api/heartbeats/executions?workspace_id=X` | On mount + 15s interval |
-| Recipe | `GET /api/recipes/executions?workspace_id=X` | On mount + 15s interval |
-| Mission | Future — empty for now | — |
+| Active Now | `active-now-widget.tsx` | Top 5 currently running tasks with progress bars |
+| Schedule | `schedule-widget.tsx` | Week calendar dots + upcoming 5 items. **Click "View All" → Calendar tab** |
+| Agent Reports | `agent-reports-widget.tsx` | Pinned agent report cards |
+| Recent Activity | `recent-activity-widget.tsx` | Last 5 completed + 3 failed. **Click "View All" → Board tab** |
 
-All sources merged client-side, sorted by `started_at DESC`.
+### 4.2 New Widgets
 
-### 4.2 Feed Item Card
-
-Each feed item is a `glass-card` with a coloured left border indicating type:
+#### Status Overview (Donut Chart)
 
 ```
-┌─ border-l-3 ──────────────────────────────────────────────┐
-│  [TypeIcon]  Type Label · "Item Name"              [Time] │
-│              Agent: {name} · Status Badge · Duration       │
-│              ───────────────────────────────────            │
-│              [Context line — varies by type]                │
-│                                        [View] [Configure]  │
-└────────────────────────────────────────────────────────────┘
+┌─ glass-card ──────────────────────────────┐
+│  Status Overview              [View all →] │
+│                                            │
+│         ┌─────────┐                        │
+│        ╱    77     ╲    ● In Review: 23    │
+│       │  Total work │   ● Done: 17         │
+│        ╲   items   ╱    ● To Do: 20        │
+│         └─────────┘     ● In Progress: 17  │
+│                                            │
+└────────────────────────────────────────────┘
 ```
 
-**Left border colours by type:**
-- Chat: `border-l-[hsl(var(--primary))]` (orange)
-- Routine: `border-l-[hsl(var(--agent))]` (purple)
-- Recipe: `border-l-[hsl(var(--info))]` (blue)
-- Mission: `border-l-[hsl(var(--success))]` (green)
+- Recharts `PieChart` with `innerRadius` for donut
+- Counts from Board data (`GET /api/activity/board/stats`)
+- Click segment → navigates to Board tab filtered by that status
+- Click "View all" → Board tab
 
-**Channel badge:** When `channel` is present, a small muted badge appears inline after the status: `via Telegram`, `via WhatsApp`, etc. Uses `text-xs text-muted-foreground` — informational, not prominent. Channel icon from the existing Settings > Channels icon set.
-
-**Context line by type:**
-- Chat: First 100 chars of the user's message, truncated
-- Routine: "Checked 3 min ago · Next run: 11:00"
-- Recipe: Step pipeline → `✓ Step 1 → ✓ Step 2 → ● Step 3...`
-- Mission: Progress bar `████░░░░ 65% · 8 of 12 tasks`
-
-**Actions:**
-- **View** — navigates to the detail view (chat opens `/chat/{id}`, recipe opens execution detail, routine opens routine detail)
-- **Configure** — navigates to the source's config page (agent config for routines, recipe editor for recipes)
-
-### 4.3 Filters
-
-Above the feed, a row of filter chips:
+#### Priority Breakdown (Bar Chart)
 
 ```
-[All]  [💬 Chats]  [🔄 Routines]  [📋 Recipes]  [🚀 Missions]  |  [Status ▼]
+┌─ glass-card ──────────────────────────────┐
+│  Priority Breakdown                        │
+│                                            │
+│  60 ┤                                      │
+│  40 ┤            ██                        │
+│  20 ┤      ██    ██                        │
+│   0 ┤  ██  ██    ██    ██    ██            │
+│     Urgent High Medium  Low  None          │
+└────────────────────────────────────────────┘
 ```
 
-- Type chips are toggle buttons (multiple can be active)
-- Status dropdown: All / Working / Done / Needs Attention / Upcoming
+- Recharts `BarChart`
+- Shows task count by priority level
+- Colour-coded bars using priority colours from Section 1
 
-### 4.4 Empty State
-
-```
-<Activity className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-"No activity yet"
-"Start a chat, create a routine, or run a recipe to see your workforce in action"
-```
-
-### 4.5 Real-Time Updates
-
-- Feed items with status `running` show the `stage-active` pulse animation on their status badge
-- New items prepend to the feed with `log-slide-in` animation (from `globals.css`)
-- Polling interval: 15s for recipe/routine executions, 30s for chats
-- Optional: WebSocket/SSE for truly real-time updates (enhancement, not MVP)
-
----
-
-## 5. Routines Tab
-
-Surfaces agent heartbeats as user-manageable recurring tasks. Currently these are invisible — users configure a heartbeat on an agent but have no way to see it running or manage it outside the agent config modal.
-
-### 5.1 Data Source
+#### Types of Work (Horizontal Bar)
 
 ```
-GET /api/heartbeats?workspace_id=X
+┌─ glass-card ──────────────────────────────┐
+│  Types of Work                 [View all →]│
+│                                            │
+│  Type          Distribution                │
+│  ⚡ Routine    ████████████████████  65%    │
+│  ✅ Task       ███████████  28%             │
+│  📁 Project    ███  7%                      │
+└────────────────────────────────────────────┘
 ```
 
-Returns all heartbeat configurations with their last execution time and status.
+- Shows distribution of work items by type
+- Horizontal stacked bars
 
-### 5.2 Routine Card
-
-```
-┌─ glass-card ──────────────────────────────────────────────┐
-│  [AgentAvatar]  Routine Name                    ● Active   │
-│                 Agent: {name}                               │
-│                 Every {interval} · Last ran {ago}           │
-│                 Next: {time}                                │
-│                 "{description}"                             │
-│                                          [Pause] [Edit]    │
-└────────────────────────────────────────────────────────────┘
-```
-
-- **Active** badge: `bg-[hsl(var(--success))]/10` with green dot
-- **Paused** badge: `bg-[hsl(var(--warning))]/10` with amber dot
-- **Edit** navigates to the agent configuration page (heartbeat section)
-- **Pause/Resume** toggles heartbeat via `PATCH /api/heartbeats/{id}/toggle`
-
-### 5.3 Routine History (Expandable)
-
-Clicking a routine card expands to show last 10 executions:
+#### Team Workload (Agent Distribution)
 
 ```
-│  ▼ Execution History                                       │
-│  ┌─ log-entry log-entry-success ─────────────────────────┐ │
-│  │  ✓ Completed · Mar 7, 10:00 · 4.2s · No issues       │ │
-│  ├─ log-entry log-entry-success ─────────────────────────┤ │
-│  │  ✓ Completed · Mar 7, 09:00 · 3.8s · No issues       │ │
-│  ├─ log-entry log-entry-error ───────────────────────────┤ │
-│  │  ✗ Failed · Mar 7, 08:00 · "API rate limit"          │ │
-│  └───────────────────────────────────────────────────────┘ │
+┌─ glass-card ──────────────────────────────┐
+│  Team Workload                             │
+│                                            │
+│  Assignee        Work distribution         │
+│  🤖 Sentinel     ████████████████  12      │
+│  📝 Loki         ██████████  8             │
+│  🔍 Vision       ████████  6               │
+│  ⚡ Pepper       ██████  4                 │
+│  ○ Unassigned    ████  3                   │
+└────────────────────────────────────────────┘
 ```
 
-Uses `log-entry`, `log-entry-success`, `log-entry-error` classes from `globals.css`.
+- Horizontal bars per agent
+- Click agent row → Board filtered by that agent
 
-### 5.4 Create Routine CTA
+### 4.3 Widget Grid
 
-```
-[+ New Routine] button in tab header
-```
+All 8 widgets rendered via `react-grid-layout` with drag-to-reorder. Layout persisted in localStorage (`automatos:dashboard-layout`). "Customize" toggle + "Reset Layout" button (existing pattern from v1).
 
-Opens a modal or navigates to agent config with heartbeat section focused. MVP: navigates to `/agents` with a toast "Select an agent to configure its routine."
-
-### 5.5 Empty State
+Default layout (2-column on desktop):
 
 ```
-<RefreshCw className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-"No routines set up"
-"Routines let your agents check things automatically — like monitoring your inbox or tracking sales"
-[Set Up a Routine →]
+Row 1: [Active Now          ] [Status Overview    ]
+Row 2: [Schedule             ] [Priority Breakdown ]
+Row 3: [Recent Activity      ] [Types of Work      ]
+Row 4: [Agent Reports        ] [Team Workload      ]
 ```
 
 ---
 
-## 6. Recipes Tab
+## 5. Board Tab (Replaces Feed + Reports)
 
-Migrates the existing `<RecipesTab>` component with enhancements.
+The centrepiece of v2. A Kanban board with agent sidebar, drag-and-drop task management, and a unified task viewer that replaces the separate Feed detail and Reports pages.
 
-### 6.1 What Stays
+### 5.1 Layout
 
-- Existing recipe grid/list view with `<ViewToggle>`
-- Recipe cards with step count, agent count, trigger type
-- Create Recipe dialog
-- Search input
+```
+┌──────────────────────────────────────────────────────────────┐
+│  [Filter: agent | priority | type | date]   11 agents | 35 tasks │
+├──────────┬───────────────────────────────────────────────────┤
+│ ● AGENTS │  ● TASK BOARD                                     │
+│    (12)  │                                                    │
+│          │  ● INBOX  ● ASSIGNED  ● IN PROGRESS  ● REVIEW  ● DONE │
+│ Bhanu    │    (11)     (10)        (7)           (5)      (0) │
+│ LEAD     │                                                    │
+│ ●WORKING │  ┌────┐   ┌────┐     ┌────┐        ┌────┐        │
+│          │  │card│   │card│     │card│        │card│        │
+│ Friday   │  │    │   │    │     │    │        │    │        │
+│ INT      │  └────┘   └────┘     └────┘        └────┘        │
+│ ●WORKING │  ┌────┐   ┌────┐     ┌────┐        ┌────┐        │
+│          │  │card│   │card│     │card│        │card│        │
+│ Fury     │  └────┘   └────┘     └────┘        └────┘        │
+│ SPC      │                                                    │
+│ ●WORKING │           ┌────┐     ┌────┐                       │
+│          │           │card│     │card│                       │
+│ ...      │           └────┘     └────┘                       │
+└──────────┴───────────────────────────────────────────────────┘
+```
 
-### 6.2 What Changes
+### 5.2 Agent Sidebar
 
-**Trigger type badges** — clearer labels with icons:
+Left panel showing all workspace agents:
 
-| Trigger | Badge | Icon |
+```
+┌─ AGENTS (12) ────────────────┐
+│                               │
+│  🤖 Bhanu          LEAD      │
+│     Founder        ● WORKING │
+│                               │
+│  ⚔️ Friday         INT       │
+│     Developer      ● WORKING │
+│                               │
+│  🔥 Fury           SPC       │
+│     Customer Rese… ● WORKING │
+│                               │
+│  ...                          │
+└───────────────────────────────┘
+```
+
+- Agent avatar, name, role badge (LEAD/INT/SPC), status dot
+- Click agent → filters board to show only that agent's tasks
+- Active filter shown as highlighted agent row
+- Click again to clear filter
+- Collapsible on mobile (hamburger toggle)
+
+Data source: `GET /api/agents?workspace_id=X` (existing endpoint)
+
+### 5.3 Board Columns
+
+5 columns using `@hello-pangea/dnd` (fork of react-beautiful-dnd, actively maintained):
+
+| Column | Status | Header Colour | Description |
+|---|---|---|---|
+| **Inbox** | `inbox` | `--muted` | New tasks not yet assigned |
+| **Assigned** | `assigned` | `--agent` | Assigned to an agent, waiting to start |
+| **In Progress** | `in_progress` | `--info` | Currently executing |
+| **Review** | `review` | `--warning` | Awaiting human or LLM review |
+| **Done** | `done` | `--success` | Completed (success or failure) |
+
+Each column header shows: `● COLUMN NAME  (count)`
+
+Columns are scrollable vertically. Cards within a column are ordered by priority (urgent first), then by `updated_at DESC`.
+
+### 5.4 Board Card
+
+Each task is a draggable card:
+
+```
+┌─ glass-card draggable ────────────────────┐
+│  ↕ Explore SiteGPT Dashboard &            │
+│    Document All Features                   │
+│                                            │
+│    Thoroughly explore the entire            │
+│    SiteGPT dashboard...                    │
+│                                            │
+│  🤖 Loki              1 day ago            │
+│  [research] [documentation] [sitegpt]      │
+│                                    [→]     │
+└────────────────────────────────────────────┘
+```
+
+**Card fields:**
+- Task name (line-clamp-2)
+- Description snippet (line-clamp-2, `text-sm text-muted-foreground`)
+- Agent avatar + name (bottom-left)
+- Time ago (bottom-right)
+- Tags as pills (`text-xs` badges)
+- Priority indicator: left border colour or small dot next to title
+- Arrow button → opens Task Viewer
+- For "In Progress": mini progress bar showing step X of Y
+
+**Drag behaviour:**
+- `@hello-pangea/dnd` `<DragDropContext>` wrapping the board
+- Each column is a `<Droppable>`
+- Each card is a `<Draggable>`
+- On drag end: optimistic UI update → `PATCH /api/activity/tasks/{id}/status`
+- On API failure: revert to previous position + toast error
+- Cards in "In Progress" with `running` backend status: draggable (user can force-move to Review/Done)
+- Cards in "Done" with `completed` status: draggable back to Inbox for re-run
+
+### 5.5 Task Viewer (Slide-Over)
+
+Replaces: `activity-feed-item.tsx` detail, `report-viewer.tsx`, `execution-detail.tsx`
+
+Opens as a right slide-over panel when clicking a card's arrow button or double-clicking a card.
+
+Content adapts based on the task's current column:
+
+#### Inbox / Assigned View
+
+```
+┌─ Task Viewer ─────────────────────────────────────┐
+│  ← Back                                    [Edit] │
+│                                                    │
+│  Explore SiteGPT Dashboard                        │
+│  Created by Henry · 1 day ago                      │
+│                                                    │
+│  Description:                                      │
+│  Thoroughly explore the entire SiteGPT dashboard   │
+│  and document all features...                      │
+│                                                    │
+│  ┌─ Details ──────────────────────────────────┐   │
+│  │ Assignee:  [🤖 Loki ▼]                     │   │
+│  │ Priority:  [● High ▼]                      │   │
+│  │ Due Date:  [Mar 15, 2026]                   │   │
+│  │ Tags:      [research] [documentation] [+]   │   │
+│  │ Steps:     3 steps defined                  │   │
+│  │ Review:    [Human ▼] (Human / LLM / Auto)  │   │
+│  └────────────────────────────────────────────┘   │
+│                                                    │
+│  [Start Task →]                                    │
+└────────────────────────────────────────────────────┘
+```
+
+- Editable fields: assignee (agent dropdown), priority, due date, tags, review mode
+- "Start Task" moves to In Progress and triggers execution
+
+#### In Progress View
+
+```
+┌─ Task Viewer ─────────────────────────────────────┐
+│  ← Back                                   [Stop]  │
+│                                                    │
+│  Explore SiteGPT Dashboard                        │
+│  🤖 Loki · Working... · Step 2 of 3              │
+│                                                    │
+│  ┌─ Progress ─────────────────────────────────┐   │
+│  │ ✓ Step 1: Pull dashboard data (45s)         │   │
+│  │ ● Step 2: Analyze features...               │   │
+│  │ ○ Step 3: Write documentation               │   │
+│  └────────────────────────────────────────────┘   │
+│                                                    │
+│  ┌─ Live Logs ────────────────────────────────┐   │
+│  │ 09:15:00  Started execution                 │   │
+│  │ 09:15:02  Step 1: Fetching dashboard...     │   │
+│  │ 09:15:47  Step 1: Complete (45s)            │   │
+│  │ 09:15:48  Step 2: Analyzing features...     │   │
+│  │ ● (streaming...)                            │   │
+│  └────────────────────────────────────────────┘   │
+│                                                    │
+│  [Move to Review]                                  │
+└────────────────────────────────────────────────────┘
+```
+
+- Reuses internals from existing `execution-detail.tsx`
+- Live log streaming via SSE
+- Step pipeline with `stage-completed`, `stage-active`, `stage-pending` CSS classes
+- "Stop" button cancels execution
+- "Move to Review" manually advances (or auto-advances on completion)
+
+#### Review View
+
+```
+┌─ Task Viewer ─────────────────────────────────────┐
+│  ← Back                              Review Mode: │
+│                                      [Human ▼]    │
+│  Explore SiteGPT Dashboard                        │
+│  🤖 Loki · Completed in 2m 34s · Awaiting Review │
+│                                                    │
+│  ┌─ Report ───────────────────────────────────┐   │
+│  │ ## SiteGPT Dashboard Analysis              │   │
+│  │                                             │   │
+│  │ Key findings:                               │   │
+│  │ - Feature A does X                          │   │
+│  │ - Feature B does Y                          │   │
+│  │ ...                                         │   │
+│  └────────────────────────────────────────────┘   │
+│                                                    │
+│  ┌─ Grade ────────────────────────────────────┐   │
+│  │ Rating: ★★★★☆                              │   │
+│  │ Notes:  [                                ]  │   │
+│  └────────────────────────────────────────────┘   │
+│                                                    │
+│  [✗ Reject → Inbox] [✓ Approve → Done]            │
+└────────────────────────────────────────────────────┘
+```
+
+- Renders report content as markdown (reuses `report-viewer.tsx` internals)
+- Grade form with star rating + notes (reuses `report-grade-form.tsx`)
+- Review mode selector: Human / LLM / Auto
+  - **Human**: requires manual approve/reject
+  - **LLM**: another agent reviews and auto-approves/rejects based on quality threshold
+  - **Auto**: moves to Done automatically on completion (no review step)
+- Reject sends back to Inbox with rejection notes
+- Approve moves to Done with grade saved
+
+#### Done View
+
+```
+┌─ Task Viewer ─────────────────────────────────────┐
+│  ← Back                                           │
+│                                                    │
+│  Explore SiteGPT Dashboard          ✓ Completed   │
+│  🤖 Loki · 2m 34s · Mar 7, 09:17                 │
+│  Grade: ★★★★☆                                     │
+│                                                    │
+│  ┌─ Results ──────────────────────────────────┐   │
+│  │ ## SiteGPT Dashboard Analysis              │   │
+│  │ (full report content)                       │   │
+│  └────────────────────────────────────────────┘   │
+│                                                    │
+│  ┌─ Execution Summary ────────────────────────┐   │
+│  │ Duration: 2m 34s                            │   │
+│  │ Tokens:   4,521                             │   │
+│  │ Steps:    3/3 completed                     │   │
+│  │ Trigger:  Manual                            │   │
+│  └────────────────────────────────────────────┘   │
+│                                                    │
+│  [↻ Re-run] [📥 Download Report] [📋 Copy]       │
+└────────────────────────────────────────────────────┘
+```
+
+- Full report content rendered
+- Execution metadata: duration, tokens, steps, trigger
+- Re-run creates a new execution of the same recipe
+- Download as markdown
+- Failed tasks show error message + stack trace in collapsible section
+
+### 5.6 Creating Tasks
+
+"New Task" button in Board header → opens existing `create-recipe-modal.tsx`:
+- 1-step recipe = simple task
+- N-step recipe = multi-step workflow
+- **No backend changes needed** — recipe model already supports both
+
+Task can also be created by:
+- Agents spawning sub-tasks via `platform_schedule_task` tool (PRD-77)
+- QA agent adding bug-fix tasks to Inbox
+- Redis queue pushing new tasks (existing infrastructure)
+
+### 5.7 Board Filters
+
+Filter bar above the board:
+
+```
+[Agent ▼] [Priority ▼] [Type ▼] [Date Range ▼]  |  🔍 Search tasks...
+```
+
+- **Agent**: multi-select dropdown of workspace agents
+- **Priority**: multi-select (Urgent/High/Medium/Low)
+- **Type**: Routine / Task (single-step) / Workflow (multi-step)
+- **Date Range**: Today / This Week / This Month / Custom
+- **Search**: instant filter by task name/description
+
+Filters persist in URL query params for shareability.
+
+### 5.8 Real-Time Updates (SSE)
+
+Board uses Server-Sent Events instead of polling:
+
+```
+GET /api/activity/board/stream?workspace_id=X
+```
+
+**SSE Event Types:**
+
+| Event | Payload | UI Effect |
 |---|---|---|
-| Scheduled | `⏰ Scheduled: Mon 9am` | `Clock` |
-| Event trigger | `⚡ Trigger: New CRM contact` | `Zap` |
-| Manual | `🖐 Manual` | `Hand` |
-| Webhook | `🔗 Webhook` | `Link` |
+| `task_created` | Full task object | Card appears in Inbox with `log-slide-in` animation |
+| `task_updated` | `{ id, status, agent_id, ... }` | Card moves to new column with animation |
+| `task_progress` | `{ id, step_current, step_total, log_line }` | Progress bar updates, log line appends |
+| `task_completed` | `{ id, status, duration, report_id }` | Card moves to Review or Done |
+| `task_failed` | `{ id, error_message }` | Card shows error badge, moves to Done |
 
-**Inline run history** — each recipe card shows its last 3 runs as mini status dots:
+**Fallback:** If SSE connection drops, fall back to 60s polling via `useActivityFeed()` (existing hook). Reconnect SSE with exponential backoff (1s, 2s, 4s, max 30s).
 
-```
-Last runs: ● ● ○   (green = done, red = failed, gray = cancelled)
-           3h  1d  3d
-```
-
-Clicking opens the execution history for that recipe.
-
-**Run count** — total executions shown: `Ran 47 times`
-
-### 6.3 Recipe Execution Detail (Drill-Down)
-
-When a user clicks a running or completed recipe execution (from Feed or from recipe card), they see:
-
-```
-┌─ glass-panel ─────────────────────────────────────────────┐
-│  ← Back to Activity                                        │
-│                                                            │
-│  📋 Weekly Team Summary                                    │
-│  Recipe · Started Mar 7, 09:15 · Done ✓ · 2m 34s          │
-│                                                            │
-│  ┌─ Step Pipeline ─────────────────────────────────────┐   │
-│  │ ✓ Pull Slack highlights (Agent: Slack Bot, 45s)     │   │
-│  │ ✓ Draft summary (Agent: Content Writer, 1m 12s)     │   │
-│  │ ✓ Post to #team-updates (Agent: Slack Bot, 37s)     │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                            │
-│  ┌─ Output ────────────────────────────────────────────┐   │
-│  │ {rendered output or artifact links}                  │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                            │
-│  ┌─ Execution Log ─────────────────────────────────────┐   │
-│  │ 09:15:00  Started execution (triggered: schedule)   │   │
-│  │ 09:15:02  Step 1: Calling Slack API...              │   │
-│  │ 09:15:47  Step 1: Complete (45s)                    │   │
-│  │ ...                                                  │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                            │
-│                         [Re-run] [Edit Recipe] [View Logs] │
-└────────────────────────────────────────────────────────────┘
-```
-
-**Step pipeline** uses the existing `stage-completed`, `stage-active`, `stage-pending` CSS classes with `stage-connector` between them.
-
-### 6.4 Older Runs
-
-A "History" sub-tab or expandable section within the recipe detail:
-
-```
-┌─ Run History ──────────────────────────────────────────────┐
-│  Run #47  · Mar 7, 09:15  · Done ✓   · 2m 34s   [View]  │
-│  Run #46  · Mar 6, 09:15  · Done ✓   · 2m 12s   [View]  │
-│  Run #45  · Mar 5, 09:15  · Failed ✗ · 0m 45s   [View]  │
-│  Run #44  · Mar 4, 09:15  · Done ✓   · 2m 48s   [View]  │
-│                                          [Load More]       │
-└────────────────────────────────────────────────────────────┘
-```
-
-Each row is clickable → opens that execution's detail view.
+**Backend implementation:**
+- New SSE endpoint in `orchestrator/api/activity.py`
+- Publishes events from: recipe executor, heartbeat service, manual status changes
+- Uses Redis pub/sub as event bus (existing Redis infrastructure)
 
 ---
 
-## 7. Missions Tab
+## 6. Calendar Tab
 
-Placeholder for complex multi-agent workflows. Not building the execution engine yet — just the UI frame so users know it's coming and understand the concept.
+Full-page scheduler view showing all of Automatos's scheduled and recurring tasks. Lets users verify what's running proactively, spot unwanted schedules, and click through to task details.
 
-### 7.1 Coming Soon State
+### 6.1 Layout
 
 ```
-┌─ glass-card ──────────────────────────────────────────────┐
-│                                                            │
-│  🚀                                                        │
-│                                                            │
-│  Missions — Coming Soon                                    │
-│                                                            │
-│  Missions are big, multi-agent projects that run for       │
-│  hours or days. Give a complex brief — like "Prepare       │
-│  the Q1 board deck" — and your AI workforce figures        │
-│  out the steps, assigns agents, and delivers results.      │
-│                                                            │
-│  ┌─ What Missions Can Do ──────────────────────────────┐   │
-│  │  • Break complex goals into tasks automatically      │   │
-│  │  • Assign the right agents to each task              │   │
-│  │  • Track progress with a live dashboard              │   │
-│  │  • Produce artifacts (docs, spreadsheets, reports)   │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                            │
-│  Want early access? Let us know what you'd use it for.     │
-│  [Request Early Access]                                    │
-│                                                            │
-└────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Scheduled Tasks                         [Week] [Today] [↻] │
+│  {user}'s automated routines                                 │
+├──────────────────────────────────────────────────────────────┤
+│  ⚡ Always Running                                           │
+│  ┌────────────────────────────────────────────┐              │
+│  │ mission control check • Every 30 min       │              │
+│  └────────────────────────────────────────────┘              │
+├──────────────────────────────────────────────────────────────┤
+│  Sun    │  Mon    │  Tue    │  Wed    │  Thu    │ *Fri* │ Sat│
+│ ┌─────┐│┌─────┐  │┌─────┐  │┌─────┐  │┌─────┐  │┌─────┐│┌──┐│
+│ │ai sc│││ai sc│  ││ai sc│  ││ai sc│  ││ai sc│  ││ai sc││    │
+│ │5:00A│││5:00A│  ││5:00A│  ││5:00A│  ││5:00A│  ││5:00A││    │
+│ ├─────┤│├─────┤  │├─────┤  │├─────┤  │├─────┤  │├─────┤│    │
+│ │morn │││morn │  ││morn │  ││morn │  ││morn │  ││morn ││    │
+│ │8:00A│││8:00A│  ││8:00A│  ││8:00A│  ││8:00A│  ││8:00A││    │
+│ ├─────┤│├─────┤  │├─────┤  │├─────┤  │├─────┤  │├─────┤│    │
+│ │comp │││comp │  ││newsl│  ││comp │  ││comp │  ││comp ││    │
+│ │10:00│││10:00│  ││9:00A│  ││10:00│  ││10:00│  ││10:00││    │
+│ └─────┘│└─────┘  │├─────┤  │└─────┘  │└─────┘  │└─────┘│    │
+│        │         ││comp │  │         │         │       │    │
+│        │         ││10:00│  │         │         │       │    │
+│        │         │└─────┘  │         │         │       │    │
+├──────────────────────────────────────────────────────────────┤
+│  📅 Next Up                                                  │
+│  mission control check .......................... In 30 min  │
+│  competitor youtube scan ........................ In 1 hours  │
+│  ai scarcity research .......................... In 20 hours │
+│  morning brief .................................. In 23 hours │
+│  newsletter reminder ............................ In 4 days  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-The "Request Early Access" button opens the ChatWidget with a pre-filled message: "I'm interested in Missions — here's what I'd use it for:"
+### 6.2 Three Sections
+
+#### Always Running
+- Shows high-frequency routines (interval < 1 hour)
+- Pill badge: `{name} • Every {interval}`
+- Click → opens task viewer
+
+#### Week Grid
+- 7-column day grid (Sun-Sat)
+- Task pills colour-coded per agent (consistent colours from agent config)
+- Shows task name (truncated) + scheduled time
+- Parsed from cron expressions in `schedule_config`
+- Current day column highlighted (today indicator)
+- Click pill → opens task viewer slide-over
+
+#### Next Up
+- Sorted list of upcoming tasks by soonest
+- Shows task name + relative time ("In 30 min", "In 1 hours")
+- Colour-coded text matching agent colour
+- Click row → opens task viewer
+
+### 6.3 Data Source
+
+Extend existing `useActivitySchedule()` hook:
+- Already returns `next_run_at`, `frequency`, `agent_name`, `agent_id`
+- Add: cron expression parsing to plot recurring items on week grid
+- Add: "always running" filter for sub-hourly intervals
+- Endpoint: `GET /api/activity/schedule?range=7d` (existing)
+
+### 6.4 View Toggle
+
+- **Week** (default): 7-day grid view
+- **Today**: single-day view with hourly timeline
+- **Refresh** button: re-fetches schedule data
+
+### 6.5 Library Decision
+
+Build custom (no external calendar library needed). The design is a simple week grid with pills — `@fullcalendar` is overkill. A CSS grid with mapped cron data is sufficient. If we later need month view or drag-to-reschedule, we can add `@fullcalendar` then.
 
 ---
 
-## 8. API Endpoints
+## 7. Memory Tab
 
-### 8.1 New Endpoints
+Two-panel layout inspired by daily journal apps. Browse and search through all of Automatos's memories, organized chronologically with rich content rendering.
+
+### 7.1 Layout
+
+```
+┌─────────────────────────┬──────────────────────────────────────┐
+│ 🔍 Search memory...     │  2026-02-26 — Thursday               │
+│                         │  Thursday, Feb 26 · 4.8 KB · 772 w  │
+│ 🧠 Long-Term Memory    │  ─────────────────────────────────── │
+│    1,608 words          │                                      │
+│    Updated 22 hours ago │  ⏰ 9:00 AM — Qwen 3.5 Medium       │
+│                         │     Series Research                  │
+│ 📖 DAILY JOURNAL       │                                      │
+│    37 entries           │  What we discussed: Alex shared the  │
+│                         │  Qwen 3.5 Medium announcement...     │
+│ ▼ Yesterday (1)        │                                      │
+│   📅 Mon, Mar 2        │  Key findings:                       │
+│   8.7 KB • 1,253 words │  - 35B-A3B beats old 235B flagship   │
+│                         │  - 122B-A10B matches 397B            │
+│ ▼ This Week (1)        │  - 27B dense gets best SWE-bench     │
+│   📅 Sun, Mar 1        │                                      │
+│   6.8 KB • 1,068 words │  Recommendations given:              │
+│                         │  1. Keep 397B on Studio 2            │
+│ ▼ February 2026 (25)   │  2. Add 35B-A3B on Studio 1          │
+│   📅 Sat, Feb 28       │  3. 122B-A10B as potential upgrade    │
+│   12.6 KB • 2,001 w    │                                      │
+│   📅 Fri, Feb 27       │  Decision: Pending                   │
+│   3.9 KB • 614 words   │  ─────────────────────────────────── │
+│   📅 Thu, Feb 26  ◀    │                                      │
+│   4.8 KB • 772 words   │  Overnight — Reborn Factory Results  │
+│   ...                   │  ...                                  │
+└─────────────────────────┴──────────────────────────────────────┘
+```
+
+### 7.2 Left Sidebar
+
+#### Search
+- Full-text search across all memories
+- **Fix required:** verify `Mem0Client.search()` POST fix merged from `fix-memory` branch
+- Results replace the journal list with search results, ranked by relevance score
+- Keyboard: Enter to search, Esc to clear
+
+#### Long-Term Memory Card
+- Shows total word count, last updated timestamp
+- Click → displays consolidated long-term memory in right panel
+- Badge: `🧠` emoji or Brain icon
+
+#### Daily Journal
+- Grouped by time period:
+  - **Yesterday** (collapsible)
+  - **This Week** (collapsible)
+  - **{Month Year}** (collapsible) — e.g., "February 2026 (25)"
+- Each entry row: `📅 {Day, Mon DD}` + `{size} • {word count}`
+- Click entry → loads full content in right panel
+- Active entry highlighted with `◀` indicator and `bg-primary/10` background
+
+### 7.3 Right Content Panel
+
+- Renders selected memory entry as rich markdown
+- Header: `{date} — {day name}` + metadata (date, size, word count, modified time)
+- Content sections with timestamp headers: `⏰ 9:00 AM — {Topic}`
+- Structured entries with: "What we discussed", "Key findings", "Recommendations", "Decision"
+- Code blocks syntax-highlighted
+- Images rendered inline
+
+### 7.4 Organize By (Toggle)
+
+Above the journal list, a segmented control:
+
+```
+[By Day] [By Agent] [By Type]
+```
+
+- **By Day** (default): grouped by date as shown above
+- **By Agent**: grouped by agent name, each agent section shows their memories
+- **By Type**: grouped by category (conversation, task, document, insight, research)
+
+### 7.5 Enhanced Filters
+
+- **Agent** dropdown (multi-select)
+- **Date range** picker
+- **Type/Category** filter (global / agent-specific)
+- **Sort**: Newest (default) / Oldest / Relevance (when searching)
+
+### 7.6 API Changes
+
+| Endpoint | Change |
+|---|---|
+| `GET /api/memory/browse` | Add `group_by` param: `day` / `agent` / `type` |
+| `GET /api/memory/browse` | Add `date_from`, `date_to` params |
+| `POST /api/memory/search` | Verify working (Mem0 POST fix) |
+| `GET /api/memory/health` | Existing — no changes |
+| `GET /api/memory/journal/{date}` | **New** — returns full day's memory content as structured markdown |
+
+---
+
+## 8. Projects Tab
+
+Evolved from the v1 "Missions" placeholder into a project management view. Projects are multi-task initiatives with progress tracking, assigned agents, and priority.
+
+### 8.1 Layout
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  📁 Projects                                     [+ New]     │
+│  5 total • 2 active • 3 planning                             │
+├──────────────────┬──────────────────┬───────────────────────┤
+│ Agent Org Infra  │ Mission Control  │ Skool AI Extension    │
+│ [Active]         │ [Active]         │                       │
+│ Core infra for   │ Central dash-    │ Chrome ext for Vibe   │
+│ the autonomous   │ board for agent  │ Code Academy. RAG     │
+│ agent org...     │ activity, docs...│ pipeline over...      │
+│                  │                  │                       │
+│ ████████ 100%    │ ██████░░ 70%     │ ░░░░░░░░ 0%          │
+│ 10/10            │ 0/0              │                       │
+│                  │                  │                       │
+│ 🟢 Charlie       │ 🟢 Henry         │ 🟢 Henry              │
+│ [high]   8d ago  │ [high]   8d ago  │         8d ago        │
+├──────────────────┼──────────────────┤                       │
+│ Micro-SaaS       │ Even G2 Integr.  │                       │
+│ [Planning]       │ [Planning]       │                       │
+│ Violet's opp     │ Smart glasses    │                       │
+│ engine — market  │ bridge app...    │                       │
+│ gaps, validate...│                  │                       │
+│                  │                  │                       │
+│ ░░░░░░░░ 0%     │ ░░░░░░░░ 0%     │                       │
+│ 0/0              │ 0/0              │                       │
+│                  │                  │                       │
+│ 🟣 Violet        │ ○ Unassigned     │                       │
+│ [medium]  8d ago │ [medium]  8d ago │                       │
+└──────────────────┴──────────────────┴───────────────────────┘
+```
+
+### 8.2 Project Card
+
+```
+┌─ glass-card ──────────────────────────────┐
+│  Project Name                    [Active] │
+│                                            │
+│  Description text (line-clamp-3)...        │
+│                                            │
+│  ████████████░░░░░░░░  70%       7/10     │
+│                                            │
+│  🟢 Agent Name                             │
+│  [priority]                    time ago    │
+└────────────────────────────────────────────┘
+```
+
+**Card fields:**
+- Project name
+- Status badge: `Active` (green) / `Planning` (blue) / `Complete` (muted) / `On Hold` (amber)
+- Description (line-clamp-3)
+- Progress bar: completed tasks / total tasks, percentage
+- Lead agent avatar + name
+- Priority badge
+- Time since creation
+
+### 8.3 Project Detail (Click-Through)
+
+Clicking a project card opens a detail view:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ← Projects                                                  │
+│                                                              │
+│  Agent Org Infrastructure                         [Active]   │
+│  Core infrastructure for the autonomous agent organization   │
+│  Lead: 🟢 Charlie · Priority: High · Created 8 days ago     │
+│                                                              │
+│  ████████████████████ 100%    10/10 tasks                    │
+│                                                              │
+│  ┌─ Tasks ────────────────────────────────────────────────┐  │
+│  │ ✓ Set up base agent framework                          │  │
+│  │ ✓ Implement heartbeat service                          │  │
+│  │ ✓ Configure inter-agent messaging                      │  │
+│  │ ✓ Deploy monitoring stack                              │  │
+│  │ ...                                                     │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                              │
+│  [+ Add Task] [Open in Board →]                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- Lists all tasks belonging to this project
+- Each task row links to the Board task viewer
+- "Add Task" creates a new task pre-linked to this project
+- "Open in Board" navigates to Board tab filtered by this project's tasks
+
+### 8.4 Data Model
+
+Projects are a **new concept** — a group of recipes/tasks with shared metadata:
+
+```python
+class Project(Base):
+    __tablename__ = 'projects'
+
+    id: int  # PK
+    workspace_id: UUID
+    name: str
+    description: str
+    status: str  # 'planning', 'active', 'complete', 'on_hold'
+    lead_agent_id: int | None  # FK to agents
+    priority: str  # 'low', 'medium', 'high', 'urgent'
+    created_at: datetime
+    updated_at: datetime
+```
+
+Link table for project ↔ task (recipe execution) relationship:
+
+```python
+class ProjectTask(Base):
+    __tablename__ = 'project_tasks'
+
+    project_id: int  # FK to projects
+    execution_id: str  # FK to recipe_executions
+    order: int  # Display order within project
+```
+
+### 8.5 API Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/activity/feed` | Unified feed — merges chats, routines, recipes. Query params: `type`, `status`, `period`, `limit`, `offset` |
-| `GET` | `/api/activity/stats` | Stats for hero cards (includes channel health). Query params: `period` |
-| `GET` | `/api/heartbeats` | List all heartbeat configs for workspace |
-| `GET` | `/api/heartbeats/{id}/executions` | Execution history for a specific heartbeat |
-| `PATCH` | `/api/heartbeats/{id}/toggle` | Pause/resume a heartbeat |
+| `GET` | `/api/projects` | List projects for workspace |
+| `POST` | `/api/projects` | Create project |
+| `GET` | `/api/projects/{id}` | Project detail with tasks |
+| `PATCH` | `/api/projects/{id}` | Update project |
+| `POST` | `/api/projects/{id}/tasks` | Link task to project |
+| `DELETE` | `/api/projects/{id}/tasks/{exec_id}` | Unlink task |
 
-### 8.2 Existing Endpoints (No Changes)
+---
+
+## 9. Global Search (Cmd+K)
+
+Spotlight-style search overlay accessible from anywhere in the app.
+
+### 9.1 Trigger
+
+- Keyboard: `Cmd+K` (Mac) / `Ctrl+K` (Windows/Linux)
+- Click: Search icon in top navigation bar
+
+### 9.2 Layout
+
+```
+┌──────────────────────────────────────────────────┐
+│  🔍 Mac Studio                          ✕   ESC │
+├──────────────────────────────────────────────────┤
+│  TASKS                                           │
+│  ┌──────────────────────────────────────────┐    │
+│  │ ✅ Flesh out $10K Mac Studio use cases  ●│    │
+│  │    Clawdbot                            → │    │
+│  ├──────────────────────────────────────────┤    │
+│  │ ✅ Local model recommendations for Mac ● │    │
+│  │    Infrastructure                      → │    │
+│  ├──────────────────────────────────────────┤    │
+│  │ ✅ Research Exo Labs dual-Studio clust ● │    │
+│  │    Mac Studio Launch                   → │    │
+│  └──────────────────────────────────────────┘    │
+│                                                  │
+│  MEMORIES                                        │
+│  ┌──────────────────────────────────────────┐    │
+│  │ 🧠 Mac Studio M2 Ultra performance...    │    │
+│  │    Feb 26, 2026                         → │    │
+│  └──────────────────────────────────────────┘    │
+│                                                  │
+│  ↑↓ navigate  ↵ select  esc close               │
+├──────────────────────────────────────────────────┤
+```
+
+### 9.3 Search Categories
+
+Results grouped by type:
+
+| Category | Icon | Source |
+|---|---|---|
+| **Tasks** | `CheckSquare` | Recipe executions (name, description) |
+| **Memories** | `Brain` | Memory search (content) |
+| **Documents** | `FileText` | Document metadata (name) |
+| **Agents** | `Bot` | Agent names, roles |
+| **Projects** | `FolderKanban` | Project names, descriptions |
+
+### 9.4 Result Item
+
+Each result shows:
+- Category icon
+- Title (highlighted match)
+- Subtitle (agent name, category, or date)
+- Status dot (colour = current status for tasks)
+- Arrow → navigates to item
+
+### 9.5 Keyboard Navigation
+
+- `↑↓` — move selection
+- `Enter` — open selected item
+- `Esc` — close search
+- Type to filter in real-time (debounced 300ms)
+
+### 9.6 API
+
+```
+GET /api/search?q={query}&workspace_id=X&types=tasks,memories,documents,agents,projects&limit=10
+```
+
+Returns results grouped by type, ordered by relevance. Backend searches across:
+- `recipe_executions` (name, description via ILIKE)
+- `memories` (Mem0 vector search)
+- `documents` (name, metadata via ILIKE)
+- `agents` (name, role via ILIKE)
+- `projects` (name, description via ILIKE)
+
+---
+
+## 10. API Endpoints (Complete)
+
+### 10.1 Existing Endpoints (No Changes)
 
 | Method | Path | Used For |
 |---|---|---|
-| `GET` | `/api/recipes` | Recipe list (Recipes tab) |
+| `GET` | `/api/recipes` | Recipe list (used by Board internally) |
 | `GET` | `/api/recipes/{id}/executions` | Recipe execution history |
-| `GET` | `/api/recipes/executions/{exec_id}` | Single execution detail |
 | `POST` | `/api/recipes/{id}/execute` | Manual recipe run |
-| `GET` | `/api/chats` | Chat list for feed |
+| `GET` | `/api/activity/feed` | Feed data (fallback for Board polling) |
+| `GET` | `/api/activity/stats` | Stats for hero cards |
+| `GET` | `/api/activity/schedule` | Calendar data source |
+| `GET` | `/api/agents` | Agent list for sidebar |
+| `GET` | `/api/memory/health` | Memory health stats |
+| `DELETE` | `/api/memory/{id}` | Delete memory |
+| `POST` | `/api/memory/consolidate` | Merge/summarize memories |
 
-### 8.3 Unified Feed Response Schema
+### 10.2 Modified Endpoints
+
+| Method | Path | Change |
+|---|---|---|
+| `GET` | `/api/activity/feed` | Add `status` filter for board columns (inbox, assigned, in_progress, review, done) |
+| `GET` | `/api/memory/browse` | Add `group_by`, `date_from`, `date_to` params |
+
+### 10.3 New Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `PATCH` | `/api/activity/tasks/{id}/status` | Update task status (drag-and-drop) |
+| `PATCH` | `/api/activity/tasks/{id}` | Update task fields (assignee, priority, tags, due_date, review_mode) |
+| `GET` | `/api/activity/board/stats` | Board column counts + priority/type/agent breakdowns for Summary widgets |
+| `GET` | `/api/activity/board/stream` | **SSE** — real-time task events stream |
+| `GET` | `/api/memory/journal/{date}` | Full day's memory as structured markdown |
+| `GET` | `/api/projects` | List projects |
+| `POST` | `/api/projects` | Create project |
+| `GET` | `/api/projects/{id}` | Project detail + linked tasks |
+| `PATCH` | `/api/projects/{id}` | Update project |
+| `POST` | `/api/projects/{id}/tasks` | Link task to project |
+| `DELETE` | `/api/projects/{id}/tasks/{exec_id}` | Unlink task |
+| `GET` | `/api/search` | Global search across all entity types |
+
+### 10.4 Database Migrations
+
+#### Migration 1: Board statuses + task fields
+
+```sql
+-- Add new statuses to recipe_executions
+ALTER TABLE recipe_executions
+  ADD COLUMN priority VARCHAR(10) DEFAULT 'medium',
+  ADD COLUMN tags JSONB DEFAULT '[]',
+  ADD COLUMN assignee_agent_id INTEGER REFERENCES agents(id),
+  ADD COLUMN review_mode VARCHAR(10) DEFAULT 'human',
+  ADD COLUMN due_date TIMESTAMP,
+  ADD COLUMN reviewed_at TIMESTAMP,
+  ADD COLUMN reviewed_by VARCHAR(50);
+
+-- Update status enum to include new values
+-- (status is VARCHAR, so just document valid values)
+-- Valid: 'inbox', 'assigned', 'pending', 'running', 'in_progress', 'review', 'completed', 'done', 'failed', 'cancelled'
+```
+
+#### Migration 2: Projects table
+
+```sql
+CREATE TABLE projects (
+  id SERIAL PRIMARY KEY,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id),
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  status VARCHAR(20) DEFAULT 'planning',
+  lead_agent_id INTEGER REFERENCES agents(id),
+  priority VARCHAR(10) DEFAULT 'medium',
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE project_tasks (
+  project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+  execution_id VARCHAR(255) REFERENCES recipe_executions(execution_id),
+  "order" INTEGER DEFAULT 0,
+  PRIMARY KEY (project_id, execution_id)
+);
+
+CREATE INDEX idx_projects_workspace ON projects(workspace_id);
+CREATE INDEX idx_project_tasks_project ON project_tasks(project_id);
+```
+
+### 10.5 Key Type Definitions
 
 ```typescript
-interface ActivityFeedItem {
+// Board task (extends ActivityFeedItem)
+interface BoardTask {
   id: string
-  type: 'chat' | 'routine' | 'recipe' | 'mission'
+  type: 'routine' | 'recipe'
   name: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused'
-  started_at: string           // ISO timestamp
-  completed_at: string | null
-  duration_seconds: number | null
-  agent: {
-    id: number
-    name: string
-    avatar_url: string | null
-  } | null
-  agents: Array<{              // For multi-agent executions
-    id: number
-    name: string
-  }>
-  summary: string              // Context line (first message, step progress, etc.)
-  source_id: string            // Recipe ID, heartbeat ID, chat ID
-  source_url: string           // Deep link to configure/view source
-  trigger: 'manual' | 'scheduled' | 'event' | 'webhook' | 'heartbeat' | null
-  channel?: {                    // Present when activity came via an external channel
-    type: 'telegram' | 'whatsapp' | 'slack' | 'email' | 'webchat'
-    name: string                 // e.g. "Support Bot", "#sales-alerts"
-  } | null
-  step_progress?: {
-    current: number
-    total: number
-    steps: Array<{
-      name: string
-      status: 'pending' | 'running' | 'completed' | 'failed'
-    }>
+  description?: string
+  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'done'
+  priority: 'urgent' | 'high' | 'medium' | 'low'
+  tags: string[]
+  assignee?: {
+    agent_id: number
+    agent_name: string
+    agent_icon?: string
   }
-  error_message: string | null
+  creator?: string
+  due_date?: string
+  review_mode: 'human' | 'llm' | 'auto'
+  started_at?: string
+  completed_at?: string
+  duration_ms?: number
+  step_progress?: { current: number; total: number }
+  error_message?: string
+  report_id?: string
+  source_id: string
+  project_id?: number
 }
 
-interface ActivityStats {
-  working_now: number
-  channels_live: number          // connected channels actively receiving messages
-  completed_today: number
-  needs_attention: number        // failed executions + stale routines + disconnected channels
-  period: string
+// SSE event
+interface BoardEvent {
+  type: 'task_created' | 'task_updated' | 'task_progress' | 'task_completed' | 'task_failed'
+  task: Partial<BoardTask> & { id: string }
+  timestamp: string
+}
+
+// Project
+interface Project {
+  id: number
+  name: string
+  description: string
+  status: 'planning' | 'active' | 'complete' | 'on_hold'
+  lead_agent?: { id: number; name: string; icon?: string }
+  priority: 'urgent' | 'high' | 'medium' | 'low'
+  task_count: number
+  completed_count: number
+  progress_pct: number
+  created_at: string
+  updated_at: string
+}
+
+// Global search result
+interface SearchResult {
+  type: 'task' | 'memory' | 'document' | 'agent' | 'project'
+  id: string
+  title: string
+  subtitle: string
+  status?: string
+  url: string
 }
 ```
 
 ---
 
-## 9. File Structure
+## 11. File Structure
 
 ```
 frontend/
   app/
     activity/
-      page.tsx                  # NEW — route entry, replaces /workflows
-    workflows/
-      page.tsx                  # MODIFY — 301 redirect to /activity
+      page.tsx                          # KEEP — route entry
   components/
     activity/
-      activity-page.tsx         # NEW — main page component (like analytics-page.tsx)
-      activity-feed.tsx         # NEW — Feed tab content
-      activity-feed-item.tsx    # NEW — individual feed card
-      activity-stats.tsx        # NEW — hero stats with polling
-      activity-routines.tsx     # NEW — Routines tab
-      routine-card.tsx          # NEW — individual routine card with history
-      activity-missions.tsx     # NEW — Missions coming-soon placeholder
-      execution-detail.tsx      # NEW — drill-down view for any execution
-    workflows/
-      recipes-tab.tsx           # MODIFY — add inline run history dots
-      workflow-management.tsx   # KEEP — imported by activity-page for RecipesTab
+      activity-page.tsx                 # MODIFY — update tabs to Summary|Board|Calendar|Memory|Projects
+      activity-feed.tsx                 # DELETE after Board is live (keep as fallback initially)
+      activity-feed-item.tsx            # DELETE after Board is live
+      activity-reports.tsx              # DELETE — merged into task viewer
+      report-card.tsx                   # DELETE — replaced by board-card
+      activity-missions.tsx             # MODIFY → activity-projects.tsx
+      activity-memory.tsx               # REWRITE — two-panel layout
+      memory-card.tsx                   # MODIFY → sidebar entry row
+      execution-detail.tsx              # KEEP — internals reused in task viewer
+      report-viewer.tsx                 # KEEP — internals reused in task viewer
+      report-grade-form.tsx             # KEEP — embedded in Review view
+
+      # NEW — Board
+      board/
+        board-view.tsx                  # Main kanban container with DragDropContext
+        board-column.tsx                # Single droppable column
+        board-card.tsx                  # Draggable task card
+        board-filters.tsx              # Filter bar (agent, priority, type, date)
+        board-agent-sidebar.tsx         # Agent roster sidebar
+        board-task-viewer.tsx           # Unified slide-over (Inbox/InProgress/Review/Done views)
+
+      # NEW — Calendar
+      calendar/
+        activity-calendar.tsx           # Main calendar container
+        calendar-week-grid.tsx          # 7-day CSS grid with task pills
+        calendar-always-running.tsx     # High-frequency routines section
+        calendar-next-up.tsx            # Upcoming tasks list
+
+      # NEW — Memory (rewrites)
+      memory/
+        memory-sidebar.tsx              # Left panel: search + journal list
+        memory-viewer.tsx               # Right panel: content renderer
+        memory-journal-entry.tsx        # Sidebar entry row (date + size)
+
+      # NEW — Projects
+      projects/
+        activity-projects.tsx           # Project card grid
+        project-card.tsx                # Individual project card
+        project-detail.tsx              # Project detail with task list
+
+      # NEW — Summary widgets
+      widgets/
+        command-centre-dashboard.tsx     # KEEP — drag grid container
+        active-now-widget.tsx            # KEEP
+        recent-activity-widget.tsx       # KEEP — add click-through to Board
+        schedule-widget.tsx              # KEEP — add click-through to Calendar
+        agent-reports-widget.tsx         # KEEP
+        status-overview-widget.tsx       # NEW — donut chart
+        priority-breakdown-widget.tsx    # NEW — bar chart
+        types-of-work-widget.tsx         # NEW — horizontal bars
+        team-workload-widget.tsx         # NEW — agent distribution bars
+
+      # NEW — Global Search
+    global-search/
+      global-search.tsx                 # Cmd+K overlay
+      search-result-item.tsx            # Individual result row
+
   hooks/
-    use-activity-feed.ts        # NEW — SWR/React Query hook for unified feed
-    use-activity-stats.ts       # NEW — polling stats hook
-    use-heartbeats.ts           # NEW — heartbeat CRUD hook
-  lib/
-    activity-service.ts         # NEW — API client methods for activity endpoints
+    use-activity-api.ts                 # MODIFY — add board stats, 60s polling
+    use-reports-api.ts                  # KEEP
+    use-memory-explorer-api.ts          # MODIFY — add group_by, date range
+    use-board-sse.ts                    # NEW — SSE hook for real-time board
+    use-board-tasks.ts                  # NEW — React Query + SSE hybrid
+    use-projects-api.ts                 # NEW — project CRUD hooks
+    use-global-search.ts               # NEW — debounced search hook
+    use-memory-journal.ts              # NEW — journal day content hook
+
+  types/
+    board.ts                            # NEW — BoardTask, BoardEvent types
+    project.ts                          # NEW — Project types
+    search.ts                           # NEW — SearchResult types
 
 orchestrator/
   api/
-    activity.py                 # NEW — /api/activity/feed + /api/activity/stats
-    heartbeats.py               # MODIFY — add GET list, GET executions, PATCH toggle
+    activity.py                         # MODIFY — add board/stream SSE, tasks PATCH, board/stats
+    projects.py                         # NEW — project CRUD endpoints
+    search.py                           # NEW — global search endpoint
+    memory.py                           # MODIFY — add journal/{date} endpoint, group_by param
+  core/
+    models/
+      core.py                           # MODIFY — add Project, ProjectTask models + recipe_execution fields
   services/
-    activity_service.py         # NEW — merges data from chats, heartbeats, recipe_executions
+    activity_service.py                 # MODIFY — add board stats aggregation
+    project_service.py                  # NEW — project business logic
+    search_service.py                   # NEW — cross-entity search
 ```
 
 ---
 
-## 10. Implementation Phases
+## 12. Implementation Phases
 
-### Phase 1: Route + Shell (no new data)
-1. Create `/activity` route and `activity-page.tsx` with `PageHeader`, `StatsBar` (hardcoded), `FilterTabs`
-2. Update sidebar: rename Workflow Management → Activity, update href + icon
-3. Add redirect from `/workflows` → `/activity`
-4. Move existing `<RecipesTab>` into the Recipes tab (zero functional change)
-5. Add Missions tab with coming-soon placeholder
-6. Wire `data-tour` attributes for the SHEPHERD tour system
+### Phase 1: Tab Restructure + Summary Widgets (PR1 + PR2)
 
-### Phase 2: Routines Tab
-7. Create `GET /api/heartbeats` endpoint (list all for workspace)
-8. Create `use-heartbeats.ts` hook
-9. Build `activity-routines.tsx` + `routine-card.tsx`
-10. Create `PATCH /api/heartbeats/{id}/toggle` endpoint
-11. Add execution history expansion per routine
+1. Rename tabs in `activity-page.tsx`: Summary | Board | Calendar | Memory | Projects
+2. Change polling from 15s → 60s across all activity hooks
+3. Update deep-link support for new tab names
+4. Build 4 new Summary widgets: status donut, priority breakdown, types of work, team workload
+5. Add `GET /api/activity/board/stats` endpoint
+6. Wire "View All" click-throughs: Schedule widget → Calendar, Recent Activity → Board
 
-### Phase 3: Unified Feed
-12. Create `activity_service.py` backend — merges `chats`, `heartbeat_executions`, `recipe_executions` into a single sorted response
-13. Create `/api/activity/feed` and `/api/activity/stats` endpoints
-14. Build `use-activity-feed.ts` + `use-activity-stats.ts` hooks with polling
-15. Build `activity-feed.tsx` + `activity-feed-item.tsx`
-16. Wire live stats into `<StatsBar>`
-17. Add filter chips (type + status)
+### Phase 2: Board — Backend (PR3)
 
-### Phase 4: Execution Detail + History
-18. Build `execution-detail.tsx` — step pipeline, output, logs
-19. Add inline run history dots to recipe cards
-20. Add "View" links from feed items → detail view
-21. Add "Configure" links → source page (agent config, recipe editor)
-22. Add "Re-run" action for completed recipe executions
+7. Database migration: add `priority`, `tags`, `assignee_agent_id`, `review_mode`, `due_date` to `recipe_executions`
+8. Add `inbox`, `assigned`, `review` as valid status values
+9. Create `PATCH /api/activity/tasks/{id}/status` endpoint
+10. Create `PATCH /api/activity/tasks/{id}` endpoint (update fields)
+11. Extend `GET /api/activity/feed` with board status filters
+12. Implement SSE endpoint `GET /api/activity/board/stream` using Redis pub/sub
 
-### Phase 5: Polish
-23. Real-time pulse animation for running items
-24. `log-slide-in` animation for new feed items
-25. Mobile responsive pass — reduced blur, stacked cards
-26. Loading skeletons matching each tab's layout
-27. Empty states for each tab
-28. `prefers-reduced-motion` compliance (disable animations)
+### Phase 3: Board — Frontend (PR4)
+
+13. Install `@hello-pangea/dnd`
+14. Build `board-view.tsx` — DragDropContext + 5 columns
+15. Build `board-column.tsx` — Droppable column with header + count
+16. Build `board-card.tsx` — Draggable card with task details
+17. Build `board-agent-sidebar.tsx` — agent roster with filter-on-click
+18. Build `board-filters.tsx` — filter bar
+19. Implement optimistic drag-and-drop with revert on failure
+20. Build `use-board-sse.ts` hook with reconnect + 60s polling fallback
+
+### Phase 4: Task Viewer (PR5)
+
+21. Build `board-task-viewer.tsx` — slide-over with 4 context-aware views
+22. Inbox/Assigned view: editable fields (assignee, priority, due date, tags, review mode)
+23. In Progress view: live logs + step pipeline (reuse `execution-detail.tsx` internals)
+24. Review view: report content + grade form + approve/reject (reuse `report-viewer.tsx` + `report-grade-form.tsx`)
+25. Done view: results + execution summary + re-run/download actions
+26. Wire task viewer to board card clicks
+
+### Phase 5: Calendar (PR6)
+
+27. Build `activity-calendar.tsx` — container with view toggle
+28. Build `calendar-always-running.tsx` — sub-hourly routines
+29. Build `calendar-week-grid.tsx` — CSS grid with cron-parsed task pills
+30. Build `calendar-next-up.tsx` — upcoming sorted list
+31. Wire calendar events to task viewer slide-over
+32. Wire Schedule widget "View All" → Calendar tab
+
+### Phase 6: Memory Enhancement (PR7)
+
+33. Verify Mem0 search POST fix is merged
+34. Rewrite `activity-memory.tsx` → two-panel layout
+35. Build `memory-sidebar.tsx` — search + grouped journal list
+36. Build `memory-viewer.tsx` — right panel markdown renderer
+37. Add `group_by` param to `GET /api/memory/browse`
+38. Create `GET /api/memory/journal/{date}` endpoint
+39. Add organize-by toggle (Day / Agent / Type)
+40. Enhanced filters: agent, date range, type, sort
+
+### Phase 7: Projects (PR8)
+
+41. Database migration: `projects` + `project_tasks` tables
+42. Create `projects.py` API with CRUD endpoints
+43. Build `activity-projects.tsx` — card grid with stats header
+44. Build `project-card.tsx` — card with progress bar + agent + priority
+45. Build `project-detail.tsx` — detail view with linked task list
+46. Wire "Open in Board" → Board tab filtered by project
+
+### Phase 8: Global Search (PR9)
+
+47. Create `GET /api/search` endpoint — cross-entity search
+48. Build `global-search.tsx` — Cmd+K overlay with keyboard navigation
+49. Build `search-result-item.tsx` — categorized result rows
+50. Wire results to navigation (Board task viewer, Memory entry, Agent page, Project detail)
+51. Add Cmd+K listener to app layout
+
+### Phase 9: Cleanup (PR10)
+
+52. Delete deprecated components: `activity-feed.tsx`, `activity-feed-item.tsx`, `activity-reports.tsx`, `report-card.tsx`
+53. Update all internal links referencing old Feed/Reports tabs
+54. Mobile responsive pass for all new components
+55. Loading skeletons for Board, Calendar, Memory, Projects
+56. Empty states for each tab
+57. `prefers-reduced-motion` compliance
 
 ---
 
-## 11. Navigation Drill-Down Map
+## 13. Dependencies
 
-From any item in the Activity Command Centre, users can reach the source configuration:
+### New npm Packages
 
-```
-Feed Item (Chat)      → [View]      → /chat/{id}
-Feed Item (Routine)   → [View]      → Routine detail (inline expand)
-                      → [Configure] → /agents/{id}#heartbeat
-Feed Item (Recipe)    → [View]      → Execution detail (inline or slide-over)
-                      → [Configure] → Recipe editor modal
-                      → [Re-run]    → POST /api/recipes/{id}/execute
-Feed Item (Mission)   → [View]      → Execution theater (future)
-                      → [Configure] → Mission editor (future)
+| Package | Purpose | Size |
+|---|---|---|
+| `@hello-pangea/dnd` | Drag-and-drop for Kanban board | ~45KB gzipped |
 
-Routine Card          → [Edit]      → /agents/{id}#heartbeat
-                      → [Pause]     → PATCH /api/heartbeats/{id}/toggle
-                      → [History ▼] → Expand execution log
+### Existing Packages (Already Installed)
 
-Recipe Card           → [Run Now]   → POST /api/recipes/{id}/execute
-                      → [Edit]      → Recipe editor modal
-                      → [History]   → Expand run list
-```
+| Package | Used For |
+|---|---|
+| `react-grid-layout` | Summary widget drag grid |
+| `recharts` | Donut, bar charts on Summary |
+| `framer-motion` | Animations |
+| `lucide-react` | Icons |
+
+No `@fullcalendar` needed — Calendar is custom CSS grid.
 
 ---
 
-## 12. Success Metrics
+## 14. Success Metrics
 
 | Metric | Target | How to Measure |
 |---|---|---|
 | Time to answer "what's running?" | < 3 seconds (one click from sidebar) | User testing |
-| Routine visibility | 100% of active heartbeats visible | Compare DB heartbeat count vs UI |
-| Recipe run findability | Any run reachable in ≤ 2 clicks | UI audit |
-| Failed execution awareness | 0 silently failed runs | "Needs Attention" stat card always accurate |
+| Task status visibility | 100% of active tasks visible on Board | Compare DB count vs UI count |
+| Drag-and-drop latency | < 200ms perceived (optimistic update) | Performance testing |
+| SSE delivery latency | < 2s from event to UI update | Instrumentation |
+| Calendar shows all schedules | 100% of cron jobs visible | Compare scheduler DB vs Calendar |
+| Memory search returns results | > 0 results for any known topic | Regression test |
+| Global search response time | < 500ms | API monitoring |
 | Page load time | < 1.5s initial, < 500ms tab switch | Lighthouse + RUM |
 | Mobile usability | All tabs functional on 375px width | Manual test |
 
 ---
 
-## 13. Open Questions
+## 15. Open Questions
 
-1. **WebSocket for real-time?** Polling at 15s is good enough for MVP. WebSocket/SSE upgrade is a future enhancement — the UI should be designed to support both without refactoring (just swap the data source in the hook).
+1. **SSE vs WebSocket:** SSE is simpler and sufficient for server→client push. If we later need client→server streaming (e.g., collaborative editing), upgrade to WebSocket. For now, SSE.
 
-2. **Feed pagination strategy?** Infinite scroll vs "Load More" button. Recommendation: "Load More" button — simpler, more predictable, works better on mobile.
+2. **Board pagination:** If a column has 100+ cards, do we paginate or virtual-scroll? Recommendation: show latest 50 per column with "Load More" button. Virtual scrolling is a future optimization.
 
-3. **Mission execution engine?** Out of scope for this PRD. When we build it, it plugs into the Missions tab and the Feed seamlessly because the `ActivityFeedItem` schema already supports it.
+3. **Project ↔ Mission relationship:** Projects in this PRD are the UI evolution of Missions. The backend `projects` table is new. Do we migrate existing mission data or start fresh? Recommendation: start fresh — Missions tab was a placeholder with no data.
 
-4. **Chat entries in feed — all or just tool-using?** Recommendation: only show chats where an agent + tools were invoked (not simple Q&A). This keeps the feed focused on "work being done" rather than casual conversation. Configurable via a toggle later.
+4. **Review mode "LLM":** Which agent performs LLM review? Options: (a) dedicated QA agent, (b) any agent with "reviewer" skill, (c) configurable per-task. Recommendation: configurable per-task with a workspace-level default.
+
+5. **Calendar — month view?** v2 ships with Week and Today views only. Month view is a future enhancement if users request it. Keeps scope manageable.

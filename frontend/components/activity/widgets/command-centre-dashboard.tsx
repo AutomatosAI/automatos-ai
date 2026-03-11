@@ -7,12 +7,21 @@ import { ActiveNowWidget } from './active-now-widget'
 import { ScheduleWidget } from './schedule-widget'
 import { AgentReportsWidget } from './agent-reports-widget'
 import { RecentActivityWidget } from './recent-activity-widget'
+import { StatusOverviewWidget } from './status-overview-widget'
+import { PriorityBreakdownWidget } from './priority-breakdown-widget'
+import { TypesOfWorkWidget } from './types-of-work-widget'
+import { TeamWorkloadWidget } from './team-workload-widget'
 import { cn } from '@/lib/utils'
 
 // ── Widget Order Storage ────────────────────────────────────
 
-const ORDER_STORAGE_KEY = 'automatos:command-centre-order'
-const DEFAULT_ORDER = ['active-now', 'schedule', 'agent-reports', 'recent-activity']
+const ORDER_STORAGE_KEY = 'automatos:command-centre-order-v2'
+const DEFAULT_ORDER = [
+  'active-now', 'status-overview',
+  'schedule', 'priority-breakdown',
+  'recent-activity', 'types-of-work',
+  'agent-reports', 'team-workload',
+]
 
 function loadSavedOrder(): string[] | null {
   if (typeof window === 'undefined') return null
@@ -34,9 +43,10 @@ function saveOrder(order: string[]) {
 interface CommandCentreDashboardProps {
   period: string
   onViewAllActivity?: () => void
+  onViewCalendar?: () => void
 }
 
-export function CommandCentreDashboard({ period, onViewAllActivity }: CommandCentreDashboardProps) {
+export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalendar }: CommandCentreDashboardProps) {
   const [widgetOrder, setWidgetOrder] = useState<string[]>(DEFAULT_ORDER)
   const [isCustomizing, setIsCustomizing] = useState(false)
   const [draggedWidget, setDraggedWidget] = useState<string | null>(null)
@@ -90,12 +100,20 @@ export function CommandCentreDashboard({ period, onViewAllActivity }: CommandCen
     switch (widgetId) {
       case 'active-now':
         return <ActiveNowWidget period={period} />
+      case 'status-overview':
+        return <StatusOverviewWidget period={period} onViewAll={onViewAllActivity} />
       case 'schedule':
-        return <ScheduleWidget />
-      case 'agent-reports':
-        return <AgentReportsWidget />
+        return <ScheduleWidget onViewAll={onViewCalendar} />
+      case 'priority-breakdown':
+        return <PriorityBreakdownWidget period={period} />
       case 'recent-activity':
         return <RecentActivityWidget period={period} onViewAll={onViewAllActivity} />
+      case 'types-of-work':
+        return <TypesOfWorkWidget period={period} />
+      case 'agent-reports':
+        return <AgentReportsWidget />
+      case 'team-workload':
+        return <TeamWorkloadWidget period={period} />
       default:
         return null
     }
@@ -103,18 +121,26 @@ export function CommandCentreDashboard({ period, onViewAllActivity }: CommandCen
 
   // Grid span config for each widget
   const gridSpan: Record<string, string> = {
-    'active-now': 'lg:col-span-5',
-    'schedule': 'lg:col-span-7',
-    'agent-reports': 'lg:col-span-12',
-    'recent-activity': 'lg:col-span-12',
+    'active-now': 'lg:col-span-6',
+    'status-overview': 'lg:col-span-6',
+    'schedule': 'lg:col-span-6',
+    'priority-breakdown': 'lg:col-span-6',
+    'recent-activity': 'lg:col-span-6',
+    'types-of-work': 'lg:col-span-6',
+    'agent-reports': 'lg:col-span-6',
+    'team-workload': 'lg:col-span-6',
   }
 
   // Height config
   const gridHeight: Record<string, string> = {
     'active-now': 'min-h-[320px]',
+    'status-overview': 'min-h-[320px]',
     'schedule': 'min-h-[320px]',
+    'priority-breakdown': 'min-h-[320px]',
+    'recent-activity': 'min-h-[280px]',
+    'types-of-work': 'min-h-[280px]',
     'agent-reports': 'min-h-[280px]',
-    'recent-activity': 'min-h-[240px]',
+    'team-workload': 'min-h-[280px]',
   }
 
   return (

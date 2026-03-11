@@ -497,7 +497,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => router.push(`/activity?tab=reports&agent_id=${item.agent?.id}`)}
+              onClick={() => router.push(`/activity?tab=board&agent_id=${item.agent?.id}`)}
               className="text-xs min-h-[44px] sm:min-h-0 justify-center"
             >
               <FileText className="w-3.5 h-3.5 mr-1.5" />

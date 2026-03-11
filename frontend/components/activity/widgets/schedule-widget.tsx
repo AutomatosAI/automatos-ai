@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 
 interface ScheduleWidgetProps {
   className?: string
+  onViewAll?: () => void
 }
 
 function WeekCalendar({ items }: { items: ScheduleItem[] }) {
@@ -104,7 +105,7 @@ function UpcomingList({ items }: { items: ScheduleItem[] }) {
   )
 }
 
-export function ScheduleWidget({ className }: ScheduleWidgetProps) {
+export function ScheduleWidget({ className, onViewAll }: ScheduleWidgetProps) {
   const { data, isLoading, isError } = useActivitySchedule('7d')
   const items = data?.scheduled ?? []
   const schedulerActive = data?.scheduler_active ?? false
@@ -116,7 +117,16 @@ export function ScheduleWidget({ className }: ScheduleWidgetProps) {
           <Calendar className="w-4 h-4 text-[hsl(var(--success))]" />
           <h3 className="text-sm font-semibold">Schedule</h3>
         </div>
-        <span className="text-[10px] text-muted-foreground">This Week</span>
+        {onViewAll ? (
+          <button
+            onClick={onViewAll}
+            className="text-[10px] text-primary hover:underline"
+          >
+            View All →
+          </button>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">This Week</span>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
