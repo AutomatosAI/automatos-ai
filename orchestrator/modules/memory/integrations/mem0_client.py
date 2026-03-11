@@ -85,6 +85,10 @@ class Mem0Client:
             self.api_url = f"https://{self.api_url}"
 
         self.api_url = self.api_url.rstrip("/")
+
+        # OpenMemory API mounts routes under /api/v1 prefix
+        if "/api/v1" not in self.api_url:
+            self.api_url = f"{self.api_url}/api/v1"
         self.headers = {}
         if self.api_key:
             self.headers["Authorization"] = f"Token {self.api_key}"
@@ -146,7 +150,7 @@ class Mem0Client:
         Returns:
             Response dict from server
         """
-        url = f"{self.api_url}/memories"
+        url = f"{self.api_url}/memories/"
 
         payload: Dict[str, Any] = {
             "messages": messages,
@@ -193,7 +197,7 @@ class Mem0Client:
         Returns:
             List of memory items
         """
-        url = f"{self.api_url}/search"
+        url = f"{self.api_url}/memories/search/"
         payload = {
             "query": query,
             "user_id": user_id,
@@ -255,7 +259,7 @@ class Mem0Client:
 
     def get_all(self, user_id: str, limit: int = 100) -> List[Dict]:
         """Get all memories for a user."""
-        url = f"{self.api_url}/memories"
+        url = f"{self.api_url}/memories/"
         params = {"user_id": user_id}
 
         resp = self._request("GET", url, params=params)
@@ -285,7 +289,7 @@ class Mem0Client:
 
     def delete(self, memory_id: str) -> bool:
         """Delete a specific memory."""
-        url = f"{self.api_url}/memories/{memory_id}"
+        url = f"{self.api_url}/memories/{memory_id}/"
 
         resp = self._request("DELETE", url)
         if resp is None:

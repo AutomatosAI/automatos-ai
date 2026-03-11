@@ -371,8 +371,8 @@ async def get_system_health(ctx: RequestContext = Depends(get_request_context_hy
             start = time.time()
             redis_client = get_redis_client()
             
-            # Perform PING
-            if redis_client.ping():
+            # Perform PING via test_connection (RedisClient wraps raw redis)
+            if redis_client.test_connection():
                 latency_ms = (time.time() - start) * 1000
                 redis_metrics = {
                     "ping": "success",
