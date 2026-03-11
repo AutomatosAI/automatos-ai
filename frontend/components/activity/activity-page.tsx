@@ -24,6 +24,7 @@ import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ActivityMissions } from './activity-missions'
 import { ActivityFeed } from './activity-feed'
 import { ActivityMemory } from './activity-memory'
+import { ActivityCalendar } from './calendar'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
 import { cn } from '@/lib/utils'
@@ -158,12 +159,7 @@ export function ActivityPage() {
 
           <TabsContent value="calendar">
             <div data-tour="activity-calendar">
-              {/* Calendar — Phase 5 PR. Placeholder for now. */}
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <Calendar className="w-12 h-12 mb-3 opacity-30" />
-                <p className="text-sm font-medium">Calendar</p>
-                <p className="text-xs mt-1">Full scheduler view coming in the next update</p>
-              </div>
+              <ActivityCalendar />
             </div>
           </TabsContent>
 
