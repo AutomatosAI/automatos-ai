@@ -223,8 +223,21 @@ class Config:
     WORKSPACE_VOLUME_PATH: str = os.getenv("WORKSPACE_VOLUME_PATH", "/workspaces")
     WORKSPACE_DEFAULT_QUOTA_GB: int = int(os.getenv("WORKSPACE_DEFAULT_QUOTA_GB", "5"))
     WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", "3"))
+
+    # Bounded Concurrency (per-workspace execution limits)
+    DEFAULT_MAX_CONCURRENT_TOTAL: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_TOTAL", "3"))
+    DEFAULT_MAX_CONCURRENT_RUNNING: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_RUNNING", "3"))
+    DEFAULT_MAX_CONCURRENT_PENDING: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_PENDING", "10"))
+
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
+
+    # Task Reconciliation (Symphony-inspired stall detection)
+    TASK_STALL_TIMEOUT_SECONDS: int = int(os.getenv("TASK_STALL_TIMEOUT_SECONDS", "300"))  # 5 min
+    TASK_PENDING_TIMEOUT_SECONDS: int = int(os.getenv("TASK_PENDING_TIMEOUT_SECONDS", "120"))  # 2 min
+    TASK_MAX_RETRIES: int = int(os.getenv("TASK_MAX_RETRIES", "2"))
+    TASK_MAX_RETRY_BACKOFF_MS: int = int(os.getenv("TASK_MAX_RETRY_BACKOFF_MS", "300000"))  # 5 min cap
+    TASK_RECONCILE_INTERVAL_SECONDS: int = int(os.getenv("TASK_RECONCILE_INTERVAL_SECONDS", "60"))
 
     # =============================================================================
     # RAILWAY API (Log retrieval for agents)

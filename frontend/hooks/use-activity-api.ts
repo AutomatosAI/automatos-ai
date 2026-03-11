@@ -62,6 +62,8 @@ export interface ActivityStats {
   channels_live: number
   completed_today: number
   needs_attention: number
+  agents_active: number
+  tasks_in_queue: number
   period: string
 }
 
@@ -143,22 +145,22 @@ export function useActivityFeed(filters?: ActivityFeedFilters) {
   return useQuery<ActivityFeedResponse>({
     queryKey: activityQueryKeys.feed(filters),
     queryFn: () => apiClient.request<ActivityFeedResponse>(endpoint),
-    refetchInterval: 15000,
-    staleTime: 10000,
+    refetchInterval: 60000,
+    staleTime: 30000,
   })
 }
 
 /**
  * Fetch hero-card stats with polling.
- * Returns working_now, channels_live, completed_today, needs_attention.
+ * Returns working_now, agents_active, tasks_in_queue, needs_attention.
  */
 export function useActivityStats(period: string = '1d') {
   return useQuery<ActivityStats>({
     queryKey: activityQueryKeys.stats(period),
     queryFn: () =>
       apiClient.request<ActivityStats>(`/api/activity/stats?period=${period}`),
-    refetchInterval: 15000,
-    staleTime: 10000,
+    refetchInterval: 60000,
+    staleTime: 30000,
   })
 }
 
@@ -170,8 +172,8 @@ export function useActivitySchedule(range: string = '7d') {
     queryKey: activityQueryKeys.schedule(range),
     queryFn: () =>
       apiClient.request<ScheduleResponse>(`/api/activity/schedule?range=${range}`),
-    refetchInterval: 30000,
-    staleTime: 20000,
+    refetchInterval: 60000,
+    staleTime: 30000,
     keepPreviousData: true,  // Don't blank widget on transient empty refetch
   })
 }
@@ -186,7 +188,53 @@ export function useAgentReports(agentIds: number[]) {
     queryFn: () =>
       apiClient.request<AgentReportsResponse>(`/api/activity/agent-reports?agent_ids=${idsParam}`),
     enabled: agentIds.length > 0,
-    refetchInterval: 30000,
-    staleTime: 20000,
+    refetchInterval: 60000,
+    staleTime: 30000,
+  })
+}
+
+// ============= BOARD STATS =============
+
+export interface BoardColumnCount {
+  status: string
+  count: number
+}
+
+export interface BoardPriorityCount {
+  priority: string
+  count: number
+}
+
+export interface BoardTypeCount {
+  type: string
+  count: number
+  percentage: number
+}
+
+export interface BoardAgentWorkload {
+  agent_id: number
+  agent_name: string
+  agent_icon: string | null
+  task_count: number
+}
+
+export interface BoardStats {
+  columns: BoardColumnCount[]
+  total_tasks: number
+  priorities: BoardPriorityCount[]
+  types: BoardTypeCount[]
+  workload: BoardAgentWorkload[]
+}
+
+/**
+ * Fetch board-level stats for Summary widgets (donut, priority, types, workload).
+ */
+export function useBoardStats(period: string = '1d') {
+  return useQuery<BoardStats>({
+    queryKey: ['activity', 'board-stats', period],
+    queryFn: () =>
+      apiClient.request<BoardStats>(`/api/activity/board/stats?period=${period}`),
+    refetchInterval: 60000,
+    staleTime: 30000,
   })
 }

@@ -188,6 +188,20 @@ class RecipeSchedulerService:
             db.add(execution)
             db.commit()
 
+            # Concurrency guard — skip this tick if workspace is at capacity
+            from services.concurrency_guard import check_concurrency
+            concurrency = await check_concurrency(UUID(str(recipe.workspace_id)), db)
+            if not concurrency.allowed:
+                logger.warning(
+                    "[RecipeScheduler] Concurrency limit reached for workspace %s, "
+                    "skipping recipe %d this tick: %s",
+                    workspace_id, recipe_id, concurrency.reason,
+                )
+                # Roll back the pending execution record — cron will retry next tick
+                db.delete(execution)
+                db.commit()
+                return
+
             logger.info("[RecipeScheduler] Firing recipe %d (%s), execution=%s", recipe.id, recipe.name, execution_id)
 
             from api.recipe_executor import launch_recipe_task

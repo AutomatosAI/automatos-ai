@@ -67,7 +67,7 @@ function ReportCard({ report, premiumIconName }: { report: AgentReport; premiumI
 
   const handleViewReport = () => {
     if (report.agent_id) {
-      router.replace(`/activity?tab=reports&agent_id=${report.agent_id}`, { scroll: false })
+      router.replace(`/activity?tab=board&agent_id=${report.agent_id}`, { scroll: false })
     }
   }
 

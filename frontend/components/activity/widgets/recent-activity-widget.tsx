@@ -67,13 +67,12 @@ export function RecentActivityWidget({ period, onViewAll, className }: RecentAct
     .slice(0, 5)
 
   const handleView = (item: ActivityFeedItem) => {
-    if (item.type === 'routine' && item.agent?.id) {
-      router.replace(`/activity?tab=reports&agent_id=${item.agent.id}`, { scroll: false })
-    } else if (item.type === 'recipe' && item.source_id) {
-      const execId = item.id.replace('recipe-', '')
-      router.push(`/workflows?openExecution=${execId}&recipeId=${item.source_id}`)
-    } else if (item.type === 'chat' && item.source_id) {
+    if (item.type === 'chat' && item.source_id) {
       router.push(`/chat/${item.source_id}`)
+    } else {
+      // Navigate to Board tab with task focused
+      const taskId = item.id.replace(/^(recipe|routine)-/, '')
+      router.replace(`/activity?tab=board&task_id=${taskId}`, { scroll: false })
     }
   }
 

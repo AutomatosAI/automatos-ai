@@ -1432,6 +1432,8 @@ class RecipeExecution(Base):
     completed_at = Column(DateTime, nullable=True)
     triggered_by = Column(String(255), nullable=True)
     execution_metadata = Column(JSONB, nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=1, server_default='1')
+    retry_of = Column(String(255), nullable=True)
 
     # Relationships
     recipe = relationship('WorkflowTemplate', back_populates='recipe_executions')
@@ -1454,4 +1456,6 @@ class RecipeExecution(Base):
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'triggered_by': self.triggered_by,
             'execution_metadata': self.execution_metadata,
+            'attempt_count': self.attempt_count,
+            'retry_of': self.retry_of,
         }
