@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { PremiumIcon, IconSelector } from '@/components/shared';
 import { Save, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
-import { useSystemIcons, useUpdateSystemConfigKey } from '@/hooks/use-system-config-api';
+import { useSystemIcons, useIconStyle, useUpdateSystemConfigKey } from '@/hooks/use-system-config-api';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +22,68 @@ interface IconSection {
     items: IconMapping[]
     defaultOpen?: boolean
 }
+
+// ─── Available Icon Styles ───────────────────────────────────────────
+
+interface IconStyleOption {
+    id: string
+    label: string
+    description: string
+    color: string
+    previewIcons: string[]
+}
+
+const ICON_STYLES: IconStyleOption[] = [
+    {
+        id: 'default',
+        label: 'Core Gradient',
+        description: 'Default multi-color gradient icons',
+        color: '',
+        previewIcons: ['brain-2', 'cog', 'graph-bar-increase'],
+    },
+    {
+        id: 'core-line-orange',
+        label: 'Core Line — Orange',
+        description: 'Clean line icons in brand orange',
+        color: '#F97316',
+        previewIcons: ['brain', 'cog', 'graph'],
+    },
+    {
+        id: 'core-line-blue',
+        label: 'Core Line — Blue',
+        description: 'Clean line icons in blue',
+        color: '#3B82F6',
+        previewIcons: ['brain', 'cog', 'graph'],
+    },
+    {
+        id: 'core-line-green',
+        label: 'Core Line — Green',
+        description: 'Clean line icons in green',
+        color: '#22C55E',
+        previewIcons: ['brain', 'cog', 'graph'],
+    },
+    {
+        id: 'core-line-red',
+        label: 'Core Line — Red',
+        description: 'Clean line icons in red',
+        color: '#EF4444',
+        previewIcons: ['brain', 'cog', 'graph'],
+    },
+    {
+        id: 'core-line-yellow',
+        label: 'Core Line — Yellow',
+        description: 'Clean line icons in yellow',
+        color: '#EAB308',
+        previewIcons: ['brain', 'cog', 'graph'],
+    },
+    {
+        id: 'core-line-purple',
+        label: 'Core Line — Purple',
+        description: 'Clean line icons in purple',
+        color: '#A855F7',
+        previewIcons: ['brain', 'cog', 'graph'],
+    },
+];
 
 const ICON_SECTIONS: IconSection[] = [
     {
@@ -171,6 +233,65 @@ function IconMappingSection({
     );
 }
 
+// ─── Style Picker Component ─────────────────────────────────────────
+
+function IconStylePicker({
+    activeStyle,
+    onStyleChange,
+    isSaving,
+}: {
+    activeStyle: string
+    onStyleChange: (styleId: string) => void
+    isSaving: boolean
+}) {
+    return (
+        <div className="border border-border/40 rounded-xl overflow-hidden bg-secondary/5">
+            <div className="px-4 py-3 border-b border-border/20">
+                <span className="font-semibold text-sm">Icon Style</span>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                    Switch all platform icons to a different visual style
+                </p>
+            </div>
+            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {ICON_STYLES.map(style => (
+                    <button
+                        key={style.id}
+                        onClick={() => onStyleChange(style.id)}
+                        disabled={isSaving}
+                        className={cn(
+                            'flex flex-col items-start gap-2 p-3 rounded-xl border transition-all text-left',
+                            'hover:bg-secondary/20 hover:border-primary/30',
+                            activeStyle === style.id
+                                ? 'bg-primary/10 border-primary ring-1 ring-primary/50'
+                                : 'border-border/30 bg-background/40'
+                        )}
+                    >
+                        <div className="flex items-center gap-2 w-full">
+                            <div className="flex gap-1">
+                                {style.previewIcons.map(icon => (
+                                    <PremiumIcon key={icon} name={icon} size={20} style={style.id} />
+                                ))}
+                            </div>
+                            {style.color && (
+                                <div
+                                    className="w-3 h-3 rounded-full ml-auto shrink-0"
+                                    style={{ backgroundColor: style.color }}
+                                />
+                            )}
+                        </div>
+                        <div>
+                            <span className="text-xs font-medium">{style.label}</span>
+                            <p className="text-[10px] text-muted-foreground leading-tight">
+                                {style.description}
+                            </p>
+                        </div>
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 // ─── Main Component ──────────────────────────────────────────────────
 
 export function SystemIconsSettingsTab() {
@@ -178,7 +299,9 @@ export function SystemIconsSettingsTab() {
     const [mappings, setMappings] = useState<Record<string, string | null>>({});
 
     const { data: iconMappings, isLoading } = useSystemIcons();
+    const { data: activeStyle, isLoading: styleLoading } = useIconStyle();
     const updateMappingsMutation = useUpdateSystemConfigKey();
+    const updateStyleMutation = useUpdateSystemConfigKey();
 
     useEffect(() => {
         if (iconMappings) {
@@ -219,7 +342,27 @@ export function SystemIconsSettingsTab() {
         }));
     };
 
-    if (isLoading) {
+    const handleStyleChange = async (styleId: string) => {
+        try {
+            await updateStyleMutation.mutateAsync({
+                key: 'active_icon_style',
+                value: styleId,
+            });
+            toast({
+                title: 'Style updated',
+                description: `Icons switched to ${ICON_STYLES.find(s => s.id === styleId)?.label ?? styleId}`,
+            });
+        } catch (error) {
+            console.error('Failed to update icon style', error);
+            toast({
+                title: 'Error',
+                description: 'Failed to update icon style.',
+                variant: 'destructive',
+            });
+        }
+    };
+
+    if (isLoading || styleLoading) {
         return (
             <div className="flex items-center justify-center p-12">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -248,6 +391,12 @@ export function SystemIconsSettingsTab() {
                     Save
                 </Button>
             </div>
+
+            <IconStylePicker
+                activeStyle={activeStyle ?? 'default'}
+                onStyleChange={handleStyleChange}
+                isSaving={updateStyleMutation.isLoading}
+            />
 
             {ICON_SECTIONS.map(section => (
                 <IconMappingSection
