@@ -1979,6 +1979,16 @@ class PlatformActionExecutor:
         if not recipe:
             return {"success": False, "error": "Recipe not found"}
 
+        # Concurrency guard — return error to agent if workspace is at capacity
+        from services.concurrency_guard import check_concurrency
+        concurrency = await check_concurrency(self.workspace_id, self.db)
+        if not concurrency.allowed:
+            logger.warning(
+                "[PlatformExecutor] Concurrency limit reached for workspace %s: %s",
+                self.workspace_id, concurrency.reason,
+            )
+            return {"status": "error", "error": concurrency.reason}
+
         # Create execution record
         execution_id = f"exec-{uuid.uuid4().hex[:12]}"
         execution = RecipeExecution(

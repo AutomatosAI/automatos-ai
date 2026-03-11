@@ -855,6 +855,23 @@ async def execute_recipe(
                     default = param_def.get('default', '')
                     input_data[param_name] = default
 
+        # Concurrency guard — reject with 429 if workspace is at capacity
+        from services.concurrency_guard import check_concurrency
+        concurrency = await check_concurrency(ctx.workspace_id, db)
+        if not concurrency.allowed:
+            logger.warning(
+                "[execute_recipe] Concurrency limit reached for workspace %s: %s",
+                ctx.workspace_id, concurrency.reason,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "concurrency_limit",
+                    "detail": concurrency.reason,
+                    "limits": concurrency.limits,
+                },
+            )
+
         # Create RecipeExecution record
         recipe_execution_id = f"exec-{uuid4().hex[:12]}"
         recipe_execution = RecipeExecution(
@@ -1718,6 +1735,23 @@ async def recipe_webhook(
 
     if not recipe.steps:
         raise HTTPException(status_code=400, detail="Recipe has no steps")
+
+    # Concurrency guard — reject with 429 if workspace is at capacity
+    from services.concurrency_guard import check_concurrency
+    concurrency = await check_concurrency(recipe.workspace_id, db)
+    if not concurrency.allowed:
+        logger.warning(
+            "[webhook] Concurrency limit reached for workspace %s: %s",
+            recipe.workspace_id, concurrency.reason,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "concurrency_limit",
+                "detail": concurrency.reason,
+                "limits": concurrency.limits,
+            },
+        )
 
     execution_id = f"webhook-{uuid4().hex[:12]}"
     execution = RecipeExecution(

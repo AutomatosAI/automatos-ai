@@ -383,6 +383,14 @@ async def lifespan(app: FastAPI):
                         await get_recipe_scheduler().start(scheduler=shared_sched)
                         logger.info("RecipeSchedulerService started on unified scheduler")
 
+                    # PRD-72: Task Reconciliation — stall detection + auto-retry
+                    try:
+                        from services.task_reconciler import get_task_reconciler
+                        await get_task_reconciler().start(scheduler=shared_sched)
+                        logger.info("TaskReconciler started on unified scheduler")
+                    except Exception as _tr_err:
+                        logger.warning("Could not start TaskReconciler: %s", _tr_err)
+
                     # PRD-77: Load agent-scheduled tasks into APScheduler
                     try:
                         from services.scheduled_task_service import ScheduledTaskService

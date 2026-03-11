@@ -39,19 +39,24 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Per-workspace execution lock — prevents concurrent recipes stomping on the
-# same git working tree.  Keys are workspace_id strings; values are asyncio
-# Locks created on first access.  The dict itself is process-global but safe
-# because asyncio is single-threaded.
+# Per-workspace execution semaphore — allows bounded concurrent recipe
+# execution within a workspace.  Keys are workspace_id strings; values are
+# asyncio.Semaphores created on first access.  The dict itself is
+# process-global but safe because asyncio is single-threaded.
 # ---------------------------------------------------------------------------
-_workspace_locks: Dict[str, asyncio.Lock] = {}
+_workspace_semaphores: Dict[str, asyncio.Semaphore] = {}
 
 
-def _get_workspace_lock(workspace_id: str) -> asyncio.Lock:
-    """Return (or create) an asyncio.Lock for the given workspace."""
-    if workspace_id not in _workspace_locks:
-        _workspace_locks[workspace_id] = asyncio.Lock()
-    return _workspace_locks[workspace_id]
+def _get_workspace_semaphore(workspace_id: str, max_concurrent: int = 3) -> asyncio.Semaphore:
+    """Return (or create) an asyncio.Semaphore for the given workspace.
+
+    If the semaphore already exists but the limit changed, we keep the
+    existing one to avoid resetting mid-flight — the concurrency guard
+    pre-check handles the real enforcement.
+    """
+    if workspace_id not in _workspace_semaphores:
+        _workspace_semaphores[workspace_id] = asyncio.Semaphore(max_concurrent)
+    return _workspace_semaphores[workspace_id]
 
 
 # ---------------------------------------------------------------------------
@@ -621,18 +626,21 @@ async def execute_recipe_direct(
     5. Upload full log to S3, store compact summary in DB
     6. Handle errors per step.error_handling config
     """
-    # Serialize recipe executions per workspace — prevents concurrent
-    # bug-fixer runs from stomping on each other's git branches.
-    ws_lock = _get_workspace_lock(str(workspace_id))
-    waiting = ws_lock.locked()
+    # Bounded concurrency per workspace — allows N recipes to run in
+    # parallel (controlled by DEFAULT_MAX_CONCURRENT_RUNNING / plan_limits).
+    from config import config as app_config
+    max_concurrent = app_config.DEFAULT_MAX_CONCURRENT_RUNNING
+    semaphore = _get_workspace_semaphore(str(workspace_id), max_concurrent)
+
+    waiting = semaphore.locked()
     if waiting:
         logger.info(
-            "[recipe_direct] QUEUED — waiting for workspace lock %s (execution=%s, recipe=%s)",
+            "[recipe_direct] QUEUED — waiting for workspace semaphore %s (execution=%s, recipe=%s)",
             workspace_id, recipe_execution_id, recipe_id,
         )
-    async with ws_lock:
+    async with semaphore:
         logger.info(
-            "[recipe_direct] Lock ACQUIRED for %s (execution=%s, recipe=%s, was_waiting=%s)",
+            "[recipe_direct] Semaphore ACQUIRED for %s (execution=%s, recipe=%s, was_waiting=%s)",
             workspace_id, recipe_execution_id, recipe_id, waiting,
         )
         try:
@@ -641,7 +649,7 @@ async def execute_recipe_direct(
             )
         finally:
             logger.info(
-                "[recipe_direct] Lock RELEASED for %s (execution=%s)",
+                "[recipe_direct] Semaphore RELEASED for %s (execution=%s)",
                 workspace_id, recipe_execution_id,
             )
 
