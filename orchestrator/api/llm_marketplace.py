@@ -147,24 +147,18 @@ def _get_available_providers(db: Session, workspace_id) -> set:
     """
     Return the set of provider names the workspace can actually use.
 
-    Checks (in order): BYOK keys, credential store, env-var config.
-    Aggregator providers (openrouter) are always included if they have a key,
-    and any model routable through an available aggregator is also usable.
+    Source of truth is the DB — NOT env vars (those are legacy).
+    Checks: 1) BYOK keys (UserApiKey), 2) Credential store entries.
     """
-    from config import config as _cfg
+    available: set = set()
 
-    # 1. Env-var / config keys (platform-wide)
-    provider_key_map = {
-        "openai": _cfg.OPENAI_API_KEY,
-        "anthropic": _cfg.ANTHROPIC_API_KEY,
-        "google": _cfg.GOOGLE_API_KEY,
-        "openrouter": _cfg.OPENROUTER_API_KEY,
-        "grok": getattr(_cfg, "XAI_API_KEY", None),
-        "azure": getattr(_cfg, "AZURE_OPENAI_API_KEY", None),
-    }
-    available = {p for p, k in provider_key_map.items() if k}
+    ALL_PROVIDERS = [
+        "openai", "anthropic", "google", "openrouter", "deepseek",
+        "azure", "bedrock", "grok", "x-ai", "cohere", "huggingface",
+        "meta-llama", "qwen",
+    ]
 
-    # 2. BYOK keys stored in DB for this workspace
+    # 1. BYOK keys stored in DB for this workspace
     if workspace_id:
         try:
             from core.models.core import UserApiKey
@@ -181,16 +175,16 @@ def _get_available_providers(db: Session, workspace_id) -> set:
         except Exception:
             pass  # table may not exist yet
 
-    # 3. Credential store entries
+    # 2. Credential store entries (platform keys added via Settings)
     try:
         from core.credentials.resolver import get_credential_resolver
         resolver = get_credential_resolver()
-        for provider in list(provider_key_map.keys()):
+        for provider in ALL_PROVIDERS:
             if provider in available:
                 continue
             for variation in [f"{provider}_api", provider]:
                 try:
-                    key = resolver.get_credential_field(variation, "api_key")
+                    key = resolver.get_credential_field(variation, "api_key", silent=True)
                     if key:
                         available.add(provider)
                         break
@@ -307,15 +301,14 @@ async def get_installed_models(
         .all()
     )
 
-    # Gate 1: filter to providers with an API key
+    # Gate 1: filter to providers with an API key.
+    # Use the model's actual provider (e.g. "google", "anthropic") even for
+    # aggregator-routed models, so users only see providers they have keys for.
+    # Special case: models whose provider IS "openrouter" (e.g. Auto Router)
+    # are shown when the openrouter key exists.
     usable = []
     for m in models:
-        tier = (m.tier or "direct").lower()
-        if tier in ("aggregator", "openrouter"):
-            provider = "openrouter"
-        else:
-            provider = (m.provider or "").lower()
-
+        provider = (m.provider or "").lower()
         if provider in available_providers:
             usable.append(m)
 
