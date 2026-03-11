@@ -180,19 +180,19 @@ class Mem0Client:
             logger.error("[Mem0] Add failed: status=%s body=%s", resp.status_code, body_preview)
             return {"error": f"HTTP {resp.status_code}: {body_preview}"}
 
-        normalized = (resp.text or "").strip().lower()
-        if normalized == "" or normalized == "null":
-            logger.info(
-                "[Mem0] No facts extracted (status=%s) for user_id=%s — "
-                "LLM found nothing to remember from the input text.",
-                resp.status_code, user_id,
-            )
-            return {"success": True, "facts_extracted": 0}
-
+        # OpenMemory server returns 200 with null/empty body on success —
+        # processing happens server-side (OpenAI extraction + pgvector storage).
+        # A 200 means the memory was accepted and processed.
         try:
             result = resp.json()
-            return result if result else {"success": True}
         except Exception:
+            result = None
+
+        if result:
+            logger.info("[Mem0] Memory stored for user_id=%s: %s", user_id, str(result)[:200])
+            return result
+        else:
+            logger.info("[Mem0] Memory accepted (status=%s) for user_id=%s", resp.status_code, user_id)
             return {"success": True}
 
     def search(self, query: str, user_id: str, limit: int = 5) -> List[Dict]:
