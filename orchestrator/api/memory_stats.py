@@ -296,11 +296,15 @@ async def browse_memories(
         all_results: List[Dict] = []
         seen_ids: set = set()
 
+        logger.info("[browse] Querying %d user_ids for workspace %s", len(user_ids), ctx.workspace_id)
+
         for uid in user_ids:
             if query:
                 results = mem0.search(query=query, user_id=uid, limit=limit)
             else:
                 results = mem0.get_all(user_id=uid, limit=limit)
+
+            logger.info("[browse] uid=%s type=%s len=%s", uid, type(results).__name__, len(results) if isinstance(results, (list, dict)) else "?")
 
             items = results if isinstance(results, list) else []
             for m in items:
@@ -323,12 +327,20 @@ async def browse_memories(
                         "tier": tier,
                     })
 
+        logger.info("[browse] Collected %d unique memories from %d user_ids", len(all_results), len(user_ids))
+
         # Sort by created_at descending (newest first), then truncate
         all_results.sort(
             key=lambda x: x.get("created_at") or "",
             reverse=True,
         )
         memories = all_results[:limit]
+
+        if memories:
+            logger.info("[browse] Returning %d memories, first: id=%s content=%s",
+                        len(memories), memories[0].get("id"), str(memories[0].get("content", ""))[:60])
+        else:
+            logger.warning("[browse] Returning 0 memories despite querying %d user_ids", len(user_ids))
 
         return {
             "success": True,
