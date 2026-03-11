@@ -107,15 +107,16 @@ function ReportStatsBar({ period }: { period: string }) {
 
 interface ActivityReportsProps {
   period?: string
+  agentId?: number
 }
 
-export function ActivityReports({ period = '30d' }: ActivityReportsProps) {
-  const [filters, setFilters] = useState<ReportFilters>({ period, limit: 20 })
+export function ActivityReports({ period = '30d', agentId }: ActivityReportsProps) {
+  const [filters, setFilters] = useState<ReportFilters>({ period, limit: 20, agent_id: agentId })
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
 
   useEffect(() => {
-    setFilters((prev) => ({ ...prev, period }))
-  }, [period])
+    setFilters((prev) => ({ ...prev, period, agent_id: agentId }))
+  }, [period, agentId])
 
   const { data, isLoading } = useReports(filters)
   const reports = data?.reports || []

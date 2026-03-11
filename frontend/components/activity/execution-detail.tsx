@@ -315,7 +315,10 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
   const handleViewSource = () => {
     if (item.type === 'chat' && item.source_id) {
       router.push(`/chat/${item.source_id}`)
-    } else if (item.source_url) {
+    } else if (item.type === 'recipe' && item.source_id) {
+      const execId = item.id?.replace('recipe-', '') || ''
+      router.push(`/workflows?openExecution=${execId}&recipeId=${item.source_id}`)
+    } else if (item.source_url && !item.source_url.startsWith('/activity')) {
       router.push(item.source_url)
     }
   }

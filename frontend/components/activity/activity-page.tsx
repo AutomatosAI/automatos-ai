@@ -67,16 +67,20 @@ export function ActivityPage() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [period, setPeriod] = useState('1d')
 
-  // Deep-link: /activity?openExecution=X&recipeId=Y
+  // Deep-link: /activity?tab=reports&agent_id=184 or /activity?openExecution=X&recipeId=Y
   const searchParams = useSearchParams()
   const openExecution = searchParams.get('openExecution')
   const deepLinkRecipeId = searchParams.get('recipeId')
+  const tabParam = searchParams.get('tab')
+  const agentIdParam = searchParams.get('agent_id')
 
   useEffect(() => {
-    if (openExecution) {
+    if (tabParam && TAB_DEFS.some((t) => t.value === tabParam)) {
+      setActiveTab(tabParam)
+    } else if (openExecution) {
       setActiveTab('feed')
     }
-  }, [openExecution])
+  }, [tabParam, openExecution])
 
   // Switch to feed tab when "View All" is clicked in recent activity widget
   const handleViewAllActivity = useCallback(() => {
@@ -146,7 +150,7 @@ export function ActivityPage() {
 
           <TabsContent value="reports">
             <div data-tour="activity-reports">
-              <ActivityReports period={period} />
+              <ActivityReports period={period} agentId={agentIdParam ? Number(agentIdParam) : undefined} />
             </div>
           </TabsContent>
 

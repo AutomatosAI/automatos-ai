@@ -68,9 +68,12 @@ export function RecentActivityWidget({ period, onViewAll, className }: RecentAct
 
   const handleView = (item: ActivityFeedItem) => {
     if (item.type === 'routine' && item.agent?.id) {
-      router.push(`/activity?tab=reports&agent_id=${item.agent.id}`)
-    } else if (item.source_url) {
-      router.push(item.source_url)
+      router.replace(`/activity?tab=reports&agent_id=${item.agent.id}`, { scroll: false })
+    } else if (item.type === 'recipe' && item.source_id) {
+      const execId = item.id.replace('recipe-', '')
+      router.push(`/workflows?openExecution=${execId}&recipeId=${item.source_id}`)
+    } else if (item.type === 'chat' && item.source_id) {
+      router.push(`/chat/${item.source_id}`)
     }
   }
 
