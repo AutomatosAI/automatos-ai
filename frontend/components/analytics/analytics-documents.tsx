@@ -84,8 +84,8 @@ export function AnalyticsDocuments({ days }: Props) {
   return (
     <div className="space-y-6">
       <StatsBar stats={[
-        { label: 'Total Documents', value: data?.summary?.totalDocuments || 0, icon: FileText, iconColor: 'text-primary' },
-        { label: 'Storage Used', value: `${(data?.summary?.totalStorageMb || 0).toFixed(1)} MB`, icon: HardDrive, iconColor: 'text-[hsl(var(--success))]' },
+        { label: 'Total Documents', value: data?.summary?.totalDocuments || 0, icon: FileText, iconColor: 'text-primary', globalIconKey: 'global_document' },
+        { label: 'Storage Used', value: `${(data?.summary?.totalStorageMb || 0).toFixed(1)} MB`, icon: HardDrive, iconColor: 'text-[hsl(var(--success))]', globalIconKey: 'global_storage' },
         { label: 'RAG Queries', value: data?.summary?.totalRagQueries || 0, change: 'This period', icon: Search, iconColor: 'text-[hsl(var(--info))]' },
         { label: 'Never Accessed', value: data?.neverAccessed || 0, change: 'Unused by RAG', icon: AlertTriangle, iconColor: data?.neverAccessed ? 'text-yellow-400' : 'text-[hsl(var(--success))]' },
       ]} loading={isLoading} />

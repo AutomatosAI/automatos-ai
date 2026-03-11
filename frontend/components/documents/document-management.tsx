@@ -384,6 +384,7 @@ export function DocumentManagement() {
         change: `+${Math.max(0, totalDocs - 2)} this month`,
         icon: FileText,
         iconColor: 'text-[hsl(var(--info))]',
+        globalIconKey: 'global_document',
 
       },
       {
@@ -400,6 +401,7 @@ export function DocumentManagement() {
         change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
         icon: FolderOpen,
         iconColor: 'text-primary',
+        globalIconKey: 'global_storage',
 
       },
       {

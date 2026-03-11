@@ -107,14 +107,13 @@ export function MarketplaceHomepage() {
             value: stats.totalItems.toString(),
             icon: Store,
             iconColor: 'text-primary',
-
+            globalIconKey: 'global_store',
           },
           {
             label: 'Categories',
             value: stats.categories.toString(),
             icon: Grid3X3,
             iconColor: 'text-[hsl(var(--info))]',
-
           },
           {
             label: 'Featured',
@@ -122,7 +121,7 @@ export function MarketplaceHomepage() {
             change: 'Curated',
             icon: TrendingUp,
             iconColor: 'text-[hsl(var(--warning))]',
-
+            globalIconKey: 'global_featured',
           },
           {
             label: 'Total Installs',
@@ -131,7 +130,6 @@ export function MarketplaceHomepage() {
               : stats.totalInstalls.toString(),
             icon: Download,
             iconColor: 'text-[hsl(var(--success))]',
-
           },
         ] satisfies StatItem[]}
       />

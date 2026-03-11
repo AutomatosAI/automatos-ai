@@ -141,9 +141,9 @@ export function AnalyticsWorkflows({ days }: Props) {
     <div className="space-y-6">
       {/* ===== WORKFLOWS SECTION ===== */}
       <StatsBar stats={[
-        { label: 'Total Workflows', value: data?.summary?.totalWorkflows || 0, icon: GitBranch, iconColor: 'text-primary' },
-        { label: 'Executions', value: data?.summary?.totalExecutions || 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]' },
-        { label: 'Success Rate', value: `${(data?.summary?.successRate || 0).toFixed(0)}%`, icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]' },
+        { label: 'Total Workflows', value: data?.summary?.totalWorkflows || 0, icon: GitBranch, iconColor: 'text-primary', globalIconKey: 'global_workflow' },
+        { label: 'Executions', value: data?.summary?.totalExecutions || 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_activity' },
+        { label: 'Success Rate', value: `${(data?.summary?.successRate || 0).toFixed(0)}%`, icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]', globalIconKey: 'global_performance' },
         { label: 'Avg Duration', value: data?.summary?.avgDuration || '0s', icon: Clock, iconColor: 'text-[hsl(var(--agent))]' },
       ]} loading={isLoading} />
 
@@ -251,10 +251,10 @@ export function AnalyticsWorkflows({ days }: Props) {
         </h3>
 
         <StatsBar stats={[
-          { label: 'Total Recipes', value: data?.recipeSummary?.totalRecipes || 0, icon: ChefHat, iconColor: 'text-primary' },
-          { label: 'Executions', value: data?.recipeSummary?.totalExecutions || 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]' },
-          { label: 'Avg Quality', value: `${((data?.recipeSummary?.avgQualityScore || 0) * 100).toFixed(0)}%`, icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]' },
-          { label: 'Avg Success Rate', value: `${(data?.recipeSummary?.avgSuccessRate || 0).toFixed(0)}%`, icon: Zap, iconColor: 'text-[hsl(var(--agent))]' },
+          { label: 'Total Recipes', value: data?.recipeSummary?.totalRecipes || 0, icon: ChefHat, iconColor: 'text-primary', globalIconKey: 'global_recipe' },
+          { label: 'Executions', value: data?.recipeSummary?.totalExecutions || 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_activity' },
+          { label: 'Avg Quality', value: `${((data?.recipeSummary?.avgQualityScore || 0) * 100).toFixed(0)}%`, icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]', globalIconKey: 'global_performance' },
+          { label: 'Avg Success Rate', value: `${(data?.recipeSummary?.avgSuccessRate || 0).toFixed(0)}%`, icon: Zap, iconColor: 'text-[hsl(var(--agent))]', globalIconKey: 'global_performance' },
         ]} loading={isLoading} />
       </div>
 

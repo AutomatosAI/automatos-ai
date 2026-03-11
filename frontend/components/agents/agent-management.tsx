@@ -82,6 +82,7 @@ export function AgentManagement() {
       change: (agentStats as any)?.total_agents ? `${(agentStats as any).total_agents} agents` : '0 agents',
       icon: Bot,
       iconColor: 'text-primary',
+      globalIconKey: 'global_agent',
 
     },
     {
@@ -90,6 +91,7 @@ export function AgentManagement() {
       change: (agentStats as any)?.active_agents && (agentStats as any)?.total_agents ? `${Math.round(((agentStats as any).active_agents / (agentStats as any).total_agents) * 100)}% online` : '0% online',
       icon: Zap,
       iconColor: 'text-[hsl(var(--success))]',
+      globalIconKey: 'global_agent',
 
     },
     {
@@ -106,6 +108,7 @@ export function AgentManagement() {
       change: (agentStats as any)?.average_performance ? ((agentStats as any).average_performance > 90 ? '↑ Excellent performance' : '↓ Needs optimization') : 'No data',
       icon: BarChart,
       iconColor: 'text-[hsl(var(--agent))]',
+      globalIconKey: 'global_performance',
 
     }
   ]

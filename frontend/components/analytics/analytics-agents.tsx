@@ -225,10 +225,10 @@ export function AnalyticsAgents({ days }: Props) {
   return (
     <div className="space-y-6">
       <StatsBar stats={[
-        { label: 'Total Agents', value: data?.summary?.totalAgents || 0, change: `${data?.summary?.activeAgents || 0} active`, icon: Bot, iconColor: 'text-primary' },
-        { label: 'Avg Success Rate', value: `${(data?.summary?.avgSuccessRate || 0).toFixed(0)}%`, change: 'Across all agents', icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]' },
+        { label: 'Total Agents', value: data?.summary?.totalAgents || 0, change: `${data?.summary?.activeAgents || 0} active`, icon: Bot, iconColor: 'text-primary', globalIconKey: 'global_agent' },
+        { label: 'Avg Success Rate', value: `${(data?.summary?.avgSuccessRate || 0).toFixed(0)}%`, change: 'Across all agents', icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]', globalIconKey: 'global_performance' },
         { label: 'Total Tokens', value: formatNumber(data?.summary?.totalTokens || 0), change: 'This period', icon: Zap, iconColor: 'text-[hsl(var(--info))]' },
-        { label: 'Total Cost', value: `$${(data?.summary?.totalCost || 0).toFixed(2)}`, change: 'This period', icon: DollarSign, iconColor: 'text-[hsl(var(--agent))]' },
+        { label: 'Total Cost', value: `$${(data?.summary?.totalCost || 0).toFixed(2)}`, change: 'This period', icon: DollarSign, iconColor: 'text-[hsl(var(--agent))]', globalIconKey: 'global_cost' },
       ]} loading={isLoading} />
 
       {/* Filter */}

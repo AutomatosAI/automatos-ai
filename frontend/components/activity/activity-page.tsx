@@ -86,8 +86,8 @@ export function ActivityPage() {
   const { data: liveStats } = useActivityStats(period)
 
   const stats: StatItem[] = [
-    { label: 'Working Now', value: liveStats?.working_now ?? 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]' },
-    { label: 'Channels Live', value: liveStats?.channels_live ?? 0, icon: Radio, iconColor: 'text-[hsl(var(--info))]' },
+    { label: 'Working Now', value: liveStats?.working_now ?? 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_activity' },
+    { label: 'Channels Live', value: liveStats?.channels_live ?? 0, icon: Radio, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_channel' },
     { label: 'Completed Today', value: liveStats?.completed_today ?? 0, icon: CheckCircle2, iconColor: 'text-[hsl(var(--success))]' },
     { label: 'Needs Attention', value: liveStats?.needs_attention ?? 0, icon: AlertTriangle, iconColor: 'text-destructive' },
   ]
