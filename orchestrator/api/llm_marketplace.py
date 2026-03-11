@@ -301,15 +301,18 @@ async def get_installed_models(
         .all()
     )
 
-    # Gate 1: filter to providers with an API key.
-    # Use the model's actual provider (e.g. "google", "anthropic") even for
-    # aggregator-routed models, so users only see providers they have keys for.
-    # Special case: models whose provider IS "openrouter" (e.g. Auto Router)
-    # are shown when the openrouter key exists.
+    # Gate 1: filter to models we can actually call.
+    # Aggregator-tier models route through OpenRouter → need openrouter key.
+    # Direct-tier models call the provider directly → need that provider's key.
     usable = []
     for m in models:
-        provider = (m.provider or "").lower()
-        if provider in available_providers:
+        tier = (m.tier or "direct").lower()
+        if tier in ("aggregator", "openrouter"):
+            routing_provider = "openrouter"
+        else:
+            routing_provider = (m.provider or "").lower()
+
+        if routing_provider in available_providers:
             usable.append(m)
 
     return [_model_to_out(m, installed_ids) for m in usable]
