@@ -1,118 +1,146 @@
-# Automatos AI 🤖
+<div align="center">
 
-> **"From Atoms to Organisms: The Future of Multi-Agent Orchestration"**
-> 🎓 **Research-Backed**: Implements [Context Engineering 2.0](RESEARCH.md) principles based on peer-reviewed research (SJTU/GAIR, 2025)
+<img src="https://img.shields.io/badge/Automatos_AI-Multi--Agent_Platform-FF4500?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0wIDE4Yy00LjQyIDAtOC0zLjU4LTgtOHMzLjU4LTggOC04IDggMy41OCA4IDgtMy41OCA4LTggOHoiLz48L3N2Zz4=" alt="Automatos AI">
+
+# Automatos AI
+
+**Build, deploy, and orchestrate autonomous AI agent teams.**
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/AutomatosAI/automatos-ai)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![CodeRabbit Reviews](https://img.shields.io/coderabbit/prs/github/AutomatosAI/automatos-ai?label=CodeRabbit&link=https://coderabbit.ai)](https://coderabbit.ai)
 
-
-
-**Automatos AI** is an enterprise-grade platform for creating, managing, and orchestrating intelligent AI agents. It goes beyond simple "chains" to create **autonomous software teams** that can plan, reason, collaborate, and execute complex workflows.
+</div>
 
 ---
 
-## 🚀 Why Automatos?
+Automatos AI is an open-source platform for building AI workforces. Create specialised agents, equip them with tools and knowledge, schedule their work, and let them operate autonomously — reporting back through a unified command centre.
 
-### 🧠 **True Multi-Agent Intelligence**
-Agents don't just follow scripts. They **collaborate**.
-- **Consensus Protocols**: Agents debate and vote on solutions.
-- **Dynamic Teams**: The system assembles the right team for the job.
-- **Self-Correction**: Agents monitor each other and fix errors in real-time.
+It is not a chatbot wrapper. It is an operating system for AI agents.
 
-![Workflow Execution](docs/assets/images/workflow_execution.png)
+<br>
 
-### 📊 **Real-Time Analytics & Streaming**
-Watch your agents think in real-time with our SSE-powered streaming architecture.
-- **Live Execution Theater**: See every step, thought, and tool call.
-- **Performance Metrics**: Track cost, latency, and success rates.
-- **Predictive Insights**: AI forecasts potential bottlenecks.
+## Talk to your agents
 
-![Analytics Dashboard](docs/assets/images/analytics_dashboard.png)
+A unified chat interface that routes your messages to the right agent automatically. Quick actions let you jump straight into coding, creating agents, managing knowledge, or building recipes.
 
-### 🕸️ **CodeGraph Intelligence**
-Your agents aren't blind. They see your entire codebase as a knowledge graph.
-- **Semantic Search**: "Find where we handle authentication."
-- **Symbol Resolution**: "Show me the `User` class hierarchy."
-- **Impact Analysis**: "What breaks if I change this function?"
+<p align="center">
+  <img src="docs/assets/01-Chat.png" alt="Chat Interface" width="800">
+</p>
 
-![CodeGraph Interface](docs/assets/images/chat_interface.png)
+<br>
+
+## Manage your AI workforce
+
+18+ agent types out of the box — Code Reviewer, QA Engineer, Sentinel, Scribe, and more. Each agent has its own model configuration, capabilities, persona, and performance metrics. Create custom agents in seconds.
+
+<p align="center">
+  <img src="docs/assets/02-Agents.png" alt="Agent Management" width="800">
+</p>
+
+<br>
+
+## 500+ tool integrations
+
+Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, and dozens more through the community marketplace. Browse, install, and manage integrations from a single dashboard.
+
+<p align="center">
+  <img src="docs/assets/03-Marketplace-tools.png" alt="Community Marketplace" width="800">
+</p>
+
+<br>
+
+## Command centre
+
+See your entire AI workforce at a glance. Live agent status, scheduled routines, task completion metrics, and agent reports — all in one place. Agents report their findings so you don't have to check on them.
+
+<p align="center">
+  <img src="docs/assets/04-Command-Center.png" alt="Command Centre" width="800">
+</p>
+
+<br>
+
+## Full cost visibility
+
+Track every API call across every model. See cost per agent, cost per request, usage trends over time, and cost projections. Know exactly what your AI workforce costs before the bill arrives.
+
+<p align="center">
+  <img src="docs/assets/05-Analytics.png" alt="Analytics Dashboard" width="800">
+</p>
+
+<br>
+
+## Knowledge bases with cloud sync
+
+Upload documents, sync folders from Dropbox and cloud storage, and let the platform chunk, embed, and index everything automatically. Your agents get RAG-powered access to your entire knowledge base.
+
+<p align="center">
+  <img src="docs/assets/06-Knowledge.png" alt="Knowledge Bases" width="800">
+</p>
 
 ---
 
-## 🏗️ The 4-Layer Architecture
+## Core capabilities
 
-Automatos is built on a modular, scalable foundation:
-
-1.  **🔵 API Layer**: 52+ REST endpoints, SSE streaming, OpenAPI specs.
-2.  **🟡 Modules Layer**: Self-contained domains (`agents`, `tools`, `codegraph`, `orchestrator`).
-3.  **🔴 Consumers Layer**: Async workers for heavy lifting (RAG, workflows).
-4.  **🟢 Core Layer**: The bedrock (PostgreSQL, Redis, LLM Gateway).
-
-[👉 Read the Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md)
+| Capability | What it does |
+|---|---|
+| **Universal Router** | Multi-tier routing (cache, rules, semantic, LLM) sends messages to the right agent every time |
+| **Recipes & Workflows** | Multi-step automation with scheduling, triggers, and inter-agent coordination |
+| **Prompt Optimisation** | A/B test and score prompts against live traffic, automatically improve agent performance |
+| **Workspace Execution** | Sandboxed environments where agents run code, manage files, and interact with Git repos |
+| **Multi-Tenancy** | Full workspace isolation — each team gets their own agents, data, and configuration |
+| **Plugin System** | Extend agents with skills, plugins, and custom tools from the marketplace or your own repos |
 
 ---
 
-## ⚡ Quick Start
+## Quick start
 
-Get running in **5 minutes**.
-
-### Prerequisites
-- Docker & Docker Compose
-- OpenAI / Anthropic API Key
-
-### 1. Clone & Configure
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
-cp .env.example .env
-# Edit .env to add your API keys
-```
-
-### 2. Launch
-```bash
+cp .env.example .env    # Add your API keys
 docker-compose up
 ```
 
-### 3. Explore
-- **Frontend**: [http://localhost:3000](http://localhost:3000)
-- **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-
-[👉 Full Quickstart Guide](docs/quickstart.md)
+- **Frontend**: http://localhost:3000
+- **API Docs**: http://localhost:8000/docs
 
 ---
 
-## 📚 Documentation
+## Tech stack
 
-### **Getting Started**
-- **[Quick Start](docs/quickstart.md)**: Zero to Hero in 5 mins.
-- **[Developer Guide](docs/DEVELOPER_GUIDE.md)**: Local setup & contribution.
-- **[Deployment](docs/DEPLOYMENT_GUIDE.md)**: Production best practices.
-
-### **Core Modules**
-- **[Orchestrator](orchestrator/modules/orchestrator/README.md)**: The brain of the system.
-- **[Agents](docs/AGENT_SYSTEM_GUIDE.md)**: Lifecycle & coordination.
-- **[CodeGraph](orchestrator/modules/codegraph/README.md)**: Code intelligence.
-- **[Tools](docs/TOOLS_INTEGRATION_GUIDE.md)**: Registry & MCP.
-- **[NL2SQL](orchestrator/modules/nl2sql/README.md)**: Database interaction.
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js 14, TypeScript, Tailwind CSS, shadcn/ui |
+| Backend | Python, FastAPI, SQLAlchemy, Alembic |
+| Database | PostgreSQL, Redis |
+| AI | OpenRouter, OpenAI, Anthropic, DeepSeek (multi-provider) |
+| Storage | AWS S3, S3 Vectors |
+| Auth | Clerk |
+| Infra | Docker, Railway |
 
 ---
 
-## 🤝 Contributing
+## Documentation
 
-We are building the operating system for the agentic future. Join us!
+Full platform documentation is available in [`/docs`](docs/README.md), auto-synced from [DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai) — 100+ pages covering architecture, APIs, agents, workflows, and deployment.
 
-- **[Contributing Guide](docs/CONTRIBUTING.md)**
-- **[Discord Community](https://discord.gg/automatos)**
-- **[GitHub Discussions](https://github.com/AutomatosAI/automatos-ai/discussions)**
+---
+
+## Contributing
+
+We're building the operating system for the agentic future. Contributions welcome.
+
+1. Fork the repo
+2. Create a feature branch
+3. Submit a PR
 
 ---
 
 <div align="center">
 
-**[🌟 Star on GitHub](https://github.com/AutomatosAI/automatos-ai)** • **[📖 Read the Docs](https://docs.automatos.ai)** • **[💬 Join Discord](https://discord.gg/automatos)**
+**[Star on GitHub](https://github.com/AutomatosAI/automatos-ai)** &middot; **[Read the Docs](docs/README.md)** &middot; **[DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai)**
 
-*Built with ❤️ by the Automatos AI Team*
+*Apache 2.0 &middot; Built by the Automatos AI team*
 
 </div>

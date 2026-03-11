@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import {
   Plus,
@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
+import { PremiumIcon } from '@/components/shared'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
@@ -42,6 +43,8 @@ import {
   useRecipeSuggestions,
   useRecipeExecutions
 } from '@/hooks/use-recipe-api'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
+import { useAgents } from '@/hooks/use-agent-api'
 import { useToast } from '@/hooks/use-toast'
 import { CreateRecipeModal } from './create-recipe-modal'
 import { ViewRecipeModal } from './view-recipe-modal'
@@ -97,6 +100,17 @@ export function RecipesTab({
   const [cookingRecipeId, setCookingRecipeId] = useState<string | null>(null)
   const [editRecipeData, setEditRecipeData] = useState<any>(null)
   const [editRecipeId, setEditRecipeId] = useState<string | null>(null)
+  const { data: iconMappings = {} } = useSystemIcons()
+  const { data: agents = [] } = useAgents()
+
+  // Build agent lookup by ID for recipe avatar icons
+  const agentMap = useMemo(() => {
+    const map = new Map<number, any>()
+    for (const agent of agents as any[]) {
+      map.set(Number(agent.id), agent)
+    }
+    return map
+  }, [agents])
 
   // Sync external create modal open state
   useEffect(() => {
@@ -313,7 +327,14 @@ export function RecipesTab({
                 <CardContent className="p-3">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-lg">
-                      {recipe.icon || '🍳'}
+                      {(() => {
+                        const premiumIconName = iconMappings[recipe.marketplace_category] || iconMappings['global_recipe'] || null
+                        return premiumIconName ? (
+                          <PremiumIcon name={premiumIconName} size={20} className="text-primary" />
+                        ) : (
+                          recipe.icon || '🍳'
+                        )
+                      })()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -375,7 +396,14 @@ export function RecipesTab({
                   <CardHeader className="pb-3">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-xl">
-                        {recipe.icon || '🍳'}
+                        {(() => {
+                          const premiumIconName = iconMappings[recipe.marketplace_category] || iconMappings['global_recipe'] || null
+                          return premiumIconName ? (
+                            <PremiumIcon name={premiumIconName} size={24} className="text-primary" />
+                          ) : (
+                            recipe.icon || '🍳'
+                          )
+                        })()}
                       </div>
                       <div className="flex-1 min-w-0">
                         <CardTitle className="text-sm font-semibold leading-tight truncate">{recipe.name}</CardTitle>
@@ -460,12 +488,25 @@ export function RecipesTab({
                     {agentIds.length > 0 && (
                       <div className="flex items-center gap-1.5">
                         {agentIds.slice(0, 4).map((aid) => {
-                          const step = steps.find((s: any) => s.agent_id === aid)
-                          return (
+                          const agentInfo = agentMap.get(aid)
+                          const agentIconName = agentInfo?.premium_icon
+                            || iconMappings[agentInfo?.marketplace_category]
+                            || iconMappings[agentInfo?.configuration?.category]
+                            || iconMappings[agentInfo?.agent_type]
+                            || null
+                          return agentIconName ? (
+                            <div
+                              key={aid}
+                              className="w-7 h-7 flex items-center justify-center shrink-0"
+                              title={agentInfo?.name || `Agent ${aid}`}
+                            >
+                              <PremiumIcon name={agentIconName} size={24} />
+                            </div>
+                          ) : (
                             <div
                               key={aid}
                               className={`w-7 h-7 rounded-lg bg-gradient-to-br ${agentColor(aid)} flex items-center justify-center border border-border/10`}
-                              title={`Agent ${aid}`}
+                              title={agentInfo?.name || `Agent ${aid}`}
                             >
                               <Bot className="w-3.5 h-3.5 text-foreground" />
                             </div>

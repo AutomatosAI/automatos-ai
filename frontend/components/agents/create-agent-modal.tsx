@@ -24,6 +24,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Slider } from '@/components/ui/slider'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { useTools } from '@/hooks/use-tools-api'
 import { PremiumIcon } from '@/components/shared'
 
@@ -211,6 +214,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         tool_ids: agentData.tools, // Agent app assignments (Composio apps)
         tags,
         configuration: {
+          category: agentData.category,
           specializations: agentData.specializations || [],
           tags
         }
@@ -425,10 +429,15 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                                       {(() => {
                                         const selected = AGENT_CATEGORIES.find(c => c.id === agentData.category)
                                         if (!selected) return <SelectValue placeholder="Select category..." />
-                                        const Icon = selected.icon
+                                        const premiumName = iconMappings[selected.id]
+                                        const FallbackIcon = selected.icon
                                         return (
                                           <>
-                                            <Icon className={`w-4 h-4 ${selected.color}`} />
+                                            {premiumName ? (
+                                              <PremiumIcon name={premiumName} size={16} className={selected.color} />
+                                            ) : (
+                                              <FallbackIcon className={`w-4 h-4 ${selected.color}`} />
+                                            )}
                                             <span>{selected.name}</span>
                                           </>
                                         )
@@ -440,11 +449,16 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                                 </SelectTrigger>
                                 <SelectContent>
                                   {AGENT_CATEGORIES.map(cat => {
-                                    const Icon = cat.icon
+                                    const premiumName = iconMappings[cat.id]
+                                    const FallbackIcon = cat.icon
                                     return (
                                       <SelectItem key={cat.id} value={cat.id}>
                                         <div className="flex items-center gap-2">
-                                          <Icon className={`w-4 h-4 ${cat.color}`} />
+                                          {premiumName ? (
+                                            <PremiumIcon name={premiumName} size={16} className={cat.color} />
+                                          ) : (
+                                            <FallbackIcon className={`w-4 h-4 ${cat.color}`} />
+                                          )}
                                           <span>{cat.name}</span>
                                         </div>
                                       </SelectItem>

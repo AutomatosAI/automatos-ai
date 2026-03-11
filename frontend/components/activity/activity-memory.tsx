@@ -105,14 +105,14 @@ function HealthBanner() {
 
       <div className="glass-card px-3 py-2 text-center min-w-[80px]">
         <div className="text-lg font-bold leading-none">
-          {Math.round(health.search_effectiveness.hit_rate * 100)}%
+          {Math.round((health.search_effectiveness?.hit_rate ?? 0) * 100)}%
         </div>
         <div className="text-[10px] text-muted-foreground mt-1">Hit Rate</div>
       </div>
 
       <div className="glass-card px-3 py-2 text-center min-w-[80px]">
         <div className="text-lg font-bold leading-none">
-          {health.search_effectiveness.total_searches}
+          {health.search_effectiveness?.total_searches ?? 0}
         </div>
         <div className="text-[10px] text-muted-foreground mt-1">Searches</div>
       </div>

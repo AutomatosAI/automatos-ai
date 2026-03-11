@@ -3,6 +3,8 @@
 import { Star, Download, Puzzle } from 'lucide-react'
 import { Card, CardHeader, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { PremiumIcon } from '@/components/shared'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 
 export interface MarketplaceWidgetSummary {
   id: string
@@ -59,6 +61,9 @@ function RatingStars({ average, count }: { average: number; count: number }) {
 }
 
 export function WidgetCard({ widget, onClick }: WidgetCardProps) {
+  const { data: iconMappings = {} } = useSystemIcons()
+  const globalPluginIcon = iconMappings['global_plugin'] || null
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
@@ -83,6 +88,8 @@ export function WidgetCard({ widget, onClick }: WidgetCardProps) {
                 alt={widget.display_name}
                 className="h-10 w-10 rounded-lg object-cover"
               />
+            ) : globalPluginIcon ? (
+              <PremiumIcon name={globalPluginIcon} size={28} />
             ) : (
               <Puzzle className="h-5 w-5 text-muted-foreground" />
             )}

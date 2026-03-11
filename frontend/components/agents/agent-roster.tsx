@@ -43,6 +43,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { useAgents, useStartAgent, useStopAgent } from '@/hooks/use-agent-api'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { AgentConfigurationModal } from './agent-configuration-modal'
 import { AgentStatusControlModal } from './agent-status-control-modal'
 import { AgentConfirmDeleteModal } from './agent-confirm-delete-modal'
@@ -211,6 +212,9 @@ export function AgentRoster({
   const [currentAgentStatus, setCurrentAgentStatus] = useState<string>('')
   const [deleteModalAgentId, setDeleteModalAgentId] = useState<number | null>(null)
 
+  // System icon mappings
+  const { data: iconMappings = {} } = useSystemIcons()
+
   // Use real API hooks for agent actions
   const startAgentMutation = useStartAgent()
   const stopAgentMutation = useStopAgent()
@@ -287,6 +291,7 @@ export function AgentRoster({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filteredAgents.map((agent) => {
             const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
+            const premiumIconName = agent.premium_icon || iconMappings[(agent as any).marketplace_category] || iconMappings[(agent as any).configuration?.category] || iconMappings[agent.agent_type] || null
             const AgentIcon = getAgentIcon(agent.agent_type || 'custom', (agent as any).marketplace_category)
             const iconColor = getAgentIconColor(agent.agent_type || 'custom', (agent as any).marketplace_category)
 
@@ -298,8 +303,8 @@ export function AgentRoster({
                 onClick={() => onViewDetails(agent.id.toString())}
               >
                 <div className="flex items-center gap-3">
-                  {agent.premium_icon ? (
-                    <PremiumIcon name={agent.premium_icon} size={36} className={`shrink-0 ${iconColor}`} />
+                  {premiumIconName ? (
+                    <PremiumIcon name={premiumIconName} size={36} className={`shrink-0 ${iconColor}`} />
                   ) : (
                     <AgentIcon className={`w-9 h-9 ${iconColor} shrink-0`} />
                   )}
@@ -362,6 +367,7 @@ export function AgentRoster({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredAgents.map((agent, index) => {
             const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
+            const premiumIconName = agent.premium_icon || iconMappings[(agent as any).marketplace_category] || iconMappings[(agent as any).configuration?.category] || iconMappings[agent.agent_type] || null
             const AgentIcon = getAgentIcon(agent.agent_type || 'custom', (agent as any).marketplace_category)
             const iconColor = getAgentIconColor(agent.agent_type || 'custom', (agent as any).marketplace_category)
 
@@ -377,8 +383,8 @@ export function AgentRoster({
                 {/* Header */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-3">
-                    {agent.premium_icon ? (
-                      <PremiumIcon name={agent.premium_icon} size={40} className={`shrink-0 ${iconColor}`} />
+                    {premiumIconName ? (
+                      <PremiumIcon name={premiumIconName} size={40} className={`shrink-0 ${iconColor}`} />
                     ) : (
                       <AgentIcon className={`w-10 h-10 ${iconColor} shrink-0`} />
                     )}

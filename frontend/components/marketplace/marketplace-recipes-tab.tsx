@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { FileText, Download, Loader2, Bot, Zap, CheckCircle, ArrowRight, ChefHat, MoreVertical, Eye } from 'lucide-react'
+import { PremiumIcon } from '@/components/shared'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -37,6 +39,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
   const { user } = useUser()
   const queryClient = useQueryClient()
   const installMutation = useInstallRecipeFromMarketplace()
+  const { data: iconMappings = {} } = useSystemIcons()
 
   // Admin check (same pattern as agents tab)
   const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
@@ -204,7 +207,14 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
             >
               <CardContent className="p-3">
                 <div className="flex items-center gap-3">
-                  <ChefHat className="w-9 h-9 text-primary shrink-0" />
+                  {(() => {
+                    const premiumIconName = iconMappings[recipe.marketplace_category] || iconMappings['global_recipe'] || null
+                    return premiumIconName ? (
+                      <PremiumIcon name={premiumIconName} size={36} className="text-primary shrink-0" />
+                    ) : (
+                      <ChefHat className="w-9 h-9 text-primary shrink-0" />
+                    )
+                  })()}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-sm truncate">{recipe.name}</span>
@@ -248,7 +258,14 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                 {/* Icon INLINE with Title - EXACTLY like Agent */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <ChefHat className="w-10 h-10 text-primary shrink-0" />
+                    {(() => {
+                      const premiumIconName = iconMappings[recipe.marketplace_category] || iconMappings['global_recipe'] || null
+                      return premiumIconName ? (
+                        <PremiumIcon name={premiumIconName} size={40} className="text-primary shrink-0" />
+                      ) : (
+                        <ChefHat className="w-10 h-10 text-primary shrink-0" />
+                      )
+                    })()}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-foreground line-clamp-1">

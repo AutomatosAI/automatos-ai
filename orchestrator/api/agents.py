@@ -275,6 +275,7 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         is_system_agent=getattr(agent, 'is_system_agent', False) or False,
         slug=getattr(agent, 'slug', None),
         required_role=getattr(agent, 'required_role', None),
+        marketplace_category=getattr(agent, 'marketplace_category', None),
         voice_profile_id=str(agent.voice_profile_id) if getattr(agent, 'voice_profile_id', None) else None,
 )
 
@@ -733,6 +734,10 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
         # Update agent_type if provided
         if agent_update.agent_type is not None:
             agent.agent_type = agent_update.agent_type
+
+        # Update marketplace_category if provided (used for icon mapping)
+        if agent_update.marketplace_category is not None:
+            agent.marketplace_category = agent_update.marketplace_category
 
         # Update configuration if provided
         if agent_update.configuration is not None:

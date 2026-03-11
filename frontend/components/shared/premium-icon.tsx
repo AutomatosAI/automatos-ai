@@ -13,9 +13,11 @@ export function PremiumIcon({ name, size = 24, className = '' }: PremiumIconProp
     return <Bot size={size} className={className} />;
   }
 
+  const iconFilename = name.endsWith('.svg') ? name : `${name}.svg`;
+
   return (
     <Image
-      src={`/assets/icons/${name}`}
+      src={`/assets/icons/${iconFilename}`}
       alt={name.replace('.svg', '').replace(/-/g, ' ')}
       width={size}
       height={size}
