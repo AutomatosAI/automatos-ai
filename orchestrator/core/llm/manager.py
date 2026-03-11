@@ -160,7 +160,7 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
         # Check if explicit credential name is set (not None and not empty string)
         if explicit_credential_name and explicit_credential_name.strip():
             try:
-                cred_data = resolver.get_dict(explicit_credential_name, environment=environment)
+                cred_data = resolver.get_dict(explicit_credential_name, environment=environment, silent=True)
                 if cred_data and len(cred_data) > 0:
                     logger.info(
                         f"Found credential '{explicit_credential_name}' for provider '{provider}' "

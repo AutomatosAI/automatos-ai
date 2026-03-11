@@ -505,11 +505,16 @@ class HeartbeatService:
                     tool_results_msgs.append({
                         "role": "tool",
                         "tool_call_id": tc_id,
-                        "content": json.dumps(tool_result, default=str)[:4000],
+                        "content": json.dumps(tool_result, default=str)[:2000],
                     })
 
                 messages.append(assistant_msg)
                 messages.extend(tool_results_msgs)
+
+                # Trim older tool exchanges if context is growing too large
+                # Keep system + user + last 2 tool exchanges max
+                if len(messages) > 8:
+                    messages = messages[:2] + messages[-6:]
             else:
                 # Max iterations reached
                 result["findings"].append(

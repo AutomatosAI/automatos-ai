@@ -146,25 +146,16 @@ class Mem0Client:
         Returns:
             Response dict from server
         """
-        url = f"{self.api_url}/api/v1/memories/"
+        url = f"{self.api_url}/memories"
 
-        # Convert messages to text format for OpenMemory API
-        text_parts = []
-        for msg in messages:
-            role = msg.get("role", "user").capitalize()
-            content = msg.get("content", "")
-            text_parts.append(f"{role}: {content}")
-        text_content = "\n".join(text_parts)
-
-        payload = {
+        payload: Dict[str, Any] = {
+            "messages": messages,
             "user_id": user_id,
-            "text": text_content,
-            "infer": True,
         }
         if metadata:
             payload["metadata"] = metadata
 
-        logger.debug("[Mem0] Adding memory for user_id=%s (text_len=%d)", user_id, len(text_content))
+        logger.debug("[Mem0] Adding memory for user_id=%s (messages=%d)", user_id, len(messages))
 
         resp = self._request("POST", url, json=payload)
         if resp is None:
@@ -202,7 +193,7 @@ class Mem0Client:
         Returns:
             List of memory items
         """
-        url = f"{self.api_url}/api/v1/memories/search/"
+        url = f"{self.api_url}/search"
         payload = {
             "query": query,
             "user_id": user_id,
@@ -264,7 +255,7 @@ class Mem0Client:
 
     def get_all(self, user_id: str, limit: int = 100) -> List[Dict]:
         """Get all memories for a user."""
-        url = f"{self.api_url}/api/v1/memories/"
+        url = f"{self.api_url}/memories"
         params = {"user_id": user_id}
 
         resp = self._request("GET", url, params=params)
@@ -294,7 +285,7 @@ class Mem0Client:
 
     def delete(self, memory_id: str) -> bool:
         """Delete a specific memory."""
-        url = f"{self.api_url}/api/v1/memories/{memory_id}"
+        url = f"{self.api_url}/memories/{memory_id}"
 
         resp = self._request("DELETE", url)
         if resp is None:
