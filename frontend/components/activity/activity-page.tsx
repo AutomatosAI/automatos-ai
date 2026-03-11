@@ -22,17 +22,21 @@ import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ActivityMissions } from './activity-missions'
-import { ActivityFeed } from './activity-feed'
 import { ActivityMemory } from './activity-memory'
 import { ActivityCalendar } from './calendar'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import type { StatItem } from '@/components/shared/stats-bar'
 import { cn } from '@/lib/utils'
 
-// Lazy-load the dashboard grid (SSR-unfriendly due to react-grid-layout)
+// Lazy-load SSR-unfriendly components (react-grid-layout, @hello-pangea/dnd)
 const CommandCentreDashboard = dynamic(
   () => import('./widgets/command-centre-dashboard').then((m) => m.CommandCentreDashboard),
   { ssr: false, loading: () => <DashboardSkeleton /> }
+)
+
+const BoardView = dynamic(
+  () => import('./board').then((m) => m.BoardView),
+  { ssr: false, loading: () => <BoardSkeleton /> }
 )
 
 function DashboardSkeleton() {
@@ -44,6 +48,23 @@ function DashboardSkeleton() {
       </div>
       <div className="h-[280px] bg-secondary/20 rounded-xl animate-pulse" />
       <div className="h-[220px] bg-secondary/20 rounded-xl animate-pulse" />
+    </div>
+  )
+}
+
+function BoardSkeleton() {
+  return (
+    <div className="space-y-3">
+      <div className="h-8 bg-secondary/20 rounded-lg animate-pulse w-96" />
+      <div className="flex gap-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex-1 min-w-[240px] space-y-2">
+            <div className="h-6 w-24 bg-secondary/30 rounded animate-pulse" />
+            <div className="h-32 bg-secondary/20 rounded-lg animate-pulse" />
+            <div className="h-28 bg-secondary/20 rounded-lg animate-pulse" />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -152,8 +173,7 @@ export function ActivityPage() {
 
           <TabsContent value="board">
             <div data-tour="activity-board">
-              {/* Board (Kanban) — Phase 3 PR. Fallback to Feed for now. */}
-              <ActivityFeed period={period} openExecution={openExecution} deepLinkRecipeId={deepLinkRecipeId} />
+              <BoardView period={period} />
             </div>
           </TabsContent>
 

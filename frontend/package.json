@@ -51,6 +51,7 @@
     "@clerk/nextjs": "^6.37.3",
     "@floating-ui/react": "0.26.0",
     "@headlessui/react": "1.7.18",
+    "@hello-pangea/dnd": "^18.0.1",
     "@hookform/resolvers": "3.3.1",
     "@monaco-editor/react": "^4.7.0",
     "@prisma/client": "5.3.1",
