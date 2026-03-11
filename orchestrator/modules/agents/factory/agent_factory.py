@@ -228,6 +228,16 @@ def _build_tool_schemas(required_tools: List[str]) -> List[Dict]:
             }
         })
     
+    # Platform action tools (from ActionRegistry — platform_* tools)
+    if "platform" in required_tools:
+        try:
+            from modules.tools.discovery import get_action_registry
+            action_registry = get_action_registry()
+            platform_tool_schemas = action_registry.to_openai_tools()
+            tools.extend(platform_tool_schemas)
+        except Exception as e:
+            logger.warning(f"Failed to load platform tools: {e}")
+
     return tools
 
 

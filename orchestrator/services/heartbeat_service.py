@@ -659,6 +659,7 @@ class HeartbeatService:
                         prompt=prompt,
                         context={"source": "heartbeat", "workspace_id": workspace_id},
                         use_memory=False,  # keep context lean
+                        required_tools=["research", "platform"],
                     )
 
                     # Extract the actual text from nested result
