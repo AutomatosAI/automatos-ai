@@ -370,6 +370,22 @@ class Config:
             return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
     
     # =============================================================================
+    # LLM ANALYTICS (PRD-54: Model Tiers & Cost Optimization)
+    # =============================================================================
+    # Comma-separated model IDs considered "premium" (expensive) for cost recommendations
+    PREMIUM_MODELS: str = os.getenv(
+        "PREMIUM_MODELS",
+        "gpt-4o,gpt-4-turbo,claude-sonnet-4-5-20250929,claude-3-5-sonnet-20241022,claude-3-opus-20240229",
+    )
+    # Comma-separated model IDs suggested as cheaper alternatives
+    BUDGET_MODELS: str = os.getenv(
+        "BUDGET_MODELS",
+        "gpt-4o-mini,claude-haiku-4-5",
+    )
+    # Estimated savings multiplier when switching from premium to budget model (0.0–1.0)
+    PREMIUM_TO_BUDGET_SAVINGS_RATIO: float = float(os.getenv("PREMIUM_TO_BUDGET_SAVINGS_RATIO", "0.85"))
+
+    # =============================================================================
     # VOICE SERVICE (PRD-74)
     # =============================================================================
     VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://voice-service.railway.internal:8300")

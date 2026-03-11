@@ -57,7 +57,7 @@ def _get_rag_setting_int(key: str, default: int) -> int:
         finally:
             db.close()
     except Exception:
-        pass
+        logger.error("Failed to read RAG setting '%s' (int), using default=%d", key, default, exc_info=True)
     return default
 
 
@@ -74,7 +74,7 @@ def _get_rag_setting_str(key: str, default: str) -> str:
         finally:
             db.close()
     except Exception:
-        pass
+        logger.error("Failed to read RAG setting '%s' (str), using default='%s'", key, default, exc_info=True)
     return default
 
 
@@ -91,7 +91,7 @@ def _get_rag_setting_float(key: str, default: float) -> float:
         finally:
             db.close()
     except Exception:
-        pass
+        logger.error("Failed to read RAG setting '%s' (float), using default=%s", key, default, exc_info=True)
     return default
 
 
@@ -958,7 +958,7 @@ class RAGService:
                     avg_response_time = round(usage_result.avg_time or 0, 1)
                     last_query_time = usage_result.last_query.isoformat() if usage_result.last_query else None
             except Exception:
-                pass  # Table may not exist yet
+                logger.error("Failed to query usage_events for retrieval stats (table may not exist yet)", exc_info=True)
 
             return {
                 'total_queries': total_docs,

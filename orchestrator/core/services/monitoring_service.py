@@ -156,7 +156,7 @@ class AlertManager:
                 try:
                     handler(alert)
                 except Exception as e:
-                    logger.error(f"Alert handler failed: {e}")
+                    logger.error(f"Alert handler failed: {e}", exc_info=True)
             
             logger.warning(f"Alert created: [{severity}] {title} - {message}")
             return alert_id
@@ -231,7 +231,7 @@ class MonitoringService:
                 time.sleep(10)  # Collect metrics every 10 seconds
                 
             except Exception as e:
-                logger.error(f"Monitoring loop error: {e}")
+                logger.error(f"Monitoring loop error: {e}", exc_info=True)
     
     def _collect_system_metrics(self):
         """Collect system performance metrics"""
@@ -280,7 +280,7 @@ class MonitoringService:
                 value=net_io.bytes_recv
             ))
         except Exception:
-            pass
+            logger.error("Failed to collect network I/O metrics", exc_info=True)
 
     def _check_thresholds(self):
         """Check metrics against thresholds and create alerts"""

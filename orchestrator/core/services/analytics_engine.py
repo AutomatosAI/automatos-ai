@@ -73,7 +73,7 @@ class AnalyticsEngine:
             }
             
         except Exception as e:
-            logger.error(f"Error getting dashboard overview: {e}")
+            logger.error(f"Error getting dashboard overview: {e}", exc_info=True)
             return {"error": str(e)}
     
     async def _get_system_health(self) -> Dict[str, Any]:
@@ -100,7 +100,7 @@ class AnalyticsEngine:
             }
             
         except Exception as e:
-            logger.error(f"Error getting system health: {e}")
+            logger.error(f"Error getting system health: {e}", exc_info=True)
             return {"error": str(e)}
     
     async def _get_agent_metrics(self) -> Dict[str, Any]:
@@ -121,7 +121,7 @@ class AnalyticsEngine:
             }
             
         except Exception as e:
-            logger.error(f"Error getting agent metrics: {e}")
+            logger.error(f"Error getting agent metrics: {e}", exc_info=True)
             return {"error": str(e)}
     
     async def _get_workflow_metrics(self) -> Dict[str, Any]:
@@ -152,7 +152,7 @@ class AnalyticsEngine:
             }
             
         except Exception as e:
-            logger.error(f"Error getting workflow metrics: {e}")
+            logger.error(f"Error getting workflow metrics: {e}", exc_info=True)
             return {"error": str(e)}
     
     async def _get_context_metrics(self) -> Dict[str, Any]:
@@ -215,7 +215,7 @@ class AnalyticsEngine:
                         }
                 except exc.SQLAlchemyError as sql_error:
                     # SQL error occurred, return zeros
-                    logger.warning(f"SQL error checking context metrics table: {sql_error}")
+                    logger.warning(f"SQL error checking context metrics table: {sql_error}", exc_info=True)
                     return {
                         "tokensSaved": 0, 
                         "avgCompressionRatio": 1.0,
@@ -225,7 +225,7 @@ class AnalyticsEngine:
                     
             except Exception as db_error:
                 # Database query failed, log error and return zeros
-                logger.warning(f"Failed to query context metrics from database: {db_error}")
+                logger.warning(f"Failed to query context metrics from database: {db_error}", exc_info=True)
                 return {
                     "tokensSaved": 0, 
                     "avgCompressionRatio": 1.0,
@@ -234,7 +234,7 @@ class AnalyticsEngine:
                 }
                 
         except Exception as e:
-            logger.error(f"Error getting context metrics: {e}")
+            logger.error(f"Error getting context metrics: {e}", exc_info=True)
             return {
                 "tokensSaved": 0, 
                 "avgCompressionRatio": 1.0,
@@ -331,7 +331,7 @@ class AnalyticsEngine:
                 
             except Exception as db_error:
                 # Database query failed, log error and return zeros
-                logger.warning(f"Failed to query learning metrics from database: {db_error}")
+                logger.warning(f"Failed to query learning metrics from database: {db_error}", exc_info=True)
                 # Return zeros for consistent error handling
                 return {
                     "totalMemoryItems": 0,
@@ -345,7 +345,7 @@ class AnalyticsEngine:
                 }
             
         except Exception as e:
-            logger.error(f"Error getting learning metrics: {e}")
+            logger.error(f"Error getting learning metrics: {e}", exc_info=True)
             return {
                 "totalMemoryItems": 0,
                 "recentMemoryItems": 0,
@@ -399,7 +399,7 @@ class AnalyticsEngine:
             }
             
         except Exception as e:
-            logger.error(f"Error getting agent analytics: {e}")
+            logger.error(f"Error getting agent analytics: {e}", exc_info=True)
             return {"error": str(e)}
     
     async def track_agent_execution(
@@ -432,7 +432,7 @@ class AnalyticsEngine:
                 self.redis_client.publish("dashboard_updates", json.dumps(update))
             
         except Exception as e:
-            logger.error(f"Error tracking agent execution: {e}")
+            logger.error(f"Error tracking agent execution: {e}", exc_info=True)
     
     async def track_context_optimization(
         self,
@@ -458,7 +458,7 @@ class AnalyticsEngine:
                 self.redis_client.publish("dashboard_updates", json.dumps(update))
             
         except Exception as e:
-            logger.error(f"Error tracking context optimization: {e}")
+            logger.error(f"Error tracking context optimization: {e}", exc_info=True)
     
     async def track_learning_progress(
         self,
@@ -485,7 +485,7 @@ class AnalyticsEngine:
                 self.redis_client.publish("dashboard_updates", json.dumps(update))
             
         except Exception as e:
-            logger.error(f"Error tracking learning progress: {e}")
+            logger.error(f"Error tracking learning progress: {e}", exc_info=True)
     
     async def get_real_time_metrics(self) -> Dict[str, Any]:
         """Get real-time metrics for WebSocket updates"""
@@ -501,5 +501,5 @@ class AnalyticsEngine:
             }
             
         except Exception as e:
-            logger.error(f"Error getting real-time metrics: {e}")
+            logger.error(f"Error getting real-time metrics: {e}", exc_info=True)
             return {"error": str(e)}
