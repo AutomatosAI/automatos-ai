@@ -458,12 +458,6 @@ app.include_router(voice_profiles_router)  # PRD-74 Phase 2: Voice Profiles
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
 
-# Include legacy routes (from existing api_routes.py)
-try:
-    from api_routes import app as legacy_routes
-    app.mount("/legacy", legacy_routes)
-except Exception as e:
-    logger.warning(f"Could not mount legacy routes: {e}")
 
 # WebSocket endpoint removed - using AI SDK SSE streaming instead
 # See consumers/workflows/streaming.py and consumers/chatbot/streaming.py

@@ -1,19 +1,15 @@
 'use client'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings, Key, Shield, Webhook, KeyRound, Radio, Brain, FileText, Puzzle, Volume2 } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Volume2 } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
-import { CredentialAuditTab } from './CredentialAuditTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
 import WebhooksSettingsTab from './WebhooksSettingsTab'
 import { ApiKeysSettingsTab } from './ApiKeysSettingsTab'
 import { ChannelsSettingsTab } from './ChannelsSettingsTab'
-import { SystemPromptsTab } from './SystemPromptsTab'
 import { ApiKeyManager } from './ApiKeyManager'
 import { VoiceProfilesSettingsTab } from './VoiceProfilesSettingsTab'
-import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
-import { Palette } from 'lucide-react'
 
 export function SettingsPanel() {
 
@@ -48,25 +44,13 @@ export function SettingsPanel() {
             <Key className="w-4 h-4 mr-1 shrink-0" />
             Credentials
           </TabsTrigger>
-          <TabsTrigger value="audit">
-            <Shield className="w-4 h-4 mr-1 shrink-0" />
-            Audit <span className="hidden sm:inline">Logs</span>
-          </TabsTrigger>
           <TabsTrigger value="channels">
             <Radio className="w-4 h-4 mr-1 shrink-0" />
             Channels
           </TabsTrigger>
-          <TabsTrigger value="prompts">
-            <FileText className="w-4 h-4 mr-1 shrink-0" />
-            <span className="hidden sm:inline">System</span> Prompts
-          </TabsTrigger>
           <TabsTrigger value="voice-profiles">
             <Volume2 className="w-4 h-4 mr-1 shrink-0" />
             Voices
-          </TabsTrigger>
-          <TabsTrigger value="system-icons">
-            <Palette className="w-4 h-4 mr-1 shrink-0" />
-            Icons
           </TabsTrigger>
           <TabsTrigger value="widget-sdk">
             <Puzzle className="w-4 h-4 mr-1 shrink-0" />
@@ -99,29 +83,14 @@ export function SettingsPanel() {
           <CredentialsTab />
         </TabsContent>
 
-        {/* PRD-18: Audit Logs Tab */}
-        <TabsContent value="audit">
-          <CredentialAuditTab />
-        </TabsContent>
-
         {/* PRD-55: Channels Tab */}
         <TabsContent value="channels">
           <ChannelsSettingsTab />
         </TabsContent>
 
-        {/* PRD-58: System Prompts Tab */}
-        <TabsContent value="prompts">
-          <SystemPromptsTab />
-        </TabsContent>
-
         {/* PRD-74: Voice Profiles */}
         <TabsContent value="voice-profiles">
           <VoiceProfilesSettingsTab />
-        </TabsContent>
-
-        {/* Phase 1: System Icons */}
-        <TabsContent value="system-icons">
-          <SystemIconsSettingsTab />
         </TabsContent>
 
         {/* PRD-38.4: Widget SDK API Keys */}

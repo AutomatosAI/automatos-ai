@@ -12,16 +12,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Settings, Save, RotateCcw, AlertCircle } from 'lucide-react'
+import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { 
-  getSettingsByCategory, 
-  getSettingsStats, 
-  bulkUpdateSettings, 
+import {
+  getSettingsByCategory,
+  getSettingsStats,
+  bulkUpdateSettings,
   resetSettingsToDefaults,
   SystemSettingsByCategory,
-  SystemSettingsStats 
+  SystemSettingsStats
 } from '@/lib/api/system-settings'
 
 // Import individual tab components
@@ -30,6 +30,9 @@ import CodeGraphSettingsTab from './CodeGraphSettingsTab'
 import SystemLoggingSettingsTab from './SystemLoggingSettingsTab'
 import APIRateLimitingSettingsTab from './APIRateLimitingSettingsTab'
 import BackendAPIKeysSettingsTab from './BackendAPIKeysSettingsTab'
+import { CredentialAuditTab } from './CredentialAuditTab'
+import { SystemPromptsTab } from './SystemPromptsTab'
+import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
 
 interface SystemSettingsTabProps {
   className?: string
@@ -191,6 +194,18 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
           <TabsTrigger value="system_logging">Logging</TabsTrigger>
           <TabsTrigger value="api_rate_limiting">Rate Limiting</TabsTrigger>
           <TabsTrigger value="backend_api_keys">API Keys</TabsTrigger>
+          <TabsTrigger value="audit_logs">
+            <Shield className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Audit Logs
+          </TabsTrigger>
+          <TabsTrigger value="system_prompts">
+            <FileText className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Prompts
+          </TabsTrigger>
+          <TabsTrigger value="system_icons">
+            <Palette className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Icons
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="general">
@@ -236,6 +251,18 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             saving={saving}
             onReset={() => resetToDefaults('backend_api_keys')}
           />
+        </TabsContent>
+
+        <TabsContent value="audit_logs">
+          <CredentialAuditTab />
+        </TabsContent>
+
+        <TabsContent value="system_prompts">
+          <SystemPromptsTab />
+        </TabsContent>
+
+        <TabsContent value="system_icons">
+          <SystemIconsSettingsTab />
         </TabsContent>
       </Tabs>
 

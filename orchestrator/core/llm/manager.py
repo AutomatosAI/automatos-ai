@@ -341,9 +341,9 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
             except Exception as e:
                 logger.debug(f"Type-based lookup in development failed: {e}")
         
-        logger.warning(
-            f"Could not find credential for provider '{provider}' using any variation. "
-            f"Tried: {credential_name_variations}"
+        logger.debug(
+            f"No stored credential for provider '{provider}' (tried: {credential_name_variations}), "
+            f"falling back to env var"
         )
         return {}
         

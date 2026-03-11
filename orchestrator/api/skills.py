@@ -108,6 +108,11 @@ class EnhancedSkillResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class AgentSkillsResponse(BaseModel):
+    skills: List[EnhancedSkillResponse]
+    total_estimated_tokens: int = 0
+    warning: Optional[str] = None
+
 class SkillRecommendationRequest(BaseModel):
     task_description: str
     task_type: Optional[str] = None
@@ -756,7 +761,7 @@ async def deactivate_skill(
 # Agent-Skill Assignment Endpoints
 # ============================================================================
 
-@router.get("/agents/{agent_id}/skills", response_model=List[EnhancedSkillResponse])
+@router.get("/agents/{agent_id}/skills", response_model=AgentSkillsResponse)
 async def get_agent_skills(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

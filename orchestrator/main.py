@@ -909,12 +909,6 @@ if voice_profiles_router is not None:
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
 
-# Include legacy routes (from existing api_routes.py)
-try:
-    from api_routes import app as legacy_routes
-    app.mount("/legacy", legacy_routes)
-except Exception as e:
-    logger.warning(f"Could not mount legacy routes: {e}")
 
 # Exports directory served through authenticated endpoint instead of open StaticFiles mount.
 # See api/exports.py (or serve via pre-signed URLs in production).

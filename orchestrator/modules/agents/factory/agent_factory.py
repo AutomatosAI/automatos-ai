@@ -1622,7 +1622,7 @@ To use actions, respond with JSON blocks like:
                         
                         # PRD-17: If LLM returns empty content, use tool results as the response
                         if not response.content or response.content.strip() == "":
-                            self.logger.warning("  ⚠️  LLM returned empty content after tool use, using tool results")
+                            self.logger.debug("  LLM returned empty content after tool use, synthesizing from tool results")
                             # Format tool results into readable response
                             tool_summary = "\n\n".join([
                                 f"**{tr['name']}**: {tr['content'][:500]}..." 

@@ -161,6 +161,7 @@ function IconMappingSection({
                                 onChange={(val) => onIconChange(item.id, val)}
                                 triggerLabel=""
                                 triggerClassName="w-[120px] h-7 text-xs"
+                                compact
                             />
                         </div>
                     ))}
