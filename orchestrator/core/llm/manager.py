@@ -466,23 +466,10 @@ class LLMManager:
         else:
             _, model = get_provider_and_model_from_settings(service_name)
             if not model:
-                # Try config.LLM_MODEL first, then provider-specific fallbacks
-                from config import config as _cfg
-                _cfg_model = _cfg.LLM_MODEL
-                if _cfg_model:
-                    model = _cfg_model
-                else:
-                    # Provider-specific fallbacks (last resort)
-                    default_models = {
-                        LLMProvider.OPENAI: "gpt-4",
-                        LLMProvider.ANTHROPIC: "claude-3-5-sonnet-20241022",
-                        LLMProvider.GOOGLE: "gemini-pro",
-                        LLMProvider.AZURE: "gpt-4",
-                        LLMProvider.HUGGINGFACE: "mistralai/Mistral-7B-Instruct-v0.2",
-                        LLMProvider.GROK: "grok-2-latest",
-                        LLMProvider.OPENROUTER: "meta-llama/llama-3.1-70b-instruct"
-                    }
-                    model = default_models.get(provider, "gpt-4")
+                raise ValueError(
+                    f"No model configured for service '{service_name}'. "
+                    f"Please set the model in Settings > System LLM."
+                )
         
         # Get other settings with defaults
         category = SERVICE_CATEGORY_MAP.get(service_name, "orchestrator_llm")

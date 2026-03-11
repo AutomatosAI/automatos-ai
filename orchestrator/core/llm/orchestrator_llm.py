@@ -82,8 +82,13 @@ class OrchestratorLLM:
             reasoning_mode: Default reasoning mode
             workspace_id: Workspace ID for usage tracking
         """
-        self.model = model or config.LLM_MODEL
-        self.provider = provider or config.LLM_PROVIDER
+        self.model = model
+        self.provider = provider
+        if not self.model or not self.provider:
+            raise ValueError(
+                "OrchestratorLLM requires model and provider. "
+                "Configure in Settings > System LLM."
+            )
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.reasoning_mode = reasoning_mode
