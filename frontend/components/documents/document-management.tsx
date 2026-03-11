@@ -383,28 +383,34 @@ export function DocumentManagement() {
         value: totalDocs.toString(),
         change: `+${Math.max(0, totalDocs - 2)} this month`,
         icon: FileText,
-        iconColor: 'text-[hsl(var(--info))]'
+        iconColor: 'text-[hsl(var(--info))]',
+        globalIconKey: 'global_document',
+
       },
       {
         label: 'Processed',
         value: processedDocs.toString(),
         change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
         icon: Database,
-        iconColor: 'text-[hsl(var(--success))]'
+        iconColor: 'text-[hsl(var(--success))]',
+
       },
       {
         label: 'Storage Used',
         value: sizeDisplay,
         change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
         icon: FolderOpen,
-        iconColor: 'text-primary'
+        iconColor: 'text-primary',
+        globalIconKey: 'global_storage',
+
       },
       {
         label: 'Vector Chunks',
         value: typedDocuments.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
         change: '',
         icon: Database,
-        iconColor: 'text-[hsl(var(--agent))]'
+        iconColor: 'text-[hsl(var(--agent))]',
+
       }
     ]
   }, [typedDocuments])

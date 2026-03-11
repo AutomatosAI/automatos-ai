@@ -856,7 +856,7 @@ class HeartbeatService:
             if webhook_url:
                 await self._send_via_webhook(webhook_url, result, message)
             else:
-                logger.warning("[Heartbeat] report_to=webhook but no webhook_url configured")
+                logger.debug("[Heartbeat] report_to=webhook but no webhook_url configured, skipping")
 
     def _format_heartbeat_message(self, result: dict) -> str:
         """Format heartbeat result as a clean notification message."""

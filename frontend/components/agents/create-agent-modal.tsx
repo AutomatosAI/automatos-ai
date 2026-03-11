@@ -17,6 +17,7 @@ import {
   Shield,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -782,7 +783,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
-                              <Label>Temperature: {modelConfig.temperature.toFixed(2)}</Label>
+                              <Label className="flex items-center gap-1">Temperature: {modelConfig.temperature.toFixed(2)} <InlineHelp id="agents.config.model.temperature" size="sm" /></Label>
                               <Slider
                                 min={0}
                                 max={2}
@@ -797,7 +798,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             </div>
 
                             <div className="space-y-2">
-                              <Label>Max Output Tokens: {modelConfig.max_tokens}</Label>
+                              <Label className="flex items-center gap-1">Max Output Tokens: {modelConfig.max_tokens} <InlineHelp id="agents.config.model.max_tokens" size="sm" /></Label>
                               <Slider
                                 min={100}
                                 max={8000}
@@ -809,7 +810,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             </div>
 
                             <div className="space-y-2">
-                              <Label>Top P: {modelConfig.top_p.toFixed(2)}</Label>
+                              <Label className="flex items-center gap-1">Top P: {modelConfig.top_p.toFixed(2)} <InlineHelp id="agents.config.model.top_p" size="sm" /></Label>
                               <Slider
                                 min={0}
                                 max={1}
@@ -824,7 +825,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             </div>
 
                             <div className="space-y-2">
-                              <Label>Frequency Penalty: {modelConfig.frequency_penalty.toFixed(2)}</Label>
+                              <Label className="flex items-center gap-1">Frequency Penalty: {modelConfig.frequency_penalty.toFixed(2)} <InlineHelp id="agents.config.model.frequency_penalty" size="sm" /></Label>
                               <Slider
                                 min={-2}
                                 max={2}
@@ -839,7 +840,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             </div>
 
                             <div className="space-y-2">
-                              <Label>Presence Penalty: {modelConfig.presence_penalty.toFixed(2)}</Label>
+                              <Label className="flex items-center gap-1">Presence Penalty: {modelConfig.presence_penalty.toFixed(2)} <InlineHelp id="agents.config.model.presence_penalty" size="sm" /></Label>
                               <Slider
                                 min={-2}
                                 max={2}

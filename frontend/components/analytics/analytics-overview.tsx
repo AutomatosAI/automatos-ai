@@ -102,7 +102,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
 
   return (
     <div className="space-y-6">
-      <StatsBar stats={summaryCards.map(card => ({
+      <StatsBar stats={summaryCards.map((card, idx) => ({
         label: card.label,
         value: card.value,
         change: card.sub,
@@ -111,6 +111,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
           .replace('text-purple-400', 'text-[hsl(var(--info))]')
           .replace('text-green-400', 'text-[hsl(var(--success))]')
           .replace('text-blue-400', 'text-[hsl(var(--agent))]'),
+        globalIconKey: (['global_agent', 'global_workflow', 'global_document', 'global_cost'] as const)[idx],
       }))} loading={isLoading} />
 
       {/* Plan Usage */}

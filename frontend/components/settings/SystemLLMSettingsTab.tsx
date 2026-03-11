@@ -26,6 +26,7 @@ import {
   Database, Eye, Play
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 import {
   SystemSetting,
   getSettingsForCategory,
@@ -435,7 +436,7 @@ export default function SystemLLMSettingsTab({
               {/* Provider & Model */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="llm_provider">LLM Provider</Label>
+                  <Label htmlFor="llm_provider" className="flex items-center gap-1">LLM Provider <InlineHelp id="settings.llm.provider" size="sm" /></Label>
                   <Select
                     value={formData.llm_provider || ''}
                     onValueChange={(value) => handleInputChange('llm_provider', value)}
@@ -463,7 +464,7 @@ export default function SystemLLMSettingsTab({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="llm_model">LLM Model</Label>
+                  <Label htmlFor="llm_model" className="flex items-center gap-1">LLM Model <InlineHelp id="settings.llm.model" size="sm" /></Label>
                   <Select
                     value={formData.llm_model || ''}
                     onValueChange={(value) => {
@@ -507,7 +508,7 @@ export default function SystemLLMSettingsTab({
               {/* Thinking Level + Temperature */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label>Thinking Level</Label>
+                  <Label className="flex items-center gap-1">Thinking Level <InlineHelp id="settings.llm.thinking_level" size="sm" /></Label>
                   <Select
                     value={orchConfig?.thinking_level || 'medium'}
                     onValueChange={(v) => handleOrchChange('thinking_level', v)}
@@ -525,7 +526,7 @@ export default function SystemLLMSettingsTab({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="llm_temperature">Temperature</Label>
+                  <Label htmlFor="llm_temperature" className="flex items-center gap-1">Temperature <InlineHelp id="settings.llm.temperature" size="sm" /></Label>
                   <Input
                     id="llm_temperature"
                     type="number"
@@ -540,7 +541,7 @@ export default function SystemLLMSettingsTab({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="llm_max_tokens">Max Tokens</Label>
+                  <Label htmlFor="llm_max_tokens" className="flex items-center gap-1">Max Tokens <InlineHelp id="settings.llm.max_tokens" size="sm" /></Label>
                   <Input
                     id="llm_max_tokens"
                     type="number"
@@ -566,7 +567,7 @@ export default function SystemLLMSettingsTab({
                 <CollapsibleContent className="mt-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label>Request Timeout (seconds)</Label>
+                      <Label className="flex items-center gap-1">Request Timeout (seconds) <InlineHelp id="settings.llm.timeout" size="sm" /></Label>
                       <Input
                         type="number" min="5" max="300"
                         value={formData.llm_timeout || '30'}
@@ -574,7 +575,7 @@ export default function SystemLLMSettingsTab({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Retry Attempts</Label>
+                      <Label className="flex items-center gap-1">Retry Attempts <InlineHelp id="settings.llm.retry_attempts" size="sm" /></Label>
                       <Input
                         type="number" min="0" max="5"
                         value={formData.llm_retry_attempts || '3'}
@@ -582,7 +583,7 @@ export default function SystemLLMSettingsTab({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Concurrent Requests</Label>
+                      <Label className="flex items-center gap-1">Concurrent Requests <InlineHelp id="settings.llm.concurrent_requests" size="sm" /></Label>
                       <Input
                         type="number" min="1" max="10"
                         value={formData.llm_concurrent_requests || '5'}
@@ -590,7 +591,7 @@ export default function SystemLLMSettingsTab({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Cache TTL (seconds)</Label>
+                      <Label className="flex items-center gap-1">Cache TTL (seconds) <InlineHelp id="settings.llm.cache_ttl" size="sm" /></Label>
                       <Input
                         type="number" min="0" max="3600"
                         value={formData.llm_cache_ttl || '300'}
@@ -598,7 +599,7 @@ export default function SystemLLMSettingsTab({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Top P</Label>
+                      <Label className="flex items-center gap-1">Top P <InlineHelp id="settings.llm.top_p" size="sm" /></Label>
                       <Input
                         type="number" step="0.1" min="0" max="1"
                         value={formData.llm_top_p || '1'}
@@ -606,7 +607,7 @@ export default function SystemLLMSettingsTab({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Frequency Penalty</Label>
+                      <Label className="flex items-center gap-1">Frequency Penalty <InlineHelp id="settings.llm.frequency_penalty" size="sm" /></Label>
                       <Input
                         type="number" step="0.1" min="-2" max="2"
                         value={formData.llm_frequency_penalty || '0'}
@@ -614,7 +615,7 @@ export default function SystemLLMSettingsTab({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Presence Penalty</Label>
+                      <Label className="flex items-center gap-1">Presence Penalty <InlineHelp id="settings.llm.presence_penalty" size="sm" /></Label>
                       <Input
                         type="number" step="0.1" min="-2" max="2"
                         value={formData.llm_presence_penalty || '0'}
@@ -622,7 +623,7 @@ export default function SystemLLMSettingsTab({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Stop Sequences</Label>
+                      <Label className="flex items-center gap-1">Stop Sequences <InlineHelp id="settings.llm.stop_sequences" size="sm" /></Label>
                       <Input
                         value={formData.llm_stop_sequences || ''}
                         onChange={(e) => handleInputChange('llm_stop_sequences', e.target.value)}
@@ -679,7 +680,7 @@ export default function SystemLLMSettingsTab({
                 <>
                   {/* Personality Mode */}
                   <div className="space-y-3">
-                    <Label>Personality Mode</Label>
+                    <Label className="flex items-center gap-1">Personality Mode <InlineHelp id="settings.soul.personality_mode" size="sm" /></Label>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {Object.entries(PERSONALITY_PRESETS).map(([key, preset]) => (
                         <button
@@ -702,7 +703,7 @@ export default function SystemLLMSettingsTab({
                   {orchConfig.personality_mode === 'custom' && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <Label>Custom Soul Prompt</Label>
+                        <Label className="flex items-center gap-1">Custom Soul Prompt <InlineHelp id="settings.soul.custom_soul" size="sm" /></Label>
                         <span className="text-xs text-muted-foreground">
                           ~{soulTokenEstimate} tokens
                         </span>
@@ -722,7 +723,7 @@ export default function SystemLLMSettingsTab({
 
                   {/* Communication Style */}
                   <div className="space-y-3">
-                    <Label>Communication Style</Label>
+                    <Label className="flex items-center gap-1">Communication Style <InlineHelp id="settings.soul.communication_style" size="sm" /></Label>
                     <div className="grid grid-cols-3 gap-3">
                       {Object.entries(COMMUNICATION_STYLES).map(([key, style]) => (
                         <button
@@ -743,7 +744,7 @@ export default function SystemLLMSettingsTab({
 
                   {/* Proactive Level */}
                   <div className="space-y-3">
-                    <Label>Proactive Behavior Level</Label>
+                    <Label className="flex items-center gap-1">Proactive Behavior Level <InlineHelp id="settings.soul.proactive_level" size="sm" /></Label>
                     <Select
                       value={orchConfig.proactive_level}
                       onValueChange={(v) => handleOrchChange('proactive_level', v)}
@@ -801,7 +802,7 @@ export default function SystemLLMSettingsTab({
                   {/* Enable Toggle */}
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
-                      <Label>Enable Heartbeat</Label>
+                      <Label className="flex items-center gap-1">Enable Heartbeat <InlineHelp id="settings.heartbeat.enable" size="sm" /></Label>
                       <p className="text-xs text-muted-foreground">
                         The orchestrator wakes up periodically to check on your agents and tasks
                       </p>
@@ -820,6 +821,7 @@ export default function SystemLLMSettingsTab({
                           <Label className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
                             Interval
+                            <InlineHelp id="settings.heartbeat.interval" size="sm" />
                           </Label>
                           <Select
                             value={String(orchConfig.heartbeat.interval_minutes)}

@@ -17,6 +17,8 @@ import {
   X
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PremiumIcon } from '@/components/shared'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { useSystemRole } from '@/contexts/role-context'
 
 interface MobileSidebarProps {
@@ -29,6 +31,7 @@ const navigationItems = [
     href: '/chat',
     icon: MessageCircle,
     iconColor: 'text-primary',
+    navIconKey: 'nav_chat',
     description: 'Your AI workspace'
   },
   {
@@ -36,6 +39,7 @@ const navigationItems = [
     href: '/agents',
     icon: Bot,
     iconColor: 'text-primary',
+    navIconKey: 'nav_agents',
     description: 'Manage AI agents and skills'
   },
   {
@@ -43,6 +47,7 @@ const navigationItems = [
     href: '/tools',
     icon: Wrench,
     iconColor: 'text-[hsl(var(--warning))]',
+    navIconKey: 'nav_tools',
     description: 'Development and utility tools'
   },
   {
@@ -50,6 +55,7 @@ const navigationItems = [
     href: '/marketplace',
     icon: Store,
     iconColor: 'text-primary',
+    navIconKey: 'nav_marketplace',
     description: 'Discover agents, recipes & tools'
   },
   {
@@ -57,6 +63,7 @@ const navigationItems = [
     href: '/documents',
     icon: Database,
     iconColor: 'text-[hsl(var(--success))]',
+    navIconKey: 'nav_knowledge',
     description: 'Documents, databases & code-graph'
   },
   {
@@ -64,6 +71,7 @@ const navigationItems = [
     href: '/team',
     icon: Users,
     iconColor: 'text-[hsl(var(--info))]',
+    navIconKey: 'nav_team',
     description: 'Manage workspace members',
     requiredRole: 'admin' as const,
   },
@@ -72,6 +80,7 @@ const navigationItems = [
     href: '/context',
     icon: Brain,
     iconColor: 'text-[hsl(var(--chart-4))]',
+    navIconKey: 'nav_context',
     description: 'RAG system and field theory',
     requiredRole: 'admin' as const,
   },
@@ -80,6 +89,7 @@ const navigationItems = [
     href: '/dashboard',
     icon: LayoutDashboard,
     iconColor: 'text-emerald-400',
+    navIconKey: 'nav_dashboard',
     description: 'System metrics & health',
   },
   {
@@ -87,6 +97,7 @@ const navigationItems = [
     href: '/analytics',
     icon: BarChart3,
     iconColor: 'text-cyan-400',
+    navIconKey: 'nav_analytics',
     description: 'Performance, costs & insights',
   },
 ]
@@ -94,6 +105,7 @@ const navigationItems = [
 export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
   const pathname = usePathname()
   const { isAdmin } = useSystemRole()
+  const { data: iconMappings = {} } = useSystemIcons()
 
   const filteredNavItems = navigationItems.filter(item => {
     if (!(item as any).requiredRole) return true
@@ -120,6 +132,7 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
         {filteredNavItems.map((item, index) => {
           const isActive = pathname === item.href
           const Icon = item.icon
+          const premiumNavIcon = item.navIconKey ? iconMappings[item.navIconKey] : null
 
           return (
             <motion.div
@@ -139,12 +152,16 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
                     : 'hover:bg-secondary/40 active:bg-secondary/60'
                 )}
               >
-                <Icon
-                  className={cn(
-                    'w-5 h-5 shrink-0',
-                    isActive ? 'text-primary' : item.iconColor || 'text-muted-foreground'
-                  )}
-                />
+                {premiumNavIcon ? (
+                  <PremiumIcon name={premiumNavIcon} size={20} className="shrink-0" />
+                ) : (
+                  <Icon
+                    className={cn(
+                      'w-5 h-5 shrink-0',
+                      isActive ? 'text-primary' : item.iconColor || 'text-muted-foreground'
+                    )}
+                  />
+                )}
                 <div className="min-w-0">
                   <p className={cn(
                     'text-sm',
@@ -173,7 +190,11 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
                 : 'hover:bg-secondary/40 active:bg-secondary/60'
             )}
           >
-            <Settings className="w-5 h-5 shrink-0 text-muted-foreground" />
+            {iconMappings['nav_settings'] ? (
+              <PremiumIcon name={iconMappings['nav_settings']} size={20} className="shrink-0" />
+            ) : (
+              <Settings className="w-5 h-5 shrink-0 text-muted-foreground" />
+            )}
             <p className="text-sm font-medium text-muted-foreground">Settings</p>
           </Link>
         </div>

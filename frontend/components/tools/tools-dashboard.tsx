@@ -657,6 +657,8 @@ export function ToolsDashboard() {
             change: 'Active',
             icon: CheckCircle,
             iconColor: 'text-[hsl(var(--success))]',
+            globalIconKey: 'global_channel',
+
           },
           {
             label: 'In Workspace',
@@ -671,6 +673,8 @@ export function ToolsDashboard() {
             change: 'Actions',
             icon: Wrench,
             iconColor: 'text-[hsl(var(--agent))]',
+            globalIconKey: 'global_tool',
+
           },
           {
             label: 'Triggers',
@@ -678,6 +682,7 @@ export function ToolsDashboard() {
             change: 'Available',
             icon: Zap,
             iconColor: 'text-primary',
+            globalIconKey: 'global_trigger',
           }
         ] satisfies StatItem[]}
         loading={toolsLoading}

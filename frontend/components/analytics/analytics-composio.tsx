@@ -160,10 +160,10 @@ export function AnalyticsComposio({ days }: Props) {
   return (
     <div className="space-y-6">
       <StatsBar stats={[
-        { label: 'Connected Apps', value: connectedAppsCount, change: 'Composio integrations', icon: AppWindow, iconColor: 'text-primary' },
+        { label: 'Connected Apps', value: connectedAppsCount, change: 'Composio integrations', icon: AppWindow, iconColor: 'text-primary', globalIconKey: 'global_channel' },
         { label: 'Total Actions Used', value: totalActionsUsed, change: `Last ${days} days`, icon: Zap, iconColor: 'text-[hsl(var(--success))]' },
-        { label: 'Most Used App', value: mostUsedApp?.total_actions_used ?? 0, change: mostUsedApp ? formatAppName(mostUsedApp.app_name) : 'No data', icon: Wrench, iconColor: 'text-[hsl(var(--info))]' },
-        { label: 'Active Integrations', value: activeIntegrations, change: `of ${connectedAppsCount} total`, icon: Link2, iconColor: 'text-[hsl(var(--agent))]' },
+        { label: 'Most Used App', value: mostUsedApp?.total_actions_used ?? 0, change: mostUsedApp ? formatAppName(mostUsedApp.app_name) : 'No data', icon: Wrench, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_tool' },
+        { label: 'Active Integrations', value: activeIntegrations, change: `of ${connectedAppsCount} total`, icon: Link2, iconColor: 'text-[hsl(var(--agent))]', globalIconKey: 'global_channel' },
       ]} loading={isLoading} />
 
       {/* API Monitoring Overview */}

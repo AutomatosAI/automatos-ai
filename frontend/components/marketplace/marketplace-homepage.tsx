@@ -107,6 +107,7 @@ export function MarketplaceHomepage() {
             value: stats.totalItems.toString(),
             icon: Store,
             iconColor: 'text-primary',
+            globalIconKey: 'global_store',
           },
           {
             label: 'Categories',
@@ -120,6 +121,7 @@ export function MarketplaceHomepage() {
             change: 'Curated',
             icon: TrendingUp,
             iconColor: 'text-[hsl(var(--warning))]',
+            globalIconKey: 'global_featured',
           },
           {
             label: 'Total Installs',

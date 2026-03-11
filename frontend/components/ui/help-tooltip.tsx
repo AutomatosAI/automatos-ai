@@ -9,13 +9,16 @@ import {
 } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useTooltip } from '@/lib/use-tooltips'
+
+const DOCS_BASE_URL = 'https://automatos.gitbook.io/automatos-ai'
 
 export interface TooltipHelpProps {
   /** Unique identifier for tooltip content (matches tooltips.json) */
-  id: string
+  id?: string
   /** Help text to display (if not using id lookup) */
   text?: string
-  /** Optional documentation link */
+  /** Optional documentation link (relative path appended to DOCS_BASE_URL) */
   docLink?: string
   /** Icon variant */
   variant?: 'info' | 'help'
@@ -67,6 +70,7 @@ export function HelpTooltip({
   inline = false,
 }: TooltipHelpProps) {
   const [open, setOpen] = useState(false)
+  const looked = useTooltip(id ?? '')
 
   // Icon component based on variant
   const IconComponent = icon || (variant === 'info' ? Info : HelpCircle)
@@ -78,10 +82,15 @@ export function HelpTooltip({
     lg: 'w-6 h-6',
   }
 
-  // Get tooltip content (from useTooltips hook or direct text)
-  // Note: In full implementation, would use useTooltips(id) to fetch from tooltips.json
-  const tooltipContent = text || `Help content for ${id}`
-  const tooltipDocLink = docLink || undefined
+  // Resolve content: direct props take priority, then JSON lookup
+  const tooltipContent = text ?? looked?.text
+  const rawDocLink = docLink ?? looked?.docLink
+  const tooltipDocLink = rawDocLink
+    ? rawDocLink.startsWith('http') ? rawDocLink : `${DOCS_BASE_URL}${rawDocLink}`
+    : undefined
+
+  // Nothing to show — render nothing
+  if (!tooltipContent) return null
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -154,7 +163,7 @@ export function HelpTooltip({
                 rel="noopener noreferrer"
                 onClick={() => setOpen(false)}
               >
-                <span>View full documentation</span>
+                <span>Learn more</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
             </div>

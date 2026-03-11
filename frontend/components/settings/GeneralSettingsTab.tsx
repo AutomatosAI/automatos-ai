@@ -16,6 +16,7 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Save, RotateCcw, Globe, Database, Zap, Shield, Key } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 
 interface GeneralSettingsTabProps {
   settings: SystemSetting[]
@@ -147,7 +148,7 @@ export default function GeneralSettingsTab({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="environment">Environment</Label>
+              <Label htmlFor="environment" className="flex items-center gap-1">Environment <InlineHelp id="settings.environment.environment" size="sm" /></Label>
               <Select
                 value={formData.environment || ''}
                 onValueChange={(value) => handleInputChange('environment', value)}
@@ -167,7 +168,7 @@ export default function GeneralSettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="log_level">Log Level</Label>
+              <Label htmlFor="log_level" className="flex items-center gap-1">Log Level <InlineHelp id="settings.environment.log_level" size="sm" /></Label>
               <Select
                 value={formData.log_level || ''}
                 onValueChange={(value) => handleInputChange('log_level', value)}
@@ -203,7 +204,7 @@ export default function GeneralSettingsTab({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Embedding Provider Selector */}
             <div className="space-y-2">
-              <Label htmlFor="embedding_provider">Embedding Provider</Label>
+              <Label htmlFor="embedding_provider" className="flex items-center gap-1">Embedding Provider <InlineHelp id="settings.embedding.provider" size="sm" /></Label>
               <Select
                 value={formData.embedding_provider || ''}
                 onValueChange={(value) => {
@@ -234,7 +235,7 @@ export default function GeneralSettingsTab({
 
             {/* Dynamic Embedding Model Selector */}
             <div className="space-y-2">
-              <Label htmlFor="embedding_model">Embedding Model</Label>
+              <Label htmlFor="embedding_model" className="flex items-center gap-1">Embedding Model <InlineHelp id="settings.embedding.model" size="sm" /></Label>
               <Select
                 value={formData.embedding_model || ''}
                 onValueChange={(value) => {
@@ -340,7 +341,7 @@ export default function GeneralSettingsTab({
 
             {/* Vector Dimensions (auto-populated based on model) */}
             <div className="space-y-2">
-              <Label htmlFor="vector_store_dimensions">Vector Dimensions (auto)</Label>
+              <Label htmlFor="vector_store_dimensions" className="flex items-center gap-1">Vector Dimensions (auto) <InlineHelp id="settings.embedding.vector_dimensions" size="sm" /></Label>
               <Input
                 id="vector_store_dimensions"
                 type="number"
@@ -356,7 +357,7 @@ export default function GeneralSettingsTab({
 
             {/* Vector Store Type */}
             <div className="space-y-2">
-              <Label htmlFor="vector_store_type">Vector Store Type</Label>
+              <Label htmlFor="vector_store_type" className="flex items-center gap-1">Vector Store Type <InlineHelp id="settings.embedding.vector_store_type" size="sm" /></Label>
               <Select
                 value={formData.vector_store_type || ''}
                 onValueChange={(value) => handleInputChange('vector_store_type', value)}
@@ -376,7 +377,7 @@ export default function GeneralSettingsTab({
 
             {/* Max Sequence Length */}
             <div className="space-y-2">
-              <Label htmlFor="embedding_max_seq_length">Max Sequence Length</Label>
+              <Label htmlFor="embedding_max_seq_length" className="flex items-center gap-1">Max Sequence Length <InlineHelp id="settings.embedding.max_seq_length" size="sm" /></Label>
               <Input
                 id="embedding_max_seq_length"
                 type="number"
@@ -388,7 +389,7 @@ export default function GeneralSettingsTab({
 
             {/* Chunk Size */}
             <div className="space-y-2">
-              <Label htmlFor="chunk_size">Chunk Size</Label>
+              <Label htmlFor="chunk_size" className="flex items-center gap-1">Chunk Size <InlineHelp id="settings.embedding.chunk_size" size="sm" /></Label>
               <Input
                 id="chunk_size"
                 type="number"
@@ -400,7 +401,7 @@ export default function GeneralSettingsTab({
 
             {/* Chunk Overlap */}
             <div className="space-y-2">
-              <Label htmlFor="chunk_overlap">Chunk Overlap</Label>
+              <Label htmlFor="chunk_overlap" className="flex items-center gap-1">Chunk Overlap <InlineHelp id="settings.embedding.chunk_overlap" size="sm" /></Label>
               <Input
                 id="chunk_overlap"
                 type="number"
@@ -412,7 +413,7 @@ export default function GeneralSettingsTab({
 
             {/* Max Context Length */}
             <div className="space-y-2">
-              <Label htmlFor="max_context_length">Max Context Length</Label>
+              <Label htmlFor="max_context_length" className="flex items-center gap-1">Max Context Length <InlineHelp id="settings.embedding.max_context_length" size="sm" /></Label>
               <Input
                 id="max_context_length"
                 type="number"
@@ -439,7 +440,7 @@ export default function GeneralSettingsTab({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="rag_rerank_enabled">Enable Reranking</Label>
+              <Label htmlFor="rag_rerank_enabled" className="flex items-center gap-1">Enable Reranking <InlineHelp id="settings.reranking.enable" size="sm" /></Label>
               <div className="flex items-center space-x-2">
                 <Switch
                   checked={formData.rag_rerank_enabled === 'true'}
@@ -455,7 +456,7 @@ export default function GeneralSettingsTab({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="rag_rerank_model">Rerank Model</Label>
+              <Label htmlFor="rag_rerank_model" className="flex items-center gap-1">Rerank Model <InlineHelp id="settings.reranking.model" size="sm" /></Label>
               <Select
                 value={formData.rag_rerank_model || 'rerank-v3.5'}
                 onValueChange={(value) => handleInputChange('rag_rerank_model', value)}

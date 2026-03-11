@@ -143,6 +143,65 @@ def _get_or_create_from_cache(db: Session, model_id: str) -> Optional[LLMModel]:
     return m
 
 
+def _get_available_providers(db: Session, workspace_id) -> set:
+    """
+    Return the set of provider names the workspace can actually use.
+
+    Checks (in order): BYOK keys, credential store, env-var config.
+    Aggregator providers (openrouter) are always included if they have a key,
+    and any model routable through an available aggregator is also usable.
+    """
+    from config import config as _cfg
+
+    # 1. Env-var / config keys (platform-wide)
+    provider_key_map = {
+        "openai": _cfg.OPENAI_API_KEY,
+        "anthropic": _cfg.ANTHROPIC_API_KEY,
+        "google": _cfg.GOOGLE_API_KEY,
+        "openrouter": _cfg.OPENROUTER_API_KEY,
+        "grok": getattr(_cfg, "XAI_API_KEY", None),
+        "azure": getattr(_cfg, "AZURE_OPENAI_API_KEY", None),
+    }
+    available = {p for p, k in provider_key_map.items() if k}
+
+    # 2. BYOK keys stored in DB for this workspace
+    if workspace_id:
+        try:
+            from core.models.core import UserApiKey
+            byok_providers = (
+                db.query(UserApiKey.provider)
+                .filter(
+                    UserApiKey.workspace_id == workspace_id,
+                    UserApiKey.is_active == True,
+                )
+                .distinct()
+                .all()
+            )
+            available.update(p[0] for p in byok_providers)
+        except Exception:
+            pass  # table may not exist yet
+
+    # 3. Credential store entries
+    try:
+        from core.credentials.resolver import get_credential_resolver
+        resolver = get_credential_resolver()
+        for provider in list(provider_key_map.keys()):
+            if provider in available:
+                continue
+            for variation in [f"{provider}_api", provider]:
+                try:
+                    key = resolver.get_credential_field(variation, "api_key")
+                    if key:
+                        available.add(provider)
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    return available
+
+
 def _get_installed_ids(db: Session, workspace_id) -> set:
     if not workspace_id:
         return set()
@@ -218,38 +277,49 @@ async def get_installed_models(
     db: Session = Depends(get_db),
 ):
     """
-    Get models installed in the current workspace (for agent model selector).
-    Falls back to all default models if workspace has no installs yet.
+    Get usable models for the current workspace.
+
+    Two-gate filter:
+      1. Provider gate — does the provider have an API key? (env, BYOK, cred store)
+      2. Model gate   — has the user installed this model to the workspace?
+
+    Result: only models the user explicitly chose AND can actually call.
     """
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
     installed_ids = _get_installed_ids(db, ctx.workspace_id)
+    available_providers = _get_available_providers(db, ctx.workspace_id)
 
-    # Always include defaults + any workspace-installed models
+    if not installed_ids:
+        # Workspace has no models installed yet — return empty so the UI
+        # can prompt the user to visit the marketplace.
+        return []
+
+    # Fetch only workspace-installed models
     models = (
         db.query(LLMModel)
         .filter(
             LLMModel.status == "active",
-            or_(
-                LLMModel.is_default == True,
-                LLMModel.id.in_(installed_ids) if installed_ids else False,
-            ),
+            LLMModel.id.in_(installed_ids),
         )
         .order_by(LLMModel.provider, LLMModel.display_name)
         .all()
     )
 
-    # If somehow no defaults exist, return all active models
-    if not models:
-        models = (
-            db.query(LLMModel)
-            .filter(LLMModel.status == "active")
-            .order_by(LLMModel.provider, LLMModel.display_name)
-            .all()
-        )
+    # Gate 1: filter to providers with an API key
+    usable = []
+    for m in models:
+        tier = (m.tier or "direct").lower()
+        if tier in ("aggregator", "openrouter"):
+            provider = "openrouter"
+        else:
+            provider = (m.provider or "").lower()
 
-    return [_model_to_out(m, installed_ids) for m in models]
+        if provider in available_providers:
+            usable.append(m)
+
+    return [_model_to_out(m, installed_ids) for m in usable]
 
 
 @router.get("/installed-ids")

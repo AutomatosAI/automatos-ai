@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { useFormContext } from 'react-hook-form'
 import { Label } from '@/components/ui/label'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Input } from '@/components/ui/input'
 import type { RecipeFormValues } from './create-recipe-modal'
 
@@ -43,7 +44,7 @@ export function RecipeExecutionConfig() {
 
         {/* Execution Mode */}
         <div>
-          <Label className="text-xs text-muted-foreground">Execution Mode</Label>
+          <Label className="text-xs text-muted-foreground flex items-center gap-1">Execution Mode <InlineHelp id="recipes.execution.mode" size="sm" /></Label>
           <div className="grid grid-cols-2 gap-3 mt-2">
             <button
               type="button"
@@ -88,7 +89,7 @@ export function RecipeExecutionConfig() {
         <div className="grid grid-cols-3 gap-3">
           {/* Max Retries */}
           <div>
-            <Label className="text-xs text-muted-foreground">Max Retries per Step</Label>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1">Max Retries per Step <InlineHelp id="recipes.execution.max_retries" size="sm" /></Label>
             <select
               value={config.max_retries}
               onChange={(e) => updateConfig('max_retries', Number(e.target.value))}
@@ -102,7 +103,7 @@ export function RecipeExecutionConfig() {
 
           {/* Per-Step Timeout */}
           <div>
-            <Label className="text-xs text-muted-foreground">Step Timeout</Label>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1">Step Timeout <InlineHelp id="recipes.execution.step_timeout" size="sm" /></Label>
             <Input
               type="number"
               min={10000}
@@ -119,7 +120,7 @@ export function RecipeExecutionConfig() {
 
           {/* Total Timeout */}
           <div>
-            <Label className="text-xs text-muted-foreground">Total Timeout</Label>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1">Total Timeout <InlineHelp id="recipes.execution.total_timeout" size="sm" /></Label>
             <Input
               type="number"
               min={10000}
@@ -149,7 +150,7 @@ export function RecipeExecutionConfig() {
         {/* Auto-Learning Toggle */}
         <div className="flex items-center justify-between">
           <div>
-            <Label className="text-xs text-muted-foreground">Auto-Learning</Label>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1">Auto-Learning <InlineHelp id="recipes.execution.auto_learning" size="sm" /></Label>
             <p className="text-xs text-muted-foreground/60 mt-0.5">Automatically analyze executions for improvement patterns</p>
           </div>
           <button
@@ -200,7 +201,7 @@ function AdvancedSection({
         <div className="px-5 pb-5 space-y-4 border-t border-border/20 pt-4">
           {/* Parallel Execution Limit */}
           <div>
-            <Label className="text-xs text-muted-foreground">Parallel Execution Limit</Label>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1">Parallel Execution Limit <InlineHelp id="recipes.execution.parallel_limit" size="sm" /></Label>
             <Input
               type="number"
               min={1}
@@ -216,7 +217,7 @@ function AdvancedSection({
 
           {/* Memory Isolation */}
           <div>
-            <Label className="text-xs text-muted-foreground">Memory Isolation</Label>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1">Memory Isolation <InlineHelp id="recipes.execution.memory_isolation" size="sm" /></Label>
             <div className="grid grid-cols-2 gap-3 mt-2">
               {MEMORY_ISOLATION_OPTIONS.map((opt) => (
                 <button

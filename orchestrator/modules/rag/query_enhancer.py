@@ -56,7 +56,7 @@ class QueryEnhancer:
                 from core.llm import create_llm_manager
                 self._llm = create_llm_manager(service_name="rag")
             except Exception as e:
-                logger.warning(f"LLM not available for query enhancement: {e}")
+                logger.debug(f"LLM not available for query enhancement (falling back to basic search): {e}")
         return self._llm
     
     def _get_embedding_manager(self):

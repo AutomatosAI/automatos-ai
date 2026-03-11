@@ -20,6 +20,8 @@ import {
   LayoutDashboard,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PremiumIcon } from '@/components/shared'
+import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { useSystemRole } from '@/contexts/role-context'
 
 interface SidebarProps {
@@ -33,6 +35,7 @@ const navigationItems = [
     href: '/chat',
     icon: MessageCircle,
     iconColor: 'text-primary',
+    navIconKey: 'nav_chat',
     description: 'Your AI workspace'
   },
   {
@@ -40,6 +43,7 @@ const navigationItems = [
     href: '/activity',
     icon: Activity,
     iconColor: 'text-[hsl(var(--info))]',
+    navIconKey: 'nav_activity',
     description: 'Your AI workforce at a glance'
   },
   {
@@ -47,6 +51,7 @@ const navigationItems = [
     href: '/agents',
     icon: Bot,
     iconColor: 'text-primary',
+    navIconKey: 'nav_agents',
     description: 'Manage AI agents and skills'
   },
   {
@@ -54,6 +59,7 @@ const navigationItems = [
     href: '/tools',
     icon: Wrench,
     iconColor: 'text-[hsl(var(--warning))]',
+    navIconKey: 'nav_tools',
     description: 'Development and utility tools'
   },
   {
@@ -61,6 +67,7 @@ const navigationItems = [
     href: '/marketplace',
     icon: Store,
     iconColor: 'text-primary',
+    navIconKey: 'nav_marketplace',
     description: 'Discover agents, recipes & tools'
   },
   {
@@ -68,6 +75,7 @@ const navigationItems = [
     href: '/documents',
     icon: Database,
     iconColor: 'text-[hsl(var(--success))]',
+    navIconKey: 'nav_knowledge',
     description: 'Documents, databases & code-graph'
   },
   {
@@ -75,22 +83,25 @@ const navigationItems = [
     href: '/team',
     icon: Users,
     iconColor: 'text-[hsl(var(--info))]',
+    navIconKey: 'nav_team',
     description: 'Manage workspace members',
-    requiredRole: 'admin' as const, // Admin only
+    requiredRole: 'admin' as const,
   },
   {
     name: 'Context Engineering',
     href: '/context',
     icon: Brain,
     iconColor: 'text-[hsl(var(--chart-4))]',
+    navIconKey: 'nav_context',
     description: 'RAG system and field theory',
-    requiredRole: 'admin' as const,  // Admin only
+    requiredRole: 'admin' as const,
   },
   {
     name: 'Dashboard',
     href: '/dashboard',
     icon: LayoutDashboard,
     iconColor: 'text-emerald-400',
+    navIconKey: 'nav_dashboard',
     description: 'System metrics & health',
   },
   {
@@ -98,6 +109,7 @@ const navigationItems = [
     href: '/analytics',
     icon: BarChart3,
     iconColor: 'text-cyan-400',
+    navIconKey: 'nav_analytics',
     description: 'Performance, costs & insights',
   },
 ]
@@ -106,6 +118,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname()
   const isChatPage = pathname?.startsWith('/chat') ?? false
   const { systemRole, isAdmin } = useSystemRole()
+  const { data: iconMappings = {} } = useSystemIcons()
 
   // Filter navigation items based on user's system role
   const filteredNavItems = navigationItems.filter(item => {
@@ -194,6 +207,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           if (!item || !(item as any).href) return null
           const isActive = pathname === item.href
           const Icon = item.icon
+          const premiumNavIcon = item.navIconKey ? iconMappings[item.navIconKey] : null
 
           return (
             <motion.div
@@ -213,12 +227,16 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     : 'hover:bg-secondary/40'
                 )}
               >
-                <Icon
-                  className={cn(
-                    'w-[18px] h-[18px] shrink-0 transition-colors',
-                    isActive ? 'text-primary' : item.iconColor || 'text-muted-foreground group-hover:text-foreground'
-                  )}
-                />
+                {premiumNavIcon ? (
+                  <PremiumIcon name={premiumNavIcon} size={18} className="shrink-0" />
+                ) : (
+                  <Icon
+                    className={cn(
+                      'w-[18px] h-[18px] shrink-0 transition-colors',
+                      isActive ? 'text-primary' : item.iconColor || 'text-muted-foreground group-hover:text-foreground'
+                    )}
+                  />
+                )}
 
                 {!collapsed && (
                   <div className="min-w-0">
@@ -257,7 +275,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 : 'hover:bg-secondary/40'
             )}
           >
-            <Settings className="w-[18px] h-[18px] shrink-0 text-muted-foreground group-hover:text-foreground" />
+            {iconMappings['nav_settings'] ? (
+              <PremiumIcon name={iconMappings['nav_settings']} size={18} className="shrink-0" />
+            ) : (
+              <Settings className="w-[18px] h-[18px] shrink-0 text-muted-foreground group-hover:text-foreground" />
+            )}
 
             {!collapsed && (
               <div className="min-w-0">

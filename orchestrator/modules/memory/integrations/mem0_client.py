@@ -272,12 +272,21 @@ class Mem0Client:
             return []
 
         if resp.status_code >= 400:
+            logger.debug("[Mem0] get_all status=%s for user_id=%s", resp.status_code, user_id)
             return []
 
         try:
             data = resp.json()
         except Exception:
+            logger.warning("[Mem0] get_all failed to parse JSON for user_id=%s body=%s", user_id, (resp.text or "")[:200])
             return []
+
+        # Debug: log what Mem0 actually returns so we can diagnose empty browse
+        logger.info("[Mem0] get_all user_id=%s type=%s keys=%s len=%s sample=%s",
+                     user_id, type(data).__name__,
+                     list(data.keys())[:5] if isinstance(data, dict) else "n/a",
+                     len(data) if isinstance(data, (list, dict)) else "?",
+                     str(data)[:200] if data else "empty")
 
         if isinstance(data, list):
             return data[:limit]

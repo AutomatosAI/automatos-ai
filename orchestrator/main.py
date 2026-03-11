@@ -753,9 +753,9 @@ app.include_router(documents_router)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(context_engineering_router)
+app.include_router(memory_stats_router)  # PRD-77: Must be BEFORE memory_router (has /browse, /health, /stats/real specific routes that would otherwise be caught by memory_router's /{memory_id} catch-all)
 app.include_router(memory_router)
 app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/memory)
-app.include_router(memory_stats_router)  # Real memory stats from database
 app.include_router(analytics_router)
 app.include_router(workflow_history_router)
 app.include_router(execution_history_router)  # Enhanced execution history API
@@ -909,12 +909,6 @@ if voice_profiles_router is not None:
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
 
-# Include legacy routes (from existing api_routes.py)
-try:
-    from api_routes import app as legacy_routes
-    app.mount("/legacy", legacy_routes)
-except Exception as e:
-    logger.warning(f"Could not mount legacy routes: {e}")
 
 # Exports directory served through authenticated endpoint instead of open StaticFiles mount.
 # See api/exports.py (or serve via pre-signed URLs in production).

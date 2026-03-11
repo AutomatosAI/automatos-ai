@@ -22,6 +22,7 @@ import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { InlineHelp } from '@/components/ui/help-tooltip'
 import { apiClient, type RAGConfig } from "@/lib/api-client"
 
 interface ConfigureRAGModalProps {
@@ -266,7 +267,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
 
                 {/* Chunk Size */}
                 <div>
-                  <Label>Chunk Size: {formData.chunk_size}</Label>
+                  <Label className="flex items-center gap-1">Chunk Size: {formData.chunk_size} <InlineHelp id="settings.embedding.chunk_size" size="sm" /></Label>
                   <Slider
                     value={[formData.chunk_size]}
                     onValueChange={(values) => handleSliderChange('chunk_size', values)}
@@ -284,7 +285,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
 
                 {/* Chunk Overlap */}
                 <div>
-                  <Label>Chunk Overlap: {formData.chunk_overlap}</Label>
+                  <Label className="flex items-center gap-1">Chunk Overlap: {formData.chunk_overlap} <InlineHelp id="settings.embedding.chunk_overlap" size="sm" /></Label>
                   <Slider
                     value={[formData.chunk_overlap]}
                     onValueChange={(values) => handleSliderChange('chunk_overlap', values)}
@@ -302,7 +303,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
 
                 {/* Retrieval Strategy */}
                 <div>
-                  <Label htmlFor="retrieval_strategy">Retrieval Strategy</Label>
+                  <Label htmlFor="retrieval_strategy" className="flex items-center gap-1">Retrieval Strategy <InlineHelp id="knowledge.rag.retrieval_strategy" size="sm" /></Label>
                   <Select
                     value={formData.retrieval_strategy}
                     onValueChange={(value) => handleInputChange('retrieval_strategy', value)}
@@ -324,7 +325,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
                   <div className="space-y-3 p-3 bg-secondary/20 rounded-lg border border-border/40">
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Hybrid Weights</p>
                     <div>
-                      <Label>Vector Weight: {formData.hybrid_vector_weight.toFixed(1)}</Label>
+                      <Label className="flex items-center gap-1">Vector Weight: {formData.hybrid_vector_weight.toFixed(1)} <InlineHelp id="knowledge.rag.hybrid_weight" size="sm" /></Label>
                       <Slider
                         value={[formData.hybrid_vector_weight]}
                         onValueChange={(values) => {
@@ -393,7 +394,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
 
                 {formData.enable_graph_retrieval && (
                   <div>
-                    <Label>Max Graph Hops: {formData.graph_max_hops}</Label>
+                    <Label className="flex items-center gap-1">Max Graph Hops: {formData.graph_max_hops} <InlineHelp id="knowledge.rag.graph_hops" size="sm" /></Label>
                     <Slider
                       value={[formData.graph_max_hops]}
                       onValueChange={(values) => handleSliderChange('graph_max_hops', values)}
@@ -412,7 +413,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
 
                 {/* Top K */}
                 <div>
-                  <Label>Top K Results: {formData.top_k}</Label>
+                  <Label className="flex items-center gap-1">Top K Results: {formData.top_k} <InlineHelp id="knowledge.rag.top_k" size="sm" /></Label>
                   <Slider
                     value={[formData.top_k]}
                     onValueChange={(values) => handleSliderChange('top_k', values)}
@@ -430,7 +431,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
 
                 {/* Similarity Threshold */}
                 <div>
-                  <Label>Similarity Threshold: {formData.similarity_threshold.toFixed(2)}</Label>
+                  <Label className="flex items-center gap-1">Similarity Threshold: {formData.similarity_threshold.toFixed(2)} <InlineHelp id="knowledge.rag.similarity_threshold" size="sm" /></Label>
                   <Slider
                     value={[formData.similarity_threshold]}
                     onValueChange={(values) => handleSliderChange('similarity_threshold', values)}

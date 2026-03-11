@@ -16,6 +16,8 @@ export interface IconSelectorProps {
     onChange: (iconName: string | null) => void;
     triggerLabel?: string;
     triggerClassName?: string;
+    /** Hide the icon name text in the trigger — show only the icon */
+    compact?: boolean;
 }
 
 export function IconSelector({
@@ -23,6 +25,7 @@ export function IconSelector({
     onChange,
     triggerLabel = 'Select Icon',
     triggerClassName = '',
+    compact = false,
 }: IconSelectorProps) {
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState('');
@@ -54,9 +57,14 @@ export function IconSelector({
                                 <Settings2 className="w-4 h-4 text-muted-foreground" />
                             </div>
                         )}
-                        <span className={value ? 'text-foreground' : 'text-muted-foreground font-normal'}>
-                            {value ? iconRegistry.find((i: any) => i.id === value)?.name || value : triggerLabel}
-                        </span>
+                        {!compact && (
+                            <span className={value ? 'text-foreground' : 'text-muted-foreground font-normal'}>
+                                {value ? iconRegistry.find((i: any) => i.id === value)?.name || value : triggerLabel}
+                            </span>
+                        )}
+                        {compact && !value && (
+                            <span className="text-muted-foreground font-normal">{triggerLabel}</span>
+                        )}
                     </div>
                 </Button>
             </PopoverTrigger>
