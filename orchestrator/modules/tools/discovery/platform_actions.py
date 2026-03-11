@@ -23,6 +23,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_marketplace_actions(registry)
     _register_report_actions(registry)
     _register_scheduling_actions(registry)
+    _register_board_task_actions(registry)
     _register_memory_browse_actions(registry)
 
     # Workspace tools (file I/O, grep, exec, git)
@@ -2018,6 +2019,60 @@ def _register_scheduling_actions(registry: ActionRegistry) -> None:
         requires_confirmation=True,
         tags=["scheduling", "write", "destructive"],
         examples=["cancel scheduled task 5", "stop that recurring task"],
+    ))
+
+
+def _register_board_task_actions(registry: ActionRegistry) -> None:
+    """Register board task actions (PRD-72)."""
+
+    registry.register(ActionDefinition(
+        name="platform_create_task",
+        description=(
+            "Create a new task on the board. Use this to raise work items for yourself "
+            "or another agent. Tasks appear in the Inbox and agents pick them up on their "
+            "next heartbeat. Use for bug reports, follow-ups, sub-tasks from recipes."
+        ),
+        category="tasks",
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Short task title",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Detailed task description / prompt for the agent",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["urgent", "high", "medium", "low"],
+                    "description": "Task priority",
+                },
+                "assigned_agent_name": {
+                    "type": "string",
+                    "description": "Name of agent to assign (default: unassigned)",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags for categorization",
+                },
+                "parent_task_id": {
+                    "type": "integer",
+                    "description": "Parent task ID if this is a sub-task",
+                },
+            },
+            "required": ["title", "description"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["tasks", "write", "board", "bug", "follow-up"],
+        examples=[
+            "create a task to fix the login bug",
+            "raise a task for the researcher to check competitor pricing",
+            "create sub-tasks for each test failure",
+        ],
     ))
 
 

@@ -1,6 +1,7 @@
 /**
  * Board task management hooks (PRD-72 v2).
- * Fetches tasks grouped by board status, with optimistic drag-and-drop updates.
+ * Fetches tasks from /api/v1/tasks, groups by board status,
+ * with optimistic drag-and-drop updates.
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -27,37 +28,29 @@ interface BoardResponse {
 
 export const boardQueryKeys = {
   all: ['board'] as const,
-  tasks: (filters?: BoardFilters) => ['board', 'tasks', filters] as const,
+  tasks: (filters?: any) => ['board', 'tasks', filters] as const,
 }
 
 // ============= HOOKS =============
 
 /**
- * Fetch all board tasks and group into columns.
- * Falls back to activity feed endpoint with board-specific status filters.
+ * Fetch all board tasks from /api/v1/tasks and group into columns.
  */
 export function useBoardTasks(filters?: BoardFilters) {
-  const queryClient = useQueryClient()
-
   const params = new URLSearchParams()
-  params.set('status', 'inbox,assigned,in_progress,review,done,completed,failed')
   if (filters?.agent_id) params.set('agent_id', String(filters.agent_id))
   if (filters?.priority) params.set('priority', filters.priority)
-  if (filters?.type) params.set('type', filters.type)
   if (filters?.search) params.set('search', filters.search)
-  if (filters?.period) params.set('period', filters.period ?? '30d')
   params.set('limit', '200')
 
-  const endpoint = `/api/activity/feed?${params.toString()}`
+  const endpoint = `/api/v1/tasks?${params.toString()}`
 
   const query = useQuery<BoardResponse>({
     queryKey: boardQueryKeys.tasks(filters),
     queryFn: async () => {
       const response = await apiClient.request<any>(endpoint)
-      // Transform ActivityFeedItems into BoardTasks
-      const items = response.items ?? response ?? []
-      const tasks: BoardTask[] = items.map((item: any) => mapFeedItemToBoardTask(item))
-      return { tasks, total: tasks.length }
+      const tasks = (response.tasks ?? []).map((t: any) => mapTaskToBoardTask(t))
+      return { tasks, total: response.total ?? tasks.length }
     },
     refetchInterval: 60000,
     staleTime: 30000,
@@ -88,19 +81,15 @@ export function useUpdateTaskStatus() {
 
   return useMutation({
     mutationFn: async ({ taskId, status }: { taskId: string; status: BoardStatus }) => {
-      return apiClient.request(`/api/activity/tasks/${taskId}/status`, {
+      return apiClient.request(`/api/v1/tasks/${taskId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       })
     },
     onMutate: async ({ taskId, status }) => {
-      // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: boardQueryKeys.all })
-
-      // Snapshot previous state
       const previous = queryClient.getQueriesData({ queryKey: boardQueryKeys.all })
 
-      // Optimistic update: move task to new status
       queryClient.setQueriesData<BoardResponse>(
         { queryKey: boardQueryKeys.all },
         (old) => {
@@ -117,7 +106,6 @@ export function useUpdateTaskStatus() {
       return { previous }
     },
     onError: (_err, _vars, context) => {
-      // Revert on failure
       if (context?.previous) {
         for (const [key, data] of context.previous) {
           queryClient.setQueryData(key, data)
@@ -133,70 +121,29 @@ export function useUpdateTaskStatus() {
 // ============= HELPERS =============
 
 /**
- * Map an ActivityFeedItem (from existing API) into a BoardTask.
- * This bridges the gap until a dedicated board endpoint exists.
+ * Map a /api/v1/tasks response item into a BoardTask.
  */
-function mapFeedItemToBoardTask(item: any): BoardTask {
-  let status: BoardStatus = 'inbox'
-
-  // Map existing statuses to board columns
-  const rawStatus = item.status ?? 'pending'
-  switch (rawStatus) {
-    case 'pending':
-      status = 'inbox'
-      break
-    case 'running':
-    case 'in_progress':
-      status = 'in_progress'
-      break
-    case 'review':
-      status = 'review'
-      break
-    case 'completed':
-    case 'done':
-      status = 'done'
-      break
-    case 'failed':
-    case 'cancelled':
-      status = 'done'
-      break
-    case 'assigned':
-      status = 'assigned'
-      break
-    case 'inbox':
-      status = 'inbox'
-      break
-    default:
-      status = 'inbox'
-  }
-
+function mapTaskToBoardTask(item: any): BoardTask {
   return {
-    id: item.id ?? '',
-    type: item.type ?? 'recipe',
-    name: item.name ?? 'Untitled',
-    description: item.summary ?? undefined,
-    status,
+    id: String(item.id),
+    type: item.type ?? 'task',
+    name: item.title ?? 'Untitled',
+    description: item.description ?? undefined,
+    status: (item.status as BoardStatus) ?? 'inbox',
     priority: item.priority ?? 'medium',
     tags: item.tags ?? [],
     assignee: item.agent
       ? {
           agent_id: item.agent.id,
           agent_name: item.agent.name,
-          agent_icon: item.agent.avatar_url ?? null,
+          agent_icon: item.agent.agent_icon ?? null,
         }
       : undefined,
-    creator: undefined,
-    due_date: item.due_date ?? undefined,
-    review_mode: item.review_mode ?? 'human',
+    review_mode: item.review_mode ?? 'auto',
     started_at: item.started_at ?? undefined,
     completed_at: item.completed_at ?? undefined,
-    duration_ms: item.duration_seconds ? item.duration_seconds * 1000 : undefined,
-    step_progress: item.step_progress
-      ? { current: item.step_progress.current, total: item.step_progress.total }
-      : undefined,
     error_message: item.error_message ?? undefined,
-    report_id: undefined,
-    source_id: item.source_id ?? '',
-    project_id: undefined,
+    source_id: String(item.id),
+    result: item.result,
   }
 }

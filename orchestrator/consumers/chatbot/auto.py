@@ -319,6 +319,13 @@ _PLATFORM_KEYWORDS = {
         "read report", "show report", "what did the agent find",
         "sentinel report", "agent standup", "last report",
     ],
+    # PRD-72: Board Tasks
+    "platform_create_task": [
+        "create a task", "add a task", "raise a task", "new task",
+        "create board task", "add to board", "create a bug report",
+        "create sub-task", "create follow-up task", "task for",
+        "raise a bug", "create work item",
+    ],
     # PRD-77: Agent Self-Scheduling
     "platform_schedule_task": [
         "schedule a task", "schedule follow-up", "remind me",
