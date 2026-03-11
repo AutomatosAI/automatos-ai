@@ -23,7 +23,6 @@ from .factory import (
     AgentMetadata,
     AgentLifecycle,
     ModelConfiguration,
-    create_specialized_agent,
 )
 
 # Registry exports
@@ -67,7 +66,6 @@ __all__ = [
     "AgentMetadata",
     "AgentLifecycle",
     "ModelConfiguration",
-    "create_specialized_agent",
     
     # Registry
     "AgentRegistry",
