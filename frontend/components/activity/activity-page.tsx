@@ -11,7 +11,7 @@ import {
   Users,
   ListTodo,
   LayoutDashboard,
-  Columns3,
+  Columns,
   Calendar,
   Brain,
   FolderKanban,
@@ -78,7 +78,7 @@ const PERIOD_OPTIONS = [
 
 const TAB_DEFS = [
   { value: 'summary', label: 'Summary', icon: LayoutDashboard },
-  { value: 'board', label: 'Board', icon: Columns3 },
+  { value: 'board', label: 'Board', icon: Columns },
   { value: 'calendar', label: 'Calendar', icon: Calendar },
   { value: 'memory', label: 'Memory', icon: Brain },
   { value: 'projects', label: 'Projects', icon: FolderKanban },
