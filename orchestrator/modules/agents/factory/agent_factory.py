@@ -1401,98 +1401,78 @@ To use actions, respond with JSON blocks like:
                 tool_names = [t['function']['name'] for t in skill_tool_schemas_from_prompt]
                 self.logger.info(f"🦸 PRD-22: Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
             
-            # Composio tool injection — ONE path for all consumers (chatbot, recipe, trigger, API).
-            # Always uses composio_execute meta-tool + enum constraint.
-            # Recipes provide pre-resolved action names via composio_action_names to
-            # replace the hint service's action selection (semantic search > ILIKE).
+            # Composio tool injection — fetch per-action schemas from SDK.
+            # Each Composio action becomes its own LLM tool with typed params
+            # (e.g. COMPOSIO_SEARCH_WEB(query: str) instead of composio_execute(action, params)).
             _composio_workspace_id = None
             composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
             if composio_apps:
-                composio_schema = {
-                    "type": "function",
-                    "function": {
-                        "name": "composio_execute",
-                        "description": (
-                            "Execute an external app action via Composio (connected third-party apps). "
-                            "Use this for actions in email/messaging and developer tools—e.g., "
-                            "read/send emails, post messages, create/manage repositories, issues, and pull requests. "
-                            "IMPORTANT: This tool has a 2-attempt limit. If the first attempt "
-                            "fails, check the error message carefully before retrying."
-                        ),
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "app_name": {"type": "string", "description": "App name (e.g., 'GMAIL', 'SLACK', 'GITHUB')"},
-                                "action": {"type": "string", "description": "Action name from Composio (e.g., 'GMAIL_LIST_EMAILS')"},
-                                "params": {"type": "object", "description": "Action parameters (schema depends on the action)", "default": {}}
-                            },
-                            "required": ["action"]
-                        }
-                    }
-                }
-                tool_schemas.append(composio_schema)
-
-                # Resolve workspace_id once for later tool execution calls
                 db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
                 _composio_workspace_id = getattr(db_agent, 'workspace_id', None) if db_agent else None
 
-                if composio_action_names:
-                    # Recipe path: action names already resolved via semantic search.
-                    # Use them directly as the enum constraint — skip the hint service.
-                    sorted_actions = sorted(composio_action_names)
-                    composio_schema["function"]["parameters"]["properties"]["action"] = {
-                        "type": "string",
-                        "description": "Action name — must be one of these actions.",
-                        "enum": sorted_actions,
-                    }
+                app_names = [t.get("name") for t in composio_apps]
+                entity_id = str(_composio_workspace_id) if _composio_workspace_id else None
 
-                    # Build a concise hint message so the LLM knows what actions are available
-                    app_names = [t.get("name") for t in composio_apps]
-                    hint_lines = [
-                        f"You have Composio apps connected: {', '.join(app_names)}.",
-                        f"Available actions (use exactly these names): {', '.join(sorted_actions)}.",
-                        "Call composio_execute with the action name and required params.",
-                    ]
-                    insert_at = 1 if messages and messages[0].get("role") == "system" else 0
-                    messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_lines)})
+                composio_action_set = set()
+                if entity_id:
+                    try:
+                        from core.composio.client import get_composio_client
+                        _client = get_composio_client()
 
-                    self.logger.info(
-                        f"🔌 Composio (semantic): constrained to {len(sorted_actions)} actions: "
-                        f"{sorted_actions} (workspace={_composio_workspace_id})"
-                    )
-                else:
-                    # Chatbot/default path: use hint service for action selection.
-                    # NOTE: Uses original_user_prompt (not the possibly-augmented `prompt`)
-                    # to avoid action-instruction injection skewing intent matching.
-                    from modules.tools.services.composio_hint_service import ComposioHintService
-                    _hint_service = ComposioHintService(self.db_session)
-                    _hint_result = _hint_service.build_hints(
-                        agent_id=agent_runtime.agent_id,
-                        prompt=original_user_prompt,
-                        workspace_id=_composio_workspace_id,
-                    )
-                    if _hint_result.hint_lines:
-                        insert_at = 1 if messages and messages[0].get("role") == "system" else 0
-                        messages.insert(insert_at, {"role": "system", "content": "\n".join(_hint_result.hint_lines)})
+                        if composio_action_names:
+                            # Recipe path: specific actions pre-resolved
+                            sdk_schemas = _client.get_action_schemas_by_name(
+                                action_names=composio_action_names,
+                                entity_id=entity_id,
+                                app_names=app_names,
+                            )
+                        else:
+                            # Default path: get all schemas for assigned apps (SDK returns by importance)
+                            sdk_schemas = _client.get_all_schemas_for_apps(
+                                app_names=app_names,
+                                entity_id=entity_id,
+                            )
 
-                    # Constrain the action field to matched actions so the LLM cannot
-                    # hallucinate wrong action names.
-                    if _hint_result.matched_actions:
-                        final_actions = _hint_result.matched_actions
+                        for entry in sdk_schemas:
+                            schema = entry.get("schema")
+                            action_name = entry.get("action_name", "")
+                            if schema and action_name:
+                                tool_schemas.append(schema)
+                                composio_action_set.add(action_name)
 
-                        composio_schema["function"]["parameters"]["properties"]["action"] = {
-                            "type": "string",
-                            "description": "Action name — must be one of the candidate actions listed above.",
-                            "enum": final_actions,
+                        self.logger.info(
+                            f"🔌 Composio: {len(composio_action_set)} per-action tools from SDK, "
+                            f"apps={app_names} (workspace={_composio_workspace_id})"
+                        )
+                    except Exception as e:
+                        self.logger.error(f"🔌 Composio SDK schema fetch failed, falling back to meta-tool: {e}", exc_info=True)
+
+                # Fallback: if SDK fetch returned nothing, use the legacy composio_execute meta-tool
+                # so the agent still has SOME composio capability.
+                if not composio_action_set:
+                    tool_schemas.append({
+                        "type": "function",
+                        "function": {
+                            "name": "composio_execute",
+                            "description": (
+                                "Execute an external app action via Composio. "
+                                "You MUST provide 'action' (the action name) and 'params' (action parameters)."
+                            ),
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "description": "Action name (e.g. 'GMAIL_SEND_EMAIL')"},
+                                    "params": {"type": "object", "description": "Action parameters"}
+                                },
+                                "required": ["action", "params"]
+                            }
                         }
+                    })
+                    self.logger.warning(f"🔌 Composio: fallback to composio_execute meta-tool, apps={app_names}")
 
-                    app_names = [t.get("name") for t in composio_apps]
-                    self.logger.info(
-                        f"🔌 Composio: hints={len(_hint_result.hint_lines)} lines, "
-                        f"strategy={_hint_result.strategy_used}, "
-                        f"constrained_actions={len(_hint_result.matched_actions)}, "
-                        f"apps={app_names} (workspace={_composio_workspace_id})"
-                    )
+                # Tell the executor which tool names are Composio actions
+                if composio_action_set and agent_runtime.tool_executor:
+                    agent_runtime.tool_executor.composio_actions = composio_action_set
 
             all_tool_names = [t['function']['name'] for t in tool_schemas]
             self.logger.info(f"📦 Providing {len(tool_schemas)} total tools to agent: {all_tool_names}")

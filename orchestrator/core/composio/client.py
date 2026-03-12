@@ -970,8 +970,15 @@ class ComposioClient:
         )
         return results
 
-    def _populate_schema_cache(self, app_name: str, entity_id: str):
-        """Fetch all action schemas for an app and cache them."""
+    def _populate_schema_cache(self, app_name: str, entity_id: str, limit: int = 30):
+        """Fetch action schemas for an app and cache them.
+
+        Args:
+            app_name: Composio app name (e.g. "GMAIL", "COMPOSIO_SEARCH")
+            entity_id: Composio entity/user ID
+            limit: Max actions to fetch per app (SDK returns by importance).
+                   Default 30 keeps context manageable for large apps (SLACK=153, GITHUB=874).
+        """
         import time as _time
         app_upper = app_name.upper()
         cache: Dict[str, Dict[str, Any]] = {}
@@ -981,7 +988,7 @@ class ComposioClient:
             raw_tools = self.toolset.tools.get(
                 user_id=entity_id,
                 toolkits=[app_name.lower()],
-                limit=2000,
+                limit=limit,
             )
             for tool in raw_tools:
                 if isinstance(tool, dict):

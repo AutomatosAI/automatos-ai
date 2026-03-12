@@ -83,6 +83,11 @@ class UnifiedToolExecutor:
         self._platform_tools = None  # For research tools (RAG, CodeGraph)
         self._action_executor = None  # For file/shell operations
         self._composio_executor = None  # PRD-36: Composio tools
+
+        # Per-action Composio tool names (set by agent_factory after SDK schema fetch).
+        # When the LLM calls e.g. COMPOSIO_SEARCH_WEB(query="..."), the executor
+        # checks this set to route it to the Composio executor.
+        self.composio_actions: set = set()
         
         # Tool routing map
         self.tool_routes = {
@@ -321,6 +326,19 @@ class UnifiedToolExecutor:
                     tool_name, parameters, workspace_id=workspace_id, trace_id=trace
                 )
 
+            # PRD-36: Route Composio per-action tools (SDK-provided schemas).
+            # The LLM calls e.g. COMPOSIO_SEARCH_WEB(query="...") directly.
+            # Parameters are flat — no nested action/params wrapping.
+            if tool_name in self.composio_actions:
+                logger.info(f"[tool-trace {trace}] Routing Composio per-action tool: {tool_name}")
+                return await self._execute_composio_execute(
+                    tool_name,
+                    {"action": tool_name, "params": parameters},
+                    agent_id,
+                    workspace_id=workspace_id,
+                    trace_id=trace,
+                )
+
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
             if not tool_spec:
@@ -329,8 +347,8 @@ class UnifiedToolExecutor:
                     "error": f"Unknown tool: {tool_name}",
                     "tool": tool_name,
                 }
-            
-            # PRD-36: Route Composio tools explicitly
+
+            # PRD-36: Legacy composio_execute meta-tool (fallback for older agents)
             if tool_name == "composio_execute":
                 logger.info(f"[tool-trace {trace}] Routing to Composio executor: {tool_name}")
                 return await self._execute_composio_execute(
