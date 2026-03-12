@@ -113,21 +113,21 @@ class MetadataSyncService:
                     actions_synced += app_result.get("actions_count", 0)
                 except Exception as e:
                     error_msg = f"Failed to sync app {app.name}: {str(e)}"
-                    logger.error(error_msg)
+                    logger.error(error_msg, exc_info=True)
                     errors.append(error_msg)
-            
+
             # Step 3: Update statistics
             await self._update_stats(apps_synced, actions_synced)
-            
-            # Mark as complete
-            self._sync_job.status = "completed"
+
+            # Mark as complete (partial success if errors exist)
+            self._sync_job.status = "completed_with_errors" if errors else "completed"
             self._sync_job.apps_synced = apps_synced
             self._sync_job.actions_synced = actions_synced
             self._sync_job.errors_count = len(errors)
             self._sync_job.error_details = {"errors": errors} if errors else None
-            
+
         except Exception as e:
-            logger.error(f"Full sync failed: {e}")
+            logger.error(f"Full sync failed: {e}", exc_info=True)
             self._sync_job.status = "failed"
             self._sync_job.error_details = {"fatal_error": str(e)}
             errors.append(str(e))
@@ -149,7 +149,20 @@ class MetadataSyncService:
             "errors_count": len(errors),
             "duration_ms": self._sync_job.duration_ms,
         }
-        logger.info(f"Full sync completed: {result}")
+        logger.info(
+            "Full sync summary: status=%s total_apps=%d successes=%d failures=%d duration_ms=%d",
+            self._sync_job.status,
+            apps_synced + len(errors),
+            apps_synced,
+            len(errors),
+            self._sync_job.duration_ms or 0,
+        )
+        if errors:
+            logger.warning(
+                "Full sync completed with %d errors: %s",
+                len(errors),
+                errors,
+            )
         return result
     
     async def run_incremental_sync(self, since: Optional[datetime] = None) -> Dict[str, Any]:
@@ -197,15 +210,19 @@ class MetadataSyncService:
                         actions_synced += app_result.get("actions_count", 0)
                         
                 except Exception as e:
-                    errors.append(f"Failed to sync {app.name}: {e}")
-            
+                    error_msg = f"Failed to sync {app.name}: {e}"
+                    logger.error(error_msg, exc_info=True)
+                    errors.append(error_msg)
+
             await self._update_stats(apps_synced, actions_synced)
-            self._sync_job.status = "completed"
-            
+            self._sync_job.status = "completed_with_errors" if errors else "completed"
+
         except Exception as e:
+            logger.error(f"Incremental sync failed: {e}", exc_info=True)
             self._sync_job.status = "failed"
             self._sync_job.error_details = {"fatal_error": str(e)}
-        
+            errors.append(str(e))
+
         finally:
             end_time = datetime.utcnow()
             self._sync_job.completed_at = end_time
@@ -213,15 +230,35 @@ class MetadataSyncService:
             self._sync_job.apps_synced = apps_synced
             self._sync_job.actions_synced = actions_synced
             self._sync_job.errors_count = len(errors)
+            self._sync_job.error_details = (
+                self._sync_job.error_details
+                or ({"errors": errors} if errors else None)
+            )
             self.db.commit()
-            
+
             await self.composio.close()
-        
+
+        logger.info(
+            "Incremental sync summary: status=%s total_apps=%d successes=%d failures=%d duration_ms=%d",
+            self._sync_job.status,
+            apps_synced + len(errors),
+            apps_synced,
+            len(errors),
+            self._sync_job.duration_ms or 0,
+        )
+        if errors:
+            logger.warning(
+                "Incremental sync completed with %d errors: %s",
+                len(errors),
+                errors,
+            )
+
         return {
             "job_id": self._sync_job.id,
             "status": self._sync_job.status,
             "apps_synced": apps_synced,
             "actions_synced": actions_synced,
+            "errors_count": len(errors),
         }
     
     async def sync_single_app(self, app_name: str) -> Dict[str, Any]:
@@ -286,7 +323,7 @@ class MetadataSyncService:
             }
             
         except Exception as e:
-            logger.error(f"Failed to sync app {app_name}: {e}")
+            logger.error(f"Failed to sync app {app_name}: {e}", exc_info=True)
             self._sync_job.status = "failed"
             self._sync_job.error_details = {"error": str(e)}
             result = {"app_name": app_name, "status": "error", "error": str(e)}
@@ -360,7 +397,7 @@ class MetadataSyncService:
             self.db.commit()
             
         except Exception as e:
-            logger.warning(f"Failed to sync actions for {app.name}: {e}")
+            logger.warning(f"Failed to sync actions for {app.name}: {e}", exc_info=True)
         
         return {"app_name": app.name, "actions_count": actions_count}
     

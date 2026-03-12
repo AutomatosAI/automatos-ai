@@ -91,6 +91,23 @@ export function useSystemConfigKey(key: string | null) {
   })
 }
 
+// Get active icon style (e.g. "default", "core-line-orange", "core-line-blue")
+export function useIconStyle() {
+  return useQuery({
+    queryKey: systemConfigQueryKeys.configKey('active_icon_style'),
+    queryFn: async () => {
+      try {
+        const data = await apiClient.getSystemConfigKey('active_icon_style');
+        return (data?.config_value as string) || 'default';
+      } catch {
+        return 'default';
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+}
+
 // Get system icon mappings specifically
 export function useSystemIcons() {
   return useQuery({

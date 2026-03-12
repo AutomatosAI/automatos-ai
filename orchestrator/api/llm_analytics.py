@@ -291,18 +291,20 @@ async def get_recommendations(
         .all()
     )
 
-    premium_models = {"gpt-4o", "gpt-4-turbo", "claude-sonnet-4-5-20250929", "claude-3-5-sonnet-20241022", "claude-3-opus-20240229"}
+    premium_models = {m.strip() for m in config.PREMIUM_MODELS.split(",") if m.strip()}
+    budget_suggestions = config.BUDGET_MODELS
+    savings_ratio = config.PREMIUM_TO_BUDGET_SAVINGS_RATIO
 
     for row in agent_usage:
         if row.model_id in premium_models and (row.avg_output or 0) < 200:
-            potential = float(row.cost or 0) * 0.85  # ~85% savings switching to mini
+            potential = float(row.cost or 0) * savings_ratio
             recs.append(Recommendation(
                 type="cost_optimization",
                 title=f"Switch Agent {row.agent_id} to a cheaper model",
                 description=(
                     f"Agent {row.agent_id} used {row.model_id} for {row.cnt} requests "
                     f"with avg {int(row.avg_output or 0)} output tokens. "
-                    f"Consider gpt-4o-mini or claude-haiku-4-5 for simple outputs."
+                    f"Consider {budget_suggestions} for simple outputs."
                 ),
                 potential_savings=round(potential, 2),
                 affected_agent_ids=[row.agent_id] if row.agent_id else [],

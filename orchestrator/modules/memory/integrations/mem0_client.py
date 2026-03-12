@@ -75,7 +75,7 @@ class Mem0Client:
         self.timeout = _DEFAULT_TIMEOUT
 
         if not self.api_url:
-            logger.warning("[Mem0] No API URL configured (MEM0_API_URL). Memory storage disabled.")
+            logger.error("[Mem0] No API URL configured (MEM0_API_URL). Memory storage disabled.")
             self.api_url = ""
             self.headers = {}
             return
@@ -92,6 +92,8 @@ class Mem0Client:
         self.headers = {}
         if self.api_key:
             self.headers["Authorization"] = f"Token {self.api_key}"
+        else:
+            logger.error("[Mem0] No API key configured (MEM0_API_KEY). Requests will be unauthenticated.")
 
         logger.info(f"Initialized Mem0Client with URL: {self.api_url}")
 
@@ -103,11 +105,11 @@ class Mem0Client:
         Returns the response or None if all attempts fail.
         """
         if not self.api_url:
-            logger.debug("[Mem0] No API URL configured — skipping request")
+            logger.warning("[Mem0] No API URL configured — skipping request to %s", url)
             return None
 
         if not _breaker.allow_request():
-            logger.debug("[Mem0] Circuit breaker open — skipping request")
+            logger.warning("[Mem0] Circuit breaker open — skipping request to %s", url)
             return None
 
         kwargs.setdefault("timeout", self.timeout)
@@ -129,10 +131,10 @@ class Mem0Client:
                     )
                     time.sleep(wait)
                 else:
-                    logger.error("[Mem0] Request failed after %d attempts: %s", _MAX_RETRIES + 1, e)
+                    logger.error("[Mem0] Request failed after %d attempts: %s", _MAX_RETRIES + 1, e, exc_info=True)
                     _breaker.record_failure()
             except Exception as e:
-                logger.error("[Mem0] Unexpected request error: %s", e)
+                logger.error("[Mem0] Unexpected request error: %s", e, exc_info=True)
                 _breaker.record_failure()
                 return None
 
@@ -186,6 +188,7 @@ class Mem0Client:
         try:
             result = resp.json()
         except Exception:
+            logger.debug("[Mem0] Add response not JSON (status=%s) — treating as success", resp.status_code)
             result = None
 
         if result:
@@ -222,12 +225,13 @@ class Mem0Client:
             return []
 
         if resp.status_code >= 400:
-            logger.warning("[Mem0] Fetch returned %s", resp.status_code)
+            logger.error("[Mem0] Search failed: status=%s body=%s", resp.status_code, (resp.text or "")[:300])
             return []
 
         try:
             data = resp.json()
         except Exception:
+            logger.error("[Mem0] Search failed to parse JSON for user_id=%s body=%s", user_id, (resp.text or "")[:200], exc_info=True)
             return []
 
         # Search endpoint returns a list of results (with scores) or a
@@ -284,7 +288,7 @@ class Mem0Client:
         try:
             data = resp.json()
         except Exception:
-            logger.warning("[Mem0] get_all failed to parse JSON for user_id=%s body=%s", user_id, (resp.text or "")[:200])
+            logger.warning("[Mem0] get_all failed to parse JSON for user_id=%s body=%s", user_id, (resp.text or "")[:200], exc_info=True)
             return []
 
         # Debug: log what Mem0 actually returns so we can diagnose empty browse
