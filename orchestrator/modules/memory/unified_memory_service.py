@@ -754,8 +754,39 @@ class UnifiedMemoryService:
         return results
 
     # ------------------------------------------------------------------
-    # L2: Short-term Memory (Postgres) — stubbed for US-013
+    # L2: Short-term Memory (Postgres)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _store_short_term_sync(
+        workspace_id: str,
+        content: str,
+        content_type: str,
+        agent_id: Optional[int],
+        importance: float,
+        metadata: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        """
+        Insert a row into memory_short_term (synchronous, runs in executor).
+
+        Returns the new row's UUID as string, or None on failure.
+        """
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        with get_db_session() as db:
+            row = MemoryShortTerm(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                content=content,
+                content_type=content_type,
+                importance=importance,
+                metadata_=metadata or {},
+            )
+            db.add(row)
+            db.flush()
+            row_id = str(row.id)
+            return row_id
 
     async def store_short_term(
         self,
@@ -765,9 +796,93 @@ class UnifiedMemoryService:
         agent_id: Optional[int] = None,
         importance: float = 0.5,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """Store content in L2 short-term memory (Postgres). Implemented in US-013."""
-        pass
+    ) -> Optional[str]:
+        """
+        Store content in L2 short-term memory (Postgres).
+
+        Args:
+            workspace_id: Workspace scope (UUID string).
+            content: Text content to store.
+            content_type: One of exchange, recipe_summary, heartbeat_log,
+                          tool_result, session_decision.
+            agent_id: Optional agent scope.
+            importance: Base importance score (0.0–1.0).
+            metadata: Optional JSONB metadata dict.
+
+        Returns:
+            The new row's UUID as string, or None on failure.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            row_id = await loop.run_in_executor(
+                None,
+                self._store_short_term_sync,
+                workspace_id,
+                content,
+                content_type,
+                agent_id,
+                importance,
+                metadata,
+            )
+            logger.info(
+                "[UnifiedMemoryService] store_short_term id=%s ws=%s type=%s",
+                row_id,
+                workspace_id,
+                content_type,
+            )
+            return row_id
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] store_short_term failed ws=%s type=%s",
+                workspace_id,
+                content_type,
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
+    def _search_short_term_sync(
+        workspace_id: str,
+        query: str,
+        days: int,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search memory_short_term by text (ILIKE) within a time window (synchronous).
+        """
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        with get_db_session() as db:
+            q = (
+                db.query(MemoryShortTerm)
+                .filter(
+                    MemoryShortTerm.workspace_id == workspace_id,
+                    MemoryShortTerm.created_at >= cutoff,
+                    MemoryShortTerm.archived_at.is_(None),
+                    MemoryShortTerm.content.ilike(f"%{query}%"),
+                )
+                .order_by(MemoryShortTerm.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "id": str(row.id),
+                    "content": row.content,
+                    "content_type": row.content_type,
+                    "importance": row.importance,
+                    "decay_score": row.decay_score,
+                    "access_count": row.access_count,
+                    "metadata": row.metadata_ or {},
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "last_accessed_at": row.last_accessed_at.isoformat() if row.last_accessed_at else None,
+                }
+                for row in q
+            ]
 
     async def search_short_term(
         self,
@@ -776,8 +891,189 @@ class UnifiedMemoryService:
         days: int = 7,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Search L2 short-term memory by text and time range. Implemented in US-013."""
-        return []
+        """
+        Search L2 short-term memory by text and time range.
+
+        Uses ILIKE text search on content column within the specified
+        day window. Results ordered by created_at DESC.
+
+        Args:
+            workspace_id: Workspace scope.
+            query: Text to search for (case-insensitive substring match).
+            days: Look-back window in days (default 7).
+            limit: Maximum results (default 20).
+
+        Returns:
+            List of memory item dicts.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                self._search_short_term_sync,
+                workspace_id,
+                query,
+                days,
+                limit,
+            )
+            logger.debug(
+                "[UnifiedMemoryService] search_short_term ws=%s query=%r days=%d → %d results",
+                workspace_id,
+                query[:60],
+                days,
+                len(results),
+            )
+            return results
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] search_short_term failed ws=%s",
+                workspace_id,
+                exc_info=True,
+            )
+            return []
+
+    @staticmethod
+    def _get_short_term_by_time_sync(
+        workspace_id: str,
+        start_date: datetime,
+        end_date: datetime,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Query memory_short_term by time range (synchronous).
+        """
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        with get_db_session() as db:
+            rows = (
+                db.query(MemoryShortTerm)
+                .filter(
+                    MemoryShortTerm.workspace_id == workspace_id,
+                    MemoryShortTerm.created_at >= start_date,
+                    MemoryShortTerm.created_at <= end_date,
+                    MemoryShortTerm.archived_at.is_(None),
+                )
+                .order_by(MemoryShortTerm.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "id": str(row.id),
+                    "content": row.content,
+                    "content_type": row.content_type,
+                    "importance": row.importance,
+                    "decay_score": row.decay_score,
+                    "access_count": row.access_count,
+                    "metadata": row.metadata_ or {},
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "last_accessed_at": row.last_accessed_at.isoformat() if row.last_accessed_at else None,
+                }
+                for row in rows
+            ]
+
+    async def get_short_term_by_time(
+        self,
+        workspace_id: str,
+        start_date: datetime,
+        end_date: datetime,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve L2 short-term memories within a time range.
+
+        Used by the Context Router for temporal queries (e.g., "what did
+        we discuss last week?").
+
+        Args:
+            workspace_id: Workspace scope.
+            start_date: Start of time window (inclusive).
+            end_date: End of time window (inclusive).
+            limit: Maximum results (default 50).
+
+        Returns:
+            List of memory item dicts ordered by created_at DESC.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                self._get_short_term_by_time_sync,
+                workspace_id,
+                start_date,
+                end_date,
+                limit,
+            )
+            logger.debug(
+                "[UnifiedMemoryService] get_short_term_by_time ws=%s range=%s→%s → %d results",
+                workspace_id,
+                start_date.isoformat(),
+                end_date.isoformat(),
+                len(results),
+            )
+            return results
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] get_short_term_by_time failed ws=%s",
+                workspace_id,
+                exc_info=True,
+            )
+            return []
+
+    @staticmethod
+    def _touch_short_term_sync(memory_id: str) -> bool:
+        """
+        Increment access_count and update last_accessed_at (synchronous).
+        """
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        with get_db_session() as db:
+            row = (
+                db.query(MemoryShortTerm)
+                .filter(MemoryShortTerm.id == memory_id)
+                .first()
+            )
+            if row is None:
+                return False
+            row.access_count = (row.access_count or 0) + 1
+            row.last_accessed_at = datetime.now(timezone.utc)
+            return True
+
+    async def touch_short_term(self, memory_id: str) -> bool:
+        """
+        Touch an L2 memory: increment access_count and update last_accessed_at.
+
+        This boosts the item's retention score in the Ebbinghaus decay
+        calculation, making frequently-accessed items persist longer.
+
+        Args:
+            memory_id: UUID of the memory_short_term row.
+
+        Returns:
+            True if the row was found and updated, False otherwise.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                self._touch_short_term_sync,
+                memory_id,
+            )
+            if result:
+                logger.debug(
+                    "[UnifiedMemoryService] touch_short_term id=%s",
+                    memory_id,
+                )
+            return result
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] touch_short_term failed id=%s",
+                memory_id,
+                exc_info=True,
+            )
+            return False
 
     # ------------------------------------------------------------------
     # L1: Session Memory (Redis)
