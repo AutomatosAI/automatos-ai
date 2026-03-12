@@ -22,7 +22,7 @@ Replace 12 scattered Mem0Client instances with a single UnifiedMemoryService. Ad
 - [x] **US-001: Create UnifiedMemoryService singleton** — `orchestrator/modules/memory/unified_memory_service.py` with shared Mem0Client, Redis client, MemoryNamespace helper for standardized user_id formats. Public methods stubbed.
 - [x] **US-002: Implement L3 long-term methods** — store_long_term(), search_long_term(), get_all_memories(), delete_memory() delegating to shared Mem0Client with MemoryNamespace user_ids.
 - [x] **US-003: Migrate SmartMemoryManager** — Replace lazy Mem0Client init with UnifiedMemoryService. Preserve 2-min LRU cache and _track_memory_access().
-- [ ] **US-004: Migrate platform_executor.py** — Replace 5 inline Mem0Client() calls (~lines 533, 1050, 1272, 3368, 3417) with UnifiedMemoryService.
+- [x] **US-004: Migrate platform_executor.py** — Replace 5 inline Mem0Client() calls (~lines 533, 1050, 1272, 3368, 3417) with UnifiedMemoryService.
 - [ ] **US-005: Migrate RecipeMemoryService** — Replace self._mem0 with UnifiedMemoryService. Add recipe namespace to MemoryNamespace if needed.
 - [ ] **US-006: Migrate widget_memory.py + memory_stats.py** — Replace lazy Mem0Client inits. Fix widget's raw workspace_id scoping via MemoryNamespace.
 - [ ] **US-007: Migrate workflows.py + workflow_recipes.py** — Replace last 2 inline Mem0Client() calls. After this: zero direct instantiation outside UnifiedMemoryService.
@@ -71,3 +71,4 @@ Replace 12 scattered Mem0Client instances with a single UnifiedMemoryService. Ad
 ## Notes
 
 - **US-003:** Added `store_two_tier()`, `store_daily_log()`, `get_all_daily_logs()` to UnifiedMemoryService to support SmartMemoryManager's two-tier storage and daily log patterns. SmartMemoryManager no longer has any direct Mem0Client usage. The 2-min LRU cache, tier classification, memory formatting, and _track_memory_access remain unchanged.
+- **US-004:** Replaced all 5 inline `Mem0Client()` calls in `platform_executor.py` with `get_unified_memory_service()`. Added `is_mem0_configured` property to `UnifiedMemoryService` to preserve the "not configured" guard that platform handlers relied on. Handlers: `_get_memory_stats`, `_store_memory`, `_search_memory`, `_browse_memories`, `_delete_memory`. Zero direct `Mem0Client` references remain in `platform_executor.py`.

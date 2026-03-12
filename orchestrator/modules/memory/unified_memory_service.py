@@ -149,6 +149,11 @@ class UnifiedMemoryService:
         self._redis_client_getter = get_redis_client
         logger.info("[UnifiedMemoryService] Initialised with shared Mem0Client and Redis")
 
+    @property
+    def is_mem0_configured(self) -> bool:
+        """Check if Mem0 backend is configured (has a valid API URL)."""
+        return bool(getattr(self._mem0, "api_url", None))
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

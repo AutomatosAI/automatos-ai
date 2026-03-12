@@ -529,22 +529,17 @@ class PlatformActionExecutor:
     async def _get_memory_stats(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Get memory stats from Mem0 — global + per-agent memories."""
         import asyncio
-        from modules.memory.integrations.mem0_client import Mem0Client
+        from modules.memory.unified_memory_service import get_unified_memory_service
 
         try:
-            client = Mem0Client()
-            if not client.api_url:
+            service = get_unified_memory_service()
+            if not service.is_mem0_configured:
                 return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
 
             ws_id = str(self.workspace_id)
-            global_user_id = f"ws_{ws_id}"
-
-            loop = asyncio.get_event_loop()
 
             # Fetch global memories
-            global_memories = await loop.run_in_executor(
-                None, lambda: client.get_all(user_id=global_user_id, limit=200)
-            )
+            global_memories = await service.get_all_memories(workspace_id=ws_id, limit=200)
 
             # Also check per-agent memories for workspace agents
             from core.models.core import Agent
@@ -559,10 +554,7 @@ class PlatformActionExecutor:
             partial = len(agents) > agent_scan_limit
             agent_stats = []
             agent_tasks = [
-                loop.run_in_executor(
-                    None,
-                    lambda uid=f"ws_{ws_id}_agent_{agent_id}": client.get_all(user_id=uid, limit=200),
-                )
+                service.get_all_memories(workspace_id=ws_id, agent_id=agent_id, limit=200)
                 for agent_id, _agent_name in scanned_agents
             ]
             agent_results = await asyncio.gather(*agent_tasks) if agent_tasks else []
@@ -1046,35 +1038,29 @@ class PlatformActionExecutor:
             return {"success": False, "error": "Missing required parameter: content"}
 
         try:
-            import asyncio
-            from modules.memory.integrations.mem0_client import Mem0Client
+            from modules.memory.unified_memory_service import get_unified_memory_service
 
-            client = Mem0Client()
-            if not client.api_url:
+            service = get_unified_memory_service()
+            if not service.is_mem0_configured:
                 return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
 
-            messages = [{"role": "user", "content": content}]
-            # Use correct user_id format: ws_{workspace_id} for global memories
-            user_id = f"ws_{self.workspace_id}"
-
-            # If agent_id provided, store as agent-specific memory
+            ws_id = str(self.workspace_id)
             agent_id = params.get("agent_id")
-            if agent_id:
-                user_id = f"ws_{self.workspace_id}_agent_{agent_id}"
+            # Cast to int if provided (may come as string from tool params)
+            agent_id_int = int(agent_id) if agent_id else None
 
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: client.add(
-                    messages=messages,
-                    user_id=user_id,
-                    metadata={"workspace_id": str(self.workspace_id), "source": "platform_tool"},
-                )
+            result = await service.store_long_term(
+                workspace_id=ws_id,
+                content=content,
+                agent_id=agent_id_int,
+                metadata={"workspace_id": ws_id, "source": "platform_tool"},
             )
 
             if result.get("error"):
                 return {"success": False, "error": result["error"]}
 
+            ns = service.namespace(ws_id)
+            user_id = ns.resolve(agent_id_int)
             facts = result.get("facts_extracted", "unknown")
             return {
                 "success": True,
@@ -1260,7 +1246,7 @@ class PlatformActionExecutor:
     async def _search_memory(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Search Mem0 memories by query."""
         import asyncio
-        from modules.memory.integrations.mem0_client import Mem0Client
+        from modules.memory.unified_memory_service import get_unified_memory_service
 
         query = params.get("query", "").strip()
         if not query:
@@ -1271,17 +1257,15 @@ class PlatformActionExecutor:
         result_char_limit = 150
 
         try:
-            client = Mem0Client()
-            if not client.api_url:
+            service = get_unified_memory_service()
+            if not service.is_mem0_configured:
                 return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
 
             ws_id = str(self.workspace_id)
-            loop = asyncio.get_event_loop()
 
             # Search global memories
-            global_user_id = f"ws_{ws_id}"
-            global_results = await loop.run_in_executor(
-                None, lambda: client.search(query=query, user_id=global_user_id, limit=limit)
+            global_results = await service.search_long_term(
+                workspace_id=ws_id, query=query, limit=limit,
             )
 
             # Search agent-specific if agent_id given, otherwise search all agents
@@ -1290,9 +1274,8 @@ class PlatformActionExecutor:
             scanned_agents = 0
             total_agents = 0
             if agent_id:
-                agent_user_id = f"ws_{ws_id}_agent_{agent_id}"
-                agent_results = await loop.run_in_executor(
-                    None, lambda: client.search(query=query, user_id=agent_user_id, limit=limit)
+                agent_results = await service.search_long_term(
+                    workspace_id=ws_id, query=query, agent_id=int(agent_id), limit=limit,
                 )
                 for m in agent_results:
                     m["_tier"] = f"agent-{agent_id}"
@@ -1316,8 +1299,8 @@ class PlatformActionExecutor:
                 scanned_agents = len(agents)
                 partial = total_agents > scanned_agents
                 agent_tasks = [
-                    loop.run_in_executor(
-                        None, lambda u=f"ws_{ws_id}_agent_{aid}": client.search(query=query, user_id=u, limit=5)
+                    service.search_long_term(
+                        workspace_id=ws_id, query=query, agent_id=aid, limit=5,
                     )
                     for (aid,) in agents
                 ]
@@ -3421,24 +3404,21 @@ class PlatformActionExecutor:
 
     async def _browse_memories(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Browse/search memories via Mem0."""
-        import asyncio
-
         try:
-            from modules.memory.integrations.mem0_client import Mem0Client
+            from modules.memory.unified_memory_service import get_unified_memory_service
 
-            client = Mem0Client()
-            user_id = f"ws_{self.workspace_id}"
+            service = get_unified_memory_service()
+            ws_id = str(self.workspace_id)
             limit = params.get("limit", 20)
             query = params.get("query")
 
-            loop = asyncio.get_event_loop()
             if query:
-                results = await loop.run_in_executor(
-                    None, lambda: client.search(query=query, user_id=user_id, limit=limit),
+                results = await service.search_long_term(
+                    workspace_id=ws_id, query=query, limit=limit,
                 )
             else:
-                results = await loop.run_in_executor(
-                    None, lambda: client.get_all(user_id=user_id, limit=limit),
+                results = await service.get_all_memories(
+                    workspace_id=ws_id, limit=limit,
                 )
 
             # Normalise to consistent format
@@ -3466,28 +3446,23 @@ class PlatformActionExecutor:
 
     async def _delete_memory(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Delete a memory by ID with workspace ownership check."""
-        import asyncio
+        from modules.memory.unified_memory_service import get_unified_memory_service
 
         memory_id = params.get("memory_id")
         if not memory_id:
             return {"success": False, "error": "memory_id is required"}
 
         try:
-            from modules.memory.integrations.mem0_client import Mem0Client
+            service = get_unified_memory_service()
+            ws_id = str(self.workspace_id)
 
-            client = Mem0Client()
-            user_id = f"ws_{self.workspace_id}"
-            loop = asyncio.get_event_loop()
-
-            # Ownership check
-            all_mems = await loop.run_in_executor(
-                None, lambda: client.get_all(user_id=user_id, limit=500),
-            )
+            # Ownership check — verify memory belongs to this workspace
+            all_mems = await service.get_all_memories(workspace_id=ws_id, limit=500)
             owned_ids = {str(m.get("id", "")) for m in (all_mems if isinstance(all_mems, list) else [])}
             if memory_id not in owned_ids:
                 return {"success": False, "error": "Memory not found or not owned by this workspace"}
 
-            deleted = await loop.run_in_executor(None, lambda: client.delete(memory_id))
+            deleted = await service.delete_memory(memory_id=memory_id)
 
             if deleted:
                 return {"success": True, "message": f"Memory {memory_id} deleted"}
