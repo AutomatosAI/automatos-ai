@@ -494,6 +494,24 @@ class SmartChatOrchestrator:
         except Exception as exc:
             logger.debug("[Orchestrator] Daily summary storage skipped: %s", exc)
 
+        # L2: Store raw exchange in Postgres (fire-and-forget — must not block TTFT)
+        try:
+            asyncio.create_task(
+                self._unified_memory.store_exchange(
+                    workspace_id=self.workspace_id,
+                    agent_id=self.agent_id,
+                    user_msg=user_message,
+                    assistant_msg=assistant_response,
+                    conversation_id=chat_id,
+                )
+            )
+        except Exception:
+            logger.warning(
+                "[Orchestrator] L2 store_exchange failed ws=%s — skipping",
+                self.workspace_id,
+                exc_info=True,
+            )
+
         # Update L1 session in Redis (fire-and-forget — must not block response)
         if chat_id:
             try:

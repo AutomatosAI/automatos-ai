@@ -1294,13 +1294,66 @@ class UnifiedMemoryService:
     async def store_exchange(
         self,
         workspace_id: str,
-        agent_id: int,
+        agent_id: Optional[int],
         user_msg: str,
         assistant_msg: str,
         conversation_id: Optional[str] = None,
-    ) -> None:
-        """Store a chat exchange in L2 + L3. Implemented in US-014."""
-        pass
+    ) -> Optional[str]:
+        """
+        Store a chat exchange in L2 short-term memory (Postgres).
+
+        L3 long-term storage (Mem0 with fact extraction) is handled separately
+        by SmartMemoryManager.store_conversation() in the orchestrator — this
+        method intentionally does NOT duplicate that path.
+
+        Args:
+            workspace_id: Workspace scope (UUID string).
+            agent_id: Agent scope (nullable).
+            user_msg: The user's message.
+            assistant_msg: The assistant's response.
+            conversation_id: Optional chat session ID for grouping.
+
+        Returns:
+            The L2 row UUID as string, or None on failure / skip.
+        """
+        # Skip trivial exchanges (mirrors SmartMemoryManager logic)
+        trivial_patterns = {
+            "hi", "hello", "hey", "thanks", "ok", "bye", "yes", "no", "sure",
+        }
+        stripped = user_msg.strip() if user_msg else ""
+        if len(stripped) < 5 or stripped.lower().rstrip("!.?") in trivial_patterns:
+            logger.debug(
+                "[UnifiedMemoryService] store_exchange skipped trivial msg ws=%s",
+                workspace_id,
+            )
+            return None
+
+        # Build L2 content: raw exchange, capped for storage efficiency
+        content = f"User: {user_msg[:750]}\nAssistant: {assistant_msg[:750]}"
+        metadata: Dict[str, Any] = {
+            "conversation_id": conversation_id,
+            "agent_id": agent_id,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        row_id = await self.store_short_term(
+            workspace_id=workspace_id,
+            content=content,
+            content_type="exchange",
+            agent_id=agent_id,
+            importance=0.5,
+            metadata=metadata,
+        )
+
+        if row_id:
+            logger.info(
+                "[UnifiedMemoryService] store_exchange L2 id=%s ws=%s agent=%s conv=%s",
+                row_id,
+                workspace_id,
+                agent_id,
+                conversation_id,
+            )
+        return row_id
 
     async def promote_to_long_term(self, memory_id: str) -> bool:
         """Promote an L2 item to L3. Implemented in US-021."""
