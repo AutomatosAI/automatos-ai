@@ -97,6 +97,8 @@ class PlatformActionExecutor:
             "platform_schedule_task": self._schedule_task,
             "platform_list_scheduled_tasks": self._list_scheduled_tasks,
             "platform_cancel_scheduled_task": self._cancel_scheduled_task,
+            # PRD-79: NL2SQL
+            "platform_query_data": self._query_data,
             # PRD-77: Memory Browsing
             "platform_browse_memories": self._browse_memories,
             "platform_delete_memory": self._delete_memory,
@@ -3397,6 +3399,103 @@ class PlatformActionExecutor:
 
         svc = ScheduledTaskService(self.db, self.workspace_id)
         return await svc.update_task_status(task_id, "cancelled")
+
+    # ------------------------------------------------------------------
+    # PRD-79: NL2SQL — query_data
+    # ------------------------------------------------------------------
+
+    async def _query_data(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Query a connected database using natural language."""
+        from modules.nl2sql.service import DatabaseKnowledgeService
+        from core.models.database_knowledge import DatabaseKnowledgeSource
+
+        question = params.get("question")
+        if not question:
+            return {"success": False, "error": "question is required"}
+
+        database_id = params.get("database_id")
+
+        try:
+            # Resolve database source
+            if database_id:
+                source = self.db.query(DatabaseKnowledgeSource).filter(
+                    DatabaseKnowledgeSource.id == database_id,
+                    DatabaseKnowledgeSource.workspace_id == self.workspace_id,
+                    DatabaseKnowledgeSource.is_active.is_(True),
+                ).first()
+                if not source:
+                    return {
+                        "success": False,
+                        "error": f"Database source {database_id} not found or not active in this workspace",
+                    }
+            else:
+                # Use first active database in workspace
+                source = self.db.query(DatabaseKnowledgeSource).filter(
+                    DatabaseKnowledgeSource.workspace_id == self.workspace_id,
+                    DatabaseKnowledgeSource.is_active.is_(True),
+                ).order_by(DatabaseKnowledgeSource.id).first()
+                if not source:
+                    return {
+                        "success": False,
+                        "error": (
+                            "No connected databases found. Connect a database first "
+                            "via Settings → Data Sources."
+                        ),
+                    }
+
+            # Execute via DatabaseKnowledgeService
+            service = DatabaseKnowledgeService()
+            agent_id = str(params.get("_agent_id", "")) or None
+            user_id = str(params.get("_user_id", "")) or str(self.workspace_id)
+
+            result = await service.query_database(
+                source_id=str(source.id),
+                natural_language_query=question,
+                user_id=user_id,
+                agent_id=agent_id,
+            )
+
+            if not result.get("success"):
+                return {
+                    "success": False,
+                    "error": result.get("error", "Query execution failed"),
+                    "sql": result.get("sql"),
+                }
+
+            # Format for agent consumption
+            data = result.get("data", [])
+            columns = result.get("columns", [])
+            row_count = result.get("row_count", len(data))
+
+            # Build readable table (truncate large results)
+            display_rows = data[:50]
+            table_text = ""
+            if columns and display_rows:
+                header = " | ".join(str(c) for c in columns)
+                separator = "-+-".join("-" * min(len(str(c)), 20) for c in columns)
+                rows_text = "\n".join(
+                    " | ".join(str(row.get(c, ""))[:50] for c in columns)
+                    for row in display_rows
+                )
+                table_text = f"{header}\n{separator}\n{rows_text}"
+                if row_count > 50:
+                    table_text += f"\n... ({row_count - 50} more rows)"
+
+            return {
+                "success": True,
+                "answer": table_text or "Query returned no rows.",
+                "sql": result.get("sql"),
+                "row_count": row_count,
+                "columns": columns,
+                "data": display_rows,
+                "explanation": result.get("explanation"),
+                "confidence": result.get("confidence"),
+                "database": source.name,
+            }
+
+        except Exception as e:
+            logger.error("[PlatformExecutor] query_data failed: %s", e, exc_info=True)
+            return {"success": False, "error": f"Database query failed: {str(e)[:200]}"}
 
     # ------------------------------------------------------------------
     # PRD-77: Memory Browsing
