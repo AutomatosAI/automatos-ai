@@ -320,8 +320,11 @@ async def update_task_status(
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
 
     task.status = new_status
-    if new_status == "in_progress" and not task.started_at:
+    if new_status == "in_progress":
         task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
+        task.error_message = None
+        task.result = None
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
 

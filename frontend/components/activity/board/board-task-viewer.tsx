@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
-import { X, Bot, Clock, CheckCircle2, AlertCircle, ArrowLeft, RotateCcw, Play, Loader2 } from 'lucide-react'
+import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow, format } from 'date-fns'
 import { useQuery } from '@tanstack/react-query'
@@ -13,29 +13,29 @@ import { useUpdateTaskStatus } from '@/hooks/use-board-tasks'
 import { cn } from '@/lib/utils'
 
 interface BoardTaskViewerProps {
-  task: BoardTask
-  onClose: () => void
-  className?: string
+  task: BoardTask | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }
 
 /**
  * Poll the backend for live task data when in_progress.
  * Falls back to the prop task when the query hasn't loaded yet.
  */
-function useLiveTask(task: BoardTask) {
-  const isActive = task.status === 'in_progress'
+function useLiveTask(task: BoardTask | null) {
+  const isActive = task?.status === 'in_progress'
 
   const { data } = useQuery({
-    queryKey: ['board-task-live', task.id],
-    queryFn: () => apiClient.request<any>(`/api/v1/tasks/${task.source_id || task.id}`),
-    enabled: isActive,
+    queryKey: ['board-task-live', task?.id],
+    queryFn: () => apiClient.request<any>(`/api/v1/tasks/${task?.source_id || task?.id}`),
+    enabled: !!task && isActive,
     refetchInterval: isActive ? 5000 : false,
     staleTime: 3000,
   })
 
+  if (!task) return null
   if (!data) return task
 
-  // Merge live data into the task shape
   return {
     ...task,
     status: data.status ?? task.status,
@@ -43,84 +43,93 @@ function useLiveTask(task: BoardTask) {
     error_message: data.error_message ?? task.error_message,
     started_at: data.started_at ?? task.started_at,
     completed_at: data.completed_at ?? task.completed_at,
+    step_progress: data.step_progress ?? task.step_progress,
   } as BoardTask
-}
-
-function formatDuration(ms: number | undefined): string {
-  if (!ms) return '--'
-  const seconds = Math.floor(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
-  if (mins < 60) return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`
-  const hours = Math.floor(mins / 60)
-  return `${hours}h ${mins % 60}m`
 }
 
 function formatElapsed(startedAt: string): string {
   return formatDistanceToNow(new Date(startedAt), { addSuffix: false })
 }
 
-// ── Status-specific views ────────────────────────────────────────────
+// ── Metadata grid — shared across views ──────────────────────────────
 
-function InboxView({ task }: { task: BoardTask }) {
+function MetadataGrid({ task }: { task: BoardTask }) {
   const priorityConf = PRIORITY_CONFIG[task.priority]
 
   return (
-    <div className="space-y-4">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <MetaItem icon={<User className="w-3.5 h-3.5" />} label="Assignee">
+        {task.assignee ? (
+          <div className="flex items-center gap-1.5">
+            {task.assignee.agent_icon ? (
+              <PremiumIcon name={task.assignee.agent_icon} size={16} />
+            ) : (
+              <Bot className="w-4 h-4 text-primary" />
+            )}
+            <span className="text-sm font-medium">{task.assignee.agent_name}</span>
+          </div>
+        ) : (
+          <span className="text-sm text-muted-foreground">Unassigned</span>
+        )}
+      </MetaItem>
+
+      <MetaItem icon={<div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: priorityConf.color }} />} label="Priority">
+        <span className="text-sm font-medium capitalize">{task.priority}</span>
+      </MetaItem>
+
+      <MetaItem icon={<Shield className="w-3.5 h-3.5" />} label="Review Mode">
+        <span className="text-sm font-medium capitalize">{task.review_mode}</span>
+      </MetaItem>
+
+      {task.due_date ? (
+        <MetaItem icon={<Calendar className="w-3.5 h-3.5" />} label="Due Date">
+          <span className="text-sm font-medium">{format(new Date(task.due_date), 'MMM d, yyyy')}</span>
+        </MetaItem>
+      ) : (
+        <MetaItem icon={<Calendar className="w-3.5 h-3.5" />} label="Created">
+          <span className="text-sm font-medium">
+            {task.started_at ? format(new Date(task.started_at), 'MMM d, yyyy') : '--'}
+          </span>
+        </MetaItem>
+      )}
+    </div>
+  )
+}
+
+function MetaItem({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        {icon}
+        <span className="text-[10px] font-medium uppercase tracking-wider">{label}</span>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// ── Status-specific content panels ───────────────────────────────────
+
+function AssignedContent({ task }: { task: BoardTask }) {
+  return (
+    <div className="space-y-6">
+      <MetadataGrid task={task} />
+
       {task.description && (
         <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Description</h4>
-          <p className="text-sm whitespace-pre-wrap">{task.description}</p>
+          <SectionLabel>Description</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-sm whitespace-pre-wrap leading-relaxed">
+            {task.description}
+          </div>
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Assignee</p>
-          <div className="flex items-center gap-1.5">
-            {task.assignee ? (
-              <>
-                {task.assignee.agent_icon ? (
-                  <PremiumIcon name={task.assignee.agent_icon} size={16} />
-                ) : (
-                  <Bot className="w-4 h-4 text-primary" />
-                )}
-                <span className="text-sm">{task.assignee.agent_name}</span>
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">Unassigned</span>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Priority</p>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: priorityConf.color }} />
-            <span className="text-sm capitalize">{task.priority}</span>
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Review Mode</p>
-          <span className="text-sm capitalize">{task.review_mode}</span>
-        </div>
-
-        {task.due_date && (
-          <div className="space-y-1">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Due Date</p>
-            <span className="text-sm">{format(new Date(task.due_date), 'MMM d, yyyy')}</span>
-          </div>
-        )}
-      </div>
-
       {task.tags.length > 0 && (
         <div>
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Tags</p>
-          <div className="flex flex-wrap gap-1">
+          <SectionLabel icon={<Tag className="w-3 h-3" />}>Tags</SectionLabel>
+          <div className="flex flex-wrap gap-1.5">
             {task.tags.map((tag) => (
-              <span key={tag} className="text-xs px-2 py-0.5 rounded-full bg-secondary/50 text-muted-foreground">
+              <span key={tag} className="text-xs px-2.5 py-1 rounded-full bg-secondary/50 text-muted-foreground border border-border/30">
                 {tag}
               </span>
             ))}
@@ -131,48 +140,54 @@ function InboxView({ task }: { task: BoardTask }) {
   )
 }
 
-function InProgressView({ task }: { task: BoardTask }) {
+function InProgressContent({ task }: { task: BoardTask }) {
   return (
-    <div className="space-y-4">
-      {/* Live status indicator */}
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--info))]/10 border border-[hsl(var(--info))]/20">
-        <Loader2 className="w-4 h-4 text-[hsl(var(--info))] animate-spin" />
-        <span className="text-sm font-medium text-[hsl(var(--info))]">Agent is working...</span>
-        {task.started_at && (
-          <span className="text-xs text-muted-foreground ml-auto">{formatElapsed(task.started_at)} elapsed</span>
-        )}
+    <div className="space-y-6">
+      {/* Live status banner */}
+      <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--info))]/10 border border-[hsl(var(--info))]/20">
+        <Loader2 className="w-5 h-5 text-[hsl(var(--info))] animate-spin shrink-0" />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-[hsl(var(--info))]">Agent is working on this task...</p>
+          {task.started_at && (
+            <p className="text-xs text-muted-foreground mt-0.5">{formatElapsed(task.started_at)} elapsed</p>
+          )}
+        </div>
       </div>
 
-      {/* Step progress if available */}
+      {/* Step progress */}
       {task.step_progress && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Progress</h4>
-            <span className="text-xs text-muted-foreground">
-              Step {task.step_progress.current} of {task.step_progress.total}
+            <SectionLabel>Progress</SectionLabel>
+            <span className="text-xs text-muted-foreground font-mono">
+              {task.step_progress.current}/{task.step_progress.total}
             </span>
           </div>
-          <div className="h-2 bg-secondary/50 rounded-full overflow-hidden">
+          <div className="h-2.5 bg-secondary/50 rounded-full overflow-hidden">
             <div
-              className="h-full bg-[hsl(var(--info))] rounded-full transition-all"
+              className="h-full bg-[hsl(var(--info))] rounded-full transition-all duration-500"
               style={{ width: `${(task.step_progress.current / task.step_progress.total) * 100}%` }}
             />
           </div>
         </div>
       )}
 
+      <MetadataGrid task={task} />
+
       {task.description && (
         <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Task Description</h4>
-          <p className="text-sm whitespace-pre-wrap text-muted-foreground">{task.description}</p>
+          <SectionLabel>Task Description</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-sm whitespace-pre-wrap text-muted-foreground leading-relaxed">
+            {task.description}
+          </div>
         </div>
       )}
 
-      {/* Partial result (streams in as task updates) */}
+      {/* Live output */}
       {task.result && (
         <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Partial Output</h4>
-          <div className="glass-card rounded-lg p-3 text-sm whitespace-pre-wrap max-h-[300px] overflow-y-auto font-mono text-xs">
+          <SectionLabel>Live Output</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-xs font-mono whitespace-pre-wrap max-h-[400px] overflow-y-auto border border-[hsl(var(--info))]/10">
             {String(task.result)}
           </div>
         </div>
@@ -181,234 +196,261 @@ function InProgressView({ task }: { task: BoardTask }) {
   )
 }
 
-function ReviewView({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
+function ReviewContent({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
   return (
-    <div className="space-y-4">
-      {/* Completion info */}
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20">
-        <Clock className="w-4 h-4 text-[hsl(var(--warning))]" />
-        <span className="text-sm font-medium text-[hsl(var(--warning))]">Awaiting Review</span>
-        {task.completed_at && (
-          <span className="text-xs text-muted-foreground ml-auto">
-            Completed {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
-          </span>
-        )}
+    <div className="space-y-6">
+      {/* Review banner */}
+      <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20">
+        <Clock className="w-5 h-5 text-[hsl(var(--warning))] shrink-0" />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-[hsl(var(--warning))]">Awaiting Review</p>
+          {task.completed_at && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Completed {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* Agent result */}
-      {task.result && (
+      {/* Agent result — the main attraction */}
+      {task.result ? (
         <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Agent Result</h4>
-          <div className="glass-card rounded-lg p-3 text-sm whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+          <SectionLabel icon={<FileText className="w-3 h-3" />}>Agent Result</SectionLabel>
+          <div className="glass-card rounded-lg p-5 text-sm whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">
             {String(task.result)}
           </div>
         </div>
-      )}
-
-      {/* Original description */}
-      {task.description && (
-        <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Original Task</h4>
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{task.description}</p>
+      ) : (
+        <div className="glass-card rounded-lg p-5 text-center text-muted-foreground">
+          <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
+          <p className="text-sm">No result data available yet.</p>
+          <p className="text-xs mt-1">The agent may still be processing or the result was empty.</p>
         </div>
       )}
 
-      {/* Metadata */}
-      <div className="grid grid-cols-2 gap-3">
-        {task.started_at && (
-          <div>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Started</p>
-            <p className="text-sm">{format(new Date(task.started_at), 'MMM d, HH:mm')}</p>
+      {/* Original task for reference */}
+      {task.description && (
+        <div>
+          <SectionLabel>Original Task</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+            {task.description}
           </div>
+        </div>
+      )}
+
+      {/* Execution timeline */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        {task.started_at && (
+          <MetaItem icon={<Clock className="w-3.5 h-3.5" />} label="Started">
+            <span className="text-sm font-medium">{format(new Date(task.started_at), 'MMM d, HH:mm')}</span>
+          </MetaItem>
         )}
         {task.completed_at && (
-          <div>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Completed</p>
-            <p className="text-sm">{format(new Date(task.completed_at), 'MMM d, HH:mm')}</p>
-          </div>
+          <MetaItem icon={<CheckCircle2 className="w-3.5 h-3.5" />} label="Completed">
+            <span className="text-sm font-medium">{format(new Date(task.completed_at), 'MMM d, HH:mm')}</span>
+          </MetaItem>
+        )}
+        {task.started_at && task.completed_at && (
+          <MetaItem icon={<Clock className="w-3.5 h-3.5" />} label="Duration">
+            <span className="text-sm font-medium">
+              {formatDistanceToNow(new Date(task.started_at), { addSuffix: false })}
+            </span>
+          </MetaItem>
         )}
       </div>
 
       {/* Review actions */}
-      <div className="flex gap-2 pt-2">
+      <div className="flex gap-3 pt-2 border-t border-border/30">
         <Button
           variant="outline"
-          size="sm"
-          className="text-xs flex-1"
+          className="flex-1"
           onClick={() => onStatusChange('inbox')}
         >
-          <X className="w-3.5 h-3.5 mr-1" />
-          Reject → Inbox
+          <AlertCircle className="w-4 h-4 mr-2" />
+          Reject
         </Button>
         <Button
-          size="sm"
-          className="text-xs flex-1"
+          className="flex-1"
           onClick={() => onStatusChange('done')}
         >
-          <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-          Approve → Done
+          <CheckCircle2 className="w-4 h-4 mr-2" />
+          Approve
         </Button>
       </div>
     </div>
   )
 }
 
-function DoneView({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
+function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
   const isFailed = task.error_message != null
 
   return (
-    <div className="space-y-4">
-      {/* Status */}
+    <div className="space-y-6">
+      {/* Status banner */}
       <div className={cn(
-        'flex items-center gap-2 px-3 py-2 rounded-lg border',
+        'flex items-center gap-3 px-4 py-3 rounded-lg border',
         isFailed
           ? 'bg-destructive/10 border-destructive/20'
           : 'bg-[hsl(var(--success))]/10 border-[hsl(var(--success))]/20',
       )}>
         {isFailed ? (
-          <>
-            <AlertCircle className="w-4 h-4 text-destructive" />
-            <span className="text-sm font-medium text-destructive">Failed</span>
-          </>
+          <AlertCircle className="w-5 h-5 text-destructive shrink-0" />
         ) : (
-          <>
-            <CheckCircle2 className="w-4 h-4 text-[hsl(var(--success))]" />
-            <span className="text-sm font-medium text-[hsl(var(--success))]">Completed</span>
-          </>
+          <CheckCircle2 className="w-5 h-5 text-[hsl(var(--success))] shrink-0" />
         )}
-        {task.completed_at && (
-          <span className="text-xs text-muted-foreground ml-auto">
-            {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
-          </span>
-        )}
+        <div className="flex-1">
+          <p className={cn('text-sm font-medium', isFailed ? 'text-destructive' : 'text-[hsl(var(--success))]')}>
+            {isFailed ? 'Task Failed' : 'Task Completed'}
+          </p>
+          {task.completed_at && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* Error */}
+      {/* Error details */}
       {task.error_message && (
         <div>
-          <h4 className="text-xs font-medium text-destructive uppercase tracking-wider mb-1">Error</h4>
-          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
-            <p className="text-xs text-destructive font-mono whitespace-pre-wrap">{task.error_message}</p>
+          <SectionLabel>Error Details</SectionLabel>
+          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-4">
+            <p className="text-sm text-destructive font-mono whitespace-pre-wrap">{task.error_message}</p>
           </div>
         </div>
       )}
 
-      {/* Agent result */}
+      {/* Result */}
       {task.result && (
         <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Result</h4>
-          <div className="glass-card rounded-lg p-3 text-sm whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+          <SectionLabel icon={<FileText className="w-3 h-3" />}>Result</SectionLabel>
+          <div className="glass-card rounded-lg p-5 text-sm whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">
             {String(task.result)}
           </div>
         </div>
       )}
 
-      {/* Original description */}
+      {/* Original description (only if no result to show) */}
       {task.description && !task.result && (
         <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Task Description</h4>
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{task.description}</p>
+          <SectionLabel>Task Description</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+            {task.description}
+          </div>
         </div>
       )}
 
       {/* Timestamps */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {task.started_at && (
-          <div>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Started</p>
-            <p className="text-sm">{format(new Date(task.started_at), 'MMM d, HH:mm')}</p>
-          </div>
+          <MetaItem icon={<Clock className="w-3.5 h-3.5" />} label="Started">
+            <span className="text-sm font-medium">{format(new Date(task.started_at), 'MMM d, HH:mm')}</span>
+          </MetaItem>
         )}
         {task.completed_at && (
-          <div>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Completed</p>
-            <p className="text-sm">{format(new Date(task.completed_at), 'MMM d, HH:mm')}</p>
-          </div>
+          <MetaItem icon={<CheckCircle2 className="w-3.5 h-3.5" />} label="Completed">
+            <span className="text-sm font-medium">{format(new Date(task.completed_at), 'MMM d, HH:mm')}</span>
+          </MetaItem>
         )}
       </div>
 
       {/* Actions */}
-      <div className="flex gap-2 pt-2">
+      <div className="flex gap-3 pt-2 border-t border-border/30">
         <Button
           variant="outline"
-          size="sm"
-          className="text-xs"
           onClick={() => onStatusChange('in_progress')}
         >
-          <RotateCcw className="w-3.5 h-3.5 mr-1" />
-          Re-run
+          <RotateCcw className="w-4 h-4 mr-2" />
+          Re-run Task
         </Button>
       </div>
     </div>
   )
 }
 
-// ── Main Viewer ──────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────
 
-export function BoardTaskViewer({ task: propTask, onClose, className }: BoardTaskViewerProps) {
+function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5 mb-2">
+      {icon && <span className="text-muted-foreground">{icon}</span>}
+      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{children}</h4>
+    </div>
+  )
+}
+
+// ── Main Modal ──────────────────────────────────────────────────────
+
+export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTaskViewerProps) {
   const task = useLiveTask(propTask)
+  const updateStatus = useUpdateTaskStatus()
+
+  if (!task) return null
+
   const statusConf = STATUS_CONFIG[task.status] ?? STATUS_CONFIG['inbox']
   const priorityConf = PRIORITY_CONFIG[task.priority]
-  const updateStatus = useUpdateTaskStatus()
 
   const handleStatusChange = (newStatus: string) => {
     updateStatus.mutate({ taskId: task.id, status: newStatus as any })
+    if (newStatus === 'done') {
+      onOpenChange(false)
+    }
   }
 
   return (
-    <div className={cn(
-      'fixed inset-y-0 right-0 w-[480px] max-w-full bg-background border-l border-border shadow-2xl z-50',
-      'flex flex-col animate-in slide-in-from-right duration-200',
-      className,
-    )}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
-        <button onClick={onClose} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back
-        </button>
-        <div className="flex items-center gap-2">
-          {task.status === 'in_progress' && (
-            <Loader2 className="w-3 h-3 text-[hsl(var(--info))] animate-spin" />
-          )}
-          <div className={cn('w-2 h-2 rounded-full', statusConf.dotColor)} />
-          <span className="text-xs font-medium text-muted-foreground">{statusConf.label}</span>
-        </div>
-      </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[760px] md:max-w-[860px] max-h-[85vh] overflow-hidden flex flex-col p-0">
+        {/* Header */}
+        <div className="px-6 pt-5 pb-4 border-b border-border/30">
+          <div className="flex items-start justify-between gap-4 pr-8">
+            <div className="space-y-1.5 min-w-0 flex-1">
+              <DialogTitle className="text-lg font-semibold leading-tight">
+                {task.name}
+              </DialogTitle>
+              <DialogDescription className="flex items-center gap-2 flex-wrap">
+                {/* Status badge */}
+                <span className={cn(
+                  'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-0.5 rounded-full border',
+                  task.status === 'in_progress' && 'bg-[hsl(var(--info))]/10 border-[hsl(var(--info))]/30 text-[hsl(var(--info))]',
+                  task.status === 'review' && 'bg-[hsl(var(--warning))]/10 border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))]',
+                  task.status === 'done' && 'bg-[hsl(var(--success))]/10 border-[hsl(var(--success))]/30 text-[hsl(var(--success))]',
+                  (task.status === 'inbox' || task.status === 'assigned') && 'bg-secondary/50 border-border/30 text-muted-foreground',
+                )}>
+                  {task.status === 'in_progress' && <Loader2 className="w-3 h-3 animate-spin" />}
+                  <div className={cn('w-1.5 h-1.5 rounded-full', statusConf.dotColor)} />
+                  {statusConf.label}
+                </span>
 
-      {/* Title section */}
-      <div className="px-4 py-3 border-b border-border/30">
-        <h2 className="text-base font-semibold mb-1">{task.name}</h2>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {task.assignee && (
-            <>
-              {task.assignee.agent_icon ? (
-                <PremiumIcon name={task.assignee.agent_icon} size={14} />
-              ) : (
-                <Bot className="w-3.5 h-3.5 text-primary" />
-              )}
-              <span>{task.assignee.agent_name}</span>
-              <span>·</span>
-            </>
-          )}
-          <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: priorityConf.color }} />
-          <span className="capitalize">{task.priority}</span>
-          {task.started_at && (
-            <>
-              <span>·</span>
-              <span>{format(new Date(task.started_at), 'MMM d, HH:mm')}</span>
-            </>
-          )}
-        </div>
-      </div>
+                {/* Priority badge */}
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: priorityConf.color }} />
+                  <span className="capitalize">{task.priority}</span>
+                </span>
 
-      {/* Content — adapts based on status */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        {(task.status === 'inbox' || task.status === 'assigned') && <InboxView task={task} />}
-        {task.status === 'in_progress' && <InProgressView task={task} />}
-        {task.status === 'review' && <ReviewView task={task} onStatusChange={handleStatusChange} />}
-        {task.status === 'done' && <DoneView task={task} onStatusChange={handleStatusChange} />}
-      </div>
-    </div>
+                {/* Agent */}
+                {task.assignee && (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {task.assignee.agent_icon ? (
+                      <PremiumIcon name={task.assignee.agent_icon} size={14} />
+                    ) : (
+                      <Bot className="w-3.5 h-3.5 text-primary" />
+                    )}
+                    {task.assignee.agent_name}
+                  </span>
+                )}
+              </DialogDescription>
+            </div>
+          </div>
+        </div>
+
+        {/* Scrollable content area */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
+          {task.status === 'in_progress' && <InProgressContent task={task} />}
+          {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} />}
+          {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
