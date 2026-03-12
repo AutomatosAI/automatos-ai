@@ -1388,10 +1388,14 @@ To use actions, respond with JSON blocks like:
                 prompt = prompt + action_prompt
             
             # PRD-17: Dynamic tool injection based on required_tools
-            # Default to research tools for backwards compatibility
+            # If caller explicitly passed required_tools, honour it.
+            # Otherwise only inject research tools when the agent has NO
+            # Composio apps — Composio-only agents should not get internal
+            # search_knowledge / semantic_search / search_codebase tools.
+            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
             if required_tools is None:
-                required_tools = ["research"]
-            
+                required_tools = [] if composio_apps else ["research"]
+
             # Build OpenAI function calling schemas (traditional tools)
             tool_schemas = _build_tool_schemas(required_tools)
             
@@ -1405,7 +1409,6 @@ To use actions, respond with JSON blocks like:
             # Each Composio action becomes its own LLM tool with typed params
             # (e.g. COMPOSIO_SEARCH_WEB(query: str) instead of composio_execute(action, params)).
             _composio_workspace_id = None
-            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
             if composio_apps:
                 db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
                 _composio_workspace_id = getattr(db_agent, 'workspace_id', None) if db_agent else None
