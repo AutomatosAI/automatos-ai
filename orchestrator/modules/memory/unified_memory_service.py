@@ -21,6 +21,7 @@ Usage:
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 from dataclasses import asdict, dataclass, field
@@ -209,6 +210,101 @@ class UnifiedMemoryService:
         return MemoryNamespace(workspace_id=str(workspace_id))
 
     # ------------------------------------------------------------------
+    # L3 Cache Helpers (Redis-backed, 5-min TTL)
+    # ------------------------------------------------------------------
+
+    async def _get_cached_search(self, cache_key: str) -> Optional[List[Dict[str, Any]]]:
+        """Read cached Mem0 search results from Redis. Returns None on miss or error."""
+        redis_client = self._get_redis()
+        if redis_client is None:
+            return None
+        try:
+            loop = asyncio.get_event_loop()
+            conn = redis_client.get_redis()
+            raw: Optional[str] = await loop.run_in_executor(None, conn.get, cache_key)
+            if raw is None:
+                return None
+            return json.loads(raw)
+        except Exception:
+            logger.debug(
+                "[UnifiedMemoryService] _get_cached_search failed key=%s",
+                cache_key,
+                exc_info=True,
+            )
+            return None
+
+    async def _set_cached_search(self, cache_key: str, results: List[Dict[str, Any]]) -> None:
+        """Write Mem0 search results to Redis with configured TTL."""
+        from config import config
+
+        redis_client = self._get_redis()
+        if redis_client is None:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            conn = redis_client.get_redis()
+            payload = json.dumps(results)
+            ttl = config.MEMORY_CACHE_TTL_SECONDS
+            await loop.run_in_executor(
+                None,
+                lambda: conn.setex(cache_key, ttl, payload),
+            )
+            logger.debug(
+                "[UnifiedMemoryService] _set_cached_search key=%s ttl=%ds items=%d",
+                cache_key,
+                ttl,
+                len(results),
+            )
+        except Exception:
+            logger.debug(
+                "[UnifiedMemoryService] _set_cached_search failed key=%s",
+                cache_key,
+                exc_info=True,
+            )
+
+    async def _invalidate_search_cache(self, workspace_id: str) -> None:
+        """
+        Delete all cached search results for a workspace.
+
+        Uses SCAN (not KEYS) for production safety — avoids blocking Redis
+        on large keyspaces.
+        """
+        redis_client = self._get_redis()
+        if redis_client is None:
+            return
+        ns = self.namespace(workspace_id)
+        pattern = ns.cache_pattern()
+        try:
+            loop = asyncio.get_event_loop()
+            conn = redis_client.get_redis()
+
+            def _scan_and_delete():
+                deleted = 0
+                cursor = 0
+                while True:
+                    cursor, keys = conn.scan(cursor=cursor, match=pattern, count=100)
+                    if keys:
+                        conn.delete(*keys)
+                        deleted += len(keys)
+                    if cursor == 0:
+                        break
+                return deleted
+
+            deleted = await loop.run_in_executor(None, _scan_and_delete)
+            if deleted > 0:
+                logger.info(
+                    "[UnifiedMemoryService] _invalidate_search_cache pattern=%s deleted=%d",
+                    pattern,
+                    deleted,
+                )
+        except Exception:
+            logger.debug(
+                "[UnifiedMemoryService] _invalidate_search_cache failed pattern=%s",
+                pattern,
+                exc_info=True,
+            )
+
+    # ------------------------------------------------------------------
     # L3: Long-term Memory (Mem0)
     # ------------------------------------------------------------------
 
@@ -253,6 +349,8 @@ class UnifiedMemoryService:
                 user_id,
                 len(content),
             )
+            # Invalidate search cache for this workspace (fire-and-forget)
+            asyncio.ensure_future(self._invalidate_search_cache(workspace_id))
             return result
         except Exception:
             logger.error(
@@ -272,6 +370,10 @@ class UnifiedMemoryService:
         """
         Search L3 long-term memory via Mem0 semantic search.
 
+        Checks Redis cache first (5-min TTL). On cache miss, calls Mem0 and
+        caches the result. Cache key:
+        ``mem:cache:{workspace_id}:{agent_id|global}:{sha256(query)[:16]}``
+
         Args:
             workspace_id: Workspace scope.
             query: Natural-language search query.
@@ -284,6 +386,18 @@ class UnifiedMemoryService:
         ns = self.namespace(workspace_id)
         user_id = ns.resolve(agent_id)
 
+        # --- Check Redis cache first ---
+        query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
+        cache_key = ns.cache_key(agent_id, query_hash)
+        cached = await self._get_cached_search(cache_key)
+        if cached is not None:
+            logger.debug(
+                "[UnifiedMemoryService] search_long_term CACHE HIT key=%s",
+                cache_key,
+            )
+            return cached
+
+        # --- Cache miss: call Mem0 ---
         try:
             loop = asyncio.get_event_loop()
             results = await loop.run_in_executor(
@@ -296,6 +410,8 @@ class UnifiedMemoryService:
                 query[:60],
                 len(results),
             )
+            # Cache the results (fire-and-forget — cache failure is non-fatal)
+            asyncio.ensure_future(self._set_cached_search(cache_key, results))
             return results
         except Exception:
             logger.error(
