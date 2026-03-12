@@ -24,7 +24,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +55,11 @@ class MemoryNamespace:
         """Agent-specific memories (L3 per-agent)."""
         return f"mem:{self.workspace_id}:agent:{agent_id}"
 
-    def recipe(self, recipe_id: int) -> str:
+    def recipe(self, recipe_id: Union[int, str]) -> str:
         """Recipe learnings (L3 per-recipe)."""
         return f"mem:{self.workspace_id}:recipe:{recipe_id}"
 
-    def recipe_agent(self, recipe_id: int, agent_id: int) -> str:
+    def recipe_agent(self, recipe_id: Union[int, str], agent_id: Union[int, str]) -> str:
         """Per-agent step memories within a recipe (L3)."""
         return f"mem:{self.workspace_id}:recipe:{recipe_id}:agent:{agent_id}"
 
@@ -334,6 +334,90 @@ class UnifiedMemoryService:
                 exc_info=True,
             )
             return False
+
+    # ------------------------------------------------------------------
+    # L3: Scoped storage (for consumers with custom namespaces)
+    # ------------------------------------------------------------------
+
+    async def store_long_term_messages(
+        self,
+        user_id: str,
+        messages: List[Dict[str, str]],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Store messages in L3 long-term memory with a pre-built namespace user_id.
+
+        Use MemoryNamespace to build the user_id. This supports custom message
+        formats (e.g., conversational user+assistant pairs) for better Mem0
+        fact extraction.
+
+        Args:
+            user_id: Pre-built user_id from MemoryNamespace (e.g., ns.recipe(id)).
+            messages: Mem0-format messages list.
+            metadata: Optional metadata dict.
+
+        Returns:
+            Mem0 response dict, or error dict on failure.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._mem0.add(messages=messages, user_id=user_id, metadata=metadata),
+            )
+            logger.info(
+                "[UnifiedMemoryService] store_long_term_messages user_id=%s",
+                user_id,
+            )
+            return result
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] store_long_term_messages failed for user_id=%s",
+                user_id,
+                exc_info=True,
+            )
+            return {"success": False, "error": "store_long_term_messages failed"}
+
+    async def search_long_term_scoped(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search L3 long-term memory with a pre-built namespace user_id.
+
+        Use MemoryNamespace to build the user_id (e.g., ns.recipe(id)).
+
+        Args:
+            user_id: Pre-built user_id from MemoryNamespace.
+            query: Natural-language search query.
+            limit: Maximum results to return.
+
+        Returns:
+            List of memory item dicts (may be empty on failure).
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self._mem0.search(query=query, user_id=user_id, limit=limit),
+            )
+            logger.debug(
+                "[UnifiedMemoryService] search_long_term_scoped user_id=%s query=%r → %d results",
+                user_id,
+                query[:60],
+                len(results),
+            )
+            return results
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] search_long_term_scoped failed for user_id=%s",
+                user_id,
+                exc_info=True,
+            )
+            return []
 
     # ------------------------------------------------------------------
     # L3: Daily Logs (Mem0 with daily namespace)
