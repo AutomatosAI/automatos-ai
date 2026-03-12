@@ -26,6 +26,7 @@ from .intent_classifier import Intent, IntentResult, get_intent_classifier
 from .smart_memory import MemoryResult, get_smart_memory_manager
 from .smart_tool_router import ToolRoutingResult, get_smart_tool_router
 from .personality import get_happy_system_prompt, AutomatosPersonality, load_orchestrator_settings
+from modules.memory.unified_memory_service import get_unified_memory_service
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ class SmartChatOrchestrator:
         self.classifier = get_intent_classifier()
         self.memory_manager = get_smart_memory_manager()
         self.tool_router = get_smart_tool_router()
+        self._unified_memory = get_unified_memory_service()
 
         # Conversation state
         self.state = ConversationState()
@@ -220,6 +222,34 @@ class SmartChatOrchestrator:
                     reasoning="No tools needed for this intent"
                 )
 
+        # 3b. Hydrate L1 session context (Redis) — graceful degradation
+        session_context = ""
+        if chat_id:
+            try:
+                session = await self._unified_memory.get_session(
+                    workspace_id=self.workspace_id,
+                    conversation_id=chat_id,
+                )
+                if session and session.summary:
+                    # Cap at ~500 tokens (~2000 chars) per PRD-79 budget
+                    summary_text = session.summary[:2000]
+                    session_context = (
+                        f"## Session Context\n\n"
+                        f"Continuing conversation ({session.exchange_count} prior exchanges).\n"
+                        f"Recent context:\n{summary_text}"
+                    )
+                    logger.debug(
+                        "[Orchestrator] Session hydrated: chat_id=%s exchanges=%d",
+                        chat_id,
+                        session.exchange_count,
+                    )
+            except Exception:
+                logger.warning(
+                    "[Orchestrator] Session hydration failed for chat_id=%s — skipping",
+                    chat_id,
+                    exc_info=True,
+                )
+
         # 4. Build System Prompt
         memory_strings = []
         if memory_result and memory_result.memories:
@@ -254,6 +284,10 @@ class SmartChatOrchestrator:
             tool_names=tool_names,
             orchestrator_settings=orch_settings,
         )
+
+        # Inject L1 session context before memory/daily sections
+        if session_context:
+            system_prompt = f"{system_prompt}\n\n{session_context}"
 
         if daily_logs:
             system_prompt = f"{system_prompt}\n\n## Recent Activity\n\n{daily_logs}"
@@ -394,6 +428,24 @@ class SmartChatOrchestrator:
             )
         except Exception as exc:
             logger.debug("[Orchestrator] Daily summary storage skipped: %s", exc)
+
+        # Update L1 session in Redis (fire-and-forget — must not block response)
+        if chat_id:
+            try:
+                asyncio.create_task(
+                    self._unified_memory.update_session(
+                        workspace_id=self.workspace_id,
+                        conversation_id=chat_id,
+                        user_msg=user_message,
+                        assistant_msg=assistant_response,
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "[Orchestrator] Session update failed for chat_id=%s — skipping",
+                    chat_id,
+                    exc_info=True,
+                )
 
         return stored
 
