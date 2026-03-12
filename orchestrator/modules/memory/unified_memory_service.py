@@ -20,6 +20,7 @@ Usage:
     results = await service.search_long_term(workspace_id, query)
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -201,7 +202,11 @@ class UnifiedMemoryService:
         messages = [{"role": "user", "content": content}]
 
         try:
-            result = self._mem0.add(messages=messages, user_id=user_id, metadata=meta or None)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._mem0.add(messages=messages, user_id=user_id, metadata=meta or None),
+            )
             logger.info(
                 "[UnifiedMemoryService] store_long_term user_id=%s len=%d",
                 user_id,
@@ -239,7 +244,11 @@ class UnifiedMemoryService:
         user_id = ns.resolve(agent_id)
 
         try:
-            results = self._mem0.search(query=query, user_id=user_id, limit=limit)
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self._mem0.search(query=query, user_id=user_id, limit=limit),
+            )
             logger.debug(
                 "[UnifiedMemoryService] search_long_term user_id=%s query=%r → %d results",
                 user_id,
@@ -276,7 +285,11 @@ class UnifiedMemoryService:
         user_id = ns.resolve(agent_id)
 
         try:
-            results = self._mem0.get_all(user_id=user_id, limit=limit)
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self._mem0.get_all(user_id=user_id, limit=limit),
+            )
             logger.debug(
                 "[UnifiedMemoryService] get_all_memories user_id=%s → %d items",
                 user_id,
@@ -302,7 +315,11 @@ class UnifiedMemoryService:
             True if deleted, False on failure.
         """
         try:
-            result = self._mem0.delete(memory_id=memory_id)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._mem0.delete(memory_id=memory_id),
+            )
             logger.info("[UnifiedMemoryService] delete_memory id=%s success=%s", memory_id, result)
             return result
         except Exception:
@@ -312,6 +329,151 @@ class UnifiedMemoryService:
                 exc_info=True,
             )
             return False
+
+    # ------------------------------------------------------------------
+    # L3: Daily Logs (Mem0 with daily namespace)
+    # ------------------------------------------------------------------
+
+    async def store_daily_log(
+        self,
+        workspace_id: str,
+        content: str,
+        agent_id: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Store a daily log entry in Mem0 under the daily namespace.
+
+        Args:
+            workspace_id: Workspace scope.
+            content: Log entry text.
+            agent_id: Optional agent that generated the log.
+            metadata: Additional metadata (must include 'date' and 'type').
+
+        Returns:
+            Mem0 response dict, or error dict on failure.
+        """
+        ns = self.namespace(workspace_id)
+        user_id = ns.daily()
+        messages = [{"role": "system", "content": content}]
+
+        try:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._mem0.add(messages=messages, user_id=user_id, metadata=metadata),
+            )
+            logger.info(
+                "[UnifiedMemoryService] store_daily_log user_id=%s len=%d",
+                user_id,
+                len(content),
+            )
+            return result
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] store_daily_log failed for user_id=%s",
+                user_id,
+                exc_info=True,
+            )
+            return {"success": False, "error": "store_daily_log failed"}
+
+    async def get_all_daily_logs(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve all daily log entries from Mem0 for a workspace.
+
+        Args:
+            workspace_id: Workspace scope.
+            limit: Maximum items.
+
+        Returns:
+            List of memory item dicts.
+        """
+        ns = self.namespace(workspace_id)
+        user_id = ns.daily()
+
+        try:
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self._mem0.get_all(user_id=user_id, limit=limit),
+            )
+            logger.debug(
+                "[UnifiedMemoryService] get_all_daily_logs user_id=%s → %d items",
+                user_id,
+                len(results),
+            )
+            return results
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] get_all_daily_logs failed for user_id=%s",
+                user_id,
+                exc_info=True,
+            )
+            return []
+
+    # ------------------------------------------------------------------
+    # L3: Two-tier store (global + agent-specific)
+    # ------------------------------------------------------------------
+
+    async def store_two_tier(
+        self,
+        workspace_id: str,
+        messages: List[Dict[str, str]],
+        agent_id: Optional[int],
+        tier: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[tuple]:
+        """
+        Store content in global and/or agent-specific tiers.
+
+        Args:
+            workspace_id: Workspace scope.
+            messages: Mem0-format messages list.
+            agent_id: Agent scope (required for 'agent' or 'both' tiers).
+            tier: One of 'global', 'agent', or 'both'.
+            metadata: Base metadata (tier tag is added automatically).
+
+        Returns:
+            List of (tier_name, result_dict) tuples.
+        """
+        ns = self.namespace(workspace_id)
+        base_meta = dict(metadata) if metadata else {}
+        results: List[tuple] = []
+
+        async def _store(user_id: str, tier_name: str) -> tuple:
+            meta = {**base_meta, "tier": tier_name}
+            try:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda uid=user_id, m=meta: self._mem0.add(
+                        messages=messages, user_id=uid, metadata=m
+                    ),
+                )
+                return (tier_name, result)
+            except Exception:
+                logger.error(
+                    "[UnifiedMemoryService] store_two_tier %s failed user_id=%s",
+                    tier_name,
+                    user_id,
+                    exc_info=True,
+                )
+                return (tier_name, {"error": f"store_{tier_name} failed"})
+
+        tasks = []
+        if tier in ("global", "both"):
+            tasks.append(_store(ns.workspace(), "global"))
+        if tier in ("agent", "both"):
+            tasks.append(_store(ns.agent(agent_id) if agent_id else ns.workspace(), "agent"))
+
+        if tasks:
+            results = list(await asyncio.gather(*tasks))
+
+        return results
 
     # ------------------------------------------------------------------
     # L2: Short-term Memory (Postgres) — stubbed for US-013

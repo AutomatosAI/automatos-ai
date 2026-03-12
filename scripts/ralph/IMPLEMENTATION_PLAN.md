@@ -21,7 +21,7 @@ Replace 12 scattered Mem0Client instances with a single UnifiedMemoryService. Ad
 
 - [x] **US-001: Create UnifiedMemoryService singleton** — `orchestrator/modules/memory/unified_memory_service.py` with shared Mem0Client, Redis client, MemoryNamespace helper for standardized user_id formats. Public methods stubbed.
 - [x] **US-002: Implement L3 long-term methods** — store_long_term(), search_long_term(), get_all_memories(), delete_memory() delegating to shared Mem0Client with MemoryNamespace user_ids.
-- [ ] **US-003: Migrate SmartMemoryManager** — Replace lazy Mem0Client init with UnifiedMemoryService. Preserve 2-min LRU cache and _track_memory_access().
+- [x] **US-003: Migrate SmartMemoryManager** — Replace lazy Mem0Client init with UnifiedMemoryService. Preserve 2-min LRU cache and _track_memory_access().
 - [ ] **US-004: Migrate platform_executor.py** — Replace 5 inline Mem0Client() calls (~lines 533, 1050, 1272, 3368, 3417) with UnifiedMemoryService.
 - [ ] **US-005: Migrate RecipeMemoryService** — Replace self._mem0 with UnifiedMemoryService. Add recipe namespace to MemoryNamespace if needed.
 - [ ] **US-006: Migrate widget_memory.py + memory_stats.py** — Replace lazy Mem0Client inits. Fix widget's raw workspace_id scoping via MemoryNamespace.
@@ -64,8 +64,10 @@ Replace 12 scattered Mem0Client instances with a single UnifiedMemoryService. Ad
 
 ## Discovered Issues
 
-_(Ralph will add issues found during implementation here)_
+1. **US-002 L3 methods were blocking the event loop** — `store_long_term()`, `search_long_term()`, `get_all_memories()`, `delete_memory()` called synchronous `Mem0Client` methods directly in async functions. Fixed in US-003 by wrapping all calls in `asyncio.run_in_executor()`.
+2. **Namespace migration breaks existing daily logs** — Old format `ws_{id}_daily` → new format `mem:{id}:daily`. Existing daily log entries in Mem0 under old keys will not be found. This is by design per PRD-79 but should be communicated to users.
+3. **pgvector module not installed locally** — `modules/memory/storage/knowledge_system.py` imports `pgvector.sqlalchemy` which is not in local dev dependencies. Pre-existing issue, unrelated to US-003.
 
 ## Notes
 
-_(Ralph will add implementation notes and learnings here)_
+- **US-003:** Added `store_two_tier()`, `store_daily_log()`, `get_all_daily_logs()` to UnifiedMemoryService to support SmartMemoryManager's two-tier storage and daily log patterns. SmartMemoryManager no longer has any direct Mem0Client usage. The 2-min LRU cache, tier classification, memory formatting, and _track_memory_access remain unchanged.
