@@ -174,10 +174,25 @@ class ComposioToolExecutor:
             }
 
         action_upper = action.upper()
-        # Prefer explicit app_name passed from composio_execute() call; fall back to parsing from action.
-        app_name = (str(app_name).strip().upper() if app_name else None) or (
-            action_upper.split("_", 1)[0].strip() if "_" in action_upper else None
-        )
+        # Prefer explicit app_name passed from composio_execute() call;
+        # then try ComposioActionCache (handles multi-word apps like COMPOSIO_SEARCH);
+        # last resort: split on first underscore.
+        app_name = (str(app_name).strip().upper() if app_name else None)
+        if not app_name:
+            # Look up in cache — this is the reliable source for app_name
+            try:
+                from core.models.composio_cache import ComposioActionCache
+                cached = (
+                    self.db.query(ComposioActionCache.app_name)
+                    .filter(func.upper(ComposioActionCache.action_name) == action_upper)
+                    .first()
+                )
+                if cached:
+                    app_name = cached.app_name.upper()
+            except Exception:
+                pass  # Fall through to split heuristic
+        if not app_name:
+            app_name = action_upper.split("_", 1)[0].strip() if "_" in action_upper else None
         if not app_name:
             return {
                 "success": False,

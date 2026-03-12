@@ -1258,7 +1258,7 @@ To use actions, respond with JSON blocks like:
                 app_names = [a.app_name for a in composio_assignments if a.app_name]
                 entity_id = str(_composio_workspace_id) if _composio_workspace_id else None
 
-                composio_action_set = set()
+                composio_action_map = {}  # action_name -> app_name
                 if entity_id:
                     try:
                         from core.composio.client import get_composio_client
@@ -1281,12 +1281,13 @@ To use actions, respond with JSON blocks like:
                         for entry in sdk_schemas:
                             schema = entry.get("schema")
                             action_name = entry.get("action_name", "")
+                            entry_app = entry.get("app_name", "")
                             if schema and action_name:
                                 tool_schemas.append(schema)
-                                composio_action_set.add(action_name)
+                                composio_action_map[action_name] = entry_app.upper() if entry_app else ""
 
                         self.logger.info(
-                            f"🔌 Composio: {len(composio_action_set)} per-action tools from SDK, "
+                            f"🔌 Composio: {len(composio_action_map)} per-action tools from SDK, "
                             f"apps={app_names} (workspace={_composio_workspace_id})"
                         )
                     except Exception as e:
@@ -1294,7 +1295,7 @@ To use actions, respond with JSON blocks like:
 
                 # Fallback: if SDK fetch returned nothing, use the legacy composio_execute meta-tool
                 # so the agent still has SOME composio capability.
-                if not composio_action_set:
+                if not composio_action_map:
                     tool_schemas.append({
                         "type": "function",
                         "function": {
@@ -1315,9 +1316,9 @@ To use actions, respond with JSON blocks like:
                     })
                     self.logger.warning(f"🔌 Composio: fallback to composio_execute meta-tool, apps={app_names}")
 
-                # Tell the executor which tool names are Composio actions
-                if composio_action_set and agent_runtime.tool_executor:
-                    agent_runtime.tool_executor.composio_actions = composio_action_set
+                # Tell the executor which tool names are Composio actions (action -> app mapping)
+                if composio_action_map and agent_runtime.tool_executor:
+                    agent_runtime.tool_executor.composio_actions = composio_action_map
 
             all_tool_names = [t['function']['name'] for t in tool_schemas]
             self.logger.info(f"📦 Providing {len(tool_schemas)} total tools to agent: {all_tool_names}")

@@ -86,8 +86,9 @@ class UnifiedToolExecutor:
 
         # Per-action Composio tool names (set by agent_factory after SDK schema fetch).
         # When the LLM calls e.g. COMPOSIO_SEARCH_WEB(query="..."), the executor
-        # checks this set to route it to the Composio executor.
-        self.composio_actions: set = set()
+        # checks this dict to route it to the Composio executor.
+        # Maps action_name -> app_name (e.g. "COMPOSIO_SEARCH_WEB" -> "COMPOSIO_SEARCH")
+        self.composio_actions: dict = {}
         
         # Tool routing map
         self.tool_routes = {
@@ -330,10 +331,11 @@ class UnifiedToolExecutor:
             # The LLM calls e.g. COMPOSIO_SEARCH_WEB(query="...") directly.
             # Parameters are flat — no nested action/params wrapping.
             if tool_name in self.composio_actions:
-                logger.info(f"[tool-trace {trace}] Routing Composio per-action tool: {tool_name}")
+                resolved_app = self.composio_actions[tool_name]
+                logger.info(f"[tool-trace {trace}] Routing Composio per-action tool: {tool_name} (app={resolved_app})")
                 return await self._execute_composio_execute(
                     tool_name,
-                    {"action": tool_name, "params": parameters},
+                    {"action": tool_name, "params": parameters, "app_name": resolved_app},
                     agent_id,
                     workspace_id=workspace_id,
                     trace_id=trace,
