@@ -97,6 +97,12 @@ class Config:
     CONTEXT_BUDGET_AWARENESS: int = int(os.getenv("CONTEXT_BUDGET_AWARENESS", "200"))
     # Knowledge awareness: TTL for per-workspace capability map cached in Redis
     MEMORY_AWARENESS_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_AWARENESS_CACHE_TTL_SECONDS", "600"))
+    # L2 Decay: Ebbinghaus decay rate (higher = faster forgetting)
+    MEMORY_DECAY_RATE: float = float(os.getenv("MEMORY_DECAY_RATE", "0.1"))
+    # L2 Decay: threshold below which items are archived
+    MEMORY_DECAY_ARCHIVE_THRESHOLD: float = float(os.getenv("MEMORY_DECAY_ARCHIVE_THRESHOLD", "0.3"))
+    # L2 Decay: batch size per workspace (rows per transaction)
+    MEMORY_DECAY_BATCH_SIZE: int = int(os.getenv("MEMORY_DECAY_BATCH_SIZE", "100"))
 
     # =============================================================================
     # API SECURITY

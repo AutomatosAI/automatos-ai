@@ -1076,6 +1076,200 @@ class UnifiedMemoryService:
             return False
 
     # ------------------------------------------------------------------
+    # L2: Ebbinghaus Decay & Archival
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _run_decay_for_workspace_sync(
+        workspace_id: str,
+        decay_rate: float,
+        archive_threshold: float,
+        batch_size: int,
+    ) -> Dict[str, int]:
+        """
+        Calculate Ebbinghaus retention scores and archive expired L2 items
+        for a single workspace (synchronous, runs in executor).
+
+        Formula:
+            retention = exp(-decay_rate * hours_elapsed)
+                        * (1 + 0.5*importance + 0.1*min(access_count, 10))
+
+        Returns:
+            {"decayed": N, "archived": M} counts.
+        """
+        import math
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        now = datetime.now(timezone.utc)
+        decayed = 0
+        archived = 0
+
+        with get_db_session() as db:
+            # Process in batches using offset pagination.
+            # The partial index ix_mem_st_ws_decay covers
+            # (workspace_id, decay_score) WHERE archived_at IS NULL.
+            offset = 0
+            while True:
+                rows = (
+                    db.query(MemoryShortTerm)
+                    .filter(
+                        MemoryShortTerm.workspace_id == workspace_id,
+                        MemoryShortTerm.archived_at.is_(None),
+                    )
+                    .order_by(MemoryShortTerm.created_at)
+                    .offset(offset)
+                    .limit(batch_size)
+                    .all()
+                )
+                if not rows:
+                    break
+
+                for row in rows:
+                    created = row.created_at
+                    if created is None:
+                        continue
+                    # Ensure timezone-aware comparison
+                    if created.tzinfo is None:
+                        created = created.replace(tzinfo=timezone.utc)
+                    hours_elapsed = max(
+                        (now - created).total_seconds() / 3600.0, 0.0
+                    )
+                    importance = row.importance or 0.0
+                    access_count = row.access_count or 0
+
+                    retention = math.exp(-decay_rate * hours_elapsed) * (
+                        1.0 + 0.5 * importance + 0.1 * min(access_count, 10)
+                    )
+
+                    row.decay_score = retention
+                    decayed += 1
+
+                    if retention < archive_threshold:
+                        row.archived_at = now
+                        archived += 1
+
+                db.flush()
+                offset += batch_size
+
+        return {"decayed": decayed, "archived": archived}
+
+    async def run_decay(self, workspace_id: str) -> Dict[str, int]:
+        """
+        Run Ebbinghaus decay scoring for a single workspace's L2 items.
+
+        Updates decay_score on every non-archived row and archives items
+        whose retention drops below the configured threshold.
+
+        Args:
+            workspace_id: Workspace to process.
+
+        Returns:
+            {"decayed": N, "archived": M} counts, or {"decayed": 0, "archived": 0}
+            on failure.
+        """
+        from config import config
+
+        try:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                self._run_decay_for_workspace_sync,
+                workspace_id,
+                config.MEMORY_DECAY_RATE,
+                config.MEMORY_DECAY_ARCHIVE_THRESHOLD,
+                config.MEMORY_DECAY_BATCH_SIZE,
+            )
+            logger.info(
+                "[UnifiedMemoryService] run_decay ws=%s decayed=%d archived=%d",
+                workspace_id,
+                result["decayed"],
+                result["archived"],
+            )
+            return result
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] run_decay failed ws=%s",
+                workspace_id,
+                exc_info=True,
+            )
+            return {"decayed": 0, "archived": 0}
+
+    async def run_decay_all(self) -> Dict[str, Any]:
+        """
+        Run Ebbinghaus decay across ALL workspaces that have L2 items.
+
+        Iterates distinct workspace_ids from memory_short_term and calls
+        run_decay() per workspace. One workspace failure does not stop
+        processing others.
+
+        Returns:
+            {"workspaces_processed": N, "total_decayed": M, "total_archived": K,
+             "errors": E}
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            workspace_ids = await loop.run_in_executor(
+                None, self._get_active_workspace_ids_sync,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] run_decay_all failed to fetch workspace_ids",
+                exc_info=True,
+            )
+            return {
+                "workspaces_processed": 0,
+                "total_decayed": 0,
+                "total_archived": 0,
+                "errors": 1,
+            }
+
+        total_decayed = 0
+        total_archived = 0
+        errors = 0
+
+        for ws_id in workspace_ids:
+            result = await self.run_decay(str(ws_id))
+            if result["decayed"] == 0 and result["archived"] == 0:
+                # Could be empty or error — don't count as error unless logged
+                pass
+            total_decayed += result["decayed"]
+            total_archived += result["archived"]
+
+        logger.info(
+            "[UnifiedMemoryService] run_decay_all complete: "
+            "workspaces=%d decayed=%d archived=%d errors=%d",
+            len(workspace_ids),
+            total_decayed,
+            total_archived,
+            errors,
+        )
+        return {
+            "workspaces_processed": len(workspace_ids),
+            "total_decayed": total_decayed,
+            "total_archived": total_archived,
+            "errors": errors,
+        }
+
+    @staticmethod
+    def _get_active_workspace_ids_sync() -> List[str]:
+        """
+        Fetch distinct workspace_ids that have non-archived L2 rows
+        (synchronous, runs in executor).
+        """
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+        from sqlalchemy import distinct
+
+        with get_db_session() as db:
+            rows = (
+                db.query(distinct(MemoryShortTerm.workspace_id))
+                .filter(MemoryShortTerm.archived_at.is_(None))
+                .all()
+            )
+            return [str(r[0]) for r in rows]
+
+    # ------------------------------------------------------------------
     # L1: Session Memory (Redis)
     # ------------------------------------------------------------------
 
