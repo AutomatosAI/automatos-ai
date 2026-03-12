@@ -258,6 +258,15 @@ class SmartChatOrchestrator:
         if daily_logs:
             system_prompt = f"{system_prompt}\n\n## Recent Activity\n\n{daily_logs}"
 
+        # Inject platform action summary so LLM knows what platform_execute can do
+        try:
+            from modules.tools.discovery import get_action_registry
+            platform_summary = get_action_registry().build_prompt_summary()
+            if platform_summary:
+                system_prompt = f"{system_prompt}\n\n{platform_summary}"
+        except Exception as e:
+            logger.warning(f"Failed to inject platform action summary into chatbot prompt: {e}")
+
         # 5. Convert messages to LLM format
         llm_messages = self._convert_messages(messages)
 
