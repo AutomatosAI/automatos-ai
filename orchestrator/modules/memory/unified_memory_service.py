@@ -63,6 +63,10 @@ class MemoryNamespace:
         """Per-agent step memories within a recipe (L3)."""
         return f"mem:{self.workspace_id}:recipe:{recipe_id}:agent:{agent_id}"
 
+    def workflow(self, workflow_id: Union[int, str]) -> str:
+        """Workflow execution memories (L3 per-workflow)."""
+        return f"mem:{self.workspace_id}:workflow:{workflow_id}"
+
     def daily(self) -> str:
         """Daily activity logs (L2)."""
         return f"mem:{self.workspace_id}:daily"
@@ -414,6 +418,43 @@ class UnifiedMemoryService:
         except Exception:
             logger.error(
                 "[UnifiedMemoryService] search_long_term_scoped failed for user_id=%s",
+                user_id,
+                exc_info=True,
+            )
+            return []
+
+    async def get_all_memories_scoped(
+        self,
+        user_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve all L3 long-term memories with a pre-built namespace user_id.
+
+        Use MemoryNamespace to build the user_id (e.g., ns.recipe(id)).
+
+        Args:
+            user_id: Pre-built user_id from MemoryNamespace.
+            limit: Maximum items.
+
+        Returns:
+            List of memory item dicts.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self._mem0.get_all(user_id=user_id, limit=limit),
+            )
+            logger.debug(
+                "[UnifiedMemoryService] get_all_memories_scoped user_id=%s → %d items",
+                user_id,
+                len(results),
+            )
+            return results
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] get_all_memories_scoped failed for user_id=%s",
                 user_id,
                 exc_info=True,
             )

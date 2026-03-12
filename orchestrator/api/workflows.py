@@ -2060,35 +2060,37 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
 
                     await stage_tracker.complete_stage(2, {"agents_assigned": len(agent_assignments)})
             
-            # MEMORY SYSTEM INITIALIZATION (Mem0 Integration with Workspace Isolation)
-            logger.info(f"🧠 Initializing Mem0 memory system with workspace isolation...")
-            mem0_client = None
+            # MEMORY SYSTEM INITIALIZATION (UnifiedMemoryService with Workspace Isolation)
+            logger.info(f"🧠 Initializing memory system with workspace isolation...")
+            memory_service_available = False
             memory_retrieval_results = {}
 
             # Get workspace_id for memory scoping
             workspace_id = execution.workspace_id
 
             try:
-                # Initialize Mem0 client
-                from modules.memory.integrations.mem0_client import Mem0Client
+                from modules.memory.unified_memory_service import get_unified_memory_service, MemoryNamespace
 
-                mem0_client = Mem0Client()
-                logger.info(f"✅ Mem0 client initialized")
+                memory_service = get_unified_memory_service()
+                if not memory_service.is_mem0_configured:
+                    raise RuntimeError("Mem0 is not configured")
+                memory_service_available = True
+                logger.info(f"✅ UnifiedMemoryService initialized")
 
-                # Create workspace-scoped user_id for memory isolation
-                # Format: workspace_{workspace_id}_workflow_{workflow_id}
-                memory_scope_id = f"workspace_{workspace_id}_workflow_{execution.workflow_id}"
+                # Use MemoryNamespace for workspace-scoped workflow memory
+                ns = MemoryNamespace(workspace_id=str(workspace_id))
+                memory_scope_id = ns.workflow(execution.workflow_id)
 
-                # Retrieve workflow memories from Mem0
+                # Retrieve workflow memories
                 logger.info(f"🧠 Retrieving workflow memories for scope: {memory_scope_id}")
 
-                memories = mem0_client.search(
-                    query=task_description,
+                memories = await memory_service.search_long_term_scoped(
                     user_id=memory_scope_id,
-                    limit=10
+                    query=task_description,
+                    limit=10,
                 )
 
-                logger.info(f"✅ Retrieved {len(memories)} memories from Mem0")
+                logger.info(f"✅ Retrieved {len(memories)} memories")
 
                 # Format memories for execution context
                 memory_retrieval_results = {
@@ -2119,7 +2121,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     logger.info(f"📊 Sample memories: {sample_memories}")
 
             except Exception as e:
-                logger.error(f"❌ Mem0 initialization or retrieval failed: {e}")
+                logger.error(f"❌ Memory initialization or retrieval failed: {e}", exc_info=True)
                 logger.warning(f"⚠️ Continuing workflow without memory system")
                 execution.input_data["memory_retrieval"] = {
                     "is_real": False,
@@ -2127,8 +2129,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 }
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
-                # Ensure mem0_client is None so we know it's not available
-                mem0_client = None
+                memory_service_available = False
             
             # Complete PLAN phase, start PREPARE phase
             if "PLAN" in active_phases:
@@ -2934,13 +2935,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             # ========== STAGE 8: MEMORY STORAGE ==========
             await stage_tracker.start_stage(8)
 
-            # MEMORY STORAGE (Store experiences to Mem0 with workspace isolation)
-            logger.info(f"💾 Storing execution experiences to Mem0...")
+            # MEMORY STORAGE (Store experiences via UnifiedMemoryService)
+            logger.info(f"💾 Storing execution experiences to memory...")
             memory_storage_results = {}
             try:
-                if mem0_client is not None and 'aggregated_results' in locals():
-                    # Create workspace-scoped memory storage
-                    memory_scope_id = f"workspace_{workspace_id}_workflow_{execution.workflow_id}"
+                if memory_service_available and 'aggregated_results' in locals():
+                    # Use MemoryNamespace for workspace-scoped workflow memory
+                    ns = MemoryNamespace(workspace_id=str(workspace_id))
+                    memory_scope_id = ns.workflow(execution.workflow_id)
 
                     # Build experience summary from execution
                     quality_scores = aggregated_results.quality_scores
@@ -2967,7 +2969,7 @@ Key Learnings:
                             result = step["execution_result"]
                             execution_summary_text += f"\n- Step {idx+1}: {step.get('description', 'Unknown')[:80]} - {result.get('status', 'unknown')}"
 
-                    # Store to Mem0
+                    # Store via UnifiedMemoryService
                     messages = [
                         {"role": "system", "content": "Workflow execution completed"},
                         {"role": "assistant", "content": execution_summary_text}
@@ -2981,11 +2983,11 @@ Key Learnings:
                         "timestamp": datetime.now().isoformat()
                     }
 
-                    logger.info(f"💾 Storing memory to Mem0 scope: {memory_scope_id}")
-                    mem0_result = mem0_client.add(
-                        messages=messages,
+                    logger.info(f"💾 Storing memory to scope: {memory_scope_id}")
+                    mem0_result = await memory_service.store_long_term_messages(
                         user_id=memory_scope_id,
-                        metadata=metadata
+                        messages=messages,
+                        metadata=metadata,
                     )
 
                     memory_storage_results = {
@@ -3003,12 +3005,12 @@ Key Learnings:
                     attributes.flag_modified(execution, "input_data")
                     db.commit()
 
-                    logger.info(f"✅ Stored execution experience to Mem0 (quality: {quality_scores.overall:.0%})")
+                    logger.info(f"✅ Stored execution experience (quality: {quality_scores.overall:.0%})")
                 else:
-                    logger.warning("Mem0 client not initialized, skipping memory storage")
+                    logger.warning("Memory service not available, skipping memory storage")
 
             except Exception as e:
-                logger.error(f"❌ Memory storage failed: {e}")
+                logger.error(f"❌ Memory storage failed: {e}", exc_info=True)
                 execution.input_data["memory_storage"] = {
                     "is_real": False,
                     "error": str(e)

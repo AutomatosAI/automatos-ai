@@ -675,25 +675,28 @@ async def delete_workflow_recipe(
         # Cleanup trigger subscriptions before deleting
         _cleanup_trigger_subscriptions(recipe.id, db)
 
-        # Cleanup Mem0 memories scoped to this recipe
+        # Cleanup Mem0 memories scoped to this recipe via UnifiedMemoryService
         try:
-            from core.services.recipe_memory_service import RecipeMemoryService
-            from modules.memory.integrations.mem0_client import Mem0Client
-            mem0 = Mem0Client()
+            from modules.memory.unified_memory_service import get_unified_memory_service, MemoryNamespace
+
+            memory_service = get_unified_memory_service()
             template_id = recipe.template_id or str(recipe.id)
-            recipe_scope = f"ws_{ctx.workspace_id}_recipe_{template_id}"
+            ns = MemoryNamespace(workspace_id=str(ctx.workspace_id))
+            recipe_scope = ns.recipe(template_id)
             # Delete all memories under the recipe scope
-            all_mems = mem0.get_all(user_id=recipe_scope, limit=200)
+            all_mems = await memory_service.get_all_memories_scoped(
+                user_id=recipe_scope, limit=200
+            )
             deleted_count = 0
             for mem in all_mems:
                 mem_id = mem.get("id") if isinstance(mem, dict) else None
                 if mem_id:
-                    mem0.delete(mem_id)
+                    await memory_service.delete_memory(mem_id)
                     deleted_count += 1
             if deleted_count:
-                logger.info(f"[delete_recipe] Cleaned up {deleted_count} Mem0 memories for scope {recipe_scope}")
+                logger.info(f"[delete_recipe] Cleaned up {deleted_count} memories for scope {recipe_scope}")
         except Exception as e:
-            logger.info(f"[delete_recipe] Mem0 cleanup skipped: {e}")
+            logger.info(f"[delete_recipe] Memory cleanup skipped: {e}")
 
         db.delete(recipe)
         db.commit()
