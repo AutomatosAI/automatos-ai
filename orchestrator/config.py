@@ -77,7 +77,17 @@ class Config:
             return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/0"
         
         return None
-    
+
+    # =============================================================================
+    # MEMORY — Unified Memory Service (PRD-79)
+    # =============================================================================
+    # L1 Session: TTL for active sessions (24 hours)
+    MEMORY_SESSION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_TTL_SECONDS", "86400"))
+    # L1 Session: TTL after end_session() called (1 hour consolidation window)
+    MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS", "3600"))
+    # L3 Cache: TTL for Mem0 search result caching in Redis
+    MEMORY_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_CACHE_TTL_SECONDS", "300"))
+
     # =============================================================================
     # API SECURITY
     # =============================================================================

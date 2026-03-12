@@ -21,9 +21,10 @@ Usage:
 """
 
 import asyncio
+import json
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,37 @@ class MemoryNamespace:
         if agent_id is not None:
             return self.agent(agent_id)
         return self.workspace()
+
+
+# ---------------------------------------------------------------------------
+# SessionMemory — L1 working memory stored in Redis
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SessionMemory:
+    """
+    L1 session state stored in Redis per conversation.
+
+    Persists across browser refreshes within a 24-hour window so agents
+    remember what was just discussed. Consolidated into L2 after session ends.
+    """
+
+    summary: str = ""
+    decisions: List[str] = field(default_factory=list)
+    action_items: List[str] = field(default_factory=list)
+    exchange_count: int = 0
+    last_updated: str = ""  # ISO-8601 string for JSON serialisation
+    ended: bool = False
+
+    def to_json(self) -> str:
+        """Serialise to JSON for Redis storage."""
+        return json.dumps(asdict(self))
+
+    @classmethod
+    def from_json(cls, raw: str) -> "SessionMemory":
+        """Deserialise from JSON string."""
+        data = json.loads(raw)
+        return cls(**data)
 
 
 # ---------------------------------------------------------------------------
@@ -632,16 +664,47 @@ class UnifiedMemoryService:
         return []
 
     # ------------------------------------------------------------------
-    # L1: Session Memory (Redis) — stubbed for US-009
+    # L1: Session Memory (Redis)
     # ------------------------------------------------------------------
 
     async def get_session(
         self,
         workspace_id: str,
         conversation_id: str,
-    ) -> Optional[Dict[str, Any]]:
-        """Retrieve L1 session from Redis. Implemented in US-009."""
-        return None
+    ) -> Optional[SessionMemory]:
+        """
+        Retrieve L1 session from Redis.
+
+        Returns None if no session exists or Redis is unavailable.
+        Redis failures never break chat — they are logged and swallowed.
+        """
+        redis_client = self._get_redis()
+        if redis_client is None:
+            return None
+
+        ns = self.namespace(workspace_id)
+        key = ns.session(conversation_id)
+
+        try:
+            loop = asyncio.get_event_loop()
+            conn = redis_client.get_redis()
+            raw: Optional[str] = await loop.run_in_executor(None, conn.get, key)
+            if raw is None:
+                return None
+            session = SessionMemory.from_json(raw)
+            logger.debug(
+                "[UnifiedMemoryService] get_session key=%s exchanges=%d",
+                key,
+                session.exchange_count,
+            )
+            return session
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] get_session failed for key=%s",
+                key,
+                exc_info=True,
+            )
+            return None
 
     async def update_session(
         self,
@@ -650,16 +713,130 @@ class UnifiedMemoryService:
         user_msg: str,
         assistant_msg: str,
     ) -> None:
-        """Update L1 session in Redis. Implemented in US-009."""
-        pass
+        """
+        Update (or create) an L1 session in Redis after each exchange.
+
+        Appends the exchange to the rolling summary (truncated to last
+        500 chars for now — Phase 2 adds LLM summarisation). Resets the
+        24-hour TTL on every update.
+
+        Redis failures are logged but never break chat.
+        """
+        from config import config
+
+        redis_client = self._get_redis()
+        if redis_client is None:
+            return
+
+        ns = self.namespace(workspace_id)
+        key = ns.session(conversation_id)
+        ttl = config.MEMORY_SESSION_TTL_SECONDS
+
+        try:
+            loop = asyncio.get_event_loop()
+            conn = redis_client.get_redis()
+
+            # Fetch existing session or create new
+            raw: Optional[str] = await loop.run_in_executor(None, conn.get, key)
+            if raw is not None:
+                session = SessionMemory.from_json(raw)
+            else:
+                session = SessionMemory()
+
+            # Build exchange snippet and append to rolling summary
+            exchange_snippet = f"User: {user_msg[:200]}\nAssistant: {assistant_msg[:200]}"
+            if session.summary:
+                combined = f"{session.summary}\n---\n{exchange_snippet}"
+            else:
+                combined = exchange_snippet
+
+            # Naive truncation to last 500 chars (Phase 2 adds LLM rolling summary)
+            session = SessionMemory(
+                summary=combined[-500:],
+                decisions=list(session.decisions),
+                action_items=list(session.action_items),
+                exchange_count=session.exchange_count + 1,
+                last_updated=datetime.now(timezone.utc).isoformat(),
+                ended=session.ended,
+            )
+
+            payload = session.to_json()
+            await loop.run_in_executor(
+                None,
+                lambda: conn.setex(key, ttl, payload),
+            )
+            logger.debug(
+                "[UnifiedMemoryService] update_session key=%s exchanges=%d",
+                key,
+                session.exchange_count,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] update_session failed for key=%s",
+                key,
+                exc_info=True,
+            )
 
     async def end_session(
         self,
         workspace_id: str,
         conversation_id: str,
     ) -> None:
-        """End L1 session, set short TTL for consolidation window. Implemented in US-009."""
-        pass
+        """
+        Mark session as ended and set a short TTL for the consolidation window.
+
+        The session stays in Redis for MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS
+        (default 1 hour) so the hourly consolidation job can promote important
+        decisions to L2 before the key expires.
+
+        Redis failures are logged but never break chat.
+        """
+        from config import config
+
+        redis_client = self._get_redis()
+        if redis_client is None:
+            return
+
+        ns = self.namespace(workspace_id)
+        key = ns.session(conversation_id)
+        consolidation_ttl = config.MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS
+
+        try:
+            loop = asyncio.get_event_loop()
+            conn = redis_client.get_redis()
+
+            raw: Optional[str] = await loop.run_in_executor(None, conn.get, key)
+            if raw is None:
+                logger.debug("[UnifiedMemoryService] end_session key=%s — no session found", key)
+                return
+
+            session = SessionMemory.from_json(raw)
+            ended_session = SessionMemory(
+                summary=session.summary,
+                decisions=list(session.decisions),
+                action_items=list(session.action_items),
+                exchange_count=session.exchange_count,
+                last_updated=datetime.now(timezone.utc).isoformat(),
+                ended=True,
+            )
+
+            payload = ended_session.to_json()
+            await loop.run_in_executor(
+                None,
+                lambda: conn.setex(key, consolidation_ttl, payload),
+            )
+            logger.info(
+                "[UnifiedMemoryService] end_session key=%s ttl=%ds exchanges=%d",
+                key,
+                consolidation_ttl,
+                ended_session.exchange_count,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] end_session failed for key=%s",
+                key,
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Cross-layer — stubbed for later stories
