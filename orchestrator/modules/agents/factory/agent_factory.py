@@ -1336,21 +1336,25 @@ To use actions, respond with JSON blocks like:
                     response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
                     execution_time = time.time() - start_time
                     
-                    # PRD-17: Handle function calling responses
-                    if response and response.tool_calls:
-                        self.logger.info(f"🔧 PRD-17: Agent called {len(response.tool_calls)} tool(s) via function calling")
+                    # PRD-17: Handle function calling responses with multi-turn tool loop
+                    max_tool_turns = 10
+                    tool_turn = 0
+                    tool_executor = agent_runtime.tool_executor  # PRD-17: Reuse executor (no re-init!)
+                    # Mid-execution discovery: max 1 attempt per execute_with_prompt call
+                    _discovery_attempted = False
+
+                    while response and response.tool_calls and tool_turn < max_tool_turns:
+                        tool_turn += 1
+                        self.logger.info(f"🔧 Tool turn {tool_turn}/{max_tool_turns}: Agent called {len(response.tool_calls)} tool(s)")
                         tool_results = []
-                        tool_executor = agent_runtime.tool_executor  # PRD-17: Reuse executor (no re-init!)
-                        
+
                         # Track executed calls in this turn to prevent duplicates
                         executed_calls_hashes = set()
-                        # Mid-execution discovery: max 1 attempt per execute_with_prompt call
-                        _discovery_attempted = False
-                        
+
                         for tool_call in response.tool_calls:
                             func_name = tool_call['function']['name']
                             func_args_str = tool_call['function']['arguments']
-                            
+
                             try:
                                 # Normalization: Parse JSON then canonicalize
                                 func_args = json.loads(func_args_str)
@@ -1362,7 +1366,7 @@ To use actions, respond with JSON blocks like:
 
                             # Create a hash of name + canonical args
                             call_hash = f"{func_name}:{canonical_args}"
-                            
+
                             if call_hash in executed_calls_hashes:
                                 self.logger.warning(f"⚠️  [DEDUPE] Skipping duplicate tool call in same turn: {func_name}")
                                 tool_results.append({
@@ -1372,7 +1376,7 @@ To use actions, respond with JSON blocks like:
                                     "content": json.dumps({"error": "Duplicate tool call skipped (already executed in this turn)"})
                                 })
                                 continue
-                            
+
                             # Filter empty parameters for critical tools if they usually require them
                             if not func_args and "SLACK" in func_name:
                                 self.logger.warning(f"⚠️  [FILTER] Skipping empty parameters for {func_name}")
@@ -1385,7 +1389,7 @@ To use actions, respond with JSON blocks like:
                                 continue
 
                             executed_calls_hashes.add(call_hash)
-                            
+
                             self.logger.info(f"  🛠️  [TRACE] Calling {func_name}({func_args})")
 
                             try:
@@ -1432,7 +1436,7 @@ To use actions, respond with JSON blocks like:
                                     "name": func_name,
                                     "content": json.dumps({"error": error_str})
                                 })
-                        
+
                         # Add assistant's tool call message and tool results to conversation
                         messages.append({
                             "role": "assistant",
@@ -1440,23 +1444,26 @@ To use actions, respond with JSON blocks like:
                             "tool_calls": response.tool_calls
                         })
                         messages.extend(tool_results)
-                        
-                        # Call LLM again to process tool results
-                        self.logger.info("  🔄 Calling LLM again with tool results...")
+
+                        # Call LLM again — it may return more tool_calls or a final answer
+                        self.logger.info(f"  🔄 Calling LLM again with tool results (turn {tool_turn})...")
                         response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
                         execution_time = time.time() - start_time
-                        
-                        # PRD-17: If LLM returns empty content, use tool results as the response
+
+                    if tool_turn > 0:
+                        if tool_turn >= max_tool_turns and response and response.tool_calls:
+                            self.logger.warning(f"⚠️  Tool loop hit max {max_tool_turns} turns, forcing final answer")
+
+                        # If LLM returns empty content after all tool turns, synthesize from last results
                         if not response.content or response.content.strip() == "":
                             self.logger.debug("  LLM returned empty content after tool use, synthesizing from tool results")
-                            # Format tool results into readable response
                             tool_summary = "\n\n".join([
-                                f"**{tr['name']}**: {tr['content'][:500]}..." 
+                                f"**{tr['name']}**: {tr['content'][:500]}..."
                                 for tr in tool_results
                             ])
                             response.content = f"Based on the tool results:\n\n{tool_summary}"
-                        
-                        self.logger.info("  ✅ LLM provided final answer after processing tool results")
+
+                        self.logger.info(f"  ✅ LLM provided final answer after {tool_turn} tool turn(s)")
                     
                     # Process any action requests in the response and iterate if needed (fallback for old JSON format)
                     action_results = []
