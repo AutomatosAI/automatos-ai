@@ -391,6 +391,15 @@ async def lifespan(app: FastAPI):
                     except Exception as _tr_err:
                         logger.warning("Could not start TaskReconciler: %s", _tr_err)
 
+                    # PRD-79: Memory background jobs (consolidation, decay, promotion)
+                    if config.MEMORY_JOBS_ENABLED:
+                        try:
+                            from services.memory_jobs import get_memory_job_scheduler
+                            await get_memory_job_scheduler().start(scheduler=shared_sched)
+                            logger.info("MemoryJobScheduler started on unified scheduler")
+                        except Exception as _mj_err:
+                            logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
+
                     # PRD-77: Load agent-scheduled tasks into APScheduler
                     try:
                         from services.scheduled_task_service import ScheduledTaskService
