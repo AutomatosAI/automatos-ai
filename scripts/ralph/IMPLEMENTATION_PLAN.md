@@ -19,8 +19,8 @@ Replace 12 scattered Mem0Client instances with a single UnifiedMemoryService. Ad
 
 ### Phase 1: Foundation
 
-- [ ] **US-001: Create UnifiedMemoryService singleton** — `orchestrator/modules/memory/unified_memory_service.py` with shared Mem0Client, Redis client, MemoryNamespace helper for standardized user_id formats. Public methods stubbed.
-- [ ] **US-002: Implement L3 long-term methods** — store_long_term(), search_long_term(), get_all_memories(), delete_memory() delegating to shared Mem0Client with MemoryNamespace user_ids.
+- [x] **US-001: Create UnifiedMemoryService singleton** — `orchestrator/modules/memory/unified_memory_service.py` with shared Mem0Client, Redis client, MemoryNamespace helper for standardized user_id formats. Public methods stubbed.
+- [x] **US-002: Implement L3 long-term methods** — store_long_term(), search_long_term(), get_all_memories(), delete_memory() delegating to shared Mem0Client with MemoryNamespace user_ids.
 - [ ] **US-003: Migrate SmartMemoryManager** — Replace lazy Mem0Client init with UnifiedMemoryService. Preserve 2-min LRU cache and _track_memory_access().
 - [ ] **US-004: Migrate platform_executor.py** — Replace 5 inline Mem0Client() calls (~lines 533, 1050, 1272, 3368, 3417) with UnifiedMemoryService.
 - [ ] **US-005: Migrate RecipeMemoryService** — Replace self._mem0 with UnifiedMemoryService. Add recipe namespace to MemoryNamespace if needed.
