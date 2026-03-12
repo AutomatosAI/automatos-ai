@@ -39,7 +39,7 @@ const ICON_STYLES: IconStyleOption[] = [
         label: 'Core Gradient',
         description: 'Default multi-color gradient icons',
         color: '',
-        previewIcons: ['cyborg', 'graph', 'dashboard-vertical-rectangle-4'],
+        previewIcons: ['brain-2', 'cog', 'graph-bar-increase'],
     },
     {
         id: 'core-line-orange',
@@ -246,59 +246,47 @@ function IconStylePicker({
 }) {
     return (
         <div className="border border-border/40 rounded-xl overflow-hidden bg-secondary/5">
-            <div className="px-5 py-4 border-b border-border/20">
-                <h3 className="font-semibold text-base">Icon Style</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                    Switch all platform icons to a different visual style. Changes apply instantly across the entire platform.
+            <div className="px-4 py-3 border-b border-border/20">
+                <span className="font-semibold text-sm">Icon Style</span>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                    Switch all platform icons to a different visual style
                 </p>
             </div>
-            <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {ICON_STYLES.map(style => {
-                    const isActive = activeStyle === style.id;
-                    return (
-                        <button
-                            key={style.id}
-                            onClick={() => onStyleChange(style.id)}
-                            disabled={isSaving}
-                            className={cn(
-                                'flex flex-col gap-3 p-4 rounded-xl border-2 transition-all text-left',
-                                'hover:bg-secondary/20 hover:border-primary/40 hover:shadow-md',
-                                isActive
-                                    ? 'bg-primary/10 border-primary ring-2 ring-primary/30 shadow-sm'
-                                    : 'border-border/30 bg-background/40'
+            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {ICON_STYLES.map(style => (
+                    <button
+                        key={style.id}
+                        onClick={() => onStyleChange(style.id)}
+                        disabled={isSaving}
+                        className={cn(
+                            'flex flex-col items-start gap-2 p-3 rounded-xl border transition-all text-left',
+                            'hover:bg-secondary/20 hover:border-primary/30',
+                            activeStyle === style.id
+                                ? 'bg-primary/10 border-primary ring-1 ring-primary/50'
+                                : 'border-border/30 bg-background/40'
+                        )}
+                    >
+                        <div className="flex items-center gap-2 w-full">
+                            <div className="flex gap-1">
+                                {style.previewIcons.map(icon => (
+                                    <PremiumIcon key={icon} name={icon} size={20} style={style.id} />
+                                ))}
+                            </div>
+                            {style.color && (
+                                <div
+                                    className="w-3 h-3 rounded-full ml-auto shrink-0"
+                                    style={{ backgroundColor: style.color }}
+                                />
                             )}
-                        >
-                            {/* Preview icons row */}
-                            <div className="flex items-center gap-3 w-full">
-                                <div className="flex gap-2 bg-background/60 rounded-lg p-2.5">
-                                    {style.previewIcons.map(icon => (
-                                        <PremiumIcon key={icon} name={icon} size={28} style={style.id} />
-                                    ))}
-                                </div>
-                                {style.color && (
-                                    <div
-                                        className="w-4 h-4 rounded-full ml-auto shrink-0 ring-1 ring-border/30"
-                                        style={{ backgroundColor: style.color }}
-                                    />
-                                )}
-                            </div>
-                            {/* Label + description */}
-                            <div className="space-y-0.5">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-semibold">{style.label}</span>
-                                    {isActive && (
-                                        <span className="text-[10px] font-medium bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">
-                                            Active
-                                        </span>
-                                    )}
-                                </div>
-                                <p className="text-xs text-muted-foreground leading-relaxed">
-                                    {style.description}
-                                </p>
-                            </div>
-                        </button>
-                    );
-                })}
+                        </div>
+                        <div>
+                            <span className="text-xs font-medium">{style.label}</span>
+                            <p className="text-[10px] text-muted-foreground leading-tight">
+                                {style.description}
+                            </p>
+                        </div>
+                    </button>
+                ))}
             </div>
         </div>
     );
