@@ -495,10 +495,17 @@ class ContextRouter:
                     daily_lines.append(f"- {content}")
             daily_text = self._truncate_to_budget("\n".join(daily_lines), budget_daily)
 
-        # Knowledge awareness (static text — no fetch)
+        # Knowledge awareness (dynamic per-workspace capability map)
         awareness_text = ""
         if signals.is_knowledge_query or signals.is_live_data:
-            awareness_text = self._build_default_awareness(signals)
+            try:
+                awareness_text = await self.build_knowledge_awareness(workspace_id)
+            except Exception:
+                logger.warning(
+                    "[ContextRouter] build_knowledge_awareness failed, using fallback",
+                    exc_info=True,
+                )
+                awareness_text = self._build_fallback_awareness(signals)
             awareness_text = self._truncate_to_budget(awareness_text, budget_awareness)
 
         # Total token estimate
@@ -544,12 +551,12 @@ class ContextRouter:
         return max(1, delta.days + 1)
 
     @staticmethod
-    def _build_default_awareness(signals: ContextSignals) -> str:
+    def _build_fallback_awareness(signals: ContextSignals) -> str:
         """
-        Build a static knowledge-awareness text block.
+        Build a static fallback awareness text when dynamic query fails.
 
-        This is a minimal default. US-018 replaces this with a dynamic
-        per-workspace capability map cached in Redis.
+        Used only when ``build_knowledge_awareness()`` cannot reach the DB or
+        Redis cache.
         """
         lines = ["## What You Can Look Up"]
         lines.append("You have access to organizational knowledge. Don't guess — look things up:")
@@ -559,3 +566,249 @@ class ContextRouter:
             lines.append("- **Business data**: Use `query_data` to ask questions about metrics, users, revenue, etc.")
         lines.append("- **Past conversations**: Your memories include recent interactions — check before asking the user to repeat themselves")
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Dynamic knowledge awareness (US-018)
+    # ------------------------------------------------------------------
+
+    async def build_knowledge_awareness(self, workspace_id: str) -> str:
+        """
+        Build a dynamic per-workspace capability map describing available
+        knowledge sources (connected databases, documents, tools).
+
+        Cached in Redis for ``MEMORY_AWARENESS_CACHE_TTL_SECONDS`` (default
+        10 min) since workspace capabilities change infrequently.
+
+        Returns:
+            A ``## What You Can Look Up`` text block (<200 tokens).
+        """
+        from modules.memory.unified_memory_service import get_unified_memory_service
+
+        service = get_unified_memory_service()
+
+        # --- Try Redis cache first ---
+        cached = await self._get_cached_awareness(service, workspace_id)
+        if cached is not None:
+            return cached
+
+        # --- Cache miss: query DB for workspace capabilities ---
+        try:
+            capabilities = await asyncio.get_event_loop().run_in_executor(
+                None, self._query_workspace_capabilities, workspace_id
+            )
+        except Exception:
+            logger.warning(
+                "[ContextRouter] build_knowledge_awareness DB query failed ws=%s",
+                workspace_id,
+                exc_info=True,
+            )
+            capabilities = {}
+
+        text = self._format_awareness_text(capabilities)
+
+        # Cache the result (fire-and-forget)
+        asyncio.ensure_future(self._set_cached_awareness(service, workspace_id, text))
+
+        return text
+
+    @staticmethod
+    def _query_workspace_capabilities(workspace_id: str) -> Dict[str, Any]:
+        """
+        Query Postgres for workspace knowledge sources (synchronous).
+
+        Returns a dict with keys: databases, doc_count, tools.
+        Runs in an executor — safe for the async context.
+        """
+        from contextlib import suppress
+        from core.database.database import get_db_session
+        from sqlalchemy import func
+
+        result: Dict[str, Any] = {
+            "databases": [],
+            "doc_count": 0,
+            "tools": [],
+        }
+
+        with suppress(Exception):
+            with get_db_session() as db:
+                # Connected external databases
+                try:
+                    from core.models.database_knowledge import DatabaseKnowledgeSource
+
+                    db_sources = (
+                        db.query(
+                            DatabaseKnowledgeSource.name,
+                            DatabaseKnowledgeSource.dialect,
+                        )
+                        .filter(
+                            DatabaseKnowledgeSource.workspace_id == workspace_id,
+                            DatabaseKnowledgeSource.is_active.is_(True),
+                        )
+                        .all()
+                    )
+                    result["databases"] = [
+                        {"name": row.name, "dialect": row.dialect}
+                        for row in db_sources
+                    ]
+                except Exception:
+                    logger.debug(
+                        "[ContextRouter] _query_workspace_capabilities databases failed",
+                        exc_info=True,
+                    )
+
+                # Document count
+                try:
+                    from core.models.core import Document
+
+                    doc_count = (
+                        db.query(func.count(Document.id))
+                        .filter(
+                            Document.workspace_id == workspace_id,
+                            Document.status == "processed",
+                        )
+                        .scalar()
+                    ) or 0
+                    result["doc_count"] = doc_count
+                except Exception:
+                    logger.debug(
+                        "[ContextRouter] _query_workspace_capabilities documents failed",
+                        exc_info=True,
+                    )
+
+                # Connected tools (Composio connections)
+                try:
+                    from core.models.composio import ComposioConnection, ComposioEntity
+
+                    tool_rows = (
+                        db.query(ComposioConnection.app_name)
+                        .join(
+                            ComposioEntity,
+                            ComposioConnection.entity_id == ComposioEntity.id,
+                        )
+                        .filter(
+                            ComposioEntity.workspace_id == workspace_id,
+                            ComposioConnection.status == "active",
+                        )
+                        .distinct()
+                        .all()
+                    )
+                    result["tools"] = [row.app_name.title() for row in tool_rows]
+                except Exception:
+                    logger.debug(
+                        "[ContextRouter] _query_workspace_capabilities tools failed",
+                        exc_info=True,
+                    )
+
+        return result
+
+    @staticmethod
+    def _format_awareness_text(capabilities: Dict[str, Any]) -> str:
+        """
+        Format a ``## What You Can Look Up`` text block from capability data.
+
+        Output is kept under ~200 tokens.
+        """
+        databases = capabilities.get("databases", [])
+        doc_count = capabilities.get("doc_count", 0)
+        tools = capabilities.get("tools", [])
+
+        lines = ["## What You Can Look Up"]
+        lines.append(
+            "You have access to organizational knowledge. Don't guess — look things up:"
+        )
+
+        if doc_count > 0:
+            lines.append(
+                f"- **Company documents** ({doc_count} indexed): Use `search_knowledge` to search uploaded docs, policies, guides"
+            )
+        else:
+            lines.append(
+                "- **Company documents**: Use `search_knowledge` to search uploaded docs, policies, guides"
+            )
+
+        if databases:
+            db_descriptions = ", ".join(
+                f"{d['name']} ({d['dialect']})" for d in databases[:5]
+            )
+            lines.append(
+                f"- **Connected databases**: {db_descriptions}. Use `query_data` to ask questions about business metrics, users, revenue"
+            )
+        else:
+            lines.append(
+                "- **Business data**: Use `query_data` to ask questions about metrics, users, revenue, etc."
+            )
+
+        if tools:
+            tool_list = ", ".join(tools[:10])
+            lines.append(
+                f"- **External tools**: Connected — {tool_list}. Use your connected tools for tasks"
+            )
+
+        lines.append(
+            "- **Past conversations**: Your memories include recent interactions — check before asking the user to repeat themselves"
+        )
+
+        return "\n".join(lines)
+
+    # --- Awareness cache helpers ---
+
+    @staticmethod
+    async def _get_cached_awareness(
+        service: Any, workspace_id: str
+    ) -> Optional[str]:
+        """Read awareness text from Redis cache. Returns None on miss."""
+        from modules.memory.unified_memory_service import MemoryNamespace
+
+        redis_client = service._get_redis()
+        if redis_client is None:
+            return None
+        ns = MemoryNamespace(workspace_id=str(workspace_id))
+        key = ns.awareness()
+        try:
+            loop = asyncio.get_event_loop()
+            conn = redis_client.get_redis()
+            raw: Optional[str] = await loop.run_in_executor(None, conn.get, key)
+            if raw is not None:
+                logger.debug(
+                    "[ContextRouter] awareness CACHE HIT key=%s", key
+                )
+            return raw
+        except Exception:
+            logger.debug(
+                "[ContextRouter] _get_cached_awareness failed key=%s",
+                key,
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
+    async def _set_cached_awareness(
+        service: Any, workspace_id: str, text: str
+    ) -> None:
+        """Write awareness text to Redis with configured TTL."""
+        from config import config
+        from modules.memory.unified_memory_service import MemoryNamespace
+
+        redis_client = service._get_redis()
+        if redis_client is None:
+            return
+        ns = MemoryNamespace(workspace_id=str(workspace_id))
+        key = ns.awareness()
+        ttl = config.MEMORY_AWARENESS_CACHE_TTL_SECONDS
+        try:
+            loop = asyncio.get_event_loop()
+            conn = redis_client.get_redis()
+            await loop.run_in_executor(
+                None, lambda: conn.setex(key, ttl, text)
+            )
+            logger.debug(
+                "[ContextRouter] _set_cached_awareness key=%s ttl=%ds",
+                key,
+                ttl,
+            )
+        except Exception:
+            logger.debug(
+                "[ContextRouter] _set_cached_awareness failed key=%s",
+                key,
+                exc_info=True,
+            )
