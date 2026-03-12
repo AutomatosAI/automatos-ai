@@ -66,7 +66,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
           value={props.description}
           onChange={(e) => props.onDescriptionChange(e.target.value)}
           placeholder="Describe the task or paste a prompt for AI planning..."
-          className="text-sm min-h-[80px] resize-none"
+          className="text-sm min-h-[120px] resize-y"
         />
       </div>
 
