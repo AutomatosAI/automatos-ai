@@ -60,52 +60,23 @@ class SmartMemoryManager:
     """
 
     def __init__(self):
-        self._mem0_client = None
+        self._unified_service = None
         self._cache: Dict[str, Tuple[float, MemoryResult]] = {}
         self._cache_ttl = 120  # 2 minutes
         self._storage_queue: List[Tuple] = []
         self._storage_task = None
 
     @property
-    def mem0_client(self):
-        """Lazy initialization of Mem0 client."""
-        if self._mem0_client is None:
+    def unified_service(self):
+        """Lazy initialization of UnifiedMemoryService."""
+        if self._unified_service is None:
             try:
-                from modules.memory.integrations.mem0_client import Mem0Client
-                self._mem0_client = Mem0Client()
-                logger.info("[SmartMemory] Mem0 client initialized")
+                from modules.memory.unified_memory_service import get_unified_memory_service
+                self._unified_service = get_unified_memory_service()
+                logger.info("[SmartMemory] UnifiedMemoryService initialized")
             except Exception as e:
-                logger.warning(f"[SmartMemory] Could not initialize Mem0: {e}")
-        return self._mem0_client
-
-    def _get_global_user_id(self, workspace_id: str) -> str:
-        """
-        Get user ID for GLOBAL memories (shared across all agents).
-
-        Format: ws_{workspace_id}
-
-        Global memories include:
-        - User's name, location, job
-        - General preferences
-        - Personal facts about the user
-        """
-        ws = str(workspace_id) if workspace_id else "default"
-        return f"ws_{ws}"
-
-    def _get_agent_user_id(self, workspace_id: str, agent_id: Optional[int]) -> str:
-        """
-        Get user ID for AGENT-SPECIFIC memories.
-
-        Format: ws_{workspace_id}_agent_{agent_id}
-
-        Agent-specific memories include:
-        - Tool preferences (Slack channels, email contacts)
-        - Workflow patterns for this agent's domain
-        - Agent-specific preferences
-        """
-        ws = str(workspace_id) if workspace_id else "default"
-        ag = str(agent_id) if agent_id else "default"
-        return f"ws_{ws}_agent_{ag}"
+                logger.warning(f"[SmartMemory] Could not initialize UnifiedMemoryService: {e}")
+        return self._unified_service
 
     def _classify_memory_tier(self, user_message: str, assistant_response: str) -> str:
         """
@@ -222,44 +193,35 @@ class SmartMemoryManager:
         user_context = UserContext()
 
         try:
-            if self.mem0_client:
-                # TWO-TIER MEMORY RETRIEVAL
+            if self.unified_service:
+                # TWO-TIER MEMORY RETRIEVAL via UnifiedMemoryService
                 # 1. Global memories (user facts shared across all agents)
                 # 2. Agent-specific memories (tool preferences, workflow patterns)
 
-                agent_user_id = self._get_agent_user_id(workspace_id, agent_id)
-
-                loop = asyncio.get_event_loop()
-
                 if widget_mode:
                     # Widget mode: agent-only retrieval — never leak global workspace memories
-                    logger.info(f"[SmartMemory] Widget mode: agent-only retrieval (agent={agent_user_id})")
-                    agent_memories = await loop.run_in_executor(
-                        None,
-                        lambda: self.mem0_client.search(query=query, user_id=agent_user_id, limit=limit)
+                    logger.info("[SmartMemory] Widget mode: agent-only retrieval (ws=%s agent=%s)", workspace_id, agent_id)
+                    agent_memories = await self.unified_service.search_long_term(
+                        workspace_id, query, agent_id=agent_id, limit=limit,
                     )
                     global_memories = []
                 else:
-                    global_user_id = self._get_global_user_id(workspace_id)
-                    logger.info(f"[SmartMemory] Two-tier search: global={global_user_id}, agent={agent_user_id}")
+                    logger.info("[SmartMemory] Two-tier search: ws=%s agent=%s", workspace_id, agent_id)
 
                     # Fetch both tiers in parallel
-                    global_task = loop.run_in_executor(
-                        None,
-                        lambda: self.mem0_client.search(query=query, user_id=global_user_id, limit=limit)
+                    global_task = self.unified_service.search_long_term(
+                        workspace_id, query, agent_id=None, limit=limit,
                     )
-                    agent_task = loop.run_in_executor(
-                        None,
-                        lambda: self.mem0_client.search(query=query, user_id=agent_user_id, limit=limit)
+                    agent_task = self.unified_service.search_long_term(
+                        workspace_id, query, agent_id=agent_id, limit=limit,
                     )
-
                     global_memories, agent_memories = await asyncio.gather(global_task, agent_task)
 
                 # Merge: global first (who the user is), then agent-specific (how they use this agent)
                 global_memories = global_memories or []
                 agent_memories = agent_memories or []
 
-                logger.info(f"[SmartMemory] Found {len(global_memories)} global + {len(agent_memories)} agent-specific memories")
+                logger.info("[SmartMemory] Found %d global + %d agent-specific memories", len(global_memories), len(agent_memories))
 
                 # Combine with global first, agent-specific second
                 # Mark agent-specific memories so we can format them differently
@@ -271,15 +233,15 @@ class SmartMemoryManager:
                 if memories:
                     for i, mem in enumerate(memories[:3]):
                         tier = mem.get("_tier", "global")
-                        logger.info(f"[SmartMemory]   Memory {i+1} [{tier}]: {mem.get('memory', '')[:80]}...")
+                        logger.info("[SmartMemory]   Memory %d [%s]: %s...", i + 1, tier, mem.get("memory", "")[:80])
 
                     # Extract user context from memories
                     user_context = self._extract_user_context(memories)
                 else:
-                    logger.info(f"[SmartMemory] ❌ No memories found for user")
+                    logger.info("[SmartMemory] No memories found for user")
 
         except Exception as e:
-            logger.warning(f"[SmartMemory] Retrieval failed: {e}")
+            logger.warning("[SmartMemory] Retrieval failed: %s", e, exc_info=True)
 
         # Format memories for LLM context
         formatted = self._format_memories_for_llm(memories, user_context)
@@ -448,8 +410,8 @@ class SmartMemoryManager:
             return False
 
         try:
-            if not self.mem0_client:
-                logger.warning("[SmartMemory] No Mem0 client available for storage")
+            if not self.unified_service:
+                logger.warning("[SmartMemory] No UnifiedMemoryService available for storage")
                 return False
 
             # TWO-TIER MEMORY STORAGE
@@ -462,7 +424,7 @@ class SmartMemoryManager:
                 tier = "agent"
             # US-015: Store last tier so callers can emit SSE events
             self._last_tier = tier
-            logger.info(f"[SmartMemory] Memory classified as: {tier}")
+            logger.info("[SmartMemory] Memory classified as: %s", tier)
 
             messages = [
                 {"role": "user", "content": user_message[:1500]},
@@ -473,70 +435,38 @@ class SmartMemoryManager:
                 "chat_id": chat_id,
                 "timestamp": datetime.utcnow().isoformat(),
                 "workspace_id": workspace_id,
-                "agent_id": agent_id
+                "agent_id": agent_id,
             }
 
-            loop = asyncio.get_event_loop()
-            results = []
-
-            # Store in global tier (personal facts, shared across all agents)
-            if tier in ("global", "both"):
-                global_user_id = self._get_global_user_id(workspace_id)
-                global_metadata = {**base_metadata, "tier": "global"}
-
-                global_result = await loop.run_in_executor(
-                    None,
-                    lambda: self.mem0_client.add(
-                        messages=messages,
-                        user_id=global_user_id,
-                        metadata=global_metadata
-                    )
-                )
-                results.append(("global", global_result))
-                logger.info(f"[SmartMemory] Global storage result: {global_result}")
-
-            # Store in agent-specific tier (tool preferences, workflow patterns)
-            if tier in ("agent", "both"):
-                agent_user_id = self._get_agent_user_id(workspace_id, agent_id)
-                agent_metadata = {**base_metadata, "tier": "agent"}
-
-                agent_result = await loop.run_in_executor(
-                    None,
-                    lambda: self.mem0_client.add(
-                        messages=messages,
-                        user_id=agent_user_id,
-                        metadata=agent_metadata
-                    )
-                )
-                results.append(("agent", agent_result))
-                logger.info(f"[SmartMemory] Agent-specific storage result: {agent_result}")
+            results = await self.unified_service.store_two_tier(
+                workspace_id=workspace_id,
+                messages=messages,
+                agent_id=agent_id,
+                tier=tier,
+                metadata=base_metadata,
+            )
 
             # Check if any storage succeeded
             success = any(r[1] and not r[1].get("error") for r in results)
 
             if success:
                 tiers_stored = [r[0] for r in results if r[1] and not r[1].get("error")]
-                logger.info(f"[SmartMemory] ✅ Stored in tiers: {tiers_stored}")
+                logger.info("[SmartMemory] Stored in tiers: %s", tiers_stored)
                 # Invalidate cache
                 self._invalidate_cache(workspace_id, agent_id)
                 return True
             else:
                 errors = [f"{r[0]}: {r[1].get('error') if r[1] else 'None'}" for r in results]
-                logger.warning(f"[SmartMemory] ❌ Storage failed: {errors}")
+                logger.warning("[SmartMemory] Storage failed: %s", errors)
                 return False
 
         except Exception as e:
-            logger.error(f"[SmartMemory] Storage failed: {e}")
+            logger.error("[SmartMemory] Storage failed: %s", e, exc_info=True)
             return False
 
     # ---------------------------------------------------------------
     # Daily Log Summary (US-011 / US-012)
     # ---------------------------------------------------------------
-
-    def _get_daily_user_id(self, workspace_id: str) -> str:
-        """Get user ID for daily log memories. Format: ws_{workspace_id}_daily"""
-        ws = str(workspace_id) if workspace_id else "default"
-        return f"ws_{ws}_daily"
 
     @staticmethod
     def _extract_summary_from_exchange(
@@ -627,12 +557,11 @@ class SmartMemoryManager:
             return False
 
         try:
-            if not self.mem0_client:
-                logger.warning("[SmartMemory] No Mem0 client for daily summary storage")
+            if not self.unified_service:
+                logger.warning("[SmartMemory] No UnifiedMemoryService for daily summary storage")
                 return False
 
             today_str = datetime.utcnow().strftime("%Y-%m-%d")
-            daily_user_id = self._get_daily_user_id(workspace_id)
 
             # Extract summary from the exchange
             summary_line = self._extract_summary_from_exchange(
@@ -640,10 +569,6 @@ class SmartMemoryManager:
             )
             timestamp = datetime.utcnow().strftime("%H:%M")
             entry = f"[{timestamp}] {summary_line}"
-
-            # Atomic per-entry storage — each exchange gets its own memory
-            # record. No read-delete-add race condition.
-            loop = asyncio.get_event_loop()
 
             metadata = {
                 "type": "daily_log_entry",
@@ -653,14 +578,31 @@ class SmartMemoryManager:
             if agent_id is not None:
                 metadata["agent_id"] = agent_id
 
-            result = await loop.run_in_executor(
-                None,
-                lambda: self.mem0_client.add(
-                    messages=[{"role": "system", "content": entry}],
-                    user_id=daily_user_id,
-                    metadata=metadata,
-                ),
+            result = await self.unified_service.store_daily_log(
+                workspace_id=workspace_id,
+                content=entry,
+                agent_id=agent_id,
+                metadata=metadata,
             )
+
+            # L2: Store daily log in short-term memory for temporal retrieval (fire-and-forget)
+            try:
+                asyncio.create_task(
+                    self.unified_service.store_short_term(
+                        workspace_id=workspace_id,
+                        content=entry,
+                        content_type="heartbeat_log",
+                        agent_id=agent_id,
+                        importance=0.4,
+                        metadata=metadata,
+                    )
+                )
+            except Exception:
+                logger.debug(
+                    "[SmartMemory] L2 store_short_term for daily log failed ws=%s",
+                    workspace_id,
+                    exc_info=True,
+                )
 
             success = bool(result and not result.get("error"))
             if success:
@@ -673,7 +615,7 @@ class SmartMemoryManager:
             return success
 
         except Exception as e:
-            logger.error("[SmartMemory] store_daily_summary failed: %s", e)
+            logger.error("[SmartMemory] store_daily_summary failed: %s", e, exc_info=True)
             return False
 
     async def get_daily_logs(
@@ -693,19 +635,16 @@ class SmartMemoryManager:
             Formatted string of daily logs, or empty string if none exist
         """
         try:
-            if not self.mem0_client:
+            if not self.unified_service:
                 return ""
 
-            daily_user_id = self._get_daily_user_id(workspace_id)
             today = datetime.utcnow()
             today_str = today.strftime("%Y-%m-%d")
             yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
             target_dates = {today_str, yesterday_str}
 
-            loop = asyncio.get_event_loop()
-            all_memories = await loop.run_in_executor(
-                None,
-                lambda: self.mem0_client.get_all(user_id=daily_user_id, limit=50),
+            all_memories = await self.unified_service.get_all_daily_logs(
+                workspace_id=workspace_id, limit=50,
             )
 
             if not all_memories:
@@ -782,17 +721,14 @@ class SmartMemoryManager:
             Number of deleted log entries
         """
         try:
-            if not self.mem0_client:
+            if not self.unified_service:
                 return 0
 
-            daily_user_id = self._get_daily_user_id(workspace_id)
             cutoff = datetime.utcnow() - timedelta(days=retention_days)
             cutoff_str = cutoff.strftime("%Y-%m-%d")
 
-            loop = asyncio.get_event_loop()
-            all_memories = await loop.run_in_executor(
-                None,
-                lambda: self.mem0_client.get_all(user_id=daily_user_id, limit=100),
+            all_memories = await self.unified_service.get_all_daily_logs(
+                workspace_id=workspace_id, limit=100,
             )
 
             if not all_memories:
@@ -806,10 +742,7 @@ class SmartMemoryManager:
                 date_val = meta.get("date", "")
                 mem_id = mem.get("id")
                 if date_val and date_val < cutoff_str and mem_id:
-                    success = await loop.run_in_executor(
-                        None,
-                        lambda mid=mem_id: self.mem0_client.delete(mid),
-                    )
+                    success = await self.unified_service.delete_memory(mem_id)
                     if success:
                         deleted += 1
                         logger.info(
@@ -824,7 +757,7 @@ class SmartMemoryManager:
             return deleted
 
         except Exception as e:
-            logger.error("[SmartMemory] cleanup_old_daily_logs failed: %s", e)
+            logger.error("[SmartMemory] cleanup_old_daily_logs failed: %s", e, exc_info=True)
             return 0
 
     def _invalidate_cache(self, workspace_id: str, agent_id: Optional[int]):

@@ -851,6 +851,33 @@ class HeartbeatService:
                     except Exception as mem_err:
                         logger.warning("[Heartbeat] Failed to store summary in memory for ws=%s: %s", ws_id, mem_err)
 
+                    # L2: Store heartbeat summary in short-term memory (fire-and-forget)
+                    try:
+                        from modules.memory.unified_memory_service import get_unified_memory_service
+
+                        unified = get_unified_memory_service()
+                        asyncio.create_task(
+                            unified.store_short_term(
+                                workspace_id=ws_id,
+                                content=summary_text[:1500],
+                                content_type="heartbeat_log",
+                                importance=0.4,
+                                metadata={
+                                    "type": "heartbeat_daily_summary",
+                                    "date": cutoff.strftime("%Y-%m-%d"),
+                                    "tick_count": len(ws_rows),
+                                    "success_count": success_count,
+                                    "error_count": error_count,
+                                },
+                            )
+                        )
+                    except Exception:
+                        logger.debug(
+                            "[Heartbeat] L2 store_short_term failed for ws=%s",
+                            ws_id,
+                            exc_info=True,
+                        )
+
             finally:
                 db.close()
 

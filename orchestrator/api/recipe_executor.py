@@ -727,7 +727,7 @@ async def _execute_recipe_inner(
         try:
             from core.services.recipe_memory_service import RecipeMemoryService
             memory_svc = RecipeMemoryService(db=db)
-            recipe_memories = memory_svc.retrieve_relevant_memories(
+            recipe_memories = await memory_svc.retrieve_relevant_memories(
                 recipe_id=recipe.id,
                 context={"workspace_id": str(workspace_id), "input_data": input_data}
             )
@@ -1199,7 +1199,7 @@ async def _execute_recipe_inner(
         try:
             from core.services.recipe_memory_service import RecipeMemoryService
             memory_svc = RecipeMemoryService(db=db)
-            memory_svc.store_execution_memory(
+            await memory_svc.store_execution_memory(
                 recipe_execution_id,
                 learnings=learning_result,
             )

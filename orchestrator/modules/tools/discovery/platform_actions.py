@@ -24,6 +24,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_report_actions(registry)
     _register_scheduling_actions(registry)
     _register_board_task_actions(registry)
+    _register_nl2sql_actions(registry)
     _register_memory_browse_actions(registry)
 
     # Workspace tools (file I/O, grep, exec, git)
@@ -2233,6 +2234,54 @@ def _register_board_task_actions(registry: ActionRegistry) -> None:
             "mark task 3 as done",
             "start task 12",
             "run task 5 now",
+        ],
+    ))
+
+
+def _register_nl2sql_actions(registry: ActionRegistry) -> None:
+    """Register NL2SQL / query_data actions (PRD-79 Phase 4)."""
+
+    registry.register(ActionDefinition(
+        name="platform_query_data",
+        description=(
+            "Query business data using natural language. Converts your question "
+            "into SQL and executes it against a connected database. Use this when "
+            "the user asks about metrics, counts, trends, revenue, users, or any "
+            "data that lives in their connected databases. Returns results as a "
+            "formatted table with row count and the generated SQL."
+        ),
+        category="database",
+        parameters={
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "Natural language question about business data "
+                        "(e.g. 'How many active users this month?', "
+                        "'Top 10 customers by revenue')."
+                    ),
+                },
+                "database_id": {
+                    "type": "integer",
+                    "description": (
+                        "ID of the database source to query. If omitted, uses "
+                        "the workspace's default (first active) database."
+                    ),
+                },
+            },
+            "required": ["question"],
+        },
+        permission_level="read",
+        requires_confirmation=False,
+        tags=["database", "query", "analytics", "metrics", "nl2sql", "data"],
+        examples=[
+            "how many active users do we have",
+            "what's our current MRR",
+            "show revenue trend for last 6 months",
+            "top 5 products by sales",
+            "how many users signed up last week",
+            "query the database for average order value",
         ],
     ))
 

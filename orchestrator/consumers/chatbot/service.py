@@ -37,7 +37,6 @@ from consumers.chatbot.tool_router import get_tool_router
 
 # Import from modules — SINGLE SOURCE for tool schemas
 from modules.tools.tool_router import get_tools_for_agent
-from modules.memory.operations import get_memory_injector
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +424,6 @@ class StreamingChatService:
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
-        self.memory_injector = get_memory_injector()
         self.tool_router = get_tool_router()
         self.streaming_handler = get_streaming_handler()
         self.workspace_id = workspace_id

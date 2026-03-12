@@ -4,8 +4,12 @@ Recipe Memory Service - Stage 8 (Memory)
 
 Stores execution experiences in Mem0 with workspace+recipe+agent scoping.
 Retrieves relevant memories for pre-execution context enhancement.
+
+All Mem0 calls delegate to UnifiedMemoryService (shared singleton).
+User IDs are built via MemoryNamespace — never raw string concatenation.
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -14,7 +18,10 @@ from sqlalchemy.orm import Session
 
 from core.database.database import get_db
 from core.models.core import RecipeExecution, WorkflowTemplate
-from modules.memory.integrations.mem0_client import Mem0Client
+from modules.memory.unified_memory_service import (
+    get_unified_memory_service,
+    MemoryNamespace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,15 +30,17 @@ class RecipeMemoryService:
     """
     Stores execution experiences in Mem0 with workspace+recipe+agent scoping.
     Retrieves relevant memories for pre-execution context enhancement.
+
+    Delegates all Mem0 operations to UnifiedMemoryService singleton.
     """
 
-    def __init__(self, db: Session, mem0_client: Optional[Mem0Client] = None):
+    def __init__(self, db: Session):
         if db is None:
             raise ValueError("RecipeMemoryService requires an injected DB session")
         self.db = db
-        self.mem0 = mem0_client or Mem0Client()
+        self._unified = get_unified_memory_service()
 
-    def store_execution_memory(
+    async def store_execution_memory(
         self,
         execution_id: str,
         learnings: Optional[Dict[str, Any]] = None,
@@ -66,30 +75,53 @@ class RecipeMemoryService:
         if not recipe:
             raise ValueError(f"Recipe not found for execution: {execution_id}")
 
-        workspace_id = execution.workspace_id
+        workspace_id = str(execution.workspace_id)
         recipe_id = recipe.template_id or str(recipe.id)
+        ns = MemoryNamespace(workspace_id=workspace_id)
         stored_memories: List[Dict[str, Any]] = []
         errors: List[str] = []
 
         # 1. Store recipe-level memory (workspace + recipe scope)
-        recipe_scope = f"ws_{workspace_id}_recipe_{recipe_id}"
+        recipe_user_id = ns.recipe(recipe_id)
         recipe_memory = self._build_recipe_memory(execution, learnings, quality_data)
 
         if recipe_memory:
-            result = self._store_memory(recipe_scope, recipe_memory, {
+            result = await self._store_memory(recipe_user_id, recipe_memory, {
                 "type": "recipe_execution",
                 "execution_id": execution_id,
                 "recipe_id": recipe_id,
-                "workspace_id": str(workspace_id),
+                "workspace_id": workspace_id,
                 "status": execution.status,
             })
             if result.get("error"):
                 errors.append(f"Recipe scope: {result['error']}")
             else:
                 stored_memories.append({
-                    "scope": recipe_scope,
+                    "scope": recipe_user_id,
                     "type": "recipe_execution",
                 })
+
+            # L2: Store recipe summary in short-term memory (fire-and-forget)
+            try:
+                asyncio.create_task(
+                    self._unified.store_short_term(
+                        workspace_id=workspace_id,
+                        content=recipe_memory[:1500],
+                        content_type="recipe_summary",
+                        importance=0.6,
+                        metadata={
+                            "execution_id": execution_id,
+                            "recipe_id": recipe_id,
+                            "status": execution.status,
+                        },
+                    )
+                )
+            except Exception:
+                logger.debug(
+                    "[RecipeMemory] L2 store_short_term failed for recipe ws=%s",
+                    workspace_id,
+                    exc_info=True,
+                )
 
         # 2. Store per-agent memories (workspace + recipe + agent scope)
         step_results = execution.step_results or []
@@ -108,27 +140,53 @@ class RecipeMemoryService:
             if not agent_id:
                 continue
 
-            agent_scope = f"ws_{workspace_id}_recipe_{recipe_id}_agent_{agent_id}"
+            agent_user_id = ns.recipe_agent(recipe_id, agent_id)
             agent_memory = self._build_agent_step_memory(idx, step_result, execution)
 
             if agent_memory:
-                result = self._store_memory(agent_scope, agent_memory, {
+                result = await self._store_memory(agent_user_id, agent_memory, {
                     "type": "agent_step_execution",
                     "execution_id": execution_id,
                     "recipe_id": recipe_id,
                     "agent_id": agent_id,
                     "step_index": idx,
-                    "workspace_id": str(workspace_id),
+                    "workspace_id": workspace_id,
                 })
                 if result.get("error"):
                     errors.append(f"Agent {agent_id} step {idx}: {result['error']}")
                 else:
                     stored_memories.append({
-                        "scope": agent_scope,
+                        "scope": agent_user_id,
                         "type": "agent_step_execution",
                         "agent_id": agent_id,
                         "step_index": idx,
                     })
+
+                # L2: Store agent step in short-term memory (fire-and-forget)
+                try:
+                    agent_id_int = int(agent_id) if str(agent_id).isdigit() else None
+                    asyncio.create_task(
+                        self._unified.store_short_term(
+                            workspace_id=workspace_id,
+                            content=agent_memory[:1500],
+                            content_type="recipe_summary",
+                            agent_id=agent_id_int,
+                            importance=0.5,
+                            metadata={
+                                "execution_id": execution_id,
+                                "recipe_id": recipe_id,
+                                "agent_id": agent_id,
+                                "step_index": idx,
+                            },
+                        )
+                    )
+                except Exception:
+                    logger.debug(
+                        "[RecipeMemory] L2 store_short_term failed for agent step ws=%s agent=%s",
+                        workspace_id,
+                        agent_id,
+                        exc_info=True,
+                    )
 
         result = {
             "execution_id": execution_id,
@@ -140,17 +198,18 @@ class RecipeMemoryService:
 
         if errors:
             logger.warning(
-                f"Stored {len(stored_memories)} memories for execution {execution_id} "
-                f"({len(errors)} errors): {errors}"
+                "Stored %d memories for execution %s (%d errors): %s",
+                len(stored_memories), execution_id, len(errors), errors,
             )
         else:
             logger.info(
-                f"Stored {len(stored_memories)} memories for execution {execution_id}"
+                "Stored %d memories for execution %s",
+                len(stored_memories), execution_id,
             )
 
         return result
 
-    def retrieve_relevant_memories(
+    async def retrieve_relevant_memories(
         self,
         recipe_id: int,
         context: Optional[Dict[str, Any]] = None,
@@ -175,17 +234,23 @@ class RecipeMemoryService:
         if not recipe:
             raise ValueError(f"Recipe not found: {recipe_id}")
 
-        # Resolve workspace_id: prefer context, then execution, then recipe
-        workspace_id = (context or {}).get("workspace_id") or recipe.workspace_id
+        # Resolve workspace_id: prefer context, then recipe
+        workspace_id = str((context or {}).get("workspace_id") or recipe.workspace_id or "")
         if not workspace_id:
-            logger.warning(f"No workspace_id for recipe {recipe_id} (marketplace recipe?), memory retrieval may be incomplete")
+            logger.warning(
+                "No workspace_id for recipe %d (marketplace recipe?), memory retrieval may be incomplete",
+                recipe_id,
+            )
         template_id = recipe.template_id or str(recipe.id)
         context = context or {}
+        ns = MemoryNamespace(workspace_id=workspace_id)
 
         # 1. Retrieve recipe-level memories
-        recipe_scope = f"ws_{workspace_id}_recipe_{template_id}"
+        recipe_user_id = ns.recipe(template_id)
         query = self._build_retrieval_query(context)
-        recipe_memories = self.mem0.search(query, recipe_scope, limit=10)
+        recipe_memories = await self._unified.search_long_term_scoped(
+            user_id=recipe_user_id, query=query, limit=10,
+        )
 
         # 2. Retrieve per-agent memories for agents in the recipe steps
         agent_memories: Dict[str, List[Dict]] = {}
@@ -200,11 +265,20 @@ class RecipeMemoryService:
         if context.get("agent_ids"):
             agent_ids.update(context["agent_ids"])
 
-        for agent_id in agent_ids:
-            agent_scope = f"ws_{workspace_id}_recipe_{template_id}_agent_{agent_id}"
-            memories = self.mem0.search(query, agent_scope, limit=5)
-            if memories:
-                agent_memories[agent_id] = memories
+        # Search all agents concurrently
+        async def _search_agent(aid):
+            agent_user_id = ns.recipe_agent(template_id, aid)
+            return aid, await self._unified.search_long_term_scoped(
+                user_id=agent_user_id, query=query, limit=5,
+            )
+
+        if agent_ids:
+            agent_results = await asyncio.gather(
+                *[_search_agent(aid) for aid in agent_ids]
+            )
+            for aid, memories in agent_results:
+                if memories:
+                    agent_memories[aid] = memories
 
         # Build summary
         total_memories = len(recipe_memories) + sum(
@@ -221,28 +295,30 @@ class RecipeMemoryService:
         }
 
         logger.info(
-            f"Retrieved {total_memories} memories for recipe {recipe_id} "
-            f"({len(recipe_memories)} recipe, {len(agent_memories)} agents)"
+            "Retrieved %d memories for recipe %d (%d recipe, %d agents)",
+            total_memories, recipe_id, len(recipe_memories), len(agent_memories),
         )
 
         return result
 
-    def _store_memory(
+    async def _store_memory(
         self,
         user_id: str,
         text: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Store a memory in Mem0 via the client's add method.
+        """Store a memory in Mem0 via UnifiedMemoryService.
 
-        Uses a conversational User→Assistant format so the Mem0 LLM
+        Uses a conversational User->Assistant format so the Mem0 LLM
         can extract factual memories from the execution data.
         """
         messages = [
             {"role": "user", "content": "Remember the following facts about this recipe execution."},
             {"role": "assistant", "content": text},
         ]
-        return self.mem0.add(messages, user_id=user_id, metadata=metadata)
+        return await self._unified.store_long_term_messages(
+            user_id=user_id, messages=messages, metadata=metadata,
+        )
 
     def _build_recipe_memory(
         self,

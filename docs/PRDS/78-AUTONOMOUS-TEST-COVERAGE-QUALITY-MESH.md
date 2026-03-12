@@ -1,18 +1,20 @@
 # PRD-78: Autonomous Test Coverage & Quality Mesh
 
-**Version:** 1.0
-**Status:** Draft
+**Version:** 1.1
+**Status:** Active
 **Priority:** P0
 **Author:** Gar Kavanagh + Auto CTO
 **Created:** 2026-03-10
-**Updated:** 2026-03-10
+**Updated:** 2026-03-12
 **Dependencies:** PRD-05 (Memory & Knowledge), PRD-55 (Autonomous Assistant Platform), PRD-68 (Progressive Complexity Routing), PRD-69 (Agent Intelligence Layer), PRD-72 (Activity Command Centre), PRD-73 (Observability & Monitoring Stack), PRD-77 (Agent Self-Scheduling & Memory Dashboard)
 
 ---
 
 ## Executive Summary
 
-Automatos already has the foundations for autonomous quality engineering: API tests, workflow execution, memory, scheduling, skills, platform observability, and agents that can raise Jira tickets and fix bugs. What it does not yet have is a **deliberately designed quality mesh**: a structured testing architecture that scales to 500+ tests, runs at different cadences, produces machine-readable artifacts, and allows specialist agents to cooperate reliably.
+Automatos already has the foundations for autonomous quality engineering: API tests, workflow execution, memory, scheduling, skills, platform observability, and agents that can raise Jira tickets and fix bugs. What it does not yet have is a **deliberately designed quality mesh**: a structured testing architecture that grows with the platform, runs at different cadences, produces machine-readable artifacts, and allows specialist agents to cooperate reliably.
+
+**Current baseline (2026-03-12):** 124 API integration tests across 23 domain files, 3 runner scripts, 1 audit/gap-finder tool. No unit tests, no browser tests, no regression-pin tests.
 
 Today, testing is partially present:
 
@@ -23,17 +25,25 @@ Today, testing is partially present:
 
 The missing piece is the **system design** that turns these into a coordinated quality program:
 
-- A test taxonomy that scales to 500+ tests without becoming noise
+- A test taxonomy that grows organically as the platform stabilizes
 - Scheduled execution lanes by speed, risk, and purpose
 - Consistent artifacts that downstream agents can consume
 - A clear role for browser automation, internal tool validation, API contracts, and worker-level regressions
 - Optional specialist agents and model routing for quality tasks
 
-This PRD defines that system.
+This PRD defines that system and its growth milestones.
+
+### Growth Philosophy
+
+This is a **living architecture**, not a "write 500 tests" project. The test suite grows in lockstep with platform maturity:
+
+1. **Pilot Readiness (now)** — Flush bugs, pin known regressions, deepen P0 coverage so 10-15 pilot users hit a stable platform.
+2. **Post-Pilot Hardening** — As real users surface issues, each bug becomes a regression test. Coverage grows from usage, not quotas.
+3. **Mature Platform** — When the platform stops changing rapidly, fill out the full taxonomy. The 500+ target is a north star, not a Phase 1 deliverable.
 
 ### What We're Building
 
-1. **A 500+ test coverage architecture** spanning unit/service tests, API integration tests, browser journeys, internal tool regressions, workflow/worker tests, and cross-system contracts
+1. **A scalable test coverage architecture** spanning API integration tests, regression pins, internal tool validation, stateful journeys, and eventually browser tests — growing as the platform matures
 2. **Three production testing recipes** with clean runner scripts, schedules, artifact outputs, and downstream handoffs:
    - Nightly Self-Test Suite
    - API Health Check & Regression Detector
@@ -49,6 +59,7 @@ This PRD defines that system.
 - Chaos testing or production incident automation
 - A new CI platform
 - A full synthetic monitoring platform for deployed environments
+- 500 tests before the platform is stable enough to warrant them
 
 Those can become future PRDs once the in-repo testing mesh is stable.
 
@@ -196,18 +207,23 @@ Coverage examples:
 - Jira evidence handoff regressions
 - workflow execution handle regressions
 
-### 3.6 Total Target
+### 3.6 Coverage Growth by Milestone
 
-| Layer | Target Count |
-|---|---:|
-| Fast deterministic | 200 |
-| API integration | 160 |
-| Playwright/browser | 100 |
-| Internal tools/worker | 70 |
-| Regression contracts | 40 |
-| **Total** | **570** |
+Tests grow with the platform. Targets are approximate and driven by need, not quotas.
 
-This gives room for growth beyond 500 without artificially inflating low-value tests.
+| Layer | Pilot Readiness | Post-Pilot | Mature Platform |
+|---|---:|---:|---:|
+| API integration (Layer B) | 160+ | 200+ | 250+ |
+| Regression contracts (Layer E) | 15+ | 40+ | 60+ |
+| Internal tools/worker (Layer D) | 10+ | 30+ | 70+ |
+| Stateful journeys (Layer B+) | 10+ | 30+ | 50+ |
+| Playwright/browser (Layer C) | 0 | 10+ | 80+ |
+| Fast deterministic (Layer A) | 0 | 50+ | 150+ |
+| **Total** | **~195** | **~360** | **~660** |
+
+**Pilot Readiness** = what we need before 10-15 users hit the platform.
+**Post-Pilot** = bugs surfaced by real usage become regression tests; stable areas get deeper journeys.
+**Mature Platform** = full taxonomy, browser coverage, unit test layer, release validation lane.
 
 ---
 
@@ -480,9 +496,11 @@ Preferred model profile:
 Why:
 - this is the most expensive but most value-dense step
 
-### 7.2 Recommended New Specialist Agents
+### 7.2 Future Specialist Agents (Post-Pilot)
 
-#### Playwright Runner
+These agents are **not needed until the suite exceeds ~300 tests and real users are generating regression data**. Do not build them prematurely.
+
+#### Playwright Runner (Post-Pilot)
 
 Responsibilities:
 - browser automation
@@ -490,26 +508,21 @@ Responsibilities:
 - journey validation
 - screenshot and trace capture
 
-Potential tools:
-- browser automation
-- screenshots
-- trace uploads
-
-#### Contract Auditor
+#### Contract Auditor (Post-Pilot)
 
 Responsibilities:
 - verify response schemas
 - compare API output against expected structures
 - detect artifact drift
 
-#### Flake Hunter
+#### Flake Hunter (Mature Platform)
 
 Responsibilities:
 - detect unstable tests across repeated runs
 - classify infra flake vs product regression
 - quarantine candidates
 
-#### Coverage Planner
+#### Coverage Planner (Mature Platform)
 
 Responsibilities:
 - read `coverage-gap-summary.json`
@@ -634,73 +647,120 @@ tests/
 
 ## 11. Implementation Plan
 
-### Phase 1: Runner and Artifact Stability
+### Milestone 1: Pilot Readiness (current priority)
 
-1. Stabilize the three runner scripts
-2. Lock the artifact schemas
-3. Ensure skill handoffs are coherent
-4. Add 20-40 high-value regression and stateful API tests
+**Goal:** Flush bugs and pin regressions so 10-15 pilot users hit a stable platform.
 
-### Phase 2: API Journey Expansion
+**Exit criteria:** All P0 areas have at least one stateful journey test. Known regressions from memory system, multi-tenancy, and cloud doc sync are pinned. Runners produce clean artifacts. ~160-200 total tests.
 
-5. Expand API tests into deeper create/use/verify/delete journeys
-6. Add internal tool contract tests
-7. Add worker/scheduler/heartbeat validation
+1. Stabilize the three runner scripts and lock artifact schemas
+2. Create `tests/regressions/` directory and pin known bugs:
+   - Memory scoping regressions (Mem0 search, user_id format mismatch)
+   - Multi-tenancy isolation (workspace fallback bug)
+   - Cloud document sync (silent processing failure)
+   - AgentFactory tool source divergence
+3. Deepen P0 API tests with stateful journeys:
+   - Chat: create → send → history → rename → delete
+   - Memory: store → search → stats consistency
+   - Workflows: create → execute → status → cancel
+   - Heartbeat: enable → trigger → verify results
+   - Agents: create → configure → assign tools → execute → delete
+4. Add test data cleanup strategy (teardown fixtures or dedicated test workspace)
+5. Add internal tool contract tests for `platform_*` executor paths
+6. Ensure `run_health_regression.py` targets include new regression tests
+7. Verify QA → Jira → Bug Fixer artifact handoff works end-to-end
 
-### Phase 3: Browser Test Foundation
+### Milestone 2: Post-Pilot Hardening
 
-8. Stand up Playwright structure and smoke pack
-9. Add critical user journeys
-10. Add artifact capture for screenshots, traces, and repro context
+**Gate:** 10-15 users actively using the platform and generating feedback.
 
-### Phase 4: Coverage Scale-Up
+**Goal:** Every user-reported bug becomes a regression test. Deepen coverage in areas users actually exercise.
 
-11. Grow to 300+ tests with stable nightly execution
-12. Add specialized regression packs
-13. Add weekly gap planning workflow
+8. Convert each pilot bug into a regression test in `tests/regressions/`
+9. Expand API journeys to cover user-reported flows
+10. Add internal tool and worker tests for scheduler, recipe execution, scratchpad
+11. Begin Playwright smoke pack (login, create agent, basic chat) — only if UI bugs are a real problem
+12. Grow to ~300-360 tests
 
-### Phase 5: 500+ Coverage Target
+### Milestone 3: Mature Platform
 
-14. Reach the target distribution across all layers
-15. Add flake detection and release lane
-16. Review split-line for future external quality repo only if lifecycle divergence demands it
+**Gate:** Platform is stable, release cadence is predictable, API surface is not changing weekly.
+
+13. Stand up full Playwright browser journey suite
+14. Add fast deterministic unit tests for pure logic
+15. Add flake detection and release validation lane
+16. Reach 500+ tests across all layers
+17. Evaluate specialist agents (Contract Auditor, Flake Hunter, Coverage Planner)
+18. Review split-line for external quality repo only if lifecycle divergence demands it
 
 ---
 
 ## 12. Success Metrics
 
+### Pilot Readiness (Milestone 1)
+
+| Metric | Target |
+|---|---:|
+| P0 domains with at least one stateful journey test | 100% |
+| Known regressions pinned as tests | 100% |
+| `qa-report.json` directly usable by Jira Admin | 100% of runs |
+| Health regression runtime | < 8 min |
+| Nightly full runtime | < 30 min |
+| Total tests | ~160-200 |
+
+### Post-Pilot (Milestone 2)
+
+| Metric | Target |
+|---|---:|
+| User-reported bugs encoded as regression tests | 90%+ |
+| Bug Fixer able to reproduce from `issue_details` | 90%+ |
+| All P1 domains covered | 100% |
+| Total tests | ~300-360 |
+
+### Mature Platform (Milestone 3)
+
 | Metric | Target |
 |---|---:|
 | Total automated tests | 500+ |
-| Critical domains with at least one stateful journey | 100% |
-| Critical regressions encoded as tests after fix | 90%+ |
-| `qa-report.json` directly usable by Jira Admin | 100% of regression runs |
-| Bug Fixer able to reproduce from `issue_details` without manual augmentation | 90%+ |
+| Browser journey coverage for critical flows | 80%+ |
 | PR lane runtime | < 10 min |
-| Health regression runtime | < 8 min |
-| Nightly full runtime | < 45 min initially |
+| Nightly full runtime | < 45 min |
 | Weekly gap finder output contains actionable tasks | 100% |
 
 ---
 
-## 13. Open Questions
+## 13. Open Questions and Decisions
 
-1. **When should browser smoke move into the health regression lane?** It may be too slow at first, but valuable once stable.
-2. **Should platform logs be fetched inside runner scripts or remain agent-enriched?** Agent enrichment is more flexible, but runner enrichment is more deterministic.
-3. **How do we quarantine flaky tests without hiding real instability?** This likely needs a dedicated flake policy.
-4. **When do we add load/performance lanes?** Probably after the coverage and artifact contracts are stable.
-5. **Do we need a dedicated Coverage Planner agent now or later?** It may become useful once weekly gap analysis starts creating significant Jira work.
+### Resolved
+
+1. **Should platform logs be fetched inside runner scripts or remain agent-enriched?**
+   **Decision:** Runner-enriched (deterministic). Runner scripts fetch logs when failures occur and embed them in `qa-report.json`. Agents can augment further but the baseline artifact must be self-contained.
+
+2. **Do we need a dedicated Coverage Planner agent now or later?**
+   **Decision:** Later (Milestone 3). The weekly gap finder output is consumed manually or by `jira-admin` until the suite is large enough to warrant a dedicated planner.
+
+3. **When do we add the 4 new specialist agents?**
+   **Decision:** Not until Milestone 2 at earliest. The 3 existing agents (QA Engineer, Jira Admin, Bug Fixer) handle Milestone 1. New agents are gated on real need, not PRD ambition.
+
+### Still Open
+
+4. **When should browser smoke move into the health regression lane?** Only after Playwright tests are stable for 2+ weeks with <5% flake rate.
+5. **How do we quarantine flaky tests without hiding real instability?** Needs a dedicated flake policy — likely a `@pytest.mark.quarantine` marker with a weekly review cadence.
+6. **When do we add load/performance lanes?** After Milestone 2, only if user feedback indicates performance issues.
+7. **Test data cleanup strategy:** Dedicated test workspace? Teardown fixtures? Or both? Needs decision before Milestone 1 regression tests create persistent test data.
 
 ---
 
 ## 14. Bottom Line
 
-This PRD does not propose "write more tests." It proposes a **quality operating system** for Automatos:
+This PRD does not propose "write 500 tests." It proposes a **quality operating system** that grows with Automatos:
 
 - tests grouped by purpose and risk
 - scripts grouped by schedule
 - artifacts grouped by downstream agent
 - specialist skills aligned with those artifacts
-- browser, API, internal tools, and workflows all covered under one mesh
+- coverage that deepens as the platform stabilizes and users surface real issues
 
-The result is not just 500+ tests. It is a testing platform that your own agents can run, interpret, escalate, and repair against with minimal manual glue.
+**Right now**, the priority is Milestone 1: flush bugs, pin regressions, deepen P0 coverage, and make the platform solid for 10-15 pilot users. Everything else follows from that foundation.
+
+The result is not a test count. It is a testing platform that your own agents can run, interpret, escalate, and repair — growing naturally from pilot to production.

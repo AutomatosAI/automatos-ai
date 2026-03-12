@@ -1,17 +1,19 @@
 """
 Memory Stats API — Mem0-first with local DB fallback
 =====================================================
-Queries the Mem0 service (OpenMemory) for memory data.
+Queries the Mem0 service (via UnifiedMemoryService) for memory data.
 Falls back to the local memory_items table if Mem0 is unavailable.
 """
 
+import asyncio
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from core.database.database import get_db
 from modules.memory.storage.knowledge_system import MemoryItem
@@ -23,43 +25,97 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/memory", tags=["Real Memory Stats"])
 
 
-def _get_mem0_client():
-    """Lazy-load a Mem0Client; returns None if unavailable."""
+# ---------------------------------------------------------------------------
+# UnifiedMemoryService helper (lazy, optional)
+# ---------------------------------------------------------------------------
+
+_memory_service: Optional[Any] = None
+_memory_service_checked: bool = False
+
+
+def _get_memory_service():
+    """Return the UnifiedMemoryService singleton or None if unavailable."""
+    global _memory_service, _memory_service_checked
+    if _memory_service_checked:
+        return _memory_service
+    _memory_service_checked = True
     try:
-        from modules.memory.integrations.mem0_client import Mem0Client
-        return Mem0Client()
-    except Exception as e:
-        logger.warning("Mem0 client not available: %s", e)
-        return None
+        from modules.memory.unified_memory_service import get_unified_memory_service
+        svc = get_unified_memory_service()
+        if svc.is_mem0_configured:
+            _memory_service = svc
+            logger.info("[memory_stats] Using UnifiedMemoryService")
+        else:
+            logger.warning("[memory_stats] Mem0 not configured")
+    except Exception as exc:
+        logger.warning("[memory_stats] UnifiedMemoryService unavailable: %s", exc)
+    return _memory_service
 
 
-def _mem0_user_id(workspace_id) -> str:
-    """Build the GLOBAL scoped user_id that SmartMemoryManager uses."""
-    return f"ws_{workspace_id}"
-
-
-def _all_mem0_user_ids(workspace_id, db: Session) -> List[str]:
-    """
-    Build ALL user_id variants that SmartMemoryManager may have stored under.
-
-    SmartMemoryManager uses three tiers:
-      - Global:  ws_{workspace_id}
-      - Agent:   ws_{workspace_id}_agent_{agent_id}
-      - Daily:   ws_{workspace_id}_daily
-    """
-    ws = str(workspace_id)
-    user_ids = [f"ws_{ws}", f"ws_{ws}_daily"]
-
-    # Get all agent IDs in this workspace
+def _get_agent_ids(workspace_id, db: Session) -> List[int]:
+    """Get all agent IDs for a workspace."""
     try:
         from core.models.core import Agent
-        agent_ids = db.query(Agent.id).filter(Agent.workspace_id == workspace_id).all()
-        for (aid,) in agent_ids:
-            user_ids.append(f"ws_{ws}_agent_{aid}")
+        rows = db.query(Agent.id).filter(Agent.workspace_id == workspace_id).all()
+        return [aid for (aid,) in rows]
     except Exception as e:
-        logger.warning("Failed to fetch agent IDs for memory browse: %s", e)
+        logger.warning("Failed to fetch agent IDs for memory stats: %s", e)
+        return []
 
-    return user_ids
+
+async def _fetch_all_scoped_memories(
+    service,
+    workspace_id: str,
+    agent_ids: List[int],
+    limit: int = 500,
+    query: Optional[str] = None,
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """
+    Fetch memories from all scopes (workspace, agent, daily) using
+    UnifiedMemoryService. Returns list of (tier_label, memory_dict) tuples,
+    deduplicated by ID.
+    """
+    from modules.memory.unified_memory_service import MemoryNamespace
+
+    ws = str(workspace_id)
+    ns = MemoryNamespace(workspace_id=ws)
+
+    tasks: List = []
+    scope_labels: List[str] = []
+
+    if query:
+        tasks.append(service.search_long_term(ws, query, limit=limit))
+        scope_labels.append("global")
+        for aid in agent_ids:
+            tasks.append(service.search_long_term(ws, query, agent_id=aid, limit=limit))
+            scope_labels.append("agent")
+        tasks.append(service.search_long_term_scoped(ns.daily(), query, limit=limit))
+        scope_labels.append("daily")
+    else:
+        tasks.append(service.get_all_memories(ws, limit=limit))
+        scope_labels.append("global")
+        for aid in agent_ids:
+            tasks.append(service.get_all_memories(ws, agent_id=aid, limit=limit))
+            scope_labels.append("agent")
+        tasks.append(service.get_all_daily_logs(ws, limit=limit))
+        scope_labels.append("daily")
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    seen_ids: set = set()
+    all_items: List[Tuple[str, Dict[str, Any]]] = []
+    for label, result in zip(scope_labels, results):
+        if isinstance(result, Exception):
+            logger.warning("[memory_stats] Fetch for scope %s failed: %s", label, result)
+            continue
+        items = result if isinstance(result, list) else []
+        for m in items:
+            mid = str(m.get("id", ""))
+            if mid and mid not in seen_ids:
+                seen_ids.add(mid)
+                all_items.append((label, m))
+
+    return all_items
 
 
 @router.get("/stats/real")
@@ -67,27 +123,21 @@ async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_contex
     """
     Get memory statistics — Mem0 first, local DB fallback.
     """
-    mem0 = _get_mem0_client()
+    service = _get_memory_service()
     mem0_total = 0
     mem0_available = False
 
-    # Try Mem0 for total count — query ALL tiers
-    if mem0:
+    # Try Mem0 for total count — query ALL tiers via UnifiedMemoryService
+    if service:
         try:
-            user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
-            seen_ids: set = set()
-            for uid in user_ids:
-                items_raw = mem0.get_all(user_id=uid, limit=1000)
-                if isinstance(items_raw, list):
-                    for m in items_raw:
-                        seen_ids.add(str(m.get("id", "")))
-                elif isinstance(items_raw, dict):
-                    for m in items_raw.get("items", []):
-                        seen_ids.add(str(m.get("id", "")))
-            mem0_total = len(seen_ids)
+            agent_ids = _get_agent_ids(ctx.workspace_id, db)
+            all_items = await _fetch_all_scoped_memories(
+                service, str(ctx.workspace_id), agent_ids, limit=1000,
+            )
+            mem0_total = len(all_items)
             mem0_available = True
         except Exception as e:
-            logger.warning(f"Mem0 stats query failed, falling back to local DB: {e}")
+            logger.warning("Memory stats query failed, falling back to local DB: %s", e, exc_info=True)
 
     # Local DB stats (always available as secondary source)
     ws_filter = MemoryItem.workspace_id == ctx.workspace_id
@@ -213,44 +263,36 @@ async def get_recent_memories(
     """
     Get most recent memories — Mem0 first, local DB fallback.
     """
-    # Try Mem0 — query ALL tiers
-    mem0 = _get_mem0_client()
-    if mem0:
+    # Try Mem0 — query ALL tiers via UnifiedMemoryService
+    service = _get_memory_service()
+    if service:
         try:
-            user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
-            all_items: List[Dict[str, Any]] = []
-            seen_ids: set = set()
+            agent_ids = _get_agent_ids(ctx.workspace_id, db)
+            scoped_items = await _fetch_all_scoped_memories(
+                service, str(ctx.workspace_id), agent_ids, limit=limit,
+            )
 
-            for uid in user_ids:
-                results = mem0.get_all(user_id=uid, limit=limit)
-                items = results if isinstance(results, list) else results.get("items", []) if isinstance(results, dict) else []
-                for m in items:
-                    mid = str(m.get("id", ""))
-                    if mid and mid not in seen_ids:
-                        seen_ids.add(mid)
-                        tier = "global"
-                        if "_agent_" in uid:
-                            tier = "agent"
-                        elif uid.endswith("_daily"):
-                            tier = "daily"
-                        all_items.append({
-                            "id": mid,
-                            "agent_id": None,
-                            "memory_type": tier,
-                            "memory_level": "long_term",
-                            "content": _truncate(m.get("content") or m.get("memory") or "", 120),
-                            "importance": m.get("score"),
-                            "access_count": None,
-                            "created_at": m.get("created_at"),
-                            "source": "mem0",
-                        })
+            all_items: List[Dict[str, Any]] = [
+                {
+                    "id": str(m.get("id", "")),
+                    "agent_id": None,
+                    "memory_type": tier,
+                    "memory_level": "long_term",
+                    "content": _truncate(m.get("content") or m.get("memory") or "", 120),
+                    "importance": m.get("score"),
+                    "access_count": None,
+                    "created_at": m.get("created_at"),
+                    "source": "mem0",
+                }
+                for tier, m in scoped_items
+            ]
 
             if all_items:
                 # Sort by created_at descending
                 all_items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
                 return all_items[:limit]
         except Exception as e:
-            logger.warning(f"Mem0 recent fetch failed, falling back to local: {e}")
+            logger.warning("Memory recent fetch failed, falling back to local: %s", e, exc_info=True)
 
     # Fallback: local DB
     recent = db.query(MemoryItem).filter(
@@ -286,48 +328,34 @@ async def browse_memories(
     If query is provided, performs vector similarity search.
     Otherwise returns all memories sorted by recency.
     """
-    mem0 = _get_mem0_client()
-    if not mem0:
+    service = _get_memory_service()
+    if not service:
         return {"success": False, "error": "Memory service unavailable", "memories": []}
 
-    user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
-
     try:
-        all_results: List[Dict] = []
-        seen_ids: set = set()
+        agent_ids = _get_agent_ids(ctx.workspace_id, db)
 
-        logger.info("[browse] Querying %d user_ids for workspace %s", len(user_ids), ctx.workspace_id)
+        logger.info("[browse] Querying all scopes for workspace %s", ctx.workspace_id)
 
-        for uid in user_ids:
-            if query:
-                results = mem0.search(query=query, user_id=uid, limit=limit)
-            else:
-                results = mem0.get_all(user_id=uid, limit=limit)
+        scoped_items = await _fetch_all_scoped_memories(
+            service, str(ctx.workspace_id), agent_ids,
+            limit=limit, query=query,
+        )
 
-            logger.info("[browse] uid=%s type=%s len=%s", uid, type(results).__name__, len(results) if isinstance(results, (list, dict)) else "?")
+        all_results: List[Dict] = [
+            {
+                "id": str(m.get("id", "")),
+                "content": m.get("memory") or m.get("content", ""),
+                "score": m.get("score"),
+                "metadata": m.get("metadata") or m.get("metadata_"),
+                "created_at": m.get("created_at"),
+                "updated_at": m.get("updated_at"),
+                "tier": tier,
+            }
+            for tier, m in scoped_items
+        ]
 
-            items = results if isinstance(results, list) else []
-            for m in items:
-                mid = str(m.get("id", ""))
-                if mid and mid not in seen_ids:
-                    seen_ids.add(mid)
-                    # Tag which tier this came from
-                    tier = "global"
-                    if "_agent_" in uid:
-                        tier = "agent"
-                    elif uid.endswith("_daily"):
-                        tier = "daily"
-                    all_results.append({
-                        "id": mid,
-                        "content": m.get("memory") or m.get("content", ""),
-                        "score": m.get("score"),
-                        "metadata": m.get("metadata") or m.get("metadata_"),
-                        "created_at": m.get("created_at"),
-                        "updated_at": m.get("updated_at"),
-                        "tier": tier,
-                    })
-
-        logger.info("[browse] Collected %d unique memories from %d user_ids", len(all_results), len(user_ids))
+        logger.info("[browse] Collected %d unique memories", len(all_results))
 
         # Sort by created_at descending (newest first), then truncate
         all_results.sort(
@@ -340,7 +368,7 @@ async def browse_memories(
             logger.info("[browse] Returning %d memories, first: id=%s content=%s",
                         len(memories), memories[0].get("id"), str(memories[0].get("content", ""))[:60])
         else:
-            logger.warning("[browse] Returning 0 memories despite querying %d user_ids", len(user_ids))
+            logger.warning("[browse] Returning 0 memories")
 
         return {
             "success": True,
@@ -361,25 +389,22 @@ async def delete_memory(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Delete a specific memory by ID — PRD-77."""
-    mem0 = _get_mem0_client()
-    if not mem0:
+    service = _get_memory_service()
+    if not service:
         return {"success": False, "error": "Memory service unavailable"}
-
-    user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
 
     try:
         # Ownership check: verify memory belongs to this workspace (any tier)
-        owned_ids: set = set()
-        for uid in user_ids:
-            items_raw = mem0.get_all(user_id=uid, limit=500)
-            items = items_raw if isinstance(items_raw, list) else []
-            for m in items:
-                owned_ids.add(str(m.get("id", "")))
+        agent_ids = _get_agent_ids(ctx.workspace_id, db)
+        scoped_items = await _fetch_all_scoped_memories(
+            service, str(ctx.workspace_id), agent_ids, limit=500,
+        )
+        owned_ids = {str(m.get("id", "")) for _, m in scoped_items}
 
         if memory_id not in owned_ids:
             return {"success": False, "error": "Memory not found or not owned by this workspace"}
 
-        deleted = mem0.delete(memory_id)
+        deleted = await service.delete_memory(memory_id)
         if deleted:
             logger.info("Memory %s deleted by workspace %s", memory_id, ctx.workspace_id)
             return {"success": True, "message": f"Memory {memory_id} deleted"}
@@ -399,38 +424,33 @@ async def get_memory_health(
     Shows total count, staleness, and basic health indicators.
     Queries ALL memory tiers (global, per-agent, daily).
     """
-    mem0 = _get_mem0_client()
-    user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
+    service = _get_memory_service()
 
     total = 0
     oldest_memory = None
     newest_memory = None
     mem0_available = False
 
-    if mem0:
+    if service:
         try:
-            all_dates: List[str] = []
-            seen_ids: set = set()
+            agent_ids = _get_agent_ids(ctx.workspace_id, db)
+            scoped_items = await _fetch_all_scoped_memories(
+                service, str(ctx.workspace_id), agent_ids, limit=500,
+            )
 
-            for uid in user_ids:
-                items_raw = mem0.get_all(user_id=uid, limit=500)
-                items = items_raw if isinstance(items_raw, list) else []
-                for m in items:
-                    mid = str(m.get("id", ""))
-                    if mid and mid not in seen_ids:
-                        seen_ids.add(mid)
-                        dt = m.get("created_at")
-                        if dt:
-                            all_dates.append(dt)
-
-            total = len(seen_ids)
+            total = len(scoped_items)
             mem0_available = True
 
+            all_dates = [
+                m.get("created_at")
+                for _, m in scoped_items
+                if m.get("created_at")
+            ]
             if all_dates:
                 oldest_memory = min(all_dates)
                 newest_memory = max(all_dates)
         except Exception as e:
-            logger.warning("Memory health check failed: %s", e)
+            logger.warning("Memory health check failed: %s", e, exc_info=True)
 
     # Search effectiveness from access log
     search_stats = {"total_searches": 0, "hits": 0, "hit_rate": 0}
@@ -465,6 +485,241 @@ async def get_memory_health(
     }
 
 
+@router.get("/layers")
+async def get_memory_layers(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Memory layer health endpoint — PRD-79 US-026.
+
+    Returns per-layer stats across the 5-layer memory stack:
+      L1 (Redis sessions), L2 (Postgres short-term), L3 (Mem0 long-term),
+      L4 (org knowledge: databases + documents).
+    Includes overall health status and per-layer latency.
+    Result is cached for 60s (configurable via MEMORY_LAYERS_CACHE_TTL_SECONDS).
+    """
+    import time as _time
+
+    from config import config as app_config
+
+    service = _get_memory_service()
+    ws_id = str(ctx.workspace_id)
+
+    # ------------------------------------------------------------------
+    # Check Redis cache first
+    # ------------------------------------------------------------------
+    cache_key = f"mem:layers:{ws_id}"
+    cache_ttl = getattr(app_config, "MEMORY_LAYERS_CACHE_TTL_SECONDS", 60)
+
+    if service:
+        try:
+            redis_client = service._get_redis()
+            if redis_client:
+                import json as _json
+
+                conn = redis_client.get_redis()
+                cached = conn.get(cache_key)
+                if cached:
+                    return _json.loads(cached)
+        except Exception:
+            pass  # cache miss — compute fresh
+
+    layers: Dict[str, Any] = {}
+    health_issues: List[str] = []
+
+    # ------------------------------------------------------------------
+    # L1: Redis Session Stats
+    # ------------------------------------------------------------------
+    l1_start = _time.monotonic()
+    l1: Dict[str, Any] = {"active_sessions": 0, "responding": False, "latency_ms": 0}
+    try:
+        if service:
+            redis_client = service._get_redis()
+            if redis_client:
+                conn = redis_client.get_redis()
+                session_pattern = f"mem:session:{ws_id}:*"
+                count = 0
+                for _ in conn.scan_iter(match=session_pattern, count=100):
+                    count += 1
+                l1["active_sessions"] = count
+                l1["responding"] = True
+    except Exception as e:
+        logger.warning("[layers] L1 Redis check failed: %s", e, exc_info=True)
+        health_issues.append("L1 Redis unavailable")
+    l1["latency_ms"] = round((_time.monotonic() - l1_start) * 1000, 1)
+    layers["L1_session"] = l1
+
+    # ------------------------------------------------------------------
+    # L2: Postgres Short-term Stats
+    # ------------------------------------------------------------------
+    l2_start = _time.monotonic()
+    l2: Dict[str, Any] = {
+        "total_rows": 0,
+        "avg_decay_score": 0.0,
+        "pending_promotion": 0,
+        "responding": False,
+        "latency_ms": 0,
+    }
+    try:
+        from modules.memory.models import MemoryShortTerm
+
+        row_count = (
+            db.query(func.count(MemoryShortTerm.id))
+            .filter(
+                MemoryShortTerm.workspace_id == ctx.workspace_id,
+                MemoryShortTerm.archived_at.is_(None),
+            )
+            .scalar()
+            or 0
+        )
+        avg_decay = (
+            db.query(func.avg(MemoryShortTerm.decay_score))
+            .filter(
+                MemoryShortTerm.workspace_id == ctx.workspace_id,
+                MemoryShortTerm.archived_at.is_(None),
+            )
+            .scalar()
+        )
+        pending_promo = (
+            db.query(func.count(MemoryShortTerm.id))
+            .filter(
+                MemoryShortTerm.workspace_id == ctx.workspace_id,
+                MemoryShortTerm.archived_at.is_(None),
+                MemoryShortTerm.promoted_to_l3 == False,  # noqa: E712
+                MemoryShortTerm.importance > getattr(app_config, "MEMORY_PROMOTION_MIN_IMPORTANCE", 0.7),
+                MemoryShortTerm.access_count > getattr(app_config, "MEMORY_PROMOTION_MIN_ACCESS_COUNT", 3),
+            )
+            .scalar()
+            or 0
+        )
+        l2["total_rows"] = row_count
+        l2["avg_decay_score"] = round(float(avg_decay or 0), 3)
+        l2["pending_promotion"] = pending_promo
+        l2["responding"] = True
+    except Exception as e:
+        logger.warning("[layers] L2 Postgres check failed: %s", e, exc_info=True)
+        health_issues.append("L2 Postgres unavailable")
+    l2["latency_ms"] = round((_time.monotonic() - l2_start) * 1000, 1)
+    layers["L2_short_term"] = l2
+
+    # ------------------------------------------------------------------
+    # L3: Mem0 Long-term Stats
+    # ------------------------------------------------------------------
+    l3_start = _time.monotonic()
+    l3: Dict[str, Any] = {
+        "total_memories": 0,
+        "responding": False,
+        "latency_ms": 0,
+    }
+    if service and service.is_mem0_configured:
+        try:
+            mems = await service.get_all_memories(ws_id, limit=1)
+            # get_all_memories returns a list; we just need to confirm it works
+            # For total count, do a broader fetch (capped at 500 to stay fast)
+            all_mems = await service.get_all_memories(ws_id, limit=500)
+            l3["total_memories"] = len(all_mems)
+            l3["responding"] = True
+        except Exception as e:
+            logger.warning("[layers] L3 Mem0 check failed: %s", e, exc_info=True)
+            health_issues.append("L3 Mem0 unavailable")
+    else:
+        health_issues.append("L3 Mem0 not configured")
+    l3["latency_ms"] = round((_time.monotonic() - l3_start) * 1000, 1)
+    layers["L3_long_term"] = l3
+
+    # ------------------------------------------------------------------
+    # L4: Organizational Knowledge Stats
+    # ------------------------------------------------------------------
+    l4_start = _time.monotonic()
+    l4: Dict[str, Any] = {
+        "connected_databases": 0,
+        "documents": 0,
+        "responding": False,
+        "latency_ms": 0,
+    }
+    try:
+        from core.models.database_knowledge import DatabaseKnowledgeSource
+        from core.models.core import Document
+
+        db_count = (
+            db.query(func.count(DatabaseKnowledgeSource.id))
+            .filter(
+                DatabaseKnowledgeSource.workspace_id == ctx.workspace_id,
+                DatabaseKnowledgeSource.is_active == True,  # noqa: E712
+            )
+            .scalar()
+            or 0
+        )
+        doc_count = (
+            db.query(func.count(Document.id))
+            .filter(Document.workspace_id == ctx.workspace_id)
+            .scalar()
+            or 0
+        )
+        l4["connected_databases"] = db_count
+        l4["documents"] = doc_count
+        l4["responding"] = True
+    except Exception as e:
+        logger.warning("[layers] L4 knowledge check failed: %s", e, exc_info=True)
+        health_issues.append("L4 knowledge query failed")
+    l4["latency_ms"] = round((_time.monotonic() - l4_start) * 1000, 1)
+    layers["L4_knowledge"] = l4
+
+    # ------------------------------------------------------------------
+    # Background Jobs Status
+    # ------------------------------------------------------------------
+    jobs_status: Dict[str, Any] = {"active": False, "jobs": {}}
+    try:
+        from services.memory_jobs import get_memory_job_scheduler
+
+        jobs_status = get_memory_job_scheduler().get_status()
+    except Exception as e:
+        logger.debug("[layers] Job scheduler status unavailable: %s", e)
+
+    # ------------------------------------------------------------------
+    # Overall Health
+    # ------------------------------------------------------------------
+    responding_layers = sum(
+        1
+        for layer in layers.values()
+        if layer.get("responding")
+    )
+    total_layers = len(layers)
+
+    if responding_layers == total_layers:
+        health_status = "healthy"
+    elif responding_layers == 0:
+        health_status = "critical"
+    else:
+        health_status = "degraded"
+
+    result = {
+        "health_status": health_status,
+        "responding_layers": f"{responding_layers}/{total_layers}",
+        "layers": layers,
+        "jobs": jobs_status,
+        "issues": health_issues if health_issues else None,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    # ------------------------------------------------------------------
+    # Cache the result
+    # ------------------------------------------------------------------
+    if service:
+        try:
+            redis_client = service._get_redis()
+            if redis_client:
+                import json as _json
+
+                conn = redis_client.get_redis()
+                conn.setex(cache_key, cache_ttl, _json.dumps(result, default=str))
+        except Exception:
+            pass  # caching is non-critical
+
+    return result
+
+
 class ConsolidateRequest(BaseModel):
     memory_ids: List[str]
     strategy: str = "merge"  # "merge" | "summarise"
@@ -487,26 +742,22 @@ async def consolidate_memories(
     if body.strategy not in ("merge", "summarise"):
         return {"success": False, "error": "strategy must be 'merge' or 'summarise'"}
 
-    mem0 = _get_mem0_client()
-    if not mem0:
+    service = _get_memory_service()
+    if not service:
         return {"success": False, "error": "Memory service unavailable"}
 
     # Fetch target memories across all tiers
     try:
-        user_ids = _all_mem0_user_ids(ctx.workspace_id, db)
+        agent_ids = _get_agent_ids(ctx.workspace_id, db)
+        scoped_items = await _fetch_all_scoped_memories(
+            service, str(ctx.workspace_id), agent_ids, limit=500,
+        )
 
         id_set = set(body.memory_ids)
-        targets: List[Dict] = []
-        seen: set = set()
-
-        for uid in user_ids:
-            items_raw = mem0.get_all(user_id=uid, limit=500)
-            items = items_raw if isinstance(items_raw, list) else []
-            for m in items:
-                mid = str(m.get("id", ""))
-                if mid in id_set and mid not in seen:
-                    seen.add(mid)
-                    targets.append(m)
+        targets: List[Dict] = [
+            m for _, m in scoped_items
+            if str(m.get("id", "")) in id_set
+        ]
 
         if len(targets) < 2:
             return {"success": False, "error": f"Found only {len(targets)} of {len(body.memory_ids)} memories"}
@@ -545,12 +796,11 @@ async def consolidate_memories(
             logger.warning("LLM summarisation failed, falling back to merge: %s", e)
             merged_content = "\n\n".join(c for c in contents if c)
 
-    # Store the consolidated memory under global tier
+    # Store the consolidated memory under global tier via UnifiedMemoryService
     try:
-        global_user_id = _mem0_user_id(ctx.workspace_id)
-        mem0.add(
-            messages=[{"role": "system", "content": merged_content}],
-            user_id=global_user_id,
+        await service.store_long_term(
+            workspace_id=str(ctx.workspace_id),
+            content=merged_content,
             metadata={"source": "consolidation", "merged_from": len(targets)},
         )
     except Exception as e:
@@ -561,7 +811,7 @@ async def consolidate_memories(
     deleted = 0
     for m in targets:
         mid = str(m.get("id", ""))
-        if mid and mem0.delete(mid):
+        if mid and await service.delete_memory(mid):
             deleted += 1
 
     logger.info(

@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/memory", tags=["Widget Memory"])
 
+# Type alias for forward reference
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from modules.memory.unified_memory_service import UnifiedMemoryService
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
@@ -68,27 +73,31 @@ class MemoryDeleteResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Mem0 client helper (lazy, optional)
+# UnifiedMemoryService helper (lazy, optional)
 # ---------------------------------------------------------------------------
 
-_mem0_client: Any = None
-_mem0_checked: bool = False
+_memory_service: Optional[Any] = None
+_memory_service_checked: bool = False
 
 
-def _get_mem0_client() -> Any:
-    """Return a Mem0Client or None if unavailable."""
-    global _mem0_client, _mem0_checked
-    if _mem0_checked:
-        return _mem0_client
-    _mem0_checked = True
+def _get_memory_service() -> Optional["UnifiedMemoryService"]:
+    """Return the UnifiedMemoryService singleton or None if unavailable."""
+    global _memory_service, _memory_service_checked
+    if _memory_service_checked:
+        return _memory_service
+    _memory_service_checked = True
     try:
-        from modules.memory.integrations.mem0_client import Mem0Client
-        _mem0_client = Mem0Client()
-        logger.info("[widget_memory] Mem0Client initialised")
+        from modules.memory.unified_memory_service import get_unified_memory_service
+        svc = get_unified_memory_service()
+        if svc.is_mem0_configured:
+            _memory_service = svc
+            logger.info("[widget_memory] Using UnifiedMemoryService")
+        else:
+            logger.warning("[widget_memory] Mem0 not configured, using in-memory fallback")
     except Exception as exc:
-        logger.warning("[widget_memory] Mem0 unavailable, using in-memory fallback: %s", exc)
-        _mem0_client = None
-    return _mem0_client
+        logger.warning("[widget_memory] UnifiedMemoryService unavailable, using fallback: %s", exc)
+        _memory_service = None
+    return _memory_service
 
 
 # ---------------------------------------------------------------------------
@@ -152,11 +161,13 @@ async def list_memories(
 ) -> MemoryListResponse:
     """List memories for the current workspace."""
     ws = _ws_key(ctx.workspace_id)
-    client = _get_mem0_client()
+    service = _get_memory_service()
 
-    if client is not None:
+    if service is not None:
         try:
-            raw = client.get_all(user_id=ws, limit=limit)
+            raw = await service.get_all_memories(
+                workspace_id=ws, limit=limit,
+            )
             items = [
                 MemoryItem(
                     id=m.get("id", str(uuid.uuid4())),
@@ -170,7 +181,7 @@ async def list_memories(
             ]
             return MemoryListResponse(memories=items, total=len(items))
         except Exception as exc:
-            logger.warning("[widget_memory] Mem0 list failed, falling back: %s", exc)
+            logger.warning("[widget_memory] Memory list failed, falling back: %s", exc, exc_info=True)
 
     # Fallback
     raw_items = _fallback_list(ws)[:limit]
@@ -186,11 +197,13 @@ async def search_memories(
 ) -> MemorySearchResponse:
     """Search memories by query within the current workspace."""
     ws = _ws_key(ctx.workspace_id)
-    client = _get_mem0_client()
+    service = _get_memory_service()
 
-    if client is not None:
+    if service is not None:
         try:
-            raw = client.search(query=q, user_id=ws, limit=limit)
+            raw = await service.search_long_term(
+                workspace_id=ws, query=q, limit=limit,
+            )
             items = [
                 MemoryItem(
                     id=m.get("id", str(uuid.uuid4())),
@@ -205,7 +218,7 @@ async def search_memories(
             ]
             return MemorySearchResponse(query=q, results=items, total=len(items))
         except Exception as exc:
-            logger.warning("[widget_memory] Mem0 search failed, falling back: %s", exc)
+            logger.warning("[widget_memory] Memory search failed, falling back: %s", exc, exc_info=True)
 
     # Fallback
     raw_items = _fallback_search(ws, q)[:limit]
@@ -221,15 +234,18 @@ async def store_memory(
     """Store a new memory in the current workspace."""
     ws = _ws_key(ctx.workspace_id)
     memory_id = str(uuid.uuid4())
-    client = _get_mem0_client()
+    service = _get_memory_service()
 
-    if client is not None:
+    if service is not None:
         try:
-            messages = [{"role": "user", "content": body.content}]
-            mem0_meta = body.metadata or {}
+            mem0_meta = dict(body.metadata) if body.metadata else {}
             if body.tags:
                 mem0_meta["tags"] = body.tags
-            result = client.add(messages=messages, user_id=ws, metadata=mem0_meta)
+            result = await service.store_long_term(
+                workspace_id=ws,
+                content=body.content,
+                metadata=mem0_meta or None,
+            )
             # Attempt to pull the stored ID from Mem0 response
             if isinstance(result, dict):
                 memory_id = result.get("id") or result.get("memory_id") or memory_id
@@ -242,7 +258,7 @@ async def store_memory(
                 created_at=datetime.now(timezone.utc).isoformat(),
             )
         except Exception as exc:
-            logger.warning("[widget_memory] Mem0 store failed, falling back: %s", exc)
+            logger.warning("[widget_memory] Memory store failed, falling back: %s", exc, exc_info=True)
 
     # Fallback
     record = _fallback_add(ws, memory_id, body.content, body.metadata, body.tags)
@@ -256,14 +272,14 @@ async def delete_memory(
 ) -> MemoryDeleteResponse:
     """Delete a memory by ID within the current workspace."""
     ws = _ws_key(ctx.workspace_id)
-    client = _get_mem0_client()
+    service = _get_memory_service()
 
-    if client is not None:
+    if service is not None:
         try:
-            deleted = client.delete(memory_id=memory_id)
+            deleted = await service.delete_memory(memory_id=memory_id)
             return MemoryDeleteResponse(id=memory_id, deleted=deleted)
         except Exception as exc:
-            logger.warning("[widget_memory] Mem0 delete failed, falling back: %s", exc)
+            logger.warning("[widget_memory] Memory delete failed, falling back: %s", exc, exc_info=True)
 
     # Fallback
     deleted = _fallback_delete(ws, memory_id)

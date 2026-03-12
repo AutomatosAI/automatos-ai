@@ -77,7 +77,45 @@ class Config:
             return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/0"
         
         return None
-    
+
+    # =============================================================================
+    # MEMORY — Unified Memory Service (PRD-79)
+    # =============================================================================
+    # L1 Session: TTL for active sessions (24 hours)
+    MEMORY_SESSION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_TTL_SECONDS", "86400"))
+    # L1 Session: TTL after end_session() called (1 hour consolidation window)
+    MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS", "3600"))
+    # L3 Cache: TTL for Mem0 search result caching in Redis
+    MEMORY_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_CACHE_TTL_SECONDS", "300"))
+    # Context Router: total token budget for pre-LLM context injection
+    CONTEXT_BUDGET_TOKENS: int = int(os.getenv("CONTEXT_BUDGET_TOKENS", "4000"))
+    # Context Router: per-source sub-budgets (tokens)
+    CONTEXT_BUDGET_SESSION: int = int(os.getenv("CONTEXT_BUDGET_SESSION", "500"))
+    CONTEXT_BUDGET_LONG_TERM: int = int(os.getenv("CONTEXT_BUDGET_LONG_TERM", "800"))
+    CONTEXT_BUDGET_TEMPORAL: int = int(os.getenv("CONTEXT_BUDGET_TEMPORAL", "600"))
+    CONTEXT_BUDGET_DAILY: int = int(os.getenv("CONTEXT_BUDGET_DAILY", "400"))
+    CONTEXT_BUDGET_AWARENESS: int = int(os.getenv("CONTEXT_BUDGET_AWARENESS", "200"))
+    # Knowledge awareness: TTL for per-workspace capability map cached in Redis
+    MEMORY_AWARENESS_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_AWARENESS_CACHE_TTL_SECONDS", "600"))
+    # L2 Decay: Ebbinghaus decay rate (higher = faster forgetting)
+    MEMORY_DECAY_RATE: float = float(os.getenv("MEMORY_DECAY_RATE", "0.1"))
+    # L2 Decay: threshold below which items are archived
+    MEMORY_DECAY_ARCHIVE_THRESHOLD: float = float(os.getenv("MEMORY_DECAY_ARCHIVE_THRESHOLD", "0.3"))
+    # L2 Decay: batch size per workspace (rows per transaction)
+    MEMORY_DECAY_BATCH_SIZE: int = int(os.getenv("MEMORY_DECAY_BATCH_SIZE", "100"))
+    # L2→L3 Promotion: minimum importance score for promotion candidates
+    MEMORY_PROMOTION_MIN_IMPORTANCE: float = float(os.getenv("MEMORY_PROMOTION_MIN_IMPORTANCE", "0.7"))
+    # L2→L3 Promotion: minimum access count for promotion candidates
+    MEMORY_PROMOTION_MIN_ACCESS_COUNT: int = int(os.getenv("MEMORY_PROMOTION_MIN_ACCESS_COUNT", "3"))
+    # L2→L3 Promotion: batch size per workspace
+    MEMORY_PROMOTION_BATCH_SIZE: int = int(os.getenv("MEMORY_PROMOTION_BATCH_SIZE", "50"))
+    # Background job intervals (PRD-79 US-023)
+    MEMORY_CONSOLIDATION_INTERVAL_SECONDS: int = int(os.getenv("MEMORY_CONSOLIDATION_INTERVAL_SECONDS", "3600"))
+    MEMORY_DECAY_INTERVAL_SECONDS: int = int(os.getenv("MEMORY_DECAY_INTERVAL_SECONDS", "3600"))
+    MEMORY_PROMOTION_HOUR_UTC: int = int(os.getenv("MEMORY_PROMOTION_HOUR_UTC", "3"))
+    MEMORY_JOBS_ENABLED: bool = os.getenv("MEMORY_JOBS_ENABLED", "true").lower() in ("true", "1", "yes")
+    MEMORY_LAYERS_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_LAYERS_CACHE_TTL_SECONDS", "60"))
+
     # =============================================================================
     # API SECURITY
     # =============================================================================

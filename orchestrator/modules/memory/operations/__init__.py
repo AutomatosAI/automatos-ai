@@ -3,7 +3,6 @@ from .augmentation import VectorStoreAugmenter, AugmentationStrategy, AugmentedM
 from .consolidation import MemoryConsolidator, ConsolidationStrategy, ConsolidationMetrics
 from .access_patterns import MemoryAccessOptimizer, AccessPattern, AccessMetrics
 from .execution_history import ExecutionHistorySearch, ExecutionResult, get_execution_history_search
-from .injection import MemoryInjector, get_memory_injector, get_memory_system
 from .prompt_injection import MemoryPromptInjector
 
 __all__ = [
@@ -19,10 +18,6 @@ __all__ = [
     "ExecutionHistorySearch",
     "ExecutionResult",
     "get_execution_history_search",
-    # Injection
-    "MemoryInjector",
-    "get_memory_injector",
-    "get_memory_system",
     # Prompt Injection
     "MemoryPromptInjector",
 ]

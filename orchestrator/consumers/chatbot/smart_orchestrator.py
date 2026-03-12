@@ -26,6 +26,7 @@ from .intent_classifier import Intent, IntentResult, get_intent_classifier
 from .smart_memory import MemoryResult, get_smart_memory_manager
 from .smart_tool_router import ToolRoutingResult, get_smart_tool_router
 from .personality import get_happy_system_prompt, AutomatosPersonality, load_orchestrator_settings
+from modules.memory.unified_memory_service import get_unified_memory_service
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ class SmartChatOrchestrator:
         self.classifier = get_intent_classifier()
         self.memory_manager = get_smart_memory_manager()
         self.tool_router = get_smart_tool_router()
+        self._unified_memory = get_unified_memory_service()
 
         # Conversation state
         self.state = ConversationState()
@@ -154,30 +156,68 @@ class SmartChatOrchestrator:
         logger.info(f"[Orchestrator] Intent: {intent_result.primary_intent.value} "
                    f"(tools: {intent_result.requires_tools}, memory: {intent_result.requires_memory})")
 
-        # 2. Retrieve Memory (if needed or stale)
+        # 2. Retrieve Context (Context Router or fallback to SmartMemoryManager)
         # PRD-68: ComplexityAssessment can override memory decision
+        # PRD-79 US-019: Context Router replaces hardcoded memory retrieval
         memory_result = None
+        context_bundle = None
         _wants_memory = self._should_fetch_memory(intent_result)
         if complexity_assessment and not complexity_assessment.needs_memory:
             _wants_memory = False
             logger.info(f"[Orchestrator] Memory SKIPPED by ComplexityAssessment ({complexity_assessment.complexity.value})")
         if _wants_memory:
-            memory_result = await self.memory_manager.retrieve_memories(
-                workspace_id=self.workspace_id,
-                agent_id=self.agent_id,
-                query=latest_query,
-                widget_mode=self.widget_mode
-            )
+            # Try Context Router first (PRD-79 Phase 2)
+            try:
+                context_bundle = await self._unified_memory.retrieve_context(
+                    workspace_id=self.workspace_id,
+                    agent_id=self.agent_id,
+                    query=latest_query,
+                    conversation_id=chat_id,
+                )
+                logger.info(
+                    "[Orchestrator] Context Router OK: ~%d tokens, signals=%s",
+                    context_bundle.total_tokens_estimate,
+                    context_bundle.signals,
+                )
+            except Exception:
+                logger.warning(
+                    "[Orchestrator] Context Router failed — falling back to SmartMemoryManager",
+                    exc_info=True,
+                )
+                context_bundle = None
+
+            # Fallback: old SmartMemoryManager path if Context Router failed
+            if context_bundle is None:
+                memory_result = await self.memory_manager.retrieve_memories(
+                    workspace_id=self.workspace_id,
+                    agent_id=self.agent_id,
+                    query=latest_query,
+                    widget_mode=self.widget_mode,
+                )
+
             self.state.messages_since_memory_fetch = 0
             self.state.memory_fetched_at = time.time()
 
-            # Update user name if found
+            # Update user name if found (from fallback path)
             if memory_result and memory_result.user_context.name:
                 self.state.user_name = memory_result.user_context.name
         else:
             self.state.messages_since_memory_fetch += 1
 
-        # US-015: Store last memory result so callers can emit SSE events
+        # US-015: Store last memory result so callers can emit SSE events.
+        # When Context Router is used, build a compatible MemoryResult from the bundle.
+        if context_bundle is not None:
+            from .smart_memory import UserContext
+            _lt_mems = list(context_bundle.long_term_memories)
+            _formatted = "\n".join(
+                m.get("memory", "") for m in _lt_mems if m.get("memory")
+            )
+            memory_result = MemoryResult(
+                memories=_lt_mems,
+                user_context=UserContext(name=self.state.user_name),
+                formatted_context=_formatted,
+                retrieval_time_ms=0.0,
+            )
         self._last_memory_result = memory_result
 
         # 3. Route Tools (if needed)
@@ -221,21 +261,6 @@ class SmartChatOrchestrator:
                 )
 
         # 4. Build System Prompt
-        memory_strings = []
-        if memory_result and memory_result.memories:
-            memory_strings = [m.get("memory", "") for m in memory_result.memories if m.get("memory")]
-
-        daily_logs = ""
-        try:
-            from config import config
-            if getattr(config, "INJECT_DAILY_LOGS", True):
-                daily_logs = await self.memory_manager.get_daily_logs(
-                    workspace_id=self.workspace_id,
-                    max_chars=2000,
-                )
-        except Exception as exc:
-            logger.debug("[Orchestrator] Daily logs skipped: %s", exc)
-
         tool_names = []
         if tool_result.filtered_tools:
             for t in tool_result.filtered_tools:
@@ -246,17 +271,91 @@ class SmartChatOrchestrator:
         # Load workspace personality settings (cached, ~0ms on hit)
         orch_settings = load_orchestrator_settings(self.workspace_id)
 
-        system_prompt = get_happy_system_prompt(
-            user_name=self.state.user_name,
-            agent_name=self.agent_name,
-            msg_count=len(messages),
-            memories=memory_strings,
-            tool_names=tool_names,
-            orchestrator_settings=orch_settings,
-        )
+        if context_bundle is not None:
+            # --- Context Router path (PRD-79) ---
+            # Extract memory strings from the bundle for the personality template
+            memory_strings = [
+                m.get("memory", "") for m in context_bundle.long_term_memories
+                if m.get("memory")
+            ]
 
-        if daily_logs:
-            system_prompt = f"{system_prompt}\n\n## Recent Activity\n\n{daily_logs}"
+            system_prompt = get_happy_system_prompt(
+                user_name=self.state.user_name,
+                agent_name=self.agent_name,
+                msg_count=len(messages),
+                memories=memory_strings,
+                tool_names=tool_names,
+                orchestrator_settings=orch_settings,
+            )
+
+            # Append Context Router sections (session, daily, temporal, awareness)
+            if context_bundle.session_summary:
+                system_prompt = f"{system_prompt}\n\n## Session Context\n\n{context_bundle.session_summary}"
+
+            if context_bundle.daily_logs:
+                system_prompt = f"{system_prompt}\n\n## Recent Activity\n\n{context_bundle.daily_logs}"
+
+            if context_bundle.temporal_results:
+                temporal_lines = "\n".join(
+                    f"- {m.get('memory') or m.get('content', '')}"
+                    for m in context_bundle.temporal_results
+                    if m.get("memory") or m.get("content")
+                )
+                if temporal_lines:
+                    system_prompt = f"{system_prompt}\n\n## Relevant Past Context\n\n{temporal_lines}"
+
+            if context_bundle.knowledge_awareness:
+                system_prompt = f"{system_prompt}\n\n{context_bundle.knowledge_awareness}"
+        else:
+            # --- Fallback path (SmartMemoryManager) ---
+            memory_strings = []
+            if memory_result and memory_result.memories:
+                memory_strings = [m.get("memory", "") for m in memory_result.memories if m.get("memory")]
+
+            daily_logs = ""
+            try:
+                from config import config
+                if getattr(config, "INJECT_DAILY_LOGS", True):
+                    daily_logs = await self.memory_manager.get_daily_logs(
+                        workspace_id=self.workspace_id,
+                        max_chars=2000,
+                    )
+            except Exception as exc:
+                logger.debug("[Orchestrator] Daily logs skipped: %s", exc)
+
+            system_prompt = get_happy_system_prompt(
+                user_name=self.state.user_name,
+                agent_name=self.agent_name,
+                msg_count=len(messages),
+                memories=memory_strings,
+                tool_names=tool_names,
+                orchestrator_settings=orch_settings,
+            )
+
+            # Fallback L1 session hydration (Redis) — only when Context Router not used
+            if chat_id:
+                try:
+                    session = await self._unified_memory.get_session(
+                        workspace_id=self.workspace_id,
+                        conversation_id=chat_id,
+                    )
+                    if session and session.summary:
+                        summary_text = session.summary[:2000]
+                        session_context = (
+                            f"## Session Context\n\n"
+                            f"Continuing conversation ({session.exchange_count} prior exchanges).\n"
+                            f"Recent context:\n{summary_text}"
+                        )
+                        system_prompt = f"{system_prompt}\n\n{session_context}"
+                except Exception:
+                    logger.warning(
+                        "[Orchestrator] Session hydration failed for chat_id=%s — skipping",
+                        chat_id,
+                        exc_info=True,
+                    )
+
+            if daily_logs:
+                system_prompt = f"{system_prompt}\n\n## Recent Activity\n\n{daily_logs}"
 
         # Inject platform action summary so LLM knows what platform_execute can do
         try:
@@ -403,6 +502,42 @@ class SmartChatOrchestrator:
             )
         except Exception as exc:
             logger.debug("[Orchestrator] Daily summary storage skipped: %s", exc)
+
+        # L2: Store raw exchange in Postgres (fire-and-forget — must not block TTFT)
+        try:
+            asyncio.create_task(
+                self._unified_memory.store_exchange(
+                    workspace_id=self.workspace_id,
+                    agent_id=self.agent_id,
+                    user_msg=user_message,
+                    assistant_msg=assistant_response,
+                    conversation_id=chat_id,
+                )
+            )
+        except Exception:
+            logger.warning(
+                "[Orchestrator] L2 store_exchange failed ws=%s — skipping",
+                self.workspace_id,
+                exc_info=True,
+            )
+
+        # Update L1 session in Redis (fire-and-forget — must not block response)
+        if chat_id:
+            try:
+                asyncio.create_task(
+                    self._unified_memory.update_session(
+                        workspace_id=self.workspace_id,
+                        conversation_id=chat_id,
+                        user_msg=user_message,
+                        assistant_msg=assistant_response,
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "[Orchestrator] Session update failed for chat_id=%s — skipping",
+                    chat_id,
+                    exc_info=True,
+                )
 
         return stored
 

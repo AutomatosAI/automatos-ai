@@ -156,6 +156,13 @@ _PLATFORM_KEYWORDS = {
         "what documents", "rag sources", "nl2sql", "queryable databases",
         "what repos are indexed",
     ],
+    "platform_query_data": [
+        "query the database", "query data", "how many users",
+        "what's our mrr", "current revenue", "latest metrics",
+        "users signed up", "average order value", "show me the data",
+        "run a query", "ask the database", "check the numbers",
+        "how many customers", "total sales", "query my database",
+    ],
     "platform_workspace_stats": [
         "workspace stats", "platform stats", "usage stats",
         "how many queries", "agent activity", "what's being used",
