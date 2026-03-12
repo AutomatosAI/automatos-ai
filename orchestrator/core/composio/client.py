@@ -947,20 +947,22 @@ class ComposioClient:
             if app_upper not in self._schema_cache or cache_age > self._schema_cache_ttl:
                 self._populate_schema_cache(app, entity_id)
 
-        # Look up requested actions
+        # Look up requested actions — search all cached apps since action names
+        # may have multi-word app prefixes (e.g. COMPOSIO_SEARCH_WEB → app COMPOSIO_SEARCH)
         results = []
         seen = set()
         for name in action_names:
             if name in seen:
                 continue
-            app_prefix = name.split("_", 1)[0]
-            app_cache = self._schema_cache.get(app_prefix, {})
-            if name in app_cache:
-                results.append({
-                    "action_name": name,
-                    "schema": app_cache[name],
-                })
-                seen.add(name)
+            for app_key, app_cache in self._schema_cache.items():
+                if name in app_cache:
+                    results.append({
+                        "action_name": name,
+                        "schema": app_cache[name],
+                        "app_name": app_key,
+                    })
+                    seen.add(name)
+                    break
 
         logger.info(
             "[ComposioClient] get_action_schemas_by_name: requested=%d resolved=%d "
@@ -970,8 +972,15 @@ class ComposioClient:
         )
         return results
 
-    def _populate_schema_cache(self, app_name: str, entity_id: str):
-        """Fetch all action schemas for an app and cache them."""
+    def _populate_schema_cache(self, app_name: str, entity_id: str, limit: int = 30):
+        """Fetch action schemas for an app and cache them.
+
+        Args:
+            app_name: Composio app name (e.g. "GMAIL", "COMPOSIO_SEARCH")
+            entity_id: Composio entity/user ID
+            limit: Max actions to fetch per app (SDK returns by importance).
+                   Default 30 keeps context manageable for large apps (SLACK=153, GITHUB=874).
+        """
         import time as _time
         app_upper = app_name.upper()
         cache: Dict[str, Dict[str, Any]] = {}
@@ -981,7 +990,7 @@ class ComposioClient:
             raw_tools = self.toolset.tools.get(
                 user_id=entity_id,
                 toolkits=[app_name.lower()],
-                limit=2000,
+                limit=limit,
             )
             for tool in raw_tools:
                 if isinstance(tool, dict):
@@ -1049,7 +1058,7 @@ class ComposioClient:
 
             for action_name, schema in self._schema_cache.get(app_upper, {}).items():
                 if action_name not in seen:
-                    results.append({"action_name": action_name, "schema": schema})
+                    results.append({"action_name": action_name, "schema": schema, "app_name": app_upper})
                     seen.add(action_name)
 
         logger.info(

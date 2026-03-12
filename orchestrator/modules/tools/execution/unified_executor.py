@@ -83,6 +83,12 @@ class UnifiedToolExecutor:
         self._platform_tools = None  # For research tools (RAG, CodeGraph)
         self._action_executor = None  # For file/shell operations
         self._composio_executor = None  # PRD-36: Composio tools
+
+        # Per-action Composio tool names (set by agent_factory after SDK schema fetch).
+        # When the LLM calls e.g. COMPOSIO_SEARCH_WEB(query="..."), the executor
+        # checks this dict to route it to the Composio executor.
+        # Maps action_name -> app_name (e.g. "COMPOSIO_SEARCH_WEB" -> "COMPOSIO_SEARCH")
+        self.composio_actions: dict = {}
         
         # Tool routing map
         self.tool_routes = {
@@ -307,7 +313,41 @@ class UnifiedToolExecutor:
             )
             logger.info(f"[tool-trace {trace}] Parameters keys={list(parameters.keys()) if isinstance(parameters, dict) else type(parameters).__name__}")
             
-            # PRD-64: Route platform_* actions to PlatformActionExecutor
+            # PRD-64: Single dispatcher for platform actions
+            if tool_name == "platform_execute":
+                action_name = (parameters.get("action") or "").strip()
+                action_params = parameters.get("params") or {}
+                if not action_name:
+                    return {"success": False, "error": "Missing required field: action", "tool": tool_name}
+
+                # Validate action exists in registry
+                from modules.tools.discovery import get_action_registry
+                registry = get_action_registry()
+                action_def = registry.get(action_name)
+                if not action_def:
+                    available = [a.name for a in registry.get_all()]
+                    return {
+                        "success": False,
+                        "error": f"Unknown platform action: '{action_name}'. Use one of: {available[:20]}...",
+                        "tool": tool_name,
+                    }
+
+                # Validate required params
+                required = action_def.parameters.get("required", [])
+                missing = [p for p in required if p not in action_params]
+                if missing:
+                    return {
+                        "success": False,
+                        "error": f"Missing required params for '{action_name}': {missing}",
+                        "tool": tool_name,
+                    }
+
+                logger.info(f"[tool-trace {trace}] platform_execute → {action_name}")
+                return await self._execute_platform_action(
+                    action_name, action_params, workspace_id=workspace_id, trace_id=trace
+                )
+
+            # PRD-64: Route platform_* actions to PlatformActionExecutor (direct calls)
             if tool_name.startswith("platform_"):
                 logger.info(f"[tool-trace {trace}] Routing to PlatformActionExecutor: {tool_name}")
                 return await self._execute_platform_action(
@@ -321,6 +361,20 @@ class UnifiedToolExecutor:
                     tool_name, parameters, workspace_id=workspace_id, trace_id=trace
                 )
 
+            # PRD-36: Route Composio per-action tools (SDK-provided schemas).
+            # The LLM calls e.g. COMPOSIO_SEARCH_WEB(query="...") directly.
+            # Parameters are flat — no nested action/params wrapping.
+            if tool_name in self.composio_actions:
+                resolved_app = self.composio_actions[tool_name]
+                logger.info(f"[tool-trace {trace}] Routing Composio per-action tool: {tool_name} (app={resolved_app})")
+                return await self._execute_composio_execute(
+                    tool_name,
+                    {"action": tool_name, "params": parameters, "app_name": resolved_app},
+                    agent_id,
+                    workspace_id=workspace_id,
+                    trace_id=trace,
+                )
+
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
             if not tool_spec:
@@ -329,8 +383,8 @@ class UnifiedToolExecutor:
                     "error": f"Unknown tool: {tool_name}",
                     "tool": tool_name,
                 }
-            
-            # PRD-36: Route Composio tools explicitly
+
+            # PRD-36: Legacy composio_execute meta-tool (fallback for older agents)
             if tool_name == "composio_execute":
                 logger.info(f"[tool-trace {trace}] Routing to Composio executor: {tool_name}")
                 return await self._execute_composio_execute(

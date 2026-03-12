@@ -93,6 +93,11 @@ class PlatformActionExecutor:
             "platform_get_latest_report": self._get_latest_report,
             # PRD-72: Board Tasks
             "platform_create_task": self._create_board_task,
+            "platform_list_tasks": self._list_board_tasks,
+            "platform_board_summary": self._board_summary,
+            "platform_get_task": self._get_board_task,
+            "platform_assign_task": self._assign_board_task,
+            "platform_update_task_status": self._update_board_task_status,
             # PRD-77: Agent Self-Scheduling
             "platform_schedule_task": self._schedule_task,
             "platform_list_scheduled_tasks": self._list_scheduled_tasks,
@@ -3336,6 +3341,236 @@ class PlatformActionExecutor:
             "task_id": task.id,
             "status": task.status,
             "title": task.title,
+        }
+
+    async def _list_board_tasks(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """List board tasks with optional filters."""
+        from core.models.core import BoardTask
+
+        query = self.db.query(BoardTask).filter(
+            BoardTask.workspace_id == self.workspace_id,
+        )
+
+        status = params.get("status")
+        if status:
+            query = query.filter(BoardTask.status == status)
+
+        priority = params.get("priority")
+        if priority:
+            query = query.filter(BoardTask.priority == priority)
+
+        agent_name = params.get("assigned_agent_name")
+        if agent_name:
+            from core.models import Agent
+            from sqlalchemy import func as sa_func
+            agent = self.db.query(Agent).filter(
+                Agent.workspace_id == self.workspace_id,
+                sa_func.lower(Agent.name) == agent_name.lower(),
+            ).first()
+            if agent:
+                query = query.filter(BoardTask.assigned_agent_id == agent.id)
+            else:
+                return {"success": True, "tasks": [], "total": 0, "note": f"No agent named '{agent_name}' found"}
+
+        limit = min(int(params.get("limit", 20)), 50)
+        tasks = query.order_by(BoardTask.created_at.desc()).limit(limit).all()
+
+        # Enrich with agent names
+        agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
+        agents_map = {}
+        if agent_ids:
+            from core.models import Agent
+            for a in self.db.query(Agent).filter(Agent.id.in_(agent_ids)).all():
+                agents_map[a.id] = a.name
+
+        result = []
+        for t in tasks:
+            result.append({
+                "id": t.id,
+                "title": t.title,
+                "status": t.status,
+                "priority": t.priority,
+                "assigned_agent": agents_map.get(t.assigned_agent_id, "unassigned"),
+                "created_at": str(t.created_at) if t.created_at else None,
+                "started_at": str(t.started_at) if t.started_at else None,
+                "completed_at": str(t.completed_at) if t.completed_at else None,
+                "error_message": t.error_message,
+            })
+
+        return {"success": True, "tasks": result, "total": len(result)}
+
+    async def _board_summary(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Get a summary of the task board: counts, busiest agents, failures."""
+        from core.models.core import BoardTask
+        from core.models import Agent
+        from sqlalchemy import func as sa_func
+
+        all_tasks = self.db.query(BoardTask).filter(
+            BoardTask.workspace_id == self.workspace_id,
+        ).all()
+
+        # Counts by status
+        by_status: Dict[str, int] = {}
+        by_priority: Dict[str, int] = {}
+        agent_task_counts: Dict[int, int] = {}
+        failed_tasks = []
+
+        for t in all_tasks:
+            by_status[t.status] = by_status.get(t.status, 0) + 1
+            by_priority[t.priority] = by_priority.get(t.priority, 0) + 1
+            if t.assigned_agent_id:
+                agent_task_counts[t.assigned_agent_id] = agent_task_counts.get(t.assigned_agent_id, 0) + 1
+            if t.error_message:
+                failed_tasks.append({"id": t.id, "title": t.title, "error": t.error_message[:200]})
+
+        # Resolve agent names for busiest
+        busiest_agents = []
+        if agent_task_counts:
+            sorted_agents = sorted(agent_task_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            agent_ids = [a[0] for a in sorted_agents]
+            agents_map = {
+                a.id: a.name
+                for a in self.db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+            }
+            busiest_agents = [
+                {"agent": agents_map.get(aid, f"Agent {aid}"), "task_count": count}
+                for aid, count in sorted_agents
+            ]
+
+        return {
+            "success": True,
+            "total_tasks": len(all_tasks),
+            "by_status": by_status,
+            "by_priority": by_priority,
+            "busiest_agents": busiest_agents,
+            "failed_tasks": failed_tasks[:5],
+        }
+
+    async def _get_board_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Get full details of a single board task."""
+        from core.models.core import BoardTask
+
+        task_id = params.get("task_id")
+        if not task_id:
+            return {"success": False, "error": "task_id is required"}
+
+        task = self.db.query(BoardTask).filter(
+            BoardTask.id == int(task_id),
+            BoardTask.workspace_id == self.workspace_id,
+        ).first()
+
+        if not task:
+            return {"success": False, "error": f"Task {task_id} not found"}
+
+        # Resolve agent name
+        agent_name = None
+        if task.assigned_agent_id:
+            from core.models import Agent
+            agent = self.db.query(Agent).get(task.assigned_agent_id)
+            agent_name = agent.name if agent else None
+
+        return {
+            "success": True,
+            "task": {
+                "id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "raw_prompt": task.raw_prompt,
+                "status": task.status,
+                "priority": task.priority,
+                "review_mode": task.review_mode,
+                "assigned_agent": agent_name or "unassigned",
+                "tags": task.tags or [],
+                "result": str(task.result)[:2000] if task.result else None,
+                "error_message": task.error_message,
+                "created_at": str(task.created_at) if task.created_at else None,
+                "started_at": str(task.started_at) if task.started_at else None,
+                "completed_at": str(task.completed_at) if task.completed_at else None,
+            },
+        }
+
+    async def _assign_board_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Assign a board task to an agent by name."""
+        from core.models.core import BoardTask
+        from core.models import Agent
+        from sqlalchemy import func as sa_func
+
+        task_id = params.get("task_id")
+        agent_name = params.get("agent_name")
+        if not task_id or not agent_name:
+            return {"success": False, "error": "task_id and agent_name are required"}
+
+        task = self.db.query(BoardTask).filter(
+            BoardTask.id == int(task_id),
+            BoardTask.workspace_id == self.workspace_id,
+        ).first()
+        if not task:
+            return {"success": False, "error": f"Task {task_id} not found"}
+
+        agent = self.db.query(Agent).filter(
+            Agent.workspace_id == self.workspace_id,
+            sa_func.lower(Agent.name) == agent_name.lower(),
+        ).first()
+        if not agent:
+            return {"success": False, "error": f"Agent '{agent_name}' not found"}
+
+        task.assigned_agent_id = agent.id
+        if task.status == "inbox":
+            task.status = "assigned"
+        self.db.commit()
+
+        return {
+            "success": True,
+            "task_id": task.id,
+            "assigned_agent": agent.name,
+            "status": task.status,
+        }
+
+    async def _update_board_task_status(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Update a board task's status. Moving to in_progress triggers execution."""
+        from core.models.core import BoardTask
+        from datetime import datetime, timezone
+
+        task_id = params.get("task_id")
+        new_status = params.get("status")
+        if not task_id or not new_status:
+            return {"success": False, "error": "task_id and status are required"}
+
+        valid = {"inbox", "assigned", "in_progress", "review", "done"}
+        if new_status not in valid:
+            return {"success": False, "error": f"Invalid status: {new_status}. Must be one of {valid}"}
+
+        task = self.db.query(BoardTask).filter(
+            BoardTask.id == int(task_id),
+            BoardTask.workspace_id == self.workspace_id,
+        ).first()
+        if not task:
+            return {"success": False, "error": f"Task {task_id} not found"}
+
+        task.status = new_status
+        if new_status == "in_progress" and not task.started_at:
+            task.started_at = datetime.now(timezone.utc)
+        if new_status in ("done", "review") and not task.completed_at:
+            task.completed_at = datetime.now(timezone.utc)
+
+        self.db.commit()
+
+        # Trigger agent execution if moved to in_progress with an assigned agent
+        if new_status == "in_progress" and task.assigned_agent_id:
+            from api.board_tasks import _launch_task_execution
+            _launch_task_execution(
+                task_id=task.id,
+                agent_id=task.assigned_agent_id,
+                workspace_id=str(self.workspace_id),
+                prompt=task.raw_prompt or task.description or task.title,
+                review_mode=task.review_mode or "auto",
+            )
+
+        return {
+            "success": True,
+            "task_id": task.id,
+            "status": task.status,
+            "triggered_execution": new_status == "in_progress" and task.assigned_agent_id is not None,
         }
 
     # ------------------------------------------------------------------

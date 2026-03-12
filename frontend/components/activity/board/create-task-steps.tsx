@@ -66,7 +66,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
           value={props.description}
           onChange={(e) => props.onDescriptionChange(e.target.value)}
           placeholder="Describe the task or paste a prompt for AI planning..."
-          className="text-sm min-h-[80px] resize-none"
+          className="text-sm min-h-[120px] resize-y"
         />
       </div>
 
@@ -89,7 +89,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
           <Select value={props.agentId} onValueChange={props.onAgentIdChange}>
             <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Unassigned" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Unassigned</SelectItem>
+              <SelectItem value="none">Unassigned</SelectItem>
               {(props.agents as any[]).map((agent: any) => (
                 <SelectItem key={agent.id} value={String(agent.id)}>
                   <span className="flex items-center gap-1.5">

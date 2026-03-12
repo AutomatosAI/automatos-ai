@@ -32,7 +32,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('medium')
-  const [agentId, setAgentId] = useState<string>('')
+  const [agentId, setAgentId] = useState<string>('none')
   const [tags, setTags] = useState('')
   const [reviewMode, setReviewMode] = useState<ReviewMode>('auto')
 
@@ -51,7 +51,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
     setTitle('')
     setDescription('')
     setPriority('medium')
-    setAgentId('')
+    setAgentId('none')
     setTags('')
     setReviewMode('auto')
     setPlanData(null)
@@ -75,7 +75,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
       title: finalTitle,
       description: finalDesc,
       priority: finalPriority,
-      assigned_agent_id: agentId ? Number(agentId) : undefined,
+      assigned_agent_id: agentId && agentId !== 'none' ? Number(agentId) : undefined,
       tags: finalTags,
       review_mode: reviewMode,
       raw_prompt: description,
@@ -106,6 +106,10 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
     }
     try {
       const result = await planTask.mutateAsync({ raw_prompt: prompt })
+      if (!result.questions || result.questions.length === 0) {
+        toast.error('AI returned no planning questions — try a more detailed description')
+        return
+      }
       setPlanData(result)
       if (result.suggested_title) setTitle(result.suggested_title)
       if (result.suggested_priority) setPriority(result.suggested_priority as TaskPriority)
@@ -115,8 +119,9 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
       }
       setAnswers(defaultAnswers)
       setStep('planning')
-    } catch {
-      toast.error('Planning failed')
+    } catch (err) {
+      console.error('[CreateTask] Planning failed:', err)
+      toast.error('Planning failed — check backend logs')
     }
   }, [description, title, planTask])
 
@@ -139,7 +144,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="glass-card sm:max-w-[540px]">
+      <DialogContent className="glass-card sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle className="text-base">
             {step === 'quick' && 'Create Task'}

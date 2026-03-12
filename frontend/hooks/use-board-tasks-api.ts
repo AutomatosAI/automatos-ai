@@ -114,20 +114,37 @@ export function useDeleteTask() {
 
 export function usePlanTask() {
   return useMutation<PlanResponse, Error, { raw_prompt: string }>({
-    mutationFn: (payload) =>
-      apiClient.request('/api/v1/tasks/plan', {
+    mutationFn: async (payload) => {
+      const res = await apiClient.request<any>('/api/v1/tasks/plan', {
         method: 'POST',
         body: JSON.stringify(payload),
-      }),
+      })
+      // Backend wraps in { planning: { ... }, raw_prompt }
+      const planning = res?.planning ?? res
+      return {
+        questions: planning.questions ?? [],
+        suggested_title: planning.suggested_title ?? '',
+        suggested_priority: planning.suggested_priority ?? 'medium',
+      }
+    },
   })
 }
 
 export function useRefineTask() {
   return useMutation<RefineResponse, Error, { raw_prompt: string; answers: Record<string, number> }>({
-    mutationFn: (payload) =>
-      apiClient.request('/api/v1/tasks/plan/refine', {
+    mutationFn: async (payload) => {
+      const res = await apiClient.request<any>('/api/v1/tasks/plan/refine', {
         method: 'POST',
         body: JSON.stringify(payload),
-      }),
+      })
+      // Backend wraps in { refined: { ... }, raw_prompt }
+      const refined = res?.refined ?? res
+      return {
+        title: refined.title ?? '',
+        description: refined.description ?? '',
+        priority: refined.priority ?? 'medium',
+        suggested_tags: refined.suggested_tags ?? [],
+      }
+    },
   })
 }

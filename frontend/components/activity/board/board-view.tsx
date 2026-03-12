@@ -44,12 +44,16 @@ export function BoardView({ period, className }: BoardViewProps) {
     })
   }, [updateStatus])
 
+  const [taskViewerOpen, setTaskViewerOpen] = useState(false)
+
   const handleOpenTask = useCallback((task: BoardTask) => {
     setOpenTask(task)
+    setTaskViewerOpen(true)
   }, [])
 
-  const handleCloseTask = useCallback(() => {
-    setOpenTask(null)
+  const handleTaskViewerChange = useCallback((open: boolean) => {
+    setTaskViewerOpen(open)
+    if (!open) setOpenTask(null)
   }, [])
 
   const handleSelectAgent = useCallback((agentId: number | null) => {
@@ -116,17 +120,8 @@ export function BoardView({ period, className }: BoardViewProps) {
         </DragDropContext>
       </div>
 
-      {/* Task viewer slide-over */}
-      {openTask && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-background/60 backdrop-blur-sm z-40"
-            onClick={handleCloseTask}
-          />
-          <BoardTaskViewer task={openTask} onClose={handleCloseTask} />
-        </>
-      )}
+      {/* Task viewer modal */}
+      <BoardTaskViewer task={openTask} open={taskViewerOpen} onOpenChange={handleTaskViewerChange} />
     </div>
   )
 }

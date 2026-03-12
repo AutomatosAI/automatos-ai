@@ -1,7 +1,7 @@
 'use client'
 
 import { Draggable } from '@hello-pangea/dnd'
-import { ArrowRight, Bot, AlertCircle } from 'lucide-react'
+import { Bot, AlertCircle } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow } from 'date-fns'
 import type { BoardTask } from '@/types/board'
@@ -42,7 +42,7 @@ export function BoardCard({ task, index, onOpen }: BoardCardProps) {
             ...provided.draggableProps.style,
             borderLeftColor: isFailed ? undefined : priorityConf.color,
           }}
-          onDoubleClick={() => onOpen(task)}
+          onClick={() => onOpen(task)}
         >
           {/* Title */}
           <p className="text-sm font-medium line-clamp-2 mb-1">{task.name}</p>
@@ -114,20 +114,9 @@ export function BoardCard({ task, index, onOpen }: BoardCardProps) {
               )}
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              {timeAgo && (
-                <span className="text-[10px] text-muted-foreground">{timeAgo}</span>
-              )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onOpen(task)
-                }}
-                className="p-0.5 rounded hover:bg-secondary/50 transition-colors"
-              >
-                <ArrowRight className="w-3.5 h-3.5 text-muted-foreground" />
-              </button>
-            </div>
+            {timeAgo && (
+              <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
+            )}
           </div>
         </div>
       )}

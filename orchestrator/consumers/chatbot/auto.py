@@ -326,6 +326,34 @@ _PLATFORM_KEYWORDS = {
         "create sub-task", "create follow-up task", "task for",
         "raise a bug", "create work item",
     ],
+    "platform_list_tasks": [
+        "list tasks", "show tasks", "what tasks", "board tasks",
+        "tasks on the board", "my tasks", "show the board",
+        "what's in progress", "in progress tasks", "assigned tasks",
+        "inbox tasks", "review tasks", "tasks for agent",
+        "what's assigned to",
+    ],
+    "platform_board_summary": [
+        "board summary", "how's the board", "board overview",
+        "daily standup", "standup summary", "how many tasks",
+        "task summary", "busiest agent", "who's busiest",
+        "any failed tasks", "task stats", "board status",
+        "how are we doing", "team status", "workload",
+    ],
+    "platform_get_task": [
+        "show task", "get task", "task details", "task info",
+        "what's task", "status of task", "details for task",
+    ],
+    "platform_assign_task": [
+        "assign task", "give task to", "assign to agent",
+        "hand off task", "delegate task", "reassign task",
+    ],
+    "platform_update_task_status": [
+        "move task", "start task", "run task now",
+        "mark task as", "complete task", "finish task",
+        "task to done", "task to in progress", "trigger task",
+        "execute task", "kick off task",
+    ],
     # PRD-77: Agent Self-Scheduling
     "platform_schedule_task": [
         "schedule a task", "schedule follow-up", "remind me",
