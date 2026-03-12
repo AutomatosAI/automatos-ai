@@ -52,183 +52,10 @@ def get_unified_tool_executor(db_session: Session, workspace_dir: str = "/tmp/au
     from modules.tools import UnifiedToolExecutor
     return UnifiedToolExecutor(db_session, workspace_dir=workspace_dir)
 
-def _build_tool_schemas(required_tools: List[str]) -> List[Dict]:
-    """
-    PRD-17: Convert tool categories to OpenAI function calling schema.
-    
-    Args:
-        required_tools: List of tool categories (e.g., ['research', 'file_ops'])
-        
-    Returns:
-        List of OpenAI function schemas
-    """
-    tools = []
-    
-    # Research tools
-    if "research" in required_tools:
-        tools.extend([
-            {
-                "type": "function",
-                "function": {
-                    "name": "search_knowledge",
-                    "description": "Search the knowledge base (RAG) for information about a topic. Returns relevant documentation chunks.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query to find relevant information"
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum number of results to return (default: 5)",
-                                "default": 5
-                            }
-                        },
-                        "required": ["query"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "semantic_search",
-                    "description": "Find semantically similar content in the document database using vector similarity.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The concept or text to find similar content for"
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum number of results to return (default: 3)",
-                                "default": 3
-                            }
-                        },
-                        "required": ["query"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "search_codebase",
-                    "description": "Search the codebase using CodeGraph for classes, functions, or code patterns.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "Class name, function name, or code pattern to search for"
-                            }
-                        },
-                        "required": ["query"]
-                    }
-                }
-            }
-        ])
-    
-    # File operation tools
-    if "file_ops" in required_tools:
-        tools.extend([
-            {
-                "type": "function",
-                "function": {
-                    "name": "read_file",
-                    "description": "Read the contents of a file from the workspace.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path to the file to read"
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "write_file",
-                    "description": "Write content to a file in the workspace.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path to the file to write"
-                            },
-                            "content": {
-                                "type": "string",
-                                "description": "Content to write to the file"
-                            }
-                        },
-                        "required": ["path", "content"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_directory",
-                    "description": "List files and directories in a path.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Directory path to list (default: workspace root)",
-                                "default": "."
-                            }
-                        },
-                        "required": []
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_directory",
-                    "description": "Create a new directory in the workspace.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path of the directory to create"
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                }
-            }
-        ])
-    
-    # Shell command tools
-    if "shell" in required_tools:
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "execute_command",
-                "description": "Execute a shell command in the workspace. Use with caution.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "type": "string",
-                            "description": "The shell command to execute"
-                        }
-                    },
-                    "required": ["command"]
-                }
-            }
-        })
-    
-    return tools
+
+# _build_tool_schemas deleted — tool schemas now come from
+# get_tools_for_agent() (DB-driven) or Composio SDK (per-action).
+
 
 
 def _build_skill_tool_schemas(agent_skills: List) -> List[Dict]:
@@ -1387,17 +1214,32 @@ To use actions, respond with JSON blocks like:
 \nYou can include multiple action blocks in your response."""
                 prompt = prompt + action_prompt
             
-            # PRD-17: Dynamic tool injection based on required_tools
-            # If caller explicitly passed required_tools, honour it.
-            # Otherwise only inject research tools when the agent has NO
-            # Composio apps — Composio-only agents should not get internal
-            # search_knowledge / semantic_search / search_codebase tools.
-            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
-            if required_tools is None:
-                required_tools = [] if composio_apps else ["research"]
+            # DB-driven tool resolution — ALL agents get core + platform tools
+            # from the registry.  Composio SDK section below ADDS external
+            # tools on top for agents with Composio assignments.
+            from modules.tools.tool_router import get_tools_for_agent
+            tool_schemas = get_tools_for_agent(
+                agent_id=agent_runtime.agent_id,
+                db_session=self.db_session,
+            )
+            # Remove composio_execute meta-tool — the SDK per-action section
+            # below provides properly typed per-action schemas instead.
+            tool_schemas = [
+                t for t in tool_schemas
+                if t.get("function", {}).get("name") != "composio_execute"
+            ]
 
-            # Build OpenAI function calling schemas (traditional tools)
-            tool_schemas = _build_tool_schemas(required_tools)
+            # Check DB for Composio app assignments (used by SDK section below)
+            from core.models.composio_cache import AgentAppAssignment
+            composio_assignments = (
+                self.db_session.query(AgentAppAssignment)
+                .filter(
+                    AgentAppAssignment.agent_id == agent_runtime.agent_id,
+                    AgentAppAssignment.is_active == True,  # noqa: E712
+                    AgentAppAssignment.app_type == "EXTERNAL",
+                )
+                .all()
+            )
             
             # PRD-22: Add skill-based tools extracted during prompt building
             if skill_tool_schemas_from_prompt:
@@ -1409,11 +1251,11 @@ To use actions, respond with JSON blocks like:
             # Each Composio action becomes its own LLM tool with typed params
             # (e.g. COMPOSIO_SEARCH_WEB(query: str) instead of composio_execute(action, params)).
             _composio_workspace_id = None
-            if composio_apps:
+            if composio_assignments:
                 db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
                 _composio_workspace_id = getattr(db_agent, 'workspace_id', None) if db_agent else None
 
-                app_names = [t.get("name") for t in composio_apps]
+                app_names = [a.app_name for a in composio_assignments if a.app_name]
                 entity_id = str(_composio_workspace_id) if _composio_workspace_id else None
 
                 composio_action_set = set()
@@ -2140,15 +1982,9 @@ To use actions, respond with JSON blocks like:
         except Exception as e:
             self.logger.warning(f"Failed to load plugins for agent {agent.id}: {e}")
 
-        # Optional tools section (kept minimal; main tool wiring remains elsewhere)
-        if required_tools:
-            try:
-                tool_schemas = _build_tool_schemas(required_tools)
-                sections.append("\n## Available Tools\n")
-                sections.append(json.dumps(tool_schemas))
-            except Exception:
-                pass
-        
+        # Tool schemas are provided via function calling (execute_with_prompt),
+        # not injected into the prompt text.  Removed _build_tool_schemas call.
+
         # Explicitly add assigned Composio apps (from the new assignment table)
         if db and agent.id:
             try:
