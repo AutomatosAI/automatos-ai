@@ -103,6 +103,12 @@ class Config:
     MEMORY_DECAY_ARCHIVE_THRESHOLD: float = float(os.getenv("MEMORY_DECAY_ARCHIVE_THRESHOLD", "0.3"))
     # L2 Decay: batch size per workspace (rows per transaction)
     MEMORY_DECAY_BATCH_SIZE: int = int(os.getenv("MEMORY_DECAY_BATCH_SIZE", "100"))
+    # L2→L3 Promotion: minimum importance score for promotion candidates
+    MEMORY_PROMOTION_MIN_IMPORTANCE: float = float(os.getenv("MEMORY_PROMOTION_MIN_IMPORTANCE", "0.7"))
+    # L2→L3 Promotion: minimum access count for promotion candidates
+    MEMORY_PROMOTION_MIN_ACCESS_COUNT: int = int(os.getenv("MEMORY_PROMOTION_MIN_ACCESS_COUNT", "3"))
+    # L2→L3 Promotion: batch size per workspace
+    MEMORY_PROMOTION_BATCH_SIZE: int = int(os.getenv("MEMORY_PROMOTION_BATCH_SIZE", "50"))
 
     # =============================================================================
     # API SECURITY

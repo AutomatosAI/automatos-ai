@@ -1550,8 +1550,274 @@ class UnifiedMemoryService:
         return row_id
 
     async def promote_to_long_term(self, memory_id: str) -> bool:
-        """Promote an L2 item to L3. Implemented in US-021."""
-        return False
+        """
+        Promote a single L2 item to L3 long-term memory via Mem0.
+
+        Reads the L2 row, sends its content to Mem0 with infer=True
+        (enables fact extraction and deduplication), then marks the row
+        as promoted. The L2 row is NOT deleted — it stays until decay
+        archives it (belt and suspenders).
+
+        Args:
+            memory_id: UUID string of the memory_short_term row.
+
+        Returns:
+            True if promotion succeeded, False otherwise.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            row_data = await loop.run_in_executor(
+                None, self._read_l2_row_sync, memory_id,
+            )
+            if row_data is None:
+                logger.warning(
+                    "[UnifiedMemoryService] promote_to_long_term: row not found id=%s",
+                    memory_id,
+                )
+                return False
+
+            workspace_id = row_data["workspace_id"]
+            agent_id = row_data.get("agent_id")
+            content = row_data["content"]
+            content_type = row_data.get("content_type", "exchange")
+            metadata = row_data.get("metadata", {})
+
+            # Store in L3 via Mem0 with fact extraction (infer=True is default)
+            result = await self.store_long_term(
+                workspace_id=workspace_id,
+                content=content,
+                agent_id=agent_id,
+                category=content_type,
+                metadata={
+                    "promoted_from_l2": str(memory_id),
+                    **(metadata if isinstance(metadata, dict) else {}),
+                },
+            )
+
+            if isinstance(result, dict) and result.get("success") is False:
+                logger.error(
+                    "[UnifiedMemoryService] promote_to_long_term: L3 store failed id=%s",
+                    memory_id,
+                )
+                return False
+
+            # Mark as promoted in L2
+            await loop.run_in_executor(
+                None, self._mark_promoted_sync, memory_id,
+            )
+            logger.info(
+                "[UnifiedMemoryService] promote_to_long_term success id=%s ws=%s",
+                memory_id,
+                workspace_id,
+            )
+            return True
+
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] promote_to_long_term failed id=%s",
+                memory_id,
+                exc_info=True,
+            )
+            return False
+
+    @staticmethod
+    def _read_l2_row_sync(memory_id: str) -> Optional[Dict[str, Any]]:
+        """Read a single L2 row by ID (synchronous, runs in executor)."""
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        with get_db_session() as db:
+            row = db.query(MemoryShortTerm).filter(
+                MemoryShortTerm.id == memory_id,
+            ).first()
+            if row is None:
+                return None
+            return {
+                "workspace_id": str(row.workspace_id),
+                "agent_id": row.agent_id,
+                "content": row.content,
+                "content_type": row.content_type,
+                "importance": row.importance,
+                "access_count": row.access_count,
+                "metadata": row.metadata_ if row.metadata_ else {},
+            }
+
+    @staticmethod
+    def _mark_promoted_sync(memory_id: str) -> None:
+        """Mark an L2 row as promoted to L3 (synchronous, runs in executor)."""
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        with get_db_session() as db:
+            row = db.query(MemoryShortTerm).filter(
+                MemoryShortTerm.id == memory_id,
+            ).first()
+            if row:
+                row.promoted_to_l3 = True
+                row.promoted_at = datetime.now(timezone.utc)
+                db.flush()
+
+    @staticmethod
+    def _get_promotion_candidates_sync(
+        workspace_id: str,
+        min_importance: float,
+        min_access_count: int,
+        batch_size: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch L2 rows eligible for promotion to L3 (synchronous, runs in executor).
+
+        Criteria: importance > threshold AND access_count > threshold
+                  AND promoted_to_l3 = False AND archived_at IS NULL.
+
+        Uses the ix_mem_st_ws_promote partial index.
+        """
+        from core.database.database import get_db_session
+        from modules.memory.models import MemoryShortTerm
+
+        with get_db_session() as db:
+            rows = (
+                db.query(MemoryShortTerm)
+                .filter(
+                    MemoryShortTerm.workspace_id == workspace_id,
+                    MemoryShortTerm.promoted_to_l3.is_(False),
+                    MemoryShortTerm.archived_at.is_(None),
+                    MemoryShortTerm.importance > min_importance,
+                    MemoryShortTerm.access_count > min_access_count,
+                )
+                .order_by(MemoryShortTerm.importance.desc())
+                .limit(batch_size)
+                .all()
+            )
+            return [
+                {
+                    "id": str(row.id),
+                    "workspace_id": str(row.workspace_id),
+                    "agent_id": row.agent_id,
+                    "content": row.content,
+                    "content_type": row.content_type,
+                    "importance": row.importance,
+                    "access_count": row.access_count,
+                    "metadata": row.metadata_ if row.metadata_ else {},
+                }
+                for row in rows
+            ]
+
+    async def run_promotion(self, workspace_id: str) -> Dict[str, int]:
+        """
+        Run L2→L3 promotion for a single workspace.
+
+        Finds L2 items meeting promotion criteria (importance > threshold,
+        access_count > threshold, not yet promoted, not archived), then
+        promotes each to L3 via Mem0 with fact extraction.
+
+        Args:
+            workspace_id: Workspace to process.
+
+        Returns:
+            {"promoted": N, "failed": M} counts.
+        """
+        from config import config
+
+        try:
+            loop = asyncio.get_event_loop()
+            candidates = await loop.run_in_executor(
+                None,
+                self._get_promotion_candidates_sync,
+                workspace_id,
+                config.MEMORY_PROMOTION_MIN_IMPORTANCE,
+                config.MEMORY_PROMOTION_MIN_ACCESS_COUNT,
+                config.MEMORY_PROMOTION_BATCH_SIZE,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] run_promotion: failed to fetch candidates ws=%s",
+                workspace_id,
+                exc_info=True,
+            )
+            return {"promoted": 0, "failed": 0}
+
+        if not candidates:
+            return {"promoted": 0, "failed": 0}
+
+        promoted = 0
+        failed = 0
+
+        for candidate in candidates:
+            success = await self.promote_to_long_term(candidate["id"])
+            if success:
+                promoted += 1
+            else:
+                failed += 1
+
+        logger.info(
+            "[UnifiedMemoryService] run_promotion ws=%s promoted=%d failed=%d",
+            workspace_id,
+            promoted,
+            failed,
+        )
+        return {"promoted": promoted, "failed": failed}
+
+    async def run_promotion_all(self) -> Dict[str, Any]:
+        """
+        Run L2→L3 promotion across ALL workspaces with eligible items.
+
+        Iterates distinct workspace_ids from memory_short_term and calls
+        run_promotion() per workspace. One workspace failure does not stop
+        processing others.
+
+        Returns:
+            {"workspaces_processed": N, "total_promoted": M, "total_failed": K,
+             "errors": E}
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            workspace_ids = await loop.run_in_executor(
+                None, self._get_active_workspace_ids_sync,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] run_promotion_all: failed to fetch workspace_ids",
+                exc_info=True,
+            )
+            return {
+                "workspaces_processed": 0,
+                "total_promoted": 0,
+                "total_failed": 0,
+                "errors": 1,
+            }
+
+        total_promoted = 0
+        total_failed = 0
+        errors = 0
+
+        for ws_id in workspace_ids:
+            try:
+                result = await self.run_promotion(str(ws_id))
+                total_promoted += result["promoted"]
+                total_failed += result["failed"]
+            except Exception:
+                logger.error(
+                    "[UnifiedMemoryService] run_promotion_all: ws=%s failed",
+                    ws_id,
+                    exc_info=True,
+                )
+                errors += 1
+
+        logger.info(
+            "[UnifiedMemoryService] run_promotion_all complete: "
+            "workspaces=%d promoted=%d failed=%d errors=%d",
+            len(workspace_ids),
+            total_promoted,
+            total_failed,
+            errors,
+        )
+        return {
+            "workspaces_processed": len(workspace_ids),
+            "total_promoted": total_promoted,
+            "total_failed": total_failed,
+            "errors": errors,
+        }
 
     async def consolidate(self, workspace_id: str) -> None:
         """Run weekly consolidation for a workspace. Implemented later."""
