@@ -485,6 +485,241 @@ async def get_memory_health(
     }
 
 
+@router.get("/layers")
+async def get_memory_layers(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Memory layer health endpoint — PRD-79 US-026.
+
+    Returns per-layer stats across the 5-layer memory stack:
+      L1 (Redis sessions), L2 (Postgres short-term), L3 (Mem0 long-term),
+      L4 (org knowledge: databases + documents).
+    Includes overall health status and per-layer latency.
+    Result is cached for 60s (configurable via MEMORY_LAYERS_CACHE_TTL_SECONDS).
+    """
+    import time as _time
+
+    from config import config as app_config
+
+    service = _get_memory_service()
+    ws_id = str(ctx.workspace_id)
+
+    # ------------------------------------------------------------------
+    # Check Redis cache first
+    # ------------------------------------------------------------------
+    cache_key = f"mem:layers:{ws_id}"
+    cache_ttl = getattr(app_config, "MEMORY_LAYERS_CACHE_TTL_SECONDS", 60)
+
+    if service:
+        try:
+            redis_client = service._get_redis()
+            if redis_client:
+                import json as _json
+
+                conn = redis_client.get_redis()
+                cached = conn.get(cache_key)
+                if cached:
+                    return _json.loads(cached)
+        except Exception:
+            pass  # cache miss — compute fresh
+
+    layers: Dict[str, Any] = {}
+    health_issues: List[str] = []
+
+    # ------------------------------------------------------------------
+    # L1: Redis Session Stats
+    # ------------------------------------------------------------------
+    l1_start = _time.monotonic()
+    l1: Dict[str, Any] = {"active_sessions": 0, "responding": False, "latency_ms": 0}
+    try:
+        if service:
+            redis_client = service._get_redis()
+            if redis_client:
+                conn = redis_client.get_redis()
+                session_pattern = f"mem:session:{ws_id}:*"
+                count = 0
+                for _ in conn.scan_iter(match=session_pattern, count=100):
+                    count += 1
+                l1["active_sessions"] = count
+                l1["responding"] = True
+    except Exception as e:
+        logger.warning("[layers] L1 Redis check failed: %s", e, exc_info=True)
+        health_issues.append("L1 Redis unavailable")
+    l1["latency_ms"] = round((_time.monotonic() - l1_start) * 1000, 1)
+    layers["L1_session"] = l1
+
+    # ------------------------------------------------------------------
+    # L2: Postgres Short-term Stats
+    # ------------------------------------------------------------------
+    l2_start = _time.monotonic()
+    l2: Dict[str, Any] = {
+        "total_rows": 0,
+        "avg_decay_score": 0.0,
+        "pending_promotion": 0,
+        "responding": False,
+        "latency_ms": 0,
+    }
+    try:
+        from modules.memory.models import MemoryShortTerm
+
+        row_count = (
+            db.query(func.count(MemoryShortTerm.id))
+            .filter(
+                MemoryShortTerm.workspace_id == ctx.workspace_id,
+                MemoryShortTerm.archived_at.is_(None),
+            )
+            .scalar()
+            or 0
+        )
+        avg_decay = (
+            db.query(func.avg(MemoryShortTerm.decay_score))
+            .filter(
+                MemoryShortTerm.workspace_id == ctx.workspace_id,
+                MemoryShortTerm.archived_at.is_(None),
+            )
+            .scalar()
+        )
+        pending_promo = (
+            db.query(func.count(MemoryShortTerm.id))
+            .filter(
+                MemoryShortTerm.workspace_id == ctx.workspace_id,
+                MemoryShortTerm.archived_at.is_(None),
+                MemoryShortTerm.promoted_to_l3 == False,  # noqa: E712
+                MemoryShortTerm.importance > getattr(app_config, "MEMORY_PROMOTION_MIN_IMPORTANCE", 0.7),
+                MemoryShortTerm.access_count > getattr(app_config, "MEMORY_PROMOTION_MIN_ACCESS_COUNT", 3),
+            )
+            .scalar()
+            or 0
+        )
+        l2["total_rows"] = row_count
+        l2["avg_decay_score"] = round(float(avg_decay or 0), 3)
+        l2["pending_promotion"] = pending_promo
+        l2["responding"] = True
+    except Exception as e:
+        logger.warning("[layers] L2 Postgres check failed: %s", e, exc_info=True)
+        health_issues.append("L2 Postgres unavailable")
+    l2["latency_ms"] = round((_time.monotonic() - l2_start) * 1000, 1)
+    layers["L2_short_term"] = l2
+
+    # ------------------------------------------------------------------
+    # L3: Mem0 Long-term Stats
+    # ------------------------------------------------------------------
+    l3_start = _time.monotonic()
+    l3: Dict[str, Any] = {
+        "total_memories": 0,
+        "responding": False,
+        "latency_ms": 0,
+    }
+    if service and service.is_mem0_configured:
+        try:
+            mems = await service.get_all_memories(ws_id, limit=1)
+            # get_all_memories returns a list; we just need to confirm it works
+            # For total count, do a broader fetch (capped at 500 to stay fast)
+            all_mems = await service.get_all_memories(ws_id, limit=500)
+            l3["total_memories"] = len(all_mems)
+            l3["responding"] = True
+        except Exception as e:
+            logger.warning("[layers] L3 Mem0 check failed: %s", e, exc_info=True)
+            health_issues.append("L3 Mem0 unavailable")
+    else:
+        health_issues.append("L3 Mem0 not configured")
+    l3["latency_ms"] = round((_time.monotonic() - l3_start) * 1000, 1)
+    layers["L3_long_term"] = l3
+
+    # ------------------------------------------------------------------
+    # L4: Organizational Knowledge Stats
+    # ------------------------------------------------------------------
+    l4_start = _time.monotonic()
+    l4: Dict[str, Any] = {
+        "connected_databases": 0,
+        "documents": 0,
+        "responding": False,
+        "latency_ms": 0,
+    }
+    try:
+        from core.models.database_knowledge import DatabaseKnowledgeSource
+        from core.models.core import Document
+
+        db_count = (
+            db.query(func.count(DatabaseKnowledgeSource.id))
+            .filter(
+                DatabaseKnowledgeSource.workspace_id == ctx.workspace_id,
+                DatabaseKnowledgeSource.is_active == True,  # noqa: E712
+            )
+            .scalar()
+            or 0
+        )
+        doc_count = (
+            db.query(func.count(Document.id))
+            .filter(Document.workspace_id == ctx.workspace_id)
+            .scalar()
+            or 0
+        )
+        l4["connected_databases"] = db_count
+        l4["documents"] = doc_count
+        l4["responding"] = True
+    except Exception as e:
+        logger.warning("[layers] L4 knowledge check failed: %s", e, exc_info=True)
+        health_issues.append("L4 knowledge query failed")
+    l4["latency_ms"] = round((_time.monotonic() - l4_start) * 1000, 1)
+    layers["L4_knowledge"] = l4
+
+    # ------------------------------------------------------------------
+    # Background Jobs Status
+    # ------------------------------------------------------------------
+    jobs_status: Dict[str, Any] = {"active": False, "jobs": {}}
+    try:
+        from services.memory_jobs import get_memory_job_scheduler
+
+        jobs_status = get_memory_job_scheduler().get_status()
+    except Exception as e:
+        logger.debug("[layers] Job scheduler status unavailable: %s", e)
+
+    # ------------------------------------------------------------------
+    # Overall Health
+    # ------------------------------------------------------------------
+    responding_layers = sum(
+        1
+        for layer in layers.values()
+        if layer.get("responding")
+    )
+    total_layers = len(layers)
+
+    if responding_layers == total_layers:
+        health_status = "healthy"
+    elif responding_layers == 0:
+        health_status = "critical"
+    else:
+        health_status = "degraded"
+
+    result = {
+        "health_status": health_status,
+        "responding_layers": f"{responding_layers}/{total_layers}",
+        "layers": layers,
+        "jobs": jobs_status,
+        "issues": health_issues if health_issues else None,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    # ------------------------------------------------------------------
+    # Cache the result
+    # ------------------------------------------------------------------
+    if service:
+        try:
+            redis_client = service._get_redis()
+            if redis_client:
+                import json as _json
+
+                conn = redis_client.get_redis()
+                conn.setex(cache_key, cache_ttl, _json.dumps(result, default=str))
+        except Exception:
+            pass  # caching is non-critical
+
+    return result
+
+
 class ConsolidateRequest(BaseModel):
     memory_ids: List[str]
     strategy: str = "merge"  # "merge" | "summarise"

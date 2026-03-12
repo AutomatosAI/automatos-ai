@@ -114,6 +114,7 @@ class Config:
     MEMORY_DECAY_INTERVAL_SECONDS: int = int(os.getenv("MEMORY_DECAY_INTERVAL_SECONDS", "3600"))
     MEMORY_PROMOTION_HOUR_UTC: int = int(os.getenv("MEMORY_PROMOTION_HOUR_UTC", "3"))
     MEMORY_JOBS_ENABLED: bool = os.getenv("MEMORY_JOBS_ENABLED", "true").lower() in ("true", "1", "yes")
+    MEMORY_LAYERS_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_LAYERS_CACHE_TTL_SECONDS", "60"))
 
     # =============================================================================
     # API SECURITY
