@@ -101,6 +101,28 @@ class RecipeMemoryService:
                     "type": "recipe_execution",
                 })
 
+            # L2: Store recipe summary in short-term memory (fire-and-forget)
+            try:
+                asyncio.create_task(
+                    self._unified.store_short_term(
+                        workspace_id=workspace_id,
+                        content=recipe_memory[:1500],
+                        content_type="recipe_summary",
+                        importance=0.6,
+                        metadata={
+                            "execution_id": execution_id,
+                            "recipe_id": recipe_id,
+                            "status": execution.status,
+                        },
+                    )
+                )
+            except Exception:
+                logger.debug(
+                    "[RecipeMemory] L2 store_short_term failed for recipe ws=%s",
+                    workspace_id,
+                    exc_info=True,
+                )
+
         # 2. Store per-agent memories (workspace + recipe + agent scope)
         step_results = execution.step_results or []
         recipe_steps = recipe.steps or []
@@ -139,6 +161,32 @@ class RecipeMemoryService:
                         "agent_id": agent_id,
                         "step_index": idx,
                     })
+
+                # L2: Store agent step in short-term memory (fire-and-forget)
+                try:
+                    agent_id_int = int(agent_id) if str(agent_id).isdigit() else None
+                    asyncio.create_task(
+                        self._unified.store_short_term(
+                            workspace_id=workspace_id,
+                            content=agent_memory[:1500],
+                            content_type="recipe_summary",
+                            agent_id=agent_id_int,
+                            importance=0.5,
+                            metadata={
+                                "execution_id": execution_id,
+                                "recipe_id": recipe_id,
+                                "agent_id": agent_id,
+                                "step_index": idx,
+                            },
+                        )
+                    )
+                except Exception:
+                    logger.debug(
+                        "[RecipeMemory] L2 store_short_term failed for agent step ws=%s agent=%s",
+                        workspace_id,
+                        agent_id,
+                        exc_info=True,
+                    )
 
         result = {
             "execution_id": execution_id,

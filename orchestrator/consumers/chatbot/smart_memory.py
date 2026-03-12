@@ -585,6 +585,25 @@ class SmartMemoryManager:
                 metadata=metadata,
             )
 
+            # L2: Store daily log in short-term memory for temporal retrieval (fire-and-forget)
+            try:
+                asyncio.create_task(
+                    self.unified_service.store_short_term(
+                        workspace_id=workspace_id,
+                        content=entry,
+                        content_type="heartbeat_log",
+                        agent_id=agent_id,
+                        importance=0.4,
+                        metadata=metadata,
+                    )
+                )
+            except Exception:
+                logger.debug(
+                    "[SmartMemory] L2 store_short_term for daily log failed ws=%s",
+                    workspace_id,
+                    exc_info=True,
+                )
+
             success = bool(result and not result.get("error"))
             if success:
                 logger.info("[SmartMemory] Daily summary stored for %s", today_str)
