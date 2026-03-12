@@ -252,14 +252,14 @@ def get_tools_for_agent(
                 "function": schema
             })
 
-        # PRD-64: Append platform action tools from ActionRegistry
+        # PRD-64: Single dispatcher for platform actions (reduces 58 schemas → 1)
         try:
             from modules.tools.discovery import get_action_registry
             action_registry = get_action_registry()
-            platform_tools = action_registry.to_openai_tools()
-            openai_tools.extend(platform_tools)
-            if platform_tools:
-                logger.info(f"[tool-trace {trace_id}] Added {len(platform_tools)} platform action tools")
+            dispatcher_schema = action_registry.to_dispatcher_schema()
+            openai_tools.append(dispatcher_schema)
+            action_count = len(action_registry.get_all())
+            logger.info(f"[tool-trace {trace_id}] Added platform_execute dispatcher ({action_count} actions behind it)")
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
 

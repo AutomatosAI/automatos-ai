@@ -109,6 +109,73 @@ class ActionRegistry:
             actions = [a for a in actions if a.permission_level == permission_filter]
         return [a.to_openai_schema() for a in actions]
 
+    def to_dispatcher_schema(self) -> Dict[str, Any]:
+        """
+        Return a SINGLE OpenAI tool schema (platform_execute) that wraps
+        all platform actions behind one dispatcher.
+
+        The LLM learns available actions from the system prompt (markdown),
+        not from the schema.  This keeps the tool payload small.
+        """
+        self._ensure_initialized()
+        return {
+            "type": "function",
+            "function": {
+                "name": "platform_execute",
+                "description": (
+                    "Execute an internal Automatos platform action. "
+                    "Pass the action name and its parameters. "
+                    "See the 'Available Platform Actions' section in your system prompt "
+                    "for the list of actions and their required parameters."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "description": "The exact platform action name (e.g. 'platform_list_agents')",
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "Parameters for the action as a JSON object",
+                        },
+                    },
+                    "required": ["action"],
+                },
+            },
+        }
+
+    def build_prompt_summary(self) -> str:
+        """
+        Build a markdown summary of all platform actions for injection
+        into the agent's system prompt.  Grouped by category.
+        """
+        self._ensure_initialized()
+        by_category: Dict[str, List[ActionDefinition]] = {}
+        for action in self._actions.values():
+            by_category.setdefault(action.category, []).append(action)
+
+        lines = ["\n## Available Platform Actions\n"]
+        lines.append(
+            "Use `platform_execute(action, params)` to call these. "
+            "The `action` field must be the exact action name.\n"
+        )
+        for category in sorted(by_category.keys()):
+            lines.append(f"### {category.replace('_', ' ').title()}")
+            for action in sorted(by_category[category], key=lambda a: a.name):
+                # Extract required params from schema
+                props = action.parameters.get("properties", {})
+                required = action.parameters.get("required", [])
+                param_hints = []
+                for pname, pdef in props.items():
+                    req_marker = " (required)" if pname in required else ""
+                    param_hints.append(f"`{pname}`{req_marker}")
+                param_str = f" — params: {', '.join(param_hints)}" if param_hints else ""
+                lines.append(f"- `{action.name}`: {action.description}{param_str}")
+            lines.append("")
+
+        return "\n".join(lines)
+
 
 def get_action_registry() -> ActionRegistry:
     """Get or create the global ActionRegistry singleton (thread-safe)."""

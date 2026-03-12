@@ -395,19 +395,9 @@ class HeartbeatService:
         communication_style = orch_settings.get("communication_style", "balanced")
         proactive_level = hb_config.get("proactive_level") or orch_settings.get("proactive_level", "notify")
 
-        # 2. Build tools based on proactive_level
+        # 2. Build tools — single dispatcher for all platform actions
         registry = get_action_registry()
-        if proactive_level in ("silent", "notify"):
-            platform_tools = registry.to_openai_tools(permission_filter="read")
-        elif proactive_level == "act_notify":
-            # read + write (exclude destructive)
-            platform_tools = [
-                a.to_openai_schema()
-                for a in registry.get_all()
-                if a.permission_level in ("read", "write")
-            ]
-        else:  # autonomous
-            platform_tools = registry.to_openai_tools()
+        platform_tools = [registry.to_dispatcher_schema()]
 
         # 3. Build proactive_level instruction
         level_instructions = {
@@ -432,11 +422,13 @@ class HeartbeatService:
             checklist_block = f"\n\nChecklist to review:\n{checklist}"
 
         # 6. Build system prompt
+        platform_action_summary = registry.build_prompt_summary()
         system_prompt = (
             f"You are the Automatos orchestrator performing a scheduled health check.\n"
             f"Personality: {personality_mode}.\n\n"
             f"Your task: Analyze your workspace using the tools provided.{checklist_block}\n\n"
             f"{level_instruction}{style_suffix}\n\n"
+            f"{platform_action_summary}\n\n"
             f"Reply with a SHORT plain-text summary (max 500 chars). No markdown."
         )
 

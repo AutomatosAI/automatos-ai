@@ -1983,8 +1983,17 @@ To use actions, respond with JSON blocks like:
         except Exception as e:
             self.logger.warning(f"Failed to load plugins for agent {agent.id}: {e}")
 
-        # Tool schemas are provided via function calling (execute_with_prompt),
-        # not injected into the prompt text.  Removed _build_tool_schemas call.
+        # Inject platform action summary so the LLM knows what's available
+        # via platform_execute(action, params)
+        try:
+            from modules.tools.discovery import get_action_registry
+            action_registry = get_action_registry()
+            platform_summary = action_registry.build_prompt_summary()
+            if platform_summary:
+                sections.append(platform_summary)
+                self.logger.info(f"Injected platform action summary ({len(action_registry.get_all())} actions)")
+        except Exception as e:
+            self.logger.warning(f"Failed to inject platform action summary: {e}")
 
         # Explicitly add assigned Composio apps (from the new assignment table)
         if db and agent.id:
