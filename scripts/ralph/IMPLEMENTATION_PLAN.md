@@ -1,36 +1,71 @@
-# Implementation Plan: PRD-72 Activity Command Centre
+# PRD-79: Unified Memory & Context Architecture — Implementation Plan
 
-> **Scope**: Cross-cutting (frontend + backend) | **Risk**: Balanced | **Branch**: `ralph/72-activity-command-centre`
+> **Scope**: Backend (orchestrator) | **Risk**: High (core memory system rewrite) | **Branch**: `ralph/79-unified-memory-context`
 
 ## Summary
 
-Replace `/workflows` with `/activity` — a unified Activity Command Centre showing chats, routines, recipes, and missions across four tabs. Backend: register heartbeat router, create activity service + API endpoints. Frontend: new page shell, feed items, routine cards, execution detail drill-down, live stats.
+Replace 12 scattered Mem0Client instances with a single UnifiedMemoryService. Add 5-layer memory stack (L0 Focus, L1 Working/Redis, L2 Short-term/Postgres, L3 Long-term/Mem0, L4 Org Knowledge). Build Context Router for intelligent pre-LLM context assembly. Add NL2SQL for live data queries.
 
 ## Reference
 
-- **PRD**: `docs/PRDS/72-ACTIVITY-COMMAND-CENTRE.md`
-- **Design system**: `frontend/app/globals.css` (glass-card, card-glow, stage-*, log-entry-*, semantic colour tokens)
-- **Shared components**: `frontend/components/shared/` (PageHeader, StatsBar, FilterTabs, SearchInput)
-- **Hook pattern**: `frontend/hooks/use-workflow-api.ts` (React Query key factory + useQuery + useMutation)
-- **Backend pattern**: `orchestrator/api/execution_history.py` (FastAPI router + hybrid auth)
-- **Existing heartbeat API**: `orchestrator/api/heartbeat.py` (exists but NOT registered in main.py)
+- **PRD**: `docs/PRDS/79-UNIFIED-MEMORY-CONTEXT-ARCHITECTURE.md`
+- **Mem0Client**: `orchestrator/modules/memory/integrations/mem0_client.py`
+- **SmartMemoryManager**: `orchestrator/consumers/chatbot/smart_memory.py` (854 lines)
+- **Config**: `orchestrator/config.py` (all constants here)
+- **Redis**: `orchestrator/core/redis/client.py`
+- **Platform tool pattern**: platform_actions.py + platform_executor.py + auto.py
 
 ## Tasks
 
-- [x] **US-001: Create /activity route shell page** — Create `frontend/app/activity/page.tsx` + `frontend/components/activity/activity-page.tsx` with PageHeader, StatsBar (hardcoded), FilterTabs (4 tabs). Update sidebar.tsx nav item. Add `/workflows` → `/activity` redirect. NOTE: `CookingPot` icon doesn't exist in this lucide-react version — use `ChefHat` instead.
-- [x] **US-002: Build Missions placeholder + wire RecipesTab** — Created `activity-missions.tsx` Coming Soon card with glass-card styling, gradient-text accent, capability bullets, and "Request Early Access" button routing to /chat. Wired existing RecipesTab into Recipes tab and ActivityMissions into Missions tab of activity-page.tsx.
-- [x] **US-003: Register heartbeat router + add endpoints** — Registered heartbeat_router in main.py (import + include_router). Added GET /api/heartbeat/workspace (lists all agent heartbeat configs with last_run and next_run), PATCH /api/heartbeat/{id}/toggle (toggles enabled flag + updates APScheduler), GET /api/heartbeat/{id}/executions (returns last N results with error extraction from findings JSONB). NOTE: heartbeat_id = agent_id since heartbeat config lives in agent.configuration.heartbeat JSON, not a separate table.
-- [x] **US-004: Create activity_service.py** — Created `orchestrator/services/activity_service.py` with `ActivityService` class (request-scoped, accepts `db: Session` + `workspace_id`). `get_feed()` merges chats (via messages JOIN for workspace scoping), heartbeat_results (raw SQL with agent JOIN), and recipe_executions (ORM). Batch-fetches recipe names. `get_stats()` returns working_now (running recipes), channels_live (connected channel_connections), completed_today, needs_attention. NOTE: chats table has no workspace_id — workspace scoping uses EXISTS subquery through messages table. heartbeat_results has no ORM model — uses raw SQL. Agent avatar uses `marketplace_icon` field (no `avatar_url` column).
-- [x] **US-005: Create /api/activity/feed + /api/activity/stats endpoints** — Created `orchestrator/api/activity.py` with GET /api/activity/feed (query params: type CSV, status, period, limit, offset) and GET /api/activity/stats (query param: period). Both use get_request_context_hybrid() auth. Delegates to ActivityService. Registered activity_router in main.py. NOTE: Local import test fails on DB credentials (expected — same as all other routers), syntax validation passes.
-- [x] **US-006: Create use-activity-api.ts hooks** — Created `frontend/hooks/use-activity-api.ts` with TypeScript interfaces (ActivityFeedItem, ActivityStats, ActivityFeedResponse, ActivityFeedFilters, ActivityChannel, ActivityStepProgress, ActivityAgent), query key factory (activityQueryKeys.feed/stats), useActivityFeed(filters) with 15s polling + param serialization, useActivityStats(period) with 15s polling. Uses apiClient.request<T>() directly (same pattern as use-database-knowledge.ts).
-- [x] **US-007: Create use-heartbeats-api.ts hook** — Created `frontend/hooks/use-heartbeats-api.ts` with TypeScript interfaces (HeartbeatConfig, HeartbeatExecution, HeartbeatListResponse, HeartbeatToggleResponse, HeartbeatExecutionsResponse), query key factory (heartbeatQueryKeys.all/detail/executions), useHeartbeats() with 30s polling, useHeartbeatExecutions(id, {enabled}) for on-demand fetch, useToggleHeartbeat() mutation with cache invalidation and toast feedback. Uses apiClient.request<T>() directly.
-- [x] **US-008: Build routine-card.tsx** — Created `frontend/components/activity/routine-card.tsx` using ItemCard shared component with glass-card styling, StatusBadge (Active green/Paused amber with dot), agent icon in purple agent colour, schedule metadata (interval, last ran relative time, next run time), Pause/Resume toggle via useToggleHeartbeat mutation, Edit button navigating to /agents?agent={id}. Uses date-fns for relative times. NOTE: React Query v4 uses `isLoading` not `isPending` (v5 property) — pre-existing type errors in other files use isPending incorrectly too.
-- [x] **US-009: Build activity-routines.tsx** — Created `frontend/components/activity/activity-routines.tsx` with useHeartbeats() data fetch, responsive grid (1/2/3 cols), RoutineCardSkeleton loading state (3 skeletons), empty state with RefreshCw icon + "Set Up a Routine" CTA, "+ New Routine" button navigating to /agents with toast. Uses framer-motion stagger via ItemCard animationDelay (index * 0.08). Wired into activity-page.tsx replacing placeholder. NOTE: Pre-existing isPending vs isLoading type errors in agent-coordination.tsx, agent-confirm-delete-modal.tsx — React Query v4 uses isLoading.
-- [x] **US-010: Add execution history to routine-card** — Added expandable execution history to routine-card.tsx with AnimatePresence collapse/expand, useHeartbeatExecutions(enabled: expanded) for on-demand fetch, log-entry/log-entry-success/log-entry-error CSS classes from globals.css, CheckCircle2/XCircle/Loader2 status icons with semantic colours, duration formatting, findings count, error message display, and 3-item skeleton loading state. History toggle button added to actions bar alongside Pause/Edit.
-- [x] **US-011: Build activity-feed-item.tsx** — Created `frontend/components/activity/activity-feed-item.tsx` with ActivityFeedItemCard component. Type-coloured left border (Chat=primary/orange, Routine=agent/purple, Recipe=info/blue, Mission=success/green). StatusBadge with PRD status labels (Waiting, Working..., Done, Needs Attention, Cancelled, Paused). Channel badge ("via {channel}"). Context line varies by type: Chat=truncated summary, Routine=description, Recipe=step pipeline with status icons, Mission=progress bar. View/Configure action buttons with smart URL routing. Includes ActivityFeedItemSkeleton for loading states. Uses framer-motion entrance animation. NOTE: Uses glass-card + card-glow directly instead of ItemCard wrapper since feed items need border-l-3 styling that doesn't fit ItemCard's layout.
-- [x] **US-012: Build activity-feed.tsx + wire live stats** — Created `frontend/components/activity/activity-feed.tsx` with type filter chips (All/Chats/Routines/Recipes/Missions as toggle buttons), status dropdown (All/Working/Done/Needs Attention/Upcoming), ActivityFeedItemCard rendering with AnimatePresence, 5-skeleton loading state, empty state with Activity icon + guidance text, "Load More" pagination (20 items per page). Wired into activity-page.tsx replacing placeholder. Replaced hardcoded StatsBar zeros with useActivityStats(period) live polling data (working_now, channels_live, completed_today, needs_attention). Fetching spinner shows during background refetches. NOTE: All pre-existing type errors unrelated to activity components (isPending vs isLoading in agent-coordination, plugins page body types, marketplace widgets).
-- [x] **US-013: Build execution-detail.tsx** — Created `frontend/components/activity/execution-detail.tsx` with glass-panel container, border-l-3 type colouring, back-to-activity link, header (type icon, name, started time, StatusBadge, duration, agent info, channel badge). Step pipeline using stage-completed/stage-active/stage-pending CSS classes with stage-connector between steps. Output section (summary or "No output captured" placeholder). Error section with log-entry-error styling. Collapsible execution log with timestamped entries using log-entry + log-entry-{level} classes. Actions: Re-run (useExecuteRecipe mutation with toast), Edit Recipe/Routine (smart routing), View Logs. ExecutionDetailSkeleton for loading states. NOTE: Re-run uses existing useExecuteRecipe mutation from use-recipe-api.ts. Pre-existing isPending type errors in agent-coordination/agent-confirm-delete-modal remain (React Query v4 uses isLoading).
-- [x] **US-014: Add run history dots to recipe cards** — Created `frontend/components/workflows/recipe-run-dots.tsx` with RecipeRunDots component that fetches last 3 executions per recipe via useRecipeExecutions(id, {limit:3}). Renders coloured status dots (green=completed/bg-[hsl(var(--success))], red=failed/bg-destructive, gray=cancelled/bg-muted-foreground/40) with relative timestamps below each dot and "Ran N times" count. Compact mode for list view shows dots inline without timestamps. Added to both grid view (between stats row and agent avatars) and list view (after stats line). Clicking dots opens recipe view modal with execution history. NOTE: Each recipe card independently fetches its last 3 executions — React Query caches with 1min staleTime. No new pre-existing errors introduced.
-- [x] **US-015: Loading skeletons + animations** — Skeletons were already present from prior stories (5 feed item skeletons, 3 routine card skeletons, execution detail skeleton). Added: `stage-active-badge` CSS class with `badge-pulse` keyframe for running status badges in feed items (subtle info-coloured glow). Added `isNew` prop to ActivityFeedItemCard with `log-entry-new` CSS class applied to items arriving via polling (tracked via `useRef<Set<string>>` in activity-feed.tsx). Added `useReducedMotion()` from framer-motion to all motion components: activity-feed-item.tsx, execution-detail.tsx, routine-card.tsx, item-card.tsx (shared), activity-missions.tsx. When reduced motion preferred, `initial` is `false` and transitions are instant. Updated `globals.css` prefers-reduced-motion media query to include `log-entry-new` and `stage-active-badge`. Added framer-motion entrance animation to activity-missions.tsx. NOTE: Stagger already implemented via `animationDelay` props from prior stories. All pre-existing type errors unrelated to activity components (isPending vs isLoading, plugins body types, marketplace widgets).
-- [x] **US-016: Mobile responsive pass** — StatsBar: overrode `hidden md:grid` with `grid gap-3 md:gap-4` className on activity-page.tsx (shows 2x2 grid on mobile, preserves existing hidden behavior for other consumers). FilterBar: `min-h-[44px] sm:min-h-0` on all filter chips + status dropdown, `-mx-1 px-1` for scroll edge bleed, chip labels hidden on xs. Feed items: `p-3 sm:p-4` responsive padding, actions stack vertically with `flex-col sm:flex-row` + full-width + 44px touch targets. Execution detail: `p-4 sm:p-6` responsive padding, stacked actions on mobile with 44px targets, back button 44px touch target. Routine cards: action buttons 44px touch targets with `flex-col sm:flex-row` stacking. FilterTabs: `overflow-x-auto scrollbar-thin` on tab container, 44px min-height on triggers. Activity missions: `p-6 sm:p-8 md:p-12` responsive padding, full-width CTA on mobile. Activity routines: responsive empty state padding, full-width "Set Up a Routine" button on mobile. Page-level: `space-y-4 sm:space-y-6`. Header actions: period selector + refresh button get 44px touch targets, refresh label hidden on mobile. NOTE: Reduced backdrop-blur on mobile already handled by globals.css @media(max-width:767px). Tab labels already hidden on `<sm` by FilterTabs `hidden sm:inline`. Pre-existing type errors unrelated to activity components (isPending vs isLoading in agent-coordination, plugins body types, marketplace widgets).
-- [x] **US-017: Update SHEPHERD tour for /activity** — Created `frontend/lib/shepherd/tours/activity-tour.ts` with 4 steps: overview (Command Centre), live stats, tab navigation, activity feed content. Uses title(), waitForElement(), stepProgress() from tour-utils.ts. Follows exact pattern from marketplace-tour.ts. Updated tour-registry.ts: replaced `/workflows` entry with `/activity` pointing to createActivityTour factory (lazy-loaded). data-tour attributes already present on activity-page.tsx from US-001 (activity-page-header, activity-stats, activity-tabs, activity-content). Sidebar generates `data-tour="nav-activity"` dynamically from href. Old workflows-tour.ts kept as dead code (no source references outside build cache). NOTE: All pre-existing type errors unrelated to activity components (isPending vs isLoading in agent-coordination, plugins body types, marketplace widgets).
+### Phase 1: Foundation
+
+- [ ] **US-001: Create UnifiedMemoryService singleton** — `orchestrator/modules/memory/unified_memory_service.py` with shared Mem0Client, Redis client, MemoryNamespace helper for standardized user_id formats. Public methods stubbed.
+- [ ] **US-002: Implement L3 long-term methods** — store_long_term(), search_long_term(), get_all_memories(), delete_memory() delegating to shared Mem0Client with MemoryNamespace user_ids.
+- [ ] **US-003: Migrate SmartMemoryManager** — Replace lazy Mem0Client init with UnifiedMemoryService. Preserve 2-min LRU cache and _track_memory_access().
+- [ ] **US-004: Migrate platform_executor.py** — Replace 5 inline Mem0Client() calls (~lines 533, 1050, 1272, 3368, 3417) with UnifiedMemoryService.
+- [ ] **US-005: Migrate RecipeMemoryService** — Replace self._mem0 with UnifiedMemoryService. Add recipe namespace to MemoryNamespace if needed.
+- [ ] **US-006: Migrate widget_memory.py + memory_stats.py** — Replace lazy Mem0Client inits. Fix widget's raw workspace_id scoping via MemoryNamespace.
+- [ ] **US-007: Migrate workflows.py + workflow_recipes.py** — Replace last 2 inline Mem0Client() calls. After this: zero direct instantiation outside UnifiedMemoryService.
+- [ ] **US-008: Delete MemoryInjector + mem0_system.py** — Grep all callers first. Migrate any remaining. Delete only after zero live callers confirmed.
+- [ ] **US-009: Implement L1 Redis session store** — SessionMemory dataclass, get/update/end session methods in UnifiedMemoryService. Redis key: mem:session:{ws}:{conv}. 24hr TTL.
+- [ ] **US-010: Wire L1 into SmartChatOrchestrator** — Session hydration on request start, session update after each exchange. Graceful degradation if Redis down.
+- [ ] **US-011: Add Redis caching for L3 Mem0 results** — 5min TTL cache in Redis. Cache key: mem:cache:{ws}:{agent}:{query_hash}. Invalidate on write. Add MEMORY_CACHE_TTL_SECONDS to config.py.
+
+### Phase 2: Context Router
+
+- [ ] **US-016: Build Context Router signal detection** — Regex-based temporal, personal, knowledge, live-data detection. <10ms budget. Returns ContextSignals dataclass.
+- [ ] **US-017: Implement retrieve_context() assembly** — Multi-layer fetch with budget allocation (session=500, long_term=800, temporal=600, daily=400, awareness=200 tokens). Add CONTEXT_BUDGET_TOKENS to config.py.
+- [ ] **US-018: Build knowledge awareness injection** — Dynamic capability map per workspace (connected DBs, docs, tools). Cache in Redis 10min TTL.
+- [ ] **US-019: Replace hardcoded memory retrieval with Context Router** — Wire into SmartChatOrchestrator. Fallback to existing SmartMemoryManager on failure.
+
+### Phase 3: Layered Storage
+
+- [ ] **US-012: Create memory_short_term Postgres table** — Alembic migration with workspace_id, agent_id, content, content_type, importance, decay_score, access_count, metadata JSONB. Composite indexes.
+- [ ] **US-013: Implement L2 CRUD** — store_short_term(), search_short_term(), get_short_term_by_time(), touch_short_term() in UnifiedMemoryService.
+- [ ] **US-014: Wire L2 for chat exchanges** — store_exchange() stores to L2 + delegates to L3. Fire-and-forget via asyncio.create_task().
+- [ ] **US-015: Wire L2 for recipes + heartbeats** — store_short_term() calls alongside existing Mem0 stores in RecipeMemoryService and heartbeat_service.
+- [ ] **US-020: Implement Ebbinghaus decay job** — retention = exp(-0.1 * hours) * (1 + 0.5*importance + 0.1*min(access_count, 10)). Archive items below 0.3. Batch per workspace.
+- [ ] **US-021: Implement L2→L3 promotion** — Daily job. Criteria: importance > 0.7 AND access_count > 3. Mem0 add with infer=True for fact extraction.
+- [ ] **US-022: Wire session consolidation L1→L2** — Extract decisions/action items from expired sessions. Store as L2 entries. Delete L1 key. Use SCAN not KEYS.
+- [ ] **US-023: Register background jobs** — Hourly: consolidation + decay. Daily: promotion. Follow existing scheduler pattern.
+
+### Phase 4: NL2SQL
+
+- [ ] **US-024: Build NL2SQL service** — Schema caching (Redis 10min), LLM SQL generation, SELECT-only validation, 5s timeout, 1000-row limit, query audit logging.
+- [ ] **US-025: Register query_data tool** — 3-file pattern: platform_actions.py, platform_executor.py, auto.py.
+
+### Phase 5: Observability & Cleanup
+
+- [ ] **US-026: Memory layer health endpoint** — GET /api/v1/memory/layers with per-layer stats and health score.
+- [ ] **US-027: Clean up skeleton classes** — Delete service.py and storage/manager.py if zero live callers confirmed via grep.
+- [ ] **US-028: Integration tests** — L1 session lifecycle, L2 CRUD + decay, L3 cache hit, Context Router signal routing, MemoryNamespace correctness.
+
+---
+
+## Discovered Issues
+
+_(Ralph will add issues found during implementation here)_
+
+## Notes
+
+_(Ralph will add implementation notes and learnings here)_

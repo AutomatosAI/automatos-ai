@@ -1,320 +1,489 @@
 {
   "project": "Automatos AI Platform",
-  "branchName": "ralph/72-activity-command-centre",
-  "description": "PRD-72: Activity Command Centre — Replace /workflows with /activity. Unified feed showing chats, routines, recipes, and missions. Four tabs (Feed, Routines, Recipes, Missions). Real-time stats, drill-down execution detail, heartbeat visibility.",
+  "branchName": "ralph/79-unified-memory-context",
+  "description": "PRD-79: Unified Memory & Context Architecture — 5-layer memory stack (L0 Focus, L1 Working/Redis, L2 Short-term/Postgres, L3 Long-term/Mem0, L4 Org Knowledge), single UnifiedMemoryService replacing 12 scattered Mem0Client instances, Context Router for intelligent pre-LLM context assembly, and NL2SQL for live data queries.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create /activity route shell page with PageHeader, StatsBar, and FilterTabs",
-      "description": "As a user, I want a new Activity page at /activity so I can see my AI workforce activity in one place.",
+      "title": "Create UnifiedMemoryService singleton with shared Mem0Client",
+      "description": "As a developer, I need a single entry point for all memory operations so that all consumers share one Mem0Client, one circuit breaker, and one connection pool.",
       "acceptanceCriteria": [
-        "Create frontend/app/activity/page.tsx — simple wrapper using MainLayout + usePageAPI('activity') following existing pattern from workflows/page.tsx",
-        "Create frontend/components/activity/activity-page.tsx with: PageHeader (title='Command', titleAccent='Centre', subtitle='Your AI workforce at a glance'), StatsBar with 4 hardcoded stats (Working Now: 0, Channels Live: 0, Completed Today: 0, Needs Attention: 0), FilterTabs with 4 tabs: Feed (Activity icon), Routines (RefreshCw), Recipes (CookingPot), Missions (Rocket)",
-        "Each tab renders a placeholder div with 'Coming soon' text for now",
-        "Update sidebar.tsx: rename 'Workflow Management' to 'Activity', change icon from GitBranch to Activity (from lucide-react), change href from /workflows to /activity, update iconColor and description",
-        "Create frontend/app/workflows/page.tsx that does a 301 redirect to /activity using next/navigation redirect()",
-        "Update the sidebar data-tour attribute from 'nav-workflows' to 'nav-activity'",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Create orchestrator/modules/memory/unified_memory_service.py with UnifiedMemoryService class",
+        "Singleton pattern via classmethod get_instance() — returns same instance across all callers",
+        "Holds ONE shared Mem0Client instance (from integrations/mem0_client.py)",
+        "Holds ONE Redis client via get_redis_client()",
+        "DB sessions acquired per-request from async pool (NOT held as singleton state)",
+        "Exports MemoryNamespace helper that builds standardized user_id strings: mem:{workspace_id}, mem:{workspace_id}:agent:{agent_id}, mem:{workspace_id}:recipe:{recipe_id}, mem:{workspace_id}:daily, mem:session:{workspace_id}:{conversation_id}",
+        "Public async methods stubbed (empty, return None/empty list): store_long_term(), search_long_term(), get_all_memories(), delete_memory()",
+        "Module-level get_unified_memory_service() convenience function",
+        "Typecheck passes"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "Follow existing pattern from analytics-page.tsx for PageHeader + StatsBar + FilterTabs structure. Import shared components from @/components/shared/. Use glass-card styling from globals.css."
+      "notes": "This is the foundation — stubs only, no logic yet. The MemoryNamespace helper is critical for eliminating the 5+ user_id format inconsistencies. Import Mem0Client from modules.memory.integrations.mem0_client. Import get_redis_client from core.redis.client. Use typing for all method signatures."
     },
     {
       "id": "US-002",
-      "title": "Build Missions Coming Soon placeholder and wire RecipesTab into Recipes tab",
-      "description": "As a user, I want to see the Missions concept explained and access my existing recipes in the new Activity page.",
+      "title": "Implement L3 long-term memory methods in UnifiedMemoryService",
+      "description": "As an agent, I need the unified service to store and search long-term memories via Mem0 so that fact extraction and deduplication work correctly.",
       "acceptanceCriteria": [
-        "Create frontend/components/activity/activity-missions.tsx — glass-card with Rocket icon, 'Missions — Coming Soon' title with gradient-text accent, description paragraph explaining multi-agent projects, bullet list of capabilities, 'Request Early Access' button that opens ChatWidget with pre-filled message",
-        "Uses design tokens from globals.css: glass-card class, text-muted-foreground for muted text, gradient-text for accent",
-        "Update activity-page.tsx Missions tab to render <ActivityMissions />",
-        "Update activity-page.tsx Recipes tab to import and render the existing RecipesTab component from @/components/workflows/recipes-tab",
-        "Pass required props to RecipesTab (workspaceId from workspace context)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "store_long_term(workspace_id, content, agent_id=None, category=None, metadata=None) delegates to shared Mem0Client.add() with correct namespace user_id",
+        "search_long_term(workspace_id, query, agent_id=None, limit=5) delegates to Mem0Client.search() with correct namespace user_id",
+        "get_all_memories(workspace_id, agent_id=None) delegates to Mem0Client.get_all() with correct namespace user_id",
+        "delete_memory(memory_id) delegates to Mem0Client.delete()",
+        "All methods use MemoryNamespace to build user_ids — never raw string concatenation",
+        "All methods have try/except with logging (exc_info=True) and return empty results on failure",
+        "Typecheck passes"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "RecipesTab already exists and works — just import it into the new tab. Missions is purely presentational."
+      "notes": "This wraps the existing Mem0Client methods with the new namespace strategy. No new external dependencies."
     },
     {
       "id": "US-003",
-      "title": "Register heartbeat router and add workspace list + toggle + history endpoints",
-      "description": "As a frontend developer, I need heartbeat API endpoints to list all routines, toggle pause/resume, and fetch execution history.",
+      "title": "Migrate SmartMemoryManager to use UnifiedMemoryService for Mem0 calls",
+      "description": "As a developer, I need the primary chat memory path to use the shared Mem0Client instead of its own lazy instance.",
       "acceptanceCriteria": [
-        "Import and register heartbeat_router in orchestrator/api/main.py (it exists in heartbeat.py but is NOT registered)",
-        "Add GET /api/heartbeat/workspace endpoint to heartbeat.py — returns all heartbeat configurations for current workspace with agent name, interval, last_run, next_run, status (active/paused), description",
-        "Add PATCH /api/heartbeat/{heartbeat_id}/toggle endpoint — toggles is_active flag on the heartbeat config, returns updated config",
-        "Add GET /api/heartbeat/{heartbeat_id}/executions endpoint — returns last N executions (default 10) with status, started_at, completed_at, duration, error_message",
-        "All endpoints use get_request_context_hybrid() for auth and workspace_id filtering",
+        "In consumers/chatbot/smart_memory.py, replace self._mem0_client lazy init with UnifiedMemoryService.get_instance()",
+        "Replace all direct self._mem0_client.add() calls with unified_service.store_long_term() using appropriate workspace_id and agent_id",
+        "Replace all direct self._mem0_client.search() calls with unified_service.search_long_term()",
+        "Replace all direct self._mem0_client.get_all() calls with unified_service.get_all_memories()",
+        "Preserve the existing 2-minute LRU cache logic (it wraps the service calls, not replaced by them)",
+        "Preserve store_daily_summary() and get_daily_logs() functionality using the daily namespace",
+        "Preserve _track_memory_access() DB writes unchanged",
+        "All existing tests still pass (if any exist)",
         "Typecheck passes"
       ],
       "priority": 3,
       "passes": false,
-      "notes": "heartbeat.py already has 217 lines with some endpoints. Extend it — don't replace. Check existing heartbeat_service.py for the SQLAlchemy models/queries to reuse."
+      "notes": "SmartMemoryManager is 854 lines. Only change the Mem0Client usage — don't refactor other logic. The 2-minute LRU cache stays as-is (it prevents redundant Mem0 calls within a session). Keep the module-level get_smart_memory_manager() function."
     },
     {
       "id": "US-004",
-      "title": "Create activity_service.py backend to merge chats, heartbeats, and recipe executions",
-      "description": "As a backend developer, I need a service that merges all execution types into a unified activity feed.",
+      "title": "Migrate platform_executor.py memory tools to UnifiedMemoryService",
+      "description": "As a developer, I need the 5 platform memory tools to stop creating fresh Mem0Client instances per call.",
       "acceptanceCriteria": [
-        "Create orchestrator/services/activity_service.py with ActivityService class",
-        "get_feed() method: queries chats (from chat sessions), heartbeat_executions, and recipe_executions tables, maps each to a unified ActivityFeedItem dict with fields: id, type (chat/routine/recipe), name, status, started_at, completed_at, duration_seconds, agent (id, name, avatar_url), summary, source_id, source_url, trigger, channel, step_progress, error_message",
-        "Merges all sources, sorts by started_at DESC, applies optional filters (type, status), paginates with limit/offset",
-        "get_stats() method: returns working_now (running count), channels_live (from settings/channels), completed_today (completed in last 24h), needs_attention (failed + stale)",
-        "Period parameter supports 1d, 7d, 30d, 90d",
-        "All queries filter by workspace_id",
+        "In modules/tools/discovery/platform_executor.py, replace all 5 inline Mem0Client() instantiations with UnifiedMemoryService.get_instance()",
+        "platform_get_memory_stats handler uses unified_service.get_all_memories() instead of direct Mem0Client.get_all()",
+        "platform_store_memory handler uses unified_service.store_long_term() instead of direct Mem0Client.add()",
+        "platform_search_memory handler uses unified_service.search_long_term() instead of direct Mem0Client.search()",
+        "platform_delete_memory handler uses unified_service.delete_memory() instead of direct Mem0Client.delete()",
+        "list_memories action uses unified_service.get_all_memories() instead of direct Mem0Client.get_all()",
+        "All handlers preserve their existing error handling and response formatting",
         "Typecheck passes"
       ],
       "priority": 4,
       "passes": false,
-      "notes": "Follow existing service pattern from orchestrator/services/. Use SQLAlchemy queries. Chat sessions may be in a different table — check the chats API for the right model."
+      "notes": "5 separate locations in platform_executor.py (lines ~533, ~1050, ~1272, ~3368, ~3417). Each creates Mem0Client() inline. Replace with the singleton. Don't change return formats."
     },
     {
       "id": "US-005",
-      "title": "Create /api/activity/feed and /api/activity/stats API endpoints",
-      "description": "As a frontend developer, I need REST endpoints to fetch the unified activity feed and hero stats.",
+      "title": "Migrate RecipeMemoryService to UnifiedMemoryService",
+      "description": "As a developer, I need recipe execution memory to use the shared service instead of its own Mem0Client instance.",
       "acceptanceCriteria": [
-        "Create orchestrator/api/activity.py with FastAPI router prefix='/api/activity'",
-        "GET /api/activity/feed — query params: type (csv), status (csv), period (1d/7d/30d/90d), limit (default 20), offset (default 0). Returns paginated list of ActivityFeedItem dicts",
-        "GET /api/activity/stats — query param: period. Returns {working_now, channels_live, completed_today, needs_attention, period}",
-        "Register activity_router in orchestrator/api/main.py",
-        "Both endpoints use get_request_context_hybrid() for auth",
-        "Returns proper HTTP error codes (401, 500)",
+        "In core/services/recipe_memory_service.py, replace self._mem0 instance with UnifiedMemoryService.get_instance()",
+        "store_execution_memory() uses unified_service.store_long_term() with recipe namespace: mem:{workspace_id}:recipe:{recipe_id}",
+        "Per-agent step memories use namespace: mem:{workspace_id}:recipe:{recipe_id}:agent:{agent_id} — add this format to MemoryNamespace if not present",
+        "retrieve_relevant_memories() uses unified_service.search_long_term() with recipe namespace",
+        "Preserve the conversational format memory building (the 'User asks assistant to remember' pattern)",
         "Typecheck passes"
       ],
       "priority": 5,
       "passes": false,
-      "notes": "Follow pattern from existing API files like llm_analytics.py or execution_history.py."
+      "notes": "RecipeMemoryService is 400 lines. Only change Mem0Client usage. The recipe namespace format mem:{ws}:recipe:{rid}:agent:{aid} may need adding to MemoryNamespace."
     },
     {
       "id": "US-006",
-      "title": "Create use-activity-api.ts hooks for feed and stats with polling",
-      "description": "As a frontend developer, I need React Query hooks to fetch the activity feed and stats with automatic polling.",
+      "title": "Migrate widget_memory.py and memory_stats.py to UnifiedMemoryService",
+      "description": "As a developer, I need the widget and stats API endpoints to use the shared Mem0Client.",
       "acceptanceCriteria": [
-        "Create frontend/hooks/use-activity-api.ts following the pattern from use-workflow-api.ts",
-        "Export activityQueryKeys factory: { feed: [...], stats: [...] }",
-        "useActivityFeed(filters) hook — fetches GET /api/activity/feed with type, status, period, limit, offset params. refetchInterval: 15000 (15s)",
-        "useActivityStats(period) hook — fetches GET /api/activity/stats. refetchInterval: 15000",
-        "Both hooks use apiClient for HTTP requests",
-        "Export TypeScript interfaces: ActivityFeedItem, ActivityStats matching the backend response schema from PRD-72",
+        "In api/widget_memory.py, replace the lazy Mem0Client init with UnifiedMemoryService.get_instance()",
+        "Widget endpoints use unified_service methods with workspace namespace (not raw workspace_id string)",
+        "Preserve the _fallback_store dict for Mem0-unavailable scenarios",
+        "In api/memory_stats.py, replace the lazy Mem0Client getter with UnifiedMemoryService.get_instance()",
+        "Stats endpoints use unified_service.get_all_memories() and unified_service.search_long_term()",
+        "The _all_mem0_user_ids() helper uses MemoryNamespace to build IDs instead of manual string formatting",
         "Typecheck passes"
       ],
       "priority": 6,
       "passes": false,
-      "notes": "Follow exact pattern from use-workflow-api.ts — query key factory, useQuery with staleTime and refetchInterval, proper typing."
+      "notes": "widget_memory.py (272 lines) uses raw workspace_id as Mem0 user_id — this is a scoping mismatch that the MemoryNamespace fixes. memory_stats.py (583 lines) has its own _all_mem0_user_ids() builder."
     },
     {
       "id": "US-007",
-      "title": "Create use-heartbeats-api.ts hook for routine management",
-      "description": "As a frontend developer, I need React Query hooks to list heartbeat configs, toggle pause/resume, and fetch execution history.",
+      "title": "Migrate workflow Mem0Client usages to UnifiedMemoryService",
+      "description": "As a developer, I need the workflow and recipe API files to use the shared Mem0Client.",
       "acceptanceCriteria": [
-        "Create frontend/hooks/use-heartbeats-api.ts following React Query pattern",
-        "Export heartbeatQueryKeys factory: { all, detail(id), executions(id) }",
-        "useHeartbeats() hook — fetches GET /api/heartbeat/workspace, returns list of heartbeat configs",
-        "useToggleHeartbeat() mutation hook — calls PATCH /api/heartbeat/{id}/toggle, invalidates heartbeat queries on success, shows toast",
-        "useHeartbeatExecutions(heartbeatId) hook — fetches GET /api/heartbeat/{id}/executions, returns last 10 runs",
-        "Export HeartbeatConfig and HeartbeatExecution TypeScript interfaces",
+        "In api/workflows.py (~line 2075), replace inline Mem0Client() with UnifiedMemoryService.get_instance()",
+        "In api/workflow_recipes.py (~line 682), replace inline Mem0Client() with UnifiedMemoryService.get_instance()",
+        "Both files use unified_service.store_long_term() with appropriate namespace",
+        "Preserve existing error handling and response formatting",
         "Typecheck passes"
       ],
       "priority": 7,
       "passes": false,
-      "notes": "Follow same pattern as use-activity-api.ts. Use apiClient for HTTP. Include toast feedback on toggle."
+      "notes": "These are the remaining 2 of 12 Mem0Client instantiation points. After this story, zero direct Mem0Client() calls should remain outside UnifiedMemoryService."
     },
     {
       "id": "US-008",
-      "title": "Build routine-card.tsx component for displaying heartbeat routines",
-      "description": "As a user, I want to see each routine as a card showing its agent, schedule, status, and actions.",
+      "title": "Delete MemoryInjector and clean up deprecated paths",
+      "description": "As a developer, I want to remove the deprecated MemoryInjector to eliminate the confusing parallel injection path.",
       "acceptanceCriteria": [
-        "Create frontend/components/activity/routine-card.tsx",
-        "Card uses glass-card class with agent avatar/icon, routine name, agent name, interval ('Every {interval}'), last ran relative time, next run time",
-        "Status badge: Active (green dot + bg-[hsl(var(--success))]/10) or Paused (amber dot + bg-[hsl(var(--warning))]/10)",
-        "Pause/Resume button calls useToggleHeartbeat mutation",
-        "Edit button navigates to /agents/{agentId} (the agent's config page)",
-        "Description text shown in text-sm text-muted-foreground",
-        "Accepts HeartbeatConfig as prop",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Search all files for imports of MemoryInjector or get_memory_injector — list all callers",
+        "For each caller: verify it has been migrated to SmartChatIntegration or SmartMemoryManager — if not, migrate it",
+        "Delete modules/memory/operations/injection.py only after confirming zero live callers",
+        "Delete modules/memory/storage/mem0_system.py (Mem0MemorySystem adapter) if no remaining callers",
+        "Update modules/memory/__init__.py to remove MemoryInjector exports",
+        "Typecheck passes"
       ],
       "priority": 8,
       "passes": false,
-      "notes": "Use semantic colour variables from globals.css. No hardcoded hex colours."
+      "notes": "CRITICAL: grep EVERY file for MemoryInjector, get_memory_injector, get_memory_system, Mem0MemorySystem before deleting. The previous dead code deletion mistake (intent_classifier.py) must not repeat. If any live caller exists, migrate it first."
     },
     {
       "id": "US-009",
-      "title": "Build activity-routines.tsx (Routines tab with card grid and empty state)",
-      "description": "As a user, I want the Routines tab to show all my agent routines in a grid with a create button.",
+      "title": "Implement L1 Redis session store in UnifiedMemoryService",
+      "description": "As a user, I want my conversation context to persist across browser refreshes within a 24-hour session so agents remember what we just discussed.",
       "acceptanceCriteria": [
-        "Create frontend/components/activity/activity-routines.tsx",
-        "Fetches heartbeat list using useHeartbeats() hook",
-        "Renders routine-card.tsx for each heartbeat in responsive grid (1 col mobile, 2 cols md, 3 cols lg)",
-        "'+ New Routine' button in top-right navigates to /agents with toast 'Select an agent to configure its routine'",
-        "Empty state: RefreshCw icon at 30% opacity, 'No routines set up' title, description text, 'Set Up a Routine' link button",
-        "Loading state: 3 skeleton cards matching routine-card shape",
-        "Uses framer-motion staggered entrance (delay: index * 0.08)",
-        "Wire into activity-page.tsx Routines tab",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Add SessionMemory dataclass: summary (str), decisions (list[str]), action_items (list[str]), exchange_count (int), last_updated (datetime)",
+        "Add get_session(workspace_id, conversation_id) -> Optional[SessionMemory] — reads from Redis key mem:session:{workspace_id}:{conversation_id}, deserializes JSON",
+        "Add update_session(workspace_id, conversation_id, user_msg, assistant_msg) — appends exchange, updates summary (simple truncation to last 500 chars for now, not LLM summarization), increments exchange_count, writes to Redis with 24hr TTL",
+        "Add end_session(workspace_id, conversation_id) — marks session ended, sets TTL to 1hr (for consolidation window)",
+        "Redis key format: mem:session:{workspace_id}:{conversation_id}",
+        "All methods have try/except — Redis failures must never break chat",
+        "Typecheck passes"
       ],
       "priority": 9,
       "passes": false,
-      "notes": "Follow grid pattern from agents page. Use Skeleton component for loading."
+      "notes": "This is greenfield — no existing Redis session store in the chat path. The summary is naive truncation for now (Phase 2 adds LLM rolling summary). Use json.dumps/loads for Redis serialization. 24hr TTL via redis.setex()."
     },
     {
       "id": "US-010",
-      "title": "Add expandable execution history to routine-card",
-      "description": "As a user, I want to click a routine card to see its last 10 execution runs inline.",
+      "title": "Wire L1 session store into SmartChatOrchestrator",
+      "description": "As a user, I want the chatbot to automatically save and restore session context when I continue a conversation.",
       "acceptanceCriteria": [
-        "Add expandable section to routine-card.tsx triggered by clicking the card or a chevron toggle",
-        "Fetches execution history using useHeartbeatExecutions(heartbeatId) — only when expanded",
-        "Renders last 10 executions as log entries using log-entry, log-entry-success, log-entry-error CSS classes from globals.css",
-        "Each entry shows: status icon (check/x), 'Completed'/'Failed' label, timestamp, duration, error message if failed",
-        "Smooth expand/collapse animation using framer-motion AnimatePresence",
-        "Loading skeleton while fetching history",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "In the SmartChatOrchestrator (or SmartChatIntegration — whichever assembles the system prompt), call unified_service.get_session() at the start of each request",
+        "If session exists: inject session summary into system prompt under a '## Session Context' heading before the memory section",
+        "After each exchange: call unified_service.update_session() with the user message and assistant response",
+        "Session hydration adds <500 tokens to the system prompt",
+        "If Redis is unavailable: skip session hydration silently (log warning), proceed with normal memory retrieval",
+        "Typecheck passes"
       ],
       "priority": 10,
       "passes": false,
-      "notes": "Use existing log-entry CSS classes. The enabled option on useHeartbeatExecutions should be set to only fetch when expanded."
+      "notes": "Find the exact file that assembles the system prompt for chat. Based on MEMORY.md it's get_happy_system_prompt(memories=...) — the session summary should be injected alongside existing memories. Do NOT create a second injection point."
     },
     {
       "id": "US-011",
-      "title": "Build activity-feed-item.tsx (individual feed card with type-coloured border)",
-      "description": "As a user, I want each activity in the feed to show type, name, agent, status, duration, and actions at a glance.",
+      "title": "Add Redis caching layer for L3 Mem0 search results",
+      "description": "As a system, I need to cache Mem0 search results in Redis to reduce cold-fetch latency from 200-500ms to <5ms for repeated queries.",
       "acceptanceCriteria": [
-        "Create frontend/components/activity/activity-feed-item.tsx",
-        "Card uses glass-card with border-l-3 coloured by type: Chat=primary (orange), Routine=agent (purple), Recipe=info (blue), Mission=success (green)",
-        "Top row: type icon + type label + item name (truncated) + relative time (right-aligned)",
-        "Second row: agent name + status badge (using semantic colours from PRD) + duration",
-        "Channel badge: when channel present, shows 'via {type}' in text-xs text-muted-foreground after status",
-        "Context line varies by type: Chat=first 100 chars of message, Routine=last/next run times, Recipe=step pipeline (checkmarks), Mission=progress bar",
-        "Action buttons: 'View' navigates to detail, 'Configure' navigates to source config page",
-        "Accepts ActivityFeedItem as prop",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "In UnifiedMemoryService.search_long_term(), before calling Mem0Client.search(), check Redis cache",
+        "Cache key: mem:cache:{workspace_id}:{agent_id or 'global'}:{sha256(query)[:16]}",
+        "Cache TTL: 5 minutes (configurable via config.py constant MEMORY_CACHE_TTL_SECONDS=300)",
+        "On cache hit: return deserialized results directly (skip Mem0)",
+        "On cache miss: call Mem0, cache the results, return them",
+        "Cache invalidation: in store_long_term(), delete all cache keys matching mem:cache:{workspace_id}:* pattern",
+        "Add MEMORY_CACHE_TTL_SECONDS to config.py",
+        "Typecheck passes"
       ],
       "priority": 11,
       "passes": false,
-      "notes": "Use hsl(var(--primary)), hsl(var(--agent)), hsl(var(--info)), hsl(var(--success)) for border colours. Status badges use semantic Badge variants."
+      "notes": "Use redis.setex() for TTL. For invalidation, use redis.delete() with a scan pattern — but be careful with KEYS command at scale. Consider using a Redis SET to track cache keys per workspace for targeted invalidation."
     },
     {
       "id": "US-012",
-      "title": "Build activity-feed.tsx (Feed tab with filters and live stats)",
-      "description": "As a user, I want the Feed tab to show a filterable timeline of all activity with live-updating stats.",
+      "title": "Create memory_short_term Postgres table and Alembic migration",
+      "description": "As a developer, I need a database table for L2 short-term memory to store raw exchanges with decay scoring.",
       "acceptanceCriteria": [
-        "Create frontend/components/activity/activity-feed.tsx",
-        "Filter chips row at top: All, Chats (MessageCircle), Routines (RefreshCw), Recipes (CookingPot), Missions (Rocket) — toggleable, multiple can be active",
-        "Status dropdown filter: All / Working / Done / Needs Attention / Upcoming",
-        "Fetches feed using useActivityFeed(filters) hook",
-        "Renders activity-feed-item.tsx for each item",
-        "Empty state: Activity icon at 30% opacity, 'No activity yet' title, description text",
-        "Loading state: 5 skeleton cards matching feed-item shape",
-        "'Load More' button at bottom when more items available (not infinite scroll)",
-        "Wire into activity-page.tsx Feed tab",
-        "Update activity-page.tsx to use useActivityStats() for live StatsBar values instead of hardcoded zeros",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Create Alembic migration adding memory_short_term table with columns: id (UUID PK), workspace_id (UUID, NOT NULL, indexed), agent_id (INTEGER, nullable, FK to agents), content (TEXT, NOT NULL), content_type (VARCHAR: 'exchange', 'recipe_summary', 'heartbeat_log', 'tool_result'), importance (FLOAT, default 0.5), decay_score (FLOAT, default 1.0), access_count (INTEGER, default 0), metadata (JSONB, default {}), created_at (TIMESTAMPTZ, default now), last_accessed_at (TIMESTAMPTZ, default now), promoted_to_l3 (BOOLEAN, default false), promoted_at (TIMESTAMPTZ, nullable)",
+        "Composite index on (workspace_id, created_at DESC) for time-range queries",
+        "Index on (workspace_id, decay_score) for decay job",
+        "Index on (workspace_id, promoted_to_l3) for promotion job",
+        "Migration runs successfully (upgrade and downgrade)",
+        "Typecheck passes"
       ],
       "priority": 12,
       "passes": false,
-      "notes": "Filter chips should use compact glass-pill styling. Load More follows PRD recommendation over infinite scroll."
+      "notes": "Follow existing migration patterns in alembic/versions/. Use UUID for id (import uuid, default=uuid.uuid4). workspace_id should reference workspaces table. agent_id references agents table."
     },
     {
       "id": "US-013",
-      "title": "Build execution-detail.tsx drill-down view for recipe and routine executions",
-      "description": "As a user, I want to drill into any execution to see its step pipeline, output, and logs.",
+      "title": "Implement L2 short-term memory CRUD in UnifiedMemoryService",
+      "description": "As an agent, I need to store and search recent exchanges in the short-term Postgres layer.",
       "acceptanceCriteria": [
-        "Create frontend/components/activity/execution-detail.tsx",
-        "Uses glass-panel class for the container",
-        "'Back to Activity' link at top",
-        "Header: type icon + execution name + type label + started time + status badge + duration",
-        "Step pipeline section: ordered list of steps using stage-completed, stage-active, stage-pending CSS classes with stage-connector between them",
-        "Each step shows: name, agent name, duration, status",
-        "Output section: rendered output text or 'No output captured' placeholder",
-        "Execution log section: timestamped log entries in chronological order",
-        "Action buttons: Re-run (POST /api/recipes/{id}/execute), Edit Recipe (opens recipe editor), View Logs",
-        "Can be rendered as inline expanded view or as a slide-over panel",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Add store_short_term(workspace_id, content, content_type, agent_id=None, importance=0.5, metadata=None) — inserts row into memory_short_term table",
+        "Add search_short_term(workspace_id, query, days=7, limit=20) — queries memory_short_term WHERE workspace_id matches AND created_at > now()-days, ordered by created_at DESC, with simple ILIKE text search on content",
+        "Add get_short_term_by_time(workspace_id, start_date, end_date) — time-range query for temporal retrieval",
+        "Add touch_short_term(memory_id) — increments access_count and updates last_accessed_at",
+        "DB session acquired per-call from async pool (not stored on self)",
+        "All methods filter by workspace_id for tenant isolation",
+        "Typecheck passes"
       ],
       "priority": 13,
       "passes": false,
-      "notes": "Use existing stage-* CSS classes from globals.css. Re-run should use existing recipe execution mutation from use-workflow-api.ts if available."
+      "notes": "Use SQLAlchemy async session. Follow the pattern from existing services that acquire DB sessions. ILIKE search is simple but sufficient for Phase 3 — vector search on L2 is a future enhancement."
     },
     {
       "id": "US-014",
-      "title": "Add inline run history dots to recipe cards in RecipesTab",
-      "description": "As a user, I want to see the last 3 run results as coloured dots on each recipe card.",
+      "title": "Wire L2 storage for chat exchanges",
+      "description": "As a system, I need every chat exchange to be stored in L2 short-term memory for temporal retrieval.",
       "acceptanceCriteria": [
-        "Modify the recipe card component in the existing RecipesTab to show last 3 runs as mini status dots",
-        "Dots coloured: green (done/bg-[hsl(var(--success))]), red (failed/bg-destructive), gray (cancelled/bg-muted)",
-        "Below dots: relative timestamps (e.g. '3h', '1d', '3d')",
-        "Show 'Ran N times' total execution count text",
-        "Clicking the dots area opens execution history for that recipe",
-        "Data comes from existing recipe execution API (GET /api/recipes/{id}/executions with limit=3)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Add store_exchange(workspace_id, agent_id, user_msg, assistant_msg, conversation_id) to UnifiedMemoryService",
+        "store_exchange() stores to L2 (short-term Postgres) with content_type='exchange' and metadata including conversation_id",
+        "store_exchange() also delegates to existing L3 store (Mem0 with infer=True) for fact extraction — preserving current behavior",
+        "Wire store_exchange() call in SmartChatOrchestrator after each assistant response",
+        "L2 storage is fire-and-forget (asyncio.create_task or background) — must not block TTFT",
+        "Typecheck passes"
       ],
       "priority": 14,
       "passes": false,
-      "notes": "This modifies existing workflow components — be careful not to break existing functionality. Only add, don't restructure."
+      "notes": "The L2 write must not add latency to the chat response. Use asyncio.create_task() to fire it in background. The L3 Mem0 store already exists via SmartMemoryManager.store_conversation() — don't duplicate it, call it."
     },
     {
       "id": "US-015",
-      "title": "Add loading skeletons, empty states, and animations to all Activity tabs",
-      "description": "As a user, I want smooth loading states and helpful empty states across all Activity tabs.",
+      "title": "Wire L2 storage for recipe executions and heartbeat logs",
+      "description": "As a system, I need recipe summaries and heartbeat daily logs stored in L2 for unified temporal retrieval.",
       "acceptanceCriteria": [
-        "Feed tab: 5 skeleton cards matching activity-feed-item shape during loading",
-        "Routines tab: 3 skeleton cards matching routine-card shape during loading (if not already added)",
-        "Running items show stage-active pulse animation on their status badge",
-        "New feed items prepend with log-slide-in animation from globals.css",
-        "All card grids use framer-motion staggered entrance (initial → animate with delay: index * 0.08)",
-        "prefers-reduced-motion media query disables animations",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "After recipe execution completes (in recipe execution path), call unified_service.store_short_term() with content_type='recipe_summary'",
+        "After heartbeat daily summary is generated (in heartbeat_service.py), call unified_service.store_short_term() with content_type='heartbeat_log'",
+        "Both writes include workspace_id, agent_id, and relevant metadata (recipe_id, heartbeat_id)",
+        "Both writes are fire-and-forget (must not block the execution pipeline)",
+        "Typecheck passes"
       ],
       "priority": 15,
       "passes": false,
-      "notes": "Use existing Skeleton component from shadcn/ui. CSS classes stage-active, log-slide-in already exist in globals.css."
+      "notes": "Find the exact locations: RecipeMemoryService.store_execution_memory() for recipes, SmartMemoryManager.store_daily_summary() for heartbeats. Add the L2 store call alongside (not replacing) existing Mem0 stores."
     },
     {
       "id": "US-016",
-      "title": "Mobile responsive pass for Activity Command Centre",
-      "description": "As a mobile user, I want the Activity page to work well on small screens.",
+      "title": "Build Context Router with temporal detection and session hydration",
+      "description": "As a system, I need an intelligent pre-LLM context assembly layer that decides what context to inject based on query analysis.",
       "acceptanceCriteria": [
-        "StatsBar: 2x2 grid on mobile (< md), 4-column on desktop",
-        "Feed items: stack all content vertically on mobile, action buttons full-width",
-        "Routine cards: single column on mobile",
-        "Filter chips: horizontally scrollable on mobile with overflow-x-auto",
-        "Execution detail: full-width on mobile, step pipeline stacks vertically",
-        "Reduced backdrop-blur(8px) on mobile per globals.css @media rule",
-        "Tab labels hide on very small screens (< sm), showing only icons",
-        "All touch targets minimum 44px",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Create orchestrator/modules/memory/context_router.py with ContextRouter class",
+        "analyze_query(query: str) method returns ContextSignals dataclass with: is_temporal (bool), is_personal_fact (bool), is_session_continuation (bool), is_knowledge_query (bool), is_live_data (bool), temporal_window (Optional[tuple[datetime, datetime]])",
+        "Temporal detection uses regex patterns for: 'last week', 'yesterday', 'earlier today', 'last month', 'recently', date references, relative time phrases",
+        "Personal fact detection uses keyword patterns: 'my name', 'I prefer', 'I like', 'remember when', 'you told me'",
+        "Knowledge query detection: 'find the doc', 'what\\'s our policy', 'search for', 'look up'",
+        "Live data detection: 'current', 'how many', 'latest', 'MRR', 'revenue', 'users signed up'",
+        "analyze_query() runs in <10ms (regex only, no LLM calls)",
+        "Typecheck passes"
       ],
       "priority": 16,
       "passes": false,
-      "notes": "Follow existing mobile patterns from other pages. Use Tailwind responsive prefixes (sm:, md:, lg:)."
+      "notes": "Keep this fast — regex patterns only, no NLP models. The temporal window calculation should convert 'last week' to (now-7d, now), 'yesterday' to (yesterday_start, yesterday_end), etc."
     },
     {
       "id": "US-017",
-      "title": "Update SHEPHERD tour system for /activity route",
-      "description": "As a new user visiting Activity for the first time, I want a guided tour of the page.",
+      "title": "Implement Context Router retrieve_context() assembly method",
+      "description": "As a system, I need the Context Router to assemble the right context bundle based on query signals.",
       "acceptanceCriteria": [
-        "Create frontend/lib/shepherd/tours/activity-tour.ts with 4 steps: page overview (target: activity page header), stats bar explanation, tab navigation, feed/routines highlight",
-        "Update tour-registry.ts: replace /workflows mapping with /activity route pointing to activity-tour factory",
-        "Add data-tour attributes to activity-page.tsx: 'activity-page-header', 'activity-stats', 'activity-tabs', 'activity-content'",
-        "Tour auto-triggers on first visit (via existing usePageTour hook)",
-        "Tour uses existing shepherd-theme.ts glass-morphism styling",
-        "Update the workflow-tour reference in tour-registry if it exists",
+        "Add retrieve_context(workspace_id, agent_id, query, conversation_id=None) to ContextRouter",
+        "Returns ContextBundle dataclass with: session_summary (str), long_term_memories (list), temporal_results (list), daily_logs (list), knowledge_awareness (str), total_tokens_estimate (int)",
+        "If session_continuation signal: fetch L1 session summary from Redis",
+        "If temporal signal: fetch L2 short-term with time filter",
+        "If personal_fact signal: search L3 long-term via Mem0",
+        "If knowledge_query or live_data signal: inject awareness text only (no pre-fetch)",
+        "Default (no signals): L3 top 5 memories + L1 session summary if exists",
+        "Total context budget configurable: default 4000 tokens (add CONTEXT_BUDGET_TOKENS to config.py)",
+        "Each source has a sub-budget: session=500, long_term=800, temporal=600, daily=400, awareness=200",
         "Typecheck passes"
       ],
       "priority": 17,
       "passes": false,
-      "notes": "Follow exact pattern from other tour files like marketplace-tour.ts. Use tour-utils.ts helpers (title, waitForElement, backNextButtons, finishButton)."
+      "notes": "Use UnifiedMemoryService methods for all data fetching. The budget allocation truncates results to fit within token limits. Use a simple len(text)//4 token estimate."
+    },
+    {
+      "id": "US-018",
+      "title": "Build knowledge awareness injection text",
+      "description": "As an agent, I need a dynamic capability map in my system prompt so I know what organizational knowledge sources exist without pre-fetching.",
+      "acceptanceCriteria": [
+        "Add build_knowledge_awareness(workspace_id) method to ContextRouter",
+        "Queries workspace for: connected databases (from database_connections or similar table), connected tools (from agent_tools/composio), uploaded documents count",
+        "Generates a '## What You Can Look Up' text block listing available sources",
+        "If workspace has connected databases: include database names and suggest query_data tool",
+        "If workspace has documents: include doc count and suggest search_knowledge tool",
+        "If workspace has external tools: list connected tool categories (Jira, Slack, GitHub, etc.)",
+        "Always includes: 'Past conversations: Your memories include recent interactions — check before asking the user to repeat themselves'",
+        "Output is <200 tokens",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "This is the 'I know Confluence exists' awareness. Cache this text in Redis (10min TTL) since workspace capabilities don't change frequently. Key: mem:awareness:{workspace_id}."
+    },
+    {
+      "id": "US-019",
+      "title": "Replace hardcoded memory retrieval in SmartChatOrchestrator with Context Router",
+      "description": "As a system, I need the chat orchestrator to use the Context Router for intelligent context assembly instead of always doing a cold Mem0 search.",
+      "acceptanceCriteria": [
+        "In SmartChatOrchestrator (or wherever get_happy_system_prompt(memories=...) is called), replace the existing memory retrieval with ContextRouter.retrieve_context()",
+        "The ContextBundle fields are formatted into the system prompt sections: session summary, memories, daily logs, knowledge awareness",
+        "Remove any separate daily log injection that duplicates Context Router output",
+        "Preserve existing system prompt structure — context goes in the same location as current memories",
+        "If Context Router fails: fall back to existing SmartMemoryManager.retrieve_memories() (graceful degradation)",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "This is the critical integration point. Find the exact location where memories are assembled into the system prompt. The Context Router replaces the memory retrieval step, not the prompt template. Keep the fallback to prevent regressions."
+    },
+    {
+      "id": "US-020",
+      "title": "Implement Ebbinghaus decay scoring background job",
+      "description": "As a system, I need an hourly job that calculates retention scores for L2 short-term memories and archives expired items.",
+      "acceptanceCriteria": [
+        "Add run_decay() method to UnifiedMemoryService",
+        "For each L2 item: retention = exp(-0.1 * hours_elapsed) * (1 + 0.5*importance + 0.1*min(access_count, 10))",
+        "Update decay_score column with calculated retention value",
+        "Items with decay_score < 0.3: soft-delete or mark as archived (add archived_at column if needed)",
+        "Process in batches of 100 rows per workspace to avoid long-running transactions",
+        "Log summary: X items decayed, Y items archived for workspace Z",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "This runs as a background job (hourly). Use math.exp() for the decay formula. Process workspace by workspace. If archived_at column needed, add a small migration."
+    },
+    {
+      "id": "US-021",
+      "title": "Implement L2 to L3 promotion pipeline",
+      "description": "As a system, I need a daily job that promotes high-importance, frequently-accessed L2 memories to L3 long-term storage via Mem0 fact extraction.",
+      "acceptanceCriteria": [
+        "Add promote_to_long_term() method to UnifiedMemoryService",
+        "Promotion criteria: importance > 0.7 AND access_count > 3 AND promoted_to_l3 = false",
+        "For each qualifying item: call Mem0Client.add() with infer=True (enables fact extraction and deduplication)",
+        "Mark promoted items: set promoted_to_l3=true, promoted_at=now()",
+        "Process in batches per workspace",
+        "Log summary: X items promoted for workspace Y",
+        "Add run_promotion() that iterates all workspaces (for scheduler)",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "The infer=True flag on Mem0 add() triggers LLM fact extraction — this is what makes L3 smart. Promoted items stay in L2 until decay removes them (belt and suspenders)."
+    },
+    {
+      "id": "US-022",
+      "title": "Wire session consolidation job (L1 to L2)",
+      "description": "As a system, I need expired L1 sessions to be consolidated into L2 short-term storage so important decisions are preserved.",
+      "acceptanceCriteria": [
+        "Add consolidate_session(workspace_id, conversation_id) method to UnifiedMemoryService",
+        "Reads the L1 Redis session, extracts key decisions and action items",
+        "Stores each decision/action item as separate L2 entries with content_type='session_decision' and importance=0.6",
+        "Deletes the L1 Redis key after successful consolidation",
+        "Add run_session_consolidation() that scans for sessions where end_session was called >1hr ago",
+        "Uses Redis SCAN (not KEYS) to find expired session keys matching mem:session:* pattern",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "Use SCAN instead of KEYS for production safety. The 1hr window gives the user time to resume before consolidation. Decisions and action items are extracted from the SessionMemory.decisions and SessionMemory.action_items fields."
+    },
+    {
+      "id": "US-023",
+      "title": "Register background jobs for decay, promotion, and consolidation",
+      "description": "As a system, I need the three memory background jobs registered with the existing scheduler/task system.",
+      "acceptanceCriteria": [
+        "Session consolidation: runs every hour",
+        "Decay scoring: runs every hour (can share the schedule with consolidation)",
+        "L2→L3 promotion: runs daily",
+        "Register all three with whatever scheduler/task system the platform uses (check for existing APScheduler, Celery, or cron-like patterns)",
+        "Each job has error handling — one workspace failure doesn't stop processing others",
+        "Each job logs start/end timestamps and summary metrics",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": "Check how existing background jobs are registered (heartbeat service has scheduled tasks). Follow the same pattern. If no scheduler exists, create simple async tasks that can be triggered via API endpoint."
+    },
+    {
+      "id": "US-024",
+      "title": "Build NL2SQL service for natural language database queries",
+      "description": "As a user, I want agents to answer questions about my connected business databases using natural language.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/memory/nl2sql_service.py with NL2SQLService class",
+        "query(question: str, database_id: int, workspace_id: str) method: loads cached schema metadata, generates SQL via LLM, validates, executes, returns formatted result",
+        "Schema loading: reads from existing DatabaseIntrospectionService (PRD-21) or database_connections table",
+        "Schema caching in Redis with 10min TTL: key mem:schema:{database_id}",
+        "SQL generation: uses config.LLM_MODEL via existing LLM service, prompt includes schema + question",
+        "SQL validation: SELECT only (reject INSERT/UPDATE/DELETE/DROP/ALTER/CREATE), no semicolons in subqueries",
+        "Execution: 5-second timeout, 1000-row limit",
+        "Query audit: log to database_query_audit table (if exists) with workspace_id, question, generated_sql, success/fail",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "Check if DatabaseIntrospectionService or database_query_audit table already exists from PRD-21. If not, create a minimal schema metadata cache. Safety is critical — the SQL validator must be thorough."
+    },
+    {
+      "id": "US-025",
+      "title": "Register query_data tool in ActionRegistry",
+      "description": "As an agent, I need a query_data tool available so I can query connected business databases using natural language.",
+      "acceptanceCriteria": [
+        "Register query_data ActionDefinition in platform_actions.py following the 3-file pattern",
+        "Tool schema: name='query_data', parameters: question (string, required), database_id (integer, optional)",
+        "Add handler in platform_executor.py that delegates to NL2SQLService.query()",
+        "Handler extracts workspace_id from execution context for tenant isolation",
+        "Handler returns formatted result text suitable for agent consumption",
+        "Add 'query_data' to Tier 2 keywords in auto.py _PLATFORM_KEYWORDS",
+        "Error responses include helpful messages ('No database connected' if no connections exist)",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": "Follow the exact 3-file pattern documented in MEMORY.md under PRD-71. ActionDefinition in platform_actions.py, handler in platform_executor.py, keywords in auto.py."
+    },
+    {
+      "id": "US-026",
+      "title": "Add memory layer health endpoint to memory_stats API",
+      "description": "As a platform operator, I need an API endpoint showing the health and distribution of memories across all 5 layers.",
+      "acceptanceCriteria": [
+        "Add GET /api/v1/memory/layers endpoint to memory_stats.py",
+        "Returns per-layer stats: L1 (active session count from Redis SCAN), L2 (row count, avg decay_score, items pending promotion), L3 (Mem0 total count, cache hit rate), L4 (connected databases count, document count)",
+        "Include overall health score: healthy if all layers responding, degraded if Redis or Mem0 down, critical if both down",
+        "Response includes latency for each layer check",
+        "Endpoint uses workspace_id scoping from auth context",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": "This is the observability story. Keep it lightweight — each layer check should be a simple count/ping, not a full scan. Cache the result for 1 minute."
+    },
+    {
+      "id": "US-027",
+      "title": "Clean up skeleton memory classes with no live callers",
+      "description": "As a developer, I want to remove unused memory skeleton code to reduce confusion about which implementation is live.",
+      "acceptanceCriteria": [
+        "Verify modules/memory/service.py (MemoryService facade) has NO live callers — grep all files",
+        "Verify modules/memory/storage/manager.py (AdvancedMemoryManager) has NO live callers — grep all files",
+        "If confirmed unused: delete both files",
+        "Update modules/memory/__init__.py to remove deleted exports",
+        "If either HAS live callers: document in notes which callers, do NOT delete",
+        "Typecheck passes"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": "Based on research: service.py and storage/manager.py are skeleton code with no live callers. But ALWAYS verify with grep before deleting — remember the intent_classifier lesson. If in doubt, leave it."
+    },
+    {
+      "id": "US-028",
+      "title": "Add integration tests for UnifiedMemoryService L1-L3 flow",
+      "description": "As a developer, I need tests verifying the full memory lifecycle: session creation, short-term storage, long-term promotion, and context retrieval.",
+      "acceptanceCriteria": [
+        "Create test file for UnifiedMemoryService",
+        "Test L1: create session, update with exchanges, retrieve session, end session, verify TTL behavior",
+        "Test L2: store short-term item, search by time range, search by text, verify decay score update",
+        "Test L3: store long-term, search long-term, verify cache hit on second search",
+        "Test cross-layer: store_exchange writes to both L2 and L3",
+        "Test Context Router: temporal query returns L2 results, personal fact query returns L3 results, knowledge query returns awareness text only",
+        "Test MemoryNamespace: all formats generate correct user_id strings",
+        "Mock Redis and Mem0 (unit tests, not integration with live services)",
+        "Tests pass"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": "Use pytest with unittest.mock. Mock Redis with fakeredis if available, otherwise mock get_redis_client(). Mock Mem0Client methods. Focus on testing the routing logic and namespace correctness."
     }
   ]
 }
