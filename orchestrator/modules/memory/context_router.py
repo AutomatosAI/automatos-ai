@@ -5,9 +5,10 @@ Context Router
 Intelligent pre-LLM context assembly layer that analyses user queries and
 decides which memory layers to fetch BEFORE the agent sees the prompt.
 
-The router does NOT call the LLM — it uses fast regex-based signal detection
-(<10 ms budget) to classify query intent and return a ContextSignals struct
-that downstream code uses to assemble the context bundle.
+Two responsibilities:
+  1. **Signal detection** (``analyze_query``) — fast regex, <10 ms, no I/O.
+  2. **Context assembly** (``retrieve_context``) — fetches from L1/L2/L3
+     based on signals and assembles a budget-constrained ContextBundle.
 
 Usage:
     from modules.memory.context_router import ContextRouter
@@ -15,14 +16,19 @@ Usage:
     router = ContextRouter()
     signals = router.analyze_query("What did we discuss last week?")
     # signals.is_temporal == True
-    # signals.temporal_window == (2026-03-05T00:00:00Z, 2026-03-12T00:00:00Z)
+
+    bundle = await router.retrieve_context(
+        workspace_id="ws-123", agent_id=1, query="What did we discuss last week?"
+    )
+    # bundle.total_tokens_estimate <= 4000
 """
 
+import asyncio
 import re
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +53,29 @@ class ContextSignals:
     is_knowledge_query: bool = False
     is_live_data: bool = False
     temporal_window: Optional[Tuple[datetime, datetime]] = None
+
+
+# ---------------------------------------------------------------------------
+# ContextBundle — assembled context ready for system prompt injection
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ContextBundle:
+    """
+    Pre-assembled context bundle returned by ``ContextRouter.retrieve_context()``.
+
+    Each field corresponds to a system-prompt section. The caller formats and
+    injects these into the prompt template. ``total_tokens_estimate`` ensures
+    the bundle stays within the configured budget.
+    """
+
+    session_summary: str = ""
+    long_term_memories: Tuple[Dict[str, Any], ...] = ()
+    temporal_results: Tuple[Dict[str, Any], ...] = ()
+    daily_logs: str = ""
+    knowledge_awareness: str = ""
+    total_tokens_estimate: int = 0
+    signals: Optional[ContextSignals] = None
 
 
 # ---------------------------------------------------------------------------
@@ -306,3 +335,227 @@ class ContextRouter:
             is_live_data=is_live_data,
             temporal_window=temporal_window,
         )
+
+    # ------------------------------------------------------------------
+    # Context assembly (US-017)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """Cheap token estimate: ~4 chars per token."""
+        return len(text) // 4 if text else 0
+
+    @staticmethod
+    def _truncate_to_budget(text: str, token_budget: int) -> str:
+        """Truncate *text* so its estimated token count fits within *token_budget*."""
+        max_chars = token_budget * 4
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars]
+
+    @staticmethod
+    def _memories_to_text(memories: List[Dict[str, Any]], token_budget: int) -> Tuple[List[Dict[str, Any]], str]:
+        """
+        Convert memory dicts to a text block and trim to fit *token_budget*.
+
+        Returns (kept_memories, text_block).
+        """
+        if not memories:
+            return [], ""
+        lines: List[str] = []
+        kept: List[Dict[str, Any]] = []
+        char_budget = token_budget * 4
+        total = 0
+        for mem in memories:
+            content = mem.get("memory") or mem.get("content") or ""
+            if not content:
+                continue
+            line = f"- {content}"
+            if total + len(line) > char_budget:
+                break
+            lines.append(line)
+            kept.append(mem)
+            total += len(line) + 1  # +1 for newline
+        return kept, "\n".join(lines)
+
+    async def retrieve_context(
+        self,
+        workspace_id: str,
+        agent_id: int,
+        query: str,
+        conversation_id: Optional[str] = None,
+    ) -> ContextBundle:
+        """
+        Assemble a budget-constrained context bundle by fetching from L1/L2/L3
+        based on query signals.
+
+        Fetch strategy (driven by ``analyze_query`` signals):
+          - **session_continuation** or default with conversation_id → L1 session
+          - **temporal** → L2 short-term with time filter
+          - **personal_fact** or default → L3 long-term via Mem0 (cached)
+          - **knowledge_query** / **live_data** → awareness text only (no pre-fetch)
+
+        Default (no strong signal): L3 top-5 memories + L1 session summary.
+
+        All layer fetches are concurrent via ``asyncio.gather``.
+        Any single-layer failure is logged and skipped — never breaks the bundle.
+        """
+        from config import config
+        from modules.memory.unified_memory_service import get_unified_memory_service
+
+        service = get_unified_memory_service()
+        signals = self.analyze_query(query)
+
+        budget_session = config.CONTEXT_BUDGET_SESSION
+        budget_long_term = config.CONTEXT_BUDGET_LONG_TERM
+        budget_temporal = config.CONTEXT_BUDGET_TEMPORAL
+        budget_daily = config.CONTEXT_BUDGET_DAILY
+        budget_awareness = config.CONTEXT_BUDGET_AWARENESS
+
+        # ----- Determine which fetches to launch -----
+        fetch_session = (
+            conversation_id is not None
+            and (signals.is_session_continuation or not any([
+                signals.is_temporal,
+                signals.is_knowledge_query,
+                signals.is_live_data,
+            ]))
+        )
+        fetch_long_term = (
+            signals.is_personal_fact
+            or not any([
+                signals.is_temporal,
+                signals.is_knowledge_query,
+                signals.is_live_data,
+            ])
+        )
+        fetch_temporal = signals.is_temporal and signals.temporal_window is not None
+        # Daily logs on default path (no strong signal)
+        fetch_daily = not any([
+            signals.is_temporal,
+            signals.is_personal_fact,
+            signals.is_session_continuation,
+            signals.is_knowledge_query,
+            signals.is_live_data,
+        ])
+
+        # ----- Launch concurrent fetches -----
+        async def _noop():
+            return None
+
+        session_task = (
+            self._safe_fetch("L1 session", service.get_session(workspace_id, conversation_id))
+            if fetch_session else _noop()
+        )
+        long_term_task = (
+            self._safe_fetch("L3 long-term", service.search_long_term(workspace_id, query, agent_id=agent_id, limit=5))
+            if fetch_long_term else _noop()
+        )
+        temporal_task = (
+            self._safe_fetch("L2 temporal", service.search_short_term(workspace_id, query, days=self._window_days(signals.temporal_window)))
+            if fetch_temporal else _noop()
+        )
+        daily_task = (
+            self._safe_fetch("daily logs", service.get_all_daily_logs(workspace_id, limit=10))
+            if fetch_daily else _noop()
+        )
+
+        session_result, lt_result, temporal_result, daily_result = await asyncio.gather(
+            session_task, long_term_task, temporal_task, daily_task,
+        )
+
+        # ----- Assemble bundle with budget constraints -----
+
+        # Session summary
+        session_text = ""
+        if session_result is not None:
+            raw_summary = getattr(session_result, "summary", "") or ""
+            exchange_count = getattr(session_result, "exchange_count", 0)
+            if raw_summary:
+                session_text = self._truncate_to_budget(
+                    f"Conversation so far ({exchange_count} exchanges):\n{raw_summary}",
+                    budget_session,
+                )
+
+        # Long-term memories
+        lt_memories: List[Dict[str, Any]] = lt_result if isinstance(lt_result, list) else []
+        kept_lt, lt_text = self._memories_to_text(lt_memories, budget_long_term)
+
+        # Temporal results
+        temporal_memories: List[Dict[str, Any]] = temporal_result if isinstance(temporal_result, list) else []
+        kept_temporal, temporal_text = self._memories_to_text(temporal_memories, budget_temporal)
+
+        # Daily logs
+        daily_text = ""
+        if daily_result and isinstance(daily_result, list):
+            daily_lines: List[str] = []
+            for mem in daily_result:
+                content = mem.get("memory") or mem.get("content") or ""
+                if content:
+                    daily_lines.append(f"- {content}")
+            daily_text = self._truncate_to_budget("\n".join(daily_lines), budget_daily)
+
+        # Knowledge awareness (static text — no fetch)
+        awareness_text = ""
+        if signals.is_knowledge_query or signals.is_live_data:
+            awareness_text = self._build_default_awareness(signals)
+            awareness_text = self._truncate_to_budget(awareness_text, budget_awareness)
+
+        # Total token estimate
+        total_tokens = sum(
+            self._estimate_tokens(t)
+            for t in (session_text, lt_text, temporal_text, daily_text, awareness_text)
+        )
+
+        return ContextBundle(
+            session_summary=session_text,
+            long_term_memories=tuple(kept_lt),
+            temporal_results=tuple(kept_temporal),
+            daily_logs=daily_text,
+            knowledge_awareness=awareness_text,
+            total_tokens_estimate=total_tokens,
+            signals=signals,
+        )
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _safe_fetch(label: str, coro):
+        """Run a coroutine and return None on failure instead of raising."""
+        try:
+            return await coro
+        except Exception:
+            logger.warning(
+                "[ContextRouter] %s fetch failed — skipping",
+                label,
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
+    def _window_days(window: Optional[Tuple[datetime, datetime]]) -> int:
+        """Convert a temporal window to a number-of-days value for search_short_term."""
+        if window is None:
+            return 7
+        start, end = window
+        delta = end - start
+        return max(1, delta.days + 1)
+
+    @staticmethod
+    def _build_default_awareness(signals: ContextSignals) -> str:
+        """
+        Build a static knowledge-awareness text block.
+
+        This is a minimal default. US-018 replaces this with a dynamic
+        per-workspace capability map cached in Redis.
+        """
+        lines = ["## What You Can Look Up"]
+        lines.append("You have access to organizational knowledge. Don't guess — look things up:")
+        if signals.is_knowledge_query:
+            lines.append("- **Company documents**: Use `search_knowledge` to search uploaded docs, policies, guides")
+        if signals.is_live_data:
+            lines.append("- **Business data**: Use `query_data` to ask questions about metrics, users, revenue, etc.")
+        lines.append("- **Past conversations**: Your memories include recent interactions — check before asking the user to repeat themselves")
+        return "\n".join(lines)

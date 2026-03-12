@@ -964,9 +964,36 @@ class UnifiedMemoryService:
         agent_id: int,
         query: str,
         conversation_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Assemble context bundle across all layers. Implemented in US-017."""
-        return {}
+    ) -> "ContextBundle":
+        """
+        Assemble a budget-constrained context bundle across all memory layers.
+
+        Delegates to ``ContextRouter.retrieve_context()`` which analyses the
+        query for signals and fetches from L1/L2/L3 accordingly.
+
+        Returns:
+            A ContextBundle with session_summary, long_term_memories,
+            temporal_results, daily_logs, knowledge_awareness, and
+            total_tokens_estimate.
+        """
+        from modules.memory.context_router import ContextRouter, ContextBundle
+
+        router = ContextRouter()
+        try:
+            return await router.retrieve_context(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                query=query,
+                conversation_id=conversation_id,
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] retrieve_context failed ws=%s agent=%s",
+                workspace_id,
+                agent_id,
+                exc_info=True,
+            )
+            return ContextBundle()
 
     async def store_exchange(
         self,
