@@ -1600,7 +1600,9 @@ class UnifiedMemoryService:
 
                         # Parse workspace_id and conversation_id from key
                         # Key format: mem:session:{workspace_id}:{conversation_id}
-                        parts = key.split(":", 3)  # ["mem", "session", ws_id, conv_id]
+                        # scan_iter returns bytes — decode to str first
+                        key_str = key.decode("utf-8") if isinstance(key, bytes) else key
+                        parts = key_str.split(":", 3)  # ["mem", "session", ws_id, conv_id]
                         if len(parts) < 4:
                             logger.warning(
                                 "[UnifiedMemoryService] run_session_consolidation: "
