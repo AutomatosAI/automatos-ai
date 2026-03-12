@@ -6,6 +6,7 @@ CRUD + planning endpoints for the lightweight task board (PRD-72).
 Tasks follow a Kanban lifecycle: inbox -> assigned -> in_progress -> review -> done.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -252,8 +253,24 @@ async def update_task(
     if "planning_data" in body:
         task.planning_data = body["planning_data"]
 
+    # Check if we need to trigger execution
+    trigger_execution = (
+        "status" in body
+        and body["status"] == "in_progress"
+        and task.assigned_agent_id
+    )
+
     db.commit()
     db.refresh(task)
+
+    if trigger_execution:
+        _launch_task_execution(
+            task_id=task.id,
+            agent_id=task.assigned_agent_id,
+            workspace_id=str(ctx.workspace_id),
+            prompt=task.raw_prompt or task.description or task.title,
+            review_mode=task.review_mode or "auto",
+        )
 
     logger.info("[BoardTasks] Updated task %d", task.id)
     return task.to_dict()
@@ -311,7 +328,85 @@ async def update_task_status(
     db.commit()
     db.refresh(task)
 
+    # Fire-and-forget: trigger agent execution when moved to in_progress
+    if new_status == "in_progress" and task.assigned_agent_id:
+        _launch_task_execution(
+            task_id=task.id,
+            agent_id=task.assigned_agent_id,
+            workspace_id=str(ctx.workspace_id),
+            prompt=task.raw_prompt or task.description or task.title,
+            review_mode=task.review_mode or "auto",
+        )
+
     return {"id": task.id, "status": task.status}
+
+
+# ── Immediate execution (fire-and-forget) ────────────────────────────
+
+def _launch_task_execution(
+    task_id: int,
+    agent_id: int,
+    workspace_id: str,
+    prompt: str,
+    review_mode: str = "auto",
+):
+    """Launch agent execution for a board task as a background coroutine."""
+
+    async def _run():
+        from core.database.database import SessionLocal
+        db = SessionLocal()
+        try:
+            from modules.agents.factory.agent_factory import AgentFactory
+
+            factory = AgentFactory(db_session=db)
+            exec_result = await factory.execute_with_prompt(
+                agent=agent_id,
+                prompt=prompt,
+                context={
+                    "source": "board_task",
+                    "task_id": task_id,
+                    "workspace_id": workspace_id,
+                },
+                use_memory=False,
+            )
+
+            # Extract response text
+            llm_text = (
+                exec_result.get("result")
+                or exec_result.get("response")
+                or exec_result.get("output")
+                or exec_result.get("content")
+                or ""
+            )
+
+            task = db.query(BoardTask).get(task_id)
+            if task and task.status == "in_progress":
+                task.result = str(llm_text)[:4000] if llm_text else None
+                task.status = "done" if review_mode == "auto" else "review"
+                task.completed_at = datetime.now(timezone.utc)
+                db.commit()
+
+            logger.info(
+                "[BoardTasks] Agent %d completed task %d → %s",
+                agent_id, task_id, task.status if task else "?",
+            )
+        except Exception as e:
+            logger.error(
+                "[BoardTasks] Task %d execution failed: %s", task_id, e, exc_info=True,
+            )
+            try:
+                task = db.query(BoardTask).get(task_id)
+                if task:
+                    task.status = "inbox"
+                    task.error_message = str(e)[:500]
+                    task.started_at = None
+                    db.commit()
+            except Exception:
+                db.rollback()
+        finally:
+            db.close()
+
+    asyncio.create_task(_run())
 
 
 # ── Planning mode ────────────────────────────────────────────────────
