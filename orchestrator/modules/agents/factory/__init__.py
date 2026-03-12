@@ -1,15 +1,13 @@
 """Agent Factory"""
 from .agent_factory import (
     AgentFactory,
-    AgentRuntime, 
+    AgentRuntime,
     AgentMetadata,
     AgentLifecycle,
     ModelConfiguration,
-    create_specialized_agent,
-    get_action_executor,
+    ResolvedKey,
     get_monitoring_service,
-    get_rag_service,
-    get_unified_tool_executor
+    get_unified_tool_executor,
 )
 
 __all__ = [
@@ -18,9 +16,7 @@ __all__ = [
     "AgentMetadata",
     "AgentLifecycle",
     "ModelConfiguration",
-    "create_specialized_agent",
-    "get_action_executor",
+    "ResolvedKey",
     "get_monitoring_service",
-    "get_rag_service",
-    "get_unified_tool_executor"
+    "get_unified_tool_executor",
 ]

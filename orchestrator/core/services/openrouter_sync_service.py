@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.models.openrouter_cache import OpenRouterModelCache, OpenRouterSyncJob
 
@@ -176,77 +177,60 @@ class OpenRouterSyncService:
         context_length = data.get("context_length") or 0
         max_completion = top_max or (context_length // 4 if context_length else 0)
 
-        existing = self.db.query(OpenRouterModelCache).filter_by(model_id=model_id).first()
+        # Atomic upsert — avoids UniqueViolation from concurrent syncs
+        now = datetime.utcnow()
+        values = dict(
+            model_id=model_id,
+            slug=data.get("canonical_slug"),
+            display_name=data.get("name", model_id),
+            description=data.get("description"),
+            provider=provider,
+            prompt_cost=prompt_cost,
+            completion_cost=completion_cost,
+            image_cost=image_cost,
+            request_cost=request_cost,
+            cache_read_cost=cache_read_cost,
+            cache_write_cost=cache_write_cost,
+            context_length=context_length,
+            max_completion_tokens=max_completion,
+            modality=modality,
+            input_modalities=input_modalities,
+            output_modalities=output_modalities,
+            tokenizer=tokenizer,
+            supports_tools=supports_tools,
+            supports_vision=supports_vision,
+            supports_streaming=supports_streaming,
+            supports_json_mode=supports_json_mode,
+            supports_reasoning=supports_reasoning,
+            supported_parameters=supported_params,
+            top_provider_context=top_ctx,
+            top_provider_max_tokens=top_max,
+            is_moderated=is_mod,
+            category=category,
+            tier=tier,
+            tags=tags,
+            created_timestamp=data.get("created"),
+            # DB column is "metadata", ORM attribute is "raw_data"
+            metadata=data,
+            last_synced_at=now,
+            updated_at=now,
+        )
 
-        if existing:
-            existing.slug = data.get("canonical_slug")
-            existing.display_name = data.get("name", model_id)
-            existing.description = data.get("description")
-            existing.provider = provider
-            existing.prompt_cost = prompt_cost
-            existing.completion_cost = completion_cost
-            existing.image_cost = image_cost
-            existing.request_cost = request_cost
-            existing.cache_read_cost = cache_read_cost
-            existing.cache_write_cost = cache_write_cost
-            existing.context_length = context_length
-            existing.max_completion_tokens = max_completion
-            existing.modality = modality
-            existing.input_modalities = input_modalities
-            existing.output_modalities = output_modalities
-            existing.tokenizer = tokenizer
-            existing.supports_tools = supports_tools
-            existing.supports_vision = supports_vision
-            existing.supports_streaming = supports_streaming
-            existing.supports_json_mode = supports_json_mode
-            existing.supports_reasoning = supports_reasoning
-            existing.supported_parameters = supported_params
-            existing.top_provider_context = top_ctx
-            existing.top_provider_max_tokens = top_max
-            existing.is_moderated = is_mod
-            existing.category = category
-            existing.tier = tier
-            existing.tags = tags
-            existing.created_timestamp = data.get("created")
-            existing.raw_data = data
-            existing.last_synced_at = datetime.utcnow()
-            return False
-        else:
-            new_model = OpenRouterModelCache(
-                model_id=model_id,
-                slug=data.get("canonical_slug"),
-                display_name=data.get("name", model_id),
-                description=data.get("description"),
-                provider=provider,
-                prompt_cost=prompt_cost,
-                completion_cost=completion_cost,
-                image_cost=image_cost,
-                request_cost=request_cost,
-                cache_read_cost=cache_read_cost,
-                cache_write_cost=cache_write_cost,
-                context_length=context_length,
-                max_completion_tokens=max_completion,
-                modality=modality,
-                input_modalities=input_modalities,
-                output_modalities=output_modalities,
-                tokenizer=tokenizer,
-                supports_tools=supports_tools,
-                supports_vision=supports_vision,
-                supports_streaming=supports_streaming,
-                supports_json_mode=supports_json_mode,
-                supports_reasoning=supports_reasoning,
-                supported_parameters=supported_params,
-                top_provider_context=top_ctx,
-                top_provider_max_tokens=top_max,
-                is_moderated=is_mod,
-                category=category,
-                tier=tier,
-                tags=tags,
-                created_timestamp=data.get("created"),
-                raw_data=data,
+        # ON CONFLICT (model_id) DO UPDATE — all fields except model_id
+        update_values = {k: v for k, v in values.items() if k != "model_id"}
+        stmt = (
+            pg_insert(OpenRouterModelCache.__table__)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=["model_id"],
+                set_=update_values,
             )
-            self.db.add(new_model)
-            return True
+        )
+        self.db.execute(stmt)
+
+        # Can't reliably distinguish insert vs update from ON CONFLICT;
+        # caller uses this for stats only — default to "updated".
+        return False
 
     # =========================================================================
     # Helpers

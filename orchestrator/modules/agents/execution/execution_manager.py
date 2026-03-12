@@ -25,7 +25,7 @@ from sqlalchemy import text
 
 import numpy as np
 
-from modules.agents.factory import AgentFactory, AgentRuntime, AgentMetadata, get_action_executor
+from modules.agents.factory import AgentFactory, AgentRuntime, AgentMetadata
 from core.models import Agent
 from modules.memory.operations.prompt_injection import MemoryPromptInjector
 
@@ -815,8 +815,7 @@ class AgentExecutionManager:
                     execution.retry_count = attempt
                     self.logger.info(f"🔄 Retry {attempt}/{self.max_retries} for: {execution.subtask_description}")
                 
-                # Execute with agent factory - include action_executor for tool calls
-                action_executor = get_action_executor()
+                # Execute with agent factory — tools resolved via get_tools_for_agent()
                 
                 # PRD-21: ENHANCED SYSTEM PROMPT - Confident, Professional, Tool-Using Agent
                 professional_system_prompt = """You are a professional AI agent with full access to the codebase, documentation, and tools.
@@ -865,8 +864,6 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                         agent=agent_record,
                         task_context=prompt[:500],
                         db=self.db_session,
-                        required_tools=required_tools,
-                        enable_smart_skill_selection=True
                     )
                     full_system_prompt = skill_enhanced_prompt + "\n\n" + professional_system_prompt
 
@@ -912,9 +909,7 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                     system_prompt=full_system_prompt,
                     use_memory=True,
                     max_retries=0,  # We handle retries here
-                    action_executor=action_executor,  # Enable platform tools
-                    required_tools=all_required_tools,  # Platform + Skill tools
-                    workspace_dir=self.workspace_dir  # Unique workspace per execution
+                    workspace_dir=self.workspace_dir,
                 )
 
                 if result.get("status") == "error":

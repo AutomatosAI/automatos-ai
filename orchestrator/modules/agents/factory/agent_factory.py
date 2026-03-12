@@ -1,131 +1,54 @@
 """
-Agent Factory - User-Defined Agents with Flexible Metadata
-===========================================================
+Agent Factory — Clean Rewrite
+==============================
 
 Pure execution layer for agents. Users define their own agent types.
 The orchestrator handles all prompt engineering using Context Engineering.
 Multiple agents of different types can run simultaneously.
+
+Tool Source: ONE path — get_tools_for_agent() from tool_router.py.
+No hardcoded tool schemas, no legacy JSON action format, no mid-execution discovery.
 """
 
-import os
-import logging
-import re
-import time
-from typing import Dict, Any, List, Optional, Union, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime
 import asyncio
 import json
+import logging
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.orm import Session
 
 from config import config
-from core.llm import (
-    LLMManager, LLMConfig, LLMProvider, LLMResponse,
-    create_llm_manager
-)
-from core.models import (
-    Agent, Skill, PriorityLevel, Base,
-)
-from core.models.composio_cache import AgentAppAssignment, ComposioAppCache, ComposioActionCache
+from core.llm import LLMConfig, LLMManager, LLMProvider, LLMResponse, create_llm_manager
+from core.models import Agent, Base, PriorityLevel, Skill
+from core.models.composio_cache import AgentAppAssignment, ComposioActionCache, ComposioAppCache
 from modules.agents.services.skill_loader import get_skill_loader
 
-# Import new services (lazy import to avoid circular deps)
-def get_action_executor():
-    from modules.agents.services.agent_action_executor import get_action_executor as _get_executor
-    return _get_executor()
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Lazy imports (avoid circular deps)
+# ---------------------------------------------------------------------------
 
 def get_monitoring_service():
     from core.services.monitoring_service import get_monitoring_service as _get_monitor
     return _get_monitor()
 
-def get_rag_service():
-    from modules.rag import get_rag_service as _get_rag
-    return _get_rag()
 
 def get_unified_tool_executor(db_session: Session, workspace_dir: str = "/tmp/automatos_workspace"):
-    """PRD-17 Phase 3: Get UnifiedToolExecutor instance with workspace support"""
     from modules.tools import UnifiedToolExecutor
     return UnifiedToolExecutor(db_session, workspace_dir=workspace_dir)
 
 
-# _build_tool_schemas deleted — tool schemas now come from
-# get_tools_for_agent() (DB-driven) or Composio SDK (per-action).
+# ---------------------------------------------------------------------------
+# Enums & Dataclasses (KEPT — battle-tested)
+# ---------------------------------------------------------------------------
 
-
-
-def _build_skill_tool_schemas(agent_skills: List) -> List[Dict]:
-    """
-    PRD-22: Extract executable tool schemas from agent skills.
-    
-    Skills can define tools in their tools_schema field (JSONB).
-    This gives agents "superpowers" - they can both READ (prompt) and EXECUTE (tools).
-    
-    Args:
-        agent_skills: List of Skill objects assigned to the agent
-        
-    Returns:
-        List of OpenAI function schemas from skills
-    """
-    tools = []
-    
-    logger.info(f"🔍 _build_skill_tool_schemas called with {len(agent_skills)} skills")
-    
-    for skill in agent_skills:
-        logger.info(f"🔍 Processing skill: {skill.name if hasattr(skill, 'name') else 'UNNAMED'}")
-        
-        # Check if skill has tools_schema defined
-        has_attr = hasattr(skill, 'tools_schema')
-        logger.info(f"  - has 'tools_schema' attribute: {has_attr}")
-        
-        if has_attr:
-            tools_schema_value = skill.tools_schema
-            logger.info(f"  - tools_schema value: {tools_schema_value}")
-            logger.info(f"  - tools_schema type: {type(tools_schema_value)}")
-            
-        if not hasattr(skill, 'tools_schema') or not skill.tools_schema:
-            logger.warning(f"  ⚠️ Skill '{skill.name}' has no tools_schema, skipping")
-            continue
-        
-        # Extract tools array from tools_schema
-        if not isinstance(skill.tools_schema, dict):
-            logger.error(f"  ❌ Skill '{skill.name}' tools_schema is not a dict! Type: {type(skill.tools_schema)}")
-            continue
-            
-        skill_tools = skill.tools_schema.get('tools', [])
-        logger.info(f"  - Found {len(skill_tools)} tools in schema")
-        
-        for tool_def in skill_tools:
-            tool_name = tool_def.get('name', 'UNKNOWN')
-            logger.info(f"  🔧 Loading tool: {tool_name}")
-            
-            # Convert to OpenAI function calling format
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": tool_def.get('name'),
-                    "description": tool_def.get('description', f"Tool from {skill.name} skill"),
-                    "parameters": tool_def.get('parameters', {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    })
-                }
-            })
-            
-            logger.info(f"  ✅ Successfully loaded tool '{tool_name}' from skill '{skill.name}'")
-    
-    logger.info(f"🔍 _build_skill_tool_schemas returning {len(tools)} total tools")
-    return tools
-
-
-logger = logging.getLogger(__name__)
-
-# Agent lifecycle states
 class AgentLifecycle(Enum):
     INITIALIZING = "initializing"
     ACTIVE = "active"
@@ -134,37 +57,20 @@ class AgentLifecycle(Enum):
     HIBERNATING = "hibernating"
     RETIRED = "retired"
 
-# Default LLM configuration for agents
-# NOTE: This is a fallback - the system prefers to use settings from system_settings table
-# Use get_default_llm_config() to get settings-aware configuration
-DEFAULT_LLM_CONFIG = {
-    "provider": "openai",  # Use environment default
-    "model": "gpt-4",  # Will be overridden by system settings if configured
-    "temperature": 0.7,
-    "max_tokens": 2000,
-    "context_window": 8192  # Will be updated from LLM models registry
-}
 
-# PRD-15: Multi-Model Configuration
 @dataclass
 class ModelConfiguration:
-    """
-    Complete model configuration for an agent (PRD-15).
-    
-    This dataclass encapsulates all model-specific settings including
-    provider, model ID, and generation parameters.
-    """
-    provider: str  # 'openai', 'anthropic', 'huggingface'
-    model_id: str  # 'gpt-4', 'claude-3-sonnet-20240229', etc.
+    """Complete model configuration for an agent (PRD-15)."""
+    provider: str
+    model_id: str
     temperature: float = 0.7
     max_tokens: int = 2000
     top_p: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     fallback_model_id: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for storage"""
         return {
             "provider": self.provider,
             "model_id": self.model_id,
@@ -173,12 +79,11 @@ class ModelConfiguration:
             "top_p": self.top_p,
             "frequency_penalty": self.frequency_penalty,
             "presence_penalty": self.presence_penalty,
-            "fallback_model_id": self.fallback_model_id
+            "fallback_model_id": self.fallback_model_id,
         }
-    
+
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> 'ModelConfiguration':
-        """Create from dictionary"""
+    def from_dict(data: Dict[str, Any]) -> "ModelConfiguration":
         return ModelConfiguration(
             provider=data.get("provider", "openai"),
             model_id=data.get("model_id", config.LLM_MODEL),
@@ -187,104 +92,69 @@ class ModelConfiguration:
             top_p=data.get("top_p", 1.0),
             frequency_penalty=data.get("frequency_penalty", 0.0),
             presence_penalty=data.get("presence_penalty", 0.0),
-            fallback_model_id=data.get("fallback_model_id")
+            fallback_model_id=data.get("fallback_model_id"),
         )
-    
+
     @staticmethod
-    def get_default() -> 'ModelConfiguration':
-        """Get default configuration"""
-        return ModelConfiguration(
-            provider=config.LLM_PROVIDER,
-            model_id=config.LLM_MODEL,
-            temperature=0.7,
-            max_tokens=2000
-        )
+    def get_default() -> "ModelConfiguration":
+        return ModelConfiguration(provider=config.LLM_PROVIDER, model_id=config.LLM_MODEL)
+
 
 @dataclass
 class AgentMetadata:
-    """
-    User-defined agent metadata - completely flexible.
-    
-    Enhanced in PRD-15 to support full model configuration.
-    Maintains backward compatibility with deprecated fields.
-    """
+    """User-defined agent metadata — completely flexible."""
     name: str
-    agent_type: str  # User-defined type (e.g., "financial_analyst", "code_reviewer")
+    agent_type: str
     description: Optional[str] = None
-    skills: List[str] = field(default_factory=list)  # Semantic tags for matching
-    
-    # PRD-15: New model configuration
+    skills: List[str] = field(default_factory=list)
     model_config: Optional[ModelConfiguration] = None
-    
-    # Deprecated: Keep for backward compatibility
+    # Deprecated — keep for backward compat
     preferred_model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     context_window: Optional[int] = None
-    
-    custom_metadata: Dict[str, Any] = field(default_factory=dict)  # Any user data
-    
+    custom_metadata: Dict[str, Any] = field(default_factory=dict)
+
     def get_model_config(self) -> ModelConfiguration:
-        """
-        Get model configuration with fallbacks.
-        
-        Priority:
-        1. model_config (new)
-        2. deprecated fields (backward compatibility)
-        3. default configuration
-        
-        Returns:
-            ModelConfiguration object
-        """
-        # Use new model_config if available
         if self.model_config:
             return self.model_config
-        
-        # Fall back to deprecated fields for backward compatibility
         if self.preferred_model:
             provider = "openai"
             if "claude" in self.preferred_model.lower():
                 provider = "anthropic"
             elif "llama" in self.preferred_model.lower() or "mistral" in self.preferred_model.lower():
                 provider = "huggingface"
-            
             return ModelConfiguration(
                 provider=provider,
                 model_id=self.preferred_model,
                 temperature=self.temperature or 0.7,
-                max_tokens=self.max_tokens or 2000
+                max_tokens=self.max_tokens or 2000,
             )
-        
-        # Use default
         return ModelConfiguration.get_default()
-    
+
     def get_llm_config(self) -> Dict[str, Any]:
-        """
-        Get LLM configuration dict (backward compatible).
-        
-        Deprecated: Use get_model_config() instead.
-        Maintained for backward compatibility.
-        """
-        model_config = self.get_model_config()
+        mc = self.get_model_config()
         return {
-            "provider": model_config.provider,
-            "model": model_config.model_id,
-            "temperature": model_config.temperature,
-            "max_tokens": model_config.max_tokens,
-            "context_window": self.context_window or 8192
+            "provider": mc.provider,
+            "model": mc.model_id,
+            "temperature": mc.temperature,
+            "max_tokens": mc.max_tokens,
+            "context_window": self.context_window or 8192,
         }
+
 
 @dataclass
 class ResolvedKey:
     """Result of API key resolution with source metadata."""
     api_key: str
-    source: str          # "byok", "platform", "env"
+    source: str  # "byok", "platform", "env"
     is_byok: bool
     provider: str = ""
 
+
 @dataclass
 class AgentRuntime:
-    """Runtime representation of an agent"""
+    """Runtime representation of an agent."""
     agent_id: int
     metadata: AgentMetadata
     llm_manager: LLMManager
@@ -294,436 +164,165 @@ class AgentRuntime:
     total_tokens_used: int = 0
     last_execution: Optional[datetime] = None
     performance_metrics: Dict[str, Any] = field(default_factory=dict)
-    memory: List[Dict[str, Any]] = field(default_factory=list)  # Short-term memory
-    tools: List[Dict[str, Any]] = field(default_factory=list)  # Assigned external apps (Composio)
-    tool_executor: Any = None  # PRD-17: Shared UnifiedToolExecutor (initialized once, reused)
+    memory: List[Dict[str, Any]] = field(default_factory=list)
+    tools: List[Dict[str, Any]] = field(default_factory=list)  # Composio app assignments
+    tool_executor: Any = None
     is_byok: bool = False
     resolved_provider: str = ""
     workspace_id: Optional[Any] = None
-    # PRD-71: Pre-built system prompt (built once at activation, consumed by chatbot/recipe_executor)
     system_prompt: Optional[str] = None
     skill_tool_schemas: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     def update_metrics(self, execution_time: float, tokens_used: int, success: bool):
-        """Update agent performance metrics"""
         self.execution_count += 1
         self.total_tokens_used += tokens_used
         self.last_execution = datetime.now()
-        
-        # Update rolling metrics
         if "avg_execution_time" not in self.performance_metrics:
             self.performance_metrics["avg_execution_time"] = execution_time
         else:
-            # Rolling average
             avg = self.performance_metrics["avg_execution_time"]
             self.performance_metrics["avg_execution_time"] = (
                 (avg * (self.execution_count - 1) + execution_time) / self.execution_count
             )
-        
-        # Success rate
         if "success_count" not in self.performance_metrics:
             self.performance_metrics["success_count"] = 0
         if success:
             self.performance_metrics["success_count"] += 1
-        
         self.performance_metrics["success_rate"] = (
             self.performance_metrics["success_count"] / self.execution_count
         )
 
+
+# ---------------------------------------------------------------------------
+# AgentFactory
+# ---------------------------------------------------------------------------
+
 class AgentFactory:
     """
     Creates and manages user-defined agents.
-    Pure execution layer - the orchestrator handles all prompt engineering.
-    Can manage multiple agents of different types simultaneously.
+    Pure execution layer — the orchestrator handles all prompt engineering.
     """
-    
+
     def __init__(self, db_session: Session = None):
-        # Use centralized database session
         if db_session:
             self.db_session = db_session
         else:
             from core.database.database import SessionLocal
             self.db_session = SessionLocal()
-        
         self.active_agents: Dict[int, AgentRuntime] = {}
         self.logger = logging.getLogger(__name__)
-    
+
+    # ==================================================================
+    # LLM Config Resolution
+    # ==================================================================
+
     def _get_default_llm_config_from_settings(self) -> Dict[str, Any]:
-        """
-        Get default LLM configuration from system settings (Settings page).
-        Falls back to DEFAULT_LLM_CONFIG if settings not available.
-        
-        This respects user's model selection from the Settings UI instead of hard-coding.
-        
-        Returns:
-            Dictionary with LLM configuration
-        """
+        """Get default LLM config from system settings, falling back to config.py."""
         try:
             from core.llm.manager import get_system_setting
-            
-            # Get provider and model from settings - check both key formats
+
             provider = get_system_setting("orchestrator_llm", "llm_provider")
             if not provider:
-                provider = get_system_setting("orchestrator_llm", "provider")  # Fallback to old key
-            
+                provider = get_system_setting("orchestrator_llm", "provider")
             model = get_system_setting("orchestrator_llm", "llm_model")
             if not model:
-                model = get_system_setting("orchestrator_llm", "model")  # Fallback to old key
-            
-            # If still not found, try config (for backward compatibility)
+                model = get_system_setting("orchestrator_llm", "model")
             if not provider:
-                from config import config
                 provider = config.LLM_PROVIDER
             if not model:
-                from config import config
                 model = config.LLM_MODEL
-            
-            # If provider/model not found, fall back to DEFAULT_LLM_CONFIG
             if not provider or not model:
-                self.logger.warning("LLM provider/model not found in system settings, falling back to DEFAULT_LLM_CONFIG")
-                return DEFAULT_LLM_CONFIG.copy()
-            
-            # If no model in settings, use provider-specific defaults
-            if not model:
-                provider_defaults = {
-                    "openai": "gpt-4o",  # Modern model with large context
-                    "anthropic": "claude-3-5-sonnet-20241022",
-                    "google": "gemini-pro",
-                    "azure": "gpt-4o",
-                    "huggingface": "mistralai/Mistral-7B-Instruct-v0.2"
+                self.logger.warning("LLM provider/model not in system settings, using config defaults")
+                return {
+                    "provider": config.LLM_PROVIDER,
+                    "model": config.LLM_MODEL,
+                    "temperature": 0.7,
+                    "max_tokens": 2000,
+                    "context_window": 8192,
                 }
-                model = provider_defaults.get(provider, config.LLM_MODEL)
-            
-            # Get context window from LLM models registry
+
+            # Lookup context window from LLM models registry
+            context_window = 8192
+            max_tokens = 2000
             try:
                 from core.models import LLMModel
                 llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
                 if llm_model:
                     context_window = llm_model.context_window
                     max_tokens = llm_model.max_output_tokens
-                else:
-                    # Fallback to reasonable defaults for common models
-                    model_contexts = {
-                        "gpt-4o": 128000,
-                        "gpt-4-turbo": 128000,
-                        "gpt-4": 8192,
-                        "claude-3-5-sonnet-20241022": 200000,
-                        "claude-3-opus": 200000,
-                        "gemini-pro": 32768
-                    }
-                    context_window = model_contexts.get(model, 8192)
-                    max_tokens = 4000 if context_window > 100000 else 2000
             except Exception as e:
                 self.logger.warning(f"Could not get context window from registry: {e}")
-                context_window = 8192
-                max_tokens = 2000
-            
-            self.logger.info(f"📋 Using model from settings: {model} (context: {context_window})")
+
+            self.logger.info(f"Using model from settings: {model} (context: {context_window})")
             return {
                 "provider": provider,
                 "model": model,
                 "temperature": 0.7,
                 "max_tokens": max_tokens,
-                "context_window": context_window
+                "context_window": context_window,
             }
         except Exception as e:
-            self.logger.warning(f"Could not get LLM config from settings: {e}, using DEFAULT_LLM_CONFIG")
-            return DEFAULT_LLM_CONFIG.copy()
-    
-    def _build_tools_prompt(self, required_tools: List[str]) -> str:
-        """
-        PRD-17: Build dynamic tools prompt based on required tool categories.
-        
-        Args:
-            required_tools: List of tool categories (e.g., ['research', 'file_ops', 'shell'])
-            
-        Returns:
-            Formatted prompt string with available tools
-        """
-        tools_sections = []
-        
-        # Research tools (search_knowledge, semantic_search, search_codebase)
-        if "research" in required_tools:
-            tools_sections.append("""
-## 🔍 RESEARCH TOOLS
+            self.logger.warning(f"Could not get LLM config from settings: {e}, using config defaults")
+            return {
+                "provider": config.LLM_PROVIDER,
+                "model": config.LLM_MODEL,
+                "temperature": 0.7,
+                "max_tokens": 2000,
+                "context_window": 8192,
+            }
 
-Available when you need to find information:
-1. **search_knowledge** - Search documentation and knowledge base
-   {"action": "search_knowledge", "params": {"query": "your search query", "limit": 5}}
-
-2. **semantic_search** - Find semantically similar content
-   {"action": "semantic_search", "params": {"query": "concept to find", "limit": 5}}
-
-3. **search_codebase** - Search code implementations  
-   {"action": "search_codebase", "params": {"query": "function or class name"}}
-
-Use these tools if you need to understand something before acting.""")
-        
-        # File operation tools (read_file, write_file, list_directory, create_directory)
-        if "file_ops" in required_tools:
-            tools_sections.append("""
-## 📁 FILE OPERATION TOOLS
-
-Available File Tools:
-1. **read_file** - Read file contents
-   {"action": "read_file", "params": {"path": "path/to/file.py"}}
-
-2. **write_file** - Create or update files
-   {"action": "write_file", "params": {"path": "path/to/file.py", "content": "file contents here"}}
-
-3. **list_directory** - List directory contents
-   {"action": "list_directory", "params": {"path": "path/to/directory"}}
-
-4. **create_directory** - Create a new directory
-   {"action": "create_directory", "params": {"path": "path/to/new_dir"}}""")
-        
-        # Shell command tools (execute_command)
-        if "shell" in required_tools:
-            tools_sections.append("""
-## 💻 SHELL COMMAND TOOLS
-
-Available Shell Tools:
-1. **execute_command** - Run shell commands (use with caution!)
-   {"action": "execute_command", "params": {"command": "ls -la", "timeout": 30}}
-
-⚠️  Use shell tools carefully - always validate commands before execution""")
-        
-        # Build final prompt
-        if not tools_sections:
-            return ""  # No tools needed
-        
-        final_prompt = "\n".join(tools_sections)
-        final_prompt += """
-
-**EXECUTION RULES**:
-- You have tools available - use them when needed
-- For simple operations (create file, run command), just execute directly
-- For complex tasks requiring understanding, search first then act
-- Be efficient - don't over-research simple tasks
-"""
-        return final_prompt
-    
-    async def create_agent(
-        self,
-        metadata: Union[AgentMetadata, Dict[str, Any]],
-        auto_verify: bool = True
-    ) -> AgentRuntime:
-        """
-        Create an agent from user-defined metadata.
-        
-        Args:
-            metadata: AgentMetadata or dict with agent configuration
-            auto_verify: Verify LLM connection immediately
-            
-        Returns:
-            AgentRuntime with active LLM connection
-        """
-        start_time = time.time()
-        
-        # Convert dict to AgentMetadata if needed
-        if isinstance(metadata, dict):
-            # PRD-15: Handle model_config from dict
-            model_config = None
-            if "model_config" in metadata:
-                model_config = ModelConfiguration.from_dict(metadata["model_config"])
-            
-            metadata = AgentMetadata(
-                name=metadata.get("name", "Unnamed Agent"),
-                agent_type=metadata.get("type", "generic"),
-                description=metadata.get("description"),
-                skills=metadata.get("skills", []),
-                model_config=model_config,
-                # Deprecated fields for backward compatibility
-                preferred_model=metadata.get("preferred_model"),
-                temperature=metadata.get("temperature"),
-                max_tokens=metadata.get("max_tokens"),
-                context_window=metadata.get("context_window"),
-                custom_metadata=metadata.get("metadata", {})
-            )
-        
-        # PRD-15: Get model configuration
-        model_config = metadata.get_model_config()
-        
-        # Create database record
-        db_agent = Agent(
-            name=metadata.name,
-            description=metadata.description or f"User-defined {metadata.agent_type} agent",
-            agent_type=metadata.agent_type,  # User-defined type
-            status=AgentLifecycle.INITIALIZING.value,
-            configuration={
-                "skills": metadata.skills,
-                "llm_config": metadata.get_llm_config(),  # Backward compatibility
-                "custom_metadata": metadata.custom_metadata
-            },
-            model_config=model_config.to_dict(),  # PRD-15: Store model config
-            priority_level=PriorityLevel.MEDIUM.value,
-            max_concurrent_tasks=5,
-            auto_start=False,
-            created_by="agent_factory"
-        )
-        
-        self.db_session.add(db_agent)
-        self.db_session.commit()
-        
-        # PRD-15: Initialize LLM connection with model configuration
-        try:
-            llm_manager, resolved = await self._create_llm_manager(model_config, db_agent.name, workspace_id=db_agent.workspace_id)
-
-            # Verify connection if requested
-            if auto_verify:
-                verification_result = await self._verify_llm_connection(llm_manager)
-                if not verification_result["success"]:
-                    # PRD-15: Try fallback model if configured
-                    if model_config.fallback_model_id:
-                        self.logger.warning(
-                            f"Primary model '{model_config.model_id}' failed, "
-                            f"trying fallback '{model_config.fallback_model_id}'"
-                        )
-                        fallback_config = ModelConfiguration(
-                            provider=model_config.provider,
-                            model_id=model_config.fallback_model_id,
-                            temperature=model_config.temperature,
-                            max_tokens=model_config.max_tokens
-                        )
-                        llm_manager, resolved = await self._create_llm_manager(fallback_config, db_agent.name, workspace_id=db_agent.workspace_id)
-                        verification_result = await self._verify_llm_connection(llm_manager)
-                        
-                        if verification_result["success"]:
-                            # Update db_agent with fallback model
-                            db_agent.model_config = fallback_config.to_dict()
-                            self.db_session.commit()
-                            self.logger.info(f"Fallback model '{model_config.fallback_model_id}' succeeded")
-                    
-                    if not verification_result["success"]:
-                        self.db_session.delete(db_agent)
-                        self.db_session.commit()
-                        raise Exception(f"LLM verification failed: {verification_result['error']}")
-                
-                self.logger.info(
-                    f"✓ Agent '{metadata.name}' LLM verified: "
-                    f"model={model_config.model_id}, provider={model_config.provider}, "
-                    f"response_time={verification_result['response_time']:.2f}s"
-                )
-            
-            # Phase 3: Load agent's tools from database
-            agent_tools = await self._load_agent_tools(db_agent.id)
-            
-            # Create runtime agent
-            agent_runtime = AgentRuntime(
-                agent_id=db_agent.id,
-                metadata=metadata,
-                llm_manager=llm_manager,
-                lifecycle_state=AgentLifecycle.ACTIVE,
-                created_at=datetime.now(),
-                tools=agent_tools,  # Assigned external apps (Composio)
-                is_byok=resolved.is_byok,
-                resolved_provider=resolved.provider,
-                workspace_id=db_agent.workspace_id,
-            )
-            
-            # Update database status
-            db_agent.status = AgentLifecycle.ACTIVE.value
-            self.db_session.commit()
-            
-            # Store in active agents
-            self.active_agents[db_agent.id] = agent_runtime
-            
-            self.logger.info(
-                f"Agent '{metadata.name}' (type: {metadata.agent_type}) created in "
-                f"{time.time() - start_time:.2f}s"
-            )
-            
-            return agent_runtime
-            
-        except Exception as e:
-            self.logger.error(f"Failed to create agent: {str(e)}")
-            if db_agent.id:
-                self.db_session.delete(db_agent)
-                self.db_session.commit()
-            raise
-    
-    async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "", workspace_id=None) -> Tuple[LLMManager, ResolvedKey]:
-        """
-        Create LLM manager from model configuration (PRD-15, PRD-54).
-
-        Supports all providers: openai, anthropic, google, openrouter, grok, huggingface.
-        Resolves API keys from: credential store → BYOK user_api_keys (workspace-scoped) → env vars.
-        """
-        from core.llm import LLMConfig, LLMProvider as LLMProviderEnum
-
-        # Map provider string to enum
-        provider_map = {
-            "openai": LLMProviderEnum.OPENAI,
-            "anthropic": LLMProviderEnum.ANTHROPIC,
-            "google": LLMProviderEnum.GOOGLE,
-            "openrouter": LLMProviderEnum.OPENROUTER,
-            "grok": LLMProviderEnum.GROK,
-            "huggingface": LLMProviderEnum.HUGGINGFACE,
-            "azure": LLMProviderEnum.AZURE,
-            "azure_openai": LLMProviderEnum.AZURE,
-            "aws_bedrock": LLMProviderEnum.AWS_BEDROCK,
-            "bedrock": LLMProviderEnum.AWS_BEDROCK,
+    def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> str:
+        """Auto-detect and correct provider-model mismatches."""
+        DIRECT_PROVIDERS = {
+            "openai", "anthropic", "google", "grok", "azure", "azure_openai",
+            "aws_bedrock", "bedrock", "huggingface", "openrouter",
         }
+        model_lower = model_id.lower()
 
-        # Auto-detect and correct provider-model mismatches
-        effective_provider = self._resolve_provider_for_model(model_config.provider, model_config.model_id)
+        # Unknown provider + slash format = OpenRouter marketplace model
+        if provider_str not in DIRECT_PROVIDERS and "/" in model_id:
+            self.logger.info(f"Provider '{provider_str}' not recognized, routing '{model_id}' through OpenRouter")
+            return "openrouter"
 
-        if effective_provider not in provider_map:
-            raise ValueError(f"Unsupported provider: {model_config.provider}")
+        # Slash-format model IDs are OpenRouter marketplace models
+        if "/" in model_id and provider_str != "openrouter":
+            prefix = model_id.split("/")[0].lower()
+            if prefix == provider_str.lower() or prefix not in DIRECT_PROVIDERS:
+                self.logger.info(
+                    f"Slash-format model '{model_id}' with provider='{provider_str}' "
+                    f"detected as OpenRouter marketplace model. Routing through OpenRouter."
+                )
+                return "openrouter"
 
-        provider = provider_map[effective_provider]
+        # Fix provider-model mismatches
+        inferred = None
+        if model_lower.startswith("gemini"):
+            inferred = "google"
+        elif model_lower.startswith("claude"):
+            inferred = "anthropic"
+        elif model_lower.startswith(("gpt-", "o1", "o3", "o4")):
+            inferred = "openai"
+        elif model_lower.startswith("grok"):
+            inferred = "grok"
 
-        # Resolve API key: BYOK (if enabled) → platform credential → env vars
-        resolved = await self._resolve_api_key(effective_provider, agent_name, workspace_id=workspace_id)
+        if inferred and inferred != provider_str and provider_str in DIRECT_PROVIDERS:
+            self.logger.warning(
+                f"Provider-model mismatch: provider='{provider_str}' but model='{model_id}' "
+                f"suggests '{inferred}'. Auto-correcting."
+            )
+            return inferred
 
-        if not resolved:
-            raise ValueError(f"API key not found for provider: {effective_provider}")
-
-        # Create LLM config
-        llm_config = LLMConfig(
-            provider=provider,
-            model=model_config.model_id,
-            temperature=model_config.temperature,
-            max_tokens=model_config.max_tokens,
-            api_key=api_key,
-        )
-
-        # Bedrock uses IAM auth: api_key=access_key, secret_key=secret_access_key
-        if model_config.provider in ("aws_bedrock", "bedrock"):
-            from config import config
-            llm_config.secret_key = config.AWS_SECRET_ACCESS_KEY
-            llm_config.base_url = config.AWS_REGION or "us-east-1"
-
-        self.logger.info(
-            f"Creating LLM manager for {agent_name or 'agent'}: "
-            f"provider={model_config.provider}, model={model_config.model_id}, source={resolved.source}"
-        )
-
-        manager = LLMManager(
-            config=llm_config,
-            workspace_id=workspace_id,
-            agent_id=None,  # not known at this point
-            is_byok=resolved.is_byok if resolved else False,
-        )
-        return manager, resolved
+        return provider_str
 
     async def _resolve_api_key(self, provider_name: str, agent_name: str = "", workspace_id=None) -> Optional[ResolvedKey]:
         """
-        Resolve API key for a provider (PRD-54 BYOK system):
-
-        New resolution chain:
-        1. If workspace has BYOK enabled for provider AND active key exists → BYOK
-        2. Else → credential store / platform key
-        3. Else → env var fallback
-
-        Returns ResolvedKey with source metadata for usage tracking.
+        Resolve API key: BYOK → credential store → env vars.
         """
-        import os
         from core.credentials.resolver import get_credential_resolver
 
         resolver = get_credential_resolver()
 
-        # 1. Check BYOK preference and try user key first
+        # 1. Check BYOK
         if workspace_id:
             try:
                 from core.models.workspaces import Workspace
@@ -732,9 +331,8 @@ Available Shell Tools:
 
                 workspace = self.db_session.query(Workspace).get(workspace_id)
                 byok_overrides = (workspace.settings or {}).get("byok_overrides", {}) if workspace else {}
-                byok_enabled = byok_overrides.get(provider_name, False)
 
-                if byok_enabled:
+                if byok_overrides.get(provider_name, False):
                     byok_key = (
                         self.db_session.query(UserApiKey)
                         .filter(
@@ -748,21 +346,20 @@ Available Shell Tools:
                     if byok_key:
                         encryption = get_encryption_service()
                         decrypted = encryption.decrypt(byok_key.encrypted_key)
-                        self.logger.info(f"Resolved BYOK API key for provider '{provider_name}' workspace={workspace_id} (key: {byok_key.display_name or byok_key.id})")
+                        self.logger.info(f"Resolved BYOK API key for '{provider_name}' workspace={workspace_id}")
                         return ResolvedKey(api_key=decrypted, source="byok", is_byok=True, provider=provider_name)
                     else:
-                        self.logger.info(f"BYOK enabled but no active key for '{provider_name}' in workspace={workspace_id}, falling through to platform key")
+                        self.logger.info(f"BYOK enabled but no active key for '{provider_name}', falling through")
             except Exception as e:
                 self.logger.error(f"BYOK key lookup failed for {provider_name}: {e}")
 
-        # 2. Try credential store (platform keys)
+        # 2. Credential store (platform keys)
         cred_names = [
             f"development_{provider_name}_api",
             f"development_{provider_name}",
             f"{provider_name}_api",
             provider_name,
         ]
-
         for cred_name in cred_names:
             try:
                 key = resolver.get_credential_field(cred_name, "api_key")
@@ -774,7 +371,7 @@ Available Shell Tools:
             except Exception:
                 continue
 
-        # 3. Fall back to config (centralized env vars)
+        # 3. Config env vars
         from config import config as _cfg
         config_map = {
             "openai": _cfg.OPENAI_API_KEY,
@@ -793,140 +390,217 @@ Available Shell Tools:
             return ResolvedKey(api_key=key, source="env", is_byok=False, provider=provider_name)
 
         return None
-    
+
+    async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "", workspace_id=None) -> Tuple[LLMManager, ResolvedKey]:
+        """Create LLM manager with API key resolution (PRD-15, PRD-54)."""
+        from core.llm import LLMConfig, LLMProvider as LLMProviderEnum
+
+        provider_map = {
+            "openai": LLMProviderEnum.OPENAI,
+            "anthropic": LLMProviderEnum.ANTHROPIC,
+            "google": LLMProviderEnum.GOOGLE,
+            "openrouter": LLMProviderEnum.OPENROUTER,
+            "grok": LLMProviderEnum.GROK,
+            "huggingface": LLMProviderEnum.HUGGINGFACE,
+            "azure": LLMProviderEnum.AZURE,
+            "azure_openai": LLMProviderEnum.AZURE,
+            "aws_bedrock": LLMProviderEnum.AWS_BEDROCK,
+            "bedrock": LLMProviderEnum.AWS_BEDROCK,
+        }
+
+        effective_provider = self._resolve_provider_for_model(model_config.provider, model_config.model_id)
+        if effective_provider not in provider_map:
+            raise ValueError(f"Unsupported provider: {effective_provider}")
+
+        provider = provider_map[effective_provider]
+        resolved = await self._resolve_api_key(effective_provider, agent_name, workspace_id=workspace_id)
+        if not resolved:
+            raise ValueError(f"API key not found for provider: {effective_provider}")
+
+        llm_config = LLMConfig(
+            provider=provider,
+            model=model_config.model_id,
+            temperature=model_config.temperature,
+            max_tokens=model_config.max_tokens,
+            api_key=resolved.api_key,
+        )
+
+        # Bedrock uses IAM auth
+        if effective_provider in ("aws_bedrock", "bedrock"):
+            llm_config.secret_key = config.AWS_SECRET_ACCESS_KEY
+            llm_config.base_url = config.AWS_REGION or "us-east-1"
+
+        self.logger.info(
+            f"Creating LLM manager for {agent_name or 'agent'}: "
+            f"provider={effective_provider}, model={model_config.model_id}, source={resolved.source}"
+        )
+
+        manager = LLMManager(
+            config=llm_config,
+            workspace_id=workspace_id,
+            agent_id=None,
+            is_byok=resolved.is_byok,
+        )
+        return manager, resolved
+
     async def _verify_llm_connection(self, llm_manager: LLMManager) -> Dict[str, Any]:
-        """Verify LLM connection with minimal test"""
+        """Verify LLM connection with minimal test."""
         try:
             start_time = time.time()
-            
-            # Minimal verification - no embedded prompts
-            messages = [
-                {"role": "user", "content": "Respond with 'OK' to confirm connection."}
-            ]
-            
+            messages = [{"role": "user", "content": "Respond with 'OK' to confirm connection."}]
             response = await llm_manager.generate_response(messages)
             response_time = time.time() - start_time
-            
             if response and response.content:
                 return {
                     "success": True,
                     "response_time": response_time,
-                    "tokens_used": response.usage.get("total_tokens", 0) if response.usage else 0
+                    "tokens_used": response.usage.get("total_tokens", 0) if response.usage else 0,
                 }
-            else:
-                return {"success": False, "error": "No response from LLM"}
-                
+            return {"success": False, "error": "No response from LLM"}
         except Exception as e:
             return {"success": False, "error": str(e)}
-    
-    def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> str:
-        """
-        Auto-detect and correct provider-model mismatches.
 
-        Handles:
-        - Unknown providers with slash-format model IDs → OpenRouter
-        - gemini models sent to openai → google
-        - claude models sent to wrong provider → anthropic
-        - gpt/o1/o3/o4 models sent to wrong provider → openai
-        - grok models sent to wrong provider → grok
-        """
-        DIRECT_PROVIDERS = {
-            "openai", "anthropic", "google", "grok", "azure", "azure_openai",
-            "aws_bedrock", "bedrock", "huggingface", "openrouter",
-        }
-        model_lower = model_id.lower()
+    # ==================================================================
+    # Agent Lifecycle
+    # ==================================================================
 
-        # Unknown provider + slash format = OpenRouter marketplace model
-        if provider_str not in DIRECT_PROVIDERS and "/" in model_id:
-            self.logger.info(f"Provider '{provider_str}' not recognized, routing '{model_id}' through OpenRouter")
-            return "openrouter"
+    async def create_agent(
+        self,
+        metadata: Union[AgentMetadata, Dict[str, Any]],
+        auto_verify: bool = True,
+    ) -> AgentRuntime:
+        """Create an agent from user-defined metadata."""
+        start_time = time.time()
 
-        # Slash-format model IDs (e.g. google/gemini-3-pro, meta-llama/llama-4)
-        # are OpenRouter marketplace models — route through OpenRouter even if
-        # the stored provider matches a direct provider name.
-        if "/" in model_id and provider_str != "openrouter":
-            prefix = model_id.split("/")[0].lower()
-            # If the provider name matches the model prefix, it's an OpenRouter
-            # model that was auto-assigned a misleading provider (e.g. provider=google
-            # for model_id=google/gemini-3-pro-image-preview).
-            if prefix == provider_str.lower() or prefix not in DIRECT_PROVIDERS:
-                self.logger.info(
-                    f"Slash-format model '{model_id}' with provider='{provider_str}' "
-                    f"detected as OpenRouter marketplace model. Routing through OpenRouter."
-                )
-                return "openrouter"
-
-        # Fix provider-model mismatches (e.g. gemini model on openai provider)
-        inferred = None
-        if model_lower.startswith("gemini"):
-            inferred = "google"
-        elif model_lower.startswith("claude"):
-            inferred = "anthropic"
-        elif model_lower.startswith(("gpt-", "o1", "o3", "o4")):
-            inferred = "openai"
-        elif model_lower.startswith("grok"):
-            inferred = "grok"
-
-        if inferred and inferred != provider_str and provider_str in DIRECT_PROVIDERS:
-            self.logger.warning(
-                f"Provider-model mismatch: provider='{provider_str}' but model='{model_id}' "
-                f"suggests '{inferred}'. Auto-correcting provider to '{inferred}'."
+        if isinstance(metadata, dict):
+            model_config = None
+            if "model_config" in metadata:
+                model_config = ModelConfiguration.from_dict(metadata["model_config"])
+            metadata = AgentMetadata(
+                name=metadata.get("name", "Unnamed Agent"),
+                agent_type=metadata.get("type", "generic"),
+                description=metadata.get("description"),
+                skills=metadata.get("skills", []),
+                model_config=model_config,
+                preferred_model=metadata.get("preferred_model"),
+                temperature=metadata.get("temperature"),
+                max_tokens=metadata.get("max_tokens"),
+                context_window=metadata.get("context_window"),
+                custom_metadata=metadata.get("metadata", {}),
             )
-            return inferred
 
-        return provider_str
+        model_config = metadata.get_model_config()
 
-    async def activate_agent(self, agent_id: int, workspace_dir: str = "/tmp/automatos_workspace", use_system_llm: bool = False) -> Optional[AgentRuntime]:
-        """
-        Load an agent from database and activate it in runtime.
+        db_agent = Agent(
+            name=metadata.name,
+            description=metadata.description or f"User-defined {metadata.agent_type} agent",
+            agent_type=metadata.agent_type,
+            status=AgentLifecycle.INITIALIZING.value,
+            configuration={
+                "skills": metadata.skills,
+                "llm_config": metadata.get_llm_config(),
+                "custom_metadata": metadata.custom_metadata,
+            },
+            model_config=model_config.to_dict(),
+            priority_level=PriorityLevel.MEDIUM.value,
+            max_concurrent_tasks=5,
+            auto_start=False,
+            created_by="agent_factory",
+        )
 
-        Args:
-            agent_id: ID of agent to activate
-            workspace_dir: Workspace directory for file operations
-            use_system_llm: If True, ignore agent's model_config and use
-                            orchestrator system settings (used by Auto mode)
+        self.db_session.add(db_agent)
+        self.db_session.commit()
 
-        Returns:
-            AgentRuntime if successful, None if agent not found or activation failed
-        """
         try:
-            # Check if already active — return cached runtime (prompt is pre-built)
-            # PRD-71: Callers that need a fresh prompt after skill/plugin changes
-            # should call deactivate_agent() first, or use force_refresh.
+            llm_manager, resolved = await self._create_llm_manager(model_config, db_agent.name, workspace_id=db_agent.workspace_id)
+
+            if auto_verify:
+                verification_result = await self._verify_llm_connection(llm_manager)
+                if not verification_result["success"] and model_config.fallback_model_id:
+                    self.logger.warning(
+                        f"Primary model '{model_config.model_id}' failed, trying fallback '{model_config.fallback_model_id}'"
+                    )
+                    fallback_config = ModelConfiguration(
+                        provider=model_config.provider,
+                        model_id=model_config.fallback_model_id,
+                        temperature=model_config.temperature,
+                        max_tokens=model_config.max_tokens,
+                    )
+                    llm_manager, resolved = await self._create_llm_manager(fallback_config, db_agent.name, workspace_id=db_agent.workspace_id)
+                    verification_result = await self._verify_llm_connection(llm_manager)
+                    if verification_result["success"]:
+                        db_agent.model_config = fallback_config.to_dict()
+                        self.db_session.commit()
+
+                if not verification_result["success"]:
+                    self.db_session.delete(db_agent)
+                    self.db_session.commit()
+                    raise Exception(f"LLM verification failed: {verification_result['error']}")
+
+            agent_tools = await self._load_agent_tools(db_agent.id)
+
+            agent_runtime = AgentRuntime(
+                agent_id=db_agent.id,
+                metadata=metadata,
+                llm_manager=llm_manager,
+                lifecycle_state=AgentLifecycle.ACTIVE,
+                created_at=datetime.now(),
+                tools=agent_tools,
+                is_byok=resolved.is_byok,
+                resolved_provider=resolved.provider,
+                workspace_id=db_agent.workspace_id,
+            )
+
+            db_agent.status = AgentLifecycle.ACTIVE.value
+            self.db_session.commit()
+            self.active_agents[db_agent.id] = agent_runtime
+
+            self.logger.info(
+                f"Agent '{metadata.name}' (type: {metadata.agent_type}) created in {time.time() - start_time:.2f}s"
+            )
+            return agent_runtime
+
+        except Exception as e:
+            self.logger.error(f"Failed to create agent: {e}")
+            if db_agent.id:
+                self.db_session.delete(db_agent)
+                self.db_session.commit()
+            raise
+
+    async def activate_agent(
+        self,
+        agent_id: int,
+        workspace_dir: str = "/tmp/automatos_workspace",
+        use_system_llm: bool = False,
+    ) -> Optional[AgentRuntime]:
+        """Load an agent from database and activate it in runtime."""
+        try:
             if agent_id in self.active_agents:
                 self.logger.info(f"Agent {agent_id} already active in runtime")
                 return self.active_agents[agent_id]
 
-            # Load from database
             db_agent = self.db_session.query(Agent).filter(Agent.id == agent_id).first()
             if not db_agent:
                 self.logger.error(f"Agent {agent_id} not found in database")
                 return None
-            
-            # Get LLM config - PRIORITIZE agent's own model_config, fall back to system settings
-            # PRD-54: Agents can now be assigned specific models (including OpenRouter/BYOK)
+
+            # Resolve LLM config: agent's own model_config → system settings
             agent_model_config = db_agent.model_config or {}
             agent_config = db_agent.configuration or {}
             agent_llm_config = agent_config.get("llm_config") or {}
 
-            # Check if agent has a specific model configured (PRD-15/54 model_config column)
-            agent_has_model = (
-                agent_model_config.get("model_id")
-                and agent_model_config.get("provider")
-            )
+            agent_has_model = agent_model_config.get("model_id") and agent_model_config.get("provider")
 
             if agent_has_model and not use_system_llm:
-                # Use agent's own model config
                 llm_config_dict = {
                     "provider": agent_model_config["provider"],
                     "model": agent_model_config["model_id"],
                     "temperature": agent_model_config.get("temperature", 0.7),
                     "max_tokens": agent_model_config.get("max_tokens", 2000),
                 }
-                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (from agent model_config)")
+                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (agent model_config)")
             else:
-                # Fall back to system settings (orchestrator LLM config)
-                reason = "use_system_llm=True (Auto mode)" if use_system_llm else "no agent model_config"
+                reason = "use_system_llm=True" if use_system_llm else "no agent model_config"
                 system_llm_config = self._get_default_llm_config_from_settings()
                 llm_config_dict = {
                     "provider": system_llm_config.get("provider"),
@@ -934,28 +608,21 @@ Available Shell Tools:
                     "temperature": agent_llm_config.get("temperature", system_llm_config.get("temperature", 0.7)),
                     "max_tokens": agent_llm_config.get("max_tokens", system_llm_config.get("max_tokens", 2000)),
                 }
-                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (from system settings — {reason})")
-            
-            # Create LLM manager with API key resolution (PRD-54)
+                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})")
+
             provider_str = llm_config_dict.get("provider", "openai")
             model_id_str = llm_config_dict.get("model", config.LLM_MODEL)
-
-            # Auto-detect provider from model name to fix misconfigurations
             provider_str = self._resolve_provider_for_model(provider_str, model_id_str)
 
             provider = LLMProvider(provider_str)
-
-            # Resolve API key: BYOK (if enabled) → platform credential → env vars
             resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=db_agent.workspace_id)
 
             # Fallback: if direct provider has no credential, try OpenRouter
             if (not resolved or not resolved.api_key) and provider_str != "openrouter":
                 self.logger.warning(
-                    f"No credential for provider '{provider_str}' — "
-                    f"falling back to OpenRouter for model '{model_id_str}'"
+                    f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
                 )
                 provider_str = "openrouter"
-                # OpenRouter expects slash-format model IDs (e.g. google/gemini-2.0-flash)
                 if "/" not in model_id_str:
                     original_provider = llm_config_dict.get("provider", "").lower()
                     model_id_str = f"{original_provider}/{model_id_str}"
@@ -976,25 +643,22 @@ Available Shell Tools:
                 is_byok=resolved.is_byok if resolved else False,
             )
 
-            # Create metadata from database agent
             metadata = AgentMetadata(
                 name=db_agent.name,
                 agent_type=db_agent.agent_type,
                 description=db_agent.description,
                 skills=agent_config.get("skills", []),
-                custom_metadata=agent_config.get("custom_metadata", {})
+                custom_metadata=agent_config.get("custom_metadata", {}),
             )
 
-            # Load agent's tools
             agent_tools = await self._load_agent_tools(agent_id)
 
-            # PRD-71: Build system prompt at activation time (single injection point)
+            # Build system prompt at activation time (single injection point)
             system_prompt, skill_tool_schemas = self._build_agent_system_prompt(
                 agent=db_agent,
                 db=self.db_session,
             )
 
-            # Create runtime
             agent_runtime = AgentRuntime(
                 agent_id=agent_id,
                 metadata=metadata,
@@ -1002,7 +666,7 @@ Available Shell Tools:
                 lifecycle_state=AgentLifecycle.ACTIVE,
                 created_at=datetime.now(),
                 tools=agent_tools,
-                tool_executor=get_unified_tool_executor(self.db_session, workspace_dir or "/tmp/automatos_workspace"),  # PRD-17: Initialize once, reuse
+                tool_executor=get_unified_tool_executor(self.db_session, workspace_dir or "/tmp/automatos_workspace"),
                 is_byok=resolved.is_byok if resolved else False,
                 resolved_provider=resolved.provider if resolved else provider_str,
                 workspace_id=db_agent.workspace_id,
@@ -1010,30 +674,19 @@ Available Shell Tools:
                 skill_tool_schemas=skill_tool_schemas,
             )
 
-            # Add to active agents
             self.active_agents[agent_id] = agent_runtime
-
-            # Update database status
             db_agent.status = AgentLifecycle.ACTIVE.value
             self.db_session.commit()
 
-            self.logger.info(f"✅ Activated agent {agent_id} ({db_agent.name}) with {llm_config_dict.get('model')}")
-
+            self.logger.info(f"Activated agent {agent_id} ({db_agent.name}) with {llm_config_dict.get('model')}")
             return agent_runtime
-            
+
         except Exception as e:
-            self.logger.error(f"Failed to activate agent {agent_id}: {str(e)}")
+            self.logger.error(f"Failed to activate agent {agent_id}: {e}")
             return None
 
     def refresh_agent_prompt(self, agent_id: int) -> bool:
-        """
-        PRD-71: Rebuild the system prompt for an already-active agent.
-
-        Call this after changing an agent's skills or plugins to ensure the
-        cached AgentRuntime has up-to-date prompt content.
-
-        Returns True if the prompt was refreshed, False if agent not active.
-        """
+        """Rebuild the system prompt for an already-active agent."""
         runtime = self.active_agents.get(agent_id)
         if not runtime:
             return False
@@ -1051,6 +704,13 @@ Available Shell Tools:
         self.logger.info(f"Refreshed system prompt for agent {agent_id}")
         return True
 
+    # ==================================================================
+    # execute_with_prompt — CLEAN REWRITE
+    # ==================================================================
+    # ONE tool source: get_tools_for_agent() from tool_router.py
+    # Tool loop with max_tool_iterations (default 10)
+    # No hardcoded schemas, no legacy JSON actions, no mid-execution discovery
+
     async def execute_with_prompt(
         self,
         agent: Union[int, AgentRuntime],
@@ -1059,493 +719,200 @@ Available Shell Tools:
         context: Optional[Dict[str, Any]] = None,
         use_memory: bool = True,
         max_retries: int = 2,
+        max_tool_iterations: int = 10,
+        composio_action_names: Optional[set] = None,
+        # Legacy params — accepted but ignored (callers may still pass them)
         enable_actions: bool = True,
         action_executor: Optional[Any] = None,
         required_tools: Optional[List[str]] = None,
-        workspace_dir: Optional[str] = None,  # Unique workspace per execution
-        composio_action_names: Optional[set] = None,  # Pre-resolved action names (recipe semantic search)
+        workspace_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a task with orchestrator-provided prompt.
 
-        The orchestrator provides the fully engineered prompt using Context Engineering.
-
-        Args:
-            agent: Agent ID or runtime
-            prompt: User prompt from orchestrator (may be atomic, molecular, or cellular)
-            system_prompt: System prompt from orchestrator (with context, examples, etc.)
-            context: Additional structured context
-            use_memory: Include agent's short-term memory
-            max_retries: Number of retries on failure
-            workspace_dir: Workspace directory for file operations
-            composio_action_names: Pre-resolved Composio action names from semantic search.
-                When provided, these constrain the composio_execute action enum instead of
-                using the hint service.  Used by recipes for single-shot reliability.
-
-        Returns:
-            Execution result with LLM response
+        Tools are determined by agent assignments via get_tools_for_agent() —
+        the single source of truth. No required_tools parameter needed.
         """
         start_time = time.time()
-        
-        # Get agent runtime - auto-activate if needed
+
+        # --- Resolve agent runtime ---
         if isinstance(agent, int):
             agent_runtime = self.active_agents.get(agent)
             if not agent_runtime:
-                # Agent not in runtime - try to activate it
-                self.logger.info(f"Agent {agent} not in runtime, attempting to activate...")
+                self.logger.info(f"Agent {agent} not in runtime, activating...")
                 agent_runtime = await self.activate_agent(agent, workspace_dir=workspace_dir or "/tmp/automatos_workspace")
                 if not agent_runtime:
-                    return {
-                        "status": "error",
-                        "error": f"Agent {agent} could not be activated"
-                    }
+                    return {"status": "error", "error": f"Agent {agent} could not be activated"}
         else:
             agent_runtime = agent
-        
-        # Log agent execution start prominently WITH MODEL INFORMATION
-        agent_name = agent_runtime.metadata.name if hasattr(agent_runtime, 'metadata') else "Unknown"
-        agent_id = agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else "Unknown"
-        agent_type = agent_runtime.metadata.agent_type if hasattr(agent_runtime, 'metadata') else "Unknown"
-        
-        # Get model information
-        model_name = "Unknown"
-        if hasattr(agent_runtime, 'llm_client') and agent_runtime.llm_client:
-            model_name = getattr(agent_runtime.llm_client, 'model', 'Unknown')
-        elif hasattr(agent_runtime, 'metadata') and hasattr(agent_runtime.metadata, 'llm_config'):
-            llm_config = agent_runtime.metadata.llm_config
-            if llm_config:
-                model_name = llm_config.get('model', 'Unknown')
-        
+
+        agent_name = agent_runtime.metadata.name
+        agent_id = agent_runtime.agent_id
+
         self.logger.info("=" * 80)
-        self.logger.info(f"🤖 EXECUTING AGENT: {agent_name} (ID: {agent_id}, Type: {agent_type})")
-        self.logger.info(f"📋 MODEL: {model_name}")
+        self.logger.info(f"EXECUTING AGENT: {agent_name} (ID: {agent_id}, Type: {agent_runtime.metadata.agent_type})")
         self.logger.info("=" * 80)
-        
-        # Update state
+
         agent_runtime.lifecycle_state = AgentLifecycle.BUSY
-        
+
         try:
-            # Build messages - orchestrator provides the engineered prompts
+            # --- Build messages ---
             messages = []
-            
-            # System prompt - either from orchestrator or built with skills
-            # PRD-22: Build system prompt with skills AND extract skill tools
+
+            # System prompt: explicit > cached > build from scratch
             skill_tool_schemas_from_prompt = []
-            
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
-            elif getattr(agent_runtime, 'system_prompt', None):
-                # PRD-71: Use pre-built prompt from AgentRuntime (single injection point)
+            elif getattr(agent_runtime, "system_prompt", None):
                 messages.append({"role": "system", "content": agent_runtime.system_prompt})
-                skill_tool_schemas_from_prompt = getattr(agent_runtime, 'skill_tool_schemas', [])
+                skill_tool_schemas_from_prompt = getattr(agent_runtime, "skill_tool_schemas", [])
             else:
-                # Fallback: build from scratch (backwards compat)
                 db_agent = self.db_session.query(Agent).filter_by(id=agent_runtime.agent_id).first()
                 if db_agent:
-                    built_system_prompt, skill_tool_schemas_from_prompt = self._build_agent_system_prompt(
+                    built_prompt, skill_tool_schemas_from_prompt = self._build_agent_system_prompt(
                         agent=db_agent,
                         task_context=prompt,
                         db=self.db_session,
-                        required_tools=required_tools,
                     )
-                    messages.append({"role": "system", "content": built_system_prompt})
-                    self.logger.info(f"Built system prompt for agent {agent_runtime.agent_id}")
-            
-            # Add short-term memory if enabled
+                    messages.append({"role": "system", "content": built_prompt})
+
+            # Short-term memory
             if use_memory and agent_runtime.memory:
-                # Only include recent relevant memory (cells concept)
-                recent_memory = agent_runtime.memory[-3:]  # Last 3 interactions
-                for mem in recent_memory:
+                for mem in agent_runtime.memory[-3:]:
                     if "user_prompt" in mem:
                         messages.append({"role": "user", "content": mem["user_prompt"]})
                     if "assistant_response" in mem:
                         messages.append({"role": "assistant", "content": mem["assistant_response"]})
-            
-            # Inject recipe step context if this is a multi-step recipe execution.
-            # This gives the agent explicit awareness of what previous steps produced,
-            # so references like "results" or "output" in the prompt are unambiguous.
-            # Supports both new keyed step_outputs dict and legacy step_results list.
+
+            # Recipe step context injection
             _has_step_outputs = context and context.get("step_outputs")
             _has_step_results = context and context.get("step_results")
             if _has_step_outputs or _has_step_results:
                 recipe_step = context.get("step", "?")
                 total_steps = context.get("total_steps", "?")
-
                 if _has_step_outputs:
-                    # New path: keyed dict {"email_summary": {text, tool_calls, ...}}
-                    step_outputs = context["step_outputs"]
-                    completed_count = len(step_outputs)
+                    completed_count = len(context["step_outputs"])
                 else:
-                    # Legacy path: list of step result dicts
-                    prev_results = context["step_results"]
-                    completed_count = len([sr for sr in prev_results if sr.get("status") == "completed"])
+                    completed_count = len([sr for sr in context["step_results"] if sr.get("status") == "completed"])
 
                 if completed_count > 0:
-                    recipe_ctx_lines = [
-                        f"You are executing step {recipe_step} of {total_steps} in a recipe.",
-                        "Previous steps have already completed. Their outputs are provided",
-                        "in a separate system context message. When the user's task mentions",
-                        "'results', 'output', 'data', or 'findings', it refers to that",
-                        "previous step content. Use it directly — do not invent or fabricate data.",
-                    ]
-                    messages.append({"role": "system", "content": "\n".join(recipe_ctx_lines)})
-                    self.logger.info(
-                        f"📋 Recipe context: step {recipe_step}/{total_steps}, "
-                        f"{completed_count} prior step(s) injected"
+                    recipe_ctx = (
+                        f"You are executing step {recipe_step} of {total_steps} in a recipe.\n"
+                        "Previous steps have already completed. Their outputs are provided "
+                        "in a separate system context message. When the user's task mentions "
+                        "'results', 'output', 'data', or 'findings', it refers to that "
+                        "previous step content. Use it directly — do not invent or fabricate data."
                     )
+                    messages.append({"role": "system", "content": recipe_ctx})
 
-            # Preserve the original user prompt before any augmentation.
-            # This is used for Composio hint generation so action-instructions
-            # injected below don't skew intent matching.
+            # Preserve original prompt for Composio hint generation
             original_user_prompt = prompt
 
-            # Check if actions are needed and add capabilities
-            action_executor = None
-            if enable_actions and self._requires_actions(prompt):
-                action_executor = get_action_executor()
-                action_prompt = """\n\nYou have access to perform real actions:
-- read_file(path) - Read file contents
-- write_file(path, content) - Create/update files
-- execute_command(cmd) - Run shell commands
-- list_directory(path) - List directory contents
-
-To use actions, respond with JSON blocks like:
-{"action": "write_file", "params": {"path": "test.py", "content": "print('hello')"}}
-\nYou can include multiple action blocks in your response."""
-                prompt = prompt + action_prompt
-            
-            # DB-driven tool resolution — ALL agents get core + platform tools
-            # from the registry.  Composio SDK section below ADDS external
-            # tools on top for agents with Composio assignments.
+            # --- Build tools: ONE SOURCE via get_tools_for_agent() ---
             from modules.tools.tool_router import get_tools_for_agent
+
             tool_schemas = get_tools_for_agent(
                 agent_id=agent_runtime.agent_id,
                 db_session=self.db_session,
+                workspace_id=agent_runtime.workspace_id,
             )
-            # Remove composio_execute meta-tool — the SDK per-action section
-            # below provides properly typed per-action schemas instead.
-            tool_schemas = [
-                t for t in tool_schemas
-                if t.get("function", {}).get("name") != "composio_execute"
-            ]
 
-            # Check DB for Composio app assignments (used by SDK section below)
-            from core.models.composio_cache import AgentAppAssignment
-            composio_assignments = (
-                self.db_session.query(AgentAppAssignment)
-                .filter(
-                    AgentAppAssignment.agent_id == agent_runtime.agent_id,
-                    AgentAppAssignment.is_active == True,  # noqa: E712
-                    AgentAppAssignment.app_type == "EXTERNAL",
-                )
-                .all()
-            )
-            
-            # PRD-22: Add skill-based tools extracted during prompt building
+            # Add skill-based tools from prompt building
             if skill_tool_schemas_from_prompt:
                 tool_schemas.extend(skill_tool_schemas_from_prompt)
-                tool_names = [t['function']['name'] for t in skill_tool_schemas_from_prompt]
-                self.logger.info(f"🦸 PRD-22: Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
-            
-            # Composio tool injection — fetch per-action schemas from SDK.
-            # Each Composio action becomes its own LLM tool with typed params
-            # (e.g. COMPOSIO_SEARCH_WEB(query: str) instead of composio_execute(action, params)).
-            _composio_workspace_id = None
-            if composio_assignments:
-                db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
-                _composio_workspace_id = getattr(db_agent, 'workspace_id', None) if db_agent else None
+                tool_names = [t["function"]["name"] for t in skill_tool_schemas_from_prompt]
+                self.logger.info(f"Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
 
-                app_names = [a.app_name for a in composio_assignments if a.app_name]
-                entity_id = str(_composio_workspace_id) if _composio_workspace_id else None
+            # Composio hint injection (enriches composio_execute with action enum + hints)
+            workspace_id = agent_runtime.workspace_id
+            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
+            if composio_apps:
+                if composio_action_names:
+                    # Recipe path: pre-resolved action names
+                    self._inject_composio_recipe_hints(
+                        tool_schemas, messages, composio_apps, composio_action_names,
+                    )
+                else:
+                    # Default path: hint service
+                    self._inject_composio_hints(
+                        tool_schemas, messages, agent_runtime, original_user_prompt, workspace_id,
+                    )
 
-                composio_action_map = {}  # action_name -> app_name
-                if entity_id:
-                    try:
-                        from core.composio.client import get_composio_client
-                        _client = get_composio_client()
+            all_tool_names = [t["function"]["name"] for t in tool_schemas]
+            self.logger.info(f"Providing {len(tool_schemas)} tools to agent: {all_tool_names}")
 
-                        if composio_action_names:
-                            # Recipe path: specific actions pre-resolved
-                            sdk_schemas = _client.get_action_schemas_by_name(
-                                action_names=composio_action_names,
-                                entity_id=entity_id,
-                                app_names=app_names,
-                            )
-                        else:
-                            # Default path: get all schemas for assigned apps (SDK returns by importance)
-                            sdk_schemas = _client.get_all_schemas_for_apps(
-                                app_names=app_names,
-                                entity_id=entity_id,
-                            )
-
-                        for entry in sdk_schemas:
-                            schema = entry.get("schema")
-                            action_name = entry.get("action_name", "")
-                            entry_app = entry.get("app_name", "")
-                            if schema and action_name:
-                                tool_schemas.append(schema)
-                                composio_action_map[action_name] = entry_app.upper() if entry_app else ""
-
-                        self.logger.info(
-                            f"🔌 Composio: {len(composio_action_map)} per-action tools from SDK, "
-                            f"apps={app_names} (workspace={_composio_workspace_id})"
-                        )
-                    except Exception as e:
-                        self.logger.error(f"🔌 Composio SDK schema fetch failed, falling back to meta-tool: {e}", exc_info=True)
-
-                # Fallback: if SDK fetch returned nothing, use the legacy composio_execute meta-tool
-                # so the agent still has SOME composio capability.
-                if not composio_action_map:
-                    tool_schemas.append({
-                        "type": "function",
-                        "function": {
-                            "name": "composio_execute",
-                            "description": (
-                                "Execute an external app action via Composio. "
-                                "You MUST provide 'action' (the action name) and 'params' (action parameters)."
-                            ),
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "action": {"type": "string", "description": "Action name (e.g. 'GMAIL_SEND_EMAIL')"},
-                                    "params": {"type": "object", "description": "Action parameters"}
-                                },
-                                "required": ["action", "params"]
-                            }
-                        }
-                    })
-                    self.logger.warning(f"🔌 Composio: fallback to composio_execute meta-tool, apps={app_names}")
-
-                # Tell the executor which tool names are Composio actions (action -> app mapping)
-                if composio_action_map and agent_runtime.tool_executor:
-                    agent_runtime.tool_executor.composio_actions = composio_action_map
-
-            all_tool_names = [t['function']['name'] for t in tool_schemas]
-            self.logger.info(f"📦 Providing {len(tool_schemas)} total tools to agent: {all_tool_names}")
-
-            action_executor = action_executor or get_action_executor()  # Ensure executor exists
-
-            # Add the main prompt from orchestrator
+            # Add user prompt
             messages.append({"role": "user", "content": prompt})
-            
-            # Execute with retries (at least 1 attempt)
+
+            # --- Execute with retries ---
             last_error = None
+            messages_snapshot = list(messages)  # snapshot before retry loop
             for attempt in range(max(1, max_retries)):
                 try:
-                    # REAL LLM API CALL WITH FUNCTION CALLING
+                    messages = list(messages_snapshot)  # reset each attempt
                     response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
                     execution_time = time.time() - start_time
-                    
-                    # PRD-17: Handle function calling responses with multi-turn tool loop
-                    max_tool_turns = 10
-                    tool_turn = 0
-                    tool_executor = agent_runtime.tool_executor  # PRD-17: Reuse executor (no re-init!)
-                    # Mid-execution discovery: max 1 attempt per execute_with_prompt call
-                    _discovery_attempted = False
 
-                    while response and response.tool_calls and tool_turn < max_tool_turns:
-                        tool_turn += 1
-                        self.logger.info(f"🔧 Tool turn {tool_turn}/{max_tool_turns}: Agent called {len(response.tool_calls)} tool(s)")
-                        tool_results = []
+                    # --- Tool loop: iterate until no more tool calls or max iterations ---
+                    tool_iteration = 0
+                    tool_results = []
+                    while response and response.tool_calls and tool_iteration < max_tool_iterations:
+                        tool_iteration += 1
+                        self.logger.info(
+                            f"Tool iteration {tool_iteration}/{max_tool_iterations}: "
+                            f"{len(response.tool_calls)} tool call(s)"
+                        )
 
-                        # Track executed calls in this turn to prevent duplicates
-                        executed_calls_hashes = set()
+                        tool_results = await self._execute_tool_calls(
+                            response.tool_calls,
+                            agent_runtime,
+                            workspace_id,
+                        )
 
-                        for tool_call in response.tool_calls:
-                            func_name = tool_call['function']['name']
-                            func_args_str = tool_call['function']['arguments']
-
-                            try:
-                                # Normalization: Parse JSON then canonicalize
-                                func_args = json.loads(func_args_str)
-                                canonical_args = json.dumps(func_args, sort_keys=True)
-                            except json.JSONDecodeError:
-                                # If invalid JSON, use raw string for hash (will likely fail later but consistent)
-                                canonical_args = func_args_str.strip()
-                                func_args = {}
-
-                            # Create a hash of name + canonical args
-                            call_hash = f"{func_name}:{canonical_args}"
-
-                            if call_hash in executed_calls_hashes:
-                                self.logger.warning(f"⚠️  [DEDUPE] Skipping duplicate tool call in same turn: {func_name}")
-                                tool_results.append({
-                                    "tool_call_id": tool_call['id'],
-                                    "role": "tool",
-                                    "name": func_name,
-                                    "content": json.dumps({"error": "Duplicate tool call skipped (already executed in this turn)"})
-                                })
-                                continue
-
-                            # Filter empty parameters for critical tools if they usually require them
-                            if not func_args and "SLACK" in func_name:
-                                self.logger.warning(f"⚠️  [FILTER] Skipping empty parameters for {func_name}")
-                                tool_results.append({
-                                    "tool_call_id": tool_call['id'],
-                                    "role": "tool",
-                                    "name": func_name,
-                                    "content": json.dumps({"error": "Skipped: Empty parameters provided for tool requiring input."})
-                                })
-                                continue
-
-                            executed_calls_hashes.add(call_hash)
-
-                            self.logger.info(f"  🛠️  [TRACE] Calling {func_name}({func_args})")
-
-                            try:
-                                result = await tool_executor.execute_tool(
-                                    tool_name=func_name,
-                                    parameters=func_args,
-                                    agent_id=agent_runtime.agent_id,
-                                    workspace_id=_composio_workspace_id
-                                )
-                                # Mid-execution discovery: check for capability gap
-                                if (
-                                    isinstance(result, dict)
-                                    and not result.get("success", True)
-                                    and not _discovery_attempted
-                                ):
-                                    tool_schemas, _disc_msg, _discovery_attempted = await self._try_discovery(
-                                        func_name, result.get("error", ""), func_args, tool_schemas,
-                                        agent_runtime, _composio_workspace_id, original_user_prompt,
-                                    )
-                                    if _disc_msg:
-                                        result = {"success": False, "error": _disc_msg, "tool": func_name}
-
-                                tool_results.append({
-                                    "tool_call_id": tool_call['id'],
-                                    "role": "tool",
-                                    "name": func_name,
-                                    "content": json.dumps(result)
-                                })
-                                self.logger.info(f"    ✅ [TRACE] {func_name} completed successfully")
-                            except Exception as e:
-                                self.logger.error(f"    ❌ [TRACE] {func_name} failed: {e}")
-                                error_str = str(e)
-                                # Mid-execution discovery: check exceptions for capability gap
-                                if not _discovery_attempted:
-                                    tool_schemas, _disc_msg, _discovery_attempted = await self._try_discovery(
-                                        func_name, error_str, func_args, tool_schemas,
-                                        agent_runtime, _composio_workspace_id, original_user_prompt,
-                                    )
-                                    if _disc_msg:
-                                        error_str = _disc_msg
-                                tool_results.append({
-                                    "tool_call_id": tool_call['id'],
-                                    "role": "tool",
-                                    "name": func_name,
-                                    "content": json.dumps({"error": error_str})
-                                })
-
-                        # Add assistant's tool call message and tool results to conversation
+                        # Append assistant message + tool results to conversation
                         messages.append({
                             "role": "assistant",
                             "content": response.content or "",
-                            "tool_calls": response.tool_calls
+                            "tool_calls": response.tool_calls,
                         })
                         messages.extend(tool_results)
 
-                        # Call LLM again — it may return more tool_calls or a final answer
-                        self.logger.info(f"  🔄 Calling LLM again with tool results (turn {tool_turn})...")
+                        # Call LLM again with tool results
                         response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
                         execution_time = time.time() - start_time
 
-                    if tool_turn > 0:
-                        if tool_turn >= max_tool_turns and response and response.tool_calls:
-                            self.logger.warning(f"⚠️  Tool loop hit max {max_tool_turns} turns, forcing final answer")
+                    if tool_iteration >= max_tool_iterations:
+                        self.logger.warning(f"Hit max tool iterations ({max_tool_iterations}) for agent {agent_id}")
 
-                        # If LLM returns empty content after all tool turns, synthesize from last results
-                        if not response.content or response.content.strip() == "":
-                            self.logger.debug("  LLM returned empty content after tool use, synthesizing from tool results")
+                    # Synthesize empty response from tool results
+                    if response and (not response.content or not response.content.strip()):
+                        if tool_results:
                             tool_summary = "\n\n".join([
-                                f"**{tr['name']}**: {tr['content'][:500]}..."
+                                f"**{tr['name']}**: {tr['content'][:500]}"
                                 for tr in tool_results
+                                if tr.get("role") == "tool"
                             ])
                             response.content = f"Based on the tool results:\n\n{tool_summary}"
 
-                        self.logger.info(f"  ✅ LLM provided final answer after {tool_turn} tool turn(s)")
-                    
-                    # Process any action requests in the response and iterate if needed (fallback for old JSON format)
-                    action_results = []
-                    if action_executor and response and response.content and '{"action"' in response.content:
-                        self.logger.info(f"🔧 Agent requested tool calls, executing...")
-                        action_results = await self._process_agent_actions(response.content, action_executor, agent_runtime)
-                        
-                        # If tools were executed, feed results back to agent for final answer
-                        if action_results:
-                            self.logger.info(f"  ✅ {len(action_results)} tool(s) executed, feeding results back to agent")
-                            
-                            # Add agent's tool request to messages
-                            messages.append({"role": "assistant", "content": response.content})
-                            
-                            # Create tool results message - agent-friendly format
-                            tool_results_text = "Research Results:\n\n"
-                            for idx, result in enumerate(action_results, 1):
-                                action_name = result.get('action', result.get('tool', 'unknown'))
-                                tool_results_text += f"=== Tool {idx}: {action_name} ===\n"
-                                
-                                if result.get('success', result.get('status') == 'success'):
-                                    # Success case - show actual content
-                                    result_data = result.get('result', result.get('data', []))
-                                    count = result.get('count', 0)
-                                    
-                                    if isinstance(result_data, list) and len(result_data) > 0:
-                                        tool_results_text += f"Found {count} results:\n\n"
-                                        # Show top 3 results with full content
-                                        for i, item in enumerate(result_data[:3], 1):
-                                            if isinstance(item, dict):
-                                                content = item.get('content', str(item))
-                                                relevance = item.get('relevance', item.get('similarity', 0))
-                                                source = item.get('source', 'Unknown')
-                                                tool_results_text += f"{i}. {content}\n"
-                                                tool_results_text += f"   [Relevance: {relevance:.2f}, Source: {source}]\n\n"
-                                            else:
-                                                tool_results_text += f"{i}. {str(item)[:500]}\n\n"
-                                        
-                                        if count > 3:
-                                            tool_results_text += f"(+ {count - 3} more results available)\n\n"
-                                    else:
-                                        tool_results_text += f"Result: {str(result_data)[:800]}\n\n"
-                                else:
-                                    # Error case
-                                    error_msg = result.get('error', result.get('result', 'Unknown error'))
-                                    tool_results_text += f"ERROR: {error_msg}\n"
-                                    tool_results_text += f"Action: Continue with available knowledge.\n\n"
-                            
-                            tool_results_text += "\n📝 INSTRUCTIONS: Use the research results above to provide a detailed, accurate answer to the original task. Cite sources where appropriate."
-                            
-                            messages.append({"role": "user", "content": tool_results_text})
-                            
-                            # Call LLM again with tool results
-                            self.logger.info("  🔄 Calling agent again with tool results for final answer...")
-                            response = await agent_runtime.llm_manager.generate_response(messages)
-                            execution_time = time.time() - start_time
-                            self.logger.info("  ✅ Agent provided final answer after research")
-                    
                     if response and response.content:
-                        # Success! Update metrics
                         tokens_used = response.usage.get("total_tokens", 0) if response.usage else 0
                         agent_runtime.update_metrics(execution_time, tokens_used, True)
-                        
-                        # Store in memory
-                        memory_entry = {
-                            "task": prompt[:200],  # Truncate for storage
-                            "response": response.content[:500],  # Truncate for storage
+
+                        # Store in short-term memory
+                        agent_runtime.memory.append({
+                            "task": prompt[:200],
+                            "response": response.content[:500],
                             "summary": f"Executed: {prompt[:100]}",
                             "timestamp": datetime.now().isoformat(),
                             "tokens": tokens_used,
-                            "execution_time": execution_time
-                        }
-                        agent_runtime.memory.append(memory_entry)
-                        
-                        # Keep memory size manageable
+                            "execution_time": execution_time,
+                        })
                         if len(agent_runtime.memory) > 20:
                             agent_runtime.memory = agent_runtime.memory[-20:]
-                        
-                        # Update lifecycle state
+
                         agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
-                        
-                        # Record in monitoring service
+
+                        # Record monitoring
                         monitoring = get_monitoring_service()
                         monitoring.record_agent_execution(
                             agent_id=agent_runtime.agent_id,
@@ -1553,17 +920,16 @@ To use actions, respond with JSON blocks like:
                             task=prompt[:100],
                             execution_time_ms=execution_time * 1000,
                             tokens_used=tokens_used,
-                            success=True
+                            success=True,
                         )
-                        
-                        # Return successful result
+
                         return {
                             "status": "success",
                             "result": response.content,
                             "agent": {
                                 "id": agent_runtime.agent_id,
                                 "name": agent_runtime.metadata.name,
-                                "type": agent_runtime.metadata.agent_type
+                                "type": agent_runtime.metadata.agent_type,
                             },
                             "execution": {
                                 "time": execution_time,
@@ -1571,296 +937,212 @@ To use actions, respond with JSON blocks like:
                                 "model": response.model,
                                 "provider": response.provider,
                                 "attempt": attempt + 1,
-                                "actions_enabled": enable_actions,
-                                "actions_executed": len(action_results)
+                                "tool_iterations": tool_iteration,
                             },
-                            "action_results": action_results,
                             "metrics": {
                                 "total_executions": agent_runtime.execution_count,
                                 "success_rate": agent_runtime.performance_metrics.get("success_rate", 1.0),
-                                "avg_execution_time": agent_runtime.performance_metrics.get("avg_execution_time", execution_time)
-                            }
+                                "avg_execution_time": agent_runtime.performance_metrics.get("avg_execution_time", execution_time),
+                            },
                         }
                     else:
                         last_error = "Empty response from LLM"
-                        
+
                 except Exception as e:
                     last_error = str(e)
                     self.logger.warning(f"Attempt {attempt + 1} failed: {last_error}")
-                    
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
-            
+                        await asyncio.sleep(2 ** attempt)
+
             # All retries failed
             agent_runtime.update_metrics(time.time() - start_time, 0, False)
             agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
-            
             return {
                 "status": "error",
                 "error": f"Task execution failed after {max_retries} attempts: {last_error}",
                 "agent": {
                     "id": agent_runtime.agent_id,
                     "name": agent_runtime.metadata.name,
-                    "type": agent_runtime.metadata.agent_type
-                }
+                    "type": agent_runtime.metadata.agent_type,
+                },
             }
-            
+
         except Exception as e:
             agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
-            self.logger.error(f"Task execution error: {str(e)}")
-            return {
-                "status": "error",
-                "error": str(e)
-            }
-    
-    def apply_skills(
+            self.logger.error(f"Task execution error: {e}")
+            return {"status": "error", "error": str(e)}
+
+    # ==================================================================
+    # Tool Execution (extracted from execute_with_prompt)
+    # ==================================================================
+
+    async def _execute_tool_calls(
         self,
-        agent: AgentRuntime,
-        new_skills: List[str]
-    ) -> AgentRuntime:
-        """
-        Apply new skills to an agent by enhancing its system prompt.
-        
-        Args:
-            agent: Agent runtime to enhance
-            new_skills: List of skill names to add
-            
-        Returns:
-            Updated agent runtime
-        """
-        skill_enhancements = []
-        
-        for skill in new_skills:
-            if skill in SKILL_PROMPTS and skill not in agent.metadata.skills:
-                skill_enhancements.append(SKILL_PROMPTS[skill])
-                agent.metadata.skills.append(skill)
-                self.logger.info(f"Applied skill '{skill}' to agent '{agent.metadata.name}'")
-        
-        if skill_enhancements:
-            # Append to existing system prompt
-            if "\n\n## Specialized Skills:" not in agent.system_prompt:
-                agent.system_prompt += "\n\n## Specialized Skills:"
-            agent.system_prompt += "".join(skill_enhancements)
-            
-            self.logger.info(
-                f"Enhanced agent '{agent.metadata.name}' with {len(skill_enhancements)} new skills"
-            )
-        
-        return agent
+        tool_calls: List[Dict],
+        agent_runtime: AgentRuntime,
+        workspace_id: Optional[Any],
+    ) -> List[Dict]:
+        """Execute tool calls from LLM response, deduplicating within a turn."""
+        tool_results = []
+        executed_hashes: set = set()
+        tool_executor = agent_runtime.tool_executor
 
-    # ======================================================================
-    # Mid-execution tool discovery helpers
-    # ======================================================================
+        for tool_call in tool_calls:
+            func_name = tool_call["function"]["name"]
+            func_args_str = tool_call["function"]["arguments"]
 
-    # Map failed function names to tool categories for platform tool discovery
-    _TOOL_TO_CATEGORY = {
-        "write_file": "file_ops", "read_file": "file_ops",
-        "list_directory": "file_ops", "create_directory": "file_ops",
-        "execute_command": "shell",
-        "search_knowledge": "research", "semantic_search": "research",
-        "search_codebase": "research",
-        "query_database": "database", "smart_query_database": "database",
-    }
+            try:
+                func_args = json.loads(func_args_str)
+                canonical_args = json.dumps(func_args, sort_keys=True)
+            except json.JSONDecodeError:
+                canonical_args = func_args_str.strip()
+                func_args = {}
 
-    _TRANSIENT_PATTERNS = ("timeout", "rate limit", "connection", "permission denied", "timed out")
+            call_hash = f"{func_name}:{canonical_args}"
 
-    @staticmethod
-    def _get_schema_names(tool_schemas: List[Dict]) -> set:
-        """Extract function names from OpenAI tool schema list."""
-        return {t.get("function", {}).get("name", "") for t in tool_schemas}
+            if call_hash in executed_hashes:
+                self.logger.warning(f"[DEDUPE] Skipping duplicate tool call: {func_name}")
+                tool_results.append({
+                    "tool_call_id": tool_call["id"],
+                    "role": "tool",
+                    "name": func_name,
+                    "content": json.dumps({"error": "Duplicate tool call skipped"}),
+                })
+                continue
 
-    def _classify_tool_failure(self, func_name: str, error_msg: str, tool_schemas: List[Dict]) -> str:
-        """
-        Classify a tool failure as CAPABILITY_GAP or TRANSIENT.
+            # Filter empty params for critical tools
+            if not func_args and "SLACK" in func_name:
+                tool_results.append({
+                    "tool_call_id": tool_call["id"],
+                    "role": "tool",
+                    "name": func_name,
+                    "content": json.dumps({"error": "Empty parameters for tool requiring input"}),
+                })
+                continue
 
-        CAPABILITY_GAP: tool doesn't exist in current schema — discovery can help.
-        TRANSIENT: timeout, rate limit, bad params — retry as-is.
-        """
-        error_lower = (error_msg or "").lower()
+            executed_hashes.add(call_hash)
+            self.logger.info(f"  [TRACE] Calling {func_name}({func_args})")
 
-        if any(p in error_lower for p in self._TRANSIENT_PATTERNS):
-            return "TRANSIENT"
-
-        if "unknown tool" in error_lower:
-            return "CAPABILITY_GAP"
-
-        if func_name not in self._get_schema_names(tool_schemas):
-            return "CAPABILITY_GAP"
-
-        if func_name == "composio_execute" and any(
-            p in error_lower for p in ("not found", "invalid action", "unknown action")
-        ):
-            return "CAPABILITY_GAP"
-
-        return "TRANSIENT"
-
-    async def _try_discovery(
-        self,
-        func_name: str,
-        error_msg: str,
-        func_args: Dict[str, Any],
-        tool_schemas: List[Dict],
-        agent_runtime,
-        workspace_id,
-        prompt: str,
-    ) -> Tuple[List[Dict], str, bool]:
-        """
-        Classify failure and attempt discovery if it's a capability gap.
-
-        Returns (updated_tool_schemas, discovery_message, discovery_attempted).
-        """
-        failure_type = self._classify_tool_failure(func_name, error_msg, tool_schemas)
-        if failure_type != "CAPABILITY_GAP":
-            return tool_schemas, "", False
-
-        self.logger.info(f"    🔍 [DISCOVERY] Capability gap: {func_name}, searching alternatives...")
-        try:
-            if func_name == "composio_execute":
-                schemas, msg = await self._discover_composio_actions(
-                    func_args, tool_schemas, agent_runtime, workspace_id, prompt
+            try:
+                result = await tool_executor.execute_tool(
+                    tool_name=func_name,
+                    parameters=func_args,
+                    agent_id=agent_runtime.agent_id,
+                    workspace_id=workspace_id,
                 )
-            else:
-                schemas, msg = self._discover_platform_tools(func_name, tool_schemas)
-            return schemas, msg, True
-        except Exception as e:
-            self.logger.warning(f"    ⚠️ [DISCOVERY] Failed: {e}", exc_info=True)
-            return tool_schemas, "", True
+                tool_results.append({
+                    "tool_call_id": tool_call["id"],
+                    "role": "tool",
+                    "name": func_name,
+                    "content": json.dumps(result),
+                })
+                self.logger.info(f"    [TRACE] {func_name} completed")
+            except Exception as e:
+                self.logger.error(f"    [TRACE] {func_name} failed: {e}")
+                tool_results.append({
+                    "tool_call_id": tool_call["id"],
+                    "role": "tool",
+                    "name": func_name,
+                    "content": json.dumps({"error": str(e)}),
+                })
 
-    def _discover_platform_tools(
-        self, func_name: str, tool_schemas: List[Dict]
-    ) -> Tuple[List[Dict], str]:
-        """Path A: Discover platform tools by category."""
-        from modules.tools.registry.tool_registry import get_tool_registry
+        return tool_results
 
-        # Resolve category from name or keyword
-        category = self._TOOL_TO_CATEGORY.get(func_name)
-        if not category:
-            name_lower = func_name.lower()
-            if "file" in name_lower:
-                category = "file_ops"
-            elif "search" in name_lower or "knowledge" in name_lower:
-                category = "research"
-            elif "command" in name_lower or "shell" in name_lower or "exec" in name_lower:
-                category = "shell"
-            elif "database" in name_lower or "query" in name_lower or "sql" in name_lower:
-                category = "database"
+    # ==================================================================
+    # Composio Hint Injection
+    # ==================================================================
 
-        if not category:
-            self.logger.info(f"    🔍 [DISCOVERY] No category mapping for '{func_name}'")
-            return tool_schemas, ""
-
-        registry = get_tool_registry()
-        candidates = registry.get_tools_for_categories([category])
-        if not candidates:
-            return tool_schemas, ""
-
-        existing_names = self._get_schema_names(tool_schemas)
-        new_tools = []
-        for spec in candidates:
-            if spec.name not in existing_names and len(new_tools) < 5:
-                new_tools.append({"type": "function", "function": spec.to_openai_format()})
-
-        if not new_tools:
-            return tool_schemas, ""
-
-        tool_schemas = tool_schemas + new_tools
-        new_names = [t["function"]["name"] for t in new_tools]
-        self.logger.info(f"    🔍 [DISCOVERY] Added {len(new_names)} platform tools: {new_names}")
-        msg = f"Tool '{func_name}' not available. Alternatives added: {new_names}. Try again with one of these."
-        return tool_schemas, msg
-
-    async def _discover_composio_actions(
+    def _inject_composio_recipe_hints(
         self,
-        func_args: Dict[str, Any],
         tool_schemas: List[Dict],
-        agent_runtime,
-        workspace_id,
-        prompt: str,
-    ) -> Tuple[List[Dict], str]:
-        """Path B: Discover Composio actions via HintService/ActionCapabilityFilter."""
-        from modules.tools.services.composio_hint_service import ComposioHintService
+        messages: List[Dict],
+        composio_apps: List[Dict],
+        composio_action_names: set,
+    ):
+        """Inject pre-resolved Composio actions (recipe path)."""
+        sorted_actions = sorted(composio_action_names)
 
-        failed_action = func_args.get("action", "")
-        db = getattr(agent_runtime, "db_session", None)
-        if not db:
-            return tool_schemas, ""
-
-        hint_svc = ComposioHintService(db)
-        hint_result = hint_svc.build_hints(
-            agent_id=agent_runtime.agent_id,
-            prompt=prompt,
-            workspace_id=workspace_id,
-            recipe_mode=True,
-        )
-        new_actions = hint_result.matched_actions if hint_result else []
-
-        # Fallback: ActionCapabilityFilter if hint service returned nothing
-        if not new_actions:
-            from modules.tools.services.action_capability_filter import ActionCapabilityFilter
-            allowed_apps = hint_result.allowed_apps if hint_result else []
-            if allowed_apps:
-                acf = ActionCapabilityFilter(db)
-                filter_result = await acf.get_actions_for_intent(prompt, allowed_apps)
-                new_actions = [a.action_id for a in filter_result.actions]
-
-        if not new_actions:
-            return tool_schemas, ""
-
-        # Find the composio_execute schema and mutate its action enum
-        composio_schema = None
-        existing_enum: List[str] = []
+        # Find composio_execute schema and constrain its action enum
         for schema in tool_schemas:
             if schema.get("function", {}).get("name") == "composio_execute":
-                composio_schema = schema
-                existing_enum = schema["function"].get("parameters", {}).get("properties", {}).get("action", {}).get("enum", [])
+                schema["function"]["parameters"]["properties"]["action"] = {
+                    "type": "string",
+                    "description": "Action name — must be one of these actions.",
+                    "enum": sorted_actions,
+                }
                 break
 
-        if composio_schema is None:
-            return tool_schemas, ""
+        app_names = [t.get("name") for t in composio_apps]
+        hint_lines = [
+            f"You have Composio apps connected: {', '.join(app_names)}.",
+            f"Available actions (use exactly these names): {', '.join(sorted_actions)}.",
+            "Call composio_execute with the action name and required params.",
+        ]
+        insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+        messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_lines)})
 
-        existing_set = set(existing_enum)
-        added = []
-        for action in new_actions:
-            if action not in existing_set and len(added) < 5:
-                added.append(action)
-                existing_set.add(action)
-
-        if not added:
-            return tool_schemas, ""
-
-        composio_schema["function"]["parameters"]["properties"]["action"]["enum"] = list(existing_set)
-        self.logger.info(f"    🔍 [DISCOVERY] Added {len(added)} Composio actions: {added}")
-        msg = (
-            f"Action '{failed_action}' not found. Alternatives added: {added}. "
-            f"Call composio_execute with one of these."
+        self.logger.info(
+            f"Composio (semantic): constrained to {len(sorted_actions)} actions: {sorted_actions}"
         )
-        return tool_schemas, msg
 
-    # ======================================================================
-    # PRD-71: Build agent system prompt — unified skills + plugins
-    # ======================================================================
+    def _inject_composio_hints(
+        self,
+        tool_schemas: List[Dict],
+        messages: List[Dict],
+        agent_runtime: AgentRuntime,
+        original_user_prompt: str,
+        workspace_id: Optional[Any],
+    ):
+        """Inject Composio hints via hint service (default/chatbot path)."""
+        try:
+            from modules.tools.services.composio_hint_service import ComposioHintService
+
+            hint_service = ComposioHintService(self.db_session)
+            hint_result = hint_service.build_hints(
+                agent_id=agent_runtime.agent_id,
+                prompt=original_user_prompt,
+                workspace_id=workspace_id,
+            )
+
+            if hint_result.hint_lines:
+                insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+                messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
+
+            if hint_result.matched_actions:
+                for schema in tool_schemas:
+                    if schema.get("function", {}).get("name") == "composio_execute":
+                        schema["function"]["parameters"]["properties"]["action"] = {
+                            "type": "string",
+                            "description": "Action name — must be one of the candidate actions listed above.",
+                            "enum": hint_result.matched_actions,
+                        }
+                        break
+
+            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
+            app_names = [t.get("name") for t in composio_apps]
+            self.logger.info(
+                f"Composio: hints={len(hint_result.hint_lines)} lines, "
+                f"strategy={hint_result.strategy_used}, "
+                f"constrained_actions={len(hint_result.matched_actions)}, "
+                f"apps={app_names}"
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to inject Composio hints: {e}")
+
+    # ==================================================================
+    # System Prompt Builder
+    # ==================================================================
+
     def _build_agent_system_prompt(
         self,
         agent: Agent,
         task_context: Optional[str] = None,
         db: Optional[Session] = None,
-        required_tools: Optional[List[str]] = None,
     ) -> Tuple[str, List[Dict]]:
         """
         Build the agent system prompt AND extract skill tool schemas.
 
-        PRD-71: Single injection point — loads ALL assigned skills AND plugin
-        content (no mutual exclusion). Plugins that have been materialized into
-        skills are skipped to avoid duplicate content.
-
-        Args:
-            agent: The agent to build prompt for
-            task_context: Optional task description for context
-            db: Database session
-            required_tools: List of tool categories to include
-
-        Returns:
-            Tuple of (system_prompt_string, skill_tool_schemas_list)
+        Single injection point — loads ALL assigned skills AND plugin content.
         """
         sections: List[str] = []
         skill_tool_schemas: List[Dict] = []
@@ -1872,27 +1154,23 @@ To use actions, respond with JSON blocks like:
         if agent.description:
             sections.append(agent.description)
 
-        # PRD-42: Inject persona
+        # Persona
         try:
-            if getattr(agent, 'use_custom_persona', False) and agent.custom_persona_prompt:
+            if getattr(agent, "use_custom_persona", False) and agent.custom_persona_prompt:
                 sections.append(f"\n## Persona & Communication Style\n{agent.custom_persona_prompt}")
-                self.logger.info(f"Loaded custom persona for agent {agent.id}")
-            elif getattr(agent, 'persona_id', None) and getattr(agent, 'persona', None):
+            elif getattr(agent, "persona_id", None) and getattr(agent, "persona", None):
                 persona_prompt = agent.persona.system_prompt or ""
                 if persona_prompt:
                     sections.append(f"\n## Persona & Communication Style\n{persona_prompt}")
-                    self.logger.info(f"Loaded persona '{agent.persona.name}' for agent {agent.id}")
         except Exception as e:
             self.logger.warning(f"Failed to load persona for agent {agent.id}: {e}")
 
-        # Task context (optional)
+        # Task context
         if task_context:
             sections.append("\n## Task Context\n" + str(task_context))
 
-        # ------------------------------------------------------------------
-        # PRD-71: Load ALL assigned skills (no filtering, no mutual exclusion)
-        # ------------------------------------------------------------------
-        if getattr(agent, 'skills', None):
+        # Skills
+        if getattr(agent, "skills", None):
             active_skills = [s for s in agent.skills if s.is_active]
             if active_skills:
                 sections.append("\n## Your Specialized Skills\n")
@@ -1901,7 +1179,6 @@ To use actions, respond with JSON blocks like:
 
                 for skill in active_skills:
                     if skill.id in loaded_skill_ids:
-                        self.logger.debug("Skipping duplicate skill %s (id=%s)", skill.name, skill.id)
                         continue
                     loaded_skill_ids.add(skill.id)
                     self.logger.info(f"Loading skill: {skill.name}")
@@ -1912,45 +1189,36 @@ To use actions, respond with JSON blocks like:
                     if loader is not None:
                         try:
                             core_content = loader.load_skill_core(skill.name, db=db)
-                            if core_content:
-                                self.logger.info(f"  Loaded {len(core_content)} chars of core content for '{skill.name}'")
                         except Exception as e:
-                            self.logger.warning(f"  Failed to load core content for '{skill.name}': {e}")
-                            core_content = None
+                            self.logger.warning(f"Failed to load core content for '{skill.name}': {e}")
 
                     if core_content and isinstance(core_content, str) and core_content.strip():
                         sections.append(core_content)
                     else:
                         fallback = skill.prompt_template or skill.description or ""
                         if fallback:
-                            self.logger.info(f"  Using fallback content for '{skill.name}' ({len(str(fallback))} chars)")
                             sections.append(str(fallback))
-                        else:
-                            self.logger.warning(f"  No content available for skill '{skill.name}'")
 
                     # Extract tool schemas from skills
-                    if hasattr(skill, 'tools_schema') and skill.tools_schema and isinstance(skill.tools_schema, dict):
+                    if hasattr(skill, "tools_schema") and skill.tools_schema and isinstance(skill.tools_schema, dict):
                         try:
-                            tools = skill.tools_schema.get('tools', [])
-                            for tool_def in tools:
+                            for tool_def in skill.tools_schema.get("tools", []):
                                 tool_name = tool_def.get("name")
                                 skill_tool_schemas.append({
                                     "type": "function",
                                     "function": {
                                         "name": tool_name,
                                         "description": tool_def.get("description", ""),
-                                        "parameters": tool_def.get("parameters", {})
-                                    }
+                                        "parameters": tool_def.get("parameters", {}),
+                                    },
                                 })
                                 self.logger.info(f"  Extracted tool: {tool_name}")
                         except Exception as e:
-                            self.logger.warning(f"  Failed to extract tools from skill '{skill.name}': {e}")
+                            self.logger.warning(f"Failed to extract tools from skill '{skill.name}': {e}")
 
                 self.logger.info(f"Loaded {len(active_skills)} skill(s) for agent {agent.id}")
 
-        # ------------------------------------------------------------------
-        # PRD-71: Load plugin content for non-materialized plugins only
-        # ------------------------------------------------------------------
+        # Plugin content (non-materialized only)
         try:
             from core.services.plugin_context_service import PluginContextService
 
@@ -1958,51 +1226,24 @@ To use actions, respond with JSON blocks like:
             if plugin_svc:
                 plugin_rows = plugin_svc.get_assigned_plugins(agent.id)
                 if plugin_rows:
-                    # Filter out plugins that have been materialized into skills
-                    # plugin_rows is List[Tuple[AgentAssignedPlugin, MarketplacePlugin]]
                     non_materialized = []
                     for row in plugin_rows:
-                        _aap, plugin = row if isinstance(row, tuple) else (row, getattr(row, 'plugin', row))
-                        materialized_ids = getattr(plugin, 'materialized_skill_ids', None) or []
-                        if materialized_ids:
-                            self.logger.info(
-                                "Skipping materialized plugin '%s' (skill_ids=%s)",
-                                getattr(plugin, 'slug', '?'), materialized_ids,
-                            )
-                        else:
+                        _aap, plugin = row if isinstance(row, tuple) else (row, getattr(row, "plugin", row))
+                        materialized_ids = getattr(plugin, "materialized_skill_ids", None) or []
+                        if not materialized_ids:
                             non_materialized.append(row)
 
                     if non_materialized:
                         tier1 = plugin_svc.build_tier1_summary(non_materialized)
                         if tier1:
                             sections.append(tier1)
-                        tier2 = plugin_svc.build_tier2_content_sync(
-                            non_materialized,
-                            task_context=task_context,
-                        )
+                        tier2 = plugin_svc.build_tier2_content_sync(non_materialized, task_context=task_context)
                         if tier2:
                             sections.append(tier2)
-                        self.logger.info(
-                            "Loaded plugin context for agent %s (%d plugins, %d skipped as materialized)",
-                            agent.id, len(non_materialized),
-                            len(plugin_rows) - len(non_materialized),
-                        )
         except Exception as e:
             self.logger.warning(f"Failed to load plugins for agent {agent.id}: {e}")
 
-        # Inject platform action summary so the LLM knows what's available
-        # via platform_execute(action, params)
-        try:
-            from modules.tools.discovery import get_action_registry
-            action_registry = get_action_registry()
-            platform_summary = action_registry.build_prompt_summary()
-            if platform_summary:
-                sections.append(platform_summary)
-                self.logger.info(f"Injected platform action summary ({len(action_registry.get_all())} actions)")
-        except Exception as e:
-            self.logger.warning(f"Failed to inject platform action summary: {e}")
-
-        # Explicitly add assigned Composio apps (from the new assignment table)
+        # Composio apps section in prompt
         if db and agent.id:
             try:
                 assignments = (
@@ -2014,33 +1255,29 @@ To use actions, respond with JSON blocks like:
                     )
                     .all()
                 )
-
                 if assignments:
                     app_names = [a.app_name.upper() for a in assignments if a.app_name]
                     cache = {
                         a.app_name: a
                         for a in db.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_(app_names)).all()
                     }
-
                     helper_section = ["\n## Available External Apps (Composio)\n"]
                     helper_section.append(
-                        "You have access to these external apps via Composio. When you need to read/send emails or post messages, "
-                        "use the `composio_execute` tool with an appropriate action for the relevant app.\n"
+                        "You have access to these external apps via Composio. "
+                        "Use the `composio_execute` tool with an appropriate action.\n"
                     )
                     for assignment in assignments:
                         app_name = (assignment.app_name or "").upper()
                         app = cache.get(app_name)
-                        if not app_name:
-                            continue
-                        helper_section.append(f"### {app_name}")
-                        if app and app.description:
-                            helper_section.append(f"**Description**: {app.description}")
-
+                        if app_name:
+                            helper_section.append(f"### {app_name}")
+                            if app and app.description:
+                                helper_section.append(f"**Description**: {app.description}")
                     sections.append("\n".join(helper_section))
             except Exception as e:
                 self.logger.warning(f"Failed to append Composio apps to prompt: {e}")
 
-        # Add instructions for handling dependency context
+        # Dependency context instructions
         sections.append("\n## IMPORTANT: Working with Context and Dependencies\n")
         sections.append("When you receive '## DEPENDENCY CONTEXT' at the beginning of your task:")
         sections.append("1. This contains outputs from previous tasks that you need to use")
@@ -2051,244 +1288,31 @@ To use actions, respond with JSON blocks like:
         sections.append("- Use the write_file tool to save your output")
         sections.append("- The task description will specify the output filename")
         sections.append("- Actually WRITE the content, don't just describe what you would write")
-        sections.append("- Process and synthesize the dependency context into meaningful output")
-        
-        # Add explicit instructions to USE skill tools if any were extracted
-        if skill_tool_schemas:
-            tool_names_list = [t['function']['name'] for t in skill_tool_schemas]
-            sections.append("\n## IMPORTANT: Using Your Skill Tools\n")
-            sections.append(f"You have access to the following specialized tools from your skills: {', '.join(tool_names_list)}")
-            sections.append("\n**These skills were loaded specifically because they match your task requirements.**")
-            sections.append("When your task requires capabilities provided by these tools, you MUST use them via function calling.")
-            sections.append("\n**Critical Workflow:**")
-            sections.append("1. Analyze your task description to understand what needs to be accomplished")
-            sections.append("2. Check if any of your available skill tools match what the task requires")
-            sections.append("3. If a tool matches the task requirement, CALL IT using function calling - do not just describe what you would do")
-            sections.append("4. Use tool results to complete the task properly")
-            sections.append("\nExample: If your task is 'create a PDF' and you have a 'create_pdf' tool → you MUST call create_pdf")
-            sections.append("Example: If your task is 'write documentation' and you have 'write_technical_content' tool → you MUST call that tool")
-            sections.append("\n**Your skills are your capabilities - use them when they match the task!**")
 
-        # Response formatting — prevent raw JSON / code block dumping
+        # Skill tool usage instructions
+        if skill_tool_schemas:
+            tool_names_list = [t["function"]["name"] for t in skill_tool_schemas]
+            sections.append("\n## IMPORTANT: Using Your Skill Tools\n")
+            sections.append(f"You have access to: {', '.join(tool_names_list)}")
+            sections.append("When your task requires capabilities provided by these tools, you MUST use them via function calling.")
+            sections.append("Analyze your task, check if any tools match, and CALL them — do not just describe what you would do.")
+
+        # Response formatting
         sections.append("\n## Response Formatting Rules\n")
-        sections.append("When you receive API/tool results (emails, messages, calendar events, etc.):")
-        sections.append("- Synthesize the data into clear, human-friendly prose — do NOT dump raw JSON or technical data")
-        sections.append("- NEVER use code blocks (``` ```), inline code backticks (`), or monospace formatting")
-        sections.append("- For emails: summarize subject, sender, date, and key message — skip raw headers, IDs, method names")
-        sections.append("- For technical content (PR comments, code reviews, etc.): describe what it says at a high level, don't reproduce code diffs or file paths")
-        sections.append("- Use bullet points or short paragraphs, written for a non-technical reader")
-        sections.append("- If the user asks for details, THEN provide more depth — but default to concise summaries")
+        sections.append("When you receive API/tool results:")
+        sections.append("- Synthesize data into clear, human-friendly prose — do NOT dump raw JSON")
+        sections.append("- NEVER use code blocks or inline code backticks")
+        sections.append("- Use bullet points or short paragraphs for a non-technical reader")
 
         prompt_text = "\n\n".join([s for s in sections if s is not None])
         return (prompt_text, skill_tool_schemas)
-    
-    async def get_agent_status(self, agent_id: int) -> Dict[str, Any]:
-        """
-        Get detailed status of an agent.
-        
-        Returns real-time agent information.
-        """
-        agent_runtime = self.active_agents.get(agent_id)
-        
-        if not agent_runtime:
-            # Try database
-            db_agent = self.db_session.query(Agent).filter_by(id=agent_id).first()
-            if db_agent:
-                return {
-                    "status": "inactive",
-                    "agent": {
-                        "id": db_agent.id,
-                        "name": db_agent.metadata.name,
-                        "type": db_agent.agent_type,
-                        "database_status": db_agent.status,
-                        "created_at": db_agent.created_at.isoformat() if db_agent.created_at else None
-                    },
-                    "runtime": None,
-                    "message": "Agent exists in database but not in runtime. Use activate_agent() to initialize."
-                }
-            else:
-                return {
-                    "status": "not_found",
-                    "error": f"Agent {agent_id} does not exist"
-                }
-        
-        # Get provider info
-        provider_info = agent_runtime.llm_manager.get_provider_info()
-        
-        return {
-            "status": "active",
-            "agent": {
-                "id": agent_runtime.agent_id,
-                "name": agent_runtime.metadata.name,
-                "type": agent_runtime.metadata.agent_type,
-                "lifecycle_state": agent_runtime.lifecycle_state.value,
-                "skills": agent_runtime.metadata.skills
-            },
-            "runtime": {
-                "created_at": agent_runtime.created_at.isoformat(),
-                "last_execution": agent_runtime.last_execution.isoformat() if agent_runtime.last_execution else None,
-                "execution_count": agent_runtime.execution_count,
-                "total_tokens_used": agent_runtime.total_tokens_used,
-                "memory_size": len(agent_runtime.memory)
-            },
-            "llm": provider_info,
-            "metrics": agent_runtime.performance_metrics
-        }
-    
-    async def test_agent_capabilities(self, agent: AgentRuntime) -> Dict[str, Any]:
-        """
-        Run comprehensive tests on agent capabilities.
-        
-        Returns detailed test results.
-        """
-        test_results = {
-            "agent_id": agent.agent_id,
-            "agent_name": agent.metadata.name,
-            "timestamp": datetime.now().isoformat(),
-            "tests": []
-        }
-        
-        # Test 1: Basic response
-        test1 = await self.execute_with_prompt(
-            agent,
-            "What are your primary capabilities?",
-            use_memory=False
-        )
-        test_results["tests"].append({
-            "name": "basic_response",
-            "success": test1["status"] == "success",
-            "execution_time": test1.get("execution", {}).get("time"),
-            "tokens": test1.get("execution", {}).get("tokens_used")
-        })
-        
-        # Test 2: Skill-specific task
-        if agent.metadata.skills:
-            skill_task = f"Demonstrate your {agent.metadata.skills[0]} capability with a brief example."
-            test2 = await self.execute_with_prompt(agent, skill_task)
-            test_results["tests"].append({
-                "name": f"skill_test_{agent.metadata.skills[0]}",
-                "success": test2["status"] == "success",
-                "execution_time": test2.get("execution", {}).get("time"),
-                "tokens": test2.get("execution", {}).get("tokens_used")
-            })
-        
-        # Test 3: Context handling
-        test3 = await self.execute_with_prompt(
-            agent,
-            "Analyze this context and provide insights",
-            context={"data": "test", "value": 42, "items": ["a", "b", "c"]}
-        )
-        test_results["tests"].append({
-            "name": "context_handling",
-            "success": test3["status"] == "success",
-            "execution_time": test3.get("execution", {}).get("time"),
-            "tokens": test3.get("execution", {}).get("tokens_used")
-        })
-        
-        # Summary
-        successful_tests = sum(1 for t in test_results["tests"] if t["success"])
-        test_results["summary"] = {
-            "total_tests": len(test_results["tests"]),
-            "successful": successful_tests,
-            "success_rate": successful_tests / len(test_results["tests"]) if test_results["tests"] else 0,
-            "total_time": sum(t.get("execution_time", 0) for t in test_results["tests"] if t.get("execution_time")),
-            "total_tokens": sum(t.get("tokens", 0) for t in test_results["tests"] if t.get("tokens"))
-        }
-        
-        return test_results
-    
-    # ======================================================================
-    # ACTION EXECUTOR HELPER METHODS
-    # ======================================================================
-    
-    def _requires_actions(self, prompt: str) -> bool:
-        """Check if the prompt requires action capabilities"""
-        action_keywords = [
-            'write', 'create', 'file', 'save', 'execute', 'run',
-            'command', 'shell', 'list', 'read', 'directory', 'folder',
-            'delete', 'remove', 'mkdir', 'code', 'script', 'program'
-        ]
-        prompt_lower = prompt.lower()
-        return any(keyword in prompt_lower for keyword in action_keywords)
-    
-    async def _process_agent_actions(self, response: str, action_executor, agent_runtime=None) -> List[Dict[str, Any]]:
-        """Process action requests from agent response"""
-        import re
-        results = []
-        
-        # Find all JSON action blocks in the response - match complete JSON objects
-        action_pattern = r'\{"action":\s*"[^"]+",\s*"params":\s*\{[^}]*\}\}'
-        matches = re.finditer(action_pattern, response)
-        
-        for match in matches:
-            try:
-                action_json = match.group(0)
-                action_data = json.loads(action_json)
-                
-                action_type = action_data.get('action')
-                params = action_data.get('params', {})
-                
-                # PRD-17 Phase 3: Reuse agent's tool_executor (initialized once)
-                tool_executor = agent_runtime.tool_executor if agent_runtime else get_unified_tool_executor(self.db_session)
-                # Resolve workspace_id from agent_runtime if available
-                _ws_id = None
-                if agent_runtime and hasattr(agent_runtime, 'agent_id'):
-                    _db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
-                    _ws_id = getattr(_db_agent, 'workspace_id', None) if _db_agent else None
-                result = await tool_executor.execute_tool(
-                    tool_name=action_type,
-                    parameters=params,
-                    agent_id=agent_runtime.agent_id if agent_runtime else 0,
-                    workspace_id=_ws_id
-                )
-                
-                # Enhanced logging for research tools
-                if action_type == 'search_knowledge':
-                    self.logger.info(f"  🔍 Executing search_knowledge with params: {params}")
-                    self.logger.info(f"  📊 Result: success={result.get('success')}, count={result.get('count', 0)}")
-                    if result.get('results'):
-                        self.logger.info(f"  📄 First result preview: {str(result.get('results', [{}])[0])[:200]}")
-                    self.logger.info(f"  ✅ Knowledge search: {result.get('count', 0)} results found")
-                elif action_type in ['semantic_search', 'search_codebase']:
-                    self.logger.info(f"  ✅ {action_type}: {result.get('count', 0)} results found")
-                
-                results.append(result)
-                    
-            except json.JSONDecodeError as e:
-                # Try to fix common JSON issues
-                self.logger.warning(f"JSON parse error at column {e.colno}: {e.msg}")
-                self.logger.warning(f"  Full problematic JSON: {match.group(0)}")
-                try:
-                    fixed_json = match.group(0)
-                    fixed_json = fixed_json.replace("'", '"')  # Single to double quotes
-                    fixed_json = re.sub(r',\s*}', '}', fixed_json)  # Trailing commas in objects
-                    fixed_json = re.sub(r',\s*\]', ']', fixed_json)  # Trailing commas in arrays
-                    action_data = json.loads(fixed_json)
-                    self.logger.info(f"  ✅ JSON fixed and parsed successfully")
-                    # Note: Would need to reprocess the fixed action_data here
-                except Exception as fix_error:
-                    self.logger.error(f"Failed to fix JSON: {fix_error}")
-            except Exception as e:
-                self.logger.error(f"Failed to process action: {e}")
-                results.append({
-                    'action': 'unknown',
-                    'params': {},
-                    'success': False,
-                    'result': str(e)
-                })
-        
-        return results
-    
-    # ======================================================================
-    # Assigned apps/integrations (Composio)
-    # ======================================================================
-    
-    async def _load_agent_tools(self, agent_id: int) -> List[Dict[str, Any]]:
-        """
-        Load Composio apps assigned to an agent from the database (schema v2).
 
-        This is DB-backed and does not rely on legacy tool tables.
-        """
+    # ==================================================================
+    # Composio App Loading
+    # ==================================================================
+
+    async def _load_agent_tools(self, agent_id: int) -> List[Dict[str, Any]]:
+        """Load Composio apps assigned to an agent from the database."""
         try:
             assignments = (
                 self.db_session.query(AgentAppAssignment)
@@ -2299,7 +1323,6 @@ To use actions, respond with JSON blocks like:
                 )
                 .all()
             )
-
             if not assignments:
                 return []
 
@@ -2315,229 +1338,87 @@ To use actions, respond with JSON blocks like:
                 app = cache.get(app_name)
                 if not app_name:
                     continue
-                tools.append(
-                    {
-                        "name": app_name,
-                        "description": (app.description if app else "") or "",
-                        "provider": "Composio",
-                        "category": ((app.categories or [None])[0] if app else None),
-                        "icon": app.logo_url if app else None,
-                        "assigned_at": assignment.assigned_at.isoformat() if assignment.assigned_at else None,
-                    }
-                )
+                tools.append({
+                    "name": app_name,
+                    "description": (app.description if app else "") or "",
+                    "provider": "Composio",
+                    "category": ((app.categories or [None])[0] if app else None),
+                    "icon": app.logo_url if app else None,
+                    "assigned_at": assignment.assigned_at.isoformat() if assignment.assigned_at else None,
+                })
 
-            self.logger.info(f"✅ Loaded {len(tools)} Composio app assignment(s) for agent {agent_id}")
+            self.logger.info(f"Loaded {len(tools)} Composio app(s) for agent {agent_id}")
             return tools
         except Exception as e:
             self.logger.warning(f"Failed to load Composio apps for agent {agent_id}: {e}")
             return []
-    
-    def _build_composio_hints(self, agent_id: int, task_prompt: str) -> List[str]:
-        """
-        Build Composio app/action hint lines for system message injection.
 
-        Delegates to the unified ComposioHintService which implements 3-tier
-        resolution: capability-based → token-filtered (with mandatory gate) → top-N fallback.
-        """
-        try:
-            from modules.tools.services.composio_hint_service import ComposioHintService
+    # ==================================================================
+    # Status & Utility
+    # ==================================================================
 
-            hint_service = ComposioHintService(self.db_session)
-            result = hint_service.build_hints(
-                agent_id=agent_id,
-                prompt=task_prompt,
-                workspace_id=None,  # Service resolves from Agent.workspace_id
-            )
-            return result.hint_lines
-        except Exception as e:
-            self.logger.warning(f"Failed to build Composio hints for agent {agent_id}: {e}", exc_info=True)
-            return []
+    async def get_agent_status(self, agent_id: int) -> Dict[str, Any]:
+        """Get detailed status of an agent."""
+        agent_runtime = self.active_agents.get(agent_id)
+
+        if not agent_runtime:
+            db_agent = self.db_session.query(Agent).filter_by(id=agent_id).first()
+            if db_agent:
+                return {
+                    "status": "inactive",
+                    "agent": {
+                        "id": db_agent.id,
+                        "name": db_agent.name,
+                        "type": db_agent.agent_type,
+                        "database_status": db_agent.status,
+                    },
+                    "runtime": None,
+                    "message": "Agent exists in database but not in runtime.",
+                }
+            return {"status": "not_found", "error": f"Agent {agent_id} does not exist"}
+
+        provider_info = agent_runtime.llm_manager.get_provider_info()
+        return {
+            "status": "active",
+            "agent": {
+                "id": agent_runtime.agent_id,
+                "name": agent_runtime.metadata.name,
+                "type": agent_runtime.metadata.agent_type,
+                "lifecycle_state": agent_runtime.lifecycle_state.value,
+                "skills": agent_runtime.metadata.skills,
+            },
+            "runtime": {
+                "created_at": agent_runtime.created_at.isoformat(),
+                "last_execution": agent_runtime.last_execution.isoformat() if agent_runtime.last_execution else None,
+                "execution_count": agent_runtime.execution_count,
+                "total_tokens_used": agent_runtime.total_tokens_used,
+                "memory_size": len(agent_runtime.memory),
+            },
+            "llm": provider_info,
+            "metrics": agent_runtime.performance_metrics,
+        }
 
     def get_agent_tool_capability(self, agent_runtime: AgentRuntime, capability: str) -> bool:
-        """
-        Check if an agent has a specific tool capability.
-        
-        Phase 3: Used by IntelligentAgentSelector for tool-based matching.
-        """
+        """Check if an agent has a specific tool capability."""
         for tool in agent_runtime.tools:
             tool_capabilities = tool.get("capabilities", {})
             if isinstance(tool_capabilities, dict):
-                methods = tool_capabilities.get("methods", [])
-                if capability in methods:
+                if capability in tool_capabilities.get("methods", []):
                     return True
-        
         return False
-    
+
     def get_agent_tools_summary(self, agent_runtime: AgentRuntime) -> Dict[str, Any]:
-        """Get summary of agent's tools for display/logging"""
+        """Get summary of agent's tools for display/logging."""
         return {
             "total_tools": len(agent_runtime.tools),
             "tools": [
-                {
-                    "name": tool.get("name"),
-                    "category": tool.get("category"),
-                    "provider": tool.get("provider")
-                }
-                for tool in agent_runtime.tools
+                {"name": t.get("name"), "category": t.get("category"), "provider": t.get("provider")}
+                for t in agent_runtime.tools
             ],
-            "categories": list(set(tool.get("category") for tool in agent_runtime.tools if tool.get("category")))
+            "categories": list(set(t.get("category") for t in agent_runtime.tools if t.get("category"))),
         }
-    
+
     def cleanup(self):
-        """Clean up resources"""
+        """Clean up resources."""
         if self.db_session:
             self.db_session.close()
-
-
-# Convenience function for quick agent creation
-async def create_specialized_agent(
-    name: str,
-    agent_type: str,
-    skills: List[str] = None,
-    auto_test: bool = True
-) -> Dict[str, Any]:
-    """
-    Quick function to create and test a specialized agent.
-    
-    Returns agent info and test results.
-    """
-    factory = AgentFactory()
-    
-    try:
-        # Create agent
-        agent = await factory.create_agent(
-            name=name,
-            agent_type=agent_type,
-            skills=skills,
-            auto_verify=True
-        )
-        
-        result = {
-            "agent": {
-                "id": agent.agent_id,
-                "name": agent.metadata.name,
-                "type": agent.agent_type.value,
-                "skills": agent.metadata.skills,
-                "status": "created"
-            }
-        }
-        
-        # Run tests if requested
-        if auto_test:
-            test_results = await factory.test_agent_capabilities(agent)
-            result["tests"] = test_results
-        
-        return result
-    
-    finally:
-        factory.cleanup()
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    async def test_agent_factory():
-        """Test the agent factory with REAL LLM connections"""
-        
-        print("=" * 60)
-        print("AGENT FACTORY TEST - REAL LLM CONNECTIONS")
-        print("=" * 60)
-        
-        factory = AgentFactory()
-        
-        try:
-            # Test 1: Create a Code Architect agent
-            print("\n1. Creating Code Architect agent...")
-            architect = await factory.create_agent(
-                metadata=AgentMetadata(
-                    name="CodeMaster",
-                    agent_type="code_architect",
-                    description="Expert in code architecture and design",
-                    skills=["code_analysis", "api_design", "system_design"]
-                ),
-                auto_verify=True
-            )
-            print(f"✓ Created: {architect.metadata.name} (ID: {architect.agent_id})")
-            
-            # Test 2: Execute a real task
-            print("\n2. Executing code review task...")
-            code_task = """
-            Review this Python function and suggest improvements:
-            
-            def calc(x, y, op):
-                if op == '+':
-                    return x + y
-                elif op == '-':
-                    return x - y
-                elif op == '*':
-                    return x * y
-                elif op == '/':
-                    return x / y
-            """
-            
-            result = await factory.execute_with_prompt(architect, code_task)
-            
-            if result["status"] == "success":
-                print(f"✓ Task executed successfully")
-                print(f"  Execution time: {result['execution']['time']:.2f}s")
-                print(f"  Tokens used: {result['execution']['tokens_used']}")
-                print(f"  Model: {result['execution']['model']}")
-                print(f"  Provider: {result['execution']['provider']}")
-                print("\n  Response preview:")
-                print("  " + result["result"][:200] + "...")
-            else:
-                print(f"✗ Task failed: {result['error']}")
-            
-            # Test 3: Create a Security Expert
-            print("\n3. Creating Security Expert agent...")
-            security_expert = await factory.create_agent(
-                metadata=AgentMetadata(
-                    name="SecGuardian",
-                    agent_type="security_expert",
-                    description="Expert in security auditing and testing",
-                    skills=["security_audit", "penetration_testing"]
-                ),
-                auto_verify=True
-            )
-            print(f"✓ Created: {security_expert.metadata.name} (ID: {security_expert.agent_id})")
-            
-            # Test 4: Security analysis task
-            print("\n4. Executing security analysis...")
-            security_task = "What are the top 3 security vulnerabilities in web applications?"
-            
-            sec_result = await factory.execute_with_prompt(security_expert, security_task)
-            
-            if sec_result["status"] == "success":
-                print(f"✓ Security analysis completed")
-                print(f"  Tokens used: {sec_result['execution']['tokens_used']}")
-            
-            # Test 5: Get agent status
-            print("\n5. Checking agent status...")
-            status = await factory.get_agent_status(architect.agent_id)
-            print(f"✓ Agent status retrieved")
-            print(f"  Lifecycle: {status['agent']['lifecycle_state']}")
-            print(f"  Executions: {status['runtime']['execution_count']}")
-            print(f"  Total tokens: {status['runtime']['total_tokens_used']}")
-            
-            # Test 6: Run capability tests
-            print("\n6. Running capability tests...")
-            test_results = await factory.test_agent_capabilities(architect)
-            print(f"✓ Tests completed")
-            print(f"  Success rate: {test_results['summary']['success_rate']*100:.0f}%")
-            print(f"  Total time: {test_results['summary']['total_time']:.2f}s")
-            print(f"  Total tokens: {test_results['summary']['total_tokens']}")
-            
-            print("\n" + "=" * 60)
-            print("ALL TESTS COMPLETED SUCCESSFULLY")
-            print("Agents are connected to REAL LLM services")
-            print("=" * 60)
-            
-        except Exception as e:
-            print(f"\n✗ Test failed: {str(e)}")
-            import traceback
-            traceback.print_exc()
-        
-        finally:
-            factory.cleanup()
-    
-    # Run the test
-    asyncio.run(test_agent_factory())

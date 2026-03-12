@@ -466,23 +466,10 @@ class LLMManager:
         else:
             _, model = get_provider_and_model_from_settings(service_name)
             if not model:
-                # Try config.LLM_MODEL first, then provider-specific fallbacks
-                from config import config as _cfg
-                _cfg_model = _cfg.LLM_MODEL
-                if _cfg_model:
-                    model = _cfg_model
-                else:
-                    # Provider-specific fallbacks (last resort)
-                    default_models = {
-                        LLMProvider.OPENAI: "gpt-4",
-                        LLMProvider.ANTHROPIC: "claude-3-5-sonnet-20241022",
-                        LLMProvider.GOOGLE: "gemini-pro",
-                        LLMProvider.AZURE: "gpt-4",
-                        LLMProvider.HUGGINGFACE: "mistralai/Mistral-7B-Instruct-v0.2",
-                        LLMProvider.GROK: "grok-2-latest",
-                        LLMProvider.OPENROUTER: "meta-llama/llama-3.1-70b-instruct"
-                    }
-                    model = default_models.get(provider, "gpt-4")
+                raise ValueError(
+                    f"No model configured for service '{service_name}'. "
+                    f"Please set the model in Settings > System LLM."
+                )
         
         # Get other settings with defaults
         category = SERVICE_CATEGORY_MAP.get(service_name, "orchestrator_llm")
@@ -572,16 +559,7 @@ class LLMManager:
         re.compile(r"invalid model", re.IGNORECASE),
     ]
 
-    # Provider-specific fallback models (cheap & reliable)
-    _DEFAULT_FALLBACK_MODELS = {
-        LLMProvider.OPENROUTER: "meta-llama/llama-3.1-70b-instruct",
-        LLMProvider.OPENAI: "gpt-4o-mini",
-        LLMProvider.ANTHROPIC: "claude-3-5-haiku-20241022",
-        LLMProvider.GOOGLE: "gemini-2.0-flash",
-        LLMProvider.AZURE: "gpt-4o-mini",
-        LLMProvider.GROK: "grok-2-latest",
-        LLMProvider.HUGGINGFACE: "mistralai/Mistral-7B-Instruct-v0.2",
-    }
+    # No default fallback models — fail clearly so user picks the right model.
 
     def _ensure_provider_initialized(self):
         """Ensure provider is initialized (lazy loading)"""
@@ -618,34 +596,13 @@ class LLMManager:
             return True
         return any(p.search(error_text) for p in self._DEAD_MODEL_PATTERNS)
 
-    def _get_fallback_model(self) -> Optional[str]:
-        """Get fallback model: user setting > provider default > None."""
-        # Check for user-configured fallback
-        category = SERVICE_CATEGORY_MAP.get(self.service_name, "orchestrator_llm")
-        user_fallback = get_system_setting(category, "fallback_model")
-        if user_fallback:
-            return user_fallback
-        return self._DEFAULT_FALLBACK_MODELS.get(self.config.provider)
-
-    def _build_fallback_config(self, fallback_model: str) -> LLMConfig:
-        """Build an LLMConfig that reuses primary credentials but swaps the model."""
-        return LLMConfig(
-            provider=self.config.provider,
-            model=fallback_model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            api_key=self.config.api_key,
-            base_url=self.config.base_url,
-            organization_id=self.config.organization_id,
-            secret_key=self.config.secret_key,
-        )
+    # No fallback helpers — errors surface directly to the user.
 
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> Any:
         """Generate response using the configured provider, with automatic usage tracking.
 
-        If the primary model returns a dead-model error (404 / "no endpoints found"),
-        retries once with a fallback model on the same provider and tags the
-        response with ``_used_fallback = True``.
+        No silent fallbacks — errors surface directly to the user with
+        actionable messages so they can fix their configuration.
         """
         self._ensure_provider_initialized()
         start = time.monotonic()
@@ -654,47 +611,18 @@ class LLMManager:
             self._track_usage(response, start)
             return response
         except Exception as exc:
-            if not self._is_retriable_model_error(exc):
-                self._track_usage(None, start, status="error")
-                raise
+            self._track_usage(None, start, status="error")
 
-            # Dead-model path — attempt fallback
-            fallback_model = self._get_fallback_model()
-            if not fallback_model or fallback_model == self.config.model:
-                self._track_usage(None, start, status="error")
-                raise
+            if self._is_retriable_model_error(exc):
+                raise ValueError(
+                    f"Model '{self.config.model}' is unavailable or has been removed. "
+                    f"Please select a different model in Settings."
+                ) from exc
 
-            logger.warning(
-                "LLM_MODEL_FAILED: Primary model '%s' on provider '%s' is unavailable (%s). "
-                "Retrying with fallback model '%s'. "
-                "ACTION REQUIRED: Update your model in Settings > Orchestrator.",
-                self.config.model, self.config.provider.value, exc,
-                fallback_model,
-            )
-
-            try:
-                fb_config = self._build_fallback_config(fallback_model)
-                fb_provider = self._create_provider(fb_config)
-                response = await fb_provider.generate_response(messages, tools)
-                # Tag so callers know this came from fallback
-                response._used_fallback = True
-                response._failed_model = self.config.model
-                response._fallback_model = fallback_model
-                self._track_usage(response, start, status="fallback")
-                return response
-            except Exception as fb_exc:
-                logger.error(
-                    "LLM_FALLBACK_FAILED: Fallback model '%s' also failed: %s",
-                    fallback_model, fb_exc,
-                )
-                self._track_usage(None, start, status="error")
-                raise fb_exc from exc
+            raise
 
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> Any:
-        """Generate response using the configured provider (synchronous), with automatic usage tracking.
-
-        Same fallback logic as ``generate_response``.
-        """
+        """Generate response using the configured provider (synchronous), with usage tracking."""
         self._ensure_provider_initialized()
         start = time.monotonic()
         try:
@@ -702,39 +630,15 @@ class LLMManager:
             self._track_usage(response, start)
             return response
         except Exception as exc:
-            if not self._is_retriable_model_error(exc):
-                self._track_usage(None, start, status="error")
-                raise
+            self._track_usage(None, start, status="error")
 
-            fallback_model = self._get_fallback_model()
-            if not fallback_model or fallback_model == self.config.model:
-                self._track_usage(None, start, status="error")
-                raise
+            if self._is_retriable_model_error(exc):
+                raise ValueError(
+                    f"Model '{self.config.model}' is unavailable or has been removed. "
+                    f"Please select a different model in Settings."
+                ) from exc
 
-            logger.warning(
-                "LLM_MODEL_FAILED: Primary model '%s' on provider '%s' is unavailable (%s). "
-                "Retrying with fallback model '%s'. "
-                "ACTION REQUIRED: Update your model in Settings > Orchestrator.",
-                self.config.model, self.config.provider.value, exc,
-                fallback_model,
-            )
-
-            try:
-                fb_config = self._build_fallback_config(fallback_model)
-                fb_provider = self._create_provider(fb_config)
-                response = fb_provider.generate_response_sync(messages)
-                response._used_fallback = True
-                response._failed_model = self.config.model
-                response._fallback_model = fallback_model
-                self._track_usage(response, start, status="fallback")
-                return response
-            except Exception as fb_exc:
-                logger.error(
-                    "LLM_FALLBACK_FAILED: Fallback model '%s' also failed: %s",
-                    fallback_model, fb_exc,
-                )
-                self._track_usage(None, start, status="error")
-                raise fb_exc from exc
+            raise
 
     def _track_usage(self, response: Any, start: float, status: str = "success") -> None:
         """Track LLM usage via UsageTracker if workspace_id is set."""

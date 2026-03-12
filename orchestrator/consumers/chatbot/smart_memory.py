@@ -117,8 +117,14 @@ class SmartMemoryManager:
         - Personal facts (name, location, job, general info) → global
         - Tool/workflow-related (Slack, email patterns, contacts for tools) → agent
         - Preferences → both (useful everywhere)
+
+        IMPORTANT: Only classify based on the USER message, not the assistant
+        response. The assistant mentioning "slack" or "github" in an explanation
+        shouldn't misclassify a personal question as agent-specific.
         """
-        combined = (user_message + " " + assistant_response).lower()
+        # Only use USER message for classification — assistant response
+        # contains tool names in explanations that cause false positives
+        combined = user_message.lower()
 
         # Tool/workflow-specific keywords → agent-specific memory
         # These are things specific to how tools are used
@@ -166,14 +172,18 @@ class SmartMemoryManager:
         # Strong agent indicators take precedence
         if has_strong_agent:
             return "agent"
+        elif has_personal and has_tool:
+            return "both"  # Personal + tool context → store everywhere
         elif has_preference and has_tool:
-            return "agent"  # Tool preference → agent specific
+            return "both"  # Tool preference → useful in both tiers
         elif has_preference:
             return "both"  # General preference → both
-        elif has_tool and not has_personal:
-            return "agent"  # Tool-specific only
+        elif has_tool:
+            return "agent"  # Pure tool-specific
+        elif has_personal:
+            return "global"  # Pure personal fact
         else:
-            return "global"  # Default to global (personal facts)
+            return "both"  # Default to both — let Mem0 decide what's worth extracting
 
     def _get_cache_key(self, workspace_id: str, agent_id: Optional[int], query: str) -> str:
         """Create cache key for memory lookups (includes agent for agent-specific cache)."""
@@ -427,9 +437,14 @@ class SmartMemoryManager:
         if not user_message or not assistant_response:
             return False
 
-        # Skip storing very short exchanges (greetings, etc.)
-        if len(user_message) < 10 and len(assistant_response) < 50:
-            logger.debug("[SmartMemory] Skipping storage for short exchange")
+        # Skip storing trivial exchanges (pure greetings with no substance)
+        # But keep short personal facts like "I'm Gerard" or "Call me G"
+        trivial_patterns = {"hi", "hello", "hey", "thanks", "ok", "bye", "yes", "no", "sure"}
+        if (
+            len(user_message.strip()) < 5
+            or user_message.strip().lower().rstrip("!.?") in trivial_patterns
+        ):
+            logger.debug("[SmartMemory] Skipping storage for trivial exchange")
             return False
 
         try:
@@ -450,8 +465,8 @@ class SmartMemoryManager:
             logger.info(f"[SmartMemory] Memory classified as: {tier}")
 
             messages = [
-                {"role": "user", "content": user_message[:500]},
-                {"role": "assistant", "content": assistant_response[:500]}
+                {"role": "user", "content": user_message[:1500]},
+                {"role": "assistant", "content": assistant_response[:1500]}
             ]
 
             base_metadata = {

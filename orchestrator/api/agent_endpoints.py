@@ -17,7 +17,7 @@ from core.models import (
     AgentType, AgentStatus
 )
 from modules.agents import (
-    AgentFactory, AgentLifecycle, create_specialized_agent
+    AgentFactory, AgentLifecycle,
 )
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
@@ -347,10 +347,11 @@ async def test_agent_capabilities_endpoint(agent_id: int, ctx: RequestContext = 
                 detail=f"Agent {agent_id} not found in runtime"
             )
         
-        # Run tests
-        test_results = await factory.test_agent_capabilities(agent_runtime)
-        
-        return test_results
+        # Removed: test_agent_capabilities was deleted in AgentFactory rewrite
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Agent capability testing has been removed",
+        )
         
     except HTTPException:
         raise
@@ -497,16 +498,11 @@ async def add_agent_skills(
                 detail="No skills specified"
             )
         
-        # Apply skills (enhances system prompt)
-        updated_agent = factory.apply_skills(agent_runtime, new_skills)
-        
-        return {
-            "status": "success",
-            "message": f"Added {len(new_skills)} skills to agent",
-            "agent_id": agent_id,
-            "total_skills": len(updated_agent.skills),
-            "skills": updated_agent.skills
-        }
+        # Removed: apply_skills was deleted — use DB skill assignments + refresh_agent_prompt
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Use skill assignment API instead of legacy apply_skills",
+        )
         
     except HTTPException:
         raise

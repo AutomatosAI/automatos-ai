@@ -297,7 +297,9 @@ async def get_assembled_context(
         # 2. Resolve model & temperature from agent model_config
         # ------------------------------------------------------------------
         model_cfg = agent.model_config or {}
-        model_id = model_cfg.get("model_id", "gpt-4") if isinstance(model_cfg, dict) else "gpt-4"
+        model_id = model_cfg.get("model_id") if isinstance(model_cfg, dict) else None
+        if not model_id:
+            raise HTTPException(400, "Agent has no model configured. Set a model in Agent > Model tab.")
         temperature = model_cfg.get("temperature", 0.7) if isinstance(model_cfg, dict) else 0.7
 
         # ------------------------------------------------------------------

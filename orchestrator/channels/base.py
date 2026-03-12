@@ -120,9 +120,7 @@ class BaseChannelAdapter(ABC):
                     },
                 )
 
-                response_text = (result or {}).get("response", "")
-                if not response_text:
-                    response_text = (result or {}).get("content", "I processed your request but have no text to return.")
+                response_text = (result or {}).get("result") or (result or {}).get("response") or (result or {}).get("content") or ""
 
                 # ── Respond ──
                 reply_channel = (
