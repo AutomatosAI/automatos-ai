@@ -32,7 +32,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('medium')
-  const [agentId, setAgentId] = useState<string>('')
+  const [agentId, setAgentId] = useState<string>('none')
   const [tags, setTags] = useState('')
   const [reviewMode, setReviewMode] = useState<ReviewMode>('auto')
 
@@ -51,7 +51,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
     setTitle('')
     setDescription('')
     setPriority('medium')
-    setAgentId('')
+    setAgentId('none')
     setTags('')
     setReviewMode('auto')
     setPlanData(null)
@@ -75,7 +75,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
       title: finalTitle,
       description: finalDesc,
       priority: finalPriority,
-      assigned_agent_id: agentId ? Number(agentId) : undefined,
+      assigned_agent_id: agentId && agentId !== 'none' ? Number(agentId) : undefined,
       tags: finalTags,
       review_mode: reviewMode,
       raw_prompt: description,

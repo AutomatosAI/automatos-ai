@@ -89,7 +89,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
           <Select value={props.agentId} onValueChange={props.onAgentIdChange}>
             <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Unassigned" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Unassigned</SelectItem>
+              <SelectItem value="none">Unassigned</SelectItem>
               {(props.agents as any[]).map((agent: any) => (
                 <SelectItem key={agent.id} value={String(agent.id)}>
                   <span className="flex items-center gap-1.5">
