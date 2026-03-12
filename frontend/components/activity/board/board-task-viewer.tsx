@@ -1,17 +1,49 @@
 'use client'
 
-import { X, Bot, Clock, CheckCircle2, AlertCircle, ArrowLeft, RotateCcw, Download, Star } from 'lucide-react'
+import { useEffect } from 'react'
+import { X, Bot, Clock, CheckCircle2, AlertCircle, ArrowLeft, RotateCcw, Play, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow, format } from 'date-fns'
+import { useQuery } from '@tanstack/react-query'
+import { apiClient } from '@/lib/api-client'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/types/board'
+import { useUpdateTaskStatus } from '@/hooks/use-board-tasks'
 import { cn } from '@/lib/utils'
 
 interface BoardTaskViewerProps {
   task: BoardTask
   onClose: () => void
   className?: string
+}
+
+/**
+ * Poll the backend for live task data when in_progress.
+ * Falls back to the prop task when the query hasn't loaded yet.
+ */
+function useLiveTask(task: BoardTask) {
+  const isActive = task.status === 'in_progress'
+
+  const { data } = useQuery({
+    queryKey: ['board-task-live', task.id],
+    queryFn: () => apiClient.request<any>(`/api/v1/tasks/${task.source_id || task.id}`),
+    enabled: isActive,
+    refetchInterval: isActive ? 5000 : false,
+    staleTime: 3000,
+  })
+
+  if (!data) return task
+
+  // Merge live data into the task shape
+  return {
+    ...task,
+    status: data.status ?? task.status,
+    result: data.result ?? task.result,
+    error_message: data.error_message ?? task.error_message,
+    started_at: data.started_at ?? task.started_at,
+    completed_at: data.completed_at ?? task.completed_at,
+  } as BoardTask
 }
 
 function formatDuration(ms: number | undefined): string {
@@ -25,6 +57,12 @@ function formatDuration(ms: number | undefined): string {
   return `${hours}h ${mins % 60}m`
 }
 
+function formatElapsed(startedAt: string): string {
+  return formatDistanceToNow(new Date(startedAt), { addSuffix: false })
+}
+
+// ── Status-specific views ────────────────────────────────────────────
+
 function InboxView({ task }: { task: BoardTask }) {
   const priorityConf = PRIORITY_CONFIG[task.priority]
 
@@ -33,7 +71,7 @@ function InboxView({ task }: { task: BoardTask }) {
       {task.description && (
         <div>
           <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Description</h4>
-          <p className="text-sm">{task.description}</p>
+          <p className="text-sm whitespace-pre-wrap">{task.description}</p>
         </div>
       )}
 
@@ -89,13 +127,6 @@ function InboxView({ task }: { task: BoardTask }) {
           </div>
         </div>
       )}
-
-      {task.step_progress && (
-        <div>
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Steps</p>
-          <span className="text-sm">{task.step_progress.total} steps defined</span>
-        </div>
-      )}
     </div>
   )
 }
@@ -103,7 +134,16 @@ function InboxView({ task }: { task: BoardTask }) {
 function InProgressView({ task }: { task: BoardTask }) {
   return (
     <div className="space-y-4">
-      {/* Progress */}
+      {/* Live status indicator */}
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--info))]/10 border border-[hsl(var(--info))]/20">
+        <Loader2 className="w-4 h-4 text-[hsl(var(--info))] animate-spin" />
+        <span className="text-sm font-medium text-[hsl(var(--info))]">Agent is working...</span>
+        {task.started_at && (
+          <span className="text-xs text-muted-foreground ml-auto">{formatElapsed(task.started_at)} elapsed</span>
+        )}
+      </div>
+
+      {/* Step progress if available */}
       {task.step_progress && (
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -121,50 +161,90 @@ function InProgressView({ task }: { task: BoardTask }) {
         </div>
       )}
 
-      {/* Runtime */}
-      {task.started_at && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Clock className="w-4 h-4" />
-          <span>Running for {formatDistanceToNow(new Date(task.started_at))}</span>
+      {task.description && (
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Task Description</h4>
+          <p className="text-sm whitespace-pre-wrap text-muted-foreground">{task.description}</p>
         </div>
       )}
 
-      {task.description && (
+      {/* Partial result (streams in as task updates) */}
+      {task.result && (
         <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Description</h4>
-          <p className="text-sm">{task.description}</p>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Partial Output</h4>
+          <div className="glass-card rounded-lg p-3 text-sm whitespace-pre-wrap max-h-[300px] overflow-y-auto font-mono text-xs">
+            {String(task.result)}
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-function ReviewView({ task }: { task: BoardTask }) {
+function ReviewView({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
   return (
     <div className="space-y-4">
       {/* Completion info */}
-      <div className="flex items-center gap-2 text-sm">
-        <CheckCircle2 className="w-4 h-4 text-[hsl(var(--success))]" />
-        <span>Completed in {formatDuration(task.duration_ms)}</span>
-        <span className="text-muted-foreground">— Awaiting Review</span>
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20">
+        <Clock className="w-4 h-4 text-[hsl(var(--warning))]" />
+        <span className="text-sm font-medium text-[hsl(var(--warning))]">Awaiting Review</span>
+        {task.completed_at && (
+          <span className="text-xs text-muted-foreground ml-auto">
+            Completed {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
+          </span>
+        )}
       </div>
 
-      {task.description && (
+      {/* Agent result */}
+      {task.result && (
         <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Report</h4>
-          <div className="glass-card rounded-lg p-3 text-sm whitespace-pre-wrap">
-            {task.description}
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Agent Result</h4>
+          <div className="glass-card rounded-lg p-3 text-sm whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+            {String(task.result)}
           </div>
         </div>
       )}
 
+      {/* Original description */}
+      {task.description && (
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Original Task</h4>
+          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{task.description}</p>
+        </div>
+      )}
+
+      {/* Metadata */}
+      <div className="grid grid-cols-2 gap-3">
+        {task.started_at && (
+          <div>
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Started</p>
+            <p className="text-sm">{format(new Date(task.started_at), 'MMM d, HH:mm')}</p>
+          </div>
+        )}
+        {task.completed_at && (
+          <div>
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Completed</p>
+            <p className="text-sm">{format(new Date(task.completed_at), 'MMM d, HH:mm')}</p>
+          </div>
+        )}
+      </div>
+
       {/* Review actions */}
       <div className="flex gap-2 pt-2">
-        <Button variant="outline" size="sm" className="text-xs flex-1">
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs flex-1"
+          onClick={() => onStatusChange('inbox')}
+        >
           <X className="w-3.5 h-3.5 mr-1" />
           Reject → Inbox
         </Button>
-        <Button size="sm" className="text-xs flex-1">
+        <Button
+          size="sm"
+          className="text-xs flex-1"
+          onClick={() => onStatusChange('done')}
+        >
           <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
           Approve → Done
         </Button>
@@ -173,58 +253,66 @@ function ReviewView({ task }: { task: BoardTask }) {
   )
 }
 
-function DoneView({ task }: { task: BoardTask }) {
+function DoneView({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
   const isFailed = task.error_message != null
 
   return (
     <div className="space-y-4">
       {/* Status */}
-      <div className="flex items-center gap-2 text-sm">
+      <div className={cn(
+        'flex items-center gap-2 px-3 py-2 rounded-lg border',
+        isFailed
+          ? 'bg-destructive/10 border-destructive/20'
+          : 'bg-[hsl(var(--success))]/10 border-[hsl(var(--success))]/20',
+      )}>
         {isFailed ? (
           <>
             <AlertCircle className="w-4 h-4 text-destructive" />
-            <span className="text-destructive">Failed</span>
+            <span className="text-sm font-medium text-destructive">Failed</span>
           </>
         ) : (
           <>
             <CheckCircle2 className="w-4 h-4 text-[hsl(var(--success))]" />
-            <span>Completed</span>
+            <span className="text-sm font-medium text-[hsl(var(--success))]">Completed</span>
           </>
         )}
-        {task.duration_ms && (
-          <span className="text-muted-foreground">in {formatDuration(task.duration_ms)}</span>
+        {task.completed_at && (
+          <span className="text-xs text-muted-foreground ml-auto">
+            {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
+          </span>
         )}
       </div>
 
       {/* Error */}
       {task.error_message && (
-        <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
-          <p className="text-xs text-destructive">{task.error_message}</p>
-        </div>
-      )}
-
-      {/* Results */}
-      {task.description && (
         <div>
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Results</h4>
-          <div className="glass-card rounded-lg p-3 text-sm whitespace-pre-wrap">
-            {task.description}
+          <h4 className="text-xs font-medium text-destructive uppercase tracking-wider mb-1">Error</h4>
+          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
+            <p className="text-xs text-destructive font-mono whitespace-pre-wrap">{task.error_message}</p>
           </div>
         </div>
       )}
 
-      {/* Execution summary */}
+      {/* Agent result */}
+      {task.result && (
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Result</h4>
+          <div className="glass-card rounded-lg p-3 text-sm whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+            {String(task.result)}
+          </div>
+        </div>
+      )}
+
+      {/* Original description */}
+      {task.description && !task.result && (
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Task Description</h4>
+          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{task.description}</p>
+        </div>
+      )}
+
+      {/* Timestamps */}
       <div className="grid grid-cols-2 gap-3">
-        <div>
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Duration</p>
-          <p className="text-sm">{formatDuration(task.duration_ms)}</p>
-        </div>
-        {task.step_progress && (
-          <div>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Steps</p>
-            <p className="text-sm">{task.step_progress.current}/{task.step_progress.total} completed</p>
-          </div>
-        )}
         {task.started_at && (
           <div>
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Started</p>
@@ -241,26 +329,35 @@ function DoneView({ task }: { task: BoardTask }) {
 
       {/* Actions */}
       <div className="flex gap-2 pt-2">
-        <Button variant="outline" size="sm" className="text-xs">
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs"
+          onClick={() => onStatusChange('in_progress')}
+        >
           <RotateCcw className="w-3.5 h-3.5 mr-1" />
           Re-run
-        </Button>
-        <Button variant="outline" size="sm" className="text-xs">
-          <Download className="w-3.5 h-3.5 mr-1" />
-          Download
         </Button>
       </div>
     </div>
   )
 }
 
-export function BoardTaskViewer({ task, onClose, className }: BoardTaskViewerProps) {
-  const statusConf = STATUS_CONFIG[task.status]
+// ── Main Viewer ──────────────────────────────────────────────────────
+
+export function BoardTaskViewer({ task: propTask, onClose, className }: BoardTaskViewerProps) {
+  const task = useLiveTask(propTask)
+  const statusConf = STATUS_CONFIG[task.status] ?? STATUS_CONFIG['inbox']
   const priorityConf = PRIORITY_CONFIG[task.priority]
+  const updateStatus = useUpdateTaskStatus()
+
+  const handleStatusChange = (newStatus: string) => {
+    updateStatus.mutate({ taskId: task.id, status: newStatus as any })
+  }
 
   return (
     <div className={cn(
-      'fixed inset-y-0 right-0 w-[420px] max-w-full bg-background border-l border-border shadow-2xl z-50',
+      'fixed inset-y-0 right-0 w-[480px] max-w-full bg-background border-l border-border shadow-2xl z-50',
       'flex flex-col animate-in slide-in-from-right duration-200',
       className,
     )}>
@@ -271,6 +368,9 @@ export function BoardTaskViewer({ task, onClose, className }: BoardTaskViewerPro
           Back
         </button>
         <div className="flex items-center gap-2">
+          {task.status === 'in_progress' && (
+            <Loader2 className="w-3 h-3 text-[hsl(var(--info))] animate-spin" />
+          )}
           <div className={cn('w-2 h-2 rounded-full', statusConf.dotColor)} />
           <span className="text-xs font-medium text-muted-foreground">{statusConf.label}</span>
         </div>
@@ -306,8 +406,8 @@ export function BoardTaskViewer({ task, onClose, className }: BoardTaskViewerPro
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {(task.status === 'inbox' || task.status === 'assigned') && <InboxView task={task} />}
         {task.status === 'in_progress' && <InProgressView task={task} />}
-        {task.status === 'review' && <ReviewView task={task} />}
-        {task.status === 'done' && <DoneView task={task} />}
+        {task.status === 'review' && <ReviewView task={task} onStatusChange={handleStatusChange} />}
+        {task.status === 'done' && <DoneView task={task} onStatusChange={handleStatusChange} />}
       </div>
     </div>
   )

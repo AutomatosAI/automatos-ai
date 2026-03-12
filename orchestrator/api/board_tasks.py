@@ -545,7 +545,11 @@ async def refine_task(
 # ── Internal helpers ─────────────────────────────────────────────────
 
 def _extract_llm_text(response) -> str:
-    """Pull plain text out of an LLM response (handles dict or string)."""
+    """Pull plain text out of an LLM response (handles LLMResponse, dict, or string)."""
+    # Handle LLMResponse objects (have .content attribute)
+    if hasattr(response, "content"):
+        return str(response.content or "")
+
     if isinstance(response, dict):
         text = (
             response.get("content")
