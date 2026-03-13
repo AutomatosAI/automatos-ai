@@ -145,6 +145,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
     error_message: item.error_message ?? undefined,
     source_id: item.source_id ?? String(item.id),
     step_progress: item.planning_data?.step_progress ?? undefined,
+    planning_data: item.planning_data ?? undefined,
     result: item.result,
   }
 }

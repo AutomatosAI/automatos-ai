@@ -33,6 +33,7 @@ export interface BoardTask {
   report_id?: string
   source_id: string
   project_id?: number
+  planning_data?: { recipe_id?: number; execution_id?: string; step_progress?: { current: number; total: number } }
   result?: any
 }
 

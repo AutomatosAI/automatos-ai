@@ -10,6 +10,7 @@ import { apiClient } from '@/lib/api-client'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/types/board'
 import { useUpdateTaskStatus } from '@/hooks/use-board-tasks'
+import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
 interface BoardTaskViewerProps {
@@ -381,6 +382,28 @@ function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: Re
   )
 }
 
+function ExecutionKitchenLink({ task, onClose }: { task: BoardTask; onClose: () => void }) {
+  const router = useRouter()
+  if (task.type !== 'recipe' || !task.planning_data?.execution_id) return null
+
+  const execId = task.planning_data.execution_id
+  const recipeId = task.planning_data.recipe_id
+
+  return (
+    <Button
+      variant="outline"
+      className="w-full"
+      onClick={() => {
+        onClose()
+        router.push(`/workflows?openExecution=${execId}&recipeId=${recipeId}`)
+      }}
+    >
+      <ExternalLink className="w-4 h-4 mr-2" />
+      View in Execution Kitchen
+    </Button>
+  )
+}
+
 // ── Main Modal ──────────────────────────────────────────────────────
 
 export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTaskViewerProps) {
@@ -459,6 +482,11 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
           {task.status === 'in_progress' && <InProgressContent task={task} />}
           {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
+
+          {/* Deep link to Execution Kitchen for recipe tasks */}
+          <div className="mt-4">
+            <ExecutionKitchenLink task={task} onClose={() => onOpenChange(false)} />
+          </div>
         </div>
       </DialogContent>
     </Dialog>
