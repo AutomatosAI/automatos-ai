@@ -577,16 +577,6 @@ export function RecipesTab({
                         <LatestRunLink recipeId={recipe.template_id || String(recipe.id || '')} />
                         {!recipe.is_system && (
                           <>
-                            {!recipe.is_marketplace_item && (
-                              <Button
-                                variant="ghost" size="sm" className="h-8 w-8 p-0"
-                                onClick={() => handleShareToMarketplace(recipe)}
-                                disabled={isSharing}
-                                title="Share"
-                              >
-                                {isSharing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
-                              </Button>
-                            )}
                             <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEditClick(recipe)} title="Edit">
                               <Edit className="w-3.5 h-3.5" />
                             </Button>
