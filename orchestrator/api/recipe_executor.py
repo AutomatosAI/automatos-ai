@@ -6,7 +6,7 @@ Simple step-by-step executor for Starter Plan recipes.
 Bypasses the 9-stage pipeline — executes recipe steps sequentially
 using the SAME components as the chatbot (PRD-50 alignment):
 
-- get_chat_tools() for tools (no enum constraint)
+- ContextService(RECIPE) for system prompt + base tools (PRD-80)
 - ComposioHintService.build_hints() for hints
 - create_llm_manager().generate_response() for LLM
 - tool_router.execute_and_format() for tool execution
@@ -74,6 +74,8 @@ async def _execute_step(
     recipe_memories: Optional[dict] = None,
     prompt_for_hints: Optional[str] = None,
     max_iterations: int = 25,
+    recipe_name: str = "",
+    total_steps: int = 1,
 ) -> dict:
     """
     Execute a single recipe step using the chatbot's exact component path.
@@ -98,10 +100,11 @@ async def _execute_step(
         Dict with status, result, and execution metadata.
     """
     # Lazy imports to avoid circular deps
-    from modules.tools.tool_router import get_agent_tools as get_chat_tools, get_tool_router
+    from modules.tools.tool_router import get_tool_router
     from modules.tools.services.composio_hint_service import ComposioHintService
     from modules.tools.services.composio_tool_service import ComposioToolService
     from modules.agents.factory.agent_factory import AgentFactory
+    from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
         SCRATCHPAD_WRITE_TOOL_DEF,
         SCRATCHPAD_READ_TOOL_DEF,
@@ -121,9 +124,31 @@ async def _execute_step(
             "execution": {"tokens_used": 0, "tool_calls": [], "messages": []},
         }
 
-    # 1. System prompt — PRD-71: use pre-built prompt from agent_runtime
-    system_prompt = await _build_system_prompt(agent, db, agent_runtime=agent_runtime)
-    messages = [{"role": "system", "content": system_prompt}]
+    # 1. System prompt + tools via ContextService (PRD-80)
+    #    Build recipe_step dict for RecipeContextSection
+    previous_output = ""
+    if scratchpad and step_order > 1:
+        prev_ctx = scratchpad.format_context_for_step(step_order)
+        if prev_ctx:
+            previous_output = prev_ctx
+
+    recipe_step_dict = {
+        "name": recipe_name,
+        "step_number": step_order,
+        "total_steps": total_steps,
+        "instructions": clean_prompt,
+        "previous_output": previous_output,
+    }
+
+    context = await ContextService(db).build_context(
+        mode=ContextMode.RECIPE,
+        agent=agent,
+        workspace_id=str(workspace_id),
+        recipe_step=recipe_step_dict,
+    )
+
+    messages = [{"role": "system", "content": context.system_prompt}]
+    base_tools = context.tools
 
     # 1b. Recipe step scope — prevent agent from wandering into other steps' tasks
     scope_instruction = (
@@ -205,16 +230,14 @@ async def _execute_step(
                     ctx_parts.append(f"  {mk}: {mv}")
             messages.append({"role": "system", "content": "\n".join(ctx_parts)})
 
-    # 3c. Scratchpad context (replaces old _format_step_data text dump)
-    if scratchpad:
-        ctx = scratchpad.format_context_for_step(step_order)
-        if ctx:
-            messages.append({"role": "system", "content": ctx})
+    # 3c. Scratchpad context — now handled via recipe_step.previous_output
+    #    in ContextService, but we still inject raw scratchpad for steps > 1
+    #    in case the RecipeContextSection truncated it.
 
     # 4. User message — clean task prompt
     messages.append({"role": "user", "content": clean_prompt})
 
-    # 5. Tools — per-action SDK tools (or composio_execute fallback) + builtins
+    # 5. Tools — base tools from ContextService (PRD-80) + Composio overlay
     #    When Composio actions are resolved (e.g. JIRA_CREATE_ISSUE), strip only
     #    the generic fallback executor. Keep platform tools, workspace tools, and
     #    knowledge tools — the LLM needs them for context gathering (e.g. fetching
@@ -225,7 +248,7 @@ async def _execute_step(
     if composio_result and composio_result.tools:
         # SDK search succeeded: keep only non-exploration builtins + per-action tools
         builtin_tools = [
-            t for t in get_chat_tools(agent_id=agent.id, workspace_id=workspace_id)
+            t for t in base_tools
             if t.get("function", {}).get("name") not in _STRIP_WHEN_COMPOSIO
         ]
         tools = builtin_tools + composio_result.tools
@@ -236,7 +259,7 @@ async def _execute_step(
         )
     else:
         # Fallback: composio_execute + hints (existing behavior)
-        tools = get_chat_tools(agent_id=agent.id, workspace_id=workspace_id)
+        tools = list(base_tools)
     if scratchpad:
         scratchpad_tools = [SCRATCHPAD_WRITE_TOOL_DEF]
         if step_order > 1:
@@ -1052,6 +1075,8 @@ async def _execute_recipe_inner(
                             recipe_memories=recipe_memories if idx == 0 else None,
                             prompt_for_hints=prompt_template,
                             max_iterations=step_max_iter,
+                            recipe_name=recipe.name,
+                            total_steps=total_steps,
                         ),
                         timeout=step_timeout_sec,
                     )
