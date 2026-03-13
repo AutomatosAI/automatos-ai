@@ -44,7 +44,7 @@ Replace 9 fragmented prompt-building code paths with a single `ContextService`. 
 ### Phase 2: Migrate Callers (One at a Time, Least Risk First)
 
 - [x] **US-013: Migrate Heartbeat Service** — Replaced inline f-string prompt + to_dispatcher_schema() in _orchestrator_tick_llm with ContextService(HEARTBEAT). Added task_context to HEARTBEAT mode sections for heartbeat-specific instructions. Uses SimpleNamespace pseudo-agent for orchestrator identity. Single db session for both context building and tool execution
-- [ ] **US-014: Migrate Agent Factory** — Replace _build_agent_system_prompt() + get_tools_for_agent() with ContextService(TASK_EXECUTION)
+- [x] **US-014: Migrate Agent Factory** — In execute_with_prompt(), when no explicit/cached system_prompt exists, uses ContextService(TASK_EXECUTION) for both prompt and tools. When caller provides system_prompt (execution_manager, channels), keeps existing behavior. _build_agent_system_prompt() NOT deleted (Phase 3). Composio hints, tool loop, retries all preserved unchanged
 - [ ] **US-015: Migrate Recipe Executor** — Replace recipe prompt assembly with ContextService(RECIPE)
 - [ ] **US-016: Migrate Execution Manager** — Verify delegation works through factory, remove any redundant prompt building
 - [ ] **US-017: Migrate Smart Orchestrator (Chatbot)** — Replace prepare_request() prompt/memory/tool assembly with ContextService(CHATBOT). Keep intent classification separate
