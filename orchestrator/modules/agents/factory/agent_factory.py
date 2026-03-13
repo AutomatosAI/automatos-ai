@@ -576,7 +576,9 @@ class AgentFactory:
                 self.logger.info(f"Agent {agent_id} already active in runtime")
                 return self.active_agents[agent_id]
 
-            db_agent = self.db_session.query(Agent).filter(Agent.id == agent_id).first()
+            from modules.agents.queries import get_agent_with_context
+
+            db_agent = get_agent_with_context(self.db_session, agent_id)
             if not db_agent:
                 self.logger.error(f"Agent {agent_id} not found in database")
                 return None
@@ -737,10 +739,11 @@ class AgentFactory:
                 messages.append({"role": "system", "content": system_prompt})
             else:
                 # --- ContextService path (the single prompt builder) ---
+                from modules.agents.queries import get_agent_with_context
                 from modules.context import ContextService, ContextMode
 
                 mode = ContextMode(context_mode) if context_mode else ContextMode.TASK_EXECUTION
-                db_agent = self.db_session.query(Agent).filter_by(id=agent_runtime.agent_id).first()
+                db_agent = get_agent_with_context(self.db_session, agent_runtime.agent_id)
                 if db_agent:
                     context_result = await ContextService(self.db_session).build_context(
                         mode=mode,
