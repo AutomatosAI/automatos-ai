@@ -165,11 +165,18 @@ class SmartChatOrchestrator:
         # ─── 2. Memory decision (KEPT — chatbot-specific optimisation) ───
         _wants_memory = self._should_fetch_memory(intent_result)
         if complexity_assessment and not getattr(complexity_assessment, "needs_memory", True):
-            _wants_memory = False
-            logger.info(
-                "[Orchestrator] Memory SKIPPED by ComplexityAssessment (%s)",
-                getattr(complexity_assessment, "complexity", "?"),
-            )
+            # Don't let complexity override when intent explicitly requires memory
+            if intent_result.requires_memory:
+                logger.info(
+                    "[Orchestrator] Memory KEPT — intent requires_memory=True overrides ComplexityAssessment (%s)",
+                    getattr(complexity_assessment, "complexity", "?"),
+                )
+            else:
+                _wants_memory = False
+                logger.info(
+                    "[Orchestrator] Memory SKIPPED by ComplexityAssessment (%s)",
+                    getattr(complexity_assessment, "complexity", "?"),
+                )
 
         # Extract tool hints from complexity assessment
         _tool_hints = None
