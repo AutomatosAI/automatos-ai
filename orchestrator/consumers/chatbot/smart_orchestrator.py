@@ -6,9 +6,8 @@ The central coordinator for the intelligent Automatos chat system.
 
 This module ties together:
 - Intent Classification (what does the user want?)
-- Memory Management (what do we know about them?)
-- Tool Routing (what tools do they need?)
-- Personality (how do we respond?)
+- ContextService (unified prompt building, memory, tools, personality)
+- Conversation State (tracking across messages)
 
 Usage:
     orchestrator = SmartChatOrchestrator(workspace_id, agent_id)
@@ -18,15 +17,13 @@ Usage:
 
 import asyncio
 import logging
+import time
+import types
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from .intent_classifier import Intent, IntentResult, get_intent_classifier
-from .smart_memory import MemoryResult, get_smart_memory_manager
-from .smart_tool_router import ToolRoutingResult, get_smart_tool_router
-from .personality import get_happy_system_prompt, AutomatosPersonality, load_orchestrator_settings
-from modules.memory.unified_memory_service import get_unified_memory_service
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +75,9 @@ class SmartChatOrchestrator:
     """
     Central orchestrator for intelligent chat processing.
 
-    This replaces the scattered logic in the old chat service with
-    a clean, unified approach.
+    Uses ContextService (PRD-80) for unified prompt building, memory
+    retrieval, and tool loading.  Intent classification remains separate
+    for tool_choice and response routing decisions.
     """
 
     # How often to refresh memory (in messages)
@@ -90,7 +88,8 @@ class SmartChatOrchestrator:
         workspace_id: str,
         agent_id: Optional[int] = None,
         agent_name: Optional[str] = None,
-        widget_mode: bool = False
+        widget_mode: bool = False,
+        db_session: Any = None,
     ):
         """
         Initialize the orchestrator.
@@ -99,17 +98,24 @@ class SmartChatOrchestrator:
             workspace_id: Workspace ID for memory scoping
             agent_id: Agent ID for memory scoping
             agent_name: Agent name for personalization
-            widget_mode: When True, restrict memory to agent-only (no global workspace memories)
+            widget_mode: When True, restrict memory to agent-only
+            db_session: Optional DB session for ContextService
         """
         self.workspace_id = workspace_id
         self.agent_id = agent_id
         self.agent_name = agent_name or "Automatos"
         self.widget_mode = widget_mode
+        self._db_session = db_session
 
         # Components
         self.classifier = get_intent_classifier()
+
+        # Legacy: keep memory_manager reference for store_exchange()
+        from .smart_memory import get_smart_memory_manager
         self.memory_manager = get_smart_memory_manager()
-        self.tool_router = get_smart_tool_router()
+
+        # Unified memory service for store_exchange L2 + session updates
+        from modules.memory.unified_memory_service import get_unified_memory_service
         self._unified_memory = get_unified_memory_service()
 
         # Conversation state
@@ -127,271 +133,100 @@ class SmartChatOrchestrator:
         """
         Prepare a chat request for the LLM.
 
-        This is the main entry point. It:
-        1. Classifies the user's intent
-        2. Retrieves relevant memories (if needed)
-        3. Routes to appropriate tools (if needed)
-        4. Builds the system prompt with personality
-        5. Returns everything needed for the LLM call
+        Uses ContextService (PRD-80) for unified prompt building, memory
+        retrieval, and tool loading.  Intent classification stays separate
+        for tool_choice and response routing decisions.
 
         Args:
             messages: Conversation messages
-            available_tools: All tools available to this agent
+            available_tools: All tools available to this agent (kept for
+                backward compatibility — ContextService loads tools internally)
             chat_id: Optional chat session ID
+            complexity_assessment: Optional PRD-68 AutoBrain assessment
 
         Returns:
             OrchestratedRequest ready for LLM
         """
-        import time
         start_time = time.time()
 
         # Extract latest user message
         latest_query = self._extract_latest_user_message(messages)
         logger.debug(f"[Orchestrator] Processing: {latest_query[:50]}...")
 
-        # 1. Classify Intent
+        # ─── 1. Classify Intent (KEPT — needed for response routing) ───
         intent_result = self.classifier.classify(latest_query, messages)
         self.state.last_intent = intent_result.primary_intent
 
-        logger.info(f"[Orchestrator] Intent: {intent_result.primary_intent.value} "
-                   f"(tools: {intent_result.requires_tools}, memory: {intent_result.requires_memory})")
+        logger.info(
+            f"[Orchestrator] Intent: {intent_result.primary_intent.value} "
+            f"(tools: {intent_result.requires_tools}, memory: {intent_result.requires_memory})"
+        )
 
-        # 2. Retrieve Context (Context Router or fallback to SmartMemoryManager)
-        # PRD-68: ComplexityAssessment can override memory decision
-        # PRD-79 US-019: Context Router replaces hardcoded memory retrieval
-        memory_result = None
-        context_bundle = None
+        # ─── 2. Memory decision (KEPT — chatbot-specific optimisation) ───
         _wants_memory = self._should_fetch_memory(intent_result)
-        if complexity_assessment and not complexity_assessment.needs_memory:
+        if complexity_assessment and not getattr(complexity_assessment, "needs_memory", True):
             _wants_memory = False
-            logger.info(f"[Orchestrator] Memory SKIPPED by ComplexityAssessment ({complexity_assessment.complexity.value})")
+            logger.info(
+                "[Orchestrator] Memory SKIPPED by ComplexityAssessment (%s)",
+                getattr(complexity_assessment, "complexity", "?"),
+            )
+
+        # Extract tool hints from complexity assessment
+        _tool_hints = None
+        if complexity_assessment and getattr(complexity_assessment, "tool_hints", None):
+            _tool_hints = complexity_assessment.tool_hints
+            logger.info(f"[Orchestrator] Tools ENABLED by tool_hints={_tool_hints}")
+
+        # ─── 3. Build context via ContextService (PRD-80) ───
+        # Replaces: memory retrieval, tool routing, prompt building,
+        # daily log injection, platform summary injection, datetime injection
+        from modules.context import ContextService, ContextMode
+
+        agent = self._load_agent()
+
+        context = await ContextService(self._db_session).build_context(
+            mode=ContextMode.CHATBOT,
+            agent=agent,
+            workspace_id=self.workspace_id,
+            messages=messages,
+            widget_mode=self.widget_mode,
+            complexity_assessment=complexity_assessment,
+            tool_hints=_tool_hints,
+            # Kwargs passed through to sections:
+            intent_result=intent_result,
+            skip_memory=not _wants_memory,
+            chat_id=chat_id,
+            query=latest_query,
+            agent_name=self.agent_name,
+            user_name=self.state.user_name,
+        )
+
+        # ─── 4. Update conversation state ───
         if _wants_memory:
-            # Try Context Router first (PRD-79 Phase 2)
-            try:
-                context_bundle = await self._unified_memory.retrieve_context(
-                    workspace_id=self.workspace_id,
-                    agent_id=self.agent_id,
-                    query=latest_query,
-                    conversation_id=chat_id,
-                )
-                logger.info(
-                    "[Orchestrator] Context Router OK: ~%d tokens, signals=%s",
-                    context_bundle.total_tokens_estimate,
-                    context_bundle.signals,
-                )
-            except Exception:
-                logger.warning(
-                    "[Orchestrator] Context Router failed — falling back to SmartMemoryManager",
-                    exc_info=True,
-                )
-                context_bundle = None
-
-            # Fallback: old SmartMemoryManager path if Context Router failed
-            if context_bundle is None:
-                memory_result = await self.memory_manager.retrieve_memories(
-                    workspace_id=self.workspace_id,
-                    agent_id=self.agent_id,
-                    query=latest_query,
-                    widget_mode=self.widget_mode,
-                )
-
             self.state.messages_since_memory_fetch = 0
             self.state.memory_fetched_at = time.time()
-
-            # Update user name if found (from fallback path)
-            if memory_result and memory_result.user_context.name:
-                self.state.user_name = memory_result.user_context.name
+            if context.user_name:
+                self.state.user_name = context.user_name
         else:
             self.state.messages_since_memory_fetch += 1
 
-        # US-015: Store last memory result so callers can emit SSE events.
-        # When Context Router is used, build a compatible MemoryResult from the bundle.
-        if context_bundle is not None:
-            from .smart_memory import UserContext
-            _lt_mems = list(context_bundle.long_term_memories)
-            _formatted = "\n".join(
-                m.get("memory", "") for m in _lt_mems if m.get("memory")
-            )
-            memory_result = MemoryResult(
-                memories=_lt_mems,
-                user_context=UserContext(name=self.state.user_name),
-                formatted_context=_formatted,
-                retrieval_time_ms=0.0,
-            )
-        self._last_memory_result = memory_result
-
-        # 3. Route Tools (if needed)
-        # PRD-68: ComplexityAssessment tool_hints override intent-based routing
-        tool_result = None
-        _wants_tools = intent_result.requires_tools
-        _tool_hints = None
-        if complexity_assessment and complexity_assessment.tool_hints:
-            _wants_tools = True
-            _tool_hints = complexity_assessment.tool_hints
-            logger.info(f"[Orchestrator] Tools ENABLED by tool_hints={_tool_hints}")
-        if _wants_tools and available_tools:
-            tool_result = await self.tool_router.route(
-                query=latest_query,
-                available_tools=available_tools,
-                conversation_context=messages,
-                tool_hints=_tool_hints,
-            )
-        else:
-            # Even when intent says "no tools", always include platform_* tools
-            # so Auto can answer platform self-awareness queries (PRD-64)
-            platform_tools = [
-                t for t in (available_tools or [])
-                if t.get("function", {}).get("name", "").startswith("platform_")
-            ]
-            if platform_tools:
-                tool_result = ToolRoutingResult(
-                    should_include_tools=True,
-                    filtered_tools=platform_tools,
-                    priority_tools=[],
-                    tool_choice="auto",
-                    reasoning="Platform tools always available for self-awareness"
-                )
-            else:
-                tool_result = ToolRoutingResult(
-                    should_include_tools=False,
-                    filtered_tools=[],
-                    priority_tools=[],
-                    tool_choice="none",
-                    reasoning="No tools needed for this intent"
-                )
-
-        # 4. Build System Prompt
-        tool_names = []
-        if tool_result.filtered_tools:
-            for t in tool_result.filtered_tools:
-                fn = t.get("function", {})
-                if fn.get("name"):
-                    tool_names.append(fn["name"])
-
-        # Load workspace personality settings (cached, ~0ms on hit)
-        orch_settings = load_orchestrator_settings(self.workspace_id)
-
-        if context_bundle is not None:
-            # --- Context Router path (PRD-79) ---
-            # Extract memory strings from the bundle for the personality template
-            memory_strings = [
-                m.get("memory", "") for m in context_bundle.long_term_memories
-                if m.get("memory")
-            ]
-
-            system_prompt = get_happy_system_prompt(
-                user_name=self.state.user_name,
-                agent_name=self.agent_name,
-                msg_count=len(messages),
-                memories=memory_strings,
-                tool_names=tool_names,
-                orchestrator_settings=orch_settings,
-            )
-
-            # Append Context Router sections (session, daily, temporal, awareness)
-            if context_bundle.session_summary:
-                system_prompt = f"{system_prompt}\n\n## Session Context\n\n{context_bundle.session_summary}"
-
-            if context_bundle.daily_logs:
-                system_prompt = f"{system_prompt}\n\n## Recent Activity\n\n{context_bundle.daily_logs}"
-
-            if context_bundle.temporal_results:
-                temporal_lines = "\n".join(
-                    f"- {m.get('memory') or m.get('content', '')}"
-                    for m in context_bundle.temporal_results
-                    if m.get("memory") or m.get("content")
-                )
-                if temporal_lines:
-                    system_prompt = f"{system_prompt}\n\n## Relevant Past Context\n\n{temporal_lines}"
-
-            if context_bundle.knowledge_awareness:
-                system_prompt = f"{system_prompt}\n\n{context_bundle.knowledge_awareness}"
-        else:
-            # --- Fallback path (SmartMemoryManager) ---
-            memory_strings = []
-            if memory_result and memory_result.memories:
-                memory_strings = [m.get("memory", "") for m in memory_result.memories if m.get("memory")]
-
-            daily_logs = ""
-            try:
-                from config import config
-                if getattr(config, "INJECT_DAILY_LOGS", True):
-                    daily_logs = await self.memory_manager.get_daily_logs(
-                        workspace_id=self.workspace_id,
-                        max_chars=2000,
-                    )
-            except Exception as exc:
-                logger.debug("[Orchestrator] Daily logs skipped: %s", exc)
-
-            system_prompt = get_happy_system_prompt(
-                user_name=self.state.user_name,
-                agent_name=self.agent_name,
-                msg_count=len(messages),
-                memories=memory_strings,
-                tool_names=tool_names,
-                orchestrator_settings=orch_settings,
-            )
-
-            # Fallback L1 session hydration (Redis) — only when Context Router not used
-            if chat_id:
-                try:
-                    session = await self._unified_memory.get_session(
-                        workspace_id=self.workspace_id,
-                        conversation_id=chat_id,
-                    )
-                    if session and session.summary:
-                        summary_text = session.summary[:2000]
-                        session_context = (
-                            f"## Session Context\n\n"
-                            f"Continuing conversation ({session.exchange_count} prior exchanges).\n"
-                            f"Recent context:\n{summary_text}"
-                        )
-                        system_prompt = f"{system_prompt}\n\n{session_context}"
-                except Exception:
-                    logger.warning(
-                        "[Orchestrator] Session hydration failed for chat_id=%s — skipping",
-                        chat_id,
-                        exc_info=True,
-                    )
-
-            if daily_logs:
-                system_prompt = f"{system_prompt}\n\n## Recent Activity\n\n{daily_logs}"
-
-        # Inject platform action summary so LLM knows what platform_execute can do
-        try:
-            from modules.tools.discovery import get_action_registry
-            platform_summary = get_action_registry().build_prompt_summary()
-            if platform_summary:
-                system_prompt = f"{system_prompt}\n\n{platform_summary}"
-        except Exception as e:
-            logger.warning(f"Failed to inject platform action summary into chatbot prompt: {e}")
-
-        # 5. Convert messages to LLM format
-        llm_messages = self._convert_messages(messages)
-
-        # Add current datetime context
-        now = datetime.utcnow()
-        date_msg = {
-            "role": "system",
-            "content": f"Current date/time (UTC): {now.strftime('%Y-%m-%d %H:%M')}. "
-                      f"Use this for any time-relative queries."
-        }
-        llm_messages.insert(1, date_msg)
+        # ─── 5. Build compat MemoryResult for SSE events / CTO override ───
+        self._last_memory_result = self._build_compat_memory_result(context)
 
         preparation_time = (time.time() - start_time) * 1000
 
         return OrchestratedRequest(
-            system_prompt=system_prompt,
-            messages=llm_messages,
-            tools=tool_result.filtered_tools,
-            tool_choice=tool_result.tool_choice,
-            memory_context=memory_result.formatted_context if memory_result else None,
-            user_name=self.state.user_name,
+            system_prompt=context.system_prompt,
+            messages=context.messages,
+            tools=context.tools,
+            tool_choice=context.tool_choice,
+            memory_context=context.memory_context,
+            user_name=context.user_name or self.state.user_name,
             intent=intent_result.primary_intent,
             intent_confidence=intent_result.confidence,
-            requires_tools=tool_result.should_include_tools or intent_result.requires_tools,
+            requires_tools=bool(context.tools) or intent_result.requires_tools,
             requires_memory=intent_result.requires_memory,
-            preparation_time_ms=preparation_time
+            preparation_time_ms=preparation_time,
         )
 
     def _should_fetch_memory(self, intent_result: IntentResult) -> bool:
@@ -410,6 +245,70 @@ class SmartChatOrchestrator:
 
         return False
 
+    def _load_agent(self) -> Any:
+        """Load the full agent record from DB for ContextService.
+
+        Falls back to a SimpleNamespace with basic fields if DB is
+        unavailable or the agent is not found.
+        """
+        if self._db_session and self.agent_id:
+            try:
+                from core.models import Agent
+                agent = self._db_session.query(Agent).filter(
+                    Agent.id == self.agent_id
+                ).first()
+                if agent:
+                    return agent
+            except Exception:
+                logger.warning(
+                    "[Orchestrator] Failed to load agent %s from DB — using fallback",
+                    self.agent_id,
+                    exc_info=True,
+                )
+
+        # Fallback: minimal pseudo-agent
+        return types.SimpleNamespace(
+            id=self.agent_id,
+            name=self.agent_name,
+            agent_type="chatbot",
+            description=None,
+            skills=[],
+        )
+
+    def _build_compat_memory_result(self, context: Any) -> Any:
+        """Build a MemoryResult-compatible object for SSE events and CTO override.
+
+        service.py accesses ``self._last_memory_result`` to:
+        1. Emit 'memory_retrieved' SSE events (reads .formatted_context)
+        2. Build CTO override prompts (reads .memories list)
+        """
+        from .smart_memory import MemoryResult, UserContext
+
+        # Use raw memories stashed by MemorySection if available
+        raw_memories = []
+        formatted_context = ""
+
+        if hasattr(context, "memory_context") and context.memory_context:
+            formatted_context = context.memory_context
+
+        # ContextService stashes raw memory dicts in kwargs via MemorySection
+        # We access them through the formatted_context as fallback
+        if formatted_context and not raw_memories:
+            # Parse bullet points from formatted memory text
+            for line in formatted_context.split("\n"):
+                line = line.strip()
+                if line.startswith("- "):
+                    raw_memories.append({"memory": line[2:]})
+
+        return MemoryResult(
+            memories=raw_memories,
+            user_context=UserContext(
+                name=context.user_name or self.state.user_name
+            ),
+            formatted_context=formatted_context,
+            retrieval_time_ms=0.0,
+        )
+
     def _extract_latest_user_message(self, messages: List[Dict]) -> str:
         """Extract the text of the latest user message."""
         for msg in reversed(messages):
@@ -427,43 +326,6 @@ class SmartChatOrchestrator:
                 return msg["content"]
 
         return ""
-
-    def _convert_messages(self, messages: List[Dict]) -> List[Dict[str, str]]:
-        """Convert messages to simple role/content format for LLM.
-
-        Filters out system-role messages since the orchestrator builds
-        its own system prompt via personality.py.
-        """
-        converted = []
-
-        for msg in messages:
-            role = msg.get("role", "user")
-
-            # Skip system messages — we build our own system prompt
-            if role == "system":
-                continue
-
-            content = ""
-
-            # Handle parts format
-            if msg.get("parts"):
-                text_parts = []
-                for part in msg["parts"]:
-                    if part.get("type") == "text" and part.get("text"):
-                        text_parts.append(part["text"])
-                    elif part.get("type") == "file":
-                        # File parts should already be resolved by _resolve_file_parts
-                        # but handle gracefully if they slip through
-                        filename = part.get("filename", "file")
-                        text_parts.append(f"[Attached file: {filename} — content not available]")
-                content = "\n".join(text_parts)
-            else:
-                content = msg.get("content", "")
-
-            if content:
-                converted.append({"role": role, "content": content})
-
-        return converted
 
     async def store_exchange(
         self,

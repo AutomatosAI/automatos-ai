@@ -635,6 +635,7 @@ class StreamingChatService:
             agent_id=agent_runtime.agent_id,
             agent_name=agent_runtime.metadata.name,
             widget_mode=self.widget_mode,
+            db_session=self.db,
         )
 
         _complexity = (

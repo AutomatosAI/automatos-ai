@@ -170,6 +170,15 @@ class ToolsSection(BaseSection):
                 )
 
                 if not result.should_include_tools:
+                    # Even when SmartToolRouter says no tools, always
+                    # include platform_* tools so the agent can answer
+                    # self-awareness queries (PRD-64).
+                    platform_tools = [
+                        t for t in all_tools
+                        if t.get("function", {}).get("name", "").startswith("platform_")
+                    ]
+                    if platform_tools:
+                        return platform_tools, "auto"
                     return [], "none"
 
                 return result.filtered_tools, result.tool_choice

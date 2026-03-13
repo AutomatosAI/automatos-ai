@@ -58,6 +58,12 @@ class IdentitySection(BaseSection):
 
     Always included (priority 1) so the agent knows who it is
     regardless of which code path invokes the LLM.
+
+    When ``personality=True`` (CHATBOT mode), generates the full
+    personality-aware prompt via ``AutomatosPersonality`` — including
+    platform skill, tool guidance, action response style, and
+    self-learning instructions.  Memory is NOT included here (handled
+    by ``MemorySection``).
     """
 
     name: str = "identity"
@@ -67,6 +73,8 @@ class IdentitySection(BaseSection):
     async def render(self, ctx: SectionContext) -> str:  # noqa: C901
         """Build the identity block for the system prompt."""
         try:
+            if ctx.kwargs.get("personality"):
+                return self._build_chatbot_identity(ctx)
             return self._build(ctx)
         except Exception:
             logger.exception("IdentitySection.render failed — returning minimal identity")
@@ -78,6 +86,7 @@ class IdentitySection(BaseSection):
     # ------------------------------------------------------------------
 
     def _build(self, ctx: SectionContext) -> str:
+        """Basic identity for non-chatbot modes (task_execution, heartbeat, etc.)."""
         agent = ctx.agent
         agent_name = getattr(agent, "name", "Agent") if agent else "Agent"
         agent_type = getattr(agent, "agent_type", "assistant") if agent else "assistant"
@@ -98,16 +107,54 @@ class IdentitySection(BaseSection):
         if persona_text:
             parts.append(f"\n## Persona & Communication Style\n{persona_text}")
 
-        # Personality adjustments (only when personality=True via kwargs)
-        if ctx.kwargs.get("personality"):
-            personality_block = self._get_personality_block(ctx)
-            if personality_block:
-                parts.append(f"\n{personality_block}")
-
         content = "\n".join(parts)
         if self.max_tokens:
             content = self.truncate(content, self.max_tokens)
         return content
+
+    def _build_chatbot_identity(self, ctx: SectionContext) -> str:
+        """Full chatbot personality prompt via AutomatosPersonality.
+
+        Replaces the call to ``get_happy_system_prompt()`` in the old
+        chatbot path.  Includes base identity, platform skill, tool
+        guidance, action response style, and self-learning — but NOT
+        memory (``MemorySection`` handles that separately).
+        """
+        from consumers.chatbot.personality import (
+            AutomatosPersonality,
+            load_orchestrator_settings,
+        )
+
+        agent_name = ctx.kwargs.get("agent_name")
+        if not agent_name:
+            agent_name = getattr(ctx.agent, "name", "Agent") if ctx.agent else "Agent"
+
+        user_name = ctx.kwargs.get("_user_name") or ctx.kwargs.get("user_name")
+        msg_count = len(ctx.messages or [])
+
+        orch_settings: Dict[str, Any] = ctx.kwargs.get("orchestrator_settings", {})
+        if not orch_settings:
+            try:
+                orch_settings = load_orchestrator_settings(ctx.workspace_id)
+            except Exception:
+                logger.debug("Could not load orchestrator settings for %s", ctx.workspace_id)
+                orch_settings = {}
+
+        parts = [
+            AutomatosPersonality.get_base_system_prompt(
+                user_name=user_name,
+                agent_name=agent_name,
+                msg_count=msg_count,
+                orchestrator_settings=orch_settings or None,
+            ),
+            AutomatosPersonality.get_platform_skill(),
+            AutomatosPersonality.get_tool_guidance_prompt(has_tools=True),
+            AutomatosPersonality.get_action_response_style(),
+            AutomatosPersonality.get_self_learning_instruction(),
+        ]
+
+        # No max_tokens truncation — the full chatbot personality is essential
+        return "\n".join(parts)
 
     @staticmethod
     def _get_persona_text(agent: Any) -> str:
