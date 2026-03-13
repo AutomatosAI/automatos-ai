@@ -32,6 +32,10 @@ class ModeConfig:
 
 
 MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
+    # personality=True: CHATBOT is the only user-facing conversational mode.
+    # AutomatosPersonality.get_base_system_prompt() produces chatbot-specific
+    # content (greetings, conversation awareness, "never show code" rules) that
+    # is inappropriate for task-executing or orchestration agents.
     ContextMode.CHATBOT: ModeConfig(
         sections=[
             "identity", "skills", "composio", "plugins",
@@ -42,6 +46,9 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         personality=True,
         max_tokens=None,
     ),
+    # personality=False: task agents should be professional/neutral regardless
+    # of workspace personality settings. Identity + persona provide sufficient
+    # agent identity without chatbot-specific tone. See PRD-81 Task 5.1.
     ContextMode.TASK_EXECUTION: ModeConfig(
         sections=[
             "identity", "skills", "composio", "plugins",
@@ -52,6 +59,8 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         personality=False,
         max_tokens=None,
     ),
+    # personality=False: orchestrator tick is internal coordination, not
+    # user-facing. Neutral tone keeps dispatcher prompts lean.
     ContextMode.HEARTBEAT_ORCHESTRATOR: ModeConfig(
         sections=[
             "identity", "skills", "platform_actions", "task_context",
@@ -61,8 +70,9 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         personality=False,
         max_tokens=8000,
     ),
-    # NOTE: memory intentionally excluded from HEARTBEAT_AGENT to keep context lean.
-    # No memory section also means no daily logs. Heartbeat agents are stateless by
+    # personality=False: heartbeat agents execute scheduled tasks autonomously.
+    # NOTE: memory intentionally excluded to keep context lean. No memory
+    # section also means no daily logs. Heartbeat agents are stateless by
     # design — add "memory" here if agents need cross-run learning.
     # See PRD-81 Task 3.5 / Task 5.5.
     ContextMode.HEARTBEAT_AGENT: ModeConfig(
@@ -74,6 +84,8 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         personality=False,
         max_tokens=128000,
     ),
+    # personality=False: recipes are multi-step automation pipelines.
+    # Professional/neutral tone ensures consistent output across steps.
     ContextMode.RECIPE: ModeConfig(
         sections=[
             "identity", "skills", "composio", "plugins",
@@ -84,18 +96,21 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         personality=False,
         max_tokens=None,
     ),
+    # personality=False: internal routing — no user-facing output.
     ContextMode.ROUTER: ModeConfig(
         sections=["identity", "datetime_context"],
         tool_loading="none",
         personality=False,
         max_tokens=None,
     ),
+    # personality=False: internal orchestration stage — no user-facing output.
     ContextMode.ORCHESTRATOR_STAGE: ModeConfig(
         sections=["identity", "datetime_context"],
         tool_loading="none",
         personality=False,
         max_tokens=None,
     ),
+    # personality=False: SQL generation — precision over personality.
     ContextMode.NL2SQL: ModeConfig(
         sections=["identity", "datetime_context"],
         tool_loading="none",
