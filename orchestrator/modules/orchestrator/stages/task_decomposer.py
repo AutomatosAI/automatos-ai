@@ -7,6 +7,7 @@ NO MOCK DATA - This module actually decomposes tasks using OpenAI GPT-4
 
 import json
 import logging
+from types import SimpleNamespace
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import asyncio
@@ -161,20 +162,36 @@ REMEMBER:
             logger.info(f"  ⚙️  Complexity: {complexity} → Target: {5 if complexity == 'low' else 7 if complexity == 'medium' else 10} subtasks")
             logger.info(f"  🎯 Design: Granular, single-skill, inter-agent collaboration")
             
-            # PRD-59/US-006: Fetch system prompt from Prompt Registry if available
-            system_prompt = "You are an expert task decomposition system. Always return valid JSON."
+            # Build system prompt via ContextService (PRD-80 US-019)
+            # PromptRegistry override is preserved: if a registry prompt exists,
+            # it's passed as task_description so IdentitySection includes it.
+            from modules.context import ContextService, ContextMode
+
+            registry_override = None
             try:
                 from modules.prompts.registry import PromptRegistry
                 registry = PromptRegistry()
                 registry_prompt = await registry.get_prompt("task-decomposer")
                 if registry_prompt and registry_prompt.get("content"):
-                    system_prompt = registry_prompt["content"]
+                    registry_override = registry_prompt["content"]
                     logger.info("📋 Stage 1: Using Prompt Registry system prompt (task-decomposer)")
             except (ImportError, Exception) as e:
                 logger.debug(f"Prompt Registry not available for Stage 1: {e}")
 
+            ctx_result = await ContextService().build_context(
+                mode=ContextMode.ORCHESTRATOR_STAGE,
+                agent=SimpleNamespace(
+                    id=None,
+                    name="Task Decomposer",
+                    role="Expert task decomposition system. Always return valid JSON.",
+                    description=None,
+                ),
+                workspace_id="system",
+                task_description=registry_override or task_description,
+            )
+
             messages = [
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": ctx_result.system_prompt},
                 {"role": "user", "content": prompt}
             ]
             

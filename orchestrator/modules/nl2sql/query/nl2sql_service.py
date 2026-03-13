@@ -52,7 +52,8 @@ class NaturalLanguageToSQLService:
         dialect: str = "postgresql",
         examples: Optional[List[Dict[str, str]]] = None,
         error_context: Optional[str] = None,
-        previous_attempts: Optional[List[Dict[str, str]]] = None
+        previous_attempts: Optional[List[Dict[str, str]]] = None,
+        system_prompt: Optional[str] = None,
     ) -> Tuple[str, str, Dict[str, Any]]:
         """
         Generate SQL from natural language using LLM.
@@ -65,6 +66,7 @@ class NaturalLanguageToSQLService:
             examples: Few-shot examples (question/SQL pairs)
             error_context: Previous error message for self-correction
             previous_attempts: List of {sql, error} dicts from failed attempts
+            system_prompt: Optional system prompt from ContextService (PRD-80)
 
         Returns:
             Tuple of (sql, explanation, metadata)
@@ -80,7 +82,10 @@ class NaturalLanguageToSQLService:
         )
 
         try:
-            messages = [{"role": "user", "content": prompt}]
+            messages: list[Dict[str, str]] = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
             llm_response = self.llm_provider.generate_response_sync(messages)
 
             response_text = llm_response.content
