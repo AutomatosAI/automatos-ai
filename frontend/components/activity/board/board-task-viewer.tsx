@@ -1,6 +1,6 @@
 'use client'
 
-import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield } from 'lucide-react'
+import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
@@ -355,15 +355,17 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
       </div>
 
       {/* Actions */}
-      <div className="flex gap-3 pt-2 border-t border-border/30">
-        <Button
-          variant="outline"
-          onClick={() => onStatusChange('in_progress')}
-        >
-          <RotateCcw className="w-4 h-4 mr-2" />
-          Re-run Task
-        </Button>
-      </div>
+      {task.type !== 'recipe' && (
+        <div className="flex gap-3 pt-2 border-t border-border/30">
+          <Button
+            variant="outline"
+            onClick={() => onStatusChange('in_progress')}
+          >
+            <RotateCcw className="w-4 h-4 mr-2" />
+            Re-run Task
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
@@ -426,6 +428,14 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: priorityConf.color }} />
                   <span className="capitalize">{task.priority}</span>
                 </span>
+
+                {/* Recipe badge */}
+                {task.type === 'recipe' && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary">
+                    <Workflow className="w-3 h-3" />
+                    Recipe
+                  </span>
+                )}
 
                 {/* Agent */}
                 {task.assignee && (

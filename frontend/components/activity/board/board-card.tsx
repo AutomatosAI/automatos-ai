@@ -1,7 +1,7 @@
 'use client'
 
 import { Draggable } from '@hello-pangea/dnd'
-import { Bot, AlertCircle } from 'lucide-react'
+import { Bot, AlertCircle, Workflow } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow } from 'date-fns'
 import type { BoardTask } from '@/types/board'
@@ -44,6 +44,14 @@ export function BoardCard({ task, index, onOpen }: BoardCardProps) {
           }}
           onClick={() => onOpen(task)}
         >
+          {/* Recipe badge */}
+          {task.type === 'recipe' && (
+            <div className="flex items-center gap-1 mb-1">
+              <Workflow className="w-3 h-3 text-primary" />
+              <span className="text-[10px] font-medium text-primary uppercase tracking-wider">Recipe</span>
+            </div>
+          )}
+
           {/* Title */}
           <p className="text-sm font-medium line-clamp-2 mb-1">{task.name}</p>
 

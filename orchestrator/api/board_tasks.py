@@ -258,6 +258,7 @@ async def update_task(
         "status" in body
         and body["status"] == "in_progress"
         and task.assigned_agent_id
+        and task.source_type != 'recipe'  # Recipe executor handles its own execution
     )
 
     db.commit()
@@ -332,7 +333,7 @@ async def update_task_status(
     db.refresh(task)
 
     # Fire-and-forget: trigger agent execution when moved to in_progress
-    if new_status == "in_progress" and task.assigned_agent_id:
+    if new_status == "in_progress" and task.assigned_agent_id and task.source_type != 'recipe':
         _launch_task_execution(
             task_id=task.id,
             agent_id=task.assigned_agent_id,

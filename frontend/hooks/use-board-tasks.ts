@@ -126,7 +126,7 @@ export function useUpdateTaskStatus() {
 function mapTaskToBoardTask(item: any): BoardTask {
   return {
     id: String(item.id),
-    type: item.type ?? 'task',
+    type: item.source_type === 'recipe' ? 'recipe' : (item.type ?? 'task'),
     name: item.title ?? 'Untitled',
     description: item.description ?? undefined,
     status: (item.status as BoardStatus) ?? 'inbox',
@@ -143,7 +143,8 @@ function mapTaskToBoardTask(item: any): BoardTask {
     started_at: item.started_at ?? undefined,
     completed_at: item.completed_at ?? undefined,
     error_message: item.error_message ?? undefined,
-    source_id: String(item.id),
+    source_id: item.source_id ?? String(item.id),
+    step_progress: item.planning_data?.step_progress ?? undefined,
     result: item.result,
   }
 }
