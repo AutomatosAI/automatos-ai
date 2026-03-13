@@ -1,1 +1,0 @@
-"""Metadata Cache Module"""

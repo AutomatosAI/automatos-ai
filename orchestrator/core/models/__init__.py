@@ -10,8 +10,6 @@ from .workspaces import *
 from .credentials import *
 from .system_settings import *
 from .database_knowledge import *
-from .enhanced import *
-from .code_graph import *
 from .context_policy import *
 from .tools import *  # Import last - may extend models from core.py
 from .tool_assignments import *  # PRD-35: Tool catalog and assignments

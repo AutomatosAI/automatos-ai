@@ -383,6 +383,14 @@ class Config:
     COMPLEXITY_CACHE_TTL_HOURS: int = int(os.getenv("COMPLEXITY_CACHE_TTL_HOURS", "24"))
 
     # =============================================================================
+    # SEARCH MODULE (modules/search)
+    # =============================================================================
+    SIMILARITY_FUNCTION: str = os.getenv("SIMILARITY_FUNCTION", "cosine")
+    VECTOR_TABLE_NAME: str = os.getenv("VECTOR_TABLE_NAME", "document_chunks")
+    SEARCH_DEFAULT_MAX_RESULTS: int = int(os.getenv("SEARCH_DEFAULT_MAX_RESULTS", "10"))
+    SEARCH_DEFAULT_MIN_RELEVANCE: float = float(os.getenv("SEARCH_DEFAULT_MIN_RELEVANCE", "0.5"))
+
+    # =============================================================================
     # RAG / KNOWLEDGE SERVICES API
     # =============================================================================
     KNOWLEDGE_API_BASE_URL: str = os.getenv("KNOWLEDGE_API_BASE_URL", "http://127.0.0.1:8000")

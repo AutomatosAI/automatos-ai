@@ -71,16 +71,14 @@ async def summarize_context(request: SummarizationRequest, ctx: RequestContext =
     - high: 20-30% of original (executive summary only)
     """
     try:
-        # Import LLM provider
-        from core.llm_provider import LLMProviderManager
-        from modules.memory import MemoryService
-        
-        # Get session context from memory
-        memory_service = MemoryService()
-        memories = await memory_service.retrieve(
-            session_id=request.session_id,
-            max_items=1000  # Get all recent memories
+        # TODO: Wire to UnifiedMemoryService (PRD-79) once session retrieval is implemented
+        raise HTTPException(
+            status_code=501,
+            detail="Context summarization not yet wired to UnifiedMemoryService"
         )
+
+        # Placeholder: previous code used deleted MemoryService skeleton
+        memories = []
         
         if not memories:
             raise HTTPException(
@@ -189,30 +187,8 @@ async def get_memory_statistics(ctx: RequestContext = Depends(get_request_contex
     - Long-term (100k items)
     - Archival (1M items)
     """
-    try:
-        # TODO: Integrate with actual MemoryService
-        from modules.memory import MemoryService
-        
-        service = MemoryService()
-        stats = await service.get_stats()
-        
-        return {
-            "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
-            "memory_levels": stats.get("memory", {}),
-            "operations": {
-                "augmentation": stats.get("augmentation", {}),
-                "consolidation": stats.get("consolidation", {}),
-                "optimization": stats.get("optimization", {})
-            },
-            "research_compliance": {
-                "context_engineering_version": "2.0",
-                "hierarchical_memory": True,
-                "self_baking": True,
-                "multi_agent_sharing": False  # TODO: Implement
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting memory stats: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    # TODO: Wire to UnifiedMemoryService (PRD-79) for real stats
+    raise HTTPException(
+        status_code=501,
+        detail="Memory stats not yet wired to UnifiedMemoryService"
+    )

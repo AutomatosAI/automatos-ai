@@ -824,12 +824,41 @@ class RAGConfigResponse(BaseModel):
     updated_at: datetime
     created_by: Optional[str] = None
 
-class SystemHealthResponse(BaseModel):
+class ComponentHealth(BaseModel):
+    """Health status of individual system component"""
+    name: str
     status: str
-    timestamp: datetime
-    services: Dict[str, str]
-    metrics: Dict[str, Any]
+    last_check: datetime
+    metrics: Optional[Dict[str, Any]] = None
+
+class SystemHealthResponse(BaseModel):
+    """Comprehensive system health response"""
+    overall_status: str
+    components: List[ComponentHealth]
+    system_metrics: Dict[str, Any]
+    uptime: str
     version: str
+    timestamp: datetime
+
+class AgentStatistics(BaseModel):
+    """Agent statistics for dashboard"""
+    total_agents: int
+    active_agents: int
+    inactive_agents: int
+    agents_by_type: Dict[str, int]
+    average_performance: float
+    total_executions: int
+    successful_executions: int
+    failed_executions: int
+
+class SystemMetrics(BaseModel):
+    """System performance metrics"""
+    uptime: str
+    cpu_usage: float
+    memory_usage: float
+    active_connections: int
+    total_requests: int
+    error_rate: float
 
 class AgentTemplate(BaseModel):
     """Agent template for creation wizard"""

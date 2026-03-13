@@ -5,7 +5,6 @@ Search Module Configuration
 Configuration for the search module.
 """
 
-import os
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
@@ -62,10 +61,10 @@ class SearchConfig:
             database_url=app_config.DATABASE_URL or "",
             embedding_dimension=_get_system_dimension(),  # Always from system settings
             embedding_model=app_config.EMBEDDING_MODEL or "",
-            similarity_function=os.getenv("SIMILARITY_FUNCTION", "cosine"),
-            vector_table_name=os.getenv("VECTOR_TABLE_NAME", "document_chunks"),
-            default_max_results=int(os.getenv("DEFAULT_MAX_RESULTS", "10")),
-            default_min_relevance=float(os.getenv("DEFAULT_MIN_RELEVANCE", "0.5")),
-            cache_ttl_minutes=int(os.getenv("CACHE_TTL_MINUTES", "30")),
+            similarity_function=app_config.SIMILARITY_FUNCTION,
+            vector_table_name=app_config.VECTOR_TABLE_NAME,
+            default_max_results=app_config.SEARCH_DEFAULT_MAX_RESULTS,
+            default_min_relevance=app_config.SEARCH_DEFAULT_MIN_RELEVANCE,
+            cache_ttl_minutes=30,
         )
 
