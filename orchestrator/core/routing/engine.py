@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from types import SimpleNamespace
 from typing import Dict, List, Optional
 from uuid import UUID
 
@@ -41,6 +42,7 @@ from core.models.routing import (
 )
 from core.routing.cache import RoutingCache, _normalize_content
 from core.services.intent_classifier import IntentClassifier
+from modules.context import ContextMode, ContextService
 
 _LLM_CONFIDENCE_THRESHOLD = config.ROUTING_LLM_CONFIDENCE_THRESHOLD
 
@@ -511,9 +513,27 @@ class UniversalRouter:
                 semantic_candidates=semantic_candidates or None,
             )
 
-            # Call the LLM
+            # Build system prompt via ContextService (ROUTER mode: identity + datetime)
+            router_agent = SimpleNamespace(
+                id=None,
+                name="Universal Router",
+                agent_type="router",
+                description="Request routing and agent classification",
+                use_custom_persona=False,
+                persona=None,
+            )
+            context = await ContextService(self._db).build_context(
+                mode=ContextMode.ROUTER,
+                agent=router_agent,
+                workspace_id=envelope.workspace_id,
+            )
+
+            # Call the LLM — system prompt from ContextService, classification as user message
             llm_manager = create_llm_manager(service_name="orchestrator")
-            messages = [{"role": "user", "content": prompt}]
+            messages = [
+                {"role": "system", "content": context.system_prompt},
+                {"role": "user", "content": prompt},
+            ]
             response = await llm_manager.generate_response(messages)
 
             if not response or not response.content:
