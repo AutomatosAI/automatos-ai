@@ -34,7 +34,7 @@ Replace 9 fragmented prompt-building code paths with a single `ContextService`. 
 - [x] **US-004: Create IdentitySection** — Agent name, role, persona, personality. Replaces get_happy_system_prompt() identity + _build_agent_system_prompt() opening
 - [x] **US-005: Create SkillsSection** — SKILL.md content from agent_skills → skills table. Replaces skill injection in agent_factory
 - [x] **US-006: Create PlatformActionsSection** — Wraps ActionRegistry.build_prompt_summary(). Replaces inline injection in 3 files
-- [ ] **US-007: Create MemorySection** — Wraps SmartMemoryManager.retrieve_memories() + daily logs. Replaces memory injection in smart_orchestrator + agent_factory
+- [x] **US-007: Create MemorySection** — Wraps SmartMemoryManager.retrieve_memories() + daily logs. Replaces memory injection in smart_orchestrator + agent_factory
 - [ ] **US-008: Create ToolsSection** — Unified tool loading with 4 strategies (FULL/FILTERED/DISPATCHER_ONLY/NONE). Replaces get_tools_for_agent + smart_tool_router.route + inline to_dispatcher_schema
 - [ ] **US-009: Create TaskContextSection** — Task description, status, priority, board context
 - [ ] **US-010: Create RecipeContextSection** — Recipe step name, instructions, previous results
