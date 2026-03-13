@@ -28,20 +28,8 @@ from consumers.chatbot.streaming import StreamingHandler, get_streaming_handler
 from consumers.chatbot.tool_router import (
     ToolRouter,
     get_tool_router,
-    get_chat_tools,
-    get_chatbot_tools,
     execute_tool,
 )
-
-# Convenience export
-CHAT_TOOLS = None
-
-def get_tools():
-    """Get chatbot tools (lazy loaded)."""
-    global CHAT_TOOLS
-    # Retain compatibility: defaults to agent_id=None (all allowed)
-    CHAT_TOOLS = get_chat_tools()
-    return CHAT_TOOLS
 
 __all__ = [
     # Main services
@@ -50,15 +38,11 @@ __all__ = [
     # Components
     'PromptAnalyzer',
     'get_prompt_analyzer',
-    'StreamingHandler', 
+    'StreamingHandler',
     'get_streaming_handler',
     'ToolRouter',
     'get_tool_router',
     # Tools
-    'get_chat_tools',
-    'get_chatbot_tools',
-    'get_tools',
     'execute_tool',
-    'CHAT_TOOLS',
 ]
 

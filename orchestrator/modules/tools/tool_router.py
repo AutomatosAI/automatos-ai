@@ -18,7 +18,6 @@ import json
 import logging
 import re
 import time
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
@@ -122,16 +121,6 @@ def _rewrite_query_after_before(query: str, after_date: datetime.date, before_da
     return f"{q} {window}".strip() if q else window
 
 
-@contextmanager
-def _session_scope():
-    """Lightweight context manager to ensure sessions are always closed."""
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-
-
 # =============================================================================
 # PUBLIC: Get tools for an agent
 # =============================================================================
@@ -145,8 +134,6 @@ def get_tools_for_agent(
     """
     Get tools from modules.tools.ToolRegistry in OpenAI function format.
     SINGLE SOURCE OF TRUTH — no duplicate definitions.
-
-    Renamed from ``get_chatbot_tools`` — zero chatbot-specific logic.
     """
     session_used = db_session or SessionLocal()
     trace_id = _new_trace_id()
@@ -279,19 +266,6 @@ def get_tools_for_agent(
     finally:
         if db_session is None:
             session_used.close()
-
-
-def get_agent_tools(
-    agent_id: Optional[int] = None,
-    workspace_id: Optional[Any] = None,
-) -> List[Dict[str, Any]]:
-    """
-    Convenience wrapper: get tools for an agent with automatic session management.
-
-    Renamed from ``get_chat_tools`` — zero chatbot-specific logic.
-    """
-    with _session_scope() as session:
-        return get_tools_for_agent(agent_id=agent_id, db_session=session, workspace_id=workspace_id)
 
 
 # =============================================================================

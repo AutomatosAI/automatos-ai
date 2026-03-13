@@ -9,6 +9,11 @@ Intelligent tool routing that decides:
 
 Works with the Intent Classifier to route appropriately.
 Supports embedding-based semantic ranking (PRD-64) with fallback to keyword matching.
+
+NOTE: This module is consumed by ContextService (ToolLoadingStrategy.FILTERED).
+It is the only caller. Future work: absorb filtering logic into
+modules/context/sections/tools.py and delete this file.
+See PRD-81 Task 5.3 and system audit R1 finding.
 """
 
 import asyncio

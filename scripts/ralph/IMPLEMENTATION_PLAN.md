@@ -54,7 +54,7 @@ Complete the half-finished PRD-79 and PRD-80 unification. Kill the legacy `_buil
 
 ### Phase 5: Tech Debt
 
-- [ ] **US-010: Consolidate tool loading aliases** — Replace get_agent_tools() and get_chat_tools() calls with get_tools_for_agent(). Delete aliases. Add SmartToolRouter future-plan comment
+- [x] **US-010: Consolidate tool loading aliases** — Deleted get_agent_tools() wrapper + _session_scope() from tool_router.py. Removed get_chat_tools/get_chatbot_tools re-exports from consumers/chatbot/tool_router.py. Removed get_tools()/CHAT_TOOLS lazy cache from consumers/chatbot/__init__.py. Removed get_chat_tools from consumers/__init__.py. Updated chatbot_llm.py to import get_tools_for_agent directly from modules.tools.tool_router. Removed get_agent_tools from modules/tools/__init__.py exports. Added SmartToolRouter future-plan comment (PRD-81 Task 5.3). Cleaned up stale docstring in get_tools_for_agent(). Note: mcp_executor.py:344 and composio_analytics.py:306 have their own get_agent_tools methods (different signatures, unrelated). All 114 context tests pass
 - [ ] **US-011: Personality decisions + get_platform_skill() deletion** — Delete get_platform_skill() if unused. Document personality=True/False rationale on each mode. Document daily logs exclusion from HEARTBEAT_AGENT
 - [ ] **US-012: Agent resolution utility** — Create get_agent_with_context() in modules/agents/queries.py with joinedload(skills, persona). Replace bare db.query(Agent) in ContextService paths
 - [ ] **US-013: Composio hints evaluation + datetime cleanup** — Compare _inject_composio_hints() with ComposioSection — delete if redundant, expand section if needed. Remove inline strftime from heartbeat agent prompt

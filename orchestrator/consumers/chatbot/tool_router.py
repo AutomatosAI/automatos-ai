@@ -1,12 +1,10 @@
 """
-Chatbot Tool Router — Thin wrapper over shared tool_router
-===========================================================
+Chatbot Tool Router — Chatbot-specific tool extensions
+=======================================================
 
-Re-exports shared functions for backward compatibility.
-Adds chatbot-specific result formatting (build_tool_context_message).
-
-All generic tool execution logic now lives in modules.tools.tool_router.
-This module re-exports with original names so existing imports keep working.
+Adds chatbot-specific result formatting (build_tool_context_message)
+and ChatToolRouter subclass. All generic tool logic lives in
+modules.tools.tool_router.
 """
 
 import json
@@ -15,9 +13,6 @@ import re
 from typing import Any, Dict, List, Optional
 
 from modules.tools.tool_router import (
-    # Public API — re-export with ORIGINAL names for backward compat
-    get_tools_for_agent as get_chatbot_tools,
-    get_agent_tools as get_chat_tools,
     execute_tool,
     execute_tool_with_validation,
     validate_action_for_intent,
@@ -33,8 +28,6 @@ logger = logging.getLogger(__name__)
 
 # Re-export everything at module level for backward compatibility
 __all__ = [
-    "get_chatbot_tools",
-    "get_chat_tools",
     "execute_tool",
     "execute_tool_with_validation",
     "validate_action_for_intent",

@@ -19,11 +19,9 @@ Usage:
 from consumers.chatbot import (
     ChatService,
     StreamingChatService,
-    get_chat_tools,
 )
 
 __all__ = [
     'ChatService',
     'StreamingChatService',
-    'get_chat_tools',
 ]
