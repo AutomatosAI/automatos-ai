@@ -701,12 +701,14 @@ class HeartbeatService:
                 try:
                     from modules.agents.factory.agent_factory import AgentFactory
 
+                    from modules.context.modes import ContextMode
+
                     factory = AgentFactory(db_session=db)
                     exec_result = await factory.execute_with_prompt(
                         agent=agent_id,
                         prompt=prompt,
                         context={"source": "heartbeat", "workspace_id": workspace_id},
-                        use_memory=False,  # keep context lean
+                        context_mode=ContextMode.HEARTBEAT_AGENT,
                     )
 
                     # Extract the actual text from nested result
