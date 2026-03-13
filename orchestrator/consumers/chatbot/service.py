@@ -535,26 +535,12 @@ class StreamingChatService:
 
     async def _load_agent_context(self, agent_runtime) -> dict:
         """
-        Load agent-specific context: persona, description, skills/plugins, tool schemas.
+        Load agent-specific context: persona, description for chatbot identity injection.
 
-        PRD-71: Uses the pre-built system prompt from AgentRuntime (built once at
-        activation by agent_factory). Falls back to DB query only if the runtime
-        has no pre-built prompt.
+        PRD-81: System prompt cache removed from AgentRuntime — ContextService is
+        now the single prompt builder. This method only provides lightweight identity
+        context for the chatbot's _inject_agent_identity().
         """
-        if getattr(agent_runtime, 'system_prompt', None):
-            return {
-                "persona": "",
-                "description": "",
-                "extra_context": agent_runtime.system_prompt,
-                "skill_tools": getattr(agent_runtime, 'skill_tool_schemas', []),
-            }
-
-        logger.error(
-            "Agent %s has no pre-built system_prompt on AgentRuntime — "
-            "skills and plugins will be missing from this conversation. "
-            "Ensure activate_agent() is called before using the agent.",
-            agent_runtime.agent_id,
-        )
         persona = ""
         try:
             from core.models import Agent as AgentModel

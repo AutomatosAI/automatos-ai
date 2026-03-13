@@ -498,7 +498,7 @@ async def add_agent_skills(
                 detail="No skills specified"
             )
         
-        # Removed: apply_skills was deleted — use DB skill assignments + refresh_agent_prompt
+        # Removed: apply_skills was deleted — use DB skill assignments (ContextService handles prompt)
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="Use skill assignment API instead of legacy apply_skills",

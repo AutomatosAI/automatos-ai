@@ -24,8 +24,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.llm import LLMConfig, LLMManager, LLMProvider, LLMResponse, create_llm_manager
 from core.models import Agent, Base, PriorityLevel, Skill
-from core.models.composio_cache import AgentAppAssignment, ComposioActionCache, ComposioAppCache
-from modules.agents.services.skill_loader import get_skill_loader
+from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 
 
 logger = logging.getLogger(__name__)
@@ -170,8 +169,6 @@ class AgentRuntime:
     is_byok: bool = False
     resolved_provider: str = ""
     workspace_id: Optional[Any] = None
-    system_prompt: Optional[str] = None
-    skill_tool_schemas: List[Dict[str, Any]] = field(default_factory=list)
 
     def update_metrics(self, execution_time: float, tokens_used: int, success: bool):
         self.execution_count += 1
@@ -653,12 +650,6 @@ class AgentFactory:
 
             agent_tools = await self._load_agent_tools(agent_id)
 
-            # Build system prompt at activation time (single injection point)
-            system_prompt, skill_tool_schemas = self._build_agent_system_prompt(
-                agent=db_agent,
-                db=self.db_session,
-            )
-
             agent_runtime = AgentRuntime(
                 agent_id=agent_id,
                 metadata=metadata,
@@ -670,8 +661,6 @@ class AgentFactory:
                 is_byok=resolved.is_byok if resolved else False,
                 resolved_provider=resolved.provider if resolved else provider_str,
                 workspace_id=db_agent.workspace_id,
-                system_prompt=system_prompt,
-                skill_tool_schemas=skill_tool_schemas,
             )
 
             self.active_agents[agent_id] = agent_runtime
@@ -684,25 +673,6 @@ class AgentFactory:
         except Exception as e:
             self.logger.error(f"Failed to activate agent {agent_id}: {e}")
             return None
-
-    def refresh_agent_prompt(self, agent_id: int) -> bool:
-        """Rebuild the system prompt for an already-active agent."""
-        runtime = self.active_agents.get(agent_id)
-        if not runtime:
-            return False
-
-        db_agent = self.db_session.query(Agent).filter(Agent.id == agent_id).first()
-        if not db_agent:
-            return False
-
-        system_prompt, skill_tool_schemas = self._build_agent_system_prompt(
-            agent=db_agent,
-            db=self.db_session,
-        )
-        runtime.system_prompt = system_prompt
-        runtime.skill_tool_schemas = skill_tool_schemas
-        self.logger.info(f"Refreshed system prompt for agent {agent_id}")
-        return True
 
     # ==================================================================
     # execute_with_prompt — CLEAN REWRITE
@@ -759,17 +729,13 @@ class AgentFactory:
             # --- Build messages ---
             messages = []
 
-            # System prompt: explicit > cached > ContextService
-            skill_tool_schemas_from_prompt = []
+            # System prompt: explicit OR ContextService
             context_result = None  # Populated when ContextService builds the prompt
 
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
-            elif getattr(agent_runtime, "system_prompt", None):
-                messages.append({"role": "system", "content": agent_runtime.system_prompt})
-                skill_tool_schemas_from_prompt = getattr(agent_runtime, "skill_tool_schemas", [])
             else:
-                # --- ContextService path (replaces _build_agent_system_prompt) ---
+                # --- ContextService path (the single prompt builder) ---
                 from modules.context import ContextService, ContextMode
 
                 db_agent = self.db_session.query(Agent).filter_by(id=agent_runtime.agent_id).first()
@@ -781,6 +747,9 @@ class AgentFactory:
                         task_description=prompt,
                     )
                     messages.append({"role": "system", "content": context_result.system_prompt})
+                else:
+                    # Last resort — should not happen
+                    messages.append({"role": "system", "content": f"You are agent {agent_runtime.agent_id}."})
 
             # Short-term memory
             if use_memory and agent_runtime.memory:
@@ -819,7 +788,7 @@ class AgentFactory:
                 # ContextService already loaded tools via ToolsSection
                 tool_schemas = list(context_result.tools)
             else:
-                # Explicit/cached system_prompt path: load tools directly
+                # Explicit system_prompt path: load tools directly
                 from modules.tools.tool_router import get_tools_for_agent
 
                 tool_schemas = get_tools_for_agent(
@@ -827,12 +796,6 @@ class AgentFactory:
                     db_session=self.db_session,
                     workspace_id=agent_runtime.workspace_id,
                 )
-
-                # Add skill-based tools from prompt building
-                if skill_tool_schemas_from_prompt:
-                    tool_schemas.extend(skill_tool_schemas_from_prompt)
-                    tool_names = [t["function"]["name"] for t in skill_tool_schemas_from_prompt]
-                    self.logger.info(f"Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
 
             # Composio hint injection (enriches composio_execute with action enum + hints)
             workspace_id = agent_runtime.workspace_id
@@ -1139,184 +1102,6 @@ class AgentFactory:
             )
         except Exception as e:
             self.logger.warning(f"Failed to inject Composio hints: {e}")
-
-    # ==================================================================
-    # System Prompt Builder
-    # ==================================================================
-
-    def _build_agent_system_prompt(
-        self,
-        agent: Agent,
-        task_context: Optional[str] = None,
-        db: Optional[Session] = None,
-    ) -> Tuple[str, List[Dict]]:
-        """
-        Build the agent system prompt AND extract skill tool schemas.
-
-        Single injection point — loads ALL assigned skills AND plugin content.
-        """
-        sections: List[str] = []
-        skill_tool_schemas: List[Dict] = []
-
-        # Identity
-        sections.append(f"# Agent: {agent.name}")
-        sections.append(f"Agent ID: {agent.id}")
-        sections.append(f"Agent Type: {getattr(agent, 'agent_type', 'unknown')}")
-        if agent.description:
-            sections.append(agent.description)
-
-        # Persona
-        try:
-            if getattr(agent, "use_custom_persona", False) and agent.custom_persona_prompt:
-                sections.append(f"\n## Persona & Communication Style\n{agent.custom_persona_prompt}")
-            elif getattr(agent, "persona_id", None) and getattr(agent, "persona", None):
-                persona_prompt = agent.persona.system_prompt or ""
-                if persona_prompt:
-                    sections.append(f"\n## Persona & Communication Style\n{persona_prompt}")
-        except Exception as e:
-            self.logger.warning(f"Failed to load persona for agent {agent.id}: {e}")
-
-        # Task context
-        if task_context:
-            sections.append("\n## Task Context\n" + str(task_context))
-
-        # Skills
-        if getattr(agent, "skills", None):
-            active_skills = [s for s in agent.skills if s.is_active]
-            if active_skills:
-                sections.append("\n## Your Specialized Skills\n")
-                loader = get_skill_loader(db) if db is not None else None
-                loaded_skill_ids: set = set()
-
-                for skill in active_skills:
-                    if skill.id in loaded_skill_ids:
-                        continue
-                    loaded_skill_ids.add(skill.id)
-                    self.logger.info(f"Loading skill: {skill.name}")
-                    sections.append(f"### {skill.name}")
-
-                    # Load prompt content
-                    core_content = None
-                    if loader is not None:
-                        try:
-                            core_content = loader.load_skill_core(skill.name, db=db)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to load core content for '{skill.name}': {e}")
-
-                    if core_content and isinstance(core_content, str) and core_content.strip():
-                        sections.append(core_content)
-                    else:
-                        fallback = skill.prompt_template or skill.description or ""
-                        if fallback:
-                            sections.append(str(fallback))
-
-                    # Extract tool schemas from skills
-                    if hasattr(skill, "tools_schema") and skill.tools_schema and isinstance(skill.tools_schema, dict):
-                        try:
-                            for tool_def in skill.tools_schema.get("tools", []):
-                                tool_name = tool_def.get("name")
-                                skill_tool_schemas.append({
-                                    "type": "function",
-                                    "function": {
-                                        "name": tool_name,
-                                        "description": tool_def.get("description", ""),
-                                        "parameters": tool_def.get("parameters", {}),
-                                    },
-                                })
-                                self.logger.info(f"  Extracted tool: {tool_name}")
-                        except Exception as e:
-                            self.logger.warning(f"Failed to extract tools from skill '{skill.name}': {e}")
-
-                self.logger.info(f"Loaded {len(active_skills)} skill(s) for agent {agent.id}")
-
-        # Plugin content (non-materialized only)
-        try:
-            from core.services.plugin_context_service import PluginContextService
-
-            plugin_svc = PluginContextService(db) if db else None
-            if plugin_svc:
-                plugin_rows = plugin_svc.get_assigned_plugins(agent.id)
-                if plugin_rows:
-                    non_materialized = []
-                    for row in plugin_rows:
-                        _aap, plugin = row if isinstance(row, tuple) else (row, getattr(row, "plugin", row))
-                        materialized_ids = getattr(plugin, "materialized_skill_ids", None) or []
-                        if not materialized_ids:
-                            non_materialized.append(row)
-
-                    if non_materialized:
-                        tier1 = plugin_svc.build_tier1_summary(non_materialized)
-                        if tier1:
-                            sections.append(tier1)
-                        tier2 = plugin_svc.build_tier2_content_sync(non_materialized, task_context=task_context)
-                        if tier2:
-                            sections.append(tier2)
-        except Exception as e:
-            self.logger.warning(f"Failed to load plugins for agent {agent.id}: {e}")
-
-        # Composio apps section in prompt
-        if db and agent.id:
-            try:
-                assignments = (
-                    db.query(AgentAppAssignment)
-                    .filter(
-                        AgentAppAssignment.agent_id == agent.id,
-                        AgentAppAssignment.is_active.is_(True),
-                        AgentAppAssignment.app_type == "EXTERNAL",
-                    )
-                    .all()
-                )
-                if assignments:
-                    app_names = [a.app_name.upper() for a in assignments if a.app_name]
-                    cache = {
-                        a.app_name: a
-                        for a in db.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_(app_names)).all()
-                    }
-                    helper_section = ["\n## Available External Apps (Composio)\n"]
-                    helper_section.append(
-                        "You have access to these external apps via Composio. "
-                        "Use the `composio_execute` tool with an appropriate action.\n"
-                    )
-                    for assignment in assignments:
-                        app_name = (assignment.app_name or "").upper()
-                        app = cache.get(app_name)
-                        if app_name:
-                            helper_section.append(f"### {app_name}")
-                            if app and app.description:
-                                helper_section.append(f"**Description**: {app.description}")
-                    sections.append("\n".join(helper_section))
-            except Exception as e:
-                self.logger.warning(f"Failed to append Composio apps to prompt: {e}")
-
-        # Dependency context instructions
-        sections.append("\n## IMPORTANT: Working with Context and Dependencies\n")
-        sections.append("When you receive '## DEPENDENCY CONTEXT' at the beginning of your task:")
-        sections.append("1. This contains outputs from previous tasks that you need to use")
-        sections.append("2. Read and understand all the context provided")
-        sections.append("3. For compilation/report tasks: Synthesize the information into a coherent document")
-        sections.append("4. For document generation tasks: Transform the input into the requested format")
-        sections.append("\nWhen your task involves writing/creating documents:")
-        sections.append("- Use the write_file tool to save your output")
-        sections.append("- The task description will specify the output filename")
-        sections.append("- Actually WRITE the content, don't just describe what you would write")
-
-        # Skill tool usage instructions
-        if skill_tool_schemas:
-            tool_names_list = [t["function"]["name"] for t in skill_tool_schemas]
-            sections.append("\n## IMPORTANT: Using Your Skill Tools\n")
-            sections.append(f"You have access to: {', '.join(tool_names_list)}")
-            sections.append("When your task requires capabilities provided by these tools, you MUST use them via function calling.")
-            sections.append("Analyze your task, check if any tools match, and CALL them — do not just describe what you would do.")
-
-        # Response formatting
-        sections.append("\n## Response Formatting Rules\n")
-        sections.append("When you receive API/tool results:")
-        sections.append("- Synthesize data into clear, human-friendly prose — do NOT dump raw JSON")
-        sections.append("- NEVER use code blocks or inline code backticks")
-        sections.append("- Use bullet points or short paragraphs for a non-technical reader")
-
-        prompt_text = "\n\n".join([s for s in sections if s is not None])
-        return (prompt_text, skill_tool_schemas)
 
     # ==================================================================
     # Composio App Loading
