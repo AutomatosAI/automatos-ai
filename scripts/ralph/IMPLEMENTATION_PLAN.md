@@ -38,7 +38,7 @@ Replace 9 fragmented prompt-building code paths with a single `ContextService`. 
 - [x] **US-008: Create ToolsSection** — Unified tool loading with 4 strategies (FULL/FILTERED/DISPATCHER_ONLY/NONE). Replaces get_tools_for_agent + smart_tool_router.route + inline to_dispatcher_schema
 - [x] **US-009: Create TaskContextSection** — Task description, status, priority, board context
 - [x] **US-010: Create RecipeContextSection** — Recipe step name, instructions, previous results
-- [ ] **US-011: Create DatetimeContext + Conversation + Custom sections** — Three lightweight sections to complete the library
+- [x] **US-011: Create DatetimeContext + Conversation + Custom sections** — Three lightweight sections to complete the library. SECTION_REGISTRY (10 entries) exported from sections/__init__.py, all MODE_CONFIGS validated against it
 - [ ] **US-012: Create ContextService.build_context()** — Main orchestrator: section composition, parallel rendering, budget allocation, tool loading, message formatting → ContextResult
 
 ### Phase 2: Migrate Callers (One at a Time, Least Risk First)
