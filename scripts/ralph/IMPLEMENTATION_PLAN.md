@@ -57,7 +57,7 @@ Replace 9 fragmented prompt-building code paths with a single `ContextService`. 
 
 ### Phase 4: Tests
 
-- [ ] **US-021: Unit tests** — Sections, budget manager, estimator, modes
+- [x] **US-021: Unit tests** — 71 tests across 5 files in tests/test_context/: test_estimator.py (fast/precise estimates, empty strings, realistic prompts), test_budget_manager.py (TokenBudget computed property + frozen, RenderedSection, budget allocation within/over budget, priority-based dropping, never-drop priority 1-2, order preservation, DEFAULT_BUDGETS coverage), test_identity_section.py (name+role+workspace, description, custom/DB persona, None agent fallback, broken persona exception), test_memory_section.py (skip_memory, context router vs smart memory fallback, kwargs stash, exception resilience, _extract_query), test_modes.py (ContextMode enum, ModeConfig frozen, MODE_CONFIGS completeness, section names in SECTION_REGISTRY, tool_loading validity). All external deps mocked
 - [ ] **US-022: Integration tests** — build_context() for each mode, failure resilience, immutability
 
 ---
