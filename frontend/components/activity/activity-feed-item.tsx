@@ -112,7 +112,7 @@ function getConfigureUrl(item: ActivityFeedItem): string | null {
     case 'routine':
       return item.agent?.id ? `/agents?agent=${item.agent.id}` : null
     case 'recipe':
-      return item.source_id ? `/workflows?recipe=${item.source_id}` : null
+      return item.source_id ? `/agents?tab=recipes&recipe=${item.source_id}` : null
     case 'mission':
       return null
     default:

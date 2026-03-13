@@ -126,7 +126,7 @@ export function AgentManagement() {
   // Navigate to ExecutionKitchen when a recipe is cooked
   const handleExecuteRecipe = useCallback((_workflowId: number, info?: { recipeExecutionId: string; recipeId: string }) => {
     if (info) {
-      window.location.href = `/activity?openExecution=${info.recipeExecutionId}&recipeId=${info.recipeId}`
+      window.location.href = `/activity/execution?id=${info.recipeExecutionId}&recipeId=${info.recipeId}`
     }
   }, [])
 

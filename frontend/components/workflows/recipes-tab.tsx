@@ -99,7 +99,7 @@ function LatestRunLink({ recipeId }: { recipeId: string }) {
       title="View latest execution"
       onClick={(e) => {
         e.stopPropagation()
-        window.location.href = `/workflows?openExecution=${execId}&recipeId=${recipeId}`
+        window.location.href = `/activity/execution?id=${execId}&recipeId=${recipeId}`
       }}
     >
       <ExternalLink className="w-3.5 h-3.5" />

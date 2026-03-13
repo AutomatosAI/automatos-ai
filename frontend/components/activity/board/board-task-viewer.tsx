@@ -395,7 +395,7 @@ function ExecutionKitchenLink({ task, onClose }: { task: BoardTask; onClose: () 
       className="w-full"
       onClick={() => {
         onClose()
-        router.push(`/workflows?openExecution=${execId}&recipeId=${recipeId}`)
+        router.push(`/activity/execution?id=${execId}&recipeId=${recipeId}`)
       }}
     >
       <ExternalLink className="w-4 h-4 mr-2" />
