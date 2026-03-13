@@ -39,7 +39,7 @@ Complete the half-finished PRD-79 and PRD-80 unification. Kill the legacy `_buil
 ### Phase 2: Kill the Cache — ContextService Only Path
 
 - [x] **US-004: Remove system_prompt cache + delete legacy methods** — Removed system_prompt and skill_tool_schemas fields from AgentRuntime. Deleted _build_agent_system_prompt() (~176 lines). Deleted refresh_agent_prompt() (~18 lines). Updated activate_agent() to skip prompt building. Removed cached prompt branch from execute_with_prompt() (3-way → 2-way: explicit > ContextService). Removed skill_tool_schemas_from_prompt variable. Fixed chatbot/service.py _load_agent_context() (removed dead cache branch). Removed orphaned imports (get_skill_loader, ComposioActionCache). Updated comment in agent_endpoints.py. All 114 context tests pass
-- [ ] **US-005: Make execute_with_prompt() always use ContextService** — Add context_mode parameter. Remove cached prompt branch. 2-way resolution: explicit > ContextService. Use context_result.tools when ContextService provides them. Remove skill_tool_schemas_from_prompt variable
+- [x] **US-005: Make execute_with_prompt() always use ContextService** — Added context_mode: Optional[str] parameter to execute_with_prompt(). ContextService path uses `context_mode or ContextMode.TASK_EXECUTION` instead of hardcoded mode. Cached prompt branch already removed in US-004. context_result.tools already used (line 789). skill_tool_schemas_from_prompt already removed. Note: context_result.tool_choice exists but generate_response() interface doesn't accept tool_choice — documented as discovered issue for future LLM interface enhancement. All 114 context tests pass
 - [ ] **US-006: Migrate heartbeat agent tick + verify channel adapters** — Pass context_mode=ContextMode.HEARTBEAT_AGENT to execute_with_prompt(). Remove use_memory=False. Verify channels/base.py does NOT pass explicit system_prompt (so it auto-uses ContextService)
 - [ ] **US-006b: Migrate execution_manager.py to ContextService** — Remove direct _build_agent_system_prompt() call. Remove professional_system_prompt hardcoded block. Make execution_manager go through execute_with_prompt() without explicit system_prompt so ContextService handles it. Move useful instructions to user prompt prefix
 
@@ -63,7 +63,7 @@ Complete the half-finished PRD-79 and PRD-80 unification. Kill the legacy `_buil
 
 ## Discovered Issues
 
-_(Ralph will populate during execution)_
+- **DI-001: LLM interface missing tool_choice support** — `ContextResult.tool_choice` exists (default "auto") but `LLMManager.generate_response()` and all LLM client `generate_response()` methods only accept `messages` and `tools` — no `tool_choice` param. Adding it would require changes to the base class + all 8 client implementations. Low priority since "auto" is the default everywhere.
 
 ## Notes
 

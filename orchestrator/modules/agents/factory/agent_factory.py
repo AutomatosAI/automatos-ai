@@ -691,6 +691,7 @@ class AgentFactory:
         max_retries: int = 2,
         max_tool_iterations: int = 10,
         composio_action_names: Optional[set] = None,
+        context_mode: Optional[str] = None,  # ContextMode enum value — overrides default TASK_EXECUTION
         # Legacy params — accepted but ignored (callers may still pass them)
         enable_actions: bool = True,
         action_executor: Optional[Any] = None,
@@ -738,10 +739,11 @@ class AgentFactory:
                 # --- ContextService path (the single prompt builder) ---
                 from modules.context import ContextService, ContextMode
 
+                mode = ContextMode(context_mode) if context_mode else ContextMode.TASK_EXECUTION
                 db_agent = self.db_session.query(Agent).filter_by(id=agent_runtime.agent_id).first()
                 if db_agent:
                     context_result = await ContextService(self.db_session).build_context(
-                        mode=ContextMode.TASK_EXECUTION,
+                        mode=mode,
                         agent=db_agent,
                         workspace_id=agent_runtime.workspace_id,
                         task_description=prompt,
