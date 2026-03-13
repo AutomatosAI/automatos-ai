@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.models.core import BoardTask
 
@@ -31,29 +30,34 @@ def create_recipe_board_task(
     total_steps = len(steps)
     triggered_by = getattr(execution, 'triggered_by', 'manual') or 'manual'
 
-    values = {
-        'workspace_id': execution.workspace_id,
-        'title': f"Recipe: {recipe.name}",
-        'description': recipe.description,
-        'status': 'in_progress',
-        'priority': 'medium',
-        'review_mode': 'auto',
-        'assigned_agent_id': first_agent_id,
-        'created_by_type': 'recipe',
-        'source_type': 'recipe',
-        'source_id': execution.execution_id,
-        'tags': ['recipe', triggered_by],
-        'started_at': datetime.now(timezone.utc),
-        'planning_data': {
+    # Check for existing task (partial unique index prevents duplicates at DB level)
+    existing = db.query(BoardTask.id).filter(
+        BoardTask.source_type == 'recipe',
+        BoardTask.source_id == execution.execution_id,
+    ).first()
+    if existing:
+        return None
+
+    task = BoardTask(
+        workspace_id=execution.workspace_id,
+        title=f"Recipe: {recipe.name}",
+        description=recipe.description,
+        status='in_progress',
+        priority='medium',
+        review_mode='auto',
+        assigned_agent_id=first_agent_id,
+        created_by_type='recipe',
+        source_type='recipe',
+        source_id=execution.execution_id,
+        tags=['recipe', triggered_by],
+        started_at=datetime.now(timezone.utc),
+        planning_data={
             'recipe_id': recipe.id,
             'total_steps': total_steps,
             'execution_id': execution.execution_id,
         },
-    }
-
-    stmt = pg_insert(BoardTask.__table__).values(**values)
-    stmt = stmt.on_conflict_do_nothing(constraint='uq_board_tasks_recipe_exec')
-    db.execute(stmt)
+    )
+    db.add(task)
     db.commit()
 
     logger.info(
