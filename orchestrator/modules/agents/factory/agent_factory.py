@@ -1029,6 +1029,16 @@ class AgentFactory:
 
     # ==================================================================
     # Composio Hint Injection
+    # ------------------------------------------------------------------
+    # These methods are COMPLEMENTARY to ComposioSection (modules/context/
+    # sections/composio.py), NOT redundant. ComposioSection renders static
+    # app-level descriptions in the system prompt. These methods do dynamic
+    # per-request work: _inject_composio_hints() uses ComposioHintService
+    # to semantically match user prompts to relevant actions AND constrains
+    # the composio_execute tool schema enum. _inject_composio_recipe_hints()
+    # does the same for recipe paths with pre-resolved action names.
+    # Future: absorb hint logic into a ComposioHintSection or expand
+    # ComposioSection with action-level detail. See PRD-81 Task 5.7.
     # ==================================================================
 
     def _inject_composio_recipe_hints(

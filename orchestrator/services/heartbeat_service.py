@@ -687,7 +687,6 @@ class HeartbeatService:
 
                 prompt = (
                     f"Scheduled heartbeat check. {heartbeat_prompt}\n"
-                    f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n"
                     "Use your tools to check. Reply with a SHORT plain-text summary (max 500 chars), no markdown.\n"
                     + (
                         "You may take action if needed."
