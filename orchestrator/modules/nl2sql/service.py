@@ -284,6 +284,28 @@ class DatabaseKnowledgeService:
             except Exception as e:
                 logger.warning(f"Failed to get few-shot examples: {e}")
 
+        # PRD-80 US-019: Build NL2SQL system prompt via ContextService
+        nl2sql_system_prompt = None
+        try:
+            from types import SimpleNamespace
+            from modules.context import ContextService, ContextMode
+
+            workspace_id = str(getattr(source, 'workspace_id', 'system'))
+            ctx_result = await ContextService().build_context(
+                mode=ContextMode.NL2SQL,
+                agent=SimpleNamespace(
+                    id=None,
+                    name="SQL Query Generator",
+                    role=f"Natural language to {source.dialect} SQL converter",
+                    description=None,
+                ),
+                workspace_id=workspace_id,
+                task_description=natural_language_query,
+            )
+            nl2sql_system_prompt = ctx_result.system_prompt
+        except Exception as e:
+            logger.warning(f"ContextService unavailable for NL2SQL, proceeding without: {e}")
+
         # PRD-61 US-005: Error self-correction loop
         last_error = None
         attempted_sqls = []
@@ -298,7 +320,8 @@ class DatabaseKnowledgeService:
                 dialect=source.dialect,
                 examples=few_shot_examples if few_shot_examples else None,
                 error_context=last_error,
-                previous_attempts=attempted_sqls if attempted_sqls else None
+                previous_attempts=attempted_sqls if attempted_sqls else None,
+                system_prompt=nl2sql_system_prompt,
             )
 
             generated_sql = sql

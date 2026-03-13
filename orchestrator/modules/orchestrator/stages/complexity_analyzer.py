@@ -21,6 +21,7 @@ Author: Automatos AI - Phase 1 Implementation
 import logging
 import re
 import asyncio
+from types import SimpleNamespace
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -420,11 +421,26 @@ Provide your analysis in JSON format:
 
 Be practical and consider the user's constraints. Don't over-engineer simple tasks."""
 
+        # Build system prompt via ContextService (PRD-80 US-019)
+        from modules.context import ContextService, ContextMode
+
+        ctx_result = await ContextService().build_context(
+            mode=ContextMode.ORCHESTRATOR_STAGE,
+            agent=SimpleNamespace(
+                id=None,
+                name="Complexity Analyzer",
+                role="Expert task complexity analyzer. Always return valid JSON.",
+                description=None,
+            ),
+            workspace_id="system",
+            task_description=task_description,
+        )
+
         messages = [
-            {"role": "system", "content": "You are an expert task complexity analyzer. Always return valid JSON."},
+            {"role": "system", "content": ctx_result.system_prompt},
             {"role": "user", "content": prompt}
         ]
-        
+
         response = await self.llm.generate_response(messages)
         
         try:

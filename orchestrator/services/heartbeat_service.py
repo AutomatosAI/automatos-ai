@@ -385,21 +385,18 @@ class HeartbeatService:
         """Run the LLM-powered orchestrator heartbeat with tool loop."""
         from consumers.chatbot.personality import load_orchestrator_settings
         from core.llm.manager import LLMManager
-        from modules.tools.discovery.action_registry import get_action_registry
+        from modules.context import ContextService, ContextMode
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
         from core.database.database import SessionLocal
+        from types import SimpleNamespace
 
-        # 1. Load personality settings
+        # 1. Load personality settings for heartbeat-specific instructions
         orch_settings = load_orchestrator_settings(workspace_id)
         personality_mode = orch_settings.get("personality_mode", "friendly")
         communication_style = orch_settings.get("communication_style", "balanced")
         proactive_level = hb_config.get("proactive_level") or orch_settings.get("proactive_level", "notify")
 
-        # 2. Build tools — single dispatcher for all platform actions
-        registry = get_action_registry()
-        platform_tools = [registry.to_dispatcher_schema()]
-
-        # 3. Build proactive_level instruction
+        # 2. Build heartbeat-specific instructions as task_description
         level_instructions = {
             "silent": "Report findings only. Do NOT take any corrective actions.",
             "notify": "Report findings only. Do NOT take any corrective actions.",
@@ -408,47 +405,62 @@ class HeartbeatService:
         }
         level_instruction = level_instructions.get(proactive_level, level_instructions["notify"])
 
-        # 4. Build communication style suffix
         style_suffix = {
             "concise": " Keep your response extremely short and direct.",
             "balanced": "",
             "detailed": " Provide thorough analysis with specifics.",
         }.get(communication_style, "")
 
-        # 5. Build checklist
         checklist = hb_config.get("checklist", "")
         checklist_block = ""
         if checklist and checklist.strip():
             checklist_block = f"\n\nChecklist to review:\n{checklist}"
 
-        # 6. Build system prompt
-        platform_action_summary = registry.build_prompt_summary()
-        system_prompt = (
-            f"You are the Automatos orchestrator performing a scheduled health check.\n"
+        task_description = (
+            f"Perform a scheduled health check for this workspace.\n"
             f"Personality: {personality_mode}.\n\n"
-            f"Your task: Analyze your workspace using the tools provided.{checklist_block}\n\n"
+            f"Analyze your workspace using the tools provided.{checklist_block}\n\n"
             f"{level_instruction}{style_suffix}\n\n"
-            f"{platform_action_summary}\n\n"
             f"Reply with a SHORT plain-text summary (max 500 chars). No markdown."
         )
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Run the scheduled heartbeat check now. Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"},
-        ]
-
-        # 7. Create LLM manager (maps to orchestrator_llm settings)
-        llm = LLMManager(
-            service_name="heartbeat",
-            workspace_id=workspace_id,
-            request_type="heartbeat",
+        # 3. Build context via ContextService
+        orchestrator_agent = SimpleNamespace(
+            id=None,
+            name="Automatos Orchestrator",
+            agent_type="orchestrator",
+            description="Scheduled workspace health check agent",
+            use_custom_persona=False,
+            persona=None,
         )
 
-        # 8. Tool loop (max 5 iterations)
-        max_iterations = 5
-        total_tokens = 0
         db = SessionLocal()
         try:
+            context = await ContextService(db).build_context(
+                mode=ContextMode.HEARTBEAT,
+                agent=orchestrator_agent,
+                workspace_id=workspace_id,
+                task_description=task_description,
+            )
+
+            system_prompt = context.system_prompt
+            platform_tools = context.tools
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Run the scheduled heartbeat check now. Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"},
+            ]
+
+            # 4. Create LLM manager (maps to orchestrator_llm settings)
+            llm = LLMManager(
+                service_name="heartbeat",
+                workspace_id=workspace_id,
+                request_type="heartbeat",
+            )
+
+            # 5. Tool loop (max 5 iterations)
+            max_iterations = 5
+            total_tokens = 0
             executor = PlatformActionExecutor(db, workspace_id)
 
             for iteration in range(max_iterations):

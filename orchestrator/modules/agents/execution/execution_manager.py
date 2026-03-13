@@ -801,91 +801,52 @@ class AgentExecutionManager:
         execution: SubtaskExecution,
         required_tools: List[str] = None
     ) -> Dict[str, Any]:
-        """Execute task with agent, with retry logic"""
-        
-        if required_tools is None:
-            required_tools = ["research"]  # Default
-        
+        """Execute task with agent, with retry logic.
+
+        Identity, skills, platform actions, memory, and tools are handled by
+        ContextService (via agent_factory.execute_with_prompt when no explicit
+        system_prompt is passed).  This method adds execution-specific guidance
+        (professional instructions + workspace rules) to the user prompt so the
+        agent receives them alongside its ContextService-built system prompt.
+        """
+
         last_error = None
-        
+
         for attempt in range(self.max_retries + 1):
             try:
                 if attempt > 0:
                     execution.status = SubtaskStatus.RETRYING
                     execution.retry_count = attempt
                     self.logger.info(f"🔄 Retry {attempt}/{self.max_retries} for: {execution.subtask_description}")
-                
-                # Execute with agent factory — tools resolved via get_tools_for_agent()
-                
-                # PRD-21: ENHANCED SYSTEM PROMPT - Confident, Professional, Tool-Using Agent
-                professional_system_prompt = """You are a professional AI agent with full access to the codebase, documentation, and tools.
 
-🎯 CRITICAL INSTRUCTIONS:
-- YOU HAVE TOOLS: Use search_knowledge, search_codebase, read_file, list_directory to find information
-- BE CONFIDENT: State findings authoritatively based on evidence from tools
-- BE COMPLETE: Finish the ENTIRE task, don't leave placeholders or "to be continued"
-- USE CODE EVIDENCE: Include specific file paths, line numbers, and code snippets
-- NO APOLOGIES: Never say "I'm sorry", "unfortunately", or "I don't have access to"
-- NO META-COMMENTARY: Don't talk about your process, just deliver the result
+                # --- Build execution-specific guidance (injected as user prompt prefix) ---
+                guidance_parts: List[str] = []
 
-❌ ABSOLUTELY FORBIDDEN:
-- "I'm sorry, but as an AI..."
-- "Unfortunately, without access to..."
-- "I'm unable to..."
-- "To be continued..."
-- "Please let me know if..."
-- "You could use..."
-- Any incomplete or draft outputs
-
-✅ REQUIRED APPROACH:
-1. If you need information: USE YOUR TOOLS (search_codebase, read_file, etc.)
-2. Find concrete evidence from the codebase
-3. Write confidently: "The platform implements..." not "It appears that..."
-4. Include code snippets with file paths
-5. Complete the FULL deliverable - no drafts
-
-REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
-                
-                # PRD-22: Build agent prompt with skills BEFORE calling execute_with_prompt
-                # Get agent record with skills
-                agent_record = (
-                    self.db_session.query(Agent)
-                    .options(joinedload(Agent.skills))
-                    .filter(Agent.id == agent_id)
-                    .first()
+                # PRD-21: Professional, tool-using agent instructions
+                guidance_parts.append(
+                    "## Execution Guidelines\n"
+                    "- USE YOUR TOOLS to find information (search_knowledge, search_codebase, read_file, list_directory).\n"
+                    "- State findings authoritatively based on evidence. Include file paths, line numbers, and code snippets.\n"
+                    "- Complete the ENTIRE task — no placeholders, drafts, or 'to be continued'.\n"
+                    "- Never apologise or say you lack access. Use tools instead."
                 )
-                
-                # Build system prompt with skills and extract tool schemas
-                full_system_prompt = professional_system_prompt
-                all_required_tools = list(required_tools or [])
-                skill_tool_schemas = []
-                if agent_record and agent_record.skills:
-                    skill_enhanced_prompt, skill_tool_schemas = self.agent_factory._build_agent_system_prompt(
-                        agent=agent_record,
-                        task_context=prompt[:500],
-                        db=self.db_session,
-                    )
-                    full_system_prompt = skill_enhanced_prompt + "\n\n" + professional_system_prompt
 
-                if skill_tool_schemas:
-                    skill_tool_names = [t['function']['name'] for t in skill_tool_schemas]
-                    all_required_tools.extend(skill_tool_names)
-                    self.logger.info(f"✅ Added {len(skill_tool_names)} skill tools: {skill_tool_names}")
-
-                # Append workspace and deliverable guidance for every agent
-                workspace_guidance_lines = [
-                    "## Workspace & Deliverable Rules",
-                    f"- Workspace root: {self.workspace_dir}",
-                    "- Keep every file operation inside this workspace (use relative paths).",
-                    "- Persist all artifacts with write_file (or the appropriate skill tool) so the orchestrator can save them.",
+                # Workspace and deliverable guidance
+                guidance_parts.append(
+                    "## Workspace & Deliverable Rules\n"
+                    f"- Workspace root: {self.workspace_dir}\n"
+                    "- Keep every file operation inside this workspace (use relative paths).\n"
+                    "- Persist all artifacts with write_file (or the appropriate skill tool) so the orchestrator can save them.\n"
                     "- In your final answer, list the relative paths of every file you created or updated."
-                ]
+                )
 
+                # Conversion tool guidance (pdf, docx, pptx, xlsx)
+                all_required_tools = list(required_tools or [])
                 conversion_tools = {
                     "create_pdf": "pdf",
                     "create_docx": "docx",
                     "create_pptx": "pptx",
-                    "create_xlsx": "xlsx"
+                    "create_xlsx": "xlsx",
                 }
                 base_stub = execution.subtask_id.replace("subtask_", "task")
 
@@ -893,20 +854,21 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                     if tool_name in all_required_tools:
                         source_name = f"{base_stub}.md"
                         output_name = f"{base_stub}.{extension}"
-                        workspace_guidance_lines.extend([
-                            "",
-                            f"- This task includes the `{tool_name}` capability. Follow this workflow:",
-                            f"  1. Draft the complete deliverable into `{source_name}` using `write_file`.",
-                            f"  2. Call `{tool_name}` with {{\"source_file\": \"{source_name}\", \"output_file\": \"{output_name}\", \"title\": \"{execution.subtask_description}\"}}.",
+                        guidance_parts.append(
+                            f"- This task includes the `{tool_name}` capability. Follow this workflow:\n"
+                            f"  1. Draft the complete deliverable into `{source_name}` using `write_file`.\n"
+                            f'  2. Call `{tool_name}` with {{"source_file": "{source_name}", "output_file": "{output_name}", "title": "{execution.subtask_description}"}}.\n'
                             f"  3. Verify the tool succeeds and report the saved file `{output_name}`."
-                        ])
+                        )
 
-                full_system_prompt = full_system_prompt + "\n\n" + "\n".join(workspace_guidance_lines)
+                # Combine guidance + original task prompt
+                enhanced_prompt = "\n\n".join(guidance_parts) + "\n\n## Task\n\n" + prompt
 
+                # No system_prompt → factory uses ContextService(TASK_EXECUTION)
+                # which provides identity, skills, platform actions, memory, tools
                 result = await self.agent_factory.execute_with_prompt(
                     agent=agent_id,
-                    prompt=prompt,
-                    system_prompt=full_system_prompt,
+                    prompt=enhanced_prompt,
                     use_memory=True,
                     max_retries=0,  # We handle retries here
                     workspace_dir=self.workspace_dir,

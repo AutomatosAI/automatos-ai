@@ -19,6 +19,7 @@ Token budget: 2000 tokens max for the negotiation output.
 
 import json
 import logging
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
@@ -118,7 +119,25 @@ class InterAgentNegotiation:
         )
 
         try:
-            messages = [{"role": "user", "content": prompt}]
+            # Build system prompt via ContextService (PRD-80 US-019)
+            from modules.context import ContextService, ContextMode
+
+            ctx_result = await ContextService().build_context(
+                mode=ContextMode.ORCHESTRATOR_STAGE,
+                agent=SimpleNamespace(
+                    id=None,
+                    name="Agent Negotiation Facilitator",
+                    role="Inter-agent negotiation coordinator. Always return valid JSON.",
+                    description=None,
+                ),
+                workspace_id="system",
+                task_description=workflow_description,
+            )
+
+            messages = [
+                {"role": "system", "content": ctx_result.system_prompt},
+                {"role": "user", "content": prompt},
+            ]
             response = await self.llm_client.generate_response(messages)
             response_text = (
                 getattr(response, "content", None)

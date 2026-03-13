@@ -759,22 +759,28 @@ class AgentFactory:
             # --- Build messages ---
             messages = []
 
-            # System prompt: explicit > cached > build from scratch
+            # System prompt: explicit > cached > ContextService
             skill_tool_schemas_from_prompt = []
+            context_result = None  # Populated when ContextService builds the prompt
+
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             elif getattr(agent_runtime, "system_prompt", None):
                 messages.append({"role": "system", "content": agent_runtime.system_prompt})
                 skill_tool_schemas_from_prompt = getattr(agent_runtime, "skill_tool_schemas", [])
             else:
+                # --- ContextService path (replaces _build_agent_system_prompt) ---
+                from modules.context import ContextService, ContextMode
+
                 db_agent = self.db_session.query(Agent).filter_by(id=agent_runtime.agent_id).first()
                 if db_agent:
-                    built_prompt, skill_tool_schemas_from_prompt = self._build_agent_system_prompt(
+                    context_result = await ContextService(self.db_session).build_context(
+                        mode=ContextMode.TASK_EXECUTION,
                         agent=db_agent,
-                        task_context=prompt,
-                        db=self.db_session,
+                        workspace_id=agent_runtime.workspace_id,
+                        task_description=prompt,
                     )
-                    messages.append({"role": "system", "content": built_prompt})
+                    messages.append({"role": "system", "content": context_result.system_prompt})
 
             # Short-term memory
             if use_memory and agent_runtime.memory:
@@ -808,20 +814,25 @@ class AgentFactory:
             # Preserve original prompt for Composio hint generation
             original_user_prompt = prompt
 
-            # --- Build tools: ONE SOURCE via get_tools_for_agent() ---
-            from modules.tools.tool_router import get_tools_for_agent
+            # --- Build tools ---
+            if context_result is not None:
+                # ContextService already loaded tools via ToolsSection
+                tool_schemas = list(context_result.tools)
+            else:
+                # Explicit/cached system_prompt path: load tools directly
+                from modules.tools.tool_router import get_tools_for_agent
 
-            tool_schemas = get_tools_for_agent(
-                agent_id=agent_runtime.agent_id,
-                db_session=self.db_session,
-                workspace_id=agent_runtime.workspace_id,
-            )
+                tool_schemas = get_tools_for_agent(
+                    agent_id=agent_runtime.agent_id,
+                    db_session=self.db_session,
+                    workspace_id=agent_runtime.workspace_id,
+                )
 
-            # Add skill-based tools from prompt building
-            if skill_tool_schemas_from_prompt:
-                tool_schemas.extend(skill_tool_schemas_from_prompt)
-                tool_names = [t["function"]["name"] for t in skill_tool_schemas_from_prompt]
-                self.logger.info(f"Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
+                # Add skill-based tools from prompt building
+                if skill_tool_schemas_from_prompt:
+                    tool_schemas.extend(skill_tool_schemas_from_prompt)
+                    tool_names = [t["function"]["name"] for t in skill_tool_schemas_from_prompt]
+                    self.logger.info(f"Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
 
             # Composio hint injection (enriches composio_execute with action enum + hints)
             workspace_id = agent_runtime.workspace_id

@@ -42,7 +42,8 @@ class SmartChatIntegration:
         workspace_id: str,
         agent_id: Optional[int] = None,
         agent_name: Optional[str] = None,
-        widget_mode: bool = False
+        widget_mode: bool = False,
+        db_session: Any = None,
     ):
         """
         Initialize the smart chat integration.
@@ -52,12 +53,14 @@ class SmartChatIntegration:
             agent_id: Agent ID for memory scoping
             agent_name: Agent name for personalization
             widget_mode: When True, restrict memory to agent-only (no global workspace memories)
+            db_session: Optional DB session for ContextService (PRD-80)
         """
         self.orchestrator = SmartChatOrchestrator(
             workspace_id=workspace_id,
             agent_id=agent_id,
             agent_name=agent_name,
-            widget_mode=widget_mode
+            widget_mode=widget_mode,
+            db_session=db_session,
         )
         self.workspace_id = workspace_id
         self.agent_id = agent_id

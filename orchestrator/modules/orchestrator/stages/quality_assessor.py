@@ -25,6 +25,7 @@ Author: Automatos AI - Phase 4 Implementation
 import logging
 import re
 import asyncio
+from types import SimpleNamespace
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -257,10 +258,28 @@ class OutputQualityAssessor:
             output, requirements, output_type, quality_threshold, context
         )
         
+        # Build system prompt via ContextService (PRD-80 US-019)
+        from modules.context import ContextService, ContextMode
+
+        ctx_result = await ContextService().build_context(
+            mode=ContextMode.ORCHESTRATOR_STAGE,
+            agent=SimpleNamespace(
+                id=None,
+                name="Quality Assessor",
+                role="Expert output quality assessor. Always return valid JSON.",
+                description=None,
+            ),
+            workspace_id="system",
+            task_description=requirements,
+        )
+
         # Get LLM assessment - support multiple LLM client interfaces
         if hasattr(self.llm_client, 'generate_response'):
             # LLMManager interface: generate_response(messages)
-            messages = [{"role": "user", "content": prompt}]
+            messages = [
+                {"role": "system", "content": ctx_result.system_prompt},
+                {"role": "user", "content": prompt},
+            ]
             llm_response = await self.llm_client.generate_response(messages)
             # Extract text from LLMResponse object
             response = getattr(llm_response, 'content', None) or getattr(llm_response, 'text', None) or str(llm_response)
