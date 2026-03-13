@@ -52,7 +52,7 @@ def create_recipe_board_task(
     }
 
     stmt = pg_insert(BoardTask.__table__).values(**values)
-    stmt = stmt.on_conflict_do_nothing(index_elements=['source_id'])
+    stmt = stmt.on_conflict_do_nothing(constraint='uq_board_tasks_recipe_exec')
     db.execute(stmt)
     db.commit()
 

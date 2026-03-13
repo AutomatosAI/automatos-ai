@@ -699,6 +699,7 @@ async def _execute_recipe_inner(
             from services.board_task_bridge import create_recipe_board_task
             create_recipe_board_task(db, recipe, execution)
         except Exception:
+            db.rollback()
             logger.warning("Board task creation failed (non-blocking)", exc_info=True)
 
         # Load and sort steps
@@ -1161,7 +1162,7 @@ async def _execute_recipe_inner(
                 from services.board_task_bridge import update_recipe_board_task_progress
                 update_recipe_board_task_progress(db, recipe_execution_id, len(step_results), total_steps)
             except Exception:
-                pass
+                db.rollback()
 
         # All steps completed successfully
         total_duration = int((time.time() - execution_start) * 1000)
@@ -1194,6 +1195,7 @@ async def _execute_recipe_inner(
             from services.board_task_bridge import complete_recipe_board_task
             complete_recipe_board_task(db, recipe_execution_id, success=True, result=str(final_output)[:4000])
         except Exception:
+            db.rollback()
             logger.warning("Board task completion failed (non-blocking)", exc_info=True)
 
         logger.info(
@@ -1420,7 +1422,7 @@ async def _fail_execution(
                 from services.board_task_bridge import complete_recipe_board_task as _complete_board
                 _complete_board(db, execution_id, success=False, error_message=error_message)
             except Exception:
-                pass
+                db.rollback()
 
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
             # Update agent performance_metrics for failure
