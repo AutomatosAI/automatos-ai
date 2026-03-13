@@ -49,7 +49,7 @@ Complete the half-finished PRD-79 and PRD-80 unification. Kill the legacy `_buil
 
 ### Phase 4: Dead Code Cleanup
 
-- [ ] **US-008: Move legacy prompt instructions to sections** — Dependency context instructions → TaskContextSection. Skill tool usage instructions → SkillsSection. Response formatting → IdentitySection
+- [x] **US-008: Move legacy prompt instructions to sections** — Added dependency context instructions (DEPENDENCY CONTEXT handling + document writing guidance) to TaskContextSection._build() after task metadata. Added skill tool usage instructions to SkillsSection._build() — extracts tool names from skills' tools_schema JSONB field via new _extract_skill_tool_names() static method, appends "Using Your Skill Tools" block when tools exist. Added response formatting guidance to IdentitySection._build() (non-chatbot path only) — synthesize API results into prose, use bullet points. Bumped max_tokens: TaskContextSection 1000→1500, IdentitySection 500→600. Fixed test_identity_section.py max_tokens assertion. All 114 context tests pass
 - [ ] **US-009: Orphaned imports + grep audit + test fixes** — Remove orphaned imports from agent_factory.py. Run 5 grep audits (all must return zero non-ContextService results). Fix any broken tests
 
 ### Phase 5: Tech Debt

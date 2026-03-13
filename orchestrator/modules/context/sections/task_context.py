@@ -25,7 +25,7 @@ class TaskContextSection(BaseSection):
 
     name: str = "task_context"
     priority: int = 2
-    max_tokens: Optional[int] = 1000
+    max_tokens: Optional[int] = 1500
 
     async def render(self, ctx: SectionContext) -> str:
         """Build the task context block for the system prompt."""
@@ -66,6 +66,21 @@ class TaskContextSection(BaseSection):
         if metadata_lines:
             parts.append("")
             parts.extend(metadata_lines)
+
+        # Dependency context instructions (from deleted _build_agent_system_prompt)
+        parts.append("")
+        parts.append("## Working with Context and Dependencies")
+        parts.append("")
+        parts.append("When you receive '## DEPENDENCY CONTEXT' at the beginning of your task:")
+        parts.append("1. This contains outputs from previous tasks that you need to use")
+        parts.append("2. Read and understand all the context provided")
+        parts.append("3. For compilation/report tasks: Synthesize the information into a coherent document")
+        parts.append("4. For document generation tasks: Transform the input into the requested format")
+        parts.append("")
+        parts.append("When your task involves writing/creating documents:")
+        parts.append("- Use the write_file tool to save your output")
+        parts.append("- The task description will specify the output filename")
+        parts.append("- Actually WRITE the content, don't just describe what you would write")
 
         content = "\n".join(parts)
         if self.max_tokens:

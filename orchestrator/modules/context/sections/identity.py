@@ -68,7 +68,7 @@ class IdentitySection(BaseSection):
 
     name: str = "identity"
     priority: int = 1
-    max_tokens: Optional[int] = 500
+    max_tokens: Optional[int] = 600
 
     async def render(self, ctx: SectionContext) -> str:  # noqa: C901
         """Build the identity block for the system prompt."""
@@ -106,6 +106,14 @@ class IdentitySection(BaseSection):
         persona_text = self._get_persona_text(agent)
         if persona_text:
             parts.append(f"\n## Persona & Communication Style\n{persona_text}")
+
+        # Response formatting guidance (from deleted _build_agent_system_prompt)
+        parts.append(
+            "\n## Response Formatting\n"
+            "When you receive API/tool results:\n"
+            "- Synthesize data into clear, human-friendly prose — do NOT dump raw JSON\n"
+            "- Use bullet points or short paragraphs for a non-technical reader"
+        )
 
         content = "\n".join(parts)
         if self.max_tokens:
