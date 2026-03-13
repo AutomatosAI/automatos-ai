@@ -185,8 +185,8 @@ class TaskReconciler:
                     (execution_id, recipe_id, workspace_id, status, input_data,
                      triggered_by, execution_metadata, attempt_count, retry_of, started_at)
                 VALUES
-                    (:eid, :rid, :wid, 'pending', :input::jsonb,
-                     'auto_retry', :meta::jsonb, :attempt, :retry_of, :now)
+                    (:eid, :rid, :wid, 'pending', CAST(:input AS jsonb),
+                     'auto_retry', CAST(:meta AS jsonb), :attempt, :retry_of, :now)
             """),
             {
                 "eid": retry_execution_id,
