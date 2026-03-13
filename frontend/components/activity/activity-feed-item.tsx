@@ -222,7 +222,7 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
   const agentDetails = item.agent?.id ? agents.find((a: any) => a.id === item.agent?.id) : null
   const premiumIconName = agentDetails?.premium_icon || null
 
-  // Recipes navigate to ExecutionKitchen via /workflows URL params.
+  // Recipes navigate to ExecutionKitchen via /activity/execution.
   // Routines drill down inline. Chats navigate to /chat.
   const handleView = (e: React.MouseEvent) => {
     e.stopPropagation()
