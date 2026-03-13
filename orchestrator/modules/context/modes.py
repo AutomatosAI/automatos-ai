@@ -13,7 +13,8 @@ from typing import Optional
 class ContextMode(str, Enum):
     CHATBOT = "chatbot"
     TASK_EXECUTION = "task_execution"
-    HEARTBEAT = "heartbeat"
+    HEARTBEAT_ORCHESTRATOR = "heartbeat_orchestrator"
+    HEARTBEAT_AGENT = "heartbeat_agent"
     RECIPE = "recipe"
     ROUTER = "router"
     ORCHESTRATOR_STAGE = "orchestrator_stage"
@@ -33,7 +34,8 @@ class ModeConfig:
 MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
     ContextMode.CHATBOT: ModeConfig(
         sections=[
-            "identity", "skills", "platform_actions", "memory",
+            "identity", "skills", "composio", "plugins",
+            "platform_actions", "memory",
             "datetime_context", "conversation",
         ],
         tool_loading="filtered",
@@ -42,14 +44,15 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
     ),
     ContextMode.TASK_EXECUTION: ModeConfig(
         sections=[
-            "identity", "skills", "platform_actions", "memory",
+            "identity", "skills", "composio", "plugins",
+            "platform_actions", "memory",
             "task_context", "datetime_context", "conversation",
         ],
         tool_loading="full",
         personality=False,
         max_tokens=None,
     ),
-    ContextMode.HEARTBEAT: ModeConfig(
+    ContextMode.HEARTBEAT_ORCHESTRATOR: ModeConfig(
         sections=[
             "identity", "skills", "platform_actions", "task_context",
             "datetime_context",
@@ -58,10 +61,20 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         personality=False,
         max_tokens=8000,
     ),
+    ContextMode.HEARTBEAT_AGENT: ModeConfig(
+        sections=[
+            "identity", "skills", "composio", "plugins",
+            "platform_actions", "task_context", "datetime_context",
+        ],
+        tool_loading="full",
+        personality=False,
+        max_tokens=128000,
+    ),
     ContextMode.RECIPE: ModeConfig(
         sections=[
-            "identity", "skills", "platform_actions", "recipe_context",
-            "datetime_context",
+            "identity", "skills", "composio", "plugins",
+            "platform_actions", "memory",
+            "recipe_context", "datetime_context",
         ],
         tool_loading="full",
         personality=False,

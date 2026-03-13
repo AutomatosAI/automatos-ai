@@ -437,7 +437,7 @@ class HeartbeatService:
         db = SessionLocal()
         try:
             context = await ContextService(db).build_context(
-                mode=ContextMode.HEARTBEAT,
+                mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
                 agent=orchestrator_agent,
                 workspace_id=workspace_id,
                 task_description=task_description,

@@ -10,7 +10,8 @@ class TestContextMode:
     """Tests for the ContextMode enum."""
 
     EXPECTED_MODES = {
-        "chatbot", "task_execution", "heartbeat", "recipe",
+        "chatbot", "task_execution", "heartbeat_orchestrator",
+        "heartbeat_agent", "recipe",
         "router", "orchestrator_stage", "nl2sql",
     }
 
@@ -76,8 +77,11 @@ class TestModeConfigs:
                 f"{mode} should not have personality=True"
             )
 
-    def test_heartbeat_has_max_tokens(self):
-        assert MODE_CONFIGS[ContextMode.HEARTBEAT].max_tokens == 8000
+    def test_heartbeat_orchestrator_has_max_tokens(self):
+        assert MODE_CONFIGS[ContextMode.HEARTBEAT_ORCHESTRATOR].max_tokens == 8000
+
+    def test_heartbeat_agent_has_max_tokens(self):
+        assert MODE_CONFIGS[ContextMode.HEARTBEAT_AGENT].max_tokens == 128000
 
     def test_tool_loading_values_valid(self):
         valid_strategies = {"full", "filtered", "dispatcher_only", "none"}
@@ -92,8 +96,11 @@ class TestModeConfigs:
     def test_task_execution_uses_full_tools(self):
         assert MODE_CONFIGS[ContextMode.TASK_EXECUTION].tool_loading == "full"
 
-    def test_heartbeat_uses_dispatcher_only(self):
-        assert MODE_CONFIGS[ContextMode.HEARTBEAT].tool_loading == "dispatcher_only"
+    def test_heartbeat_orchestrator_uses_dispatcher_only(self):
+        assert MODE_CONFIGS[ContextMode.HEARTBEAT_ORCHESTRATOR].tool_loading == "dispatcher_only"
+
+    def test_heartbeat_agent_uses_full_tools(self):
+        assert MODE_CONFIGS[ContextMode.HEARTBEAT_AGENT].tool_loading == "full"
 
     def test_router_uses_no_tools(self):
         assert MODE_CONFIGS[ContextMode.ROUTER].tool_loading == "none"
@@ -103,7 +110,8 @@ class TestSectionRegistry:
     """Tests for SECTION_REGISTRY completeness."""
 
     EXPECTED_SECTIONS = {
-        "identity", "skills", "platform_actions", "memory", "tools",
+        "identity", "skills", "composio", "plugins",
+        "platform_actions", "memory", "tools",
         "task_context", "recipe_context", "datetime_context",
         "conversation", "custom",
     }

@@ -33,8 +33,8 @@ Complete the half-finished PRD-79 and PRD-80 unification. Kill the legacy `_buil
 ### Phase 1: Add Missing Sections + Mode Configs
 
 - [x] **US-001: Create ComposioSection and PluginsSection** — Port Composio app rendering from agent_factory.py lines 1247-1278 into modules/context/sections/composio.py. Port plugin tier1+tier2 rendering from lines 1222-1243 into modules/context/sections/plugins.py. Both follow existing section patterns (render() method, graceful error handling). Also registered both in SECTION_REGISTRY (__init__.py)
-- [ ] **US-002: Register new sections and update mode configs** — Register composio + plugins in SECTION_REGISTRY. Split ContextMode.HEARTBEAT into HEARTBEAT_ORCHESTRATOR (dispatcher_only tools, simple) and HEARTBEAT_AGENT (full tools + composio + plugins). Add composio/plugins to CHATBOT, TASK_EXECUTION, RECIPE modes. Add memory to RECIPE. Update DEFAULT_BUDGETS for new modes
-- [ ] **US-003: Update heartbeat_service.py** — Change ContextMode.HEARTBEAT to ContextMode.HEARTBEAT_ORCHESTRATOR
+- [x] **US-002: Register new sections and update mode configs** — Split ContextMode.HEARTBEAT into HEARTBEAT_ORCHESTRATOR (dispatcher_only, 8K max) and HEARTBEAT_AGENT (full tools + composio + plugins, 128K max). Added composio/plugins to CHATBOT, TASK_EXECUTION, RECIPE, HEARTBEAT_AGENT modes. Added memory to RECIPE. Updated DEFAULT_BUDGETS. Updated all tests (test_modes, test_service, test_budget_manager). SECTION_REGISTRY already had composio+plugins from US-001
+- [x] **US-003: Update heartbeat_service.py** — Changed ContextMode.HEARTBEAT to ContextMode.HEARTBEAT_ORCHESTRATOR (done as part of US-002, single reference at line 440)
 
 ### Phase 2: Kill the Cache — ContextService Only Path
 

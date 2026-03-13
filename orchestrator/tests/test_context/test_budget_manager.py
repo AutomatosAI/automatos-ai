@@ -189,11 +189,17 @@ class TestDefaultBudgets:
         for mode in ContextMode:
             assert mode in DEFAULT_BUDGETS, f"Missing DEFAULT_BUDGET for {mode}"
 
-    def test_heartbeat_budget_compact(self):
-        """Heartbeat has 0 message reserve (no conversation history)."""
-        budget = DEFAULT_BUDGETS[ContextMode.HEARTBEAT]
+    def test_heartbeat_orchestrator_budget_compact(self):
+        """Heartbeat orchestrator has 0 message reserve (no conversation history)."""
+        budget = DEFAULT_BUDGETS[ContextMode.HEARTBEAT_ORCHESTRATOR]
         assert budget.reserved_for_messages == 0
         assert budget.reserved_for_response == 2_048
+
+    def test_heartbeat_agent_budget(self):
+        """Heartbeat agent has 0 message reserve, 4K response reserve."""
+        budget = DEFAULT_BUDGETS[ContextMode.HEARTBEAT_AGENT]
+        assert budget.reserved_for_messages == 0
+        assert budget.reserved_for_response == 4_096
 
     def test_chatbot_budget_generous_messages(self):
         """Chatbot reserves 60K for message history."""
