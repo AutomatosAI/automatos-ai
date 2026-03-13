@@ -45,7 +45,7 @@ Complete the half-finished PRD-79 and PRD-80 unification. Kill the legacy `_buil
 
 ### Phase 3: Memory Gap Verification + Daily Logs
 
-- [ ] **US-007: Verify and fix memory + daily logs** — Confirm memory in TASK_EXECUTION + RECIPE modes. Verify MemorySection renders daily logs (## Recent Activity) for non-chatbot modes. Document HEARTBEAT_AGENT memory exclusion. Check recipe_executor.py for redundant manual Mem0 injection and remove if duplicate
+- [x] **US-007: Verify and fix memory + daily logs** — Verified: TASK_EXECUTION and RECIPE modes both include "memory" in sections (lines 48 and 76 of modes.py). MemorySection renders daily logs via _retrieve_daily_logs() for all modes (uses workspace_id only, no chatbot dependency). _extract_query() falls back to task_description for non-chat modes. Added HEARTBEAT_AGENT memory exclusion comment to modes.py (PRD-81 Task 3.5/5.5). Recipe executor Mem0 injection (lines 206-217) is COMPLEMENTARY — uses RecipeMemoryService (recipe-scoped: past run learnings) vs MemorySection (workspace-scoped: user memories). Kept as-is. Execution manager MemoryPromptInjector (line 550) injects pre-fetched workflow-scoped memories into user prompt — different scope from MemorySection's live search but potential for duplicate content (tracked as DI-002)
 
 ### Phase 4: Dead Code Cleanup
 
@@ -64,6 +64,7 @@ Complete the half-finished PRD-79 and PRD-80 unification. Kill the legacy `_buil
 ## Discovered Issues
 
 - **DI-001: LLM interface missing tool_choice support** — `ContextResult.tool_choice` exists (default "auto") but `LLMManager.generate_response()` and all LLM client `generate_response()` methods only accept `messages` and `tools` — no `tool_choice` param. Adding it would require changes to the base class + all 8 client implementations. Low priority since "auto" is the default everywhere.
+- **DI-002: Execution manager MemoryPromptInjector may duplicate ContextService MemorySection** — `execution_manager.py:550` uses `MemoryPromptInjector.inject_memory_into_prompt()` to inject pre-fetched workflow memories into user prompt. Now that ContextService TASK_EXECUTION mode includes MemorySection (live Mem0 search in system prompt), agents may receive overlapping memory content from both paths. The scopes differ (workflow-planned vs live-search) but content could overlap. Future cleanup: either remove MemoryPromptInjector and rely on MemorySection, or add dedup logic.
 
 ## Notes
 

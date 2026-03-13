@@ -61,6 +61,10 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         personality=False,
         max_tokens=8000,
     ),
+    # NOTE: memory intentionally excluded from HEARTBEAT_AGENT to keep context lean.
+    # No memory section also means no daily logs. Heartbeat agents are stateless by
+    # design — add "memory" here if agents need cross-run learning.
+    # See PRD-81 Task 3.5 / Task 5.5.
     ContextMode.HEARTBEAT_AGENT: ModeConfig(
         sections=[
             "identity", "skills", "composio", "plugins",
