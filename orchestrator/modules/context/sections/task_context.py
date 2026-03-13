@@ -67,7 +67,7 @@ class TaskContextSection(BaseSection):
             parts.append("")
             parts.extend(metadata_lines)
 
-        # Dependency context instructions (from deleted _build_agent_system_prompt)
+        # Dependency context instructions
         parts.append("")
         parts.append("## Working with Context and Dependencies")
         parts.append("")

@@ -1,9 +1,8 @@
 """
 IdentitySection — Agent name, role, persona, personality.
 
-Priority 1 (never dropped). Replaces the identity portion of
-get_happy_system_prompt() in personality.py and the opening of
-_build_agent_system_prompt() in agent_factory.py.
+Priority 1 (never dropped). Renders agent name, role, persona,
+personality, and response formatting guidance.
 """
 
 from __future__ import annotations
@@ -107,7 +106,7 @@ class IdentitySection(BaseSection):
         if persona_text:
             parts.append(f"\n## Persona & Communication Style\n{persona_text}")
 
-        # Response formatting guidance (from deleted _build_agent_system_prompt)
+        # Response formatting guidance
         parts.append(
             "\n## Response Formatting\n"
             "When you receive API/tool results:\n"

@@ -1,9 +1,8 @@
 """
 SkillsSection — SKILL.md content for the agent's assigned skill.
 
-Priority 4. Replaces skill injection in agent_factory.py's
-_build_agent_system_prompt() and ensures heartbeat/recipe paths
-also get consistent skill content.
+Priority 4. Renders the agent's assigned SKILL.md content for all
+execution paths (chatbot, task, heartbeat, recipe).
 """
 
 from __future__ import annotations
@@ -66,7 +65,7 @@ class SkillsSection(BaseSection):
         # Join multiple skills with a separator
         combined = "\n\n---\n\n".join(parts) if len(parts) > 1 else parts[0]
 
-        # Skill tool usage instructions (from deleted _build_agent_system_prompt)
+        # Skill tool usage instructions
         skill_tool_names = self._extract_skill_tool_names(active_skills)
         if skill_tool_names:
             combined += (
