@@ -30,7 +30,7 @@ Replace 9 fragmented prompt-building code paths with a single `ContextService`. 
 
 - [x] **US-001: Create package skeleton** — result.py (ContextResult frozen dataclass), modes.py (ContextMode enum + ModeConfig + MODE_CONFIGS), estimator.py (TokenEstimator), sections/__init__.py, __init__.py
 - [x] **US-002: Create BaseSection ABC** — sections/base.py with SectionContext dataclass, render() ABC, estimate_tokens(), truncate()
-- [ ] **US-003: Create TokenBudgetManager** — budget.py with TokenBudget, RenderedSection, allocate() with priority-based trimming, DEFAULT_BUDGETS per mode
+- [x] **US-003: Create TokenBudgetManager** — budget.py with TokenBudget, RenderedSection, allocate() with priority-based trimming, DEFAULT_BUDGETS per mode
 - [ ] **US-004: Create IdentitySection** — Agent name, role, persona, personality. Replaces get_happy_system_prompt() identity + _build_agent_system_prompt() opening
 - [ ] **US-005: Create SkillsSection** — SKILL.md content from agent_skills → skills table. Replaces skill injection in agent_factory
 - [ ] **US-006: Create PlatformActionsSection** — Wraps ActionRegistry.build_prompt_summary(). Replaces inline injection in 3 files
