@@ -51,7 +51,8 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
     ),
     ContextMode.HEARTBEAT: ModeConfig(
         sections=[
-            "identity", "skills", "platform_actions", "datetime_context",
+            "identity", "skills", "platform_actions", "task_context",
+            "datetime_context",
         ],
         tool_loading="dispatcher_only",
         personality=False,
