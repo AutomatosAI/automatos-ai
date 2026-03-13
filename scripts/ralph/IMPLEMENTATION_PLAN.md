@@ -53,7 +53,7 @@ Replace 9 fragmented prompt-building code paths with a single `ContextService`. 
 
 ### Phase 3: Cleanup
 
-- [ ] **US-020: Dead code cleanup** — Delete _build_agent_system_prompt, simplify get_happy_system_prompt, delete smart_tool_router.py if unused. GREP BEFORE DELETING
+- [x] **US-020: Dead code cleanup** — Deleted get_happy_system_prompt() + build_complete_system_prompt() from personality.py (zero callers — IdentitySection replaces). Deleted _build_system_prompt() from recipe_executor.py (zero callers — ContextService RECIPE mode replaces). KEPT: _build_agent_system_prompt in agent_factory.py (still called by activate_agent + refresh_agent_prompt). KEPT: smart_tool_router.py (still imported by ContextService ToolsSection for FILTERED strategy). KEPT: get_tools_for_agent (still used by service.py, agent_factory.py, ToolsSection). KEPT: build_prompt_summary (still used by PlatformActionsSection). All confirmed via grep before action
 
 ### Phase 4: Tests
 

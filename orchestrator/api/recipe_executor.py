@@ -463,30 +463,6 @@ def _composio_scope_message(app_names: List[str]) -> str:
     )
 
 
-async def _build_system_prompt(
-    agent: Agent, db: Session, agent_runtime=None,
-) -> str:
-    """
-    Build a system prompt for the agent.
-
-    PRD-71: Uses the pre-built system prompt from AgentRuntime (built once at
-    activation by agent_factory). Falls back to a minimal prompt if the runtime
-    has no pre-built prompt.
-    """
-    # PRD-71: Use pre-built prompt from AgentRuntime (single injection point)
-    if agent_runtime and getattr(agent_runtime, 'system_prompt', None):
-        return agent_runtime.system_prompt
-
-    # Fallback: minimal identity-only prompt (shouldn't happen in normal flow)
-    logger.warning("[recipe] No pre-built system_prompt on AgentRuntime — using minimal fallback")
-    sections = [
-        f"# Agent: {agent.name}",
-        f"Agent ID: {agent.id}",
-        f"Agent Type: {getattr(agent, 'agent_type', 'unknown')}",
-    ]
-    if agent.description:
-        sections.append(agent.description)
-    return "\n\n".join(sections)
 
 
 # ---------------------------------------------------------------------------
