@@ -112,7 +112,7 @@ function getConfigureUrl(item: ActivityFeedItem): string | null {
     case 'routine':
       return item.agent?.id ? `/agents?agent=${item.agent.id}` : null
     case 'recipe':
-      return item.source_id ? `/workflows?recipe=${item.source_id}` : null
+      return item.source_id ? `/agents?tab=recipes&recipe=${item.source_id}` : null
     case 'mission':
       return null
     default:
@@ -222,7 +222,7 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
   const agentDetails = item.agent?.id ? agents.find((a: any) => a.id === item.agent?.id) : null
   const premiumIconName = agentDetails?.premium_icon || null
 
-  // Recipes navigate to ExecutionKitchen via /workflows URL params.
+  // Recipes navigate to ExecutionKitchen via /activity/execution.
   // Routines drill down inline. Chats navigate to /chat.
   const handleView = (e: React.MouseEvent) => {
     e.stopPropagation()

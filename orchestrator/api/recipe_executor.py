@@ -694,6 +694,14 @@ async def _execute_recipe_inner(
         execution.step_results = []
         db.commit()
 
+        # Create board task for this execution
+        try:
+            from services.board_task_bridge import create_recipe_board_task
+            create_recipe_board_task(db, recipe, execution)
+        except Exception:
+            db.rollback()
+            logger.warning("Board task creation failed (non-blocking)", exc_info=True)
+
         # Load and sort steps
         steps = sorted(recipe.steps or [], key=lambda s: s.get('order', 0))
         if not steps:
@@ -1149,6 +1157,13 @@ async def _execute_recipe_inner(
             step_results.append(compact)
             _persist_step_results(db, execution, step_results)
 
+            # Update board task progress
+            try:
+                from services.board_task_bridge import update_recipe_board_task_progress
+                update_recipe_board_task_progress(db, recipe_execution_id, len(step_results), total_steps)
+            except Exception:
+                db.rollback()
+
         # All steps completed successfully
         total_duration = int((time.time() - execution_start) * 1000)
         total_tokens = sum(s.get("tokens_used", 0) for s in step_results)
@@ -1174,6 +1189,14 @@ async def _execute_recipe_inner(
             "steps_completed": len(step_results),
         }
         db.commit()
+
+        # Complete the board task
+        try:
+            from services.board_task_bridge import complete_recipe_board_task
+            complete_recipe_board_task(db, recipe_execution_id, success=True, result=str(final_output)[:4000])
+        except Exception:
+            db.rollback()
+            logger.warning("Board task completion failed (non-blocking)", exc_info=True)
 
         logger.info(
             f"[recipe_direct] Execution {recipe_execution_id} COMPLETED — "
@@ -1393,6 +1416,14 @@ async def _fail_execution(
             if step_results is not None:
                 execution.step_results = step_results
             db.commit()
+
+            # Fail the board task
+            try:
+                from services.board_task_bridge import complete_recipe_board_task as _complete_board
+                _complete_board(db, execution_id, success=False, error_message=error_message)
+            except Exception:
+                db.rollback()
+
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
             # Update agent performance_metrics for failure
             _update_agent_performance_metrics(db, step_results or [], success=False)

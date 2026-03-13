@@ -1,6 +1,6 @@
 'use client'
 
-import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield } from 'lucide-react'
+import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
@@ -10,6 +10,7 @@ import { apiClient } from '@/lib/api-client'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/types/board'
 import { useUpdateTaskStatus } from '@/hooks/use-board-tasks'
+import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
 interface BoardTaskViewerProps {
@@ -355,15 +356,17 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
       </div>
 
       {/* Actions */}
-      <div className="flex gap-3 pt-2 border-t border-border/30">
-        <Button
-          variant="outline"
-          onClick={() => onStatusChange('in_progress')}
-        >
-          <RotateCcw className="w-4 h-4 mr-2" />
-          Re-run Task
-        </Button>
-      </div>
+      {task.type !== 'recipe' && (
+        <div className="flex gap-3 pt-2 border-t border-border/30">
+          <Button
+            variant="outline"
+            onClick={() => onStatusChange('in_progress')}
+          >
+            <RotateCcw className="w-4 h-4 mr-2" />
+            Re-run Task
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
@@ -376,6 +379,28 @@ function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: Re
       {icon && <span className="text-muted-foreground">{icon}</span>}
       <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{children}</h4>
     </div>
+  )
+}
+
+function ExecutionKitchenLink({ task, onClose }: { task: BoardTask; onClose: () => void }) {
+  const router = useRouter()
+  if (task.type !== 'recipe' || !task.planning_data?.execution_id) return null
+
+  const execId = task.planning_data.execution_id
+  const recipeId = task.planning_data.recipe_id
+
+  return (
+    <Button
+      variant="outline"
+      className="w-full"
+      onClick={() => {
+        onClose()
+        router.push(`/activity/execution?id=${execId}&recipeId=${recipeId}`)
+      }}
+    >
+      <ExternalLink className="w-4 h-4 mr-2" />
+      View in Execution Kitchen
+    </Button>
   )
 }
 
@@ -427,6 +452,14 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
                   <span className="capitalize">{task.priority}</span>
                 </span>
 
+                {/* Recipe badge */}
+                {task.type === 'recipe' && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary">
+                    <Workflow className="w-3 h-3" />
+                    Recipe
+                  </span>
+                )}
+
                 {/* Agent */}
                 {task.assignee && (
                   <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -449,6 +482,11 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
           {task.status === 'in_progress' && <InProgressContent task={task} />}
           {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
+
+          {/* Deep link to Execution Kitchen for recipe tasks */}
+          <div className="mt-4">
+            <ExecutionKitchenLink task={task} onClose={() => onOpenChange(false)} />
+          </div>
         </div>
       </DialogContent>
     </Dialog>

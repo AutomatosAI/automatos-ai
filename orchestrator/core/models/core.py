@@ -1485,6 +1485,8 @@ class BoardTask(Base):
     created_by_type = Column(String(20), nullable=False, default='user', server_default='user')
     created_by_id = Column(String(255), nullable=True)
     parent_task_id = Column(Integer, ForeignKey('board_tasks.id', ondelete='SET NULL'), nullable=True)
+    source_type = Column(String(30), nullable=False, default='user', server_default='user')
+    source_id = Column(String(255), nullable=True)
     tags = Column(JSONB, default=list)
     result = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
@@ -1510,6 +1512,8 @@ class BoardTask(Base):
             "created_by_type": self.created_by_type,
             "created_by_id": self.created_by_id,
             "parent_task_id": self.parent_task_id,
+            "source_type": self.source_type,
+            "source_id": self.source_id,
             "tags": self.tags or [],
             "result": self.result,
             "error_message": self.error_message,

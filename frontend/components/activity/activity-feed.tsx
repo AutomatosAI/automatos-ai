@@ -227,7 +227,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
     // Navigate to ExecutionKitchen for recipes (detailed live view)
     if (item.type === 'recipe' && item.source_id) {
       const execId = item.id.replace('recipe-', '')
-      router.push(`/workflows?openExecution=${execId}&recipeId=${item.source_id}`)
+      router.push(`/activity/execution?id=${execId}&recipeId=${item.source_id}`)
       return
     }
     // For chats, navigate to the chat

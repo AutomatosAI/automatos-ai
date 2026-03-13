@@ -22,7 +22,8 @@ import {
   Bot,
   Zap,
   Wrench,
-  BarChart3
+  BarChart3,
+  ExternalLink
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -80,6 +81,30 @@ function agentColor(id: number): string {
     'from-[hsl(var(--destructive))]/80 to-[hsl(var(--destructive))]/60',
   ]
   return colors[(id || 0) % colors.length]
+}
+
+/** Small icon button linking to the Execution Kitchen for the latest run. */
+function LatestRunLink({ recipeId }: { recipeId: string }) {
+  const { data } = useRecipeExecutions(recipeId, { limit: 1 })
+  const executions: any[] = (data as any)?.items || (Array.isArray(data) ? data : [])
+  const latest = executions[0]
+  if (!latest) return null
+
+  const execId = latest.execution_id || String(latest.id)
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-8 w-8 p-0"
+      title="View latest execution"
+      onClick={(e) => {
+        e.stopPropagation()
+        window.location.href = `/activity/execution?id=${execId}&recipeId=${recipeId}`
+      }}
+    >
+      <ExternalLink className="w-3.5 h-3.5" />
+    </Button>
+  )
 }
 
 export function RecipesTab({
@@ -353,19 +378,22 @@ export function RecipesTab({
                         />
                       </div>
                     </div>
-                    <Button
-                      className="h-8 text-xs shrink-0"
-                      size="sm"
-                      onClick={(e) => { e.stopPropagation(); handleCookRecipe(recipe) }}
-                      disabled={isCooking}
-                    >
-                      {isCooking ? (
-                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                      ) : (
-                        <Play className="w-3 h-3 mr-1" />
-                      )}
-                      Cook
-                    </Button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <LatestRunLink recipeId={recipe.template_id || String(recipe.id || '')} />
+                      <Button
+                        className="h-8 text-xs"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); handleCookRecipe(recipe) }}
+                        disabled={isCooking}
+                      >
+                        {isCooking ? (
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        ) : (
+                          <Play className="w-3 h-3 mr-1" />
+                        )}
+                        Cook
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -546,18 +574,9 @@ export function RecipesTab({
                         Details
                       </Button>
                       <div className="flex items-center gap-1">
+                        <LatestRunLink recipeId={recipe.template_id || String(recipe.id || '')} />
                         {!recipe.is_system && (
                           <>
-                            {!recipe.is_marketplace_item && (
-                              <Button
-                                variant="ghost" size="sm" className="h-8 w-8 p-0"
-                                onClick={() => handleShareToMarketplace(recipe)}
-                                disabled={isSharing}
-                                title="Share"
-                              >
-                                {isSharing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
-                              </Button>
-                            )}
                             <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEditClick(recipe)} title="Edit">
                               <Edit className="w-3.5 h-3.5" />
                             </Button>
