@@ -140,7 +140,514 @@ Based on this analysis, our mission schema adopts the following patterns:
 
 ## 3. State Machine Design
 
-_(US-002)_
+### 3.1 Design Philosophy
+
+The state machine must serve three audiences simultaneously:
+
+1. **The coordinator** — needs to know what's ready to run, what's blocked, and what failed
+2. **The dashboard** — needs human-readable status that maps to the existing board_tasks UI
+3. **The debugger** — needs a complete transition history to answer "what happened?"
+
+We adopt a **two-level state model** inspired by Prefect's architecture: a small, stable `StateType` enum drives orchestration logic, while a richer `StateName` provides user-facing detail. This lets us add display states (e.g., `awaiting_payment`) without touching coordinator code.
+
+We also adopt the **dual-write pattern** validated in Section 2: every state transition updates the denormalized current-state column on the row (fast queries) AND appends an immutable event to `orchestration_events` (audit trail). Both writes occur in a single database transaction. This is the same pattern Prefect uses at significantly larger scale than our target (~100-500 concurrent runs).
+
+**Why not full event sourcing?** We don't need deterministic replay (Temporal's use case). Our agents are non-deterministic LLMs — replaying orchestration code wouldn't reproduce the same results. Event sourcing adds projection maintenance, snapshot management, and eventual consistency complexity that isn't justified at our scale. The hybrid approach gives us O(1) current-state queries and a complete audit trail without the overhead.
+
+**Why not pure CRUD?** Airflow's mutable-only approach makes debugging "why did this task get stuck?" require grepping application logs. We need structured transition history for mission observability, telemetry (PRD-106), and human review.
+
+### 3.2 State Definitions
+
+#### Run States (orchestration_runs)
+
+| StateType | StateName | Terminal? | Description | Triggered By |
+|-----------|-----------|-----------|-------------|-------------|
+| PENDING | `pending` | No | Run created, plan not yet approved | System (on mission creation) |
+| PENDING | `planning` | No | Coordinator is decomposing the goal into tasks | Coordinator |
+| PENDING | `awaiting_approval` | No | Plan ready, waiting for human to approve | Coordinator (after planning) |
+| RUNNING | `running` | No | Tasks are being executed | Human (approves plan) or System (autonomy mode) |
+| PAUSED | `paused` | No | Human paused execution | Human |
+| PAUSED | `budget_exceeded` | No | Hard budget cap hit, waiting for human decision | System (budget check) |
+| TERMINAL | `completed` | Yes | All tasks passed verification, human accepted | Human (accepts) or System (auto-accept mode) |
+| TERMINAL | `failed` | Yes | Unrecoverable failure (max retries exhausted, human rejected) | System or Human |
+| TERMINAL | `cancelled` | Yes | Human cancelled the mission | Human |
+
+#### Task States (orchestration_tasks)
+
+| StateType | StateName | Terminal? | Description | Triggered By |
+|-----------|-----------|-----------|-------------|-------------|
+| PENDING | `pending` | No | Task created, dependencies not yet met | Coordinator (during planning) |
+| PENDING | `queued` | No | Dependencies met, waiting for agent slot | Dependency resolver |
+| PENDING | `awaiting_retry` | No | Failed, scheduled for retry after backoff | System (retry logic) |
+| RUNNING | `assigned` | No | Agent selected, execution starting | Coordinator |
+| RUNNING | `running` | No | Agent actively working (LLM calls in progress) | Agent |
+| RUNNING | `continuing` | No | Agent exited cleanly, needs more turns | Agent (clean exit) |
+| PAUSED | `verifying` | No | Output submitted, verifier evaluating | Agent (submits output) |
+| PAUSED | `awaiting_human` | No | Verifier or coordinator requested human review | Verifier or Coordinator |
+| TERMINAL | `completed` | Yes | Passed verification (or human accepted) | Verifier or Human |
+| TERMINAL | `failed` | Yes | Max retries exhausted or human rejected | System or Human |
+| TERMINAL | `cancelled` | Yes | Parent run cancelled or human cancelled task | Run state change or Human |
+| TERMINAL | `skipped` | Yes | Dependency failed with `all_done` trigger rule; task not needed | Dependency resolver |
+
+#### StateType Mapping
+
+Orchestration code switches on `StateType` (4 values, stable). Display and logging use `StateName` (extensible).
+
+```python
+from enum import StrEnum
+
+class StateType(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    PAUSED = "paused"
+    TERMINAL = "terminal"
+
+class RunState(StrEnum):
+    PENDING = "pending"
+    PLANNING = "planning"
+    AWAITING_APPROVAL = "awaiting_approval"
+    RUNNING = "running"
+    PAUSED = "paused"
+    BUDGET_EXCEEDED = "budget_exceeded"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+class TaskState(StrEnum):
+    PENDING = "pending"
+    QUEUED = "queued"
+    AWAITING_RETRY = "awaiting_retry"
+    ASSIGNED = "assigned"
+    RUNNING = "running"
+    CONTINUING = "continuing"
+    VERIFYING = "verifying"
+    AWAITING_HUMAN = "awaiting_human"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    SKIPPED = "skipped"
+
+RUN_STATE_TYPE: dict[RunState, StateType] = {
+    RunState.PENDING: StateType.PENDING,
+    RunState.PLANNING: StateType.PENDING,
+    RunState.AWAITING_APPROVAL: StateType.PENDING,
+    RunState.RUNNING: StateType.RUNNING,
+    RunState.PAUSED: StateType.PAUSED,
+    RunState.BUDGET_EXCEEDED: StateType.PAUSED,
+    RunState.COMPLETED: StateType.TERMINAL,
+    RunState.FAILED: StateType.TERMINAL,
+    RunState.CANCELLED: StateType.TERMINAL,
+}
+
+TASK_STATE_TYPE: dict[TaskState, StateType] = {
+    TaskState.PENDING: StateType.PENDING,
+    TaskState.QUEUED: StateType.PENDING,
+    TaskState.AWAITING_RETRY: StateType.PENDING,
+    TaskState.ASSIGNED: StateType.RUNNING,
+    TaskState.RUNNING: StateType.RUNNING,
+    TaskState.CONTINUING: StateType.RUNNING,
+    TaskState.VERIFYING: StateType.PAUSED,
+    TaskState.AWAITING_HUMAN: StateType.PAUSED,
+    TaskState.COMPLETED: StateType.TERMINAL,
+    TaskState.FAILED: StateType.TERMINAL,
+    TaskState.CANCELLED: StateType.TERMINAL,
+    TaskState.SKIPPED: StateType.TERMINAL,
+}
+
+TERMINAL_RUN_STATES = frozenset(
+    s for s, t in RUN_STATE_TYPE.items() if t == StateType.TERMINAL
+)
+TERMINAL_TASK_STATES = frozenset(
+    s for s, t in TASK_STATE_TYPE.items() if t == StateType.TERMINAL
+)
+```
+
+### 3.3 Transition Diagrams
+
+#### Run State Transitions
+
+```
+                            ┌─────────────┐
+                            │   pending    │
+                            └──────┬──────┘
+                                   │ coordinator starts planning
+                                   ▼
+                            ┌─────────────┐
+                            │  planning    │
+                            └──────┬──────┘
+                                   │ plan ready
+                                   ▼
+                    ┌───────────────────────────────┐
+                    │      awaiting_approval         │◄──── human pauses
+                    └───────────┬───────────────────┘       │
+                  human approves│    human rejects           │
+             or autonomy mode   │         │                  │
+                                ▼         ▼                  │
+                         ┌──────────┐  ┌────────┐            │
+              ┌─────────►│ running  │  │ failed │            │
+              │          └────┬─────┘  └────────┘            │
+              │               │                              │
+              │    ┌──────────┼──────────┐                   │
+              │    │          │          │                    │
+              │    ▼          ▼          ▼                    │
+              │ ┌──────┐  ┌──────────┐  ┌───────────────┐    │
+              │ │paused│  │completed │  │budget_exceeded│    │
+              │ └──┬───┘  └──────────┘  └───────┬───────┘    │
+              │    │                            │            │
+              │    └────────── resume ───────────┘            │
+              │         (human continues)                    │
+              └──────────────────────────────────────────────┘
+
+         Any non-terminal state ──── human cancels ────► cancelled
+```
+
+#### Task State Transitions
+
+```
+                        ┌─────────┐
+                        │ pending │
+                        └────┬────┘
+                             │ dependencies met
+                             ▼
+                        ┌─────────┐
+                        │ queued  │
+                        └────┬────┘
+                             │ agent assigned
+                             ▼
+                        ┌──────────┐
+                        │ assigned │
+                        └────┬─────┘
+                             │ execution begins
+                             ▼
+                        ┌─────────┐
+              ┌────────►│ running │◄────────────────────┐
+              │         └────┬────┘                     │
+              │              │                          │
+              │   ┌──────────┼───────────┐              │
+              │   │          │           │              │
+              │   ▼          ▼           ▼              │
+              │ ┌────────┐ ┌──────────┐ ┌───────────┐   │
+              │ │crashed │ │continuing│ │ output    │   │
+              │ │(failed)│ │(clean    │ │ submitted │   │
+              │ └───┬────┘ │ exit)    │ └─────┬─────┘   │
+              │     │      └────┬─────┘       │         │
+              │     │           │             ▼         │
+              │     │    1s delay,      ┌───────────┐   │
+              │     │    attempt=same   │ verifying │   │
+              │     │           │       └─────┬─────┘   │
+              │     │           │             │         │
+              │     │           │    ┌────────┼────────┐│
+              │     │           │    │        │        ││
+              │     │           │    ▼        ▼        ▼│
+              │     │           │ ┌──────┐ ┌───────┐ ┌──────────────┐
+              │     │           │ │passed│ │failed │ │awaiting_human│
+              │     │           │ └──┬───┘ └───┬───┘ └──────┬───────┘
+              │     │           │    │         │            │
+              │     │           │    ▼         ▼            │
+              │     │           │ completed  retry?         │
+              │     │           │         ┌───┴───┐    human decides
+              │     │           │        yes      no       │
+              │     │           │         │       │    ┌───┴───┐
+              │     │           │         ▼       ▼   approve reject
+              │     │           │  ┌──────────┐ failed  │      │
+              │     │           │  │awaiting_ │         │      │
+              │     │           │  │retry     │         ▼      ▼
+              │     │           │  └────┬─────┘     completed failed
+              │     │           │       │
+              │     └───────────┼───────┘
+              │                 │  backoff expires
+              └─────────────────┘
+
+         Any non-terminal state ──── run cancelled ────► cancelled
+         Dependency failed + trigger=all_success ──────► skipped
+```
+
+### 3.4 Transition Tables
+
+#### Run Transitions
+
+| From | To | Trigger | Actor | Side Effects |
+|------|----|---------|-------|-------------|
+| `pending` | `planning` | Mission created | Coordinator | Emit `run_started` event |
+| `planning` | `awaiting_approval` | Plan decomposition complete | Coordinator | Create `orchestration_tasks` rows; emit `plan_ready` event |
+| `planning` | `running` | Plan complete + autonomy mode | Coordinator | Create tasks + begin execution; emit `plan_ready` + `run_started` |
+| `awaiting_approval` | `running` | Human approves plan | Human (API) | Begin task execution; emit `human_approved` event |
+| `awaiting_approval` | `failed` | Human rejects plan | Human (API) | Emit `human_rejected` event |
+| `running` | `completed` | All tasks terminal + all passed | Coordinator | Set `completed_at`; emit `run_completed`; offer "save as routine" |
+| `running` | `failed` | Unrecoverable task failure or budget exceeded without override | Coordinator | Set `completed_at`; emit `run_failed`; cancel remaining tasks |
+| `running` | `paused` | Human pauses | Human (API) | Pause all non-terminal tasks; emit `run_paused` |
+| `running` | `budget_exceeded` | Cost exceeds hard cap | System (budget check) | Pause all non-terminal tasks; emit `budget_exceeded` |
+| `paused` | `running` | Human resumes | Human (API) | Resume paused tasks; emit `run_resumed` |
+| `budget_exceeded` | `running` | Human increases budget | Human (API) | Resume tasks; emit `budget_increased` |
+| `budget_exceeded` | `cancelled` | Human cancels | Human (API) | Cancel all tasks; emit `run_cancelled` |
+| Any non-terminal | `cancelled` | Human cancels | Human (API) | Cancel all non-terminal tasks; emit `run_cancelled` |
+
+#### Task Transitions
+
+| From | To | Trigger | Actor | Side Effects |
+|------|----|---------|-------|-------------|
+| `pending` | `queued` | All dependencies in terminal success state | Dependency resolver | Emit `task_queued` |
+| `pending` | `skipped` | Dependency failed + trigger rule = `all_success` | Dependency resolver | Emit `task_skipped` |
+| `queued` | `assigned` | Agent selected by coordinator | Coordinator | Set `agent_id`; create board_task; emit `task_assigned` |
+| `assigned` | `running` | Agent begins execution | Agent | Set `started_at`; update board_task → `in_progress`; emit `task_started` |
+| `running` | `continuing` | Agent exits cleanly, needs more turns | Agent (clean exit) | Emit `task_continuing`; schedule continuation (1s delay, same attempt) |
+| `continuing` | `running` | Continuation dispatched | System (timer) | Emit `task_resumed` |
+| `running` | `verifying` | Agent submits output | Agent | Store output reference; update board_task → `review`; emit `task_output_submitted` |
+| `verifying` | `completed` | Verifier passes output | Verifier agent | Set `verifier_score`; update board_task → `done`; emit `verification_passed` |
+| `verifying` | `awaiting_human` | Verifier score below threshold or verifier uncertain | Verifier agent | Emit `human_review_requested` |
+| `verifying` | `awaiting_retry` | Verifier fails output + retries remaining | Verifier agent | Set `verifier_score`; emit `verification_failed`; schedule retry with backoff |
+| `verifying` | `failed` | Verifier fails output + no retries remaining | Verifier agent | Set `verifier_score`; update board_task → `done` (with error); emit `task_failed` |
+| `awaiting_human` | `completed` | Human approves | Human (API) | Update board_task → `done`; emit `human_approved` |
+| `awaiting_human` | `awaiting_retry` | Human rejects + retries remaining | Human (API) | Emit `human_rejected`; schedule retry |
+| `awaiting_human` | `failed` | Human rejects + no retries | Human (API) | Update board_task → `done` (with error); emit `human_rejected` + `task_failed` |
+| `awaiting_retry` | `assigned` | Backoff timer expires | System (timer) | Increment `attempt_count`; emit `task_retrying` |
+| `running` | `failed` | Infrastructure failure (timeout, crash, OOM) | System (reconciler) | Update board_task → `done` (with error); emit `task_crashed` |
+| `running` | `awaiting_retry` | Infrastructure failure + retries remaining | System (reconciler) | Emit `task_crashed`; schedule retry with backoff |
+| Any non-terminal | `cancelled` | Parent run cancelled | Run state change | Update board_task → `done` (with error); emit `task_cancelled` |
+
+### 3.5 Continuation vs Retry (from Symphony)
+
+The distinction between continuation and retry is critical for AI agent tasks. An agent researching a topic may need 5 LLM turns — each "exit" between turns is a continuation, not a failure.
+
+| Dimension | Continuation | Retry |
+|-----------|-------------|-------|
+| **Trigger** | Agent exits cleanly, work incomplete | Infrastructure failure, verification failure, or timeout |
+| **Attempt counter** | Unchanged (same attempt) | Incremented |
+| **Delay** | 1 second (fixed) | Exponential backoff: `min(10s × 2^(attempt-1), 5min)` |
+| **Agent context** | Same agent, workspace preserved, prior output available | Same or different agent, fresh prompt with attempt number |
+| **State sequence** | `running → continuing → running` | `running → awaiting_retry → assigned → running` |
+| **Board task status** | Stays `in_progress` | Briefly shows retry status, then back to `in_progress` |
+| **Budget impact** | Counts toward task budget | Counts toward task budget (coordinator may switch to cheaper model on retry) |
+| **Max turns** | Configurable per task (default: 10, matching existing AgentFactory tool loop) | Configurable per task (default: 3) |
+
+**Backoff progression for retries:**
+
+| Attempt | Delay | Cumulative Wait |
+|---------|-------|-----------------|
+| 1 | 10s | 10s |
+| 2 | 20s | 30s |
+| 3 | 40s | 70s |
+| 4 | 80s | 150s (2.5min) |
+| 5 | 160s | 310s (5.2min) |
+| 6+ | 300s (cap) | +5min each |
+
+### 3.6 Failure Classification
+
+Following Prefect's `CRASHED` vs `FAILED` distinction, adapted for AI agent execution:
+
+| Failure Type | Cause | Retryable? | Retry Strategy | Example |
+|-------------|-------|-----------|----------------|---------|
+| **Infrastructure failure** (CRASHED equivalent) | Agent timeout, OOM, network error, provider outage | Yes (auto) | Same task, exponential backoff | OpenRouter returns 503; agent process killed |
+| **Quality failure** (FAILED equivalent) | Verifier rejects output, wrong format, incomplete work | Yes (auto) | Same or different model, with failure context in prompt | Research report missing 2 of 5 required sections |
+| **Human rejection** | Human reviews and rejects | Conditional | Only if human chooses "retry" vs "fail" | Human says "this analysis is wrong, try again" |
+| **Budget exhaustion** | Task cost exceeds per-task or per-run budget | No (requires human) | Human must increase budget | Task used $5 of $3 budget |
+| **Dependency failure** | Upstream task failed with `all_success` trigger | No | Task skipped | Research task failed → analysis task can't proceed |
+| **Cancellation** | Human or system cancels | No | N/A | User abandons mission |
+
+**Key design decision:** Infrastructure failures bypass verification (no point judging output from a crashed agent). Quality failures always go through verification. This matches Prefect's pattern where `CRASHED` bypasses orchestration rules via `force=True`.
+
+### 3.7 Stall Detection
+
+Adapted from Symphony's reconciliation loop and the existing `task_reconciler.py`:
+
+| Detection | Threshold | Action |
+|-----------|-----------|--------|
+| Task in `running` with no heartbeat/event | `TASK_STALL_TIMEOUT` (default: 5 min) | Transition to `awaiting_retry` (if retries remain) or `failed` |
+| Task in `assigned` with no start event | `TASK_ASSIGN_TIMEOUT` (default: 2 min) | Re-queue: transition back to `queued` for reassignment |
+| Task in `verifying` with no verdict | `VERIFY_TIMEOUT` (default: 3 min) | Escalate to `awaiting_human` |
+| Run in `running` with all tasks terminal but not resolved | `RUN_RESOLVE_TIMEOUT` (default: 1 min) | Coordinator re-evaluates run completion |
+
+**Implementation:** Extend the existing `task_reconciler.py` pattern. The reconciler runs on a tick (via APScheduler, matching the existing heartbeat infrastructure) and queries for stalled entities using the denormalized state column + `updated_at` timestamp. This is the DB-authoritative scheduling pattern from Airflow — the reconciler re-derives "what needs attention" from DB state each tick, with no in-memory state to lose on crash.
+
+```python
+# Pseudocode for orchestration reconciler tick
+async def reconcile_tick(session: AsyncSession):
+    now = utcnow()
+
+    # Stalled running tasks
+    stalled = await session.execute(
+        select(OrchestrationTask)
+        .where(
+            OrchestrationTask.state == TaskState.RUNNING,
+            OrchestrationTask.updated_at < now - timedelta(seconds=TASK_STALL_TIMEOUT),
+        )
+        .with_for_update(skip_locked=True)  # skip tasks being processed by another tick
+    )
+    for task in stalled.scalars():
+        if task.attempt_count < task.max_retries:
+            await transition_task(session, task, TaskState.AWAITING_RETRY,
+                                  reason="stall_detected")
+        else:
+            await transition_task(session, task, TaskState.FAILED,
+                                  reason="stall_detected_max_retries")
+
+    # Ready-to-run tasks (dependencies resolved)
+    queued = await session.execute(
+        select(OrchestrationTask)
+        .where(OrchestrationTask.state == TaskState.QUEUED)
+    )
+    for task in queued.scalars():
+        if await all_dependencies_met(session, task):
+            await assign_agent(session, task)
+```
+
+### 3.8 Board Task Status Mapping
+
+The existing `board_tasks` table has 5 statuses: `inbox`, `assigned`, `in_progress`, `review`, `done`. Every orchestration task creates a corresponding board_task for UI visibility. The mapping:
+
+| Orchestration Task State | Board Task Status | Notes |
+|-------------------------|-------------------|-------|
+| `pending` | (no board_task yet) | Board task created on assignment |
+| `queued` | (no board_task yet) | Board task created on assignment |
+| `awaiting_retry` | `assigned` | Waiting to be re-dispatched |
+| `assigned` | `assigned` | Agent selected |
+| `running` | `in_progress` | Sets `started_at` |
+| `continuing` | `in_progress` | Stays in progress during multi-turn |
+| `verifying` | `review` | Output under evaluation |
+| `awaiting_human` | `review` | Human decision needed |
+| `completed` | `done` | Sets `completed_at` |
+| `failed` | `done` | Sets `completed_at` + `error_message` |
+| `cancelled` | `done` | Sets `completed_at` + `error_message` |
+| `skipped` | `done` | Sets `completed_at` + result = "skipped: dependency failed" |
+
+**Integration mechanism:** Board tasks are linked via `source_type='orchestration'` and `source_id=<orchestration_run_id>` (existing fields on `board_tasks`). The `orchestration_tasks` table holds a `board_task_id` FK for direct reference. State synchronization is performed as a side effect of the `transition_task()` function — every orchestration state change updates the corresponding board_task status in the same transaction.
+
+### 3.9 Concurrency Safety
+
+State transitions must be safe under concurrent access. Two scenarios matter:
+
+1. **Coordinator and agent racing on the same task** — coordinator tries to cancel while agent submits output
+2. **Reconciler and agent racing** — reconciler detects stall while agent is about to report completion
+
+**Approach: Optimistic locking with `version_id_col`**
+
+```python
+class OrchestrationTask(Base):
+    __tablename__ = "orchestration_tasks"
+
+    id = mapped_column(UUID, primary_key=True, server_default=func.gen_random_uuid())
+    state = mapped_column(sa.Enum(TaskState), nullable=False, default=TaskState.PENDING)
+    version_id = mapped_column(Integer, nullable=False, default=1)
+
+    __mapper_args__ = {"version_id_col": version_id}
+```
+
+Every `UPDATE` includes `WHERE version_id = <loaded_value>` and increments the version. If another transaction changed the row, SQLAlchemy raises `StaleDataError`. The transition function catches this and returns a conflict result rather than silently corrupting state.
+
+```python
+from sqlalchemy.orm.exc import StaleDataError
+
+async def transition_task(
+    session: AsyncSession,
+    task: OrchestrationTask,
+    to_state: TaskState,
+    *,
+    reason: str | None = None,
+    metadata: dict | None = None,
+) -> tuple[bool, OrchestrationTask]:
+    """Atomically transition a task state. Returns (success, task)."""
+    from_state = task.state
+
+    if to_state not in ALLOWED_TASK_TRANSITIONS.get(from_state, set()):
+        raise InvalidTransition(f"{from_state} → {to_state} not allowed")
+
+    if to_state in TERMINAL_TASK_STATES and from_state in TERMINAL_TASK_STATES:
+        raise InvalidTransition("Cannot transition between terminal states")
+
+    task.state = to_state
+    task.updated_at = utcnow()
+
+    # Side effects
+    if to_state == TaskState.RUNNING and task.started_at is None:
+        task.started_at = utcnow()
+    if TASK_STATE_TYPE[to_state] == StateType.TERMINAL and task.completed_at is None:
+        task.completed_at = utcnow()
+
+    # Append event (dual-write)
+    event = OrchestrationEvent(
+        run_id=task.run_id,
+        task_id=task.id,
+        event_type=f"task_{to_state}",
+        payload={"from": from_state, "to": to_state, "reason": reason, **(metadata or {})},
+    )
+    session.add(event)
+
+    # Sync board task
+    if task.board_task_id:
+        board_status = TASK_TO_BOARD_STATUS[to_state]
+        await sync_board_task(session, task.board_task_id, board_status, task)
+
+    try:
+        await session.flush()
+        return True, task
+    except StaleDataError:
+        await session.rollback()
+        return False, await session.get(OrchestrationTask, task.id)
+```
+
+**For claim-style operations** (assigning an agent to a queued task), use `SELECT FOR UPDATE SKIP LOCKED` to prevent two coordinators from claiming the same task:
+
+```python
+# Claim next queued task for agent
+task = await session.execute(
+    select(OrchestrationTask)
+    .where(OrchestrationTask.state == TaskState.QUEUED)
+    .order_by(OrchestrationTask.created_at)
+    .limit(1)
+    .with_for_update(skip_locked=True)
+)
+```
+
+### 3.10 Transition Enforcement
+
+**No external library needed.** The transition rules are a ~30-line dict. Python state machine libraries (pytransitions, python-statemachine) don't integrate with SQLAlchemy and would add a dependency for ~10 states. We enforce transitions in application code via the `transition_task()` / `transition_run()` functions. All state changes must go through these functions — never set `.state` directly.
+
+```python
+ALLOWED_TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
+    TaskState.PENDING:        frozenset({TaskState.QUEUED, TaskState.SKIPPED, TaskState.CANCELLED}),
+    TaskState.QUEUED:         frozenset({TaskState.ASSIGNED, TaskState.CANCELLED}),
+    TaskState.ASSIGNED:       frozenset({TaskState.RUNNING, TaskState.CANCELLED}),
+    TaskState.RUNNING:        frozenset({TaskState.CONTINUING, TaskState.VERIFYING,
+                                         TaskState.AWAITING_RETRY, TaskState.FAILED, TaskState.CANCELLED}),
+    TaskState.CONTINUING:     frozenset({TaskState.RUNNING, TaskState.CANCELLED}),
+    TaskState.VERIFYING:      frozenset({TaskState.COMPLETED, TaskState.AWAITING_RETRY,
+                                         TaskState.AWAITING_HUMAN, TaskState.FAILED}),
+    TaskState.AWAITING_HUMAN: frozenset({TaskState.COMPLETED, TaskState.AWAITING_RETRY, TaskState.FAILED}),
+    TaskState.AWAITING_RETRY: frozenset({TaskState.ASSIGNED, TaskState.CANCELLED}),
+    # Terminal states have no outgoing transitions
+    TaskState.COMPLETED:      frozenset(),
+    TaskState.FAILED:         frozenset(),
+    TaskState.CANCELLED:      frozenset(),
+    TaskState.SKIPPED:        frozenset(),
+}
+
+ALLOWED_RUN_TRANSITIONS: dict[RunState, frozenset[RunState]] = {
+    RunState.PENDING:            frozenset({RunState.PLANNING, RunState.CANCELLED}),
+    RunState.PLANNING:           frozenset({RunState.AWAITING_APPROVAL, RunState.RUNNING, RunState.FAILED, RunState.CANCELLED}),
+    RunState.AWAITING_APPROVAL:  frozenset({RunState.RUNNING, RunState.FAILED, RunState.CANCELLED}),
+    RunState.RUNNING:            frozenset({RunState.COMPLETED, RunState.FAILED, RunState.PAUSED,
+                                            RunState.BUDGET_EXCEEDED, RunState.CANCELLED}),
+    RunState.PAUSED:             frozenset({RunState.RUNNING, RunState.CANCELLED}),
+    RunState.BUDGET_EXCEEDED:    frozenset({RunState.RUNNING, RunState.CANCELLED}),
+    # Terminal states
+    RunState.COMPLETED:          frozenset(),
+    RunState.FAILED:             frozenset(),
+    RunState.CANCELLED:          frozenset(),
+}
+```
+
+### 3.11 Key Design Decisions Summary
+
+| Decision | Choice | Alternatives Considered | Rationale |
+|----------|--------|------------------------|-----------|
+| State tracking | Hybrid dual-write (CRUD + event log) | Pure event sourcing (Temporal/Dagster), pure CRUD (Airflow) | O(1) queries + audit trail, no projection maintenance overhead. Validated by Prefect at larger scale. |
+| State model | Two-level (StateType + StateName) | Flat enum, hierarchical states | Stable orchestration code (4 StateTypes) + extensible display (add states without touching coordinator). Inspired by Prefect's StateType/state_name pattern. |
+| Continuation vs retry | Distinct paths with different semantics | Single retry mechanism for both | AI agents frequently need multiple turns (continuation). Conflating this with failure retry causes unnecessary backoff and attempt inflation. Adopted from Symphony. |
+| Failure classification | Infrastructure vs quality, separate handling | Single "failed" state | Infrastructure failure → auto-retry same config. Quality failure → retry with different model or escalate to human. Adapted from Prefect's CRASHED vs FAILED. |
+| Concurrency control | Optimistic locking (version_id_col) + SELECT FOR UPDATE for claims | Pessimistic locking everywhere, eventual consistency | Low contention (state changes are seconds apart). Optimistic = no lock held during slow operations. Pessimistic only for claim-style dequeuing. |
+| Transition enforcement | Application-level dict + function | DB triggers, state machine library | ~100 lines, no dependency, testable, integrated with dual-write and board_task sync. Libraries don't integrate with SQLAlchemy. |
+| Board task mapping | Orchestration owns lifecycle, syncs to board_task as side effect | Board task as source of truth, separate UI table | Existing UI gets mission visibility for free. No new frontend work needed for basic mission tracking. |
+| Stall detection | DB-authoritative reconciler on tick (extending existing task_reconciler pattern) | In-memory timeouts, heartbeat-only | Crash-safe — reconciler re-derives state from DB each tick. Matches existing infrastructure (APScheduler + task_reconciler.py). |
 
 ---
 

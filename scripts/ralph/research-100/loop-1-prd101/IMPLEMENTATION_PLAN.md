@@ -3,7 +3,7 @@
 ## Progress
 
 - [x] US-001: Research DAG execution patterns
-- [ ] US-002: Research state machine patterns for task lifecycle
+- [x] US-002: Research state machine patterns for task lifecycle
 - [ ] US-003: Design orchestration_runs table
 - [ ] US-004: Design orchestration_tasks table
 - [ ] US-005: Design orchestration_events table
@@ -18,6 +18,13 @@
 - **DB-authoritative scheduling** (Airflow) is the safest pattern — coordinator re-derives ready tasks from DB, no in-memory state to lose
 - **Infrastructure failure vs quality failure** needs different handling — Prefect's CRASHED vs FAILED distinction maps to our agent timeout vs bad output
 - All 5 systems avoid storing large task outputs in the task table — separate output storage referenced by ID or path
+
+- **Two-level state model** (StateType + StateName) inspired by Prefect allows adding display states without touching orchestration logic
+- **Continuation vs retry** adopted from Symphony — critical for multi-turn agent work (continuation = 1s delay, same attempt; retry = exponential backoff, attempt incremented)
+- **Optimistic locking** via SQLAlchemy `version_id_col` is sufficient for our concurrency needs; SELECT FOR UPDATE only for claim-style dequeuing
+- **Board task mapping** via `source_type='orchestration'` field already exists — no new board_tasks columns needed for basic integration
+- **Stall detection** extends existing `task_reconciler.py` pattern — DB-authoritative, crash-safe, runs on APScheduler tick
+- **No state machine library needed** — ~100 lines of Python (enums + transition dict + transition function) covers all requirements
 
 ## Cross-PRD Dependencies Found
 
