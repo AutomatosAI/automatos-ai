@@ -4,7 +4,7 @@
 
 - [x] US-001: Design PRD-101 outline (Mission Schema & Data Model)
 - [x] US-002: Design PRD-102 outline (Coordinator Architecture)
-- [ ] US-003: Design PRD-103 outline (Verification & Quality)
+- [x] US-003: Design PRD-103 outline (Verification & Quality)
 - [ ] US-004: Design PRD-104 outline (Ephemeral Agents & Model Selection)
 - [ ] US-005: Design PRD-105 outline (Budget & Governance)
 - [ ] US-006: Design PRD-106 outline (Outcome Telemetry & Learning)
@@ -32,6 +32,16 @@
 - `_orchestrator_tick_llm` (heartbeat_service.py:382) is the structural template for coordinator tick — same skeleton, different prompt/tools/budget
 - `AgentCommunicationProtocol` and `CollaborativeReasoner` exist but are not wired into live code paths — coordinator could activate these
 - `SharedContextManager` has 2h Redis TTL — insufficient for multi-day missions, needs DB persistence
+
+- Rubric-based absolute scoring is more stable than pairwise (9% vs 35% flip rate) — Zheng et al. 2023
+- Self-preference bias is empirically proven — MUST use different model for verification than execution
+- Deterministic-first pattern (OpenAI Evals): check format/length/schema before expensive LLM judge calls
+- DeepEval's DAG (decision-tree evaluation) maps naturally to success criteria checking pipelines
+- FutureAGI live traffic scoring (`POST /score`) is the existing pattern to extend — add `POST /verify-task`
+- Three existing quality scoring systems (recipe_quality, quality_assessor, report grading) overlap — PRD-103 must clarify boundaries
+- Verification cost budget: 10-30% of task generation cost (industry benchmark)
+- RAGAS achieves 95% human agreement on faithfulness — useful for RAG-heavy mission tasks
+- DeepEval supports ~14 pre-built metrics + custom DAG metrics; RAGAS specializes in RAG with ~8 metrics
 
 ## Cross-PRD Dependencies Found
 
