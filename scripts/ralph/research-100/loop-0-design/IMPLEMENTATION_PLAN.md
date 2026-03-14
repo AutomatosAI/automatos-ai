@@ -9,7 +9,7 @@
 - [x] US-005: Design PRD-105 outline (Budget & Governance)
 - [x] US-006: Design PRD-106 outline (Outcome Telemetry & Learning)
 - [x] US-007: Design PRD-107 outline (Context Interface Abstraction)
-- [ ] US-008: Design PRD-108 outline (Memory Field Prototype)
+- [x] US-008: Design PRD-108 outline (Memory Field Prototype)
 
 ## Discoveries
 
@@ -97,3 +97,14 @@
 - Propensity logging (`action_probability`) not needed in v1 but schema should not preclude it for future bandit evaluation
 - OpenTelemetry `gen_ai.*` semantic conventions are emerging — worth adopting attribute naming even without OTel transport
 - 10+ existing telemetry touchpoints already in codebase — extend, don't duplicate
+
+- Redis Vector Search (Redis Stack) is the zero-infrastructure choice — already deployed, native TTL maps to decay, hybrid KNN + metadata in single command
+- Qdrant Recommendations API (positive/negative examples) maps directly to resonance discovery — fallback if Redis Stack not available
+- FAISS requires external metadata table + mutex for concurrent writes — best for raw benchmarking, not production prototype
+- Existing `memory_types.py:65` already implements `np.exp(-self.decay_factor * time_elapsed)` with access_count boost — same formula for field decay
+- Score-time decay (no deletion) is recommended over TTL-based deletion — preserves data for experiment analysis, allows Hebbian resurrection
+- Context Engineering Ch. 09 attractor protection formula: `effective_decay = decay_rate × (1 - min(0.5, Σ(resonance × 0.5)))` — attractors decay at half rate
+- Ch. 11 convergence detection: `‖gradient_field(x,y)‖ < 0.01` — but full attractor dynamics out of scope for prototype
+- EmbeddingManager already supports batch with configurable concurrency — field inject/query costs ~$0.001 per call, ~$0.08 per mission
+- Prototype must implement real cosine similarity for S(A,B) — the placeholder `random.uniform(0,1)` in Context Engineering code invalidates resonance entirely
+- Risk: "resonance is just cosine similarity rebranded" — the novel mechanisms are decay + reinforcement + same-interface backend swap
