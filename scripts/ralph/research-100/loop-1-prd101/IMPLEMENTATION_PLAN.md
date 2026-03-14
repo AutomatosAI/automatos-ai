@@ -4,7 +4,7 @@
 
 - [x] US-001: Research DAG execution patterns
 - [x] US-002: Research state machine patterns for task lifecycle
-- [ ] US-003: Design orchestration_runs table
+- [x] US-003: Design orchestration_runs table
 - [ ] US-004: Design orchestration_tasks table
 - [ ] US-005: Design orchestration_events table
 - [ ] US-006: Design integration with existing tables

@@ -653,7 +653,330 @@ ALLOWED_RUN_TRANSITIONS: dict[RunState, frozenset[RunState]] = {
 
 ## 4. Data Model: orchestration_runs
 
-_(US-003)_
+The `orchestration_runs` table is the top-level record for every mission. It stores the user's original goal, the coordinator's decomposition plan, execution configuration, and aggregate tracking metrics. One row = one mission attempt.
+
+### 4.1 Design Principles
+
+1. **Denormalized current state** — `state` column for O(1) dashboard queries (dual-write pattern from Section 2.4)
+2. **Immutable goal, mutable plan** — the user's original `goal` never changes; the `plan` JSONB evolves during planning
+3. **JSONB for extensible config** — autonomy level, budget caps, model preferences stored as structured JSON, not as N columns that require migrations for every new setting
+4. **Workspace isolation** — every query must filter by `workspace_id` (FK → `workspaces.id`)
+5. **Match existing patterns** — UUID primary key, `server_default=func.now()` timestamps, `ondelete='CASCADE'` for workspace FK (consistent with `board_tasks`, `agent_reports`)
+
+### 4.2 Column Definitions
+
+| Column | Type | Nullable | Default | Constraint | Description |
+|--------|------|----------|---------|------------|-------------|
+| `id` | `UUID` | No | `gen_random_uuid()` | PK | Stable mission identifier; persists across retries |
+| `workspace_id` | `UUID` | No | — | FK → `workspaces.id` ON DELETE CASCADE | Multi-tenant isolation |
+| `title` | `VARCHAR(500)` | No | — | — | Human-readable mission title (coordinator-generated or user-provided) |
+| `description` | `TEXT` | Yes | `NULL` | — | Optional extended description |
+| `goal` | `TEXT` | No | — | — | Original user input, verbatim. Never modified after creation. |
+| `state` | `VARCHAR(30)` | No | `'pending'` | — | Current `RunState` value (see Section 3.2). Denormalized for fast queries. |
+| `state_type` | `VARCHAR(10)` | No | `'pending'` | — | Current `StateType` value. Stable enum for coordinator logic. |
+| `plan` | `JSONB` | Yes | `NULL` | — | Coordinator's decomposition — task list with descriptions, dependencies, agent assignments. Populated during `planning` state. Schema in Section 4.3. |
+| `config` | `JSONB` | No | `'{}'` | — | Mission configuration — autonomy level, budget, model preferences, timeout overrides. Schema in Section 4.4. |
+| `result_summary` | `TEXT` | Yes | `NULL` | — | Coordinator-generated summary of mission outcome (for completed missions) |
+| `error_message` | `TEXT` | Yes | `NULL` | — | Failure reason (for failed/cancelled missions) |
+| `created_by` | `VARCHAR(255)` | No | — | — | User ID (Clerk) or `'system'` for auto-triggered missions. String type matches `board_tasks.created_by_id` pattern. |
+| `coordinator_agent_id` | `INTEGER` | Yes | `NULL` | FK → `agents.id` ON DELETE SET NULL | Roster agent acting as coordinator, or NULL if using system coordinator |
+| `total_tokens` | `INTEGER` | No | `0` | `CHECK (total_tokens >= 0)` | Aggregate token usage across all tasks |
+| `total_cost` | `NUMERIC(10,6)` | No | `0` | `CHECK (total_cost >= 0)` | Aggregate cost in USD across all tasks |
+| `task_count` | `INTEGER` | No | `0` | `CHECK (task_count >= 0)` | Total tasks in this mission (denormalized for dashboard) |
+| `tasks_completed` | `INTEGER` | No | `0` | `CHECK (tasks_completed >= 0)` | Tasks in terminal success state (denormalized) |
+| `tasks_failed` | `INTEGER` | No | `0` | `CHECK (tasks_failed >= 0)` | Tasks in terminal failure state (denormalized) |
+| `started_at` | `TIMESTAMPTZ` | Yes | `NULL` | — | When first task began execution (state → `running`) |
+| `completed_at` | `TIMESTAMPTZ` | Yes | `NULL` | — | When mission reached terminal state |
+| `duration_ms` | `INTEGER` | Yes | `NULL` | — | `completed_at - started_at` in milliseconds. Computed on completion. |
+| `version_id` | `INTEGER` | No | `1` | — | Optimistic locking counter (SQLAlchemy `version_id_col`) |
+| `created_at` | `TIMESTAMPTZ` | No | `NOW()` | — | Row creation timestamp |
+| `updated_at` | `TIMESTAMPTZ` | No | `NOW()` | — | Last modification timestamp (auto-updated) |
+
+**Why `NUMERIC(10,6)` for cost?** LLM API calls cost fractions of a cent. `FLOAT` introduces rounding errors on aggregation (`SUM` of 1000 tasks at $0.003 each). `NUMERIC` is exact. 10 digits with 6 decimal places supports up to $9,999.999999 per mission — more than sufficient.
+
+**Why denormalized task counts?** Dashboard queries like "show all running missions with progress" would otherwise require `JOIN + GROUP BY` on potentially large task tables. The coordinator updates these counters atomically when task states change (same transaction as the dual-write event).
+
+### 4.3 Plan JSONB Schema
+
+The `plan` column stores the coordinator's task decomposition. It's populated during the `planning` state and serves as the blueprint for task creation.
+
+```json
+{
+  "version": 1,
+  "strategy": "sequential",
+  "reasoning": "The user wants EU AI Act compliance research. This decomposes into 4 sequential phases: research requirements, analyze product, write report, review report.",
+  "tasks": [
+    {
+      "temp_id": "t1",
+      "title": "Research EU AI Act requirements",
+      "description": "Identify all requirements from the EU AI Act relevant to our product category",
+      "task_type": "research",
+      "suggested_agent": {
+        "type": "roster",
+        "agent_id": 42,
+        "agent_name": "Researcher"
+      },
+      "suggested_model": "anthropic/claude-sonnet-4-6",
+      "tools_needed": ["web_search", "document_analysis"],
+      "depends_on": [],
+      "estimated_tokens": 15000,
+      "estimated_cost": 0.045,
+      "success_criteria": "Comprehensive list of requirements with article references"
+    },
+    {
+      "temp_id": "t2",
+      "title": "Analyze product against requirements",
+      "description": "Map each EU AI Act requirement to our product's current compliance status",
+      "task_type": "analysis",
+      "suggested_agent": {
+        "type": "roster",
+        "agent_id": 42,
+        "agent_name": "Researcher"
+      },
+      "suggested_model": null,
+      "tools_needed": ["workspace_read_file", "workspace_grep"],
+      "depends_on": ["t1"],
+      "estimated_tokens": 20000,
+      "estimated_cost": 0.060,
+      "success_criteria": "Gap analysis table with compliance status per requirement"
+    }
+  ],
+  "total_estimated_tokens": 75000,
+  "total_estimated_cost": 0.225
+}
+```
+
+**Design notes:**
+- `temp_id` is a coordinator-assigned identifier used during planning. Real `orchestration_tasks.id` UUIDs replace these after approval.
+- `depends_on` references `temp_id` values (resolved to real task IDs on task creation).
+- `suggested_agent` and `suggested_model` are hints — the coordinator may override based on availability or budget.
+- `strategy` is informational: `"sequential"`, `"parallel"`, or `"mixed"`. The actual execution order is determined by dependency resolution.
+- The plan is **immutable after approval**. Re-planning creates a new version (increment `version`), logged as an event.
+
+### 4.4 Config JSONB Schema
+
+The `config` column stores mission-level settings. Modeled after `workflow_recipes.execution_config` — same pattern of structured JSON for runtime configuration.
+
+```json
+{
+  "autonomy": {
+    "level": "approve",
+    "auto_approve_threshold": null
+  },
+  "budget": {
+    "soft_limit_usd": 2.00,
+    "hard_limit_usd": 5.00,
+    "warn_at_percent": 80
+  },
+  "model_preferences": {
+    "planner": "anthropic/claude-sonnet-4-6",
+    "researcher": null,
+    "writer": null,
+    "reviewer": "anthropic/claude-haiku-4-5-20251001",
+    "verifier": "anthropic/claude-haiku-4-5-20251001"
+  },
+  "timeouts": {
+    "task_stall_seconds": 300,
+    "task_assign_seconds": 120,
+    "verify_seconds": 180,
+    "run_max_duration_seconds": 3600
+  },
+  "retry": {
+    "max_retries_per_task": 3,
+    "max_continuations_per_task": 10,
+    "backoff_base_seconds": 10,
+    "backoff_max_seconds": 300
+  },
+  "notifications": {
+    "on_completion": true,
+    "on_failure": true,
+    "on_budget_warning": true,
+    "channel": "slack"
+  }
+}
+```
+
+**Autonomy levels:**
+| Level | Behavior |
+|-------|----------|
+| `"approve"` (default) | Coordinator shows plan → human approves → execution begins |
+| `"autonomous"` | Plan auto-approved if estimated cost ≤ `auto_approve_threshold`. Otherwise, falls back to `approve`. |
+| `"full_auto"` | No human gates. System runs to completion or budget exhaustion. Requires explicit opt-in. |
+
+**Why JSONB instead of columns?** Config evolves faster than schema. Adding "notification preferences" or "priority scheduling" shouldn't require an Alembic migration. The trade-off is weaker type enforcement at the DB level — mitigated by Pydantic validation on the API layer (same pattern used by `workflow_recipes.execution_config` and `agents.configuration`).
+
+### 4.5 Indexes
+
+```sql
+-- Primary query: "show my active missions" (dashboard)
+CREATE INDEX ix_orch_runs_workspace_state
+    ON orchestration_runs (workspace_id, state_type)
+    WHERE state_type != 'terminal';
+
+-- Query: "find mission by ID" (detail view)
+-- PK index covers this
+
+-- Query: "recent completed missions" (history)
+CREATE INDEX ix_orch_runs_workspace_completed
+    ON orchestration_runs (workspace_id, completed_at DESC)
+    WHERE state_type = 'terminal';
+
+-- Query: "missions by creator" (user activity)
+CREATE INDEX ix_orch_runs_created_by
+    ON orchestration_runs (workspace_id, created_by);
+
+-- Query: "stale runs" (reconciler)
+CREATE INDEX ix_orch_runs_state_updated
+    ON orchestration_runs (state, updated_at)
+    WHERE state_type NOT IN ('terminal');
+```
+
+**Partial indexes** (`WHERE state_type != 'terminal'`) keep the index small — most runs will be terminal over time. Active runs (the ones queried by dashboards and reconcilers) stay in a compact index.
+
+### 4.6 Example INSERT
+
+```sql
+-- User submits: "Research EU AI Act compliance for our product"
+INSERT INTO orchestration_runs (
+    workspace_id,
+    title,
+    goal,
+    state,
+    state_type,
+    config,
+    created_by
+) VALUES (
+    '550e8400-e29b-41d4-a716-446655440000',           -- workspace_id
+    'EU AI Act Compliance Research',                     -- title (coordinator-generated)
+    'Research EU AI Act compliance for our product',     -- goal (user's exact input)
+    'pending',                                           -- state
+    'pending',                                           -- state_type
+    '{
+      "autonomy": {"level": "approve"},
+      "budget": {"soft_limit_usd": 2.0, "hard_limit_usd": 5.0, "warn_at_percent": 80},
+      "model_preferences": {},
+      "timeouts": {},
+      "retry": {"max_retries_per_task": 3}
+    }'::jsonb,                                           -- config (defaults merged with user prefs)
+    'user_2abc123'                                       -- created_by (Clerk user ID)
+)
+RETURNING id, created_at;
+
+-- Returns: id = 'a1b2c3d4-...', created_at = '2026-03-14T22:30:00Z'
+-- Next: Coordinator transitions state → 'planning' and begins decomposition
+```
+
+### 4.7 Alembic Migration
+
+```python
+"""PRD-101: Create orchestration_runs table
+
+Mission-level execution records for the Mission Mode coordinator.
+Stores user goals, coordinator plans, execution config, and aggregate metrics.
+"""
+
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+
+revision = "prd101_orchestration_runs"
+down_revision = None  # Set to latest migration at implementation time
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "orchestration_runs",
+        sa.Column("id", UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"),
+                  primary_key=True),
+        sa.Column("workspace_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("title", sa.String(500), nullable=False),
+        sa.Column("description", sa.Text, nullable=True),
+        sa.Column("goal", sa.Text, nullable=False),
+        sa.Column("state", sa.String(30), nullable=False, server_default="pending"),
+        sa.Column("state_type", sa.String(10), nullable=False, server_default="pending"),
+        sa.Column("plan", JSONB, nullable=True),
+        sa.Column("config", JSONB, nullable=False, server_default="{}"),
+        sa.Column("result_summary", sa.Text, nullable=True),
+        sa.Column("error_message", sa.Text, nullable=True),
+        sa.Column("created_by", sa.String(255), nullable=False),
+        sa.Column("coordinator_agent_id", sa.Integer, nullable=True),
+        sa.Column("total_tokens", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("total_cost", sa.Numeric(10, 6), nullable=False, server_default="0"),
+        sa.Column("task_count", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("tasks_completed", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("tasks_failed", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("duration_ms", sa.Integer, nullable=True),
+        sa.Column("version_id", sa.Integer, nullable=False, server_default="1"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("NOW()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("NOW()")),
+        # Constraints
+        sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["coordinator_agent_id"], ["agents.id"], ondelete="SET NULL"),
+        sa.CheckConstraint("total_tokens >= 0", name="ck_orch_runs_tokens_positive"),
+        sa.CheckConstraint("total_cost >= 0", name="ck_orch_runs_cost_positive"),
+        sa.CheckConstraint("task_count >= 0", name="ck_orch_runs_task_count_positive"),
+        sa.CheckConstraint("tasks_completed >= 0", name="ck_orch_runs_tasks_completed_positive"),
+        sa.CheckConstraint("tasks_failed >= 0", name="ck_orch_runs_tasks_failed_positive"),
+    )
+
+    # Indexes
+    op.create_index(
+        "ix_orch_runs_workspace_state",
+        "orchestration_runs",
+        ["workspace_id", "state_type"],
+        postgresql_where=sa.text("state_type != 'terminal'"),
+    )
+    op.create_index(
+        "ix_orch_runs_workspace_completed",
+        "orchestration_runs",
+        ["workspace_id", sa.text("completed_at DESC")],
+        postgresql_where=sa.text("state_type = 'terminal'"),
+    )
+    op.create_index(
+        "ix_orch_runs_created_by",
+        "orchestration_runs",
+        ["workspace_id", "created_by"],
+    )
+    op.create_index(
+        "ix_orch_runs_state_updated",
+        "orchestration_runs",
+        ["state", "updated_at"],
+        postgresql_where=sa.text("state_type != 'terminal'"),
+    )
+
+    # Table comment
+    op.execute(
+        "COMMENT ON TABLE orchestration_runs IS "
+        "'Mission-level execution records (PRD-101). One row per mission attempt.'"
+    )
+
+
+def downgrade() -> None:
+    op.drop_index("ix_orch_runs_state_updated", table_name="orchestration_runs")
+    op.drop_index("ix_orch_runs_created_by", table_name="orchestration_runs")
+    op.drop_index("ix_orch_runs_workspace_completed", table_name="orchestration_runs")
+    op.drop_index("ix_orch_runs_workspace_state", table_name="orchestration_runs")
+    op.drop_table("orchestration_runs")
+```
+
+### 4.8 Design Decisions
+
+| Decision | Choice | Alternative | Rationale |
+|----------|--------|-------------|-----------|
+| Primary key type | UUID | Integer (SERIAL) | Missions may be created from multiple sources (API, chatbot, scheduler). UUID avoids coordination for ID generation. Matches `workspaces.id` and `agent_reports.id` patterns. |
+| Goal storage | Immutable `TEXT` column | Part of `config` JSONB | The goal is the user's contract with the system. It should never be buried in JSON or accidentally modified. Separate column enables full-text search. |
+| Plan storage | JSONB column on runs table | Separate `orchestration_plans` table | Plans are 1:1 with runs and always loaded together. A separate table adds a JOIN for every plan read with no queryability benefit (we never query across plans). |
+| Cost tracking | `NUMERIC(10,6)` | `FLOAT`, `INTEGER` (cents) | `FLOAT` accumulates rounding errors. Integer cents loses sub-cent precision (common in LLM billing). `NUMERIC` is exact and supports both. |
+| Denormalized counters | `task_count`, `tasks_completed`, `tasks_failed` | Computed via `COUNT(*)` query | Dashboard shows "3/7 tasks complete" — this query runs on every page load. Denormalized counters avoid a JOIN + GROUP BY on every render. Updated atomically with task state transitions. |
+| Config extensibility | JSONB with Pydantic validation | Typed columns | Config changes (new autonomy levels, new notification types) shouldn't require migrations. Same pattern as `agents.configuration` and `workflow_recipes.execution_config`. |
+| `created_by` type | `VARCHAR(255)` | `INTEGER` FK → `users.id` | Matches `board_tasks.created_by_id` pattern. Clerk user IDs are strings (`user_2abc...`). Supports `'system'` for auto-triggered missions without a nullable FK. |
+| `coordinator_agent_id` | Nullable FK → `agents.id` | Required FK, separate `coordinator_type` column | Most missions use the system coordinator (no specific agent). When a roster agent coordinates, reference it. `SET NULL` on agent deletion — the run record survives. |
 
 ---
 
