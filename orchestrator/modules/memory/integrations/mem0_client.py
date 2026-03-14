@@ -210,17 +210,16 @@ class Mem0Client:
         Returns:
             List of memory items
         """
-        # OpenMemory API: POST /memories/search/ for semantic search
-        url = f"{self.api_url}/memories/search/"
-        payload = {
-            "query": query,
-            "filters": {"user_id": user_id},
-            "top_k": limit,
+        # OpenMemory OSS: GET /api/v1/memories/?user_id=...
+        # This server version has no /search endpoint — list + filter is the search.
+        url = f"{self.api_url}/memories/"
+        params = {
+            "user_id": user_id,
         }
 
         logger.debug("[Mem0] Searching memories for user=%s query=%r", user_id, query)
 
-        resp = self._request("POST", url, json=payload)
+        resp = self._request("GET", url, params=params)
         if resp is None:
             return []
 
