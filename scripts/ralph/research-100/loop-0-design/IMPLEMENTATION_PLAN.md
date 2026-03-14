@@ -6,7 +6,7 @@
 - [x] US-002: Design PRD-102 outline (Coordinator Architecture)
 - [x] US-003: Design PRD-103 outline (Verification & Quality)
 - [x] US-004: Design PRD-104 outline (Ephemeral Agents & Model Selection)
-- [ ] US-005: Design PRD-105 outline (Budget & Governance)
+- [x] US-005: Design PRD-105 outline (Budget & Governance)
 - [ ] US-006: Design PRD-106 outline (Outcome Telemetry & Learning)
 - [ ] US-007: Design PRD-107 outline (Context Interface Abstraction)
 - [ ] US-008: Design PRD-108 outline (Memory Field Prototype)
@@ -63,3 +63,16 @@
 - Hybrid contractor creation recommended: in-memory AgentRuntime for speed + async DB audit row for observability
 - `agents` table has 45+ columns — contractors only need ~8 fields. Consider minimal DB row or in-memory-only mode
 - Existing `inter_agent.py` AgentCommunicationProtocol and CollaborativeReasoner are unwired — future option for contractor coordination
+
+- OpenClaw actually has 8 policy stages (not 6 as stated in PRD-100) — all monotonically narrowing, deny always wins
+- OpenClaw enforces at tool-set construction (tools passed to LLM) — same as our `get_tools_for_agent()` pattern
+- AWS Budgets has NO true hard cap — 8-12 hour billing lag makes it useless for real-time LLM enforcement
+- K8s admission control pattern is the right model: synchronous pre-call check, hard rejection, in-flight work completes
+- Two `TokenBudgetManager` classes exist — `modules/context/budget.py` (context-window) and `stages/token_budget_manager.py` (workflow, broken)
+- `stages/token_budget_manager.py` has latent `AttributeError` — references `config.TOKEN_BUDGET_DEFAULT` etc. that don't exist in `config.py`
+- `Workspace.plan_limits` JSONB exists but is completely unwired — the enforcement hook is already in the schema
+- `llm_usage` table has no `mission_id` column — must add for per-mission cost attribution
+- `UsageTracker` is fire-and-forget (post-call only) — budget enforcement needs a pre-call admission gate in `LLMManager`
+- LiteLLM BudgetManager's `projected_cost()` + `update_cost()` two-phase pattern is the reference implementation
+- Anthropic uses token bucket natively; cached input tokens excluded from ITPM — relevant for mission cost optimization
+- Cost-denominated token bucket with disabled refill is the right algorithm for fixed-budget missions
