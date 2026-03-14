@@ -8,7 +8,7 @@
 - [x] US-004: Design PRD-104 outline (Ephemeral Agents & Model Selection)
 - [x] US-005: Design PRD-105 outline (Budget & Governance)
 - [x] US-006: Design PRD-106 outline (Outcome Telemetry & Learning)
-- [ ] US-007: Design PRD-107 outline (Context Interface Abstraction)
+- [x] US-007: Design PRD-107 outline (Context Interface Abstraction)
 - [ ] US-008: Design PRD-108 outline (Memory Field Prototype)
 
 ## Discoveries
@@ -42,6 +42,17 @@
 - Verification cost budget: 10-30% of task generation cost (industry benchmark)
 - RAGAS achieves 95% human agreement on faithfulness — useful for RAG-heavy mission tasks
 - DeepEval supports ~14 pre-built metrics + custom DAG metrics; RAGAS specializes in RAG with ~8 metrics
+
+- ContextService has 8 modes, 12 sections, all rendered in parallel via asyncio.gather — adapter wraps this without changing internals
+- `ContextResult` (frozen dataclass) is the current public contract — `AgentContext` in ports module becomes the new one
+- 4 callers directly import ContextService: smart_orchestrator, heartbeat_service, recipe_executor, routing/engine — all must migrate to ContextProvider port
+- SharedContextManager has 3 merge strategies (override, append, consensus) + 3 consensus methods (majority, average, union) — all preserved behind SharedContextPort
+- AgentCommunicationProtocol and CollaborativeReasoner exist in inter_agent.py but are NOT wired into live code paths — coordinator (PRD-102) could activate these
+- LangGraph's two-tier model (checkpointer + store) validates our two-port design: ContextProvider (per-agent) + SharedContextPort (cross-agent)
+- AutoGen's `update_context()` preprocessor pattern confirms the approach: memory/shared context injects as system message
+- Context Engineering theory requires resonance-based query primitive ("what resonates with X?") — different from traditional retrieval, but same interface shape
+- Non-commutativity of field operations (inject order matters) — interface must preserve operation ordering
+- BaseSection ABC already exists with `async def render(self, ctx: SectionContext) -> str` — good precedent for port pattern
 
 ## Cross-PRD Dependencies Found
 
