@@ -982,7 +982,560 @@ def downgrade() -> None:
 
 ## 5. Data Model: orchestration_tasks
 
-_(US-004)_
+The `orchestration_tasks` table records every subtask within a mission. Each row tracks assignment, execution, verification, and result for a single unit of work. Tasks reference their parent run, their assigned agent, and their corresponding board task (for UI visibility). Dependencies between tasks are stored in a separate join table (`orchestration_task_dependencies`) — not as an array column — for referential integrity and clean scheduling queries.
+
+### 5.1 Design Principles
+
+1. **Join table for dependencies** — PostgreSQL's own documentation warns that "searching for specific array elements can be a sign of database misdesign" and recommends a separate table. A `task_dependencies` join table gives us FK enforcement, B-tree indexes for both directions (upstream/downstream), and trivial addition of edge metadata (`dependency_type`). At our scale (5-50 tasks per mission), the extra JOIN is negligible — and the "find ready tasks" query is cleaner than `unnest()` or `jsonb_array_elements()`.
+2. **Board task bridge** — every `orchestration_task` creates a `board_task` with `source_type='orchestration'` and `source_id` set to the run ID. This gives us free dashboard visibility without new UI components. The `board_task_id` FK on `orchestration_tasks` links back for updates.
+3. **Two-level state** — `state` (rich display) and `state_type` (stable orchestration logic) from Section 3.2, same pattern as `orchestration_runs`.
+4. **Continuation vs retry** — `attempt_number` tracks retry attempts (backoff, fresh start). `continuation_count` tracks clean continuation turns (same attempt, 1s delay). Both capped by `config.retry` on the parent run.
+5. **Output stored externally** — large task outputs go to `output_ref` (workspace file path or report ID), not inline. Only `output_summary` (≤2000 chars) is stored on the row for dashboard display. This follows the pattern all 5 studied systems use — none store large outputs on the task row.
+6. **Match existing conventions** — UUID primary key (matches `orchestration_runs`), `NUMERIC(10,6)` for cost, `TIMESTAMPTZ` timestamps with `server_default`, optimistic locking via `version_id`.
+
+### 5.2 Column Definitions
+
+| Column | Type | Nullable | Default | Constraint | Description |
+|--------|------|----------|---------|------------|-------------|
+| `id` | `UUID` | No | `gen_random_uuid()` | PK | Stable task identifier |
+| `run_id` | `UUID` | No | — | FK → `orchestration_runs.id` ON DELETE CASCADE | Parent mission |
+| `workspace_id` | `UUID` | No | — | FK → `workspaces.id` ON DELETE CASCADE | Denormalized for query efficiency (avoids JOIN to runs for workspace filtering) |
+| `sequence_number` | `SMALLINT` | No | — | — | Position in plan order (1-based). Stable after planning — used for display, not execution order. |
+| `title` | `VARCHAR(500)` | No | — | — | Human-readable task title (from coordinator plan) |
+| `description` | `TEXT` | Yes | `NULL` | — | Detailed task description / instructions for the agent |
+| `task_type` | `VARCHAR(30)` | No | — | — | `TaskType` enum: `research`, `analysis`, `writing`, `coding`, `verification`, `review`, `synthesis`, `other` |
+| `state` | `VARCHAR(30)` | No | `'pending'` | — | Current `TaskState` value (Section 3.2) |
+| `state_type` | `VARCHAR(10)` | No | `'pending'` | — | Current `StateType` value. Stable enum for coordinator logic. |
+| `trigger_rule` | `VARCHAR(30)` | No | `'all_success'` | — | When this task becomes ready. Values: `all_success` (default), `all_done`, `none_failed`, `always`. Inspired by Airflow's trigger rules — we adopt the 4 most relevant for agent orchestration. |
+| `agent_id` | `INTEGER` | Yes | `NULL` | FK → `agents.id` ON DELETE SET NULL | Assigned roster agent. NULL if contractor or unassigned. |
+| `agent_type` | `VARCHAR(20)` | Yes | `NULL` | — | `roster` (permanent agent) or `contractor` (ephemeral, mission-scoped). NULL when unassigned. |
+| `model_override` | `VARCHAR(255)` | Yes | `NULL` | — | LLM model override for this task. NULL = use run-level `config.model_preferences` or agent default. |
+| `tools_requested` | `JSONB` | Yes | `NULL` | — | Array of tool names the coordinator wants available for this task. Hint, not enforcement — agent's assigned tools take precedence. |
+| `success_criteria` | `TEXT` | Yes | `NULL` | — | Plain-text description of what constitutes success. Used by the verifier (PRD-103). |
+| `output_summary` | `VARCHAR(2000)` | Yes | `NULL` | — | Truncated output for dashboard display. Written by agent or coordinator on completion. |
+| `output_ref` | `VARCHAR(500)` | Yes | `NULL` | — | Reference to full output: workspace file path (`/reports/{agent}/{slug}.md`) or `agent_reports.id`. |
+| `verifier_score` | `NUMERIC(3,2)` | Yes | `NULL` | `CHECK (verifier_score >= 0 AND verifier_score <= 1)` | Verification quality score (0.00–1.00). Written by verifier agent (PRD-103). |
+| `verified_by` | `VARCHAR(255)` | Yes | `NULL` | — | Who verified: agent ID, `'human'`, or `'auto'`. |
+| `error_message` | `TEXT` | Yes | `NULL` | — | Failure reason (for failed/cancelled tasks) |
+| `attempt_number` | `SMALLINT` | No | `1` | `CHECK (attempt_number >= 1)` | Current retry attempt (incremented on retry, not on continuation) |
+| `continuation_count` | `SMALLINT` | No | `0` | `CHECK (continuation_count >= 0)` | Number of continuation turns within current attempt |
+| `tokens_used` | `INTEGER` | No | `0` | `CHECK (tokens_used >= 0)` | Total tokens consumed across all attempts |
+| `cost` | `NUMERIC(10,6)` | No | `0` | `CHECK (cost >= 0)` | Total cost in USD across all attempts |
+| `board_task_id` | `INTEGER` | Yes | `NULL` | FK → `board_tasks.id` ON DELETE SET NULL | Corresponding board task for UI visibility. Created when task is planned. |
+| `started_at` | `TIMESTAMPTZ` | Yes | `NULL` | — | When agent began execution (state → `running`) |
+| `completed_at` | `TIMESTAMPTZ` | Yes | `NULL` | — | When task reached terminal state |
+| `duration_ms` | `INTEGER` | Yes | `NULL` | — | `completed_at - started_at` in milliseconds |
+| `version_id` | `INTEGER` | No | `1` | — | Optimistic locking counter (SQLAlchemy `version_id_col`) |
+| `created_at` | `TIMESTAMPTZ` | No | `NOW()` | — | Row creation timestamp |
+| `updated_at` | `TIMESTAMPTZ` | No | `NOW()` | — | Last modification timestamp |
+
+**Why denormalize `workspace_id`?** The dashboard query "show all tasks for my workspace" would otherwise require a JOIN to `orchestration_runs`. Since workspace_id never changes for a task, denormalizing avoids the JOIN on every task list render.
+
+**Why `SMALLINT` for attempt/continuation?** A task that retries 255+ times or continues 65535+ turns has a bug, not a workload. `SMALLINT` (2 bytes, max 32767) is more than sufficient and saves 2 bytes per row vs `INTEGER`.
+
+**Why `NUMERIC(3,2)` for verifier_score?** Scores are 0.00 to 1.00. `NUMERIC(3,2)` stores exactly two decimal places with no floating-point rounding. `FLOAT` would work but invites `0.6999...` display issues.
+
+### 5.3 Trigger Rules
+
+Inspired by Airflow's trigger rule system (13 rules), we adopt the 4 most relevant for LLM agent orchestration. Each rule defines when a task's dependencies are considered "met" and the task can transition from `pending` to `queued`.
+
+| Rule | Semantics | Use Case |
+|------|-----------|----------|
+| `all_success` (default) | All upstream tasks must be in `completed` state | Standard pipeline: next agent runs only after all prerequisites succeed |
+| `all_done` | All upstream tasks must be in any terminal state (`completed`, `failed`, `cancelled`, `skipped`) | Join/aggregation nodes that collect results regardless of individual success |
+| `none_failed` | All upstream tasks must be terminal AND none may be `failed` (skipped/cancelled are OK) | Parallel fan-out where some branches are optional but hard failures should block |
+| `always` | Skip dependency evaluation entirely — task is immediately `queued` when created | Cleanup, notification, or cost-tracking tasks that must always run |
+
+**Why only 4 rules?** Airflow's `ONE_SUCCESS`, `ONE_FAILED`, `ALL_FAILED`, etc. are designed for complex ETL branching with thousands of tasks. Our missions have 5-50 tasks with human oversight. Four rules cover every pattern we need:
+- Sequential pipeline → `all_success`
+- Parallel research with synthesis → `all_success` on the synthesis task
+- Error-tolerant aggregation → `all_done`
+- Optional branches → `none_failed`
+- Guaranteed cleanup → `always`
+
+If we discover a need for `one_success` (race pattern) or others, adding them requires only a new enum value and a case in the trigger rule evaluator — no schema change.
+
+### 5.4 Task Dependencies (Join Table)
+
+```sql
+CREATE TABLE orchestration_task_dependencies (
+    task_id          UUID NOT NULL,
+    depends_on_id    UUID NOT NULL,
+    dependency_type  VARCHAR(20) NOT NULL DEFAULT 'data',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (task_id, depends_on_id),
+    FOREIGN KEY (task_id) REFERENCES orchestration_tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (depends_on_id) REFERENCES orchestration_tasks(id) ON DELETE CASCADE,
+    CHECK (task_id != depends_on_id)
+);
+
+CREATE INDEX ix_task_deps_depends_on ON orchestration_task_dependencies (depends_on_id);
+```
+
+**Dependency types:**
+
+| Type | Semantics |
+|------|-----------|
+| `data` (default) | Downstream task consumes upstream task's output. The coordinator passes the output reference to the downstream agent's context. |
+| `ordering` | Downstream task must wait for upstream to complete, but does not consume its output. Used for side-effect ordering (e.g., "write to DB before reading from DB"). |
+
+**Why a join table instead of an array column?**
+
+| Criterion | Join Table (chosen) | `UUID[]` Array | JSONB Array |
+|-----------|-------------------|----------------|-------------|
+| FK enforcement | ✅ DB-enforced | ❌ None | ❌ None |
+| Self-referencing cycle prevention | ✅ `CHECK (task_id != depends_on_id)` | ❌ App-only | ❌ App-only |
+| Edge metadata | ✅ Add columns | ❌ Requires schema change | ⚠️ Add JSON keys |
+| "Find ready tasks" query | ✅ Standard `NOT EXISTS` + JOIN | ⚠️ `unnest()` + JOIN | ⚠️ `jsonb_array_elements()` + JOIN |
+| Index type | B-tree (cheap) | GIN (overkill at scale) | GIN (overkill at scale) |
+| "What blocks task X?" | ✅ Single index lookup | ❌ Full-table scan | ❌ Full-table scan |
+| "What does task X block?" | ✅ Single index lookup | ⚠️ `ANY()` scan | ⚠️ `jsonb_path_query()` |
+| PostgreSQL recommendation | ✅ Preferred | ❌ "Sign of misdesign" | ❌ Not for relational edges |
+
+**Cycle detection** happens at planning time in Python (via `graphlib.TopologicalSorter.prepare()`) before rows are inserted. The `CHECK (task_id != depends_on_id)` constraint catches self-references at the DB level; multi-node cycles are caught by the topological sort.
+
+### 5.5 Dependency Resolution Algorithm
+
+We use Python's `graphlib.TopologicalSorter` (stdlib since 3.9), which implements Kahn's algorithm internally with incremental update support.
+
+**At planning time — validate the DAG:**
+
+```python
+from graphlib import TopologicalSorter, CycleError
+
+def validate_task_graph(tasks: list[dict]) -> list[str]:
+    """
+    Validate that the coordinator's plan has no circular dependencies.
+    Returns topological order or raises ValueError with cycle path.
+
+    tasks: list of {"temp_id": "t1", "depends_on": ["t0"], ...} from plan JSONB
+    """
+    ts = TopologicalSorter()
+    for task in tasks:
+        ts.add(task["temp_id"], *task.get("depends_on", []))
+
+    try:
+        ts.prepare()
+    except CycleError as e:
+        cycle_path = " → ".join(e.args[1])
+        raise ValueError(f"Circular dependency detected: {cycle_path}")
+
+    return list(ts.static_order())
+```
+
+**At runtime — find ready tasks and react to completions:**
+
+```python
+from graphlib import TopologicalSorter
+
+class DependencyResolver:
+    """
+    Tracks task completion and determines which tasks are ready to execute.
+    Initialized from DB state on coordinator startup — crash-safe.
+    """
+
+    def __init__(self, tasks: dict[str, list[str]], completed: set[str]):
+        """
+        tasks: {task_id: [dependency_task_id, ...]} — from DB
+        completed: set of task_ids already in terminal state — from DB
+        """
+        self._ts = TopologicalSorter()
+        for task_id, deps in tasks.items():
+            if task_id not in completed:
+                remaining_deps = [d for d in deps if d not in completed]
+                self._ts.add(task_id, *remaining_deps)
+        self._ts.prepare()  # safe — cycles validated at planning time
+
+    def get_ready(self) -> tuple[str, ...]:
+        """Return task IDs with all dependencies met."""
+        return self._ts.get_ready()
+
+    def mark_done(self, task_id: str) -> tuple[str, ...]:
+        """Mark task complete. Returns newly-unblocked task IDs."""
+        self._ts.done(task_id)
+        return self._ts.get_ready()
+
+    def is_complete(self) -> bool:
+        """True when all tasks are done."""
+        return not self._ts.is_active()
+```
+
+**Crash safety:** The resolver is reconstructed from DB state on every coordinator tick (same pattern as Airflow's DB-authoritative scheduling). No in-memory state survives across restarts. The coordinator queries:
+
+```sql
+-- Load task graph from DB
+SELECT t.id, array_agg(d.depends_on_id) AS deps
+FROM orchestration_tasks t
+LEFT JOIN orchestration_task_dependencies d ON d.task_id = t.id
+WHERE t.run_id = $1
+GROUP BY t.id;
+```
+
+Then builds the resolver with completed tasks excluded. This is O(N) where N = number of tasks in the mission (5-50). Rebuilding from scratch on every tick is trivially fast at this scale.
+
+**Edge cases:**
+
+| Scenario | Behavior |
+|----------|----------|
+| Empty mission (0 tasks) | `get_ready()` returns empty tuple. `is_complete()` returns True immediately. |
+| Single task, no deps | Task is immediately ready. |
+| Fully parallel (no deps) | All tasks returned by first `get_ready()`. |
+| Diamond (A→B, A→C, B→D, C→D) | A first, then B+C in parallel, then D after both complete. |
+| Self-reference | Caught by DB constraint `CHECK (task_id != depends_on_id)`. |
+| Multi-node cycle | Caught by `TopologicalSorter.prepare()` at planning time. |
+
+### 5.6 Trigger Rule Evaluation
+
+The "find ready tasks" query combines dependency resolution with trigger rule evaluation. For `all_success` (the default and most common), a task is ready when all its upstream dependencies have `state = 'completed'`. Other rules evaluate different terminal state combinations.
+
+```sql
+-- Find tasks ready to execute in a mission
+-- This is the coordinator's core scheduling query
+SELECT t.id, t.title, t.trigger_rule
+FROM orchestration_tasks t
+WHERE t.run_id = $1
+  AND t.state = 'pending'
+  AND (
+    -- Rule: ALWAYS — skip dependency check
+    t.trigger_rule = 'always'
+    OR
+    -- No dependencies at all
+    NOT EXISTS (
+      SELECT 1 FROM orchestration_task_dependencies d WHERE d.task_id = t.id
+    )
+    OR
+    -- Has dependencies — evaluate trigger rule
+    CASE t.trigger_rule
+      -- ALL_SUCCESS: every upstream must be 'completed'
+      WHEN 'all_success' THEN NOT EXISTS (
+        SELECT 1
+        FROM orchestration_task_dependencies d
+        JOIN orchestration_tasks dep ON dep.id = d.depends_on_id
+        WHERE d.task_id = t.id
+          AND dep.state != 'completed'
+      )
+      -- ALL_DONE: every upstream must be in any terminal state
+      WHEN 'all_done' THEN NOT EXISTS (
+        SELECT 1
+        FROM orchestration_task_dependencies d
+        JOIN orchestration_tasks dep ON dep.id = d.depends_on_id
+        WHERE d.task_id = t.id
+          AND dep.state_type != 'terminal'
+      )
+      -- NONE_FAILED: all upstream terminal, none 'failed'
+      WHEN 'none_failed' THEN NOT EXISTS (
+        SELECT 1
+        FROM orchestration_task_dependencies d
+        JOIN orchestration_tasks dep ON dep.id = d.depends_on_id
+        WHERE d.task_id = t.id
+          AND (dep.state_type != 'terminal' OR dep.state = 'failed')
+      )
+      ELSE FALSE  -- unknown rule, don't schedule
+    END
+  );
+```
+
+**In practice, the coordinator uses the Python `DependencyResolver` (Section 5.5) rather than this SQL for the common `all_success` case.** The SQL version is provided for:
+- Reconciler/stall detection (runs on APScheduler, independent of coordinator)
+- Debugging ("why isn't this task running?")
+- Dashboard queries ("show me blocked tasks")
+
+**Cascade states:** When a task fails and downstream tasks have `trigger_rule = 'all_success'`, the coordinator cascades them to `skipped` state. This is done in Python (loop over downstream tasks, check trigger rule, set state + emit event) rather than as a DB trigger — keeping side effects explicit and debuggable.
+
+### 5.7 Indexes
+
+```sql
+-- Primary query: "tasks in this mission" (mission detail view)
+CREATE INDEX ix_orch_tasks_run_id
+    ON orchestration_tasks (run_id);
+
+-- Query: "pending tasks in this mission" (coordinator scheduling)
+CREATE INDEX ix_orch_tasks_run_state
+    ON orchestration_tasks (run_id, state_type)
+    WHERE state_type != 'terminal';
+
+-- Query: "tasks assigned to this agent" (agent workload view)
+CREATE INDEX ix_orch_tasks_agent
+    ON orchestration_tasks (agent_id, state)
+    WHERE agent_id IS NOT NULL;
+
+-- Query: "tasks for this workspace" (dashboard)
+CREATE INDEX ix_orch_tasks_workspace
+    ON orchestration_tasks (workspace_id, state_type);
+
+-- Query: "board task link" (reverse lookup from board UI)
+CREATE INDEX ix_orch_tasks_board_task
+    ON orchestration_tasks (board_task_id)
+    WHERE board_task_id IS NOT NULL;
+
+-- Query: "stale tasks" (reconciler)
+CREATE INDEX ix_orch_tasks_state_updated
+    ON orchestration_tasks (state, updated_at)
+    WHERE state_type NOT IN ('terminal', 'pending');
+```
+
+**Partial indexes** on active states keep indexes compact. Terminal tasks accumulate over time but are rarely queried for scheduling.
+
+### 5.8 Example: Creating Tasks from a Plan
+
+After the coordinator generates a plan and the human approves, tasks are created in a single transaction:
+
+```sql
+-- Transaction: create tasks + dependencies + board tasks for a mission
+
+-- 1. Create orchestration tasks
+INSERT INTO orchestration_tasks (
+    id, run_id, workspace_id, sequence_number, title, description,
+    task_type, state, state_type, trigger_rule,
+    agent_id, agent_type, model_override, tools_requested, success_criteria
+) VALUES
+    -- Task 1: Research (no dependencies)
+    ('11111111-0000-0000-0000-000000000001',
+     'aaaaaaaa-0000-0000-0000-000000000001',
+     '550e8400-e29b-41d4-a716-446655440000',
+     1, 'Research EU AI Act requirements',
+     'Identify all requirements from the EU AI Act relevant to our product category',
+     'research', 'pending', 'pending', 'all_success',
+     42, 'roster', NULL, '["web_search", "document_analysis"]',
+     'Comprehensive list of requirements with article references'),
+    -- Task 2: Analysis (depends on Task 1)
+    ('11111111-0000-0000-0000-000000000002',
+     'aaaaaaaa-0000-0000-0000-000000000001',
+     '550e8400-e29b-41d4-a716-446655440000',
+     2, 'Analyze product against requirements',
+     'Map each EU AI Act requirement to our product compliance status',
+     'analysis', 'pending', 'pending', 'all_success',
+     42, 'roster', NULL, '["workspace_read_file", "workspace_grep"]',
+     'Gap analysis table with compliance status per requirement'),
+    -- Task 3: Write report (depends on Tasks 1 + 2)
+    ('11111111-0000-0000-0000-000000000003',
+     'aaaaaaaa-0000-0000-0000-000000000001',
+     '550e8400-e29b-41d4-a716-446655440000',
+     3, 'Write compliance report',
+     'Synthesize research and analysis into a compliance report',
+     'writing', 'pending', 'pending', 'all_success',
+     NULL, 'contractor', 'anthropic/claude-sonnet-4-6', NULL,
+     'Professional report covering all identified requirements'),
+    -- Task 4: Review (depends on Task 3, always runs)
+    ('11111111-0000-0000-0000-000000000004',
+     'aaaaaaaa-0000-0000-0000-000000000001',
+     '550e8400-e29b-41d4-a716-446655440000',
+     4, 'Review and score report',
+     'Verify report quality, completeness, and accuracy',
+     'verification', 'pending', 'pending', 'all_success',
+     NULL, 'contractor', 'anthropic/claude-haiku-4-5-20251001', NULL,
+     'Score ≥ 0.7 on quality, completeness, and accuracy dimensions');
+
+-- 2. Create dependencies
+INSERT INTO orchestration_task_dependencies (task_id, depends_on_id, dependency_type) VALUES
+    ('11111111-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', 'data'),
+    ('11111111-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000001', 'data'),
+    ('11111111-0000-0000-0000-000000000003', '11111111-0000-0000-0000-000000000002', 'data'),
+    ('11111111-0000-0000-0000-000000000004', '11111111-0000-0000-0000-000000000003', 'data');
+
+-- 3. Create board tasks (for UI visibility)
+INSERT INTO board_tasks (
+    workspace_id, title, description, status, priority,
+    source_type, source_id, assigned_agent_id, created_by_type, created_by_id
+) VALUES
+    ('550e8400-e29b-41d4-a716-446655440000',
+     'Research EU AI Act requirements',
+     'Identify all requirements from the EU AI Act relevant to our product category',
+     'inbox', 'medium', 'orchestration',
+     'aaaaaaaa-0000-0000-0000-000000000001',
+     42, 'orchestration', 'system')
+RETURNING id;
+-- Link board_task.id back to orchestration_task.board_task_id
+
+-- 4. Update run task counts
+UPDATE orchestration_runs
+SET task_count = 4, state = 'running', state_type = 'running',
+    started_at = NOW()
+WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+```
+
+### 5.9 Board Task Mapping
+
+Every `orchestration_task` creates a corresponding `board_task` for UI visibility. The mapping:
+
+| orchestration_tasks field | board_tasks field | Notes |
+|---------------------------|-------------------|-------|
+| `title` | `title` | Direct copy |
+| `description` | `description` | Direct copy |
+| `workspace_id` | `workspace_id` | Same FK |
+| `agent_id` | `assigned_agent_id` | Roster agent; NULL for contractors |
+| — | `source_type` | Always `'orchestration'` |
+| `run_id` (as string) | `source_id` | Links board task back to mission |
+| — | `created_by_type` | `'orchestration'` |
+| — | `created_by_id` | `'system'` |
+| `state` → mapped | `status` | See mapping below |
+
+**State → Board Status mapping:**
+
+| orchestration_task state | board_task status |
+|--------------------------|-------------------|
+| `pending`, `queued`, `awaiting_retry` | `inbox` |
+| `assigned` | `assigned` |
+| `running`, `continuing` | `in_progress` |
+| `verifying`, `awaiting_human` | `review` |
+| `completed` | `done` |
+| `failed`, `cancelled`, `skipped` | `done` (with `error_message` set) |
+
+The coordinator updates the board task status atomically with the orchestration task state change (same transaction as the dual-write event pattern from Section 3.1).
+
+### 5.10 Alembic Migration
+
+```python
+"""PRD-101: Create orchestration_tasks and orchestration_task_dependencies tables
+
+Task-level execution records and dependency edges for Mission Mode.
+Each task tracks assignment, execution, verification, and links to board_tasks for UI.
+"""
+
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+
+revision = "prd101_orchestration_tasks"
+down_revision = "prd101_orchestration_runs"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "orchestration_tasks",
+        sa.Column("id", UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"),
+                  primary_key=True),
+        sa.Column("run_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("workspace_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("sequence_number", sa.SmallInteger, nullable=False),
+        sa.Column("title", sa.String(500), nullable=False),
+        sa.Column("description", sa.Text, nullable=True),
+        sa.Column("task_type", sa.String(30), nullable=False),
+        sa.Column("state", sa.String(30), nullable=False, server_default="pending"),
+        sa.Column("state_type", sa.String(10), nullable=False, server_default="pending"),
+        sa.Column("trigger_rule", sa.String(30), nullable=False, server_default="all_success"),
+        sa.Column("agent_id", sa.Integer, nullable=True),
+        sa.Column("agent_type", sa.String(20), nullable=True),
+        sa.Column("model_override", sa.String(255), nullable=True),
+        sa.Column("tools_requested", JSONB, nullable=True),
+        sa.Column("success_criteria", sa.Text, nullable=True),
+        sa.Column("output_summary", sa.String(2000), nullable=True),
+        sa.Column("output_ref", sa.String(500), nullable=True),
+        sa.Column("verifier_score", sa.Numeric(3, 2), nullable=True),
+        sa.Column("verified_by", sa.String(255), nullable=True),
+        sa.Column("error_message", sa.Text, nullable=True),
+        sa.Column("attempt_number", sa.SmallInteger, nullable=False, server_default="1"),
+        sa.Column("continuation_count", sa.SmallInteger, nullable=False, server_default="0"),
+        sa.Column("tokens_used", sa.Integer, nullable=False, server_default="0"),
+        sa.Column("cost", sa.Numeric(10, 6), nullable=False, server_default="0"),
+        sa.Column("board_task_id", sa.Integer, nullable=True),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("duration_ms", sa.Integer, nullable=True),
+        sa.Column("version_id", sa.Integer, nullable=False, server_default="1"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("NOW()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("NOW()")),
+        # Foreign keys
+        sa.ForeignKeyConstraint(["run_id"], ["orchestration_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["board_task_id"], ["board_tasks.id"], ondelete="SET NULL"),
+        # Constraints
+        sa.CheckConstraint("verifier_score >= 0 AND verifier_score <= 1",
+                          name="ck_orch_tasks_score_range"),
+        sa.CheckConstraint("attempt_number >= 1", name="ck_orch_tasks_attempt_positive"),
+        sa.CheckConstraint("continuation_count >= 0", name="ck_orch_tasks_continuation_positive"),
+        sa.CheckConstraint("tokens_used >= 0", name="ck_orch_tasks_tokens_positive"),
+        sa.CheckConstraint("cost >= 0", name="ck_orch_tasks_cost_positive"),
+    )
+
+    # Indexes
+    op.create_index("ix_orch_tasks_run_id", "orchestration_tasks", ["run_id"])
+    op.create_index(
+        "ix_orch_tasks_run_state", "orchestration_tasks",
+        ["run_id", "state_type"],
+        postgresql_where=sa.text("state_type != 'terminal'"),
+    )
+    op.create_index(
+        "ix_orch_tasks_agent", "orchestration_tasks",
+        ["agent_id", "state"],
+        postgresql_where=sa.text("agent_id IS NOT NULL"),
+    )
+    op.create_index("ix_orch_tasks_workspace", "orchestration_tasks",
+                    ["workspace_id", "state_type"])
+    op.create_index(
+        "ix_orch_tasks_board_task", "orchestration_tasks",
+        ["board_task_id"],
+        postgresql_where=sa.text("board_task_id IS NOT NULL"),
+    )
+    op.create_index(
+        "ix_orch_tasks_state_updated", "orchestration_tasks",
+        ["state", "updated_at"],
+        postgresql_where=sa.text("state_type NOT IN ('terminal', 'pending')"),
+    )
+
+    # Dependencies join table
+    op.create_table(
+        "orchestration_task_dependencies",
+        sa.Column("task_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("depends_on_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("dependency_type", sa.String(20), nullable=False, server_default="data"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("NOW()")),
+        # Composite PK
+        sa.PrimaryKeyConstraint("task_id", "depends_on_id"),
+        # FKs
+        sa.ForeignKeyConstraint(["task_id"], ["orchestration_tasks.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["depends_on_id"], ["orchestration_tasks.id"],
+                               ondelete="CASCADE"),
+        # Prevent self-reference
+        sa.CheckConstraint("task_id != depends_on_id", name="ck_task_deps_no_self_ref"),
+    )
+    op.create_index("ix_task_deps_depends_on", "orchestration_task_dependencies",
+                    ["depends_on_id"])
+
+    # Table comments
+    op.execute(
+        "COMMENT ON TABLE orchestration_tasks IS "
+        "'Task-level execution records within a mission (PRD-101).'"
+    )
+    op.execute(
+        "COMMENT ON TABLE orchestration_task_dependencies IS "
+        "'DAG edges between orchestration tasks. Join table for dependency resolution (PRD-101).'"
+    )
+
+
+def downgrade() -> None:
+    op.drop_index("ix_task_deps_depends_on", table_name="orchestration_task_dependencies")
+    op.drop_table("orchestration_task_dependencies")
+    op.drop_index("ix_orch_tasks_state_updated", table_name="orchestration_tasks")
+    op.drop_index("ix_orch_tasks_board_task", table_name="orchestration_tasks")
+    op.drop_index("ix_orch_tasks_workspace", table_name="orchestration_tasks")
+    op.drop_index("ix_orch_tasks_agent", table_name="orchestration_tasks")
+    op.drop_index("ix_orch_tasks_run_state", table_name="orchestration_tasks")
+    op.drop_index("ix_orch_tasks_run_id", table_name="orchestration_tasks")
+    op.drop_table("orchestration_tasks")
+```
+
+### 5.11 Design Decisions
+
+| Decision | Choice | Alternative | Rationale |
+|----------|--------|-------------|-----------|
+| Dependency storage | Join table (`orchestration_task_dependencies`) | `UUID[]` array column, JSONB array | PostgreSQL docs recommend against arrays for relationship storage. Join table gives FK enforcement, B-tree indexes, edge metadata, and cleaner queries. At 5-50 tasks per mission, the extra JOIN is free. |
+| Dependency direction | `task_id` depends on `depends_on_id` | Reverse (downstream_id, upstream_id) | "This task depends on that task" reads naturally. Matches `graphlib.TopologicalSorter.add(node, *predecessors)` convention. |
+| Trigger rules | 4 rules (all_success, all_done, none_failed, always) | Full Airflow set (13 rules) | 4 rules cover all agent orchestration patterns. Adding more is a code change, not a schema change. YAGNI. |
+| Output storage | `output_summary` (2000 chars) + `output_ref` (path) | Full output as TEXT column | All 5 studied systems avoid inline output storage. Large agent outputs (reports, code) go to workspace files or reports table. Summary is for dashboard display only. |
+| Board task integration | FK `board_task_id` on orchestration_tasks | Reverse FK on board_tasks | orchestration_tasks owns the relationship. Board tasks are created first, then linked. `SET NULL` on board task deletion preserves orchestration history. |
+| Workspace_id denormalization | Denormalized on tasks | JOIN to runs | Avoids JOIN on every workspace-filtered task query. workspace_id is immutable — no consistency risk. |
+| Cycle detection | Python `graphlib.TopologicalSorter` at planning time | DB trigger, recursive CTE | Cycles are a planning error, not a runtime condition. Detecting at planning time with a clear error message ("circular dependency: A → B → C → A") is better UX than a DB constraint error. |
+| Dependency resolution at runtime | Python `DependencyResolver` rebuilt from DB state | Pure SQL query | Python resolver uses `graphlib` incremental updates (O(out-degree) per completion). SQL query is provided for reconciler/debugging. Both derive from the same DB state — crash-safe. |
+| `attempt_number` vs `continuation_count` | Separate columns | Single `attempts` counter | Continuation (clean exit, 1s delay, same workspace) and retry (failure, backoff, fresh start) are fundamentally different operations (Symphony research). Conflating them makes it impossible to distinguish "agent needed 5 turns" from "agent failed 5 times." |
+| Verifier score type | `NUMERIC(3,2)` | `FLOAT`, `INTEGER` (0-100) | Consistent with `NUMERIC(10,6)` for cost. Exact decimal arithmetic. 0.00–1.00 is a standard scoring range that avoids the "is 7/10 good or bad?" ambiguity of integer scales. |
 
 ---
 
