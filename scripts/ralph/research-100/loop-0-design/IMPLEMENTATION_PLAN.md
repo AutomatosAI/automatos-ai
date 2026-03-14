@@ -7,7 +7,7 @@
 - [x] US-003: Design PRD-103 outline (Verification & Quality)
 - [x] US-004: Design PRD-104 outline (Ephemeral Agents & Model Selection)
 - [x] US-005: Design PRD-105 outline (Budget & Governance)
-- [ ] US-006: Design PRD-106 outline (Outcome Telemetry & Learning)
+- [x] US-006: Design PRD-106 outline (Outcome Telemetry & Learning)
 - [ ] US-007: Design PRD-107 outline (Context Interface Abstraction)
 - [ ] US-008: Design PRD-108 outline (Memory Field Prototype)
 
@@ -76,3 +76,13 @@
 - LiteLLM BudgetManager's `projected_cost()` + `update_cost()` two-phase pattern is the reference implementation
 - Anthropic uses token bucket natively; cached input tokens excluded from ITPM — relevant for mission cost optimization
 - Cost-denominated token bucket with disabled refill is the right algorithm for fixed-budget missions
+
+- MLflow's three-tier storage (metrics=append-only, params=immutable, tags=mutable) maps cleanly to mission telemetry: config fields (agent, model, task_type) are immutable, outcome fields (score, acceptance) are mutable post-execution
+- W&B summary/history split is the right pattern: summary columns on mission_tasks for dashboards, event log table for deep analysis
+- `llm_usage` table is the foundation — adding nullable `mission_task_id` FK is the lowest-friction integration path
+- `heartbeat_results.cost` column exists but is never populated — quick fix opportunity
+- Prometheus agent metrics (`automatos_metrics.py`) are defined but never `.inc()`'d — wire them into UsageTracker
+- Eppo/Statsig pattern: store `metric_sum` + `metric_sum_squares` for variance computation without raw data re-read
+- Propensity logging (`action_probability`) not needed in v1 but schema should not preclude it for future bandit evaluation
+- OpenTelemetry `gen_ai.*` semantic conventions are emerging — worth adopting attribute naming even without OTel transport
+- 10+ existing telemetry touchpoints already in codebase — extend, don't duplicate
