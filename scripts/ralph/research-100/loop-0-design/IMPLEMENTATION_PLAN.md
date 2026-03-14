@@ -5,7 +5,7 @@
 - [x] US-001: Design PRD-101 outline (Mission Schema & Data Model)
 - [x] US-002: Design PRD-102 outline (Coordinator Architecture)
 - [x] US-003: Design PRD-103 outline (Verification & Quality)
-- [ ] US-004: Design PRD-104 outline (Ephemeral Agents & Model Selection)
+- [x] US-004: Design PRD-104 outline (Ephemeral Agents & Model Selection)
 - [ ] US-005: Design PRD-105 outline (Budget & Governance)
 - [ ] US-006: Design PRD-106 outline (Outcome Telemetry & Learning)
 - [ ] US-007: Design PRD-107 outline (Context Interface Abstraction)
@@ -51,3 +51,15 @@
 - PRD-105 (Budget) needs `budget_config`/`budget_spent` JSONB schemas from PRD-101's mission_runs
 - PRD-106 (Telemetry) will query mission_events + cost/token fields — schema must support efficient aggregation
 - Existing `llm_usage` table tracks per-call costs — mission tasks should reference or aggregate these
+
+- `AgentFactory.execute_with_prompt()` already accepts `AgentRuntime` directly (line 711) — zero changes needed for contractor execution path
+- Agent Zero conversation sealing (progressive compression: 50% current / 30% topics / 20% bulks) and utility model pattern should be adopted
+- AutoGen's agent-as-config-dict pattern `(name, system_message, llm_config, tools, description)` is the contractor config model
+- K8s Job lifecycle patterns (TTL cleanup, activeDeadlineSeconds, podFailurePolicy) map directly to contractor lifecycle
+- RouteLLM (ICLR 2025): 75% cost reduction at 95% quality with static role→model mapping — validates our approach
+- BudgetMLAgent: cascade pattern (free → cheap → expensive) achieves 96% cost reduction — relevant to PRD-105
+- OpenRouter's `sort`/`max_price`/`preferred_min_throughput` provider params are the v1 model selection interface
+- Cognitive diversity is a hard constraint: reviewer model family MUST differ from coder model family
+- Hybrid contractor creation recommended: in-memory AgentRuntime for speed + async DB audit row for observability
+- `agents` table has 45+ columns — contractors only need ~8 fields. Consider minimal DB row or in-memory-only mode
+- Existing `inter_agent.py` AgentCommunicationProtocol and CollaborativeReasoner are unwired — future option for contractor coordination
