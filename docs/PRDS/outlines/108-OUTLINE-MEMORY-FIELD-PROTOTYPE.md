@@ -129,7 +129,7 @@ A **minimum viable shared field** where 2-3 agents inject findings as embeddings
 ```
 ┌──────────────────────────────────────────┐
 │              SHARED FIELD                │
-│  (Redis Vector Search or Qdrant)         │
+│  (Qdrant — Railway Docker service)       │
 │                                          │
 │  Vectors: 2048-dim (qwen3-embedding-8b)  │
 │  Metadata: agent_id, strength, timestamp │
@@ -350,9 +350,21 @@ The experiment task must be:
 - **Qdrant** — Richer metadata filtering; Recommendations API maps to resonance discovery; `:memory:` mode for testing; better query expressiveness
 - **FAISS** — Fastest raw vector operations; simplest API; requires external metadata table and mutex for writes
 
-**Recommendation: Redis Vector Search for v1 prototype.** Zero infrastructure cost (already deployed), TTL maps naturally to decay, and the experiment doesn't need Qdrant's advanced features. If Redis limitations hit (10 attribute max, no recommendation API), migrate to Qdrant for v2.
+**~~Recommendation: Redis Vector Search for v1 prototype.~~** ~~Zero infrastructure cost (already deployed), TTL maps naturally to decay.~~
 
-**Fallback: Qdrant Docker container** if Redis Vector Search module isn't available in current Redis deployment (needs Redis Stack, not vanilla Redis).
+**UPDATED (2026-03-15): Redis Vector Search is NOT available.** Railway deploys vanilla Redis, not Redis Stack. Confirmed via Railway community — Redis Stack modules (RediSearch, RedisJSON) are not supported on Railway's Redis service. See: https://station.railway.com/questions/redis-for-vector-search-gen-ai-51d559c3
+
+**Recommendation: Qdrant Docker container as primary backend.** Deploy as a Railway service alongside existing infrastructure. Qdrant offers:
+- Native metadata/payload filtering (agent_id, strength, timestamp) — first-class, not an afterthought
+- Recommendations API — maps directly to resonance discovery (positive/negative example vectors)
+- `:memory:` mode for local testing — zero infrastructure for development
+- Docker single-command deploy — `docker run -p 6333:6333 qdrant/qdrant`
+- Better query expressiveness than Redis Vector Search would have provided
+- No attribute limit (Redis caps at 10 per index)
+
+**Decay implementation change:** Without Redis TTL, decay is implemented as score-time computation (already the recommended approach in Section 4.4). The `compute_decayed_strength()` function applies `S(t) = S₀ × e^(-λt)` at query time. No automatic key expiration — patterns persist until explicitly cleaned up or filtered out by the archival threshold (`strength × decay < 0.05`).
+
+**FAISS as local-only benchmark:** Use FAISS `IndexFlatL2` for pure vector math benchmarking (no infrastructure needed, in-process). Not suitable for production due to thread-safety limitations and lack of metadata storage.
 
 ### Q2: Embedding model and dimension?
 
@@ -449,7 +461,7 @@ Coordinator → create_context([agent_a, agent_b, agent_c])
 | 3 | **Measuring the wrong thing** — experiment task doesn't exercise the field's advantages | High | Medium | Choose tasks where context preservation is critical (research synthesis, multi-step analysis). Validate task selection with dry run |
 | 4 | **Confirmation bias in evaluation** — desire for Phase 3 to succeed biases human eval | Medium | High | Blind evaluation: human raters don't know which condition produced which output. LLM-as-judge scoring as secondary metric |
 | 5 | **Embedding quality bottleneck** — if qwen3-embedding-8b produces poor embeddings for the domain, cosine similarity is meaningless | High | Low | Run embedding quality sanity check first: known-similar texts should have similarity > 0.8 |
-| 6 | **Redis Vector Search not available** — current Redis deployment may be vanilla Redis without Stack modules | Medium | Medium | Check with `MODULE LIST` command. Fallback: Qdrant Docker container |
+| 6 | ~~**Redis Vector Search not available**~~ **CONFIRMED (2026-03-15):** Railway Redis is vanilla — no Stack modules. **RESOLVED:** Qdrant Docker container is now the primary backend, not a fallback. Deploy as Railway service. | ~~Medium~~ Resolved | ~~Medium~~ Confirmed | Qdrant is now the primary recommendation |
 | 7 | **Decay rate miscalibration** — λ=0.1 may be too fast (useful info decays before Agent C reads it) or too slow (noise persists) | Medium | Medium | Run sensitivity analysis: test λ ∈ {0.05, 0.1, 0.2}. Pick the one that maximizes information retention metric |
 | 8 | **Cost of embeddings scales poorly** — each inject/query costs an API call | Low | Low | At prototype scale (80 calls/mission × $0.001 = $0.08), negligible. Flag if scaling to 1000+ calls |
 | 9 | **Neural field "resonance" is just cosine similarity rebranded** — no novel mechanism beyond standard vector search | High | Medium | The novelty is: (a) decay removes stale info automatically, (b) reinforcement amplifies co-accessed patterns, (c) same interface swaps backends. If (a)+(b) don't improve results, the rebranding concern is valid — accept the result honestly |

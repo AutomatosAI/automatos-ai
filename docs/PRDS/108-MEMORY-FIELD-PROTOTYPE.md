@@ -230,13 +230,33 @@ async def inject(self, context_id: str, key: str, value: str,
                 "key": key,
                 "value": value,
                 "strength": effective_strength,
-                "created_at": datetime.utcnow().isoformat(),
-                "last_accessed": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "last_accessed": datetime.now(timezone.utc).isoformat(),
                 "access_count": 0,
                 "content_hash": content_hash,
             },
         )],
     )
+```
+
+#### Helper: `_find_by_hash()`
+
+```python
+async def _find_by_hash(self, context_id: str, content_hash: str):
+    """Find an existing point by content hash (deduplication).
+
+    Uses the payload index on content_hash for efficient lookup.
+    Returns the first matching point or None.
+    """
+    collection = f"field_{context_id}"
+    results, _ = await self._client.scroll(
+        collection_name=collection,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="content_hash", match=MatchValue(value=content_hash))]
+        ),
+        limit=1,
+    )
+    return results[0] if results else None
 ```
 
 ### 4.2 Operation 2: `query(embedding, top_k)`
@@ -264,7 +284,7 @@ async def query(self, context_id: str, query: str,
     )
 
     # Apply decay + reinforcement scoring
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     scored = []
     for hit in raw_results:
         payload = hit.payload
@@ -343,44 +363,47 @@ When a pattern is accessed via `query()`:
 async def _reinforce_batch(self, context_id: str, point_ids: list[str]) -> None:
     """Hebbian reinforcement: accessed patterns resist decay.
 
-    1. Increment access_count
-    2. Update last_accessed timestamp (resets decay clock)
-    3. Co-access bonus: patterns accessed together get mutual strength boost
+    1. Batch-retrieve all accessed points (single Qdrant call)
+    2. Compute new access_count + co-access bonus for each
+    3. Batch-update payloads (one set_payload per point — Qdrant has no batch update)
     """
     collection = f"field_{context_id}"
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Single batch retrieve instead of N+1 calls
+    all_points = await self._client.retrieve(collection, ids=point_ids)
+    if not all_points:
+        return
+
+    point_map = {str(p.id): p for p in all_points}
 
     for pid in point_ids:
-        # Get current payload
-        points = await self._client.retrieve(collection, ids=[pid])
-        if not points:
+        point = point_map.get(pid)
+        if not point:
             continue
-        payload = points[0].payload
 
-        # Update access metadata
-        new_count = payload["access_count"] + 1
+        new_count = point.payload["access_count"] + 1
+        initial_strength = point.payload["strength"]
+
+        # Co-access bonus: +2% per co-accessed pattern, capped at reinforce_cap × initial
+        # The cap is relative to INITIAL strength (stored at injection), not current decayed value
+        if len(point_ids) > 1:
+            boosted_strength = min(
+                initial_strength * (1.0 + 0.02 * (len(point_ids) - 1)),
+                initial_strength * self._reinforce_cap,
+            )
+        else:
+            boosted_strength = initial_strength
+
         await self._client.set_payload(
             collection_name=collection,
             payload={
                 "access_count": new_count,
                 "last_accessed": now,
+                "strength": boosted_strength,
             },
             points=[pid],
         )
-
-    # Co-access bonus: if multiple patterns accessed together, boost all
-    if len(point_ids) > 1:
-        for pid in point_ids:
-            points = await self._client.retrieve(collection, ids=[pid])
-            if not points:
-                continue
-            current_strength = points[0].payload["strength"]
-            boosted = min(current_strength * 1.02, current_strength * self._reinforce_cap / points[0].payload.get("strength", 1.0))
-            await self._client.set_payload(
-                collection_name=collection,
-                payload={"strength": boosted},
-                points=[pid],
-            )
 ```
 
 ### 4.5 Operation 5: `measure_stability()`
@@ -402,7 +425,7 @@ async def measure_stability(self, context_id: str) -> dict:
     if not points:
         return {"stability": 0.0, "pattern_count": 0, "avg_strength": 0.0}
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     strengths = []
     for p in points:
         age_hours = (now - datetime.fromisoformat(p.payload["last_accessed"])).total_seconds() / 3600
@@ -442,13 +465,13 @@ Implements PRD-107's `SharedContextPort` interface:
 import hashlib
 import math
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
-    Filter, FieldCondition, MatchValue,
+    Filter, FieldCondition, MatchValue, PayloadSchemaType,
 )
 
 from core.ports.context import SharedContextPort
@@ -465,7 +488,7 @@ class VectorFieldSharedContext(SharedContextPort):
     """
 
     def __init__(self):
-        self._client = QdrantClient(
+        self._client = AsyncQdrantClient(
             url=config.QDRANT_URL,
             api_key=config.QDRANT_API_KEY,
         )
@@ -482,12 +505,29 @@ class VectorFieldSharedContext(SharedContextPort):
         field_id = str(uuid.uuid4())
         collection_name = f"field_{field_id}"
 
-        self._client.create_collection(
+        await self._client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(
                 size=self._dimension,
                 distance=Distance.COSINE,
             ),
+        )
+
+        # Create payload indexes for filtered queries
+        await self._client.create_payload_index(
+            collection_name=collection_name,
+            field_name="content_hash",
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
+        await self._client.create_payload_index(
+            collection_name=collection_name,
+            field_name="agent_id",
+            field_schema=PayloadSchemaType.INTEGER,
+        )
+        await self._client.create_payload_index(
+            collection_name=collection_name,
+            field_name="created_at",
+            field_schema=PayloadSchemaType.KEYWORD,
         )
 
         # Inject initial data if provided
@@ -509,9 +549,9 @@ class VectorFieldSharedContext(SharedContextPort):
     async def destroy_context(self, context_id: str) -> None:
         collection_name = f"field_{context_id}"
         try:
-            self._client.delete_collection(collection_name)
+            await self._client.delete_collection(collection_name)
         except Exception:
-            pass  # Collection may already be cleaned up
+            logger.warning(f"Failed to delete field collection {collection_name}", exc_info=True)
 ```
 
 ---

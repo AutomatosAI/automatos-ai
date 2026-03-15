@@ -233,7 +233,11 @@ Exceptions:
 - **Copy fields from `llm_usage` into telemetry** — full denormalization, fast queries
 - **Reference via `execution_id` (recommended)** — `llm_usage` already has `execution_id`; mission_events reference the same ID
 
-**Recommendation: Add `mission_task_id` FK to `llm_usage`.** This is the simplest path — one new nullable column on an existing table. Mission-level aggregates can be computed via `SUM(cost) WHERE mission_task_id = X`. No data duplication.
+**Recommendation: Add `mission_task_id` FK to `llm_usage`.** This is the simplest path — one new **nullable** column on an existing table. Mission-level aggregates can be computed via `SUM(cost) WHERE mission_task_id = X`. No data duplication.
+
+**Critical: the FK MUST be nullable.** The `llm_usage` table has thousands of existing rows from non-mission LLM calls (chatbot, heartbeat, routing, embeddings). These rows have no mission context and never will. A non-nullable FK would require backfilling or blocking the migration. Additionally, non-mission LLM calls will continue after missions ship — chatbot conversations, heartbeat ticks, and routing calls never have a `mission_task_id`.
+
+**Backfill strategy:** Do NOT attempt to retroactively assign `mission_task_id` to existing rows. Historical `llm_usage` rows predate missions — backfilling would create false attributions. Only new LLM calls made within mission execution get the FK set. Run backfill asynchronously if needed (e.g., linking by `execution_id` correlation), never in the migration itself — the `llm_usage` table is write-hot and a long-running UPDATE would cause write contention.
 
 ### Q6: How to handle telemetry for coordinator and verifier LLM calls?
 

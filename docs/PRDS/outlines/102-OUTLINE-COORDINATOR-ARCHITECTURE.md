@@ -114,8 +114,10 @@ The coordinator monitors via the two-phase tick (Symphony pattern):
 **Phase A — Dispatch:**
 1. Query `mission_tasks` where `status = 'pending'`
 2. For each: check if all `task_inputs.__parents__` tasks are in terminal success state
-3. If ready: transition to `scheduled`, create/update `BoardTask`, invoke `AgentFactory.execute_with_prompt()` (or queue for agent tick)
+3. If ready: transition to `scheduled` and **dispatch directly** via `AgentFactory.execute_with_prompt()` — do NOT create a `BoardTask` and wait for the agent's heartbeat tick to pick it up. Direct dispatch gives the coordinator control over timing, retry, and result collection. A `BoardTask` is created *for visibility* (kanban tracking) but is NOT the dispatch mechanism.
 4. Respect concurrency limits (configurable per mission)
+
+> **Design clarification:** The coordinator always dispatches directly. Board tasks exist for human visibility on the kanban, not for agent scheduling. The heartbeat tick path (`_agent_tick()`) remains for routine/recipe work only — missions bypass it entirely.
 
 **Phase B — Reconcile:**
 1. Query `mission_tasks` where `status = 'running'`

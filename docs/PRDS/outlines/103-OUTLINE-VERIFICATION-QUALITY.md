@@ -287,7 +287,7 @@ VerificationService.verify_task(task_id)
 | 4 | **False positives (bad output passes)** | High | Medium | Multiple criteria checked independently. Any "must-pass" criterion failing = task fails regardless of aggregate. Human review for missions above cost threshold. |
 | 5 | **False negatives (good output fails)** | Medium | Medium | Confidence scores + human escalation path. Track false negative rate via human override data. Adjust thresholds based on telemetry (PRD-106). |
 | 6 | **Verifier prompt engineering is hard** | High | High | Start with simple rubric template. Iterate based on human override data. Constitutional AI principles as fallback. FutureAGI's existing eval expertise. |
-| 7 | **Three existing quality scoring systems create confusion** | Medium | Medium | PRD-103 must either unify them or clearly delineate: recipe_quality = recipe-scoped, quality_assessor = per-execution, verification = against success criteria. |
+| 7 | **Three existing quality scoring systems create confusion** | Medium | Medium | **Verification is the new canonical quality signal for missions.** Do NOT unify existing scoring systems — they serve different scopes: `recipe_quality_service` = recipe-scoped rolling average (stays as-is), `quality_assessor` = per-execution pipeline stage (stays as-is), `report grading` = human 1-5 stars on agent reports (stays as-is). Verification (PRD-103) is **new and separate** — it evaluates mission task outputs against explicit `success_criteria`. Attempting to merge these would break existing consumers and conflate different evaluation contexts. |
 
 ### Dependencies
 

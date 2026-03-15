@@ -191,7 +191,11 @@ SPAWNING → READY → EXECUTING → REPORTING → CLEANUP → DESTROYED
 
 9. **How do contractors appear on the board?** Each contractor task creates a `board_task` with `source_type='mission'` and the mission's project label. Contractor agent_id is set on `board_tasks.assigned_agent_id` (requires minimal DB row).
 10. **How does the coordinator communicate with contractors?** NOT via inter_agent Redis pub/sub. Coordinator calls `execute_with_prompt()` directly and awaits result. Simpler, debuggable, matches heartbeat tick pattern.
-11. **Can a contractor spawn sub-contractors?** No. Contractors are leaf nodes. Only the coordinator decomposes and assigns. This prevents unbounded recursion and keeps the system observable.
+11. **Can a contractor spawn sub-contractors?** **No. This is a hard architectural constraint, not a simplification.** Reasons:
+    - **Bounded recursion:** If contractors could spawn sub-contractors, a single mission could produce unbounded agent trees. Budget enforcement becomes impossible — the coordinator can't pre-estimate cost for a tree of unknown depth.
+    - **Observability:** The coordinator must see every executing agent. Sub-contractors would be invisible to the coordinator's reconciliation tick — stalls, failures, and budget overruns go undetected.
+    - **Debugging:** A flat coordinator→contractor structure means every task trace is 2 levels deep. Sub-contractors create N-level traces that are exponentially harder to debug.
+    - **Alternative:** If a task is too complex for one contractor, the coordinator should decompose it into smaller tasks (replanning), not delegate decomposition to the contractor. The coordinator IS the decomposition engine.
 
 ---
 

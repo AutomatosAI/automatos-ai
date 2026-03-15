@@ -155,16 +155,9 @@ A task is schedulable when all tasks referenced in `task_inputs` (both data deps
 
 **Design decision:** Events supplement, not replace, the status columns on `mission_runs` and `mission_tasks`. Status columns are the "MutableState" cache (Temporal pattern) for fast queries. Events are the audit log for debugging, replay, and telemetry extraction.
 
-#### 4. `mission_tags` — Extensible Metadata (Dagster-inspired)
+#### 4. ~~`mission_tags`~~ — DEFERRED
 
-| Field | Type | Purpose |
-|---|---|---|
-| `id` | BIGSERIAL PK | |
-| `mission_run_id` | UUID FK→mission_runs CASCADE | |
-| `key` | VARCHAR(255) | |
-| `value` | TEXT | |
-
-Indexed on `(key, value)` and `(mission_run_id)`. Used for: project labels, category tags, source indicators, custom metadata without schema migration.
+> **Decision (review 2026-03-15):** Cut from v1. The `metadata` JSONB field on `mission_runs` provides the same extensibility without a join table. Add a dedicated tags table only if JSONB query performance becomes a bottleneck (unlikely at expected mission volume). Dagster's pattern is designed for thousands of runs — we'll have tens to hundreds.
 
 ---
 

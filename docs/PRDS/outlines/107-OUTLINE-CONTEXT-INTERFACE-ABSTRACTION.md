@@ -373,6 +373,24 @@ The coordinator code is identical in both phases. Only the adapter (selected at 
 
 **Recommendation: Port accepts strings, adapter maps internally.** This decouples callers from the enum. New modes (e.g., `COORDINATOR`, `VERIFIER` from PRD-102/103) are added to the adapter config, not to the port interface. Phase 3 may define entirely different modes.
 
+**Type safety consideration:** Define a `ContextModeType` string literal union or `StrEnum` in the ports module itself (not in `modes.py`). This gives callers autocomplete and typo-catching without coupling them to the concrete implementation's enum:
+
+```python
+# In orchestrator/core/ports/context.py
+from enum import StrEnum
+
+class ContextModeType(StrEnum):
+    CHATBOT = "chatbot"
+    HEARTBEAT = "heartbeat"
+    TASK_EXECUTION = "task_execution"
+    COORDINATOR = "coordinator"
+    VERIFIER = "verifier"
+    ROUTER = "router"
+    # Phase 3 can add: FIELD_QUERY = "field_query"
+```
+
+The adapter maps these strings to its internal representation. Callers get type safety; the port stays decoupled from the backend.
+
 ### Q6: Sync vs. async interface?
 
 **Recommendation: Async only.** Both backends are I/O-bound (Phase 2: DB queries + Redis; Phase 3: vector search + embedding). LangGraph's dual sync/async API is admirable but unnecessary complexity for our Python async-first codebase. All callers already use `await`.

@@ -275,10 +275,10 @@ class CoordinatorService:
 
     async def create_mission(
         self,
-        workspace_id: int,
+        workspace_id: uuid.UUID,
         goal: str,
         config: MissionConfig,
-        created_by: int,  # user_id
+        created_by: str,  # Clerk user ID (e.g., "user_2abc...")
     ) -> OrchestrationRun:
         """
         Create a new mission. Transitions: → pending → planning.
@@ -289,19 +289,19 @@ class CoordinatorService:
         ...
 
     async def approve_plan(
-        self, run_id: int, modifications: Optional[PlanModification] = None
+        self, run_id: uuid.UUID, modifications: Optional[PlanModification] = None
     ) -> OrchestrationRun:
         """Human approves plan. Transitions: awaiting_approval → running."""
         ...
 
     async def reject_plan(
-        self, run_id: int, reason: str
+        self, run_id: uuid.UUID, reason: str
     ) -> OrchestrationRun:
         """Human rejects plan. Transitions: awaiting_approval → failed."""
         ...
 
     async def review_mission(
-        self, run_id: int, verdict: ReviewVerdict
+        self, run_id: uuid.UUID, verdict: ReviewVerdict
     ) -> OrchestrationRun:
         """
         Human reviews completed mission.
@@ -311,15 +311,15 @@ class CoordinatorService:
         """
         ...
 
-    async def pause_mission(self, run_id: int) -> OrchestrationRun:
+    async def pause_mission(self, run_id: uuid.UUID) -> OrchestrationRun:
         """Human pauses. Transitions: running → paused."""
         ...
 
-    async def resume_mission(self, run_id: int) -> OrchestrationRun:
+    async def resume_mission(self, run_id: uuid.UUID) -> OrchestrationRun:
         """Human resumes. Transitions: paused → running."""
         ...
 
-    async def cancel_mission(self, run_id: int) -> OrchestrationRun:
+    async def cancel_mission(self, run_id: uuid.UUID) -> OrchestrationRun:
         """Human cancels. Transitions: any non-terminal → cancelled."""
         ...
 ```
@@ -351,7 +351,7 @@ async def _dispatch_phase(self, run: OrchestrationRun) -> None:
     Find tasks whose dependencies are met and dispatch them.
     Runs within a single DB transaction per mission.
     """
-    if run.state_name == RunState.PAUSED:
+    if run.state == RunState.PAUSED:
         return  # Skip paused missions (budget_exceeded is also PAUSED)
 
     # 1. Find ready tasks
@@ -370,7 +370,7 @@ async def _dispatch_phase(self, run: OrchestrationRun) -> None:
         await self._dispatcher.dispatch_task(run, task)
 
 
-async def _find_ready_tasks(self, run_id: int) -> list[OrchestrationTask]:
+async def _find_ready_tasks(self, run_id: uuid.UUID) -> list[OrchestrationTask]:
     """
     A task is ready when:
     1. status = 'queued' (dependencies already resolved)
@@ -385,9 +385,9 @@ async def _find_ready_tasks(self, run_id: int) -> list[OrchestrationTask]:
         select(OrchestrationTask)
         .where(
             OrchestrationTask.run_id == run_id,
-            OrchestrationTask.state_name == TaskState.QUEUED,
+            OrchestrationTask.state == TaskState.QUEUED,
         )
-        .order_by(OrchestrationTask.task_order)
+        .order_by(OrchestrationTask.sequence_number)
     )
 ```
 
@@ -436,7 +436,7 @@ async def _reconcile_phase(self, run: OrchestrationRun) -> None:
 When a task completes, the coordinator must check whether downstream tasks are now unblocked. This is event-driven, not polling-based (blackboard pattern).
 
 ```python
-async def _on_task_completed(self, run_id: int, completed_task_id: int) -> None:
+async def _on_task_completed(self, run_id: uuid.UUID, completed_task_id: int) -> None:
     """
     Called when a task reaches terminal success state.
     Check all downstream dependents — if all their parents are
@@ -451,7 +451,7 @@ async def _on_task_completed(self, run_id: int, completed_task_id: int) -> None:
         )
         .where(
             OrchestrationTaskDependency.depends_on_id == completed_task_id,
-            OrchestrationTask.state_name == TaskState.PENDING,
+            OrchestrationTask.state == TaskState.PENDING,
         )
     )
 
@@ -485,7 +485,7 @@ async def check_task_health(
     stall_threshold = self._get_stall_threshold(task)
 
     if elapsed > stall_threshold:
-        if task.attempt_count < task.max_retries:
+        if task.attempt_number < task.max_retries:
             await self._transition_task(
                 task, TaskState.AWAITING_RETRY,
                 reason=f"Stalled for {elapsed:.0f}s (threshold: {stall_threshold}s)"
@@ -520,7 +520,7 @@ async def _transition_task(
             OrchestrationTask.version == task.version,  # Optimistic lock
         )
         .values(
-            state_name=new_state,
+            state=new_state,
             state_type=TASK_STATE_TYPE[new_state],
             version=task.version + 1,
             updated_at=datetime.utcnow(),
@@ -535,7 +535,7 @@ async def _transition_task(
     await self._emit_event(task.run_id, f"task_{new_state}", {
         "task_id": task.id,
         "reason": reason,
-        "from_state": task.state_name,
+        "from_state": task.state,
         "to_state": new_state,
     })
     return True
@@ -644,7 +644,7 @@ class MissionPlanner:
     async def decompose(
         self,
         goal: str,
-        workspace_id: int,
+        workspace_id: uuid.UUID,
         available_agents: list[AgentSummary],
         config: MissionConfig,
     ) -> DecompositionResult:
@@ -850,7 +850,7 @@ Respond with a JSON object matching this schema exactly:
 
 ```python
 async def _validate_plan(
-    self, result: DecompositionResult, workspace_id: int
+    self, result: DecompositionResult, workspace_id: uuid.UUID
 ) -> list[ValidationError]:
     """
     Structural validation of a decomposition.
@@ -895,7 +895,7 @@ async def _validate_plan(
     for task in result.tasks:
         if not any(c.get("must_pass") for c in task.success_criteria):
             errors.append(ValidationError(
-                "NO_MUST_PASS", f"Task {task.task_order} has no must_pass criterion"
+                "NO_MUST_PASS", f"Task {task.sequence_number} has no must_pass criterion"
             ))
 
     # 6. Budget estimate within limits
@@ -906,7 +906,7 @@ async def _validate_plan(
         ))
 
     # 7. Task orders are unique and sequential
-    orders = [t.task_order for t in result.tasks]
+    orders = [t.sequence_number for t in result.tasks]
     if len(orders) != len(set(orders)):
         errors.append(ValidationError("DUPLICATE_ORDER", "Task orders must be unique"))
 
@@ -1053,6 +1053,12 @@ class MissionDispatcher:
         await self._transition_task(task, TaskState.ASSIGNED)
 
         # 4. Build context and dispatch (fire-and-forget, result collected by reconciler)
+        #
+        # CRASH RECOVERY: Task is ASSIGNED in DB before this coroutine starts.
+        # If coordinator crashes between ASSIGNED and execute_with_prompt():
+        #   → Reconciler detects ASSIGNED task with no progress events
+        #   → After stall timeout (60s), re-dispatches to same or different agent
+        # The DB is the source of truth — the in-memory coroutine is expendable.
         asyncio.create_task(
             self._execute_task(run, task, agent_id)
         )
@@ -1093,7 +1099,7 @@ class MissionDispatcher:
 
         except Exception as e:
             # Infrastructure failure
-            if task.attempt_count < task.max_retries:
+            if task.attempt_number < task.max_retries:
                 await self._transition_task(
                     task, TaskState.AWAITING_RETRY,
                     reason=f"Infrastructure failure: {str(e)[:500]}"
@@ -1152,7 +1158,7 @@ class MissionContextSection(BaseSection):
         lines = [
             f"## Current Mission",
             f"**Goal:** {run.goal}",
-            f"**Status:** {run.state_name}",
+            f"**Status:** {run.state}",
             f"**Plan version:** {run.plan_version}",
             f"**Budget:** ${run.budget_spent.get('cost_usd', 0):.2f} / "
             f"${run.budget_config.get('max_cost_usd', 'unlimited')}",
@@ -1167,16 +1173,16 @@ class MissionContextSection(BaseSection):
                 "awaiting_human": "🧑", "awaiting_retry": "⏰",
                 "completed": "✅", "failed": "❌", "cancelled": "🚫",
                 "skipped": "⏭️",
-            }.get(task.state_name, "❓")
+            }.get(task.state, "❓")
 
             dep_info = ""
-            if task.state_name == "pending":
+            if task.state == "pending":
                 deps = await self._get_pending_deps(task.id)
                 dep_info = f" (waiting for: {', '.join(d.title for d in deps)})"
 
             lines.append(
-                f"  {status_emoji} T{task.task_order}: {task.title} "
-                f"[{task.state_name}]{dep_info}"
+                f"  {status_emoji} T{task.sequence_number}: {task.title} "
+                f"[{task.state}]{dep_info}"
             )
 
             if task.verifier_score is not None:
@@ -1265,7 +1271,7 @@ async def _retry_with_feedback(
     Schedule a retry with verifier feedback injected into the agent's prompt.
     """
     feedback_context = {
-        "previous_attempt": task.attempt_count,
+        "previous_attempt": task.attempt_number,
         "verifier_feedback": verification_result.reasoning,
         "failed_criteria": [
             c for c in verification_result.criteria_scores
@@ -1276,15 +1282,15 @@ async def _retry_with_feedback(
 
     # Update task with feedback for next attempt
     task.retry_context = feedback_context
-    task.attempt_count += 1
+    task.attempt_number += 1
 
     # Calculate backoff delay
-    delay_s = min(10 * (2 ** (task.attempt_count - 1)), 300)
+    delay_s = min(10 * (2 ** (task.attempt_number - 1)), 300)
 
     await self._transition_task(
         task, TaskState.AWAITING_RETRY,
         reason=f"Verification failed (score: {verification_result.aggregate_score:.2f}). "
-               f"Retry {task.attempt_count}/{task.max_retries} in {delay_s}s."
+               f"Retry {task.attempt_number}/{task.max_retries} in {delay_s}s."
     )
 
     # Schedule retry after backoff
@@ -1615,7 +1621,7 @@ User          CoordinatorService    MissionDispatcher
 | `ContextService.build_context()` | Coordinator builds its own context with `ContextMode.COORDINATOR` | Add new mode + 2 new sections |
 | `get_tools_for_agent()` (`tool_router.py:~140`) | Resolves tools for task agents | None for roster agents; PRD-104 adds `explicit_tools` param for contractors |
 | `UnifiedToolExecutor.execute_tool()` | Coordinator's own tool loop for mission management | None |
-| `BoardTask` model (`core/models/board.py`) | Creates board tasks with `source_type='mission'` for kanban visibility | None — existing model supports this |
+| `BoardTask` model (`core/models/board.py`) | Creates board tasks with `source_type='orchestration'` for kanban visibility | None — existing model supports this |
 | `TaskReconciler` (`services/task_reconciler.py`) | Extended to cover `orchestration_tasks` alongside `recipe_executions` | Add mission task query to `_tick()` |
 | `SharedContextManager` (`inter_agent.py`) | Stores mission-scoped shared context for cross-task data flow | None — used via `SharedContextPort` (PRD-107) |
 | `UnifiedScheduler` | Registers coordinator tick alongside heartbeat tick | None — additive registration |
@@ -1653,12 +1659,12 @@ async def _create_board_task(
         description=task.description,
         status="todo",
         assigned_agent_id=agent_id,
-        source_type="mission",
+        source_type="orchestration",
         source_id=str(run.id),
         labels=[f"MISSION-{run.id}"],
         metadata={
             "mission_id": run.id,
-            "task_order": task.task_order,
+            "task_order": task.sequence_number,
             "task_type": task.task_type,
         },
     )
@@ -1680,7 +1686,7 @@ async def convert_to_routine(
     steps = []
     for task in tasks:
         steps.append({
-            "order": task.task_order,
+            "order": task.sequence_number,
             "title": task.title,
             "description": task.description,
             "agent_id": task.assigned_agent_id,

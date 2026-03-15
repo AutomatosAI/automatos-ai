@@ -1,0 +1,259 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/81-mission-cleanup",
+  "description": "PRD-81: MISSION CLEANUP — Complete the Context & Memory Unification. Finish the half-done PRD-79 and PRD-80 by killing the legacy _build_agent_system_prompt() cache, making ContextService the only prompt path for all 6 agent-facing code paths, adding ComposioSection + PluginsSection, enabling memory for task/recipe paths, and cleaning up ~270 lines of dead prompt-building code.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create ComposioSection and PluginsSection for ContextService",
+      "description": "As a developer, I need Composio app context and Plugin context rendered as ContextService sections so that all agent-facing paths get these capabilities instead of only the legacy _build_agent_system_prompt() path.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/context/sections/composio.py with ComposioSection class that has a render() method",
+        "ComposioSection queries AgentAppAssignment + ComposioAppCache for the agent's assigned Composio apps",
+        "ComposioSection renders a '## Connected Apps' block listing app names, descriptions, and available action hints",
+        "If agent has no Composio apps assigned, render() returns empty string",
+        "Create orchestrator/modules/context/sections/plugins.py with PluginsSection class that has a render() method",
+        "PluginsSection calls PluginContextService.get_assigned_plugins() for the agent",
+        "PluginsSection renders tier1 summary (always included) and tier2 content (if under budget) using existing build_tier1_summary() and build_tier2_content_sync()",
+        "If agent has no plugins assigned, render() returns empty string",
+        "Both sections handle DB errors gracefully (return empty string, log warning)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Port logic from agent_factory.py lines 1222-1278. ComposioSection reads from AgentAppAssignment, ComposioAppCache, ComposioActionCache models. PluginsSection delegates to existing PluginContextService. Both follow the same pattern as existing sections (identity.py, skills.py). Import models from core.models.composio_cache."
+    },
+    {
+      "id": "US-002",
+      "title": "Register new sections and update mode configs",
+      "description": "As a developer, I need ComposioSection and PluginsSection registered in the SECTION_REGISTRY so ContextService can render them, and all mode configs updated to include them.",
+      "acceptanceCriteria": [
+        "Register 'composio' -> ComposioSection and 'plugins' -> PluginsSection in modules/context/sections/__init__.py SECTION_REGISTRY",
+        "Add ContextMode.HEARTBEAT_ORCHESTRATOR to modes.py with sections: identity, skills, platform_actions, task_context, datetime_context and tool_loading='dispatcher_only', personality=False, max_tokens=8000",
+        "Add ContextMode.HEARTBEAT_AGENT to modes.py with sections: identity, skills, composio, plugins, platform_actions, task_context, datetime_context and tool_loading='full', personality=False, max_tokens=128000",
+        "Update CHATBOT mode to include 'composio' and 'plugins' in sections list (after 'skills')",
+        "Update TASK_EXECUTION mode to include 'composio' and 'plugins' in sections list (after 'skills')",
+        "Update RECIPE mode to include 'composio', 'plugins', and 'memory' in sections list",
+        "Add DEFAULT_BUDGETS entries in budget.py for HEARTBEAT_ORCHESTRATOR (total=128000, reserved_response=2048) and HEARTBEAT_AGENT (total=128000, reserved_response=4096)",
+        "Remove old ContextMode.HEARTBEAT entry if it exists (replaced by the two new modes)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "All changes are in modes.py, budget.py, and sections/__init__.py. The HEARTBEAT split is critical — orchestrator tick gets dispatcher_only tools (simple), agent tick gets full tools + composio + plugins. Check if ContextMode is an enum or string literal — match the pattern of existing modes."
+    },
+    {
+      "id": "US-003",
+      "title": "Update heartbeat_service.py to use HEARTBEAT_ORCHESTRATOR mode",
+      "description": "As a developer, I need the orchestrator tick to use the new HEARTBEAT_ORCHESTRATOR context mode instead of the old HEARTBEAT mode.",
+      "acceptanceCriteria": [
+        "In services/heartbeat_service.py, find the line using ContextMode.HEARTBEAT (around line 439) and change to ContextMode.HEARTBEAT_ORCHESTRATOR",
+        "Update the import to include the new mode name",
+        "Verify no other references to ContextMode.HEARTBEAT exist in heartbeat_service.py",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Simple rename. If ContextMode.HEARTBEAT is used elsewhere in the file, update all references. This is a safe change — the mode config should be equivalent to the old HEARTBEAT config."
+    },
+    {
+      "id": "US-004",
+      "title": "Remove system_prompt cache from AgentRuntime and delete _build_agent_system_prompt",
+      "description": "As a developer, I need to remove the legacy prompt cache that bypasses ContextService, so that all agent execution paths go through ContextService.",
+      "acceptanceCriteria": [
+        "Find the AgentRuntime class definition (likely in agent_factory.py or a models file in modules/agents/)",
+        "Remove the system_prompt field from AgentRuntime",
+        "Remove the skill_tool_schemas field from AgentRuntime",
+        "In activate_agent(), remove the _build_agent_system_prompt() call and the system_prompt/skill_tool_schemas assignments to AgentRuntime constructor",
+        "Delete the entire _build_agent_system_prompt() method from agent_factory.py (lines ~1143-1319, ~176 lines)",
+        "Delete the refresh_agent_prompt() method from agent_factory.py (~18 lines)",
+        "Search for and fix ALL references to agent_runtime.system_prompt or runtime.system_prompt across the codebase",
+        "Search for and fix ALL references to agent_runtime.skill_tool_schemas across the codebase",
+        "grep -rn '_build_agent_system_prompt' orchestrator/ returns zero results",
+        "grep -rn 'refresh_agent_prompt' orchestrator/ returns zero results",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "CRITICAL: Before deleting _build_agent_system_prompt(), grep EVERY file for callers. Known callers: agent_factory.py (activate_agent, execute_with_prompt), possibly execution_manager.py. ALL callers must be updated or removed. The execution_manager.py may call _build_agent_system_prompt() directly — if so, remove that call and let it go through execute_with_prompt() which uses ContextService."
+    },
+    {
+      "id": "US-005",
+      "title": "Make execute_with_prompt() always use ContextService with context_mode param",
+      "description": "As a developer, I need execute_with_prompt() to have a 2-way prompt resolution (explicit > ContextService) instead of the 3-way (explicit > cached > ContextService), with a context_mode parameter for callers to specify which mode to use.",
+      "acceptanceCriteria": [
+        "Add context_mode: Optional[ContextMode] = None parameter to execute_with_prompt() signature",
+        "Remove the middle branch that checks getattr(agent_runtime, 'system_prompt', None) — this field no longer exists",
+        "The prompt resolution is now: if system_prompt param provided, use it; else call ContextService.build_context(mode=context_mode or ContextMode.TASK_EXECUTION)",
+        "When ContextService provides context_result, use context_result.tools instead of calling get_tools_for_agent() separately",
+        "When ContextService provides context_result, use context_result.tool_choice if available",
+        "When explicit system_prompt is provided, still call get_tools_for_agent() for tool loading (explicit path is responsible for its own tools)",
+        "Add a last-resort fallback: if db_agent not found, use minimal identity prompt",
+        "Remove the skill_tool_schemas_from_prompt variable and any code that uses it",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "This is the core change. The mode parameter defaults to TASK_EXECUTION but callers like heartbeat can pass HEARTBEAT_AGENT. The explicit system_prompt escape hatch stays for callers that build their own prompts (e.g., execution_manager with hardcoded professional prompt — until Phase 5 cleans it up)."
+    },
+    {
+      "id": "US-006",
+      "title": "Migrate heartbeat agent tick and verify channel adapters",
+      "description": "As a developer, I need the heartbeat agent tick to use the new HEARTBEAT_AGENT context mode, and verify that channel adapters (channels/base.py) automatically get ContextService after the cache removal.",
+      "acceptanceCriteria": [
+        "In services/heartbeat_service.py _agent_tick(), change the factory.execute_with_prompt() call to pass context_mode=ContextMode.HEARTBEAT_AGENT",
+        "Remove use_memory=False from the call — memory exclusion is now handled by the HEARTBEAT_AGENT mode config not including 'memory' in sections",
+        "Import ContextMode from modules.context.modes",
+        "Grep channels/base.py for execute_with_prompt calls — verify they do NOT pass explicit system_prompt (so they'll use ContextService automatically after US-004/US-005)",
+        "If channels/base.py passes system_prompt explicitly, remove that param so it falls through to ContextService TASK_EXECUTION mode",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Two things: (1) heartbeat agent mode switch, (2) channel adapter verification. channels/base.py uses factory.execute_with_prompt() — after US-004 removes the cache and US-005 makes ContextService the default, channels should automatically get the right prompt. But verify no explicit system_prompt is passed that would bypass ContextService."
+    },
+    {
+      "id": "US-006b",
+      "title": "Migrate execution_manager.py to ContextService",
+      "description": "As a developer, I need to ensure execution_manager.py no longer calls _build_agent_system_prompt() directly or uses its own hardcoded professional_system_prompt, and instead goes through execute_with_prompt() which uses ContextService.",
+      "acceptanceCriteria": [
+        "Read execution_manager.py _execute_subtask() and _execute_with_retries() — identify how it builds prompts",
+        "If execution_manager calls _build_agent_system_prompt() directly: remove that call",
+        "If execution_manager passes system_prompt= to execute_with_prompt(): remove that param so factory uses ContextService",
+        "If professional_system_prompt hardcoded block exists (~40 lines of instructions): move any genuinely useful instructions to the user prompt or to a ContextService section, then delete the block",
+        "If execution_manager has workspace guidance or conversion tool instructions appended: move to user prompt prefix (not system prompt) or to a section",
+        "After changes, execution_manager should call execute_with_prompt() WITHOUT system_prompt= so ContextService TASK_EXECUTION mode handles identity, skills, tools, memory",
+        "grep -rn 'professional_system_prompt' orchestrator/ returns zero results",
+        "grep -rn '_build_agent_system_prompt' orchestrator/modules/agents/execution/ returns zero results",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "CRITICAL gap from original review. The system audit (Path 6) shows execution_manager produces a DIFFERENT prompt than factory — it prepends skill content and appends a hardcoded professional prompt + workspace guidance + conversion tool instructions. PRD-80 US-016 may have already partially migrated this (check IMPLEMENTATION_PLAN.md notes for US-016). If already migrated, this story is just verification. If not, this is the migration."
+    },
+    {
+      "id": "US-007",
+      "title": "Verify and fix memory injection for task execution and recipe paths",
+      "description": "As a developer, I need to verify that TASK_EXECUTION and RECIPE modes actually include memory in their ContextService output, verify daily logs render in MemorySection, and remove any redundant manual memory injection.",
+      "acceptanceCriteria": [
+        "Verify 'memory' is in MODE_CONFIGS[ContextMode.TASK_EXECUTION].sections — add if missing",
+        "Verify 'memory' is in MODE_CONFIGS[ContextMode.RECIPE].sections — add if missing (should be there from US-002)",
+        "Add comment to HEARTBEAT_AGENT mode: 'NOTE: memory intentionally excluded to keep context lean. Add memory here if agents need cross-run learning. See PRD-81 Task 3.5.'",
+        "Read MemorySection.render() in modules/context/sections/memory.py — verify it includes daily logs (## Recent Activity) in its output, not just Mem0 search results",
+        "If MemorySection does NOT render daily logs: add daily log retrieval via smart_memory.get_daily_logs() or equivalent, with a 500-token cap",
+        "If MemorySection already renders daily logs: verify the rendering works for non-chatbot modes (TASK_EXECUTION, RECIPE) — daily logs should appear whenever memory section is included",
+        "Check recipe_executor.py lines 206-217 for manual Mem0 injection — if it calls the same SmartMemoryManager.retrieve_memories() that MemorySection uses, remove the manual injection",
+        "If recipe_executor.py manual injection adds recipe-SCOPED memories (not workspace-scoped), keep it as complementary context",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Phase 3 of the PRD is mostly verification. The key action item is checking recipe_executor.py for redundant memory injection. Read the code at lines 206-217 before deciding to remove it."
+    },
+    {
+      "id": "US-008",
+      "title": "Move legacy prompt instructions to ContextService sections",
+      "description": "As a developer, I need the useful instructions that were in the deleted _build_agent_system_prompt() moved into appropriate ContextService sections so they're not lost.",
+      "acceptanceCriteria": [
+        "Add dependency context instructions to modules/context/sections/task_context.py — append after task description: the '## IMPORTANT: Working with Context and Dependencies' block about using DEPENDENCY CONTEXT outputs",
+        "Add skill tool usage instructions to modules/context/sections/skills.py — after rendering skill content, if skill tools exist, append '## Using Your Skill Tools' block with tool names and usage guidance",
+        "Add response formatting instructions to modules/context/sections/identity.py — after persona rendering, append '## Response Formatting' block about synthesizing data into human-friendly prose (without the overly restrictive 'NEVER use code blocks' rule)",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "These are static text blocks, no DB queries needed. The dependency instructions were at lines 1291-1301 of the deleted method, skill tool instructions at lines 1303-1309, response formatting at lines 1311-1316. Adapt wording to be section-appropriate."
+    },
+    {
+      "id": "US-009",
+      "title": "Clean up orphaned imports, run grep audit, update tests",
+      "description": "As a developer, I need to remove orphaned imports from agent_factory.py, verify all legacy prompt patterns are gone via grep audit, and update any broken tests.",
+      "acceptanceCriteria": [
+        "Check if PluginContextService import in agent_factory.py is still used — delete if orphaned",
+        "Check if AgentAppAssignment/ComposioAppCache/ComposioActionCache imports in agent_factory.py are still used — delete if orphaned",
+        "Check if get_skill_loader import in agent_factory.py is still used — delete if orphaned",
+        "grep -rn '_build_agent_system_prompt' orchestrator/ returns zero results (excluding __pycache__)",
+        "grep -rn 'refresh_agent_prompt' orchestrator/ returns zero results",
+        "grep -rn 'professional_system_prompt' orchestrator/ returns zero results (check execution_manager.py)",
+        "grep -rn 'build_prompt_summary' in non-ContextService/non-registry files returns zero results",
+        "grep -rn 'get_happy_system_prompt' in non-ContextService files returns zero results",
+        "Fix any tests that reference deleted methods (_build_agent_system_prompt, refresh_agent_prompt, agent_runtime.system_prompt)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "This is the cleanup audit. Run all 5 grep patterns from PRD-81 Task 4.5. If professional_system_prompt still exists in execution_manager.py (audit R3 said it should have been deleted in PRD-80 — verify), delete it and update execution_manager to use ContextService via execute_with_prompt()."
+    },
+    {
+      "id": "US-010",
+      "title": "Consolidate tool loading aliases and document SmartToolRouter",
+      "description": "As a developer, I need to remove the redundant get_agent_tools() and get_chat_tools() aliases, and document the SmartToolRouter future plan.",
+      "acceptanceCriteria": [
+        "grep -rn 'get_agent_tools' orchestrator/ to find all callers",
+        "Replace all get_agent_tools() calls with direct get_tools_for_agent() calls",
+        "Delete get_agent_tools() wrapper from tool_router.py",
+        "grep -rn 'get_chat_tools' orchestrator/ to find all callers",
+        "Replace all get_chat_tools() calls with direct get_tools_for_agent() calls",
+        "Delete get_chat_tools() re-export from consumers/chatbot/tool_router.py (or delete the file if it only re-exports)",
+        "Add future-plan comment to top of consumers/chatbot/smart_tool_router.py noting it is consumed only by ContextService and future work should absorb it into modules/context/sections/tools.py",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Before deleting, grep to ensure no callers remain. If consumers/chatbot/tool_router.py contains other logic beyond the re-export, keep the file and only remove the get_chat_tools function."
+    },
+    {
+      "id": "US-011",
+      "title": "Delete get_platform_skill() and clean up personality decisions",
+      "description": "As a developer, I need to remove the orphaned get_platform_skill() method and document personality mode decisions.",
+      "acceptanceCriteria": [
+        "grep -rn 'get_platform_skill' orchestrator/ — verify zero callers outside personality.py",
+        "If zero callers: delete get_platform_skill() method from consumers/chatbot/personality.py",
+        "If callers exist: document them in notes, do NOT delete",
+        "In modules/context/modes.py, add comment to HEARTBEAT_ORCHESTRATOR explaining personality=True decision (orchestrator represents platform to user) OR personality=False decision with rationale",
+        "Read identity.py personality rendering logic — check if AutomatosPersonality.get_base_system_prompt() is chatbot-specific or generic enough for task agents",
+        "Add comments to TASK_EXECUTION, RECIPE, HEARTBEAT_AGENT modes explaining why personality=False (professional/neutral tone) or why personality=True",
+        "Add comment to HEARTBEAT_AGENT explaining no daily logs (no memory section = no daily logs, by design)",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Read the personality rendering in identity.py before deciding. If get_base_system_prompt() output contains chatbot-specific language like 'you are Auto, the friendly assistant', then personality should stay chatbot-only. If generic, consider enabling for heartbeat_orchestrator."
+    },
+    {
+      "id": "US-012",
+      "title": "Create get_agent_with_context() utility for consistent agent loading",
+      "description": "As a developer, I need a single utility function for loading agents with all their associations (skills, persona) to replace scattered db.query(Agent) patterns.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/agents/queries.py with get_agent_with_context(db, agent_id) function",
+        "Function returns db.query(Agent).options(joinedload(Agent.skills), joinedload(Agent.persona)).filter_by(id=agent_id).first()",
+        "Replace the bare db.query(Agent).filter_by(id=agent_id).first() call in execute_with_prompt() (where it loads agent for ContextService) with get_agent_with_context()",
+        "Replace any other db.query(Agent) calls in ContextService-related paths with the utility",
+        "Leave non-ContextService paths alone (admin endpoints, list endpoints)",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Small utility file (~30 lines). The joinedload ensures skills and persona are eagerly loaded, preventing lazy-loading issues when ContextService sections try to access them. Only replace queries in ContextService paths — admin/API endpoints can keep their simple queries."
+    },
+    {
+      "id": "US-013",
+      "title": "Evaluate _inject_composio_hints() redundancy and remove inline datetime from heartbeat",
+      "description": "As a developer, I need to determine if _inject_composio_hints() in agent_factory.py is redundant with ComposioSection, and remove the inline datetime from the heartbeat agent prompt.",
+      "acceptanceCriteria": [
+        "Read _inject_composio_hints() in agent_factory.py — document what it injects (app-level? action-level? parameter hints?)",
+        "Compare with what ComposioSection renders (from US-001)",
+        "If ComposioSection covers the same info: delete _inject_composio_hints() and _inject_composio_recipe_hints()",
+        "If _inject_composio_hints() adds action-level detail that ComposioSection doesn't: expand ComposioSection to include it, THEN delete the method",
+        "If action-level detail is too complex to move now: keep the method but add a TODO comment referencing PRD-81 Task 5.7",
+        "In heartbeat_service.py _agent_tick(), remove the inline Time: strftime line from the user prompt (datetime is now in DatetimeContextSection)",
+        "grep -rn 'strftime' services/heartbeat_service.py should not appear in _agent_tick()",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Two separate cleanups in one story. The composio evaluation requires reading both implementations and comparing. The datetime removal is a 1-line delete. If _inject_composio_hints adds action names like GMAIL_SEND_EMAIL with parameter hints, that's more detail than ComposioSection's app-level descriptions — either expand ComposioSection or keep the method."
+    }
+  ]
+}

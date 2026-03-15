@@ -135,10 +135,11 @@ Request → AuthN → AuthZ → Mutating Admission → Validating Admission → 
 
 **Pre-estimation formula:**
 ```python
-estimated_cost = (input_tokens × model_input_rate) + (max_output_tokens × model_output_rate)
+estimated_cost = (input_tokens × model_input_rate) + (estimated_output_tokens × model_output_rate)
+# where estimated_output_tokens = max_tokens × 0.7
 ```
 - Input tokens: countable exactly pre-call via tokenizer
-- Output tokens: use `max_tokens` as worst case, reconcile after
+- Output tokens: use `max_tokens × 0.7` as estimate (empirical median for agent tasks), NOT worst case. Worst-case (`max_tokens`) over-reserves budget and blocks legitimate work — missions would stall at 70% actual spend because the budget gate thinks 100% is committed. Reconcile actual vs estimated after each call; adjust reserve if the model consistently over/under-produces.
 
 **Anthropic tier structure (for reference):**
 - Tier 1: 50 RPM, 30K ITPM, $100/mo cap
