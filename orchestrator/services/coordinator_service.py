@@ -232,7 +232,7 @@ class CoordinatorService:
                 await self._execute_task(db, run, task, dispatch_result.agent_id)
 
         # --- Reconcile phase ---
-        MissionReconciler.reconcile(db, run)
+        await MissionReconciler.reconcile(db, run)
 
         # --- Check if run advanced to verifying → build summary ---
         db.refresh(run)

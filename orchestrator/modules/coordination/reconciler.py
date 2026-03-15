@@ -3,6 +3,7 @@ Mission Reconciler — PRD-82A Sequential Mission Coordinator
 ============================================================
 
 Reconciles active missions on every coordinator tick:
+- Verification: COMPLETED tasks → verify via VerificationService → VERIFIED/RETRYING/FAILED
 - Stall detection: ASSIGNED tasks >60s, RUNNING tasks >300s → mark stalled
 - Stalled recovery: stalled → assigned for re-dispatch
 - Completion check: all tasks terminal & verified → advance run to verifying
@@ -12,6 +13,7 @@ Stateless — all data comes from DB. Caller manages transactions.
 
 Source: PRD-82A Sections 4.2 (transitions), 8 (failure codes), 11 (retry guardrails)
         PRD-102 Section 4.3-4.5 (reconciler design)
+        PRD-103 Sections 3-5 (verification service)
 """
 
 import logging
@@ -24,6 +26,7 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from config import Config
+from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import (
     ActorType,
@@ -32,6 +35,13 @@ from core.models.orchestration_enums import (
     RunState,
     TaskState,
     TERMINAL_TASK_STATES,
+)
+from modules.coordination.verification import (
+    VERDICT_FAIL,
+    VERDICT_PARTIAL,
+    VERDICT_PASS,
+    VerificationResult,
+    VerificationService,
 )
 from services.orchestration_board_bridge import sync_board_status
 from services.orchestration_state import (
@@ -57,6 +67,8 @@ class ReconcileResult:
     stalls_detected: int = 0
     stalls_recovered: int = 0
     tasks_failed: int = 0
+    tasks_verified: int = 0
+    tasks_verification_failed: int = 0
     run_advanced: bool = False
     run_new_state: Optional[str] = None
     error: Optional[str] = None
@@ -76,13 +88,14 @@ class MissionReconciler:
     """
 
     @staticmethod
-    def reconcile(db: Session, run: OrchestrationRun) -> ReconcileResult:
+    async def reconcile(db: Session, run: OrchestrationRun) -> ReconcileResult:
         """
         Run a full reconciliation pass for a single mission run.
 
-        Checks all non-terminal tasks for stalls, then evaluates whether
-        the run should advance (all verified → verifying) or fail
-        (any task failed with retries exhausted).
+        Steps:
+        1. Verify completed tasks (COMPLETED → VERIFYING → VERIFIED/RETRYING/FAILED)
+        2. Detect stalls (ASSIGNED >60s, RUNNING >300s)
+        3. Check if all tasks terminal → advance run or fail run
 
         Args:
             db: SQLAlchemy session (caller manages transaction).
@@ -95,8 +108,15 @@ class MissionReconciler:
         stalls_detected = 0
         stalls_recovered = 0
         tasks_failed = 0
+        tasks_verified = 0
+        tasks_verification_failed = 0
 
         try:
+            # --- Verification phase (completed → verifying → verdict) ---
+            verify_counts = await MissionReconciler._verify_completed_tasks(db, run)
+            tasks_verified = verify_counts[0]
+            tasks_verification_failed = verify_counts[1]
+
             # --- Stall detection + recovery ---
             stall_counts = MissionReconciler._detect_and_recover_stalls(db, run_id)
             stalls_detected = stall_counts[0]
@@ -135,6 +155,8 @@ class MissionReconciler:
                     stalls_detected=stalls_detected,
                     stalls_recovered=stalls_recovered,
                     tasks_failed=tasks_failed,
+                    tasks_verified=tasks_verified,
+                    tasks_verification_failed=tasks_verification_failed,
                 )
 
             # --- Check for fatal failure (task failed, retries exhausted) ---
@@ -150,6 +172,8 @@ class MissionReconciler:
                         stalls_detected=stalls_detected,
                         stalls_recovered=stalls_recovered,
                         tasks_failed=tasks_failed,
+                        tasks_verified=tasks_verified,
+                        tasks_verification_failed=tasks_verification_failed,
                         run_advanced=True,
                         run_new_state=RunState.FAILED.value,
                     )
@@ -159,6 +183,8 @@ class MissionReconciler:
                 stalls_detected=stalls_detected,
                 stalls_recovered=stalls_recovered,
                 tasks_failed=tasks_failed,
+                tasks_verified=tasks_verified,
+                tasks_verification_failed=tasks_verification_failed,
             )
 
         except Exception:
@@ -170,8 +196,307 @@ class MissionReconciler:
                 stalls_detected=stalls_detected,
                 stalls_recovered=stalls_recovered,
                 tasks_failed=tasks_failed,
+                tasks_verified=tasks_verified,
+                tasks_verification_failed=tasks_verification_failed,
                 error="reconciliation_error",
             )
+
+    # -----------------------------------------------------------------------
+    # Verification of completed tasks
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    async def _verify_completed_tasks(
+        db: Session,
+        run: OrchestrationRun,
+    ) -> tuple:
+        """
+        Find tasks in COMPLETED state, verify them via VerificationService.
+
+        Flow per task:
+          COMPLETED → VERIFYING → verify_task() → VERIFIED / RETRYING / FAILED
+
+        Returns (tasks_verified, tasks_verification_failed) counts.
+        """
+        run_id = run.id
+        tasks_verified = 0
+        tasks_verification_failed = 0
+
+        completed_tasks: List[OrchestrationTask] = (
+            db.query(OrchestrationTask)
+            .filter(
+                and_(
+                    OrchestrationTask.run_id == run_id,
+                    OrchestrationTask.state == TaskState.COMPLETED.value,
+                )
+            )
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+
+        if not completed_tasks:
+            return (0, 0)
+
+        verification_service = VerificationService()
+
+        for task in completed_tasks:
+            # Transition COMPLETED → VERIFYING
+            try:
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.VERIFYING,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="reconciler",
+                    reason="Starting verification",
+                )
+                sync_board_status(db, task)
+            except ConflictError:
+                logger.warning(
+                    "Conflict transitioning task %s to verifying", task.id,
+                )
+                continue
+
+            # Resolve executor model from assigned agent
+            executor_model = MissionReconciler._get_executor_model(db, task)
+
+            # Parse verification criteria from task spec
+            criteria = task.verification_criteria if task.verification_criteria else None
+
+            # Run verification
+            try:
+                result: VerificationResult = await verification_service.verify_task(
+                    task_title=task.title,
+                    task_description=task.description or "",
+                    output=task.output or "",
+                    verification_criteria=criteria,
+                    executor_model=executor_model,
+                )
+            except Exception:
+                logger.error(
+                    "Verification service error for task %s", task.id,
+                    exc_info=True,
+                )
+                # Treat verification error as partial (escalate)
+                result = VerificationResult(
+                    verdict=VERDICT_PARTIAL,
+                    reasoning="Verification service raised an exception",
+                )
+
+            # Emit verification result event with scores
+            emit_event(
+                db=db,
+                run_id=run_id,
+                event_type=EventType.TASK_VERIFICATION_COMPLETED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="reconciler",
+                task_id=task.id,
+                payload={
+                    "verdict": result.verdict,
+                    "scores": result.scores,
+                    "reasoning": result.reasoning,
+                    "confidence": result.confidence,
+                    "deterministic_passed": result.deterministic_passed,
+                    "tokens_used": result.tokens_used,
+                },
+            )
+
+            # Update token tracking
+            if result.tokens_used > 0:
+                task.tokens_used = (task.tokens_used or 0) + result.tokens_used
+                run.tokens_used = (run.tokens_used or 0) + result.tokens_used
+
+                # Check budget warning
+                if (
+                    run.token_budget_estimate
+                    and run.tokens_used > run.token_budget_estimate * 1.5
+                ):
+                    emit_event(
+                        db=db,
+                        run_id=run_id,
+                        event_type=EventType.BUDGET_WARNING,
+                        actor_type=ActorType.COORDINATOR,
+                        actor_id="reconciler",
+                        payload={
+                            "tokens_used": run.tokens_used,
+                            "token_budget_estimate": run.token_budget_estimate,
+                            "ratio": round(run.tokens_used / run.token_budget_estimate, 2),
+                        },
+                    )
+
+            # Apply verdict
+            if result.verdict == VERDICT_PASS:
+                MissionReconciler._apply_verdict_pass(db, task)
+                tasks_verified += 1
+
+            elif result.verdict == VERDICT_FAIL:
+                failed = MissionReconciler._apply_verdict_fail(db, task, result)
+                if failed:
+                    tasks_verification_failed += 1
+
+            elif result.verdict == VERDICT_PARTIAL:
+                MissionReconciler._apply_verdict_partial(db, run_id, task, result)
+                tasks_verification_failed += 1
+
+            db.flush()
+
+        return (tasks_verified, tasks_verification_failed)
+
+    @staticmethod
+    def _get_executor_model(db: Session, task: OrchestrationTask) -> Optional[str]:
+        """Get the model used by the task's assigned agent."""
+        if not task.assigned_agent_id:
+            return None
+        agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+        if not agent or not agent.model_config:
+            return None
+        return agent.model_config.get("model_id")
+
+    @staticmethod
+    def _apply_verdict_pass(
+        db: Session,
+        task: OrchestrationTask,
+    ) -> None:
+        """Handle PASS verdict: transition task to VERIFIED."""
+        try:
+            transition_task(
+                db=db,
+                task=task,
+                new_state=TaskState.VERIFIED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="reconciler",
+                reason="Verification passed",
+            )
+            sync_board_status(db, task)
+            logger.info(
+                "Task %s verified (pass)", task.id,
+            )
+        except ConflictError:
+            logger.warning("Conflict transitioning task %s to verified", task.id)
+
+    @staticmethod
+    def _apply_verdict_fail(
+        db: Session,
+        task: OrchestrationTask,
+        result: VerificationResult,
+    ) -> bool:
+        """
+        Handle FAIL verdict: retry with feedback or fail permanently.
+
+        Returns True if the task was permanently failed, False if retrying.
+        """
+        max_retries = task.max_retries or Config.COORDINATOR_MAX_TASK_RETRIES
+        attempt = task.attempt_number or 0
+
+        if attempt < max_retries:
+            # Retry with verifier feedback injected into task context
+            task.failure_reason_code = FailureReasonCode.VERIFICATION_FAIL.value
+            task.attempt_number = attempt + 1
+
+            # Inject verification feedback into input_context for retry
+            feedback_context = task.input_context or {}
+            feedback_context["verification_feedback"] = {
+                "attempt": attempt + 1,
+                "reasoning": result.reasoning,
+                "scores": result.scores,
+                "failures": result.deterministic_failures,
+            }
+            task.input_context = feedback_context
+
+            try:
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.RETRYING,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="reconciler",
+                    reason=f"Verification failed, retrying (attempt {attempt + 1}/{max_retries}): {result.reasoning}",
+                )
+                sync_board_status(db, task)
+                logger.info(
+                    "Task %s verification failed → retrying (attempt %d/%d): %s",
+                    task.id, attempt + 1, max_retries, result.reasoning,
+                )
+                return False
+            except ConflictError:
+                logger.warning("Conflict transitioning task %s to retrying", task.id)
+                return False
+        else:
+            # Max retries exhausted → fail permanently
+            task.failure_reason_code = FailureReasonCode.MAX_RETRIES_EXHAUSTED.value
+            task.failure_detail = (
+                f"Verification failed after {attempt} attempts. "
+                f"Last reasoning: {result.reasoning}"
+            )
+            try:
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.FAILED,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="reconciler",
+                    reason=f"Verification failed, max retries exhausted: {result.reasoning}",
+                )
+                sync_board_status(db, task)
+                logger.info(
+                    "Task %s verification failed permanently (retries exhausted)",
+                    task.id,
+                )
+                return True
+            except ConflictError:
+                logger.warning("Conflict transitioning task %s to failed", task.id)
+                return False
+
+    @staticmethod
+    def _apply_verdict_partial(
+        db: Session,
+        run_id: UUID,
+        task: OrchestrationTask,
+        result: VerificationResult,
+    ) -> None:
+        """
+        Handle PARTIAL verdict: fail with escalation event for human review.
+
+        PARTIAL means low confidence — escalate rather than retry blindly.
+        """
+        task.failure_reason_code = FailureReasonCode.VERIFICATION_FAIL.value
+        task.failure_detail = (
+            f"Verification partial (low confidence {result.confidence:.2f}): "
+            f"{result.reasoning}"
+        )
+        try:
+            transition_task(
+                db=db,
+                task=task,
+                new_state=TaskState.FAILED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="reconciler",
+                reason=f"Verification partial — escalating: {result.reasoning}",
+            )
+            sync_board_status(db, task)
+
+            # Emit escalation event for potential human intervention
+            emit_event(
+                db=db,
+                run_id=run_id,
+                event_type=EventType.TASK_VERIFICATION_FAILED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="reconciler",
+                task_id=task.id,
+                payload={
+                    "verdict": VERDICT_PARTIAL,
+                    "confidence": result.confidence,
+                    "reasoning": result.reasoning,
+                    "scores": result.scores,
+                    "escalation": True,
+                },
+            )
+            logger.info(
+                "Task %s verification partial (confidence=%.2f) → failed with escalation",
+                task.id, result.confidence,
+            )
+        except ConflictError:
+            logger.warning("Conflict transitioning task %s to failed (partial)", task.id)
 
     # -----------------------------------------------------------------------
     # Stall detection and recovery
@@ -355,6 +680,8 @@ class MissionReconciler:
         stalls_detected: int,
         stalls_recovered: int,
         tasks_failed: int,
+        tasks_verified: int = 0,
+        tasks_verification_failed: int = 0,
     ) -> ReconcileResult:
         """
         When all tasks are terminal, advance the run to verifying or failed.
@@ -363,6 +690,15 @@ class MissionReconciler:
         Any failed → run transitions to failed.
         """
         run_id = run.id
+        result_kwargs = dict(
+            run_id=run_id,
+            stalls_detected=stalls_detected,
+            stalls_recovered=stalls_recovered,
+            tasks_failed=tasks_failed,
+            tasks_verified=tasks_verified,
+            tasks_verification_failed=tasks_verification_failed,
+        )
+
         verified_tasks = [
             t for t in all_tasks
             if TaskState(t.state) == TaskState.VERIFIED
@@ -385,10 +721,7 @@ class MissionReconciler:
                     len(all_tasks),
                 )
                 return ReconcileResult(
-                    run_id=run_id,
-                    stalls_detected=stalls_detected,
-                    stalls_recovered=stalls_recovered,
-                    tasks_failed=tasks_failed,
+                    **result_kwargs,
                     run_advanced=True,
                     run_new_state=RunState.VERIFYING.value,
                 )
@@ -414,10 +747,7 @@ class MissionReconciler:
                     len(all_tasks),
                 )
                 return ReconcileResult(
-                    run_id=run_id,
-                    stalls_detected=stalls_detected,
-                    stalls_recovered=stalls_recovered,
-                    tasks_failed=tasks_failed,
+                    **result_kwargs,
                     run_advanced=True,
                     run_new_state=RunState.FAILED.value,
                 )
@@ -441,22 +771,14 @@ class MissionReconciler:
                         reason=f"{len(skipped_tasks)} tasks skipped due to dependency failure",
                     )
                     return ReconcileResult(
-                        run_id=run_id,
-                        stalls_detected=stalls_detected,
-                        stalls_recovered=stalls_recovered,
-                        tasks_failed=tasks_failed,
+                        **result_kwargs,
                         run_advanced=True,
                         run_new_state=RunState.FAILED.value,
                     )
                 except ConflictError:
                     logger.warning("Conflict advancing run %s to failed", run_id)
 
-        return ReconcileResult(
-            run_id=run_id,
-            stalls_detected=stalls_detected,
-            stalls_recovered=stalls_recovered,
-            tasks_failed=tasks_failed,
-        )
+        return ReconcileResult(**result_kwargs)
 
     @staticmethod
     def _check_fatal_failure(

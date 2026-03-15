@@ -93,6 +93,7 @@ class EventType(str, Enum):
     TASK_VERIFICATION_STARTED = "task_verification_started"
     TASK_VERIFICATION_PASSED = "task_verification_passed"
     TASK_VERIFICATION_FAILED = "task_verification_failed"
+    TASK_VERIFICATION_COMPLETED = "task_verification_completed"
     TASK_HUMAN_REVIEW_REQUESTED = "task_human_review_requested"
     TASK_HUMAN_APPROVED = "task_human_approved"
     TASK_HUMAN_REJECTED = "task_human_rejected"

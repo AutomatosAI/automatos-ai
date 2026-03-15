@@ -235,3 +235,25 @@
 - Config constants added to config.py: COORDINATOR_MAX_VERIFICATION_RETRIES (2), COORDINATOR_VERIFICATION_PASS_THRESHOLD (0.7), COORDINATOR_VERIFICATION_FAIL_THRESHOLD (0.4), COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION (0.5), COORDINATOR_VERIFIER_MODEL_MAPPING (5 family→model pairs), COORDINATOR_VERIFIER_FALLBACK_MODEL (gpt-4o-mini)
 - 4 smoke tests passed: cross-model selection, verdict computation, empty output, deterministic short-circuit
 - Import validated: VerificationService, VerificationResult, VERDICT_PASS/FAIL/PARTIAL all resolve cleanly
+
+### Iteration 20 — US-020: Wire Verification into Reconciler
+- Modified `orchestrator/modules/coordination/reconciler.py` — wired VerificationService into reconcile loop
+- Made reconcile() and _verify_completed_tasks() async (VerificationService.verify_task() is async)
+- Updated `orchestrator/services/coordinator_service.py` — changed `MissionReconciler.reconcile(db, run)` call to `await MissionReconciler.reconcile(db, run)`
+- Added TASK_VERIFICATION_COMPLETED to EventType enum in orchestration_enums.py
+- New verification phase runs BEFORE stall detection in reconcile():
+  1. Finds all COMPLETED tasks for the run
+  2. Transitions each COMPLETED → VERIFYING (with board sync)
+  3. Resolves executor model from assigned agent's model_config
+  4. Calls VerificationService.verify_task() with task data + executor model
+  5. Emits TASK_VERIFICATION_COMPLETED event with scores, verdict, confidence
+  6. Updates tokens_used on task + run, emits BUDGET_WARNING if >1.5× estimate
+  7. Applies verdict: PASS→VERIFIED, FAIL→RETRYING (with feedback injected into input_context) or FAILED (max retries), PARTIAL→FAILED with escalation event
+- ReconcileResult extended with tasks_verified, tasks_verification_failed counts
+- _get_executor_model(): queries Agent by assigned_agent_id, returns model_config["model_id"]
+- _apply_verdict_pass(): VERIFYING → VERIFIED + board sync
+- _apply_verdict_fail(): retries < max → RETRYING with verification_feedback in input_context (reasoning, scores, failures); retries exhausted → FAILED with max_retries_exhausted
+- _apply_verdict_partial(): → FAILED with TASK_VERIFICATION_FAILED escalation event (escalation: True in payload)
+- All ConflictError paths handled gracefully (log warning, continue)
+- **Phase 4 complete** (US-018 through US-020)
+- Import validated: async reconcile, new ReconcileResult fields, new EventType all resolve cleanly
