@@ -5,7 +5,7 @@
 ## Phase 1: Schema & Models
 
 - [x] US-001: Create orchestration enums module (`orchestrator/core/models/orchestration_enums.py`) — StateType, RunState(10), TaskState(11), EventType(39), ActorType, TaskType, TriggerRule, FailureReasonCode(8) StrEnums. Transition dicts, terminal frozensets, BOARD_STATUS_MAP. Note: Python 3.10 — used `(str, Enum)` pattern instead of `StrEnum`.
-- [ ] US-002: Create OrchestrationRun model (`orchestrator/core/models/orchestration.py`) — mission execution row with output_summary JSONB, token tracking, version_id optimistic locking.
+- [x] US-002: Create OrchestrationRun model (`orchestrator/core/models/orchestration.py`) — mission execution row with output_summary JSONB, token tracking, version_id optimistic locking. Uses SQLAlchemy 1.x Column style matching existing codebase patterns. CHECK constraint on state column validates against RunState enum values.
 - [ ] US-003: Create OrchestrationTask model — task row with failure_reason_code, token tracking, version_id, partial index on active states.
 - [ ] US-004: Create OrchestrationTaskDependency + OrchestrationEvent models — DAG edges + append-only audit log.
 - [ ] US-005: Create Alembic migration — CREATE 4 tables, ALTER board_tasks + agent_reports with new FKs. Indexes CONCURRENTLY on existing tables.

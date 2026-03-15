@@ -10,3 +10,12 @@
 - 7 mapping dicts/frozensets: RUN_STATE_TYPE, TASK_STATE_TYPE, TERMINAL_RUN_STATES, TERMINAL_TASK_STATES, ALLOWED_TASK_TRANSITIONS, ALLOWED_RUN_TRANSITIONS, BOARD_STATUS_MAP
 - Discovery: Python 3.10 environment — used `(str, Enum)` instead of `StrEnum`
 - All acceptance criteria validated via import + assertions
+
+### Iteration 2 — US-002: OrchestrationRun Model
+- Created `orchestrator/core/models/orchestration.py` with OrchestrationRun class
+- 19 columns: id (UUID PK), workspace_id (FK), goal, plan, config, state, state_type, created_by, assigned_coordinator_id (FK agents.id), output_summary (JSONB), token_budget_estimate, tokens_used, max_retries, max_concurrent, started_at, completed_at, created_at, updated_at, version_id
+- Optimistic locking via `__mapper_args__ = {'version_id_col': version_id}`
+- CHECK constraint on state column validates against all RunState values
+- Pattern: follows SQLAlchemy 1.x Column style matching core.py (not mapped_column)
+- workspace_id is UUID FK to workspaces.id, created_by is String (Clerk user ID)
+- Import validated: all columns, constraints, and mapper args verified
