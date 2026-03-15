@@ -1541,7 +1541,595 @@ def downgrade() -> None:
 
 ## 6. Event Log & Audit Trail
 
-_(US-005)_
+The `orchestration_events` table is the append-only audit trail for every state change, decision, and notable occurrence in a mission's lifecycle. It is the second half of the **dual-write pattern** established in Section 2.4: every state transition writes the new state to the entity row (fast queries) AND appends an immutable event (complete history). Both writes occur in a single database transaction.
+
+### 6.1 Design Philosophy
+
+**Lightweight event sourcing, not full event sourcing.** We log events for observability, debugging, and telemetry — not for state reconstruction. The `orchestration_runs` and `orchestration_tasks` tables hold the authoritative current state. Events answer "what happened and when?" without being the source of truth for "what is the current state?"
+
+This is the same trade-off Prefect makes with its `flow_run_state` / `task_run_state` history tables alongside denormalized state on the run row. It avoids the projection maintenance and snapshot management overhead of full event sourcing (Dagster/Temporal) while giving us a complete audit trail that pure CRUD (Airflow's mutable `task_instance`) cannot provide.
+
+**Why not just application logs?** Structured events in PostgreSQL are queryable, joinable, and indexable. "Show me every failure in the last 24 hours with the failing agent and retry count" is a SQL query, not a log grep. Events also serve as the raw data feed for PRD-106 (Outcome Telemetry & Learning Foundation) — every event is a data point for pattern analysis.
+
+**Existing patterns in Automatos:** The codebase already has three audit log tables that inform our design:
+
+| Table | Pattern | What We Adopt |
+|-------|---------|---------------|
+| `skill_audit_log` (PRD-22) | `action` + `action_details` JSON + `status` + `execution_time_ms` | Structured action with flexible JSON payload; timing metadata |
+| `permission_audit_logs` (PRD-17) | `action` + `details` JSON + `user_id` + `timestamp` | Actor identification; indexed action column |
+| `heartbeat_results` | `findings[]` + `actions_taken[]` JSONB arrays + `source_type`/`source_id` | Append-only event accumulation; source attribution |
+
+Our `orchestration_events` table combines the best of these: typed events (from audit logs), flexible JSONB payload (from all three), actor tracking (from permission logs), and append-only semantics (from heartbeat_results).
+
+### 6.2 Event Type Taxonomy
+
+Event types follow the `{entity}_{lifecycle}` naming convention from Temporal (e.g., `ActivityTaskScheduled`, `ActivityTaskCompleted`), adapted to our domain. Types are grouped by entity for readability but stored as a flat enum.
+
+#### Run Events
+
+| Event Type | Trigger | Payload Fields |
+|-----------|---------|----------------|
+| `run_created` | Mission submitted by user or system | `goal`, `config_summary`, `autonomy_level` |
+| `run_planning_started` | Coordinator begins decomposition | `coordinator_model` |
+| `run_plan_ready` | Coordinator produces task plan | `task_count`, `estimated_cost`, `strategy` |
+| `run_approved` | Human approves plan (or auto-approved) | `approved_by`, `modifications` (if human edited plan) |
+| `run_rejected` | Human rejects plan | `rejected_by`, `reason` |
+| `run_started` | First task begins execution | — |
+| `run_paused` | Human pauses mission | `paused_by`, `reason` |
+| `run_resumed` | Human resumes mission | `resumed_by` |
+| `run_budget_warning` | Cost exceeds soft limit | `current_cost`, `soft_limit`, `percent_used` |
+| `run_budget_exceeded` | Cost exceeds hard limit | `current_cost`, `hard_limit` |
+| `run_budget_increased` | Human increases budget cap | `old_limit`, `new_limit`, `increased_by` |
+| `run_completed` | All tasks terminal + success | `total_cost`, `total_tokens`, `duration_ms`, `tasks_completed`, `tasks_failed` |
+| `run_failed` | Unrecoverable failure | `reason`, `failing_task_id`, `total_cost` |
+| `run_cancelled` | Human cancels mission | `cancelled_by`, `tasks_remaining` |
+
+#### Task Events
+
+| Event Type | Trigger | Payload Fields |
+|-----------|---------|----------------|
+| `task_created` | Coordinator creates task from plan | `task_type`, `trigger_rule`, `depends_on` (task IDs) |
+| `task_queued` | Dependencies met, ready for assignment | `unblocked_by` (task ID that completed last) |
+| `task_assigned` | Coordinator assigns agent | `agent_id`, `agent_type`, `model`, `board_task_id` |
+| `task_started` | Agent begins execution | `attempt_number` |
+| `task_continuing` | Agent exits cleanly, needs more turns | `continuation_count`, `tokens_this_turn` |
+| `task_resumed` | Continuation dispatched | `continuation_count` |
+| `task_output_submitted` | Agent submits result | `output_ref`, `output_summary_length`, `tokens_used` |
+| `task_verification_started` | Verifier begins evaluation | `verifier_agent_id`, `verifier_model` |
+| `task_verification_passed` | Verifier approves output | `score`, `verifier_feedback` |
+| `task_verification_failed` | Verifier rejects output | `score`, `verifier_feedback`, `retries_remaining` |
+| `task_human_review_requested` | Escalated to human | `reason`, `score` |
+| `task_human_approved` | Human approves output | `approved_by` |
+| `task_human_rejected` | Human rejects output | `rejected_by`, `reason`, `retries_remaining` |
+| `task_retrying` | Retry scheduled after failure | `attempt_number`, `backoff_seconds`, `failure_type` (`infrastructure` or `quality`) |
+| `task_crashed` | Infrastructure failure detected | `error_type`, `error_message`, `duration_ms` |
+| `task_failed` | Max retries exhausted or unrecoverable | `reason`, `total_attempts`, `total_cost` |
+| `task_skipped` | Dependency failed + trigger rule prevents execution | `skipped_because`, `failed_dependency_id` |
+| `task_cancelled` | Parent run cancelled | `cancelled_by` |
+
+#### System Events
+
+| Event Type | Trigger | Payload Fields |
+|-----------|---------|----------------|
+| `stall_detected` | Reconciler finds stalled task/run | `entity_type`, `entity_id`, `stalled_state`, `stalled_since`, `action_taken` |
+| `model_fallback` | Primary model unavailable, falling back | `task_id`, `requested_model`, `fallback_model`, `reason` |
+| `cost_snapshot` | Periodic cost aggregation | `run_id`, `total_cost`, `total_tokens`, `by_task` (breakdown) |
+
+**Why 30+ event types instead of a generic "state_changed"?** Typed events enable:
+1. **Targeted queries** — `WHERE event_type = 'task_crashed'` is faster than `WHERE payload->>'type' = 'crash'`
+2. **Payload validation** — each event type has a known payload schema (enforceable via Pydantic on write)
+3. **Downstream processing** — PRD-106 telemetry can subscribe to specific event types without parsing payloads
+4. **Dashboard widgets** — "recent failures" widget queries `task_failed` + `task_crashed` directly
+
+**Why not Temporal's 59 event types?** Temporal models internal execution machinery (workflow task scheduling, timer management, deterministic replay checkpoints). We don't have an execution replay engine — our events track business-level lifecycle changes visible to users and the coordinator.
+
+### 6.3 Column Definitions
+
+| Column | Type | Nullable | Default | Constraint | Description |
+|--------|------|----------|---------|------------|-------------|
+| `id` | `BIGSERIAL` | No | auto-increment | PK | Sequential event ID. `BIGINT` not `UUID` — events are high-volume append-only where sequential IDs are cheaper and provide natural ordering. |
+| `run_id` | `UUID` | No | — | FK → `orchestration_runs.id` ON DELETE CASCADE | Which mission this event belongs to |
+| `task_id` | `UUID` | Yes | `NULL` | FK → `orchestration_tasks.id` ON DELETE CASCADE | Which task (NULL for run-level events like `run_created`, `run_completed`) |
+| `event_type` | `VARCHAR(50)` | No | — | — | Event type from taxonomy (Section 6.2). Indexed for filtering. |
+| `payload` | `JSONB` | No | `'{}'` | — | Event-specific data. Schema varies by event_type (see payload fields in Section 6.2). |
+| `actor_type` | `VARCHAR(20)` | No | `'system'` | — | Who triggered the event: `system`, `coordinator`, `agent`, `verifier`, `human`, `reconciler` |
+| `actor_id` | `VARCHAR(255)` | Yes | `NULL` | — | ID of the actor: agent ID, user ID (Clerk), or NULL for system-triggered events |
+| `created_at` | `TIMESTAMPTZ` | No | `NOW()` | — | When the event occurred. Indexed for time-range queries. |
+
+**Why `BIGSERIAL` instead of `UUID`?**
+- Events are append-only, never referenced by ID from other tables — no need for globally-unique identifiers
+- Sequential `BIGINT` is 8 bytes vs UUID's 16 bytes — saves 8 bytes per row at potentially millions of rows
+- B-tree indexes on `BIGINT` are more compact and cache-friendly
+- Natural ordering: `ORDER BY id` = insertion order without consulting `created_at`
+- Matches Dagster's `event_logs` (integer PK) and Airflow's `log` table (serial PK)
+
+**Why `VARCHAR(50)` instead of a PostgreSQL ENUM for event_type?** Adding new event types to a PostgreSQL ENUM requires `ALTER TYPE ... ADD VALUE` — a DDL operation that can't be rolled back in a transaction. `VARCHAR` with application-layer validation (Pydantic enum) is simpler to evolve. Same rationale as the `state` columns on runs/tasks.
+
+**Why no `workspace_id`?** Events always belong to a run, and runs have `workspace_id`. For workspace-filtered event queries, JOIN to `orchestration_runs`. This avoids denormalizing workspace_id onto every event row (unlike tasks, where the denormalization saves a frequent JOIN). Event queries are less frequent and typically already filtered by `run_id`.
+
+### 6.4 Event Immutability Contract
+
+Events are **append-only**. Once written, an event row is never updated or deleted by application code. This contract enables:
+
+1. **Trustworthy audit trail** — "what happened" is never rewritten after the fact
+2. **Safe concurrent reads** — no locking needed for event queries
+3. **Simple replication** — append-only tables replicate cleanly to read replicas or analytics databases
+4. **PRD-106 compatibility** — telemetry pipelines can process events exactly once with a high-water-mark cursor (last processed `id`)
+
+**Enforcement:** No `UPDATE` or `DELETE` statements against `orchestration_events` in application code. The retention policy (Section 6.7) is the only mechanism that removes rows, and it operates at the DBA/cron level, not application level.
+
+**No `updated_at` column.** Unlike runs and tasks, events have no mutable state. A single `created_at` timestamp is sufficient. Adding `updated_at` would signal that updates are expected — the opposite of our intent.
+
+### 6.5 Event Creation Pattern
+
+Events are created as a side effect of state transitions, inside the same database transaction. This is already implemented in the `transition_task()` function from Section 3.9:
+
+```python
+from enum import StrEnum
+
+class EventType(StrEnum):
+    # Run events
+    RUN_CREATED = "run_created"
+    RUN_PLANNING_STARTED = "run_planning_started"
+    RUN_PLAN_READY = "run_plan_ready"
+    RUN_APPROVED = "run_approved"
+    RUN_REJECTED = "run_rejected"
+    RUN_STARTED = "run_started"
+    RUN_PAUSED = "run_paused"
+    RUN_RESUMED = "run_resumed"
+    RUN_BUDGET_WARNING = "run_budget_warning"
+    RUN_BUDGET_EXCEEDED = "run_budget_exceeded"
+    RUN_BUDGET_INCREASED = "run_budget_increased"
+    RUN_COMPLETED = "run_completed"
+    RUN_FAILED = "run_failed"
+    RUN_CANCELLED = "run_cancelled"
+
+    # Task events
+    TASK_CREATED = "task_created"
+    TASK_QUEUED = "task_queued"
+    TASK_ASSIGNED = "task_assigned"
+    TASK_STARTED = "task_started"
+    TASK_CONTINUING = "task_continuing"
+    TASK_RESUMED = "task_resumed"
+    TASK_OUTPUT_SUBMITTED = "task_output_submitted"
+    TASK_VERIFICATION_STARTED = "task_verification_started"
+    TASK_VERIFICATION_PASSED = "task_verification_passed"
+    TASK_VERIFICATION_FAILED = "task_verification_failed"
+    TASK_HUMAN_REVIEW_REQUESTED = "task_human_review_requested"
+    TASK_HUMAN_APPROVED = "task_human_approved"
+    TASK_HUMAN_REJECTED = "task_human_rejected"
+    TASK_RETRYING = "task_retrying"
+    TASK_CRASHED = "task_crashed"
+    TASK_FAILED = "task_failed"
+    TASK_SKIPPED = "task_skipped"
+    TASK_CANCELLED = "task_cancelled"
+
+    # System events
+    STALL_DETECTED = "stall_detected"
+    MODEL_FALLBACK = "model_fallback"
+    COST_SNAPSHOT = "cost_snapshot"
+
+
+class ActorType(StrEnum):
+    SYSTEM = "system"
+    COORDINATOR = "coordinator"
+    AGENT = "agent"
+    VERIFIER = "verifier"
+    HUMAN = "human"
+    RECONCILER = "reconciler"
+
+
+def emit_event(
+    session: AsyncSession,
+    *,
+    run_id: uuid.UUID,
+    event_type: EventType,
+    task_id: uuid.UUID | None = None,
+    payload: dict | None = None,
+    actor_type: ActorType = ActorType.SYSTEM,
+    actor_id: str | None = None,
+) -> None:
+    """
+    Append an immutable event to the orchestration_events table.
+
+    MUST be called within an existing transaction — never commits on its own.
+    The caller (transition_task, transition_run, or coordinator logic)
+    owns the transaction boundary.
+    """
+    event = OrchestrationEvent(
+        run_id=run_id,
+        task_id=task_id,
+        event_type=event_type.value,
+        payload=payload or {},
+        actor_type=actor_type.value,
+        actor_id=actor_id,
+    )
+    session.add(event)
+```
+
+**Integration with `transition_task()` (from Section 3.9):**
+
+The `transition_task()` function already emits events via `OrchestrationEvent(...)`. The `emit_event()` helper standardizes this pattern with enum validation and consistent actor tracking. The existing code in Section 3.9 line `event_type=f"task_{to_state}"` is replaced with explicit `EventType` enum values — some state transitions emit events that don't map 1:1 to the state name (e.g., entering `failed` from `running` emits `task_crashed`, but entering `failed` from `verifying` emits `task_failed`).
+
+**Events that don't correspond to state transitions:**
+
+Not every event is a state change. Some events are emitted mid-state:
+
+| Event | State During Emission | Notes |
+|-------|-----------------------|-------|
+| `run_budget_warning` | `running` (unchanged) | Soft limit hit — informational, no state change |
+| `task_verification_started` | `verifying` (unchanged) | Tracking when verifier begins, not a state change |
+| `stall_detected` | Various | Reconciler observation before it acts |
+| `model_fallback` | `running` (unchanged) | Model substitution during execution |
+| `cost_snapshot` | `running` (unchanged) | Periodic aggregation |
+
+### 6.6 Query Examples
+
+The event table is designed for three primary query patterns: **timeline reconstruction**, **failure analysis**, and **performance metrics extraction**.
+
+#### Timeline Reconstruction
+
+"Show me everything that happened in mission X, in order."
+
+```sql
+SELECT
+    e.id,
+    e.event_type,
+    e.task_id,
+    t.title AS task_title,
+    e.actor_type,
+    e.actor_id,
+    e.payload,
+    e.created_at
+FROM orchestration_events e
+LEFT JOIN orchestration_tasks t ON t.id = e.task_id
+WHERE e.run_id = $1
+ORDER BY e.id;  -- id = insertion order, cheaper than ORDER BY created_at
+```
+
+#### Failure Analysis
+
+"Find all failures across my workspace in the last 24 hours."
+
+```sql
+SELECT
+    e.run_id,
+    r.title AS mission_title,
+    e.task_id,
+    t.title AS task_title,
+    e.event_type,
+    e.payload->>'error_message' AS error,
+    e.payload->>'failure_type' AS failure_type,
+    e.created_at
+FROM orchestration_events e
+JOIN orchestration_runs r ON r.id = e.run_id
+LEFT JOIN orchestration_tasks t ON t.id = e.task_id
+WHERE r.workspace_id = $1
+  AND e.event_type IN ('task_crashed', 'task_failed', 'run_failed')
+  AND e.created_at >= NOW() - INTERVAL '24 hours'
+ORDER BY e.created_at DESC;
+```
+
+#### Performance Metrics
+
+"Calculate average time from task assignment to completion for each task type."
+
+```sql
+WITH task_timings AS (
+    SELECT
+        t.task_type,
+        t.id AS task_id,
+        assign_evt.created_at AS assigned_at,
+        complete_evt.created_at AS completed_at,
+        EXTRACT(EPOCH FROM (complete_evt.created_at - assign_evt.created_at)) * 1000 AS duration_ms
+    FROM orchestration_tasks t
+    JOIN orchestration_events assign_evt
+        ON assign_evt.task_id = t.id AND assign_evt.event_type = 'task_assigned'
+    JOIN orchestration_events complete_evt
+        ON complete_evt.task_id = t.id AND complete_evt.event_type IN ('task_verification_passed', 'task_human_approved')
+    WHERE t.workspace_id = $1
+      AND t.state = 'completed'
+)
+SELECT
+    task_type,
+    COUNT(*) AS tasks,
+    ROUND(AVG(duration_ms)) AS avg_ms,
+    ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)) AS p95_ms,
+    ROUND(MIN(duration_ms)) AS min_ms,
+    ROUND(MAX(duration_ms)) AS max_ms
+FROM task_timings
+GROUP BY task_type
+ORDER BY avg_ms DESC;
+```
+
+#### Retry Analysis
+
+"Which tasks are retried most often, and what's the success rate after retry?"
+
+```sql
+SELECT
+    t.task_type,
+    t.title,
+    COUNT(*) FILTER (WHERE e.event_type = 'task_retrying') AS retry_count,
+    COUNT(*) FILTER (WHERE e.event_type = 'task_verification_passed') AS eventual_successes,
+    COUNT(*) FILTER (WHERE e.event_type = 'task_failed') AS eventual_failures,
+    ROUND(
+        COUNT(*) FILTER (WHERE e.event_type = 'task_verification_passed')::numeric /
+        NULLIF(COUNT(*) FILTER (WHERE e.event_type IN ('task_verification_passed', 'task_failed')), 0),
+        2
+    ) AS success_rate
+FROM orchestration_events e
+JOIN orchestration_tasks t ON t.id = e.task_id
+WHERE t.workspace_id = $1
+  AND e.event_type IN ('task_retrying', 'task_verification_passed', 'task_failed')
+GROUP BY t.id, t.task_type, t.title
+HAVING COUNT(*) FILTER (WHERE e.event_type = 'task_retrying') > 0
+ORDER BY retry_count DESC;
+```
+
+#### PRD-106 Telemetry Feed
+
+"Stream events since cursor for telemetry pipeline processing."
+
+```sql
+-- Cursor-based polling: process events since last high-water mark
+SELECT id, run_id, task_id, event_type, payload, actor_type, actor_id, created_at
+FROM orchestration_events
+WHERE id > $1  -- $1 = last processed event ID (high-water mark)
+ORDER BY id
+LIMIT 1000;    -- batch size
+```
+
+This cursor pattern (sequential `BIGSERIAL` ID as cursor) is why events use `BIGSERIAL` instead of `UUID`. The telemetry pipeline stores its last processed ID and polls for new events — no complex change-data-capture infrastructure needed.
+
+### 6.7 Retention Policy
+
+Events accumulate indefinitely if not managed. At our expected scale (10-50 events per mission, ~100 missions/day = ~2,500 events/day = ~1M events/year), storage is manageable but querying old events degrades performance without maintenance.
+
+**Three-tier retention strategy:**
+
+| Tier | Age | Storage | Access Pattern |
+|------|-----|---------|----------------|
+| **Hot** | 0–30 days | `orchestration_events` table (PostgreSQL) | Real-time queries, dashboard, debugging |
+| **Warm** | 30–180 days | Same table, but excluded from partial indexes | Historical analysis, PRD-106 pattern mining |
+| **Cold** | 180+ days | Archived (export to S3/object storage as JSONL, then DELETE) | Compliance/audit only, rare access |
+
+**Implementation approach: pg_cron + batched DELETE**
+
+At our projected volume (~1M events/year), table partitioning (pg_partman) is overkill. A simple scheduled cleanup job is sufficient:
+
+```sql
+-- Run weekly via pg_cron or APScheduler
+-- Archive old events to export table, then delete
+WITH archived AS (
+    DELETE FROM orchestration_events
+    WHERE created_at < NOW() - INTERVAL '180 days'
+    RETURNING *
+)
+INSERT INTO orchestration_events_archive
+SELECT * FROM archived;
+```
+
+**When to upgrade to partitioning:** If event volume exceeds ~10M events/month (e.g., 100+ missions/day with 50+ events each), switch to `PARTITION BY RANGE (created_at)` with monthly partitions and pg_partman for automated partition management. The table schema supports this transition — `created_at` is already `NOT NULL` and indexed.
+
+**Archive table schema:** Identical to `orchestration_events` but without foreign key constraints (the referenced runs/tasks may be deleted independently). Used only for compliance queries.
+
+### 6.8 Indexes
+
+```sql
+-- Primary query: "timeline for a mission" (mission detail view)
+-- Also used by transition_task() to emit events within a run context
+CREATE INDEX ix_orch_events_run_id
+    ON orchestration_events (run_id, id);
+
+-- Query: "events for a specific task" (task detail view, debugging)
+CREATE INDEX ix_orch_events_task_id
+    ON orchestration_events (task_id, id)
+    WHERE task_id IS NOT NULL;
+
+-- Query: "recent failures" (dashboard widget, alerting)
+CREATE INDEX ix_orch_events_type_created
+    ON orchestration_events (event_type, created_at DESC);
+
+-- Query: "telemetry cursor" (PRD-106 pipeline, sequential scan from last ID)
+-- PK index on id covers this — sequential reads on a BIGSERIAL PK are optimal
+
+-- Query: "time-range scans" (retention cleanup, analytics)
+-- BRIN index: compact, effective for append-only time-ordered data
+CREATE INDEX ix_orch_events_created_brin
+    ON orchestration_events USING BRIN (created_at)
+    WITH (pages_per_range = 32);
+```
+
+**Why BRIN for `created_at`?** Events are insert-ordered and `created_at` correlates perfectly with physical row order. A BRIN index is ~1000x smaller than a B-tree for the same column on append-only tables. It supports time-range scans (retention cleanup, "last 24 hours" queries) efficiently. The tradeoff is slightly less precise than B-tree — acceptable for time-range filtering where exact row targeting isn't needed.
+
+**Why `(run_id, id)` instead of `(run_id, created_at)`?** The `id` column (BIGSERIAL) provides insertion ordering identical to `created_at` but without timezone comparison overhead. For `ORDER BY` within a run, `id` is strictly monotonic — faster to sort and more compact in the index.
+
+### 6.9 SQLAlchemy Model
+
+```python
+from sqlalchemy import BigInteger, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.orm import Mapped, mapped_column
+from datetime import datetime
+import uuid
+
+from orchestrator.core.database.base import Base
+
+
+class OrchestrationEvent(Base):
+    """
+    Append-only event log for mission lifecycle tracking (PRD-101).
+
+    Events are NEVER updated or deleted by application code.
+    Every state transition in orchestration_runs/tasks emits an event
+    in the same transaction (dual-write pattern, Section 2.4).
+
+    Serves as raw data feed for PRD-106 (Outcome Telemetry).
+    """
+    __tablename__ = "orchestration_events"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=True,
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("orchestration_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("orchestration_tasks.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True,
+    )
+    payload: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}",
+    )
+    actor_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="system",
+    )
+    actor_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    # No version_id — events are immutable
+    # No updated_at — events are never modified
+    # No relationships defined — events are write-heavy, read via raw queries
+```
+
+### 6.10 Alembic Migration
+
+```python
+"""PRD-101: Create orchestration_events table
+
+Append-only event log for mission lifecycle tracking.
+Second half of the dual-write pattern — every state transition
+on runs/tasks emits an event in the same transaction.
+"""
+
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+
+revision = "prd101_orchestration_events"
+down_revision = "prd101_orchestration_tasks"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "orchestration_events",
+        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+        sa.Column("run_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("task_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("event_type", sa.String(50), nullable=False),
+        sa.Column("payload", JSONB, nullable=False, server_default="{}"),
+        sa.Column("actor_type", sa.String(20), nullable=False, server_default="system"),
+        sa.Column("actor_id", sa.String(255), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("NOW()")),
+        # Foreign keys
+        sa.ForeignKeyConstraint(["run_id"], ["orchestration_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["task_id"], ["orchestration_tasks.id"], ondelete="CASCADE"),
+    )
+
+    # Indexes
+    op.create_index("ix_orch_events_run_id", "orchestration_events", ["run_id", "id"])
+    op.create_index(
+        "ix_orch_events_task_id", "orchestration_events",
+        ["task_id", "id"],
+        postgresql_where=sa.text("task_id IS NOT NULL"),
+    )
+    op.create_index(
+        "ix_orch_events_type_created", "orchestration_events",
+        ["event_type", sa.text("created_at DESC")],
+    )
+    op.execute(
+        "CREATE INDEX ix_orch_events_created_brin "
+        "ON orchestration_events USING BRIN (created_at) "
+        "WITH (pages_per_range = 32)"
+    )
+
+    # Table comment
+    op.execute(
+        "COMMENT ON TABLE orchestration_events IS "
+        "'Append-only event log for mission lifecycle (PRD-101). "
+        "Never UPDATE or DELETE from application code.'"
+    )
+
+    # Archive table (identical schema, no FKs)
+    op.create_table(
+        "orchestration_events_archive",
+        sa.Column("id", sa.BigInteger, primary_key=True),  # NOT autoincrement — preserves original IDs
+        sa.Column("run_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("task_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("event_type", sa.String(50), nullable=False),
+        sa.Column("payload", JSONB, nullable=False, server_default="{}"),
+        sa.Column("actor_type", sa.String(20), nullable=False, server_default="system"),
+        sa.Column("actor_id", sa.String(255), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_index("ix_orch_events_archive_run", "orchestration_events_archive", ["run_id"])
+    op.create_index("ix_orch_events_archive_created", "orchestration_events_archive", ["created_at"])
+
+    op.execute(
+        "COMMENT ON TABLE orchestration_events_archive IS "
+        "'Cold storage for orchestration events older than 180 days (PRD-101).'"
+    )
+
+
+def downgrade() -> None:
+    op.drop_index("ix_orch_events_archive_created", table_name="orchestration_events_archive")
+    op.drop_index("ix_orch_events_archive_run", table_name="orchestration_events_archive")
+    op.drop_table("orchestration_events_archive")
+    op.execute("DROP INDEX IF EXISTS ix_orch_events_created_brin")
+    op.drop_index("ix_orch_events_type_created", table_name="orchestration_events")
+    op.drop_index("ix_orch_events_task_id", table_name="orchestration_events")
+    op.drop_index("ix_orch_events_run_id", table_name="orchestration_events")
+    op.drop_table("orchestration_events")
+```
+
+### 6.11 Connection to PRD-106 (Outcome Telemetry)
+
+The `orchestration_events` table is the **primary data source** for PRD-106 (Outcome Telemetry & Learning Foundation). Every event is a structured data point that the telemetry pipeline can process for pattern analysis.
+
+**What PRD-106 will extract from events:**
+
+| Analysis | Events Used | Insight |
+|----------|-------------|---------|
+| **Agent effectiveness** | `task_assigned` + `task_verification_passed`/`task_failed` | Which agents succeed at which task types? |
+| **Model cost-effectiveness** | `task_assigned` (model) + `cost_snapshot` | Does claude-sonnet at 10x the cost produce measurably better results than haiku? |
+| **Retry patterns** | `task_retrying` + `task_crashed` | Which failure types are transient (worth retrying) vs persistent? |
+| **Task duration distribution** | `task_started` + `task_verification_passed` | How long do different task types actually take? |
+| **Verification accuracy** | `task_verification_passed` + `task_human_approved`/`task_human_rejected` | Does the verifier's judgment match human judgment? |
+| **Mission bottlenecks** | Timeline reconstruction per run | Which tasks consistently delay mission completion? |
+| **Budget accuracy** | `run_plan_ready` (estimated_cost) + `run_completed` (total_cost) | How accurate are the coordinator's cost estimates? |
+
+**Design constraint for PRD-106:** The event schema must remain stable — adding new event types is fine, but changing existing payload schemas or event type names breaks downstream telemetry queries. New payload fields should be additive (never remove or rename existing fields).
+
+### 6.12 Design Decisions
+
+| Decision | Choice | Alternative | Rationale |
+|----------|--------|-------------|-----------|
+| Primary key | `BIGSERIAL` | UUID | Events are high-volume, append-only, never externally referenced. Sequential integers are 8 bytes vs 16, more compact in indexes, and provide natural ordering. Matches Dagster (`event_logs`) and Airflow (`log`) patterns. |
+| Event type storage | `VARCHAR(50)` with Python enum | PostgreSQL ENUM type | `ALTER TYPE ADD VALUE` can't be rolled back in a transaction. VARCHAR with application-layer validation is simpler to evolve. New event types don't need a migration. |
+| Payload structure | Flat `JSONB` column | Typed columns per event | 30+ event types × 3-5 fields each = 100+ columns. JSONB keeps the table lean. Payload schema is validated by Pydantic on write (same pattern as `orchestration_runs.config`). |
+| Actor tracking | `actor_type` + `actor_id` | Single `actor` string | Separating type from ID enables queries like "find all human actions" (`WHERE actor_type = 'human'`) without parsing a composite string. |
+| Workspace filtering | JOIN to `orchestration_runs` | Denormalize `workspace_id` | Unlike tasks (which need workspace filtering on every list query), event queries are typically scoped to a run_id. Denormalizing workspace_id onto every event row wastes 16 bytes/row with minimal query benefit. |
+| Retention | pg_cron batched DELETE + archive table | pg_partman, application-layer TTL | At ~1M events/year, partitioning overhead isn't justified. Batched DELETE with `RETURNING` → archive is simple, transactional, and handles our scale. Upgrade path to pg_partman is documented if volume grows 10x. |
+| Archive strategy | Separate table (same schema, no FKs) | S3 export only | Keeping archived events in PostgreSQL enables historical queries without object storage tooling. The archive table has minimal indexes (run_id + created_at only) to reduce write overhead. |
+| `created_at` index | BRIN | B-tree | Append-only data with correlated physical order is the ideal BRIN use case — ~1000x smaller than B-tree with comparable query performance for range scans. |
+| No `workspace_id` column | JOIN for workspace queries | Denormalize | Events are queried by run_id (detail view) or event_type (alerts). Workspace-level event queries are rare and tolerate a JOIN. Saves 16 bytes × millions of rows. |
+| Immutability enforcement | Application convention + table comment | DB trigger blocking UPDATE/DELETE | DB trigger adds overhead on every INSERT (trigger evaluation). Convention is sufficient when all writes go through `emit_event()`. The table comment documents the contract. |
 
 ---
 
