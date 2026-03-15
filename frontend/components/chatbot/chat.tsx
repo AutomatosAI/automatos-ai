@@ -32,6 +32,7 @@ import { analytics } from '@/lib/analytics'
 
 // PRD-82A: Mission mode
 import { useMissionStore } from '@/stores/mission-store'
+import { useCreateMission } from '@/hooks/use-missions-api'
 
 export interface ChatProps {
   id: string
@@ -70,6 +71,8 @@ export function Chat({
   // PRD-82A: Mission mode toggle
   const isMissionMode = useMissionStore((s) => s.isMissionMode)
   const setMissionMode = useMissionStore((s) => s.setMissionMode)
+  const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
+  const createMission = useCreateMission()
 
   // PRD-66: Workspace context for Code Canvas
   const { workspace } = useWorkspace()
@@ -424,6 +427,34 @@ export function Chat({
 
   const regenerate = () => reload()
 
+  // PRD-82A US-003: Intercept chat submit in mission mode → create mission instead
+  const handleSendMessage = useCallback(
+    (message: any) => {
+      if (!isMissionMode) {
+        sendMessage(message)
+        return
+      }
+
+      const goal = typeof message === 'string' ? message : message?.content
+      if (!goal?.trim()) return
+
+      createMission.mutate(
+        { goal: goal.trim() },
+        {
+          onSuccess: (mission) => {
+            setActivePlanningMissionId(mission.id)
+            setMissionMode(false)
+            toast.success('Mission created — plan is being generated')
+          },
+          onError: (err) => {
+            toast.error(err.message || 'Failed to create mission')
+          },
+        }
+      )
+    },
+    [isMissionMode, sendMessage, createMission, setActivePlanningMissionId, setMissionMode]
+  )
+
   // PRD-50: Handle agent change — fire correction API when overriding auto-routed agent
   const handleAgentChange = useCallback((newAgentId: number | null) => {
     const prev = lastRoutingDecision.current
@@ -556,11 +587,11 @@ export function Chat({
     })
 
     // Send the suggestion as a message
-    sendMessage(suggestion)
+    handleSendMessage(suggestion)
     // Close suggestions after use
     setActiveTool(null)
     setToolSuggestions([])
-  }, [sendMessage, activeTool])
+  }, [handleSendMessage, activeTool])
 
   // Handle selections
   const handleArtifactSelect = useCallback((artifact: Artifact) => {
@@ -815,7 +846,7 @@ export function Chat({
                         chatId={id}
                         status={status}
                         stop={stop}
-                        sendMessage={sendMessage}
+                        sendMessage={handleSendMessage}
                         selectedModelId={currentModelId}
                         onModelChange={setCurrentModelId}
                         selectedAgentId={selectedAgentId}
@@ -914,7 +945,7 @@ export function Chat({
                           chatId={id}
                           status={status}
                           stop={stop}
-                          sendMessage={sendMessage}
+                          sendMessage={handleSendMessage}
                           selectedModelId={currentModelId}
                           onModelChange={setCurrentModelId}
                           selectedAgentId={selectedAgentId}
@@ -1003,7 +1034,7 @@ export function Chat({
                   chatId={id}
                   status={status}
                   stop={stop}
-                  sendMessage={sendMessage}
+                  sendMessage={handleSendMessage}
                   selectedModelId={currentModelId}
                   onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
@@ -1177,7 +1208,7 @@ export function Chat({
                   chatId={id}
                   status={status}
                   stop={stop}
-                  sendMessage={sendMessage}
+                  sendMessage={handleSendMessage}
                   selectedModelId={currentModelId}
                   onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
