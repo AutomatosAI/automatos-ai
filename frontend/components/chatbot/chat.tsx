@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
-import { Bot, ArrowDown, Database, GitBranch, Wrench, Code2 } from 'lucide-react'
+import { Bot, ArrowDown, Database, GitBranch, Wrench, Code2, Target } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
@@ -29,6 +29,9 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/componen
 import { ToolSuggestionBar } from '@/components/suggestions/ToolSuggestionBar'
 import type { SuggestionResponse } from '@/components/suggestions/types'
 import { analytics } from '@/lib/analytics'
+
+// PRD-82A: Mission mode
+import { useMissionStore } from '@/stores/mission-store'
 
 export interface ChatProps {
   id: string
@@ -63,6 +66,10 @@ export function Chat({
   const dispatchMemoryInjected = useWorkspaceStore((s) => s.dispatchMemoryInjected)
   const dispatchMemoryStored = useWorkspaceStore((s) => s.dispatchMemoryStored)
   const dispatchWorkflowUpdate = useWorkspaceStore((s) => s.dispatchWorkflowUpdate)
+
+  // PRD-82A: Mission mode toggle
+  const isMissionMode = useMissionStore((s) => s.isMissionMode)
+  const setMissionMode = useMissionStore((s) => s.setMissionMode)
 
   // PRD-66: Workspace context for Code Canvas
   const { workspace } = useWorkspace()
@@ -960,6 +967,26 @@ export function Chat({
                     <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
                     <span className="hidden md:inline">Code</span>
                   </button>
+                  {/* PRD-82A: Mission mode toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setMissionMode(!isMissionMode)}
+                    title="Mission"
+                    className={[
+                      'inline-flex items-center justify-center rounded-full',
+                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
+                      'gap-2 text-xs font-medium',
+                      isMissionMode
+                        ? 'bg-orange-500/20 ring-1 ring-orange-500/50 text-foreground/90'
+                        : 'bg-black/10 text-foreground/90',
+                      'backdrop-blur',
+                      'hover:bg-orange-500/10 transition-colors',
+                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
+                    ].join(' ')}
+                  >
+                    <Target className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
+                    <span className="hidden md:inline">Mission</span>
+                  </button>
                   {quickLinks.map((item) => {
                     const Icon = item.icon
                     return (
@@ -1091,6 +1118,26 @@ export function Chat({
                   >
                     <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
                     <span className="hidden md:inline">Code</span>
+                  </button>
+                  {/* PRD-82A: Mission mode toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setMissionMode(!isMissionMode)}
+                    title="Mission"
+                    className={[
+                      'inline-flex items-center justify-center rounded-full',
+                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
+                      'gap-2 text-xs font-medium',
+                      isMissionMode
+                        ? 'bg-orange-500/20 ring-1 ring-orange-500/50 text-foreground/90'
+                        : 'bg-black/10 text-foreground/90',
+                      'backdrop-blur',
+                      'hover:bg-orange-500/10 transition-colors',
+                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
+                    ].join(' ')}
+                  >
+                    <Target className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
+                    <span className="hidden md:inline">Mission</span>
                   </button>
                   {quickLinks.map((item) => {
                     const Icon = item.icon
