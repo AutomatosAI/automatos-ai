@@ -191,4 +191,12 @@ DEFAULT_BUDGETS: dict[ContextMode, TokenBudget] = {
         reserved_for_response=4_096,
         reserved_for_messages=0,
     ),
+    # Coordinator: 131072 total (128k). Needs full mission context + agent
+    # roster + task history. No messages — coordinator builds its own context.
+    # PRD-82A Section 12, Phase 3: token_budget=131072.
+    ContextMode.COORDINATOR: TokenBudget(
+        total=131_072,
+        reserved_for_response=4_096,
+        reserved_for_messages=0,
+    ),
 }

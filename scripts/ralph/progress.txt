@@ -177,3 +177,17 @@
   - Registered CoordinatorService.start(scheduler=shared_sched) after ScheduledTaskService
   - Non-fatal: catches and logs exceptions if coordinator fails to start
 - Import validated: CoordinatorService + get_coordinator_service both resolve cleanly
+
+### Iteration 16 — US-016: COORDINATOR Context Mode + MissionContextSection
+- Added ContextMode.COORDINATOR to modes.py enum
+- Added COORDINATOR ModeConfig to MODE_CONFIGS: sections=[identity, mission_context, agent_roster, platform_actions, task_context, datetime_context], tool_loading=full, personality=False, max_tokens=131072
+- Added COORDINATOR TokenBudget to DEFAULT_BUDGETS in budget.py: total=131072, reserved_for_response=4096, reserved_for_messages=0
+- Created orchestrator/modules/context/sections/mission_context.py with MissionContextSection class
+  - Priority 2 (never dropped by budget manager), max_tokens=8000
+  - Renders: goal, state, run_id, plan summary, token budget usage, task statuses with sequence/title/state/agent_role/assigned_agent_id/attempt
+  - Accepts data via ctx.kwargs: mission_run (ORM or dict), mission_tasks (list of ORM or dict)
+  - _attr_or_key() helper handles both ORM attributes and dict keys
+  - Returns empty string when no mission_run provided (section skipped)
+- Registered MissionContextSection in SECTION_REGISTRY and __all__ in sections/__init__.py
+- Note: agent_roster section referenced in COORDINATOR mode sections but not yet created — ContextService logs warning and skips. US-017 creates it.
+- Import validated: all assertions pass (enum, ModeConfig, TokenBudget, SECTION_REGISTRY, render with mock data)

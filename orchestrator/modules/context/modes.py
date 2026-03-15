@@ -19,6 +19,7 @@ class ContextMode(str, Enum):
     ROUTER = "router"
     ORCHESTRATOR_STAGE = "orchestrator_stage"
     NL2SQL = "nl2sql"
+    COORDINATOR = "coordinator"
 
 
 @dataclass(frozen=True)
@@ -116,5 +117,18 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         tool_loading="none",
         personality=False,
         max_tokens=None,
+    ),
+    # personality=False: coordinator is internal orchestration — decomposes goals,
+    # dispatches tasks, reconciles state. Needs mission context + agent roster
+    # to plan and dispatch effectively. 128k budget for full mission context +
+    # agent roster + task history. PRD-82A Section 12, Phase 3.
+    ContextMode.COORDINATOR: ModeConfig(
+        sections=[
+            "identity", "mission_context", "agent_roster",
+            "platform_actions", "task_context", "datetime_context",
+        ],
+        tool_loading="full",
+        personality=False,
+        max_tokens=131072,
     ),
 }
