@@ -1,6 +1,12 @@
-# PRD-81: MISSION CLEANUP — Ralph Progress
+# PRD-82A: Sequential Mission Coordinator — Ralph Progress
 
-## Branch: ralph/81-mission-cleanup
+## Branch: ralph/82a-sequential-mission-coordinator
 
 ---
 
+### Iteration 1 — US-001: Orchestration Enums
+- Created `orchestrator/core/models/orchestration_enums.py`
+- 8 enums: StateType(4), RunState(10), TaskState(11), EventType(39), ActorType(7), TaskType(5), TriggerRule(3), FailureReasonCode(8)
+- 7 mapping dicts/frozensets: RUN_STATE_TYPE, TASK_STATE_TYPE, TERMINAL_RUN_STATES, TERMINAL_TASK_STATES, ALLOWED_TASK_TRANSITIONS, ALLOWED_RUN_TRANSITIONS, BOARD_STATUS_MAP
+- Discovery: Python 3.10 environment — used `(str, Enum)` instead of `StrEnum`
+- All acceptance criteria validated via import + assertions
