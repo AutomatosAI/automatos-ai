@@ -130,3 +130,20 @@
 - Uses DependencyResolver.validate_task_graph() with UUID stand-ins for cycle detection
 - Import validated: all exports resolve cleanly
 - Unit checks passed: JSON extraction, parse, validation (min task count error)
+
+### Iteration 12 — US-012: MissionDispatcher
+- (completed in prior session — see IMPLEMENTATION_PLAN.md)
+
+### Iteration 13 — US-013: MissionReconciler
+- Created `orchestrator/modules/coordination/reconciler.py`
+- MissionReconciler class with reconcile() static method — full reconciliation pass per mission run
+- Immutable ReconcileResult dataclass: run_id, stalls_detected, stalls_recovered, tasks_failed, run_advanced, run_new_state, error
+- Stall detection: finds ASSIGNED/RUNNING tasks exceeding configurable thresholds (60s/300s from config.py)
+- Stall recovery: stalled → assigned with attempt_number increment; if max_retries exhausted → failed
+- Completion check: all tasks terminal & all verified → run transitions to verifying; any failed → run fails
+- Fatal failure detection: max_retries_exhausted, no_agent_available, dependency_failed → skip remaining tasks + fail run
+- _skip_remaining_tasks(): transitions pending/queued tasks to skipped with dependency_failed reason
+- Config constants added to config.py: COORDINATOR_ASSIGNED_STALL_THRESHOLD_SECONDS (60), COORDINATOR_RUNNING_STALL_THRESHOLD_SECONDS (300), COORDINATOR_MAX_TASK_RETRIES (3), COORDINATOR_TICK_INTERVAL_SECONDS (5), COORDINATOR_ENABLED flag
+- Board status synced after every task state change via sync_board_status()
+- ConflictError handling on all transitions (optimistic locking awareness)
+- Import validated: MissionReconciler, ReconcileResult resolve cleanly
