@@ -35,3 +35,16 @@
 - Renders card with fade-in animation (framer-motion) before messagesEndRef
 - Card appears in BOTH layout modes (widget layout and standard layout)
 - Typecheck passes (no new errors in mission/chat files)
+
+## Iteration 6 — US-006 + US-007: Plan approval controls & DAG plan mode
+- Added approval bar between header and main content in mission-detail-page.tsx
+  - Shows when mission.state === 'awaiting_approval'
+  - Info text with Eye icon, Approve (green) and Reject (red outline) buttons
+  - Approve calls useApproveMission with planModifications wrapped in { modifications }
+  - Reject toggles textarea for feedback, calls useRejectMission with { reason }
+  - Both show toast on success/error, clear planModifications
+  - Buttons disabled while mutation loading
+- Added Textarea import from @/components/ui/textarea
+- Changed DAG mode: awaiting_approval → 'plan', awaiting_human → 'review', else → 'execution'
+- US-007 was a single-line change in same file, implemented together
+- Typecheck passes (no new errors in mission/chat files)
