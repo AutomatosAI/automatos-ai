@@ -40,3 +40,15 @@
 - NO version_id — append-only table, never updated
 - Added UniqueConstraint import to sqlalchemy imports
 - Import validated: both models load, all columns/constraints/indexes verified
+
+### Iteration 5 — US-005: Alembic Migration
+- Created `orchestrator/alembic/versions/prd82a_orchestration_tables.py`
+- Standalone migration (down_revision = None) following existing PRD migration pattern
+- CREATE 4 tables: orchestration_runs, orchestration_tasks, orchestration_task_dependencies, orchestration_events
+- ALTER board_tasks: add orchestration_run_id (UUID FK), orchestration_task_id (UUID FK) — both nullable
+- ALTER agent_reports: add orchestration_task_id (UUID FK) — nullable
+- All operations idempotent (IF NOT EXISTS / DO $$ BEGIN ... END $$ guards)
+- CHECK constraints on state columns match Python enums exactly (verified programmatically)
+- Indexes: workspace_id, run_id, composite (run_id, sequence_number), partial active states, composite event timeline (run_id, created_at), partial indexes on FK columns of existing tables
+- Downgrade: drops FK columns from existing tables first, then drops 4 tables in reverse dependency order
+- Note: CONCURRENTLY not used for indexes on existing tables since alembic runs inside a transaction; used IF NOT EXISTS instead
