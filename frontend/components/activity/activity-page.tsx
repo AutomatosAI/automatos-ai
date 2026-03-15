@@ -14,14 +14,14 @@ import {
   Columns,
   Calendar,
   Brain,
-  FolderKanban,
+  Target,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
-import { ActivityMissions } from './activity-missions'
+import { MissionList } from '@/components/missions/mission-list'
 import { ActivityMemory } from './activity-memory'
 import { ActivityCalendar } from './calendar'
 import { useActivityStats } from '@/hooks/use-activity-api'
@@ -81,7 +81,7 @@ const TAB_DEFS = [
   { value: 'board', label: 'Board', icon: Columns },
   { value: 'calendar', label: 'Calendar', icon: Calendar },
   { value: 'memory', label: 'Memory', icon: Brain },
-  { value: 'projects', label: 'Projects', icon: FolderKanban },
+  { value: 'missions', label: 'Missions', icon: Target },
 ]
 
 export function ActivityPage() {
@@ -189,9 +189,9 @@ export function ActivityPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="projects">
-            <div data-tour="activity-projects">
-              <ActivityMissions />
+          <TabsContent value="missions">
+            <div data-tour="activity-missions">
+              <MissionList />
             </div>
           </TabsContent>
         </FilterTabs>
