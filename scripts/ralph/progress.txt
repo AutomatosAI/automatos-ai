@@ -19,3 +19,13 @@
 - Pattern: follows SQLAlchemy 1.x Column style matching core.py (not mapped_column)
 - workspace_id is UUID FK to workspaces.id, created_by is String (Clerk user ID)
 - Import validated: all columns, constraints, and mapper args verified
+
+### Iteration 3 — US-003: OrchestrationTask Model
+- Added OrchestrationTask to `orchestrator/core/models/orchestration.py`
+- 24 columns: id (UUID PK), run_id (FK orchestration_runs.id), title, description, task_type, sequence_number, agent_role, state, state_type, assigned_agent_id (FK agents.id), verification_criteria (JSONB), input_context (JSONB), output, output_metadata (JSONB), failure_reason_code, failure_detail, attempt_number, max_retries, tokens_used, started_at, completed_at, created_at, updated_at, version_id
+- Composite index: ix_orchestration_tasks_run_sequence on (run_id, sequence_number)
+- Partial index: ix_orchestration_tasks_active on (run_id, state) WHERE state NOT IN terminal states
+- CHECK constraint: ck_orchestration_tasks_state validates TaskState enum values
+- Optimistic locking: version_id_col wired in __mapper_args__
+- Bug caught: task_type default was accidentally set to TaskState.PENDING.value — fixed to "llm_generation"
+- Import validated: all 24 columns, 3 indexes, constraints, and mapper args verified

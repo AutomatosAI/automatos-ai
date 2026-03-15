@@ -14,15 +14,24 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 
 from core.database.base import Base
-from core.models.orchestration_enums import RunState, StateType, RUN_STATE_TYPE
+from core.models.orchestration_enums import (
+    RunState,
+    StateType,
+    TaskState,
+    RUN_STATE_TYPE,
+    TASK_STATE_TYPE,
+    TERMINAL_TASK_STATES,
+)
 
 
 class OrchestrationRun(Base):
@@ -122,4 +131,135 @@ class OrchestrationRun(Base):
         return (
             f"<OrchestrationRun id={self.id} state={self.state} "
             f"goal={self.goal[:50] if self.goal else None!r}>"
+        )
+
+
+class OrchestrationTask(Base):
+    """
+    Individual task within a mission execution.
+
+    Each task is assigned to a roster agent, executed sequentially, and verified
+    before the next task is dispatched. State machine: PRD-82A Section 4.2.
+
+    CRITICAL: `completed` is NOT terminal — only `verified`, `failed`, `skipped`.
+    Board `done` status maps ONLY from `verified` (PRD-82A Section 4.3).
+    """
+
+    __tablename__ = "orchestration_tasks"
+
+    # Primary key
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+
+    # Parent mission
+    run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Task definition
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    task_type = Column(
+        String(30),
+        nullable=False,
+        default="llm_generation",
+        server_default="llm_generation",
+    )
+
+    # Ordering within the mission
+    sequence_number = Column(Integer, nullable=False)
+
+    # Desired agent role (e.g. 'researcher') — AgentMatcher resolves to actual agent
+    agent_role = Column(String(100), nullable=True)
+
+    # State machine (PRD-82A Section 4.1)
+    state = Column(
+        String(30),
+        nullable=False,
+        default=TaskState.PENDING.value,
+        server_default=TaskState.PENDING.value,
+    )
+    state_type = Column(
+        String(10),
+        nullable=False,
+        default=StateType.INITIAL.value,
+        server_default=StateType.INITIAL.value,
+    )
+
+    # Agent assignment (filled by AgentMatcher + dispatcher)
+    assigned_agent_id = Column(
+        Integer,
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Verification criteria — deterministic checks + LLM judge config
+    verification_criteria = Column(JSONB, nullable=True)
+
+    # Input/output
+    input_context = Column(JSONB, nullable=True)
+    output = Column(Text, nullable=True)
+    output_metadata = Column(JSONB, nullable=True)
+
+    # Failure tracking (PRD-82A Section 8)
+    failure_reason_code = Column(String(50), nullable=True)
+    failure_detail = Column(Text, nullable=True)
+
+    # Retry tracking (PRD-82A Section 11)
+    attempt_number = Column(Integer, nullable=False, server_default="0")
+    max_retries = Column(Integer, nullable=False, server_default="3")
+
+    # Budget tracking (PRD-82A Section 9)
+    tokens_used = Column(Integer, nullable=False, server_default="0")
+
+    # Timestamps
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # Optimistic locking (PRD-82A Section 5, principle 7)
+    version_id = Column(Integer, nullable=False, server_default="1")
+
+    __mapper_args__ = {"version_id_col": version_id}
+
+    __table_args__ = (
+        # Composite index for ordering tasks within a run
+        Index("ix_orchestration_tasks_run_sequence", "run_id", "sequence_number"),
+        # Partial index on active (non-terminal) states for coordinator tick queries
+        Index(
+            "ix_orchestration_tasks_active",
+            "run_id",
+            "state",
+            postgresql_where=text(
+                f"state NOT IN ({', '.join(repr(s.value) for s in TERMINAL_TASK_STATES)})"
+            ),
+        ),
+        CheckConstraint(
+            f"state IN ({', '.join(repr(s.value) for s in TaskState)})",
+            name="ck_orchestration_tasks_state",
+        ),
+        {"extend_existing": True},
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<OrchestrationTask id={self.id} run_id={self.run_id} "
+            f"seq={self.sequence_number} state={self.state} "
+            f"title={self.title[:40] if self.title else None!r}>"
         )
