@@ -20,7 +20,7 @@
 ## Phase 3: Coordinator
 
 - [x] US-010: Create coordination package + AgentMatcher (`orchestrator/modules/coordination/agent_matcher.py`) — deterministic scoring (5 weights, threshold 0.4). Immutable MatchResult dataclass. Batch queries for tool assignments and busy agents. Skill matching hierarchy: exact name (1.0), substring (0.75), tag (0.5), none (0.0). History placeholder at 0.5 until 82B.
-- [ ] US-011: Create MissionPlanner (`orchestrator/modules/coordination/planner.py`) — LLM decomposition + PlanValidator. 3 retry attempts on validation failure.
+- [x] US-011: Create MissionPlanner (`orchestrator/modules/coordination/planner.py`) — LLM decomposition + PlanValidator. 3 retry attempts on validation failure. Async decompose() method uses create_llm_manager("orchestrator"), prompt-based JSON extraction with markdown block handling, DependencyResolver for DAG validation, agent role fuzzy matching against name/skills/tags. DecompositionResult/PlannedTask/PlannedDependency frozen dataclasses. PlanValidationError raised after 3 failed attempts.
 - [ ] US-012: Create MissionDispatcher (`orchestrator/modules/coordination/dispatcher.py`) — sequential dispatch, optimistic claim pattern, execute_with_prompt() integration.
 - [ ] US-013: Create MissionReconciler (`orchestrator/modules/coordination/reconciler.py`) — stall detection (60s/300s), completion check, failure check.
 - [ ] US-014: Create CoordinatorService (`orchestrator/services/coordinator_service.py`) — 5s tick, lifecycle methods (create/approve/reject/review/pause/resume/cancel), output_summary builder.

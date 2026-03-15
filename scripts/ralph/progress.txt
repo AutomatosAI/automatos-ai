@@ -114,3 +114,19 @@
 - Model fit: 1.0 if preferred_model in agent's model_id, 0.5 otherwise
 - Availability: 1.0 if idle, 0.5 if busy (has ASSIGNED/RUNNING orchestration tasks)
 - Import validated: AgentMatcher, MatchResult, MATCH_THRESHOLD all resolve cleanly
+
+### Iteration 11 — US-011: MissionPlanner
+- Created `orchestrator/modules/coordination/planner.py`
+- MissionPlanner class with async decompose() static method — LLM decomposition + structural validation
+- 3 frozen dataclasses: DecompositionResult (tasks, dependencies, token_estimate), PlannedTask (12 fields), PlannedDependency (from/to temp_ids)
+- PlanValidationError exception with list of validation errors
+- LLM call via create_llm_manager("orchestrator"), structured JSON prompt with available agent roster
+- JSON extraction: handles markdown code blocks (```json ... ```), raw JSON, and brace-delimited fallback
+- Plan parsing: _parse_plan() converts raw JSON to typed PlannedTask/PlannedDependency lists with error collection
+- Validation (_validate_plan): 5 checks — task count (3-20), dep references valid, DAG acyclic (via DependencyResolver), agent roles match roster (fuzzy: name/skills/tags), no orphan tasks
+- Retry loop: up to 3 attempts, injects validation errors into next prompt for self-correction
+- Token estimate: TOKENS_PER_TASK_ESTIMATE (2000) × task count
+- Agent roster rendering: active agents with name, description, skills, tags, model_id
+- Uses DependencyResolver.validate_task_graph() with UUID stand-ins for cycle detection
+- Import validated: all exports resolve cleanly
+- Unit checks passed: JSON extraction, parse, validation (min task count error)
