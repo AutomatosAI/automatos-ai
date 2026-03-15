@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
-import { Bot, ArrowDown, Database, GitBranch, Wrench, Code2, Target } from 'lucide-react'
+import { Bot, ArrowDown, Database, GitBranch, Wrench, Code2, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
@@ -790,6 +790,27 @@ export function Chat({
                         isLoading={isLoadingSuggestions}
                         hasContext={hasContextSuggestions}
                       />
+                      {/* PRD-82A US-002: Mission mode indicator banner */}
+                      <AnimatePresence>
+                        {isMissionMode && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2 text-sm text-orange-400"
+                          >
+                            <Target className="h-4 w-4 shrink-0" />
+                            <span className="flex-1">Mission Mode — Describe your goal and an AI team will execute it</span>
+                            <button
+                              type="button"
+                              onClick={() => setMissionMode(false)}
+                              className="shrink-0 rounded p-0.5 hover:bg-orange-500/20 transition-colors"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                       <MultimodalInput
                         chatId={id}
                         status={status}
@@ -868,6 +889,27 @@ export function Chat({
                           }}
                           isLoading={isLoadingSuggestions}
                         />
+                        {/* PRD-82A US-002: Mission mode indicator banner */}
+                        <AnimatePresence>
+                          {isMissionMode && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2 text-sm text-orange-400"
+                            >
+                              <Target className="h-4 w-4 shrink-0" />
+                              <span className="flex-1">Mission Mode — Describe your goal and an AI team will execute it</span>
+                              <button
+                                type="button"
+                                onClick={() => setMissionMode(false)}
+                                className="shrink-0 rounded p-0.5 hover:bg-orange-500/20 transition-colors"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                         <MultimodalInput
                           chatId={id}
                           status={status}
@@ -936,6 +978,27 @@ export function Chat({
                   }}
                   isLoading={isLoadingSuggestions}
                 />
+                {/* PRD-82A US-002: Mission mode indicator banner */}
+                <AnimatePresence>
+                  {isMissionMode && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2 text-sm text-orange-400"
+                    >
+                      <Target className="h-4 w-4 shrink-0" />
+                      <span className="flex-1">Mission Mode — Describe your goal and an AI team will execute it</span>
+                      <button
+                        type="button"
+                        onClick={() => setMissionMode(false)}
+                        className="shrink-0 rounded p-0.5 hover:bg-orange-500/20 transition-colors"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <MultimodalInput
                   chatId={id}
                   status={status}
@@ -1087,6 +1150,28 @@ export function Chat({
                   }}
                   isLoading={isLoadingSuggestions}
                 />
+
+                {/* PRD-82A US-002: Mission mode indicator banner */}
+                <AnimatePresence>
+                  {isMissionMode && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2 text-sm text-orange-400"
+                    >
+                      <Target className="h-4 w-4 shrink-0" />
+                      <span className="flex-1">Mission Mode — Describe your goal and an AI team will execute it</span>
+                      <button
+                        type="button"
+                        onClick={() => setMissionMode(false)}
+                        className="shrink-0 rounded p-0.5 hover:bg-orange-500/20 transition-colors"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 <MultimodalInput
                   chatId={id}

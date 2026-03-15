@@ -10,7 +10,7 @@ Add Mission mode toggle to chat input, create missions from chat, show inline mi
 ## Tasks
 
 - [x] US-001: Add Mission mode toggle button to chat quick links
-- [ ] US-002: Show mission mode indicator banner in chat
+- [x] US-002: Show mission mode indicator banner in chat
 - [ ] US-003: Intercept chat submit to create mission when in mission mode
 - [ ] US-004: Show inline mission card in chat after creation (new component)
 - [ ] US-005: Render mission card in chat when activePlanningMissionId is set
