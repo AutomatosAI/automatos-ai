@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -262,4 +263,139 @@ class OrchestrationTask(Base):
             f"<OrchestrationTask id={self.id} run_id={self.run_id} "
             f"seq={self.sequence_number} state={self.state} "
             f"title={self.title[:40] if self.title else None!r}>"
+        )
+
+
+class OrchestrationTaskDependency(Base):
+    """
+    DAG edge between two orchestration tasks.
+
+    Represents a dependency: `task_id` cannot start until `depends_on_task_id`
+    reaches a terminal success state (controlled by `trigger_rule`).
+
+    Used by DependencyResolver to validate the DAG (no cycles) and determine
+    which tasks are ready for dispatch.
+
+    Source: PRD-82A Section 4, PRD-101 Section 5.5
+    """
+
+    __tablename__ = "orchestration_task_dependencies"
+
+    # Primary key
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+
+    # The downstream task (blocked until dependency met)
+    task_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # The upstream task (must complete first)
+    depends_on_task_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # When the dependency is considered met (PRD-82A: only all_success for v1)
+    trigger_rule = Column(
+        String(30),
+        nullable=False,
+        default="all_success",
+        server_default="all_success",
+    )
+
+    __table_args__ = (
+        # Prevent duplicate edges
+        UniqueConstraint(
+            "task_id",
+            "depends_on_task_id",
+            name="uq_orchestration_task_dep_pair",
+        ),
+        {"extend_existing": True},
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<OrchestrationTaskDependency task={self.task_id} "
+            f"depends_on={self.depends_on_task_id} rule={self.trigger_rule}>"
+        )
+
+
+class OrchestrationEvent(Base):
+    """
+    Append-only audit log for the orchestration subsystem.
+
+    Every state change on runs/tasks produces a corresponding event row in
+    the SAME transaction (dual-write pattern, PRD-82A Section 5 principle 2).
+    Non-transition events (budget warnings, stall detections) are also logged.
+
+    This table is NEVER updated — only INSERTed. No version_id column.
+
+    Source: PRD-82A Section 5, PRD-101 Section 6.2
+    """
+
+    __tablename__ = "orchestration_events"
+
+    # Primary key
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+
+    # Parent mission (always present)
+    run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Associated task (nullable — run-level events have no task)
+    task_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orchestration_tasks.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    # Event classification
+    event_type = Column(String(50), nullable=False)
+
+    # Who triggered this event
+    actor_type = Column(String(20), nullable=False)
+    actor_id = Column(String(255), nullable=True)
+
+    # State transition (nullable for non-transition events)
+    old_state = Column(String(30), nullable=True)
+    new_state = Column(String(30), nullable=True)
+
+    # Arbitrary event data (verification scores, error details, etc.)
+    payload = Column(JSONB, nullable=True)
+
+    # Immutable timestamp
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        # Composite index for event timeline queries per run
+        Index("ix_orchestration_events_run_created", "run_id", "created_at"),
+        {"extend_existing": True},
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<OrchestrationEvent id={self.id} run={self.run_id} "
+            f"type={self.event_type} {self.old_state}→{self.new_state}>"
         )

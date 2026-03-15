@@ -29,3 +29,14 @@
 - Optimistic locking: version_id_col wired in __mapper_args__
 - Bug caught: task_type default was accidentally set to TaskState.PENDING.value — fixed to "llm_generation"
 - Import validated: all 24 columns, 3 indexes, constraints, and mapper args verified
+
+### Iteration 4 — US-004: OrchestrationTaskDependency + OrchestrationEvent Models
+- Added OrchestrationTaskDependency to `orchestrator/core/models/orchestration.py`
+- 4 columns: id (UUID PK), task_id (FK orchestration_tasks.id), depends_on_task_id (FK orchestration_tasks.id), trigger_rule (default 'all_success')
+- Unique constraint: uq_orchestration_task_dep_pair on (task_id, depends_on_task_id)
+- Added OrchestrationEvent to `orchestrator/core/models/orchestration.py`
+- 10 columns: id (UUID PK), run_id (FK), task_id (FK nullable), event_type, actor_type, actor_id, old_state, new_state, payload (JSONB), created_at
+- Composite index: ix_orchestration_events_run_created on (run_id, created_at) for timeline queries
+- NO version_id — append-only table, never updated
+- Added UniqueConstraint import to sqlalchemy imports
+- Import validated: both models load, all columns/constraints/indexes verified
