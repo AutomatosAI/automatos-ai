@@ -1,8 +1,8 @@
 # PRD-101 — Mission Schema & Data Model
 
-**Version:** 0.9 (Sections 1-8 complete; Sections 9-13 pending)
+**Version:** 1.0
 **Type:** Research + Design
-**Status:** In Progress
+**Status:** Complete — Ready for Peer Review
 **Priority:** P0
 **Dependencies:** PRD-100 (Research Master)
 **Author:** Gerard Kavanagh + Claude
@@ -41,8 +41,8 @@ This document is the research and design specification for the mission data laye
 - [x] **`orchestration_tasks` table** (Section 5) — 25 columns, join table for dependencies with trigger rules, topological sort algorithm using `graphlib.TopologicalSorter`, board task bridge functions, Alembic migration.
 - [x] **`orchestration_events` table** (Section 6) — append-only audit trail, 30+ event types, BRIN indexes for time-series queries, retention policy, connection to PRD-106 telemetry.
 - [x] **Integration contracts** (Section 7) — field mappings to board_tasks, agent_reports, and recipes. ER diagram. Migration safety guarantees. Workspace isolation pattern.
-- [ ] **Full SQL DDL** (Section 12) — copy-pasteable CREATE TABLE statements.
-- [ ] **SQLAlchemy models** (Section 13) — Python model classes matching existing codebase conventions.
+- [x] **Full SQL DDL** (Section 12) — copy-pasteable CREATE TABLE statements for all 5 tables + existing table alterations.
+- [x] **SQLAlchemy models** (Section 13) — Python model classes matching existing codebase conventions, with enums, transition tables, and board status mapping.
 
 ### 1.3 What This PRD Does NOT Cover
 
@@ -2938,28 +2938,900 @@ These are unresolved design decisions surfaced during research. Each needs input
 
 ## 9. Risk Register
 
-_(US-008)_
+| # | Risk | Impact | Likelihood | Mitigation | Detected During |
+|---|------|--------|------------|------------|-----------------|
+| R1 | **JSONB schema drift** — `plan` and `config` JSONB columns evolve without validation, leading to coordinator crashes on old data | High | High | Pydantic models with `model_validate()` on read. Version field in plan JSONB enables migration logic. Always add fields as optional with defaults. | Section 4.3 plan schema design |
+| R2 | **Denormalized counter desync** — `task_count`, `tasks_completed`, `tasks_failed` on `orchestration_runs` drift from actual `orchestration_tasks` counts due to bugs or partial transaction failures | Medium | Medium | (1) Counters updated in same transaction as task state change. (2) Reconciler periodically re-derives counts from `SELECT COUNT(*) ... GROUP BY state` and corrects drift. (3) Dashboard queries can fall back to live COUNT if discrepancy detected. | Section 4.2 denormalized counters |
+| R3 | **Optimistic locking contention** — high-frequency state transitions cause `StaleDataError` storms, especially during parallel task execution with fast completion | Medium | Low | At our scale (5-50 tasks/mission), state changes are seconds apart — contention is minimal. `transition_task()` returns `(False, refreshed_task)` on conflict — caller retries once with fresh state. If contention grows, switch hot-path transitions to `SELECT FOR UPDATE SKIP LOCKED`. | Section 3.9 concurrency safety |
+| R4 | **Board task coupling** — synchronous board task updates inside `transition_task()` add latency and create a failure coupling between orchestration and board systems | Medium | Low | Board task sync is a simple `UPDATE` on an already-loaded row (same transaction, no extra round-trip). If board_task_id is NULL (task not yet planned), sync is skipped. Fallback: if board sync fails, orchestration state still commits — board is eventually consistent via reconciler. | Section 7.2.4 state synchronization |
+| R5 | **Event table growth** — append-only `orchestration_events` grows unbounded if retention policy isn't implemented, degrading query performance on time-range scans | Low | High | BRIN index on `created_at` keeps time-range scans efficient regardless of table size. At projected volume (~1M events/year), PostgreSQL handles this comfortably. Archive strategy (Section 6.7) is documented but deferred to PRD-106 which defines retention needs. Monitor table size via `pg_total_relation_size()`. | Section 6.7 retention policy |
+| R6 | **Migration lock on `board_tasks`** — adding indexes to the existing `board_tasks` table during migration could lock the table in production | High | Medium | Use `CREATE INDEX CONCURRENTLY` for all indexes on existing tables. This requires the index creation to run outside a transaction (`op.execute("COMMIT")` before `CREATE INDEX CONCURRENTLY`). Test migration on staging with production-sized data before deploying. | Section 7.7.4 raw SQL style |
+| R7 | **Trigger rule complexity creep** — starting with 4 trigger rules invites requests for more (`one_success`, `one_failed`, branching logic), increasing coordinator complexity | Low | Medium | 4 rules are stored as `VARCHAR(30)` — adding new values requires only a code change in the trigger rule evaluator, not a schema migration. Gate new rules behind feature flags. Document that complex conditional logic belongs in the coordinator's planning prompt (PRD-102), not in trigger rules. | Section 5.3 trigger rules |
+| R8 | **Recipe conversion loses fidelity** — converting a mission DAG to a recipe flattens parallel execution into sequential steps, losing the execution structure that made the mission succeed | Medium | High | Document the limitation explicitly (Section 7.4.4). Recipe `execution_config.mode` preserves the strategy hint. Full DAG-aware recipes are a future enhancement — the recipe engine would need to understand dependencies natively (not in scope for PRD-101 or 82A). | Section 7.4.4 limitations |
+| R9 | **Circular dependency at runtime** — coordinator dynamically adds tasks during execution that create a cycle not caught at planning time | High | Low | `graphlib.TopologicalSorter.prepare()` is called after every dynamic task addition, not just at initial planning. If a cycle is detected, the new task is rejected with an error event. The `CHECK (task_id != depends_on_id)` constraint catches self-references at the DB level. | Section 5.5 cycle detection |
+| R10 | **`output_ref` path breakage** — task output stored at a workspace file path is moved or deleted, leaving `output_ref` pointing to nothing | Low | Medium | `output_ref` is a reference, not a guarantee. The report service (PRD-76) also stores content in `agent_reports` — the report is the durable artifact, the file is a convenience copy. Downstream tasks receive `output_summary` (inline text), not the file path. | Section 5.1 output storage |
 
 ---
 
 ## 10. Implementation Acceptance Criteria
 
-_(US-008)_
+These are testable criteria for PRD-82A (the implementation PRD that follows this research document). The schema is "done" when all criteria pass.
+
+### 10.1 Database Schema
+
+| # | Criterion | Verification Method |
+|---|-----------|-------------------|
+| AC-1 | `orchestration_runs` table exists with all 22 columns from Section 4.2 | `\d orchestration_runs` matches column definitions |
+| AC-2 | `orchestration_tasks` table exists with all 27 columns from Section 5.2 | `\d orchestration_tasks` matches column definitions |
+| AC-3 | `orchestration_task_dependencies` table exists with composite PK and self-reference CHECK | `\d orchestration_task_dependencies` shows PK + constraint |
+| AC-4 | `orchestration_events` table exists with BIGSERIAL PK and all 8 columns from Section 6.3 | `\d orchestration_events` matches column definitions |
+| AC-5 | `orchestration_events_archive` table exists (identical schema, no FKs) | `\d orchestration_events_archive` |
+| AC-6 | All FK constraints enforced: runs→workspaces, runs→agents, tasks→runs, tasks→workspaces, tasks→agents, tasks→board_tasks, deps→tasks (both directions), events→runs, events→tasks | `SELECT conname FROM pg_constraint WHERE conrelid = ...` |
+| AC-7 | All CHECK constraints enforced: non-negative tokens/cost/counts, score range 0-1, attempt ≥ 1, no self-referencing deps | `INSERT` violating each CHECK returns error |
+| AC-8 | All indexes from Section 7.6 exist, including partial indexes with correct WHERE clauses | `\di` + `pg_indexes` query for WHERE clause text |
+| AC-9 | `agent_reports.orchestration_task_id` column exists (nullable UUID FK → orchestration_tasks) | `\d agent_reports` shows new column |
+| AC-10 | Partial unique indexes on `board_tasks` for `source_type = 'orchestration'` and `source_type = 'orchestration_task'` | Duplicate INSERT returns unique violation |
+
+### 10.2 SQLAlchemy Models
+
+| # | Criterion | Verification Method |
+|---|-----------|-------------------|
+| AC-11 | `OrchestrationRun` model importable from `orchestrator.core.models` | `from orchestrator.core.models import OrchestrationRun` succeeds |
+| AC-12 | `OrchestrationTask` model importable with relationships to run, agent, board_task | Model introspection shows relationships |
+| AC-13 | `OrchestrationTaskDependency` model importable with composite PK | Model metadata shows composite PK |
+| AC-14 | `OrchestrationEvent` model importable with BIGSERIAL PK | Model metadata shows autoincrement Integer PK |
+| AC-15 | `version_id_col` configured on OrchestrationRun and OrchestrationTask for optimistic locking | `__mapper_args__` includes `version_id_col` |
+| AC-16 | All Python enums (`StateType`, `RunState`, `TaskState`, `EventType`, `ActorType`, `TaskType`, `TriggerRule`) defined and importable | Import and iterate all enum values |
+
+### 10.3 State Machine
+
+| # | Criterion | Verification Method |
+|---|-----------|-------------------|
+| AC-17 | `transition_task()` enforces allowed transitions from Section 3.10 — invalid transitions raise `InvalidTransition` | Unit test: attempt every invalid transition, assert error |
+| AC-18 | `transition_run()` enforces allowed transitions — invalid transitions raise `InvalidTransition` | Unit test: attempt every invalid transition, assert error |
+| AC-19 | Every state transition emits an `OrchestrationEvent` in the same transaction | Unit test: transition + query events in same session, assert event exists |
+| AC-20 | Terminal state transitions set `completed_at` and `duration_ms` | Unit test: transition to completed/failed/cancelled, assert timestamps set |
+| AC-21 | `StaleDataError` on concurrent modification returns `(False, refreshed_task)` instead of raising | Unit test: load task in two sessions, modify in one, attempt transition in other |
+| AC-22 | Board task status synced on every orchestration task state change (per mapping in Section 3.8) | Integration test: transition task, query board_task, assert status matches |
+
+### 10.4 Integration
+
+| # | Criterion | Verification Method |
+|---|-----------|-------------------|
+| AC-23 | `create_mission_board_task()` creates parent board_task with `source_type='orchestration'` | Integration test: create run, call function, query board_tasks |
+| AC-24 | `create_task_board_task()` creates child board_task with `parent_task_id` linking to mission board_task | Integration test: verify `parent_task_id` is set |
+| AC-25 | Duplicate board_task creation is idempotent (returns existing ID) | Call `create_mission_board_task()` twice, assert same board_task.id |
+| AC-26 | Auto-report creation on task completion writes to `agent_reports` with `orchestration_task_id` FK | Integration test: complete task, query `agent_reports` for matching FK |
+| AC-27 | Workspace isolation: query for run_id belonging to workspace A with workspace B context returns 404 | Integration test: cross-workspace access attempt fails |
+
+### 10.5 Migration
+
+| # | Criterion | Verification Method |
+|---|-----------|-------------------|
+| AC-28 | Migration runs successfully on empty database | `alembic upgrade head` on fresh DB |
+| AC-29 | Migration runs successfully on production-like database (existing board_tasks, agent_reports, agents) | `alembic upgrade head` on staging with data |
+| AC-30 | Downgrade cleanly removes all orchestration tables and the `agent_reports.orchestration_task_id` column | `alembic downgrade -1` + verify tables gone |
+| AC-31 | Migration is re-runnable (`IF NOT EXISTS` on all CREATE statements) | Run migration twice without error |
+| AC-32 | Existing board_tasks and agent_reports rows unaffected by migration | Row count before = row count after |
 
 ---
 
 ## 11. Dependencies & Sequencing
 
-_(US-008)_
+### 11.1 What Must Be Built First
+
+The schema is the foundation — everything else depends on it:
+
+```
+PRD-101 (this document — schema design)
+    │
+    ▼
+PRD-82A (implementation: Alembic migration, SQLAlchemy models, API endpoints)
+    │
+    ├── PRD-102 (Coordinator) — reads/writes orchestration_runs, creates orchestration_tasks
+    ├── PRD-103 (Verification) — writes verifier_score, verified_by on orchestration_tasks
+    ├── PRD-104 (Ephemeral Agents) — writes agent_type='contractor' on orchestration_tasks
+    ├── PRD-105 (Budget) — reads/writes total_cost, config.budget on orchestration_runs
+    └── PRD-106 (Telemetry) — reads orchestration_events for pattern analysis
+```
+
+### 11.2 Implementation Order for PRD-82A
+
+Within the implementation PRD, build in this order:
+
+| Phase | Deliverable | Depends On | Can Parallelize With |
+|-------|------------|------------|---------------------|
+| **1. Migration** | Alembic migration file creating all 4 tables + archive table + existing table alterations | Nothing | — |
+| **2. Models** | SQLAlchemy model classes in `orchestrator/core/models/orchestration.py` | Phase 1 (tables must exist) | — |
+| **3. Enums** | Python enums (`StateType`, `RunState`, `TaskState`, etc.) in `orchestrator/core/models/orchestration_enums.py` | Nothing (pure Python) | Phase 1 |
+| **4. State machine** | `transition_task()`, `transition_run()`, `emit_event()` in `orchestrator/services/orchestration_state.py` | Phase 2, 3 | — |
+| **5. Board bridge** | `create_mission_board_task()`, `create_task_board_task()` in `orchestrator/services/orchestration_board_bridge.py` | Phase 2 | Phase 4 |
+| **6. Dependency resolver** | `DependencyResolver` class, `validate_task_graph()` in `orchestrator/services/orchestration_deps.py` | Phase 3 (uses TaskState enum) | Phase 4, 5 |
+| **7. API endpoints** | CRUD endpoints for runs, tasks, events in `orchestrator/api/missions.py` | Phase 2, 4, 5, 6 | — |
+
+### 11.3 What Can Be Deferred
+
+These features are designed in this PRD but can be implemented incrementally:
+
+| Feature | Section | Defer Until | Rationale |
+|---------|---------|-------------|-----------|
+| Trigger rules beyond `all_success` | 5.3 | PRD-82C (parallel execution) | Sequential missions only need `all_success`. Other rules enable parallel patterns. |
+| Recipe conversion ("Save as Routine") | 7.4 | PRD-82D or later | Nice-to-have. Core mission execution works without it. |
+| Event archive/retention | 6.7 | PRD-106 (telemetry defines needs) | At <1M events/year, no urgency. |
+| `orchestration_events_archive` table | 6.10 | Same as above | Table exists (migration creates it) but archival job is deferred. |
+| Report auto-creation | 7.3.2 | PRD-82B (coordinator builds this flow) | Depends on coordinator knowing when tasks complete. |
+| Stall detection reconciler | 3.7 | PRD-82B (coordinator) | Reconciler is part of coordinator's tick loop. |
+
+### 11.4 Cross-PRD Interface Contracts
+
+These are the columns/fields that downstream PRDs will write to. The schema must support them even if this PRD doesn't populate them:
+
+| Column | Written By | PRD |
+|--------|-----------|-----|
+| `orchestration_tasks.verifier_score` | Verifier agent | PRD-103 |
+| `orchestration_tasks.verified_by` | Verifier agent or human | PRD-103 |
+| `orchestration_tasks.agent_type = 'contractor'` | Coordinator | PRD-104 |
+| `orchestration_tasks.model_override` | Coordinator (model routing) | PRD-104 |
+| `orchestration_runs.total_cost` / `total_tokens` | Budget enforcer | PRD-105 |
+| `orchestration_runs.config.budget.*` | User / Budget enforcer | PRD-105 |
+| `orchestration_events` (all event types) | Telemetry pipeline reads | PRD-106 |
 
 ---
 
 ## 12. Appendix: Full SQL DDL
 
-_(US-008)_
+Complete `CREATE TABLE` statements ready to convert to Alembic. These follow the codebase convention of raw SQL via `op.execute()`.
+
+```sql
+-- ============================================================
+-- PRD-101: Mission Schema & Data Model
+-- Complete DDL for orchestration tables
+-- ============================================================
+
+-- 1. orchestration_runs — mission-level execution records
+CREATE TABLE IF NOT EXISTS orchestration_runs (
+    id                      UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id            UUID            NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    title                   VARCHAR(500)    NOT NULL,
+    description             TEXT,
+    goal                    TEXT            NOT NULL,
+    state                   VARCHAR(30)     NOT NULL DEFAULT 'pending',
+    state_type              VARCHAR(10)     NOT NULL DEFAULT 'pending',
+    plan                    JSONB,
+    config                  JSONB           NOT NULL DEFAULT '{}',
+    result_summary          TEXT,
+    error_message           TEXT,
+    created_by              VARCHAR(255)    NOT NULL,
+    coordinator_agent_id    INTEGER         REFERENCES agents(id) ON DELETE SET NULL,
+    total_tokens            INTEGER         NOT NULL DEFAULT 0,
+    total_cost              NUMERIC(10,6)   NOT NULL DEFAULT 0,
+    task_count              INTEGER         NOT NULL DEFAULT 0,
+    tasks_completed         INTEGER         NOT NULL DEFAULT 0,
+    tasks_failed            INTEGER         NOT NULL DEFAULT 0,
+    started_at              TIMESTAMPTZ,
+    completed_at            TIMESTAMPTZ,
+    duration_ms             INTEGER,
+    version_id              INTEGER         NOT NULL DEFAULT 1,
+    created_at              TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_orch_runs_tokens_positive          CHECK (total_tokens >= 0),
+    CONSTRAINT ck_orch_runs_cost_positive             CHECK (total_cost >= 0),
+    CONSTRAINT ck_orch_runs_task_count_positive        CHECK (task_count >= 0),
+    CONSTRAINT ck_orch_runs_tasks_completed_positive   CHECK (tasks_completed >= 0),
+    CONSTRAINT ck_orch_runs_tasks_failed_positive      CHECK (tasks_failed >= 0)
+);
+
+COMMENT ON TABLE orchestration_runs IS
+    'Mission-level execution records (PRD-101). One row per mission attempt.';
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS ix_orch_runs_workspace_state
+    ON orchestration_runs (workspace_id, state_type)
+    WHERE state_type != 'terminal';
+
+CREATE INDEX IF NOT EXISTS ix_orch_runs_workspace_completed
+    ON orchestration_runs (workspace_id, completed_at DESC)
+    WHERE state_type = 'terminal';
+
+CREATE INDEX IF NOT EXISTS ix_orch_runs_created_by
+    ON orchestration_runs (workspace_id, created_by);
+
+CREATE INDEX IF NOT EXISTS ix_orch_runs_state_updated
+    ON orchestration_runs (state, updated_at)
+    WHERE state_type != 'terminal';
+
+
+-- 2. orchestration_tasks — task-level execution records
+CREATE TABLE IF NOT EXISTS orchestration_tasks (
+    id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id              UUID            NOT NULL REFERENCES orchestration_runs(id) ON DELETE CASCADE,
+    workspace_id        UUID            NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    sequence_number     SMALLINT        NOT NULL,
+    title               VARCHAR(500)    NOT NULL,
+    description         TEXT,
+    task_type           VARCHAR(30)     NOT NULL,
+    state               VARCHAR(30)     NOT NULL DEFAULT 'pending',
+    state_type          VARCHAR(10)     NOT NULL DEFAULT 'pending',
+    trigger_rule        VARCHAR(30)     NOT NULL DEFAULT 'all_success',
+    agent_id            INTEGER         REFERENCES agents(id) ON DELETE SET NULL,
+    agent_type          VARCHAR(20),
+    model_override      VARCHAR(255),
+    tools_requested     JSONB,
+    success_criteria    TEXT,
+    output_summary      VARCHAR(2000),
+    output_ref          VARCHAR(500),
+    verifier_score      NUMERIC(3,2),
+    verified_by         VARCHAR(255),
+    error_message       TEXT,
+    attempt_number      SMALLINT        NOT NULL DEFAULT 1,
+    continuation_count  SMALLINT        NOT NULL DEFAULT 0,
+    tokens_used         INTEGER         NOT NULL DEFAULT 0,
+    cost                NUMERIC(10,6)   NOT NULL DEFAULT 0,
+    board_task_id       INTEGER         REFERENCES board_tasks(id) ON DELETE SET NULL,
+    started_at          TIMESTAMPTZ,
+    completed_at        TIMESTAMPTZ,
+    duration_ms         INTEGER,
+    version_id          INTEGER         NOT NULL DEFAULT 1,
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ck_orch_tasks_score_range         CHECK (verifier_score >= 0 AND verifier_score <= 1),
+    CONSTRAINT ck_orch_tasks_attempt_positive     CHECK (attempt_number >= 1),
+    CONSTRAINT ck_orch_tasks_continuation_positive CHECK (continuation_count >= 0),
+    CONSTRAINT ck_orch_tasks_tokens_positive       CHECK (tokens_used >= 0),
+    CONSTRAINT ck_orch_tasks_cost_positive         CHECK (cost >= 0)
+);
+
+COMMENT ON TABLE orchestration_tasks IS
+    'Task-level execution records within a mission (PRD-101).';
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS ix_orch_tasks_run_id
+    ON orchestration_tasks (run_id);
+
+CREATE INDEX IF NOT EXISTS ix_orch_tasks_run_state
+    ON orchestration_tasks (run_id, state_type)
+    WHERE state_type != 'terminal';
+
+CREATE INDEX IF NOT EXISTS ix_orch_tasks_agent
+    ON orchestration_tasks (agent_id, state)
+    WHERE agent_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ix_orch_tasks_workspace
+    ON orchestration_tasks (workspace_id, state_type);
+
+CREATE INDEX IF NOT EXISTS ix_orch_tasks_board_task
+    ON orchestration_tasks (board_task_id)
+    WHERE board_task_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ix_orch_tasks_state_updated
+    ON orchestration_tasks (state, updated_at)
+    WHERE state_type NOT IN ('terminal', 'pending');
+
+
+-- 3. orchestration_task_dependencies — DAG edges
+CREATE TABLE IF NOT EXISTS orchestration_task_dependencies (
+    task_id          UUID            NOT NULL REFERENCES orchestration_tasks(id) ON DELETE CASCADE,
+    depends_on_id    UUID            NOT NULL REFERENCES orchestration_tasks(id) ON DELETE CASCADE,
+    dependency_type  VARCHAR(20)     NOT NULL DEFAULT 'data',
+    created_at       TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (task_id, depends_on_id),
+    CONSTRAINT ck_task_deps_no_self_ref CHECK (task_id != depends_on_id)
+);
+
+COMMENT ON TABLE orchestration_task_dependencies IS
+    'DAG edges between orchestration tasks. Join table for dependency resolution (PRD-101).';
+
+CREATE INDEX IF NOT EXISTS ix_task_deps_depends_on
+    ON orchestration_task_dependencies (depends_on_id);
+
+
+-- 4. orchestration_events — append-only audit trail
+CREATE TABLE IF NOT EXISTS orchestration_events (
+    id              BIGSERIAL       PRIMARY KEY,
+    run_id          UUID            NOT NULL REFERENCES orchestration_runs(id) ON DELETE CASCADE,
+    task_id         UUID            REFERENCES orchestration_tasks(id) ON DELETE CASCADE,
+    event_type      VARCHAR(50)     NOT NULL,
+    payload         JSONB           NOT NULL DEFAULT '{}',
+    actor_type      VARCHAR(20)     NOT NULL DEFAULT 'system',
+    actor_id        VARCHAR(255),
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE orchestration_events IS
+    'Append-only event log for mission lifecycle (PRD-101). Never UPDATE or DELETE from application code.';
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS ix_orch_events_run_id
+    ON orchestration_events (run_id, id);
+
+CREATE INDEX IF NOT EXISTS ix_orch_events_task_id
+    ON orchestration_events (task_id, id)
+    WHERE task_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ix_orch_events_type_created
+    ON orchestration_events (event_type, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS ix_orch_events_created_brin
+    ON orchestration_events USING BRIN (created_at)
+    WITH (pages_per_range = 32);
+
+
+-- 5. orchestration_events_archive — cold storage (no FKs)
+CREATE TABLE IF NOT EXISTS orchestration_events_archive (
+    id              BIGINT          PRIMARY KEY,  -- preserves original IDs
+    run_id          UUID            NOT NULL,
+    task_id         UUID,
+    event_type      VARCHAR(50)     NOT NULL,
+    payload         JSONB           NOT NULL DEFAULT '{}',
+    actor_type      VARCHAR(20)     NOT NULL DEFAULT 'system',
+    actor_id        VARCHAR(255),
+    created_at      TIMESTAMPTZ     NOT NULL
+);
+
+COMMENT ON TABLE orchestration_events_archive IS
+    'Cold storage for orchestration events older than 180 days (PRD-101).';
+
+CREATE INDEX IF NOT EXISTS ix_orch_events_archive_run
+    ON orchestration_events_archive (run_id);
+
+CREATE INDEX IF NOT EXISTS ix_orch_events_archive_created
+    ON orchestration_events_archive (created_at);
+
+
+-- 6. Alterations to existing tables
+
+-- agent_reports: link reports to orchestration tasks
+ALTER TABLE agent_reports
+    ADD COLUMN IF NOT EXISTS orchestration_task_id UUID
+    REFERENCES orchestration_tasks(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS ix_agent_reports_orch_task
+    ON agent_reports (orchestration_task_id)
+    WHERE orchestration_task_id IS NOT NULL;
+
+-- board_tasks: idempotent mission/task board task creation
+-- NOTE: Use CREATE INDEX CONCURRENTLY in production to avoid table lock
+CREATE UNIQUE INDEX IF NOT EXISTS uq_board_tasks_orchestration_run
+    ON board_tasks (source_id) WHERE source_type = 'orchestration';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_board_tasks_orchestration_task
+    ON board_tasks (source_id) WHERE source_type = 'orchestration_task';
+```
 
 ---
 
 ## 13. Appendix: SQLAlchemy Models
 
-_(US-008)_
+Complete Python model classes matching the DDL above. These follow the codebase conventions documented in the model audit: `Base` from `core.database.base`, `PGUUID(as_uuid=True)` for UUIDs, `server_default` for all defaults, `DateTime(timezone=True)` for timestamps, no PostgreSQL ENUM types.
+
+```python
+"""PRD-101: Mission Schema & Data Model — SQLAlchemy Models.
+
+Orchestration tables for Mission Mode: runs, tasks, dependencies, events.
+All models use the project's established conventions:
+- Base from core.database.base
+- PGUUID(as_uuid=True) for UUID columns
+- VARCHAR for enum columns (no DB ENUM types)
+- JSONB for structured data with server_default='{}'
+- DateTime(timezone=True) with server_default=func.now()
+- extend_existing=True in __table_args__
+"""
+
+from uuid import uuid4
+
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.orm import relationship
+
+from core.database.base import Base
+
+
+# ---------------------------------------------------------------------------
+# orchestration_runs
+# ---------------------------------------------------------------------------
+
+class OrchestrationRun(Base):
+    """Mission-level execution record. One row per mission attempt."""
+
+    __tablename__ = "orchestration_runs"
+    __table_args__ = (
+        Index(
+            "ix_orch_runs_workspace_state",
+            "workspace_id", "state_type",
+            postgresql_where="state_type != 'terminal'",
+        ),
+        Index(
+            "ix_orch_runs_workspace_completed",
+            "workspace_id", "completed_at",
+            postgresql_where="state_type = 'terminal'",
+        ),
+        Index("ix_orch_runs_created_by", "workspace_id", "created_by"),
+        Index(
+            "ix_orch_runs_state_updated",
+            "state", "updated_at",
+            postgresql_where="state_type != 'terminal'",
+        ),
+        CheckConstraint("total_tokens >= 0", name="ck_orch_runs_tokens_positive"),
+        CheckConstraint("total_cost >= 0", name="ck_orch_runs_cost_positive"),
+        CheckConstraint("task_count >= 0", name="ck_orch_runs_task_count_positive"),
+        CheckConstraint("tasks_completed >= 0", name="ck_orch_runs_tasks_completed_positive"),
+        CheckConstraint("tasks_failed >= 0", name="ck_orch_runs_tasks_failed_positive"),
+        {"extend_existing": True},
+    )
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    goal = Column(Text, nullable=False)
+    state = Column(String(30), nullable=False, default="pending", server_default="pending")
+    state_type = Column(String(10), nullable=False, default="pending", server_default="pending")
+    plan = Column(JSONB, nullable=True)
+    config = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    result_summary = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=False)
+    coordinator_agent_id = Column(
+        Integer,
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    total_tokens = Column(Integer, nullable=False, default=0, server_default="0")
+    total_cost = Column(Numeric(10, 6), nullable=False, default=0, server_default="0")
+    task_count = Column(Integer, nullable=False, default=0, server_default="0")
+    tasks_completed = Column(Integer, nullable=False, default=0, server_default="0")
+    tasks_failed = Column(Integer, nullable=False, default=0, server_default="0")
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    version_id = Column(Integer, nullable=False, default=1, server_default="1")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
+    )
+
+    __mapper_args__ = {"version_id_col": version_id}
+
+    # Relationships
+    workspace = relationship("Workspace", foreign_keys=[workspace_id])
+    coordinator_agent = relationship("Agent", foreign_keys=[coordinator_agent_id])
+    tasks = relationship(
+        "OrchestrationTask", back_populates="run", cascade="all, delete-orphan",
+    )
+    events = relationship(
+        "OrchestrationEvent", back_populates="run", cascade="all, delete-orphan",
+    )
+
+
+# ---------------------------------------------------------------------------
+# orchestration_tasks
+# ---------------------------------------------------------------------------
+
+class OrchestrationTask(Base):
+    """Task-level execution record within a mission."""
+
+    __tablename__ = "orchestration_tasks"
+    __table_args__ = (
+        Index("ix_orch_tasks_run_id", "run_id"),
+        Index(
+            "ix_orch_tasks_run_state", "run_id", "state_type",
+            postgresql_where="state_type != 'terminal'",
+        ),
+        Index(
+            "ix_orch_tasks_agent", "agent_id", "state",
+            postgresql_where="agent_id IS NOT NULL",
+        ),
+        Index("ix_orch_tasks_workspace", "workspace_id", "state_type"),
+        Index(
+            "ix_orch_tasks_board_task", "board_task_id",
+            postgresql_where="board_task_id IS NOT NULL",
+        ),
+        Index(
+            "ix_orch_tasks_state_updated", "state", "updated_at",
+            postgresql_where="state_type NOT IN ('terminal', 'pending')",
+        ),
+        CheckConstraint(
+            "verifier_score >= 0 AND verifier_score <= 1",
+            name="ck_orch_tasks_score_range",
+        ),
+        CheckConstraint("attempt_number >= 1", name="ck_orch_tasks_attempt_positive"),
+        CheckConstraint("continuation_count >= 0", name="ck_orch_tasks_continuation_positive"),
+        CheckConstraint("tokens_used >= 0", name="ck_orch_tasks_tokens_positive"),
+        CheckConstraint("cost >= 0", name="ck_orch_tasks_cost_positive"),
+        {"extend_existing": True},
+    )
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("orchestration_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    workspace_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence_number = Column(SmallInteger, nullable=False)
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    task_type = Column(String(30), nullable=False)
+    state = Column(String(30), nullable=False, default="pending", server_default="pending")
+    state_type = Column(String(10), nullable=False, default="pending", server_default="pending")
+    trigger_rule = Column(String(30), nullable=False, default="all_success", server_default="all_success")
+    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    agent_type = Column(String(20), nullable=True)
+    model_override = Column(String(255), nullable=True)
+    tools_requested = Column(JSONB, nullable=True)
+    success_criteria = Column(Text, nullable=True)
+    output_summary = Column(String(2000), nullable=True)
+    output_ref = Column(String(500), nullable=True)
+    verifier_score = Column(Numeric(3, 2), nullable=True)
+    verified_by = Column(String(255), nullable=True)
+    error_message = Column(Text, nullable=True)
+    attempt_number = Column(SmallInteger, nullable=False, default=1, server_default="1")
+    continuation_count = Column(SmallInteger, nullable=False, default=0, server_default="0")
+    tokens_used = Column(Integer, nullable=False, default=0, server_default="0")
+    cost = Column(Numeric(10, 6), nullable=False, default=0, server_default="0")
+    board_task_id = Column(
+        Integer, ForeignKey("board_tasks.id", ondelete="SET NULL"), nullable=True,
+    )
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    version_id = Column(Integer, nullable=False, default=1, server_default="1")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
+    )
+
+    __mapper_args__ = {"version_id_col": version_id}
+
+    # Relationships
+    run = relationship("OrchestrationRun", back_populates="tasks")
+    workspace = relationship("Workspace", foreign_keys=[workspace_id])
+    agent = relationship("Agent", foreign_keys=[agent_id])
+    board_task = relationship("BoardTask", foreign_keys=[board_task_id])
+    events = relationship(
+        "OrchestrationEvent", back_populates="task", cascade="all, delete-orphan",
+    )
+
+
+# ---------------------------------------------------------------------------
+# orchestration_task_dependencies
+# ---------------------------------------------------------------------------
+
+class OrchestrationTaskDependency(Base):
+    """DAG edge: task_id depends on depends_on_id."""
+
+    __tablename__ = "orchestration_task_dependencies"
+    __table_args__ = (
+        Index("ix_task_deps_depends_on", "depends_on_id"),
+        CheckConstraint("task_id != depends_on_id", name="ck_task_deps_no_self_ref"),
+        {"extend_existing": True},
+    )
+
+    task_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("orchestration_tasks.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    depends_on_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("orchestration_tasks.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    dependency_type = Column(String(20), nullable=False, default="data", server_default="data")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    task = relationship(
+        "OrchestrationTask", foreign_keys=[task_id],
+        backref="downstream_deps",
+    )
+    depends_on = relationship(
+        "OrchestrationTask", foreign_keys=[depends_on_id],
+        backref="upstream_deps",
+    )
+
+
+# ---------------------------------------------------------------------------
+# orchestration_events
+# ---------------------------------------------------------------------------
+
+class OrchestrationEvent(Base):
+    """Append-only event log for mission lifecycle tracking.
+
+    Events are NEVER updated or deleted by application code.
+    Every state transition emits an event in the same transaction
+    (dual-write pattern, PRD-101 Section 2.4).
+    """
+
+    __tablename__ = "orchestration_events"
+    __table_args__ = (
+        Index("ix_orch_events_run_id", "run_id", "id"),
+        Index(
+            "ix_orch_events_task_id", "task_id", "id",
+            postgresql_where="task_id IS NOT NULL",
+        ),
+        Index("ix_orch_events_type_created", "event_type", "created_at"),
+        {"extend_existing": True},
+    )
+    # NOTE: BRIN index on created_at must be created via raw SQL in migration:
+    # CREATE INDEX ix_orch_events_created_brin ON orchestration_events USING BRIN (created_at)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    run_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("orchestration_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    task_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("orchestration_tasks.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    event_type = Column(String(50), nullable=False)
+    payload = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    actor_type = Column(String(20), nullable=False, default="system", server_default="system")
+    actor_id = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # No version_id — events are immutable
+    # No updated_at — events are never modified
+
+    # Relationships
+    run = relationship("OrchestrationRun", back_populates="events")
+    task = relationship("OrchestrationTask", back_populates="events")
+```
+
+### 13.1 Model Registration
+
+Add to `orchestrator/core/models/__init__.py`:
+
+```python
+from .orchestration import (
+    OrchestrationRun,
+    OrchestrationTask,
+    OrchestrationTaskDependency,
+    OrchestrationEvent,
+)
+```
+
+### 13.2 Enum Definitions
+
+Place in `orchestrator/core/models/orchestration_enums.py` (separate file to avoid circular imports):
+
+```python
+"""PRD-101: Orchestration enums for state machines, event types, and task classification."""
+
+from enum import StrEnum
+
+
+class StateType(StrEnum):
+    """Stable orchestration logic enum (4 values). Coordinator switches on this."""
+    PENDING = "pending"
+    RUNNING = "running"
+    PAUSED = "paused"
+    TERMINAL = "terminal"
+
+
+class RunState(StrEnum):
+    """Rich display state for orchestration_runs."""
+    PENDING = "pending"
+    PLANNING = "planning"
+    AWAITING_APPROVAL = "awaiting_approval"
+    RUNNING = "running"
+    PAUSED = "paused"
+    BUDGET_EXCEEDED = "budget_exceeded"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class TaskState(StrEnum):
+    """Rich display state for orchestration_tasks."""
+    PENDING = "pending"
+    QUEUED = "queued"
+    AWAITING_RETRY = "awaiting_retry"
+    ASSIGNED = "assigned"
+    RUNNING = "running"
+    CONTINUING = "continuing"
+    VERIFYING = "verifying"
+    AWAITING_HUMAN = "awaiting_human"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    SKIPPED = "skipped"
+
+
+class TaskType(StrEnum):
+    """Classification of orchestration task work."""
+    RESEARCH = "research"
+    ANALYSIS = "analysis"
+    WRITING = "writing"
+    CODING = "coding"
+    VERIFICATION = "verification"
+    REVIEW = "review"
+    SYNTHESIS = "synthesis"
+    OTHER = "other"
+
+
+class TriggerRule(StrEnum):
+    """When a task's dependencies are considered met."""
+    ALL_SUCCESS = "all_success"
+    ALL_DONE = "all_done"
+    NONE_FAILED = "none_failed"
+    ALWAYS = "always"
+
+
+class AgentType(StrEnum):
+    """Whether an agent is permanent or mission-scoped."""
+    ROSTER = "roster"
+    CONTRACTOR = "contractor"
+
+
+class EventType(StrEnum):
+    """Typed event categories for orchestration_events."""
+    # Run lifecycle
+    RUN_CREATED = "run_created"
+    RUN_PLANNING_STARTED = "run_planning_started"
+    RUN_PLAN_READY = "run_plan_ready"
+    RUN_APPROVED = "run_approved"
+    RUN_REJECTED = "run_rejected"
+    RUN_STARTED = "run_started"
+    RUN_PAUSED = "run_paused"
+    RUN_RESUMED = "run_resumed"
+    RUN_BUDGET_WARNING = "run_budget_warning"
+    RUN_BUDGET_EXCEEDED = "run_budget_exceeded"
+    RUN_BUDGET_INCREASED = "run_budget_increased"
+    RUN_COMPLETED = "run_completed"
+    RUN_FAILED = "run_failed"
+    RUN_CANCELLED = "run_cancelled"
+
+    # Task lifecycle
+    TASK_CREATED = "task_created"
+    TASK_QUEUED = "task_queued"
+    TASK_ASSIGNED = "task_assigned"
+    TASK_STARTED = "task_started"
+    TASK_CONTINUING = "task_continuing"
+    TASK_RESUMED = "task_resumed"
+    TASK_OUTPUT_SUBMITTED = "task_output_submitted"
+    TASK_VERIFICATION_STARTED = "task_verification_started"
+    TASK_VERIFICATION_PASSED = "task_verification_passed"
+    TASK_VERIFICATION_FAILED = "task_verification_failed"
+    TASK_HUMAN_REVIEW_REQUESTED = "task_human_review_requested"
+    TASK_HUMAN_APPROVED = "task_human_approved"
+    TASK_HUMAN_REJECTED = "task_human_rejected"
+    TASK_RETRYING = "task_retrying"
+    TASK_CRASHED = "task_crashed"
+    TASK_FAILED = "task_failed"
+    TASK_SKIPPED = "task_skipped"
+    TASK_CANCELLED = "task_cancelled"
+
+    # System
+    STALL_DETECTED = "stall_detected"
+    MODEL_FALLBACK = "model_fallback"
+    COST_SNAPSHOT = "cost_snapshot"
+
+
+class ActorType(StrEnum):
+    """Who triggered an orchestration event."""
+    SYSTEM = "system"
+    COORDINATOR = "coordinator"
+    AGENT = "agent"
+    VERIFIER = "verifier"
+    HUMAN = "human"
+    RECONCILER = "reconciler"
+
+
+# ---- State mappings ----
+
+RUN_STATE_TYPE: dict[RunState, StateType] = {
+    RunState.PENDING: StateType.PENDING,
+    RunState.PLANNING: StateType.PENDING,
+    RunState.AWAITING_APPROVAL: StateType.PENDING,
+    RunState.RUNNING: StateType.RUNNING,
+    RunState.PAUSED: StateType.PAUSED,
+    RunState.BUDGET_EXCEEDED: StateType.PAUSED,
+    RunState.COMPLETED: StateType.TERMINAL,
+    RunState.FAILED: StateType.TERMINAL,
+    RunState.CANCELLED: StateType.TERMINAL,
+}
+
+TASK_STATE_TYPE: dict[TaskState, StateType] = {
+    TaskState.PENDING: StateType.PENDING,
+    TaskState.QUEUED: StateType.PENDING,
+    TaskState.AWAITING_RETRY: StateType.PENDING,
+    TaskState.ASSIGNED: StateType.RUNNING,
+    TaskState.RUNNING: StateType.RUNNING,
+    TaskState.CONTINUING: StateType.RUNNING,
+    TaskState.VERIFYING: StateType.PAUSED,
+    TaskState.AWAITING_HUMAN: StateType.PAUSED,
+    TaskState.COMPLETED: StateType.TERMINAL,
+    TaskState.FAILED: StateType.TERMINAL,
+    TaskState.CANCELLED: StateType.TERMINAL,
+    TaskState.SKIPPED: StateType.TERMINAL,
+}
+
+TERMINAL_RUN_STATES = frozenset(
+    s for s, t in RUN_STATE_TYPE.items() if t == StateType.TERMINAL
+)
+TERMINAL_TASK_STATES = frozenset(
+    s for s, t in TASK_STATE_TYPE.items() if t == StateType.TERMINAL
+)
+
+# ---- Transition tables ----
+
+ALLOWED_RUN_TRANSITIONS: dict[RunState, frozenset[RunState]] = {
+    RunState.PENDING:           frozenset({RunState.PLANNING, RunState.CANCELLED}),
+    RunState.PLANNING:          frozenset({RunState.AWAITING_APPROVAL, RunState.RUNNING,
+                                           RunState.FAILED, RunState.CANCELLED}),
+    RunState.AWAITING_APPROVAL: frozenset({RunState.RUNNING, RunState.FAILED, RunState.CANCELLED}),
+    RunState.RUNNING:           frozenset({RunState.COMPLETED, RunState.FAILED, RunState.PAUSED,
+                                           RunState.BUDGET_EXCEEDED, RunState.CANCELLED}),
+    RunState.PAUSED:            frozenset({RunState.RUNNING, RunState.CANCELLED}),
+    RunState.BUDGET_EXCEEDED:   frozenset({RunState.RUNNING, RunState.CANCELLED}),
+    RunState.COMPLETED:         frozenset(),
+    RunState.FAILED:            frozenset(),
+    RunState.CANCELLED:         frozenset(),
+}
+
+ALLOWED_TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
+    TaskState.PENDING:        frozenset({TaskState.QUEUED, TaskState.SKIPPED, TaskState.CANCELLED}),
+    TaskState.QUEUED:         frozenset({TaskState.ASSIGNED, TaskState.CANCELLED}),
+    TaskState.ASSIGNED:       frozenset({TaskState.RUNNING, TaskState.CANCELLED}),
+    TaskState.RUNNING:        frozenset({TaskState.CONTINUING, TaskState.VERIFYING,
+                                         TaskState.AWAITING_RETRY, TaskState.FAILED,
+                                         TaskState.CANCELLED}),
+    TaskState.CONTINUING:     frozenset({TaskState.RUNNING, TaskState.CANCELLED}),
+    TaskState.VERIFYING:      frozenset({TaskState.COMPLETED, TaskState.AWAITING_RETRY,
+                                         TaskState.AWAITING_HUMAN, TaskState.FAILED}),
+    TaskState.AWAITING_HUMAN: frozenset({TaskState.COMPLETED, TaskState.AWAITING_RETRY,
+                                         TaskState.FAILED}),
+    TaskState.AWAITING_RETRY: frozenset({TaskState.ASSIGNED, TaskState.CANCELLED}),
+    TaskState.COMPLETED:      frozenset(),
+    TaskState.FAILED:         frozenset(),
+    TaskState.CANCELLED:      frozenset(),
+    TaskState.SKIPPED:        frozenset(),
+}
+
+# ---- Board task status mapping ----
+
+TASK_STATE_TO_BOARD_STATUS: dict[TaskState, str] = {
+    TaskState.PENDING:        "inbox",
+    TaskState.QUEUED:         "inbox",
+    TaskState.AWAITING_RETRY: "assigned",
+    TaskState.ASSIGNED:       "assigned",
+    TaskState.RUNNING:        "in_progress",
+    TaskState.CONTINUING:     "in_progress",
+    TaskState.VERIFYING:      "review",
+    TaskState.AWAITING_HUMAN: "review",
+    TaskState.COMPLETED:      "done",
+    TaskState.FAILED:         "done",
+    TaskState.CANCELLED:      "done",
+    TaskState.SKIPPED:        "done",
+}
+```

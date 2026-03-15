@@ -1,7 +1,7 @@
 {
   "project": "PRD-100 Super Ralph Loop",
   "description": "Meta-PRD factory: Ralph designs 8 research PRDs (101-108), then Ralph writes each one",
-  "currentLoop": 1,
+  "currentLoop": 2,
   "totalLoops": 9,
   "loops": [
     {
@@ -13,7 +13,7 @@
     {
       "id": 1,
       "name": "loop-1-prd101",
-      "status": "pending",
+      "status": "complete",
       "description": "Research + write PRD-101: Mission Schema & Data Model"
     },
     {

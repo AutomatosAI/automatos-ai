@@ -9,7 +9,7 @@
 - [x] US-005: Design orchestration_events table
 - [x] US-006: Design integration with existing tables
 - [x] US-007: Write PRD introduction and problem statement
-- [ ] US-008: Write PRD conclusion, risks, and acceptance criteria
+- [x] US-008: Write PRD conclusion, risks, and acceptance criteria
 
 ## Discoveries
 
