@@ -1,6 +1,6 @@
 # PRD-101 — Mission Schema & Data Model
 
-**Version:** 0.1 (Draft — sections added incrementally)
+**Version:** 0.9 (Sections 1-8 complete; Sections 9-13 pending)
 **Type:** Research + Design
 **Status:** In Progress
 **Priority:** P0
@@ -12,7 +12,64 @@
 
 ## 1. Problem Statement
 
-_(US-007 — written after all research sections are complete)_
+### 1.1 The Gap
+
+Automatos has a production-grade foundation: 340 LLMs, 850 tools, 11 channel adapters, 5-layer memory, a Kanban board, agent reports, scheduled heartbeats, and a recipe engine. Users can do single-agent Tasks and scheduled Routines today. What they cannot do is describe a complex goal — "Research EU AI Act compliance for our product" — and have the system decompose it into subtasks, assign agents, execute with verification, and track everything on the board.
+
+This is the **Mission** gap identified in PRD-100 (Section 3). Every piece of infrastructure exists except the data layer that makes coordinated multi-agent execution persistent, traceable, and recoverable.
+
+Specifically, the platform has **no**:
+
+| Missing Component | Why It Matters |
+|-------------------|----------------|
+| `orchestration_runs` table | No way to record a mission's goal, plan, config, cost, or status |
+| `orchestration_tasks` table | No way to track subtasks with dependencies, assignment, and verification |
+| `orchestration_events` table | No audit trail for state transitions — debugging requires log-grepping |
+| Task dependency graph | No DAG, no topological sort, no "what's ready to run?" query |
+| State machine for task lifecycle | Board tasks have 4 statuses; missions need 10+ with defined transitions |
+| Integration contracts | No defined mapping from orchestration tables → board_tasks, agent_reports, recipes |
+
+Without this data layer, the Coordinator (PRD-102), Verifier (PRD-103), Ephemeral Agents (PRD-104), Budget Enforcement (PRD-105), and Telemetry (PRD-106) have nothing to read from or write to. **The schema is the foundation everything else stands on.**
+
+### 1.2 What This PRD Delivers
+
+This document is the research and design specification for the mission data layer. It delivers:
+
+- [x] **Prior art analysis** (Section 2) — five production systems studied: Temporal, Prefect, Airflow, Dagster, Symphony. Key patterns extracted: dual-write state tracking, DB-authoritative scheduling, continuation vs retry, infrastructure vs quality failure classification.
+- [x] **State machine design** (Section 3) — two-level state model (StateType + StateName), full transition tables for runs and tasks, continuation vs retry semantics, stall detection algorithm, board task status mapping, concurrency safety via optimistic locking.
+- [x] **`orchestration_runs` table** (Section 4) — 20 columns, JSONB schemas for plan and config, 7 indexes, Alembic migration pseudocode.
+- [x] **`orchestration_tasks` table** (Section 5) — 25 columns, join table for dependencies with trigger rules, topological sort algorithm using `graphlib.TopologicalSorter`, board task bridge functions, Alembic migration.
+- [x] **`orchestration_events` table** (Section 6) — append-only audit trail, 30+ event types, BRIN indexes for time-series queries, retention policy, connection to PRD-106 telemetry.
+- [x] **Integration contracts** (Section 7) — field mappings to board_tasks, agent_reports, and recipes. ER diagram. Migration safety guarantees. Workspace isolation pattern.
+- [ ] **Full SQL DDL** (Section 12) — copy-pasteable CREATE TABLE statements.
+- [ ] **SQLAlchemy models** (Section 13) — Python model classes matching existing codebase conventions.
+
+### 1.3 What This PRD Does NOT Cover
+
+These are explicitly out of scope — each has its own research PRD:
+
+| Out of Scope | Covered By |
+|-------------|------------|
+| How the coordinator decomposes goals into tasks | PRD-102 (Coordinator Architecture) |
+| How verification/scoring works | PRD-103 (Verification & Quality) |
+| Ephemeral "contractor" agent lifecycle | PRD-104 (Ephemeral Agents & Model Selection) |
+| Budget enforcement and approval gates | PRD-105 (Budget & Governance) |
+| Outcome telemetry queries and learning | PRD-106 (Outcome Telemetry & Learning Foundation) |
+| Context interface for Phase 3 swap | PRD-107 (Context Interface Abstraction) |
+| API endpoints and service layer | PRD-82A (Implementation PRD) |
+| Frontend changes beyond existing board | PRD-82A (Implementation PRD) |
+
+This PRD designs the **tables, state machine, and integration contracts**. PRD-82A will take these designs and produce the Alembic migration, SQLAlchemy models, API endpoints, and service layer code.
+
+### 1.4 Design Philosophy
+
+Five principles guided every decision in this document:
+
+1. **Research before building.** Every architectural choice in Sections 3-7 cites a production system that validated the pattern at scale. No design-by-vibes.
+2. **DB-authoritative.** The database is the single source of truth for mission state. The coordinator re-derives "what's ready to run?" from DB on every tick. No in-memory state to lose on crash.
+3. **Dual-write for state.** Current state denormalized on the row for O(1) dashboard queries. Every transition also appended to `orchestration_events` for audit trail. Both in one transaction.
+4. **Additive-only integration.** Three new tables. Zero changes to existing table structures. New optional columns and indexes on existing tables added via `CREATE INDEX CONCURRENTLY`. No downtime. No backfill.
+5. **Schema enables, implementation decides.** The schema supports parallel execution, budget enforcement, and verification scoring — but whether those features are built sequentially or in parallel is an implementation decision for PRD-82A through 82D.
 
 ---
 
@@ -2850,7 +2907,32 @@ def downgrade() -> None:
 
 ## 8. Open Questions
 
-_(US-007)_
+These are unresolved design decisions surfaced during research. Each needs input before or during implementation (PRD-82A).
+
+### 8.1 Schema Design Questions
+
+| # | Question | Context | Options | Recommendation |
+|---|----------|---------|---------|----------------|
+| Q1 | **Should `orchestration_events` use BIGSERIAL or UUID for PK?** | BIGSERIAL is more natural for append-only tables (monotonic, BRIN-friendly, smaller indexes). UUID matches every other table in the codebase. | (a) BIGSERIAL — optimal for append-only workload (b) UUID — consistency with codebase | BIGSERIAL — event tables are different from entity tables. Append-only semantics favor monotonic keys. BRIN indexes on BIGSERIAL are ~100x smaller than B-tree on UUID. |
+| Q2 | **Should `plan` JSONB on `orchestration_runs` be immutable after planning phase?** | Currently the design allows plan mutation during execution (e.g., coordinator adds tasks dynamically). But immutable plans are easier to reason about and debug. | (a) Immutable after `RUNNING` — changes create a new plan version (b) Mutable — coordinator updates in place (c) Append-only plan history (array of versions) | Mutable for v1 — dynamic replanning is a Phase 2 feature (PRD-102) and immutability would block it. Revisit when PRD-102 defines coordinator behavior. |
+| Q3 | **How should large task outputs be stored?** | Section 5.1 says outputs go to `output_ref` (workspace file path or report ID). But the workspace file system is per-agent, and missions span multiple agents. | (a) Workspace files under `/missions/{run_id}/` directory (b) Agent reports via `platform_submit_report` (c) S3 directly (d) JSONB column with size limit | (a) or (b) — workspace files for raw output, agent reports for structured results. PRD-76 already built the report pipeline. Avoid S3 for v1 complexity. |
+| Q4 | **Should `orchestration_task_dependencies` support weighted edges?** | Current design has `dependency_type` (strict/soft). Weighted edges could express "80% confidence this dependency is needed" for AI-planned graphs. | (a) Keep simple — strict/soft only (b) Add `weight` FLOAT column | (a) — YAGNI. AI-planned dependency confidence is a PRD-102 concern. The schema can add a column later without migration risk. |
+
+### 8.2 Integration Questions
+
+| # | Question | Context | Options | Recommendation |
+|---|----------|---------|---------|----------------|
+| Q5 | **Should board task creation be synchronous (in transition_task) or async (event-driven)?** | Section 7.2.5 defines synchronous board task creation inside `transition_task()`. This couples orchestration to board logic. An event-driven approach (listen to `orchestration_events`) decouples them but adds eventual consistency. | (a) Synchronous — same transaction, guaranteed consistency (b) Async — event consumer creates board tasks | (a) for v1 — the board task bridge is 3 functions and matches the existing `board_task_bridge.py` pattern from recipes. Decoupling adds complexity without benefit at our scale. |
+| Q6 | **Should recipe conversion (Section 7.4) preserve agent assignments or parameterize them?** | A mission assigns specific roster agents. When converted to a recipe, should it lock to those agents or use role-based placeholders? | (a) Snapshot — lock agent IDs (b) Parameterize — convert to role placeholders like `{researcher}` (c) Snapshot with manual editing | (c) — snapshot first, let users edit. Auto-parameterization requires prompt analysis that's out of scope. |
+| Q7 | **Should `workspace_id` on `orchestration_tasks` be denormalized?** | Section 7.5.3 argues for denormalization (avoids JOIN to `orchestration_runs` on every task query). But it's redundant data. | Already decided: Yes, denormalize. | Confirmed — every task query needs workspace scoping. The JOIN cost is small but avoidable, and the pattern matches `board_tasks` which also denormalizes `workspace_id`. |
+
+### 8.3 Operational Questions
+
+| # | Question | Context | Options | Recommendation |
+|---|----------|---------|---------|----------------|
+| Q8 | **What's the event retention period?** | Section 6.7 proposes 90 days hot + archive. But we don't have an archive mechanism today. | (a) 90 days, then DELETE (b) 90 days, then archive to S3/cold storage (c) Keep everything (small scale) | (c) for v1 — at <1000 missions/month, event volume is negligible. Revisit when PRD-106 telemetry analysis defines data retention needs. |
+| Q9 | **Should the stall detection reconciler be a new service or extend `task_reconciler.py`?** | Section 3.7 proposes extending the existing reconciler. But orchestration stall detection has different logic than recipe task reconciliation. | (a) Extend `task_reconciler.py` — add orchestration-specific tick (b) New `orchestration_reconciler.py` — separate concerns | (b) — separate file, same APScheduler infrastructure. The reconciliation logic is different enough to warrant its own module. Register it as a new scheduled tick alongside the existing one. |
+| Q10 | **Should we add a `tags` JSONB column or a separate `orchestration_run_tags` table?** | Section 2.4 notes Dagster uses `run_tags` table for filterable metadata. JSONB is simpler but harder to index for arbitrary key lookups. | (a) JSONB column on `orchestration_runs` (b) Separate tags table with `(run_id, key, value)` | (a) for v1 — GIN index on JSONB handles our query patterns. Separate table is warranted only if we need cross-run tag aggregation queries, which is a PRD-106 concern. |
 
 ---
 
