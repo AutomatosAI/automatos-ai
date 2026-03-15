@@ -74,3 +74,16 @@
 - No internal commit/rollback (except rollback on StaleDataError before re-raising)
 - Pattern follows existing board_task_bridge.py style (db: Session param, logging, typed returns)
 - Import validated: all 5 exports resolve cleanly
+
+### Iteration 8 — US-008: Board Bridge Service
+- Created `orchestrator/services/orchestration_board_bridge.py`
+- 3 public functions: create_mission_board_task(), create_task_board_task(), sync_board_status()
+- 1 internal helper: _resolve_board_status() — maps TaskState → BOARD_STATUS_MAP (PRD terms) → kanban status
+- Secondary mapping _ORCHESTRATION_TO_BOARD_STATUS bridges PRD vocabulary (backlog/todo/blocked/cancelled) to BoardTask vocabulary (inbox/in_progress/review/done)
+- create_mission_board_task(): source_type='orchestration', links via orchestration_run_id FK, idempotent
+- create_task_board_task(): source_type='orchestration_task', links via orchestration_task_id FK, parent_task_id set to mission board task, idempotent
+- sync_board_status(): reads task.state, maps to board status, updates linked BoardTask; syncs agent assignment, timestamps, result/error
+- All writes in caller's transaction (db.flush(), no commit)
+- Non-fatal: missing board tasks → log warning, don't crash
+- Discovery: BoardTask ORM model was missing orchestration_run_id and orchestration_task_id FK columns (migration had them). Added to core.py and to_dict()
+- Import validated: all 3 exports resolve cleanly

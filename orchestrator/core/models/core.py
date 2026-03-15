@@ -1516,6 +1516,8 @@ class BoardTask(Base):
     parent_task_id = Column(Integer, ForeignKey('board_tasks.id', ondelete='SET NULL'), nullable=True)
     source_type = Column(String(30), nullable=False, default='user', server_default='user')
     source_id = Column(String(255), nullable=True)
+    orchestration_run_id = Column(UUID, ForeignKey('orchestration_runs.id', ondelete='SET NULL'), nullable=True)
+    orchestration_task_id = Column(UUID, ForeignKey('orchestration_tasks.id', ondelete='SET NULL'), nullable=True)
     tags = Column(JSONB, default=list)
     result = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
@@ -1543,6 +1545,8 @@ class BoardTask(Base):
             "parent_task_id": self.parent_task_id,
             "source_type": self.source_type,
             "source_id": self.source_id,
+            "orchestration_run_id": str(self.orchestration_run_id) if self.orchestration_run_id else None,
+            "orchestration_task_id": str(self.orchestration_task_id) if self.orchestration_task_id else None,
             "tags": self.tags or [],
             "result": self.result,
             "error_message": self.error_message,
