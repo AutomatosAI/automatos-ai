@@ -217,7 +217,7 @@ ALLOWED_TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.RUNNING: frozenset({TaskState.COMPLETED, TaskState.STALLED, TaskState.FAILED, TaskState.SKIPPED}),
     TaskState.COMPLETED: frozenset({TaskState.VERIFYING, TaskState.SKIPPED}),
     TaskState.VERIFYING: frozenset({TaskState.VERIFIED, TaskState.RETRYING, TaskState.FAILED, TaskState.SKIPPED}),
-    TaskState.VERIFIED: frozenset(),  # terminal
+    TaskState.VERIFIED: frozenset({TaskState.RETRYING}),  # terminal except human rejection
     TaskState.FAILED: frozenset(),    # terminal
     TaskState.SKIPPED: frozenset(),   # terminal
     TaskState.STALLED: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED}),

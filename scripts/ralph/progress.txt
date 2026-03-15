@@ -147,3 +147,21 @@
 - Board status synced after every task state change via sync_board_status()
 - ConflictError handling on all transitions (optimistic locking awareness)
 - Import validated: MissionReconciler, ReconcileResult resolve cleanly
+
+### Iteration 14 — US-014: CoordinatorService
+- Created `orchestrator/services/coordinator_service.py`
+- CoordinatorService class with async tick() method — queries RUNNING missions, per-run dispatch + reconcile
+- Tick guard: _tick_running flag prevents concurrent ticks
+- _process_run(): loads workspace roster agents, calls MissionDispatcher.dispatch_next(), calls MissionReconciler.reconcile(), auto-builds output summary when run advances to VERIFYING
+- _execute_task(): AgentFactory.execute_with_prompt() integration, ASSIGNED→RUNNING→COMPLETED/FAILED transitions, run-level token tracking with BUDGET_WARNING event at >1.5× estimate
+- Lifecycle: create_mission() — PENDING→PLANNING→decompose()→create task+dep+board rows→AWAITING_APPROVAL (or RUNNING if auto_approve)
+- Lifecycle: approve_plan() — AWAITING_APPROVAL→RUNNING, queues root tasks (no deps) via DependencyResolver.get_ready_tasks()
+- Lifecycle: reject_plan() — →FAILED, skips all pending tasks
+- Lifecycle: review_mission() — accept→COMPLETED; reject→re-queue specific tasks with human feedback injected into input_context
+- Lifecycle: pause/resume/cancel with appropriate events and task skipping
+- build_output_summary(): structured aggregation per PRD-82A Section 6 (goal, task_summaries, duration, token counts)
+- Helper: _queue_initial_tasks() transitions PENDING→QUEUED for root tasks
+- Helper: _requeue_task_with_feedback() injects feedback into input_context, transitions VERIFIED→RETRYING→ASSIGNED
+- Enum fix: added RETRYING to ALLOWED_TASK_TRANSITIONS[VERIFIED] — required for human rejection flow (PRD-82A Section 16)
+- DB pattern: SessionLocal per tick (no stored session on singleton), matching heartbeat_service pattern
+- Import validated: CoordinatorService resolves cleanly
