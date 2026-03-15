@@ -1,0 +1,458 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/82a-sequential-mission-coordinator",
+  "description": "PRD-82A: Sequential Mission Coordinator — user says 'do this project' → coordinator decomposes into tasks → assigns roster agents → executes sequentially → verifies each output → human reviews. One task at a time. No contractors, no budget gates, no parallel dispatch.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create orchestration enums module",
+      "description": "As a developer, I need all orchestration StrEnums defined so that models and services can reference canonical state values.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/models/orchestration_enums.py",
+        "Define StateType StrEnum: INITIAL, ACTIVE, BLOCKED, TERMINAL",
+        "Define RunState StrEnum with 10 values: pending, planning, awaiting_approval, running, paused, verifying, awaiting_human, completed, failed, cancelled",
+        "Define TaskState StrEnum with 11 values: pending, queued, assigned, running, completed, verifying, verified, failed, skipped, stalled, retrying",
+        "Define EventType StrEnum with at least 30 event types including BUDGET_WARNING (see PRD-101 Section 3.2)",
+        "Define ActorType StrEnum: system, coordinator, agent, human, scheduler",
+        "Define TaskType StrEnum: llm_generation, tool_execution, analysis, synthesis, review",
+        "Define TriggerRule StrEnum: all_success, any_success, all_complete",
+        "Define FailureReasonCode StrEnum with 8 values: agent_error, agent_timeout, verification_fail, verification_reject, no_agent_available, dependency_failed, cancelled, max_retries_exhausted",
+        "Create RUN_STATE_TYPE dict mapping each RunState to its StateType",
+        "Create TASK_STATE_TYPE dict mapping each TaskState to its StateType",
+        "Create TERMINAL_RUN_STATES frozenset: {completed, failed, cancelled}",
+        "Create TERMINAL_TASK_STATES frozenset: {verified, failed, skipped}",
+        "Create ALLOWED_TASK_TRANSITIONS dict mapping each TaskState to set of valid next states (per PRD-82A Section 4.2)",
+        "Create ALLOWED_RUN_TRANSITIONS dict mapping each RunState to set of valid next states",
+        "Create BOARD_STATUS_MAP dict mapping TaskState to board status string (per PRD-82A Section 4.3): pending→backlog, queued→todo, assigned→in_progress, running→in_progress, completed→in_review, verifying→in_review, verified→done, failed→blocked, stalled→blocked, retrying→in_progress, skipped→cancelled",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Reference PRD-82A Sections 4.1-4.3 and PRD-101 Section 3.2 + 3.10 for the full enum definitions. All enums inherit from str, Enum (StrEnum pattern). CRITICAL: completed is NOT terminal for tasks — only verified, failed, skipped are terminal."
+    },
+    {
+      "id": "US-002",
+      "title": "Create OrchestrationRun SQLAlchemy model",
+      "description": "As a developer, I need the OrchestrationRun model representing a mission execution in the database.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/models/orchestration.py",
+        "Define OrchestrationRun model with __tablename__ = 'orchestration_runs'",
+        "Columns: id (UUID, PK, server_default=gen_random_uuid()), workspace_id (UUID, FK workspaces.id, NOT NULL, indexed)",
+        "Columns: goal (Text, NOT NULL), plan (JSONB, nullable), config (JSONB, nullable, server_default='{}')",
+        "Columns: state (VARCHAR(30), NOT NULL, default='pending'), state_type (VARCHAR(10), NOT NULL, default='initial')",
+        "Columns: created_by (String, NOT NULL — Clerk user ID), assigned_coordinator_id (Integer, FK agents.id, nullable)",
+        "Columns: output_summary (JSONB, nullable), token_budget_estimate (Integer, nullable), tokens_used (Integer, server_default='0')",
+        "Columns: max_retries (Integer, server_default='3'), max_concurrent (Integer, server_default='1')",
+        "Columns: started_at (DateTime(timezone=True), nullable), completed_at (DateTime(timezone=True), nullable)",
+        "Columns: created_at (DateTime(timezone=True), server_default=func.now()), updated_at (DateTime(timezone=True), onupdate=func.now())",
+        "Column: version_id (Integer, NOT NULL, server_default='1') for optimistic locking",
+        "Add __mapper_args__ = {'version_id_col': version_id}",
+        "Add CHECK constraint: state IN (list of RunState values)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Reference PRD-101 Section 13 for column definitions. Use SQLAlchemy 2.0 style (mapped_column). workspace_id is UUID type matching existing workspaces table. created_by is String (Clerk user IDs like 'user_xxx'). Import func from sqlalchemy for server defaults."
+    },
+    {
+      "id": "US-003",
+      "title": "Create OrchestrationTask SQLAlchemy model",
+      "description": "As a developer, I need the OrchestrationTask model representing individual tasks within a mission.",
+      "acceptanceCriteria": [
+        "Add OrchestrationTask to orchestrator/core/models/orchestration.py",
+        "Columns: id (UUID, PK, server_default=gen_random_uuid()), run_id (UUID, FK orchestration_runs.id, NOT NULL, indexed)",
+        "Columns: title (String(500), NOT NULL), description (Text, nullable), task_type (VARCHAR(30), default='llm_generation')",
+        "Columns: sequence_number (Integer, NOT NULL), agent_role (String(100), nullable)",
+        "Columns: state (VARCHAR(30), NOT NULL, default='pending'), state_type (VARCHAR(10), NOT NULL, default='initial')",
+        "Columns: assigned_agent_id (Integer, FK agents.id, nullable), verification_criteria (JSONB, nullable)",
+        "Columns: input_context (JSONB, nullable), output (Text, nullable), output_metadata (JSONB, nullable)",
+        "Columns: failure_reason_code (VARCHAR(50), nullable), failure_detail (Text, nullable)",
+        "Columns: attempt_number (Integer, server_default='0'), max_retries (Integer, server_default='3')",
+        "Columns: tokens_used (Integer, server_default='0')",
+        "Columns: started_at, completed_at, created_at, updated_at (same timezone DateTime pattern as OrchestrationRun)",
+        "Column: version_id (Integer, NOT NULL, server_default='1') with __mapper_args__ version_id_col",
+        "Add composite index on (run_id, sequence_number)",
+        "Add partial index on state WHERE state NOT IN ('verified', 'failed', 'skipped') for active task queries",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Reference PRD-101 Section 13. sequence_number is the ordering within a mission. agent_role is the desired role (e.g., 'researcher') vs assigned_agent_id which is the actual agent chosen by AgentMatcher. The partial index on non-terminal states speeds up the coordinator tick's 'find active tasks' query."
+    },
+    {
+      "id": "US-004",
+      "title": "Create OrchestrationTaskDependency and OrchestrationEvent models",
+      "description": "As a developer, I need the dependency edge table and the append-only event log for the orchestration system.",
+      "acceptanceCriteria": [
+        "Add OrchestrationTaskDependency to orchestration.py with __tablename__ = 'orchestration_task_dependencies'",
+        "Dependency columns: id (UUID PK), task_id (UUID FK orchestration_tasks.id, NOT NULL), depends_on_task_id (UUID FK orchestration_tasks.id, NOT NULL), trigger_rule (VARCHAR(30), default='all_success')",
+        "Add unique constraint on (task_id, depends_on_task_id) to prevent duplicate edges",
+        "Add OrchestrationEvent to orchestration.py with __tablename__ = 'orchestration_events'",
+        "Event columns: id (UUID PK), run_id (UUID FK orchestration_runs.id, NOT NULL, indexed), task_id (UUID FK orchestration_tasks.id, nullable, indexed)",
+        "Event columns: event_type (VARCHAR(50), NOT NULL), actor_type (VARCHAR(20), NOT NULL), actor_id (String, nullable)",
+        "Event columns: old_state (VARCHAR(30), nullable), new_state (VARCHAR(30), nullable)",
+        "Event columns: payload (JSONB, nullable), created_at (DateTime(timezone=True), server_default=func.now())",
+        "Add index on (run_id, created_at) for event timeline queries",
+        "OrchestrationEvent has NO version_id — it is append-only, never updated",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Dependencies form a DAG. The trigger_rule determines when a downstream task becomes ready — 'all_success' means ALL upstream tasks must be in a terminal success state. Events are the audit trail — every state change gets an event row in the same transaction (dual-write pattern)."
+    },
+    {
+      "id": "US-005",
+      "title": "Create Alembic migration for orchestration tables",
+      "description": "As a developer, I need the database migration that creates all 4 orchestration tables and adds FK columns to existing tables.",
+      "acceptanceCriteria": [
+        "Create alembic/versions/xxxx_prd82a_orchestration_tables.py migration",
+        "CREATE TABLE orchestration_runs with all columns from OrchestrationRun model",
+        "CREATE TABLE orchestration_tasks with all columns from OrchestrationTask model",
+        "CREATE TABLE orchestration_task_dependencies with all columns",
+        "CREATE TABLE orchestration_events with all columns",
+        "ALTER TABLE board_tasks ADD COLUMN orchestration_run_id UUID NULL REFERENCES orchestration_runs(id)",
+        "ALTER TABLE board_tasks ADD COLUMN orchestration_task_id UUID NULL REFERENCES orchestration_tasks(id)",
+        "ALTER TABLE agent_reports ADD COLUMN orchestration_task_id UUID NULL REFERENCES orchestration_tasks(id)",
+        "Create all indexes defined in the models (including partial indexes and composite indexes)",
+        "Use CREATE INDEX CONCURRENTLY for indexes on existing tables (board_tasks, agent_reports)",
+        "downgrade() drops all FKs from board_tasks and agent_reports, then drops all 4 tables in reverse order",
+        "Migration runs successfully: alembic upgrade head",
+        "Migration reverts successfully: alembic downgrade -1",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Run 'alembic revision --autogenerate -m \"prd82a_orchestration_tables\"' to generate the skeleton, then verify and adjust. The board_tasks table is in core.py. agent_reports may be in a reports model. Check existing migration chain for the current head revision. All new FKs are nullable — no data migration needed."
+    },
+    {
+      "id": "US-006",
+      "title": "Register orchestration models in __init__.py",
+      "description": "As a developer, I need the new models importable from the core.models package.",
+      "acceptanceCriteria": [
+        "Add imports in orchestrator/core/models/__init__.py: from .orchestration import OrchestrationRun, OrchestrationTask, OrchestrationTaskDependency, OrchestrationEvent",
+        "Add imports: from .orchestration_enums import RunState, TaskState, EventType, ActorType, TaskType, TriggerRule, FailureReasonCode, StateType",
+        "Add imports for the mapping dicts and frozensets: ALLOWED_TASK_TRANSITIONS, ALLOWED_RUN_TRANSITIONS, TERMINAL_RUN_STATES, TERMINAL_TASK_STATES, BOARD_STATUS_MAP",
+        "Verify no circular import issues by running: python -c 'from orchestrator.core.models import OrchestrationRun'",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Follow the existing pattern in __init__.py for how other models are imported and re-exported."
+    },
+    {
+      "id": "US-007",
+      "title": "Create state transition service (orchestration_state.py)",
+      "description": "As a developer, I need validated state transitions with dual-write event emission for both tasks and runs.",
+      "acceptanceCriteria": [
+        "Create orchestrator/services/orchestration_state.py",
+        "Implement transition_task(db, task, new_state, actor_type, actor_id, reason=None) function",
+        "transition_task validates new_state is in ALLOWED_TASK_TRANSITIONS[task.state], raises InvalidTransitionError if not",
+        "transition_task updates task.state, task.state_type (from TASK_STATE_TYPE map), updates timestamps (started_at when entering running, completed_at when entering terminal)",
+        "transition_task creates OrchestrationEvent in same transaction with old_state, new_state, actor info",
+        "transition_task handles StaleDataError from SQLAlchemy (optimistic lock conflict) — raises a clean ConflictError",
+        "Implement transition_run(db, run, new_state, actor_type, actor_id, reason=None) with same pattern using ALLOWED_RUN_TRANSITIONS",
+        "transition_run updates started_at when entering 'running', completed_at when entering terminal states",
+        "Implement emit_event(db, run_id, event_type, actor_type, actor_id, task_id=None, payload=None) for non-transition events",
+        "Define InvalidTransitionError and ConflictError exception classes",
+        "All state changes and events happen in the caller's transaction (no internal commit)",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "The dual-write pattern means state change + event are in the SAME transaction. The caller (coordinator service) manages the transaction boundary. StaleDataError comes from SQLAlchemy's version_id_col mechanism — catch it and wrap in ConflictError. Import ALLOWED_TASK_TRANSITIONS etc from orchestration_enums."
+    },
+    {
+      "id": "US-008",
+      "title": "Create board bridge service (orchestration_board_bridge.py)",
+      "description": "As a developer, I need board tasks created and synced for mission visibility on the kanban.",
+      "acceptanceCriteria": [
+        "Create orchestrator/services/orchestration_board_bridge.py",
+        "Implement create_mission_board_task(db, run) — creates a BoardTask with source_type='orchestration', links via orchestration_run_id FK, title from run.goal, status='backlog'",
+        "Implement create_task_board_task(db, run, task) — creates a BoardTask with source_type='orchestration_task', links via orchestration_task_id FK, parent_id referencing the mission board task, title from task.title",
+        "Implement sync_board_status(db, task) — reads task.state, maps via BOARD_STATUS_MAP from enums, updates the linked BoardTask status",
+        "sync_board_status handles case where no linked BoardTask exists (log warning, don't crash)",
+        "Board tasks are created in the caller's transaction (no internal commit)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Read the existing BoardTask model in core/models/core.py first to understand its columns (status values, source_type field, parent_id for nesting). The source_type field may need to accept new values — check if it's a VARCHAR or an enum. If enum, you may need to add the new values."
+    },
+    {
+      "id": "US-009",
+      "title": "Create dependency resolver service (orchestration_deps.py)",
+      "description": "As a developer, I need DAG validation and topological ordering for task dependencies.",
+      "acceptanceCriteria": [
+        "Create orchestrator/services/orchestration_deps.py",
+        "Implement DependencyResolver class",
+        "validate_task_graph(tasks, deps) method — uses graphlib.TopologicalSorter to validate the DAG: no cycles, all dependency references point to valid task IDs, no orphan tasks",
+        "validate_task_graph raises CyclicDependencyError (custom exception) if cycle detected",
+        "validate_task_graph raises InvalidDependencyError if a dep references a non-existent task ID",
+        "get_ready_tasks(db, run_id) method — queries tasks for the run where state='pending' AND all upstream dependencies (via orchestration_task_dependencies) are in TERMINAL_TASK_STATES with success (verified state)",
+        "get_ready_tasks returns list of OrchestrationTask objects ordered by sequence_number",
+        "get_topological_order(tasks, deps) method — returns tasks in valid execution order",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "graphlib.TopologicalSorter is stdlib (Python 3.9+). CyclicGraphError from graphlib is raised automatically if there's a cycle — catch and wrap in CyclicDependencyError. For get_ready_tasks, the SQL query needs a NOT EXISTS subquery: no dependency where depends_on_task.state NOT IN ('verified')."
+    },
+    {
+      "id": "US-010",
+      "title": "Create coordination package and AgentMatcher",
+      "description": "As a developer, I need the coordination module package and the deterministic agent matching logic.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/coordination/__init__.py (empty package)",
+        "Create orchestrator/modules/coordination/agent_matcher.py",
+        "Implement AgentMatcher class with match(task_spec, agents) method",
+        "Scoring weights: tool_coverage=0.35, skill_match=0.25, model_fit=0.15, availability=0.10, history=0.15",
+        "tool_coverage: fraction of task's required tools that the agent has assigned",
+        "skill_match: 1.0 if agent's skill matches task's agent_role, 0.0 otherwise",
+        "model_fit: 1.0 if agent's model matches task preference (if specified), 0.5 otherwise",
+        "availability: 1.0 if agent has no RUNNING tasks in current missions, 0.5 if busy",
+        "history: placeholder returning 0.5 (no history data in 82A, will be wired in 82B)",
+        "Threshold: minimum score 0.4 — return None if no agent meets threshold",
+        "Returns the single best-scoring agent, or None",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "task_spec is a dict-like with optional keys: required_tools (list[str]), agent_role (str), preferred_model (str). agents is list of Agent ORM objects. The matcher is deterministic — no LLM calls. For availability, query orchestration_tasks WHERE assigned_agent_id = agent.id AND state IN ('assigned', 'running')."
+    },
+    {
+      "id": "US-011",
+      "title": "Create MissionPlanner with LLM decomposition",
+      "description": "As a developer, I need the planner that decomposes a goal into a task DAG using an LLM call with structural validation.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/coordination/planner.py",
+        "Implement MissionPlanner class",
+        "decompose(goal, workspace_id, agents, config) method returns DecompositionResult dataclass (tasks: list, dependencies: list, token_estimate: int)",
+        "Makes LLM call to coordinator's model with structured output schema requesting: list of tasks with title, description, agent_role, sequence_number, verification_criteria, required_tools, and dependency edges",
+        "PlanValidator sub-component validates the LLM output: DAG is acyclic (via DependencyResolver.validate_task_graph), all referenced agent_roles exist in the provided agents roster, task count within 3-20 bounds, no orphan tasks",
+        "If structural validation fails, retry LLM call up to 3 times with validation error feedback",
+        "If all 3 retries fail structural validation, raise PlanValidationError",
+        "token_estimate calculated as sum of estimated input+output tokens per task (rough: 2000 per task)",
+        "Uses config.LLM_MODEL as default model for the planning call (not hardcoded)",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "The LLM prompt should describe available agents (names, skills, tools) and ask for a sequential plan. Use OpenRouter via the existing LLM infrastructure (check how heartbeat_service or agent_factory makes LLM calls). The structured output schema should match what we need to create OrchestrationTask rows. Template matching is deferred to 82B — LLM-only decomposition for v1."
+    },
+    {
+      "id": "US-012",
+      "title": "Create MissionDispatcher with sequential execution",
+      "description": "As a developer, I need the dispatcher that claims queued tasks, selects agents, and calls execute_with_prompt().",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/coordination/dispatcher.py",
+        "Implement MissionDispatcher class",
+        "dispatch_next(db, run) method: find queued tasks via DependencyResolver.get_ready_tasks(), pick first by sequence_number",
+        "Sequential enforcement: if ANY task for this run is in state ASSIGNED or RUNNING, do NOT dispatch (return None)",
+        "Use optimistic claim pattern: UPDATE orchestration_tasks SET state='assigned', assigned_agent_id=:agent_id, version_id=version_id+1 WHERE id=:task_id AND state='queued' AND version_id=:expected — if 0 rows affected, skip (another instance claimed it)",
+        "Select agent via AgentMatcher.match() — if no match, transition task to failed with failure_reason_code='no_agent_available'",
+        "After successful claim, call AgentFactory.execute_with_prompt() with the task's description as prompt and assigned agent",
+        "On execute_with_prompt() completion: store output in task.output, transition to 'completed'",
+        "On execute_with_prompt() exception: transition to 'failed' with failure_reason_code='agent_error', store error in failure_detail",
+        "Create board task for the orchestration task via board bridge before dispatch",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "CRITICAL: The dispatch claim pattern (PRD-82A Section 4.4) prevents double-dispatch. Use raw SQL via db.execute(text(...)) for the atomic UPDATE since SQLAlchemy ORM version_id_col doesn't support the conditional UPDATE pattern directly. After claim succeeds, load the task fresh for the ORM. execute_with_prompt() is in agent_factory.py — check its current signature."
+    },
+    {
+      "id": "US-013",
+      "title": "Create MissionReconciler with stall detection",
+      "description": "As a developer, I need the reconciler that checks running tasks for stalls, handles completions, and advances mission state.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/coordination/reconciler.py",
+        "Implement MissionReconciler class",
+        "reconcile(db, run) method: check all non-terminal tasks for the run",
+        "Stall detection: ASSIGNED task with no state change for 60s → transition to 'stalled', set failure_reason_code='agent_timeout'",
+        "Stall detection: RUNNING task with no state change for 300s → transition to 'stalled', set failure_reason_code='agent_timeout'",
+        "Stall thresholds configurable via config (not hardcoded)",
+        "Stalled tasks: transition to 'assigned' for re-dispatch (stall recovery)",
+        "Completion check: if all tasks are in TERMINAL_TASK_STATES → check if all verified → transition run to 'verifying'",
+        "Failure check: if any task is 'failed' and attempt_number >= max_retries → transition run to 'failed'",
+        "Sync board task status after every task state change via board bridge",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "The reconciler runs on every coordinator tick (5s). Stall detection uses updated_at timestamp comparison. Use datetime.now(timezone.utc) not datetime.utcnow(). The 60s/300s thresholds should come from config.py — add COORDINATOR_ASSIGNED_STALL_THRESHOLD_SECONDS and COORDINATOR_RUNNING_STALL_THRESHOLD_SECONDS."
+    },
+    {
+      "id": "US-014",
+      "title": "Create CoordinatorService with tick loop and lifecycle methods",
+      "description": "As a developer, I need the main coordinator service that registers a 5s tick and orchestrates missions end-to-end.",
+      "acceptanceCriteria": [
+        "Create orchestrator/services/coordinator_service.py",
+        "Implement CoordinatorService class",
+        "tick() method: query all active orchestration_runs (state_type IN ('active', 'blocked' but not 'awaiting_approval', 'awaiting_human', 'paused')), for each: run dispatcher.dispatch_next() then reconciler.reconcile()",
+        "create_mission(db, workspace_id, goal, created_by, config=None) method: create OrchestrationRun in 'pending' state, call planner.decompose(), create OrchestrationTask rows + dependency rows, create board tasks, transition to 'awaiting_approval' (or 'running' if auto_approve in config)",
+        "approve_plan(db, run_id, modifications=None) method: validate run is in 'awaiting_approval', apply modifications if any, transition to 'running', queue first tasks (transition pending→queued for tasks with no dependencies)",
+        "reject_plan(db, run_id, reason) method: transition to 'failed' with reason",
+        "review_mission(db, run_id, verdict, task_feedback=None) method: if accept → transition to 'completed'; if reject with task_feedback → re-queue specific tasks with feedback",
+        "pause_mission(db, run_id) method: transition run to 'paused' (dispatcher skips paused missions)",
+        "resume_mission(db, run_id) method: transition run from 'paused' to 'running'",
+        "cancel_mission(db, run_id) method: transition run to 'cancelled', skip all pending/queued tasks",
+        "Build output_summary JSONB when all tasks verified (per PRD-82A Section 6) before transitioning to 'awaiting_human'",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "This is the brain of 82A. The tick() runs every 5s (registered on the shared scheduler — check how heartbeat_service registers its tick). tick() should be async. create_mission() is the most complex method — it calls the planner, creates all DB rows, and sets up the board. The output_summary is a structured JSON aggregation of task results (not an LLM call)."
+    },
+    {
+      "id": "US-015",
+      "title": "Register coordinator tick on scheduler",
+      "description": "As a developer, I need the coordinator tick registered alongside the heartbeat tick on the shared scheduler.",
+      "acceptanceCriteria": [
+        "Find where HeartbeatService registers its tick (likely in startup or scheduler registration code)",
+        "Register CoordinatorService.tick() on the same scheduler with 5s interval",
+        "Coordinator tick runs independently from heartbeat tick (they don't block each other)",
+        "Import and instantiate CoordinatorService in the startup path",
+        "Coordinator tick only runs if there are active missions (skip tick if no active runs, to avoid unnecessary DB queries)",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Check orchestrator/services/heartbeat_service.py or orchestrator/main.py for the scheduler pattern. The coordinator needs DB session access — follow the same pattern as heartbeat for session management. The 'skip if no active missions' optimization is a simple COUNT query."
+    },
+    {
+      "id": "US-016",
+      "title": "Add COORDINATOR context mode and MissionContextSection",
+      "description": "As a developer, I need the COORDINATOR context mode so the planner LLM call has mission state and agent roster in its prompt.",
+      "acceptanceCriteria": [
+        "Add ContextMode.COORDINATOR to orchestrator/modules/context/modes.py with sections: identity, mission_context, agent_roster, platform_actions, task_context, datetime_context",
+        "Set token_budget=131072, tool_loading='full', personality=False",
+        "Create orchestrator/modules/context/sections/mission_context.py with MissionContextSection class",
+        "MissionContextSection.render() outputs: mission goal, plan summary, current task statuses, agent assignments, token budget/usage",
+        "Register 'mission_context' in SECTION_REGISTRY (sections/__init__.py)",
+        "Add DEFAULT_BUDGETS entry for COORDINATOR mode in budget.py: total=131072, reserved_response=4096",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Follow the pattern of existing context sections (identity.py, skills.py, etc). MissionContextSection receives the mission run and its tasks via the context builder's kwargs. Check how ContextService.build_context() passes data to sections — it may use a context dict or kwargs."
+    },
+    {
+      "id": "US-017",
+      "title": "Create AgentRosterSection for context",
+      "description": "As a developer, I need the agent roster rendered in the coordinator's context so the planner knows what agents are available.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/context/sections/agent_roster.py with AgentRosterSection class",
+        "render() queries workspace agents: id, name, skills, assigned tools, configured model, recent task success rate",
+        "Output format: markdown list with each agent's capabilities summarized in 2-3 lines",
+        "If no agents in workspace, render a note: 'No agents available in this workspace'",
+        "Register 'agent_roster' in SECTION_REGISTRY (sections/__init__.py)",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "The roster helps the planner assign the right agent_role to each task. Recent success rate can be derived from agent_reports or orchestration_events if they exist, otherwise default to 'no history'. Keep the rendering concise — the coordinator needs capability info, not full agent configs."
+    },
+    {
+      "id": "US-018",
+      "title": "Create DeterministicChecker for verification",
+      "description": "As a developer, I need deterministic checks that validate task output before burning an LLM verification call.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/coordination/deterministic_checks.py",
+        "Implement DeterministicChecker class",
+        "check(output, criteria) method — criteria is a list of check dicts from task.verification_criteria",
+        "Support 8 check types: format_regex, min_length, max_length, required_sections, json_schema, url_valid, contains_keywords, word_count_range",
+        "format_regex: output matches the provided regex pattern",
+        "min_length / max_length: character count bounds",
+        "required_sections: output contains all listed markdown section headers (e.g., '## Summary')",
+        "json_schema: if output is JSON, validate against provided schema",
+        "url_valid: any URLs in output are well-formed",
+        "contains_keywords: output contains all listed keywords",
+        "word_count_range: word count within [min, max] bounds",
+        "Returns DeterministicResult(passed: bool, failures: list[str]) — failures list describes which checks failed and why",
+        "If any check with must_pass=True fails, short-circuit and return immediately",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Each criterion dict: {'type': 'min_length', 'value': 100, 'must_pass': True}. The must_pass flag means failure is instant FAIL — no LLM judge needed. Non-must_pass failures are informational and passed to the LLM judge for consideration. Use re module for regex, json module for schema validation."
+    },
+    {
+      "id": "US-019",
+      "title": "Create VerificationService with cross-model LLM judge",
+      "description": "As a developer, I need the verification service that runs deterministic checks then an LLM judge using a different model family.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/coordination/verification.py",
+        "Implement VerificationService class",
+        "verify_task(db, task) method returns VerificationResult(verdict: str, scores: dict, reasoning: str) where verdict is 'pass', 'fail', or 'partial'",
+        "Step 1: Run DeterministicChecker — if must_pass check fails, return verdict='fail' immediately",
+        "Step 2: Select verifier model — if task agent used Claude family, use GPT-4o; if GPT family, use Claude. Use config for model names (not hardcoded)",
+        "Step 3: LLM judge call with prompt: task description + expected output criteria + actual output + deterministic check results → structured verdict",
+        "LLM judge scores: relevance (0-1), completeness (0-1), accuracy (0-1), format_compliance (0-1)",
+        "verdict='pass' if all scores >= 0.7, 'fail' if any score < 0.4, 'partial' otherwise",
+        "Store verification result as OrchestrationEvent with event_type='verification_completed' and scores in payload",
+        "Handle LLM judge errors: up to 2 retries on the verification call itself",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "Cross-model verification is a core PRD-82A principle (Section 5, principle 4). The model family detection: check if the agent's model string contains 'claude' or 'gpt' or 'deepseek' etc. Use config.VERIFICATION_MODEL_MAPPING or similar to define the cross-model pairs. The LLM call goes through OpenRouter like other LLM calls in the system."
+    },
+    {
+      "id": "US-020",
+      "title": "Wire verification into reconciler",
+      "description": "As a developer, I need the reconciler to call VerificationService after task completion and handle pass/fail/partial verdicts.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/reconciler.py, after detecting a task in 'completed' state: transition to 'verifying', call VerificationService.verify_task()",
+        "On verdict='pass': transition task to 'verified', sync board status to 'done'",
+        "On verdict='fail': if attempt_number < max_retries, transition to 'retrying' with failure_reason_code='verification_fail', inject verifier reasoning into task context for retry",
+        "On verdict='fail' with attempt_number >= max_retries: transition to 'failed' with failure_reason_code='max_retries_exhausted'",
+        "On verdict='partial': transition to 'failed' with failure_reason_code='verification_fail' and emit event for potential human escalation",
+        "After all tasks verified: build output_summary, transition run to 'awaiting_human'",
+        "Update tokens_used on task and run after each verification",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "The verification flow: completed → verifying → verified (or retrying/failed). When retrying, the verifier's reasoning gets injected into the task's input_context so the agent sees what went wrong. Token tracking: add verification tokens to task.tokens_used and run.tokens_used."
+    },
+    {
+      "id": "US-021",
+      "title": "Create missions REST API router",
+      "description": "As a developer, I need the REST API endpoints for creating and managing missions.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/missions.py with FastAPI APIRouter",
+        "POST /api/missions — accepts {goal: str, config: dict optional}, calls CoordinatorService.create_mission(), returns 201 with run_id",
+        "GET /api/missions — list missions for workspace, paginated (limit/offset), filterable by state query param",
+        "GET /api/missions/{id} — returns full mission detail: run + tasks (with states) + recent events",
+        "POST /api/missions/{id}/approve — calls approve_plan(), accepts optional {modifications: dict}",
+        "POST /api/missions/{id}/reject — calls reject_plan(), requires {reason: str}",
+        "POST /api/missions/{id}/review — calls review_mission(), accepts {verdict: 'accept'|'reject', task_feedback: dict optional}",
+        "POST /api/missions/{id}/pause — calls pause_mission()",
+        "POST /api/missions/{id}/resume — calls resume_mission()",
+        "POST /api/missions/{id}/cancel — calls cancel_mission()",
+        "All endpoints require auth (use existing auth dependency from other API routers)",
+        "All endpoints enforce workspace isolation (workspace_id from auth context)",
+        "Pydantic request/response models for all endpoints",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "Follow the pattern of existing API routers (check orchestrator/api/ for examples like board.py or agents.py). Use the existing auth dependency that extracts workspace_id from the Clerk token. Response models should use 'mission' terminology per PRD-82A Section 10 (API uses 'mission', DB uses 'orchestration'). The GET detail endpoint should include output_summary if available."
+    },
+    {
+      "id": "US-022",
+      "title": "Mount missions router in main app",
+      "description": "As a developer, I need the missions API router registered in the FastAPI application.",
+      "acceptanceCriteria": [
+        "Find the main FastAPI app setup (likely orchestrator/main.py or orchestrator/api/__init__.py)",
+        "Import the missions router from orchestrator/api/missions.py",
+        "Mount it with app.include_router(missions_router) with appropriate prefix and tags",
+        "Verify the endpoints appear in /docs (OpenAPI schema)",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "Simple registration. Check how other routers are mounted — match the pattern (prefix, tags, dependencies)."
+    }
+  ]
+}
