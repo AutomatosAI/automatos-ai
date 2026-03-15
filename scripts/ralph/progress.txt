@@ -52,3 +52,11 @@
 - Indexes: workspace_id, run_id, composite (run_id, sequence_number), partial active states, composite event timeline (run_id, created_at), partial indexes on FK columns of existing tables
 - Downgrade: drops FK columns from existing tables first, then drops 4 tables in reverse dependency order
 - Note: CONCURRENTLY not used for indexes on existing tables since alembic runs inside a transaction; used IF NOT EXISTS instead
+
+### Iteration 6 — US-006: Register Models in __init__.py
+- Added imports to `orchestrator/core/models/__init__.py`
+- 4 models: OrchestrationRun, OrchestrationTask, OrchestrationTaskDependency, OrchestrationEvent
+- 8 enums: StateType, RunState, TaskState, EventType, ActorType, TaskType, TriggerRule, FailureReasonCode
+- 5 mappings: ALLOWED_TASK_TRANSITIONS, ALLOWED_RUN_TRANSITIONS, TERMINAL_RUN_STATES, TERMINAL_TASK_STATES, BOARD_STATUS_MAP
+- Validated: `from core.models import OrchestrationRun` works, no circular imports
+- **Phase 1 complete** (US-001 through US-006)

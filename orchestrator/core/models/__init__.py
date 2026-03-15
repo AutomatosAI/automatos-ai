@@ -21,6 +21,29 @@ from .personas import *  # PRD-42: Agent Personas
 from .system_prompts import *  # PRD-58: System Prompt Management
 from .voice_profiles import *  # PRD-74: Voice Profiles
 
+# PRD-82A: Orchestration (Sequential Mission Coordinator)
+from .orchestration import (  # noqa: F401
+    OrchestrationRun,
+    OrchestrationTask,
+    OrchestrationTaskDependency,
+    OrchestrationEvent,
+)
+from .orchestration_enums import (  # noqa: F401
+    StateType,
+    RunState,
+    TaskState,
+    EventType,
+    ActorType,
+    TaskType,
+    TriggerRule,
+    FailureReasonCode,
+    ALLOWED_TASK_TRANSITIONS,
+    ALLOWED_RUN_TRANSITIONS,
+    TERMINAL_RUN_STATES,
+    TERMINAL_TASK_STATES,
+    BOARD_STATUS_MAP,
+)
+
 # PRD-72: Board Tasks — explicit import so `from core.models import BoardTask` works
 from .core import BoardTask  # noqa: F811
 
