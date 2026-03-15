@@ -274,3 +274,11 @@
 - Error handling: PlanValidationError→422, ConflictError/InvalidTransitionError→409, generic→500 with rollback
 - Helper functions: _run_to_response(), _task_to_response(), _event_to_response(), _get_run_for_workspace()
 - Import validated: 9 routes loaded successfully
+
+### Iteration 22 — US-022: Mount Missions Router in Main App
+- Modified `orchestrator/main.py` — added try/except import + include_router block
+- Placed after board_tasks_router (PRD-72), before scheduled_tasks_router (PRD-77)
+- Follows existing pattern: try/except ImportError with logger.warning fallback
+- Import validated: router loads with prefix=/api/missions, 9 routes
+- **Phase 5 complete** (US-021 through US-022)
+- **ALL PHASES COMPLETE** — PRD-82A Sequential Mission Coordinator fully implemented

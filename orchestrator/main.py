@@ -883,6 +883,13 @@ try:
 except ImportError as e:
     logger.warning("Could not load board tasks router: %s", e)
 
+# PRD-82A: Sequential Mission Coordinator
+try:
+    from api.missions import router as missions_router
+    app.include_router(missions_router)
+except ImportError as e:
+    logger.warning("Could not load missions router: %s", e)
+
 # PRD-77: Agent Self-Scheduling
 try:
     from api.scheduled_tasks import router as scheduled_tasks_router
