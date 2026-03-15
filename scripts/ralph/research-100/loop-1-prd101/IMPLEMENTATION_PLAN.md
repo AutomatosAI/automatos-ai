@@ -7,7 +7,7 @@
 - [x] US-003: Design orchestration_runs table
 - [x] US-004: Design orchestration_tasks table
 - [x] US-005: Design orchestration_events table
-- [ ] US-006: Design integration with existing tables
+- [x] US-006: Design integration with existing tables
 - [ ] US-007: Write PRD introduction and problem statement
 - [ ] US-008: Write PRD conclusion, risks, and acceptance criteria
 
@@ -33,6 +33,14 @@
 - **Prefect's `task_inputs`** is lineage metadata only — dependency resolution happens in-process via `future.result()` blocking. The JSON column is never queried for scheduling.
 - **`source_type='orchestration'`** does not yet exist in BoardTask — safe to add. Existing values: `user`, `recipe`.
 - **`parent_task_id`** on BoardTask is defined but unused — could be used for mission task hierarchy in future but not needed now.
+
+- **`parent_task_id` on BoardTask** is defined but completely unused — first consumer is orchestration (mission → task hierarchy)
+- **`source_type` on BoardTask** is VARCHAR(30), not a DB enum — adding `'orchestration'` and `'orchestration_task'` values requires no migration
+- **Recipe `template_definition` vs `steps`** — two JSONB columns coexist (legacy vs new 9-stage). Mission-to-recipe conversion targets the `steps` column
+- **`agent_reports.agent_id`** made nullable in PRD-76 Phase 2 — supports orchestrator-level reports with no agent
+- **Existing recipe bridge pattern** (`board_task_bridge.py`) is the template for orchestration board integration — same 3-function pattern (create/update/complete), same idempotency via partial unique indexes
+- **No RLS in the codebase** — all workspace isolation is application-layer `.filter(Model.workspace_id == ctx.workspace_id)` pattern
+- **`CREATE INDEX CONCURRENTLY`** needed for indexes on existing tables (board_tasks, agent_reports) to avoid table locks in production
 
 ## Cross-PRD Dependencies Found
 

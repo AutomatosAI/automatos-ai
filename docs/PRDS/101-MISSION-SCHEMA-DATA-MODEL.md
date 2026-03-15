@@ -2135,7 +2135,716 @@ The `orchestration_events` table is the **primary data source** for PRD-106 (Out
 
 ## 7. Integration with Existing Schema
 
-_(US-006)_
+The orchestration tables don't exist in isolation — they must integrate cleanly with four existing systems: the Kanban board (`board_tasks`), agent reports (`agent_reports`), recipes (`workflow_recipes`), and workspace isolation. This section defines every integration point, the data flow between tables, and the migration strategy that adds three new tables without breaking anything.
+
+### 7.1 Entity Relationship Diagram
+
+```
+┌──────────────┐          ┌─────────────────────────┐          ┌──────────────┐
+│  workspaces  │          │   orchestration_runs     │          │    agents    │
+│──────────────│          │─────────────────────────│          │──────────────│
+│ id (UUID) PK │◄────FK───│ workspace_id             │          │ id (INT) PK  │
+│ ...          │          │ id (UUID) PK             │──FK────► │ ...          │
+└──────────────┘          │ coordinator_agent_id ────┘          └──────┬───────┘
+       ▲                  │ state, plan, config...   │                 │
+       │                  └──────────┬───────────────┘                 │
+       │                             │ 1:N                             │
+       │                             ▼                                 │
+       │                  ┌─────────────────────────┐                  │
+       │                  │   orchestration_tasks    │                  │
+       │             FK───│ workspace_id             │                  │
+       │                  │ id (UUID) PK             │──FK─────────────┘
+       │                  │ run_id ──────────────FK──┘    agent_id
+       │                  │ board_task_id ───FK──┐
+       │                  │ state, output_ref... │
+       │                  └──────┬───────┬───────┘
+       │                         │       │
+       │                    1:N  │       │  M:N
+       │                         ▼       ▼
+       │           ┌──────────────┐  ┌───────────────────────────────┐
+       │           │ orchestration│  │ orchestration_task_dependencies│
+       │           │ _events      │  │───────────────────────────────│
+       │           │──────────────│  │ task_id (FK → tasks)          │
+       │           │ run_id (FK)  │  │ depends_on_id (FK → tasks)    │
+       │           │ task_id (FK) │  │ dependency_type                │
+       │           │ event_type   │  └───────────────────────────────┘
+       │           │ payload JSONB│
+       │           └──────────────┘
+       │
+       │            ┌──────────────────┐          ┌──────────────────────┐
+       │            │   board_tasks    │          │   workflow_recipes   │
+       │            │──────────────────│          │──────────────────────│
+       ├───FK───────│ workspace_id     │          │ id (INT) PK          │
+       │            │ id (INT) PK      │◄─ ─ ─ ─ │ originated_from_     │
+       │            │ source_type      │   (save  │   mission_run_id     │
+       │            │ source_id        │  as      │ steps, inputs...     │
+       │            │ parent_task_id──┐│ routine) └──────────────────────┘
+       │            │ planning_data   ││
+       │            └─────────────────┘│           ┌──────────────────────┐
+       │                    ▲          └──────────►│ board_tasks (child)  │
+       │                    │                      │ parent_task_id = ↑   │
+       │                    │ FK                   └──────────────────────┘
+       │                    │
+       │            ┌──────────────────┐
+       │            │  agent_reports   │
+       │            │──────────────────│
+       └───FK───────│ workspace_id     │
+                    │ agent_id (FK)    │
+                    │ orchestration_   │
+                    │   task_id (FK)   │  ◄── NEW COLUMN
+                    │ report_type      │
+                    │ file_path        │
+                    └──────────────────┘
+```
+
+### 7.2 Board Task Integration
+
+Every orchestration run creates one **parent** board task (the mission), and every orchestration task creates one **child** board task (linked via `parent_task_id`). This gives the existing Kanban UI mission visibility without new frontend components.
+
+#### 7.2.1 Source Type Values
+
+The `board_tasks.source_type` column currently holds two values:
+
+| Value | Created By | Count Today |
+|-------|-----------|-------------|
+| `user` (default) | Manual creation via API | Most tasks |
+| `recipe` | `board_task_bridge.py` during recipe execution | Recipe-triggered tasks |
+
+Orchestration adds two new values:
+
+| Value | Created By | Description |
+|-------|-----------|-------------|
+| `orchestration` | Coordinator on mission start | One per `orchestration_runs` row — the parent task |
+| `orchestration_task` | Coordinator during task planning | One per `orchestration_tasks` row — child tasks |
+
+No migration needed — `source_type` is `VARCHAR(30)`, not a database enum.
+
+#### 7.2.2 Field Mapping: orchestration_runs → board_tasks (Parent)
+
+| BoardTask Field | Source | Example Value |
+|----------------|--------|---------------|
+| `workspace_id` | `orchestration_runs.workspace_id` | `550e8400-...` |
+| `title` | `"Mission: " + orchestration_runs.title` | `"Mission: EU AI Act Compliance"` |
+| `description` | `orchestration_runs.goal` (verbatim user input) | `"Research EU AI Act compliance for our product"` |
+| `status` | Mapped from `orchestration_runs.state` (see Section 3.8 pattern) | `in_progress` |
+| `priority` | `orchestration_runs.config.priority` or `'high'` | `high` |
+| `review_mode` | `'manual'` (missions always need human review) | `manual` |
+| `assigned_agent_id` | `orchestration_runs.coordinator_agent_id` | `42` or `NULL` |
+| `created_by_type` | `'orchestration'` | `orchestration` |
+| `created_by_id` | `orchestration_runs.created_by` | `user_clerk_abc` |
+| `parent_task_id` | `NULL` (this IS the parent) | `NULL` |
+| `source_type` | `'orchestration'` | `orchestration` |
+| `source_id` | `str(orchestration_runs.id)` | `"a1b2c3d4-..."` |
+| `tags` | `['mission', orchestration_runs.state]` | `['mission', 'running']` |
+| `planning_data` | See below | JSONB |
+| `started_at` | `orchestration_runs.started_at` | Timestamp |
+
+**`planning_data` JSONB for mission parent:**
+
+```json
+{
+  "run_id": "a1b2c3d4-...",
+  "strategy": "sequential",
+  "task_progress": {"completed": 2, "total": 4, "failed": 0},
+  "budget": {"spent": 0.12, "limit": 5.00},
+  "current_task": "Analyze product against requirements"
+}
+```
+
+#### 7.2.3 Field Mapping: orchestration_tasks → board_tasks (Child)
+
+| BoardTask Field | Source | Example Value |
+|----------------|--------|---------------|
+| `workspace_id` | `orchestration_tasks.workspace_id` | `550e8400-...` |
+| `title` | `orchestration_tasks.title` | `"Research EU AI Act requirements"` |
+| `description` | `orchestration_tasks.description` | Detailed task instructions |
+| `status` | Mapped from `orchestration_tasks.state` (Section 3.8) | `assigned` |
+| `priority` | Inherited from parent or `'medium'` | `medium` |
+| `review_mode` | `'auto'` unless task has `success_criteria` → `'manual'` | `auto` |
+| `assigned_agent_id` | `orchestration_tasks.agent_id` | `42` |
+| `created_by_type` | `'orchestration'` | `orchestration` |
+| `parent_task_id` | Parent mission's `board_tasks.id` | `1234` |
+| `source_type` | `'orchestration_task'` | `orchestration_task` |
+| `source_id` | `str(orchestration_tasks.id)` | `"e5f6g7h8-..."` |
+| `tags` | `['mission_task', orchestration_tasks.task_type]` | `['mission_task', 'research']` |
+| `planning_data` | See below | JSONB |
+| `result` | `orchestration_tasks.output_summary` (≤2000 chars, truncated to 4000 by board) | Summary text |
+| `error_message` | `orchestration_tasks.error_message` | Failure reason |
+
+**`planning_data` JSONB for task child:**
+
+```json
+{
+  "task_id": "e5f6g7h8-...",
+  "run_id": "a1b2c3d4-...",
+  "sequence": 1,
+  "task_type": "research",
+  "attempt": 1,
+  "continuation": 0,
+  "dependencies": ["depends on: Task 0 (always)"],
+  "trigger_rule": "all_success"
+}
+```
+
+#### 7.2.4 State Synchronization
+
+Board task status is updated as a **side effect of `transition_task()` and `transition_run()`** — in the same database transaction as the state change and event emission (the dual-write from Section 3.3). This is not a separate sync job; it's atomic.
+
+```python
+# Inside transition_task() — already defined in Section 3.9
+async def transition_task(session, task, to_state, *, reason=None, metadata=None):
+    # ... validate transition, update state, emit event ...
+
+    # Sync board task status (same transaction)
+    if task.board_task_id:
+        board_task = await session.get(BoardTask, task.board_task_id)
+        if board_task:
+            board_task.status = TASK_STATE_TO_BOARD_STATUS[to_state]
+            if to_state == TaskState.RUNNING and not board_task.started_at:
+                board_task.started_at = utcnow()
+            if TASK_STATE_TYPE[to_state] == StateType.TERMINAL:
+                board_task.completed_at = utcnow()
+                if to_state == TaskState.COMPLETED:
+                    board_task.result = task.output_summary[:4000] if task.output_summary else None
+                elif to_state in (TaskState.FAILED, TaskState.CANCELLED):
+                    board_task.error_message = task.error_message
+
+    # Update parent mission board task progress
+    await _update_mission_board_progress(session, task.run_id)
+```
+
+#### 7.2.5 Board Task Bridge Functions
+
+Following the pattern in `orchestrator/services/board_task_bridge.py`, add these functions to the same file (or a new `orchestration_board_bridge.py`):
+
+```python
+def create_mission_board_task(
+    db: Session,
+    run: OrchestrationRun,
+) -> Optional[int]:
+    """Create parent BoardTask for a mission. Returns board_task.id or None if exists."""
+    existing = db.query(BoardTask.id).filter(
+        BoardTask.source_type == 'orchestration',
+        BoardTask.source_id == str(run.id),
+    ).first()
+    if existing:
+        return existing[0]
+
+    task = BoardTask(
+        workspace_id=run.workspace_id,
+        title=f"Mission: {run.title}",
+        description=run.goal,
+        status='in_progress',
+        priority='high',
+        review_mode='manual',
+        coordinator_agent_id=run.coordinator_agent_id,
+        created_by_type='orchestration',
+        created_by_id=run.created_by,
+        source_type='orchestration',
+        source_id=str(run.id),
+        tags=['mission'],
+        planning_data={
+            'run_id': str(run.id),
+            'strategy': (run.plan or {}).get('strategy', 'unknown'),
+            'task_progress': {'completed': 0, 'total': run.task_count, 'failed': 0},
+        },
+    )
+    db.add(task)
+    db.flush()  # Get id without committing (caller manages transaction)
+    return task.id
+
+
+def create_task_board_task(
+    db: Session,
+    task: OrchestrationTask,
+    parent_board_task_id: int,
+) -> Optional[int]:
+    """Create child BoardTask for an orchestration task. Returns board_task.id."""
+    existing = db.query(BoardTask.id).filter(
+        BoardTask.source_type == 'orchestration_task',
+        BoardTask.source_id == str(task.id),
+    ).first()
+    if existing:
+        return existing[0]
+
+    bt = BoardTask(
+        workspace_id=task.workspace_id,
+        title=task.title,
+        description=task.description,
+        status='inbox',
+        priority='medium',
+        review_mode='auto',
+        assigned_agent_id=task.agent_id,
+        created_by_type='orchestration',
+        parent_task_id=parent_board_task_id,
+        source_type='orchestration_task',
+        source_id=str(task.id),
+        tags=['mission_task', task.task_type],
+        planning_data={
+            'task_id': str(task.id),
+            'run_id': str(task.run_id),
+            'sequence': task.sequence_number,
+            'task_type': task.task_type,
+        },
+    )
+    db.add(bt)
+    db.flush()
+    return bt.id
+```
+
+#### 7.2.6 New Indexes on board_tasks
+
+Two partial unique indexes prevent duplicate board tasks for the same orchestration entity:
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS uq_board_tasks_orchestration_run
+    ON board_tasks(source_id) WHERE source_type = 'orchestration';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_board_tasks_orchestration_task
+    ON board_tasks(source_id) WHERE source_type = 'orchestration_task';
+```
+
+These follow the existing pattern from PRD-72:
+```sql
+-- Already exists:
+CREATE UNIQUE INDEX uq_board_tasks_recipe_exec
+    ON board_tasks(source_id) WHERE source_type = 'recipe';
+```
+
+#### 7.2.7 parent_task_id Usage
+
+The `board_tasks.parent_task_id` column exists today (`INTEGER FK → board_tasks.id ON DELETE SET NULL`) but is **unused by recipes or manual tasks**. The API accepts it (`POST /api/v1/tasks` body, `GET /api/v1/tasks?parent_task_id=N` filter) but no feature populates it.
+
+Orchestration is the first consumer: every task-level board task has `parent_task_id` pointing to the mission-level board task. This enables:
+- Dashboard query: "show all tasks in this mission" → `WHERE parent_task_id = :mission_board_id`
+- Tree rendering: parent + children hierarchy in the Kanban UI
+- Cascade behavior: already defined as `ON DELETE SET NULL` — if mission board task is manually deleted, child tasks become orphans (acceptable; orchestration tables are the source of truth)
+
+### 7.3 Agent Reports Integration
+
+PRD-76 established the `agent_reports` table for structured report metadata with workspace file storage. Orchestration task completion should auto-generate reports using the same system.
+
+#### 7.3.1 New FK on agent_reports
+
+Add one nullable column:
+
+```sql
+ALTER TABLE agent_reports
+    ADD COLUMN IF NOT EXISTS orchestration_task_id UUID
+    REFERENCES orchestration_tasks(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS ix_agent_reports_orch_task
+    ON agent_reports(orchestration_task_id)
+    WHERE orchestration_task_id IS NOT NULL;
+```
+
+This parallels the existing `heartbeat_result_id` FK — both are optional context references that link a report to its trigger:
+
+| FK Column | Links To | Populated When |
+|-----------|----------|---------------|
+| `heartbeat_result_id` | `heartbeat_results.id` | Report created during heartbeat tick |
+| `orchestration_task_id` | `orchestration_tasks.id` | Report created on task completion |
+
+Both can be NULL (standalone report). Both use `ON DELETE SET NULL` (report survives source deletion).
+
+#### 7.3.2 Report Creation Flow
+
+When an orchestration task reaches a terminal state with output, a report is auto-created via the existing `ReportService.create_report()`:
+
+```python
+# Called from transition_task() when to_state in TERMINAL_TASK_STATES
+async def _auto_create_task_report(
+    session: AsyncSession,
+    task: OrchestrationTask,
+    run: OrchestrationRun,
+):
+    """Auto-generate an agent_report for a completed orchestration task."""
+    if not task.output_summary and not task.output_ref:
+        return  # No output → no report
+
+    agent = await session.get(Agent, task.agent_id) if task.agent_id else None
+
+    report_type = _task_type_to_report_type(task.task_type, task.state)
+    status = "ok" if task.state == TaskState.COMPLETED else "warning"
+
+    await report_service.create_report(
+        workspace_id=task.workspace_id,
+        agent_id=task.agent_id,          # nullable — matches PRD-76 Phase 2
+        agent_name=agent.name if agent else "Coordinator",
+        title=f"{run.title} — {task.title}",
+        content=task.output_summary or f"See full output: {task.output_ref}",
+        report_type=report_type,
+        status=status,
+        summary=task.output_summary[:500] if task.output_summary else None,
+        metrics={
+            "tokens_used": task.tokens_used,
+            "cost_usd": float(task.cost),
+            "duration_ms": task.duration_ms,
+            "attempt_number": task.attempt_number,
+            "verifier_score": float(task.verifier_score) if task.verifier_score else None,
+        },
+        orchestration_task_id=task.id,   # NEW FK
+    )
+```
+
+#### 7.3.3 Report Type Mapping
+
+Existing `report_type` values: `standup`, `research`, `incident`, `summary`, `delivery`, `audit`.
+
+Orchestration task types map to report types:
+
+| Task Type (`orchestration_tasks.task_type`) | Report Type | Rationale |
+|---------------------------------------------|-------------|-----------|
+| `research` | `research` | Direct mapping |
+| `analysis` | `research` | Analysis is a form of research |
+| `writing` | `delivery` | Writing produces a deliverable |
+| `coding` | `delivery` | Code output is a deliverable |
+| `verification` | `audit` | Verification is quality audit |
+| `review` | `audit` | Review is quality audit |
+| `synthesis` | `summary` | Synthesis produces a summary |
+| `other` | `delivery` | Default to deliverable |
+
+For failed tasks, `report_type` is always `incident` (regardless of task type) to surface failures in the incident filter.
+
+No new `report_type` enum values are needed — the existing six cover all orchestration task types.
+
+#### 7.3.4 Mission-Level Summary Report
+
+When a run reaches a terminal state (`completed`, `failed`, `cancelled`), the coordinator creates one summary report for the entire mission:
+
+```python
+async def _create_mission_summary_report(
+    session: AsyncSession,
+    run: OrchestrationRun,
+):
+    """Create a summary report for the entire mission."""
+    tasks = await session.execute(
+        select(OrchestrationTask)
+        .where(OrchestrationTask.run_id == run.id)
+        .order_by(OrchestrationTask.sequence_number)
+    )
+
+    # Build markdown summary
+    lines = [f"# Mission: {run.title}\n", f"**Goal:** {run.goal}\n"]
+    for t in tasks.scalars():
+        status_icon = "✅" if t.state == "completed" else "❌" if t.state == "failed" else "⏭️"
+        lines.append(f"- {status_icon} **{t.title}** — {t.state} ({t.duration_ms or 0}ms, ${float(t.cost):.4f})")
+
+    lines.append(f"\n**Total cost:** ${float(run.total_cost):.4f}")
+    lines.append(f"**Total tokens:** {run.total_tokens}")
+    lines.append(f"**Duration:** {run.duration_ms}ms")
+
+    await report_service.create_report(
+        workspace_id=run.workspace_id,
+        agent_id=run.coordinator_agent_id,
+        agent_name="Mission Coordinator",
+        title=f"Mission Complete: {run.title}",
+        content="\n".join(lines),
+        report_type="summary",
+        status="ok" if run.state == "completed" else "warning",
+        summary=run.result_summary[:500] if run.result_summary else None,
+        metrics={
+            "total_tokens": run.total_tokens,
+            "total_cost": float(run.total_cost),
+            "duration_ms": run.duration_ms,
+            "tasks_completed": run.tasks_completed,
+            "tasks_failed": run.tasks_failed,
+            "task_count": run.task_count,
+        },
+    )
+```
+
+### 7.4 Recipe Integration ("Save as Routine")
+
+A successfully completed mission can be converted into a repeatable recipe (`workflow_recipes` row). This is the "Save as Routine?" button from PRD-100 Section 3.
+
+#### 7.4.1 Conversion Flow
+
+```
+User clicks "Save as Routine" on completed mission
+        │
+        ▼
+   API: POST /api/v1/missions/{run_id}/save-as-recipe
+        │
+        ▼
+   Read orchestration_runs + orchestration_tasks + orchestration_task_dependencies
+        │
+        ▼
+   Transform mission structure → recipe structure
+        │
+        ▼
+   INSERT workflow_recipes row
+        │
+        ▼
+   Return recipe_id → user can edit, schedule, or run immediately
+```
+
+#### 7.4.2 Field Mapping: orchestration_runs → workflow_recipes
+
+| orchestration_runs Field | workflow_recipes Field | Transformation |
+|--------------------------|----------------------|----------------|
+| `title` | `name` | Direct copy |
+| `goal` | `description` | Direct copy (user's original intent) |
+| `id` | — (stored in `template_definition.originated_from`) | Lineage tracking |
+| `plan.strategy` | `execution_config.mode` | `"sequential"` → `"sequential"`, `"parallel"` → `"parallel"` |
+| `plan.tasks` | `steps` | See task→step mapping below |
+| `config.budget` | `execution_config.budget` | Copy budget config |
+| `config.model_preferences` | Per-step model config | Distributed to steps |
+| `config.retry` | `execution_config.max_retries` | Copy retry policy |
+| `workspace_id` | `workspace_id` | Direct copy |
+| `created_by` | `created_by` | Direct copy |
+| — | `template_id` | Auto-generated: `"mission-{run_id[:8]}-{timestamp}"` |
+| — | `owner_type` | `'workspace'` |
+| — | `tags` | `['from_mission', 'auto_generated']` |
+
+#### 7.4.3 Field Mapping: orchestration_tasks → recipe steps
+
+Each orchestration task becomes a recipe step. Dependencies are flattened to `pass_to` references:
+
+```json
+{
+  "steps": [
+    {
+      "step_id": "s1",
+      "order": 1,
+      "agent_id": 42,
+      "prompt_template": "Research EU AI Act requirements relevant to our product category.\n\nSuccess criteria: {success_criteria}",
+      "task_type": "research",
+      "model_override": "anthropic/claude-sonnet-4-6",
+      "tools_needed": ["web_search", "document_analysis"],
+      "pass_to": null,
+      "error_handling": {"max_retries": 3, "on_failure": "stop"},
+      "originated_from_task_id": "e5f6g7h8-..."
+    },
+    {
+      "step_id": "s2",
+      "order": 2,
+      "agent_id": 42,
+      "prompt_template": "Analyze our product against the requirements from step s1.\n\nInput from previous step: {{s1.output}}",
+      "task_type": "analysis",
+      "depends_on": ["s1"],
+      "pass_to": "s3",
+      "error_handling": {"max_retries": 2, "on_failure": "stop"}
+    }
+  ]
+}
+```
+
+| orchestration_tasks Field | Recipe Step Field | Notes |
+|---------------------------|------------------|-------|
+| `sequence_number` | `order` | Direct mapping |
+| `title` + `description` | `prompt_template` | Combined into agent instructions |
+| `agent_id` | `agent_id` | Roster agent preserved; contractor agents replaced with `null` (user must assign) |
+| `model_override` | `model_override` | Preserved if set |
+| `task_type` | `task_type` | New field on steps (not in current recipe schema) |
+| `tools_requested` | `tools_needed` | Hint list preserved |
+| `success_criteria` | Embedded in `prompt_template` | Injected as template variable |
+| Dependencies (join table) | `depends_on` array | Simplified to step_id references |
+| `trigger_rule` | `error_handling.on_failure` | `all_success` → `"stop"`, `all_done` → `"continue"`, `always` → `"always_run"` |
+
+#### 7.4.4 Limitations
+
+1. **Contractor agents don't survive conversion.** Ephemeral agents are mission-scoped — the recipe stores `agent_id: null` with a note that the user must assign a roster agent or let the coordinator pick one.
+2. **DAG → sequence flattening.** Complex parallel DAGs are topologically sorted into a linear sequence for the recipe's `order` field. Parallel execution is noted in `execution_config.mode: "parallel"` but individual step parallelism is lost. This is acceptable — recipes are simpler than missions by design.
+3. **No input parameterization.** The first conversion is a snapshot — the user's original goal is hardcoded in the description. To make the recipe truly reusable, the user must edit the steps to add `{{variable}}` placeholders in the `prompt_template` fields and define corresponding `inputs` schema. This is a manual step, not automated.
+
+#### 7.4.5 `execution_config` JSONB for Mission-Derived Recipes
+
+```json
+{
+  "mode": "sequential",
+  "max_retries": 3,
+  "timeout_per_step": 300,
+  "total_timeout": 1800,
+  "budget": {
+    "max_cost_usd": 5.00,
+    "max_tokens": 100000
+  },
+  "originated_from": {
+    "mission_run_id": "a1b2c3d4-...",
+    "actual_cost": 0.45,
+    "actual_tokens": 23000,
+    "actual_duration_ms": 45000,
+    "completed_at": "2026-03-15T14:30:00Z"
+  }
+}
+```
+
+The `originated_from` block preserves lineage — when the recipe runs, the system can compare actual performance against the originating mission to detect drift.
+
+### 7.5 Workspace Isolation
+
+All orchestration queries MUST filter by `workspace_id`. This is enforced at the application layer (no PostgreSQL RLS), matching the pattern used by every other table in the platform.
+
+#### 7.5.1 Auth Pattern
+
+Workspace ID is resolved from the request via `hybrid.py`:
+
+1. Header: `X-Workspace-ID` (preferred)
+2. Header: `X-Workspace` (fallback)
+3. Query param: `workspace_id`
+4. Environment: `WORKSPACE_ID` / `DEFAULT_WORKSPACE_ID`
+
+The `_user_has_workspace_access()` function validates the user owns or is a member of the requested workspace, preventing `X-Workspace-ID` spoofing.
+
+#### 7.5.2 Query Pattern
+
+Every API endpoint follows this pattern (from `board_tasks.py`):
+
+```python
+# List: Always scope to workspace
+runs = db.query(OrchestrationRun).filter(
+    OrchestrationRun.workspace_id == ctx.workspace_id
+).order_by(OrchestrationRun.created_at.desc())
+
+# Get single: Filter on BOTH id AND workspace_id
+run = db.query(OrchestrationRun).filter(
+    OrchestrationRun.id == run_id,
+    OrchestrationRun.workspace_id == ctx.workspace_id,
+).first()
+if not run:
+    raise HTTPException(status_code=404, detail="Run not found")
+```
+
+**Critical:** Never filter on `id` alone — always include `workspace_id` in the WHERE clause for single-record lookups. This prevents a user in workspace A from accessing workspace B's missions by guessing UUIDs.
+
+#### 7.5.3 Denormalized workspace_id on orchestration_tasks
+
+As noted in Section 5.1, `orchestration_tasks` denormalizes `workspace_id` (copied from the parent run) to avoid a JOIN on the most common query: "show all tasks for my workspace." The denormalization is safe because:
+- workspace_id never changes on a run
+- The coordinator copies it at task creation time
+- The FK constraint on `orchestration_runs.workspace_id` ensures the workspace exists
+
+#### 7.5.4 Cascade Delete
+
+All orchestration tables use `ON DELETE CASCADE` for the workspace FK:
+
+```sql
+workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE
+```
+
+When a workspace is deleted, all its runs, tasks, dependencies, events, board tasks, and reports are cascade-deleted. This matches the pattern on `board_tasks`, `agent_reports`, `workflow_recipes`, and every other workspace-scoped table.
+
+#### 7.5.5 No Admin Override Needed
+
+Unlike agents and skills (which have marketplace items visible across workspaces), orchestration is strictly workspace-scoped. There is no `admin_all_workspaces` bypass for mission data — missions belong to exactly one workspace, always.
+
+### 7.6 Index Summary
+
+All indexes across the orchestration tables and their integration points:
+
+#### New Tables (from Sections 4-6)
+
+| Table | Index | Type | Purpose |
+|-------|-------|------|---------|
+| `orchestration_runs` | `ix_orch_runs_ws_created` | B-tree (`workspace_id`, `created_at DESC`) | Dashboard timeline: "my recent missions" |
+| `orchestration_runs` | `ix_orch_runs_active` | Partial B-tree (`workspace_id`) WHERE `state_type IN ('scheduled','running')` | Reconciler: "find active runs" |
+| `orchestration_runs` | `ix_orch_runs_created_by` | B-tree (`created_by`) | "My missions" filter |
+| `orchestration_tasks` | `ix_orch_tasks_run` | B-tree (`run_id`) | Task list for a mission |
+| `orchestration_tasks` | `ix_orch_tasks_ws_state` | B-tree (`workspace_id`, `state`) | Dashboard: "tasks by status" |
+| `orchestration_tasks` | `ix_orch_tasks_agent` | B-tree (`agent_id`) WHERE `agent_id IS NOT NULL` | "Tasks assigned to this agent" |
+| `orchestration_tasks` | `ix_orch_tasks_board` | B-tree (`board_task_id`) WHERE `board_task_id IS NOT NULL` | Reverse lookup: board → orchestration |
+| `orchestration_task_dependencies` | PK covers (`task_id`, `depends_on_id`) | B-tree (composite PK) | Dependency lookup in both directions |
+| `orchestration_task_dependencies` | `ix_orch_deps_reverse` | B-tree (`depends_on_id`) | "What depends on this task?" (downstream lookup) |
+| `orchestration_events` | `ix_orch_events_run` | B-tree (`run_id`) | Event timeline for a mission |
+| `orchestration_events` | `ix_orch_events_task` | B-tree (`task_id`) WHERE `task_id IS NOT NULL` | Events for a specific task |
+| `orchestration_events` | `ix_orch_events_created` | BRIN (`created_at`) | Time-range queries on append-only data |
+| `orchestration_events` | `ix_orch_events_type` | B-tree (`event_type`) | Filter by event type |
+
+#### Existing Tables (new indexes)
+
+| Table | Index | Type | Purpose |
+|-------|-------|------|---------|
+| `board_tasks` | `uq_board_tasks_orchestration_run` | Unique partial (`source_id`) WHERE `source_type = 'orchestration'` | Idempotent mission board task creation |
+| `board_tasks` | `uq_board_tasks_orchestration_task` | Unique partial (`source_id`) WHERE `source_type = 'orchestration_task'` | Idempotent task board task creation |
+| `agent_reports` | `ix_agent_reports_orch_task` | B-tree (`orchestration_task_id`) WHERE `orchestration_task_id IS NOT NULL` | "Reports from this task" |
+
+### 7.7 Migration Safety
+
+The orchestration migration creates **only new tables and adds optional columns/indexes to existing tables**. No existing columns are modified or removed.
+
+#### 7.7.1 Migration Strategy
+
+One migration file: `prd101_orchestration_tables.py` (following the PRD-prefixed naming convention from recent migrations like `prd76_agent_reports.py`, `prd77_agent_scheduled_tasks.py`).
+
+```python
+revision = "prd101_orchestration_tables"
+down_revision = None  # Standalone — safe to run in any order
+```
+
+**Standalone migration** (`down_revision = None`) — same pattern as prd76, prd77, prd79. No dependency on other migrations. Safe to run against any database state.
+
+#### 7.7.2 Safety Guarantees
+
+| Risk | Mitigation |
+|------|-----------|
+| Table already exists (re-run) | `CREATE TABLE IF NOT EXISTS` on all tables |
+| Index already exists | `CREATE INDEX IF NOT EXISTS` on all indexes |
+| FK target doesn't exist | Tables created in dependency order: runs → tasks → dependencies → events |
+| Existing `board_tasks` rows | No column changes to `board_tasks` — only new indexes added |
+| Existing `agent_reports` rows | New `orchestration_task_id` column is `NULL` by default — no backfill needed |
+| Downgrade safety | `DROP TABLE IF EXISTS` in reverse dependency order: events → dependencies → tasks → runs |
+| Production lock time | `CREATE INDEX CONCURRENTLY` for indexes on existing tables (board_tasks, agent_reports) to avoid locking |
+
+#### 7.7.3 Changes to Existing Tables
+
+| Table | Change | Risk Level | Notes |
+|-------|--------|-----------|-------|
+| `board_tasks` | 2 new partial unique indexes | **Low** — additive only | Use `CREATE INDEX CONCURRENTLY` to avoid table lock |
+| `agent_reports` | 1 new nullable column + 1 partial index | **Low** — nullable column, no default | `ALTER TABLE ADD COLUMN IF NOT EXISTS` is fast (metadata-only for nullable columns in PostgreSQL) |
+
+No changes to `agents`, `workspaces`, `workflow_recipes`, or any other existing table. The `workflow_recipes` table gains no new columns — the "save as routine" flow creates a new row using existing columns, with mission lineage stored in the `execution_config` JSONB.
+
+#### 7.7.4 Raw SQL Style
+
+Following the codebase convention (prd76, prd79), the migration uses `op.execute()` with raw SQL rather than `op.create_table()`:
+
+```python
+def upgrade() -> None:
+    # 1. New tables (raw SQL — clean FK syntax, IF NOT EXISTS)
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS orchestration_runs ( ... );
+        CREATE TABLE IF NOT EXISTS orchestration_tasks ( ... );
+        CREATE TABLE IF NOT EXISTS orchestration_task_dependencies ( ... );
+        CREATE TABLE IF NOT EXISTS orchestration_events ( ... );
+    """)
+
+    # 2. Indexes on new tables
+    op.execute(""" CREATE INDEX IF NOT EXISTS ... """)
+
+    # 3. Alterations to existing tables (CONCURRENTLY for production safety)
+    op.execute("""
+        ALTER TABLE agent_reports
+            ADD COLUMN IF NOT EXISTS orchestration_task_id UUID
+            REFERENCES orchestration_tasks(id) ON DELETE SET NULL;
+    """)
+
+    # Note: CONCURRENTLY indexes must be created outside transaction
+    # op.execute("COMMIT")  -- if needed for CONCURRENTLY
+    # op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ...")
+
+
+def downgrade() -> None:
+    op.execute("ALTER TABLE agent_reports DROP COLUMN IF EXISTS orchestration_task_id;")
+    op.execute("DROP TABLE IF EXISTS orchestration_events;")
+    op.execute("DROP TABLE IF EXISTS orchestration_task_dependencies;")
+    op.execute("DROP TABLE IF EXISTS orchestration_tasks;")
+    op.execute("DROP TABLE IF EXISTS orchestration_runs;")
+```
+
+### 7.8 Design Decisions Summary
+
+| Decision | Choice | Alternative | Rationale |
+|----------|--------|-------------|-----------|
+| Board task granularity | 1 parent (mission) + N children (tasks) | 1 flat board task per mission | Children use existing `parent_task_id` FK for hierarchy. Individual task visibility matches PRD-100's "every task visible on board" requirement. |
+| Board task sync | Side effect in `transition_task()` | Separate sync job / CDC | Same-transaction update is atomic and simple. No eventual consistency lag. Matches recipe bridge pattern. |
+| `source_type` values | `orchestration` + `orchestration_task` | Single `orchestration` value for both | Separate values enable "show only missions" vs "show only tasks" filters. Partial unique indexes need distinct values. |
+| Report auto-creation | On terminal state in `transition_task()` | Agent calls `platform_submit_report` explicitly | Auto-creation ensures every task gets a report. Agent can still call `platform_submit_report` for richer content — the auto-report is a fallback. |
+| Report FK | New `orchestration_task_id` on `agent_reports` | Reuse `heartbeat_result_id` | Explicit FK enables "reports for this mission" queries. Heartbeat and orchestration are separate execution contexts. |
+| Recipe conversion | Snapshot with manual editing | Parameterized template auto-generation | First version is a snapshot — auto-parameterization requires prompt analysis that's out of scope for PRD-101. Users edit the recipe to add variables. |
+| Workspace isolation | Application-layer filtering only | PostgreSQL RLS | Matches existing pattern across all tables. RLS would be a platform-wide decision, not per-feature. |
+| Migration strategy | Standalone (`down_revision = None`) | Chained to previous migration | Standalone migrations are the recent convention (prd76+). Avoids merge head conflicts. |
+| Existing table changes | Additive only (new columns, indexes) | Modify existing columns | Zero risk to existing functionality. No backfill migrations. No downtime. |
 
 ---
 
