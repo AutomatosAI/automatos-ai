@@ -60,3 +60,17 @@
 - 5 mappings: ALLOWED_TASK_TRANSITIONS, ALLOWED_RUN_TRANSITIONS, TERMINAL_RUN_STATES, TERMINAL_TASK_STATES, BOARD_STATUS_MAP
 - Validated: `from core.models import OrchestrationRun` works, no circular imports
 - **Phase 1 complete** (US-001 through US-006)
+
+### Iteration 7 — US-007: State Transition Service
+- Created `orchestrator/services/orchestration_state.py`
+- 3 public functions: transition_task(), transition_run(), emit_event()
+- 2 custom exceptions: InvalidTransitionError (with entity_type, entity_id, current/target state), ConflictError (with entity_type, entity_id)
+- Dual-write pattern: state field updates + OrchestrationEvent creation in same db.flush()
+- Optimistic locking: catches SQLAlchemy StaleDataError → raises clean ConflictError
+- Transition validation: checks ALLOWED_TASK_TRANSITIONS / ALLOWED_RUN_TRANSITIONS before applying
+- Timestamp logic: started_at set on first entry to RUNNING, completed_at set on terminal states
+- emit_event() for non-transition events (budget warnings, stall detections) — no state validation
+- Internal helpers: _task_state_to_event_type(), _run_state_to_event_type() map states to EventType enums
+- No internal commit/rollback (except rollback on StaleDataError before re-raising)
+- Pattern follows existing board_task_bridge.py style (db: Session param, logging, typed returns)
+- Import validated: all 5 exports resolve cleanly

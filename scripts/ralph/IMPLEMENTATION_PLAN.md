@@ -13,7 +13,7 @@
 
 ## Phase 2: State Machine & Board Bridge
 
-- [ ] US-007: Create state transition service (`orchestrator/services/orchestration_state.py`) — transition_task(), transition_run(), emit_event(). Dual-write pattern. Optimistic lock handling.
+- [x] US-007: Create state transition service (`orchestrator/services/orchestration_state.py`) — transition_task(), transition_run(), emit_event(). Dual-write pattern: state change + OrchestrationEvent in same flush. Optimistic lock: catches StaleDataError → raises ConflictError. InvalidTransitionError for disallowed transitions. Timestamp updates: started_at on RUNNING, completed_at on terminal states. Internal helpers map TaskState/RunState to EventType for event creation. No internal commit — caller manages transaction.
 - [ ] US-008: Create board bridge service (`orchestrator/services/orchestration_board_bridge.py`) — create_mission_board_task(), create_task_board_task(), sync_board_status(). Uses BOARD_STATUS_MAP.
 - [ ] US-009: Create dependency resolver (`orchestrator/services/orchestration_deps.py`) — DependencyResolver with graphlib. validate_task_graph(), get_ready_tasks(), get_topological_order().
 
