@@ -19,7 +19,7 @@
 
 ## Phase 3: Coordinator
 
-- [ ] US-010: Create coordination package + AgentMatcher (`orchestrator/modules/coordination/agent_matcher.py`) — deterministic scoring (5 weights, threshold 0.4).
+- [x] US-010: Create coordination package + AgentMatcher (`orchestrator/modules/coordination/agent_matcher.py`) — deterministic scoring (5 weights, threshold 0.4). Immutable MatchResult dataclass. Batch queries for tool assignments and busy agents. Skill matching hierarchy: exact name (1.0), substring (0.75), tag (0.5), none (0.0). History placeholder at 0.5 until 82B.
 - [ ] US-011: Create MissionPlanner (`orchestrator/modules/coordination/planner.py`) — LLM decomposition + PlanValidator. 3 retry attempts on validation failure.
 - [ ] US-012: Create MissionDispatcher (`orchestrator/modules/coordination/dispatcher.py`) — sequential dispatch, optimistic claim pattern, execute_with_prompt() integration.
 - [ ] US-013: Create MissionReconciler (`orchestrator/modules/coordination/reconciler.py`) — stall detection (60s/300s), completion check, failure check.

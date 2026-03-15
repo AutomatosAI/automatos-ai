@@ -98,3 +98,19 @@
 - Functional tests passed: linear DAG ordering, cycle detection, invalid dep detection, no-deps validation
 - Import validated: all 3 exports resolve cleanly
 - **Phase 2 complete** (US-007 through US-009)
+
+### Iteration 10 — US-010: Coordination Package + AgentMatcher
+- Created `orchestrator/modules/coordination/__init__.py` (package init)
+- Created `orchestrator/modules/coordination/agent_matcher.py`
+- AgentMatcher class with static match() method — deterministic scoring, no LLM calls
+- Immutable MatchResult dataclass (frozen=True): agent_id, agent_name, total_score, 5 component scores
+- 5 scoring weights (sum=1.0): tool_coverage=0.35, skill_match=0.25, model_fit=0.15, availability=0.10, history=0.15
+- Match threshold: 0.4 minimum total score
+- Batch queries: _build_tool_map() loads all AgentAppAssignment rows for candidates in 1 query
+- Batch queries: _get_busy_agent_ids() finds agents with ASSIGNED/RUNNING tasks in 1 query
+- Skill matching hierarchy: exact name match (1.0), substring in name/desc/skills (0.75), tag match (0.5), no match (0.0)
+- History score: placeholder 0.5 (wired in 82B when telemetry data available)
+- Tool coverage: fraction of required_tools matched against agent's app assignments
+- Model fit: 1.0 if preferred_model in agent's model_id, 0.5 otherwise
+- Availability: 1.0 if idle, 0.5 if busy (has ASSIGNED/RUNNING orchestration tasks)
+- Import validated: AgentMatcher, MatchResult, MATCH_THRESHOLD all resolve cleanly
