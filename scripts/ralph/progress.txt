@@ -204,3 +204,15 @@
 - Completes COORDINATOR context mode — all 6 sections now have implementations (identity, mission_context, agent_roster, platform_actions, task_context, datetime_context)
 - **Phase 3 complete** (US-010 through US-017)
 - Import validated: section registry includes agent_roster, render tests pass with mock data
+
+### Iteration 18 — US-018: DeterministicChecker
+- Created `orchestrator/modules/coordination/deterministic_checks.py`
+- DeterministicChecker class with check(output, criteria) method — runs all deterministic checks against task output
+- 8 check types: format_regex (re.search), min_length, max_length, required_sections (markdown headers + fallback text match), json_schema (type/required/property-type validation without jsonschema dep), url_valid (urlparse), contains_keywords (case-insensitive), word_count_range ([min, max])
+- must_pass short-circuit: if a must_pass check fails, immediately returns DeterministicResult(passed=False, short_circuited=True) — remaining checks are skipped
+- Immutable result dataclasses: DeterministicResult (passed, failures, short_circuited), CheckFailure (check_type, description, must_pass)
+- Handler registry pattern: _handlers dict maps check_type → handler function for extensibility
+- Unknown check types logged as warning and skipped (non-fatal)
+- Exception handling: if a handler raises, captures as a failure description (doesn't crash)
+- 14 smoke tests passed covering all check types, must_pass short-circuit, edge cases
+- Import validated: DeterministicChecker, DeterministicResult, CheckFailure all resolve cleanly

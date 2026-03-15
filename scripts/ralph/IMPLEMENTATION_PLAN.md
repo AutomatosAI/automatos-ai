@@ -30,7 +30,7 @@
 
 ## Phase 4: Verification
 
-- [ ] US-018: Create DeterministicChecker (`orchestrator/modules/coordination/deterministic_checks.py`) — 8 check types, must_pass short-circuit.
+- [x] US-018: Create DeterministicChecker (`orchestrator/modules/coordination/deterministic_checks.py`) — 8 check types (format_regex, min_length, max_length, required_sections, json_schema, url_valid, contains_keywords, word_count_range). must_pass short-circuit: if any must_pass check fails, returns immediately with short_circuited=True. Immutable result dataclasses: DeterministicResult (passed, failures, short_circuited), CheckFailure (check_type, description, must_pass). JSON schema validation handles type checks, required properties, and property type validation without external dependency. URL validation via urlparse. 14 smoke tests passed.
 - [ ] US-019: Create VerificationService (`orchestrator/modules/coordination/verification.py`) — deterministic first, then cross-model LLM judge. Pass/fail/partial verdicts.
 - [ ] US-020: Wire verification into reconciler — completed→verifying→verified flow, retry with feedback, token tracking.
 
