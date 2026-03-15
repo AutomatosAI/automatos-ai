@@ -6,28 +6,19 @@ Implement ONE task from the plan, validate, commit, exit.
 
 Study with subagents:
 - @CLAUDE.md (how to build/test)
-- @docs/PRDS/82A-SEQUENTIAL-MISSION-COORDINATOR.md (full requirements)
-- @scripts/ralph/IMPLEMENTATION_PLAN.md (current state)
+- @scripts/ralph/IMPLEMENTATION_PLAN.md (current state — tasks + key references)
 - @scripts/ralph/prd.json (acceptance criteria for each story)
 
 ### Key References
 
-- **PRD-82A**: `docs/PRDS/82A-SEQUENTIAL-MISSION-COORDINATOR.md` — state machine (Section 4), board mapping (Section 4.3), dispatch claim pattern (Section 4.4), output summary (Section 6), failure codes (Section 8), budget tracking (Section 9)
-- **PRD-101**: `docs/PRDS/101-ORCHESTRATION-DATA-SCHEMA.md` — canonical schema definitions, column types, constraints
-- **PRD-102**: `docs/PRDS/102-COORDINATOR-ARCHITECTURE.md` — coordinator design, tick pattern, lifecycle methods
-- **PRD-103**: `docs/PRDS/103-VERIFICATION-QUALITY.md` — verification service, deterministic checks, cross-model judge
-- **Existing models**: `orchestrator/core/models/core.py` — Agent, BoardTask, Workspace models (reference for FK types, patterns)
-- **Model registry**: `orchestrator/core/models/__init__.py` — how models are exported
-- **AgentFactory**: `orchestrator/modules/agents/factory/agent_factory.py` — execute_with_prompt() signature
-- **Heartbeat service**: `orchestrator/services/heartbeat_service.py` — scheduler tick pattern to follow
-- **Board model**: `orchestrator/core/models/core.py` — BoardTask columns, source_type values
-- **Context modes**: `orchestrator/modules/context/modes.py` — ContextMode enum + MODE_CONFIGS
-- **Context budget**: `orchestrator/modules/context/budget.py` — TokenBudgetManager + DEFAULT_BUDGETS
-- **Context sections**: `orchestrator/modules/context/sections/` — identity.py, skills.py etc (pattern to follow)
-- **Section registry**: `orchestrator/modules/context/sections/__init__.py` — SECTION_REGISTRY dict
-- **Tool router**: `orchestrator/modules/tools/tool_router.py` — get_tools_for_agent()
-- **Config pattern**: `orchestrator/config.py` — ALL config constants live here, no os.getenv() elsewhere
-- **Existing API routers**: `orchestrator/api/` — pattern for auth, workspace isolation, Pydantic models
+- **Chat component**: `frontend/components/chatbot/chat.tsx` — main chat with quick links (~line 726), Code button (~line 947/1079), MultimodalInput (~line 1060)
+- **Chat input**: `frontend/components/chatbot/multimodal-input.tsx` — textarea + toolbar, handleSubmit, sendMessage callback
+- **Mission store**: `frontend/stores/mission-store.ts` — isMissionMode, activePlanningMissionId, setMissionMode, planModifications, taskFeedback
+- **Mission hooks**: `frontend/hooks/use-missions-api.ts` — useCreateMission, useApproveMission, useRejectMission, useMission, useMissions, etc.
+- **Mission types**: `frontend/types/missions.ts` — MissionResponse, RunState, TaskState, TERMINAL_RUN_STATES, RUN_STATE_CONFIG, computeMissionStats
+- **Mission components**: `frontend/components/missions/` — MissionStatusBadge, MissionDAGCanvas, MissionDetailPage, MissionTaskNode, MissionActivityFeed, TaskInspector, HumanReviewPanel, MissionList, MissionCard
+- **UX Spec**: `docs/UX/MISSION-CONTROL-UX-SPEC.md` — design decisions and interaction patterns
+- **Backend API**: POST /api/missions {goal, config?} → MissionResponse. GET /api/missions → paginated list. GET /api/missions/{id} → detail with tasks + events. POST .../approve, reject, review, pause, resume, cancel.
 
 ### Check for completion
 
@@ -43,54 +34,35 @@ grep -c "^\- \[ \]" scripts/ralph/IMPLEMENTATION_PLAN.md || echo 0
 1. **Study the plan** — Choose the FIRST unchecked task from @scripts/ralph/IMPLEMENTATION_PLAN.md
 2. **Read prd.json** — Find the matching US-XXX story in @scripts/ralph/prd.json and follow its acceptance criteria exactly
 3. **Search first** — Don't assume not implemented. Check if the component/service already exists
-4. **Read existing code** — Before creating a new file, read the reference files listed in the story notes and follow existing patterns
+4. **Read existing code** — Before creating or editing a file, read the files listed in the story notes and the Key References above to follow existing patterns
 5. **Implement** — ONE task only. Implement completely — no placeholders or stubs
-6. **Validate** — Run typecheck/import check. All acceptance criteria must be met
+6. **Validate** — Run typecheck. All acceptance criteria must be met
 
 ### Architecture Rules (CRITICAL)
 
-- NO hardcoded config values — all constants in `config.py`
-- NO os.getenv() outside of `config.py`
-- workspace_id is UUID type, created_by is String (Clerk user ID like 'user_xxx')
-- All orchestration DB columns use `orchestration_*` naming, API uses `mission` naming
-- `completed` task state is NOT terminal — only `verified`, `failed`, `skipped` are terminal
-- Board task `done` status ONLY maps from `verified` state, NOT from `completed`
-- Follow existing SQLAlchemy model patterns in `core/models/core.py`
-- Follow existing section patterns in `modules/context/sections/` — each section has a `render()` method
-- DB sessions acquired per-request from async pool — NEVER stored on singleton
-- All methods include logging with exc_info=True on exceptions
+- React Query v4 — use `isLoading` NOT `isPending` for loading states
+- Zustand for UI state (mission mode, selections), React Query for server state (fetching/mutations)
+- shadcn/ui components (Button, Skeleton, Input, Textarea, ScrollArea, etc.)
+- Lucide React icons EXCLUSIVELY — no other icon libraries
+- Dark surfaces, orange accents (#f97316 / orange-500)
+- Glass morphism: `backdrop-blur` + `bg-opacity` (e.g., `bg-card/50 backdrop-blur`)
+- Framer Motion for animations (already imported in chat.tsx)
+- `toast` from `'sonner'` for notifications
+- `useRouter` from `'next/navigation'` (App Router, NOT pages router)
+- Next.js strict route typing — use `as any` cast on `router.push()` for dynamic routes like `/missions/${id}`
 - Follow immutable data patterns — return new objects, don't mutate
-- Use datetime.now(timezone.utc) NOT datetime.utcnow()
 - BEFORE DELETING ANY CODE: grep EVERY file for callers
 
 ### Validation
 
-For new model imports:
+For frontend TypeScript (check only mission/chat errors):
 ```bash
-cd orchestrator && python -c "from core.models.orchestration_enums import RunState, TaskState" 2>&1
+cd frontend && npx tsc --noEmit 2>&1 | grep -iE "mission|chat\.tsx|mission-created" | head -20
 ```
 
-For new modules:
-```bash
-cd orchestrator && python -c "from services.orchestration_state import transition_task" 2>&1
-```
+Note: There are ~781 pre-existing TS errors in unrelated files (workflow-service, permissions, context-service, etc.). Mission and chat components are clean. Only check for NEW errors introduced by your changes.
 
-For coordination modules:
-```bash
-cd orchestrator && python -c "from modules.coordination.planner import MissionPlanner" 2>&1
-```
-
-For API:
-```bash
-cd orchestrator && python -c "from api.missions import router" 2>&1
-```
-
-For migrations:
-```bash
-cd orchestrator && alembic upgrade head 2>&1
-```
-
-If validation cannot run (e.g., missing deps), verify via grep that all imports resolve.
+If no mission/chat errors appear, validation passes.
 
 ## Phase 2: Update & Learn
 
@@ -105,7 +77,7 @@ If validation cannot run (e.g., missing deps), verify via grep that all imports 
 ## Phase 3: Commit & Exit
 
 ```bash
-git add -A && git commit -m "feat(orchestration): [description of what was implemented]"
+git add -A && git commit -m "feat(missions): [description of what was implemented]"
 ```
 
 Check remaining:
