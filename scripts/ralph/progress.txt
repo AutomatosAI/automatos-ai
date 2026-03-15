@@ -216,3 +216,22 @@
 - Exception handling: if a handler raises, captures as a failure description (doesn't crash)
 - 14 smoke tests passed covering all check types, must_pass short-circuit, edge cases
 - Import validated: DeterministicChecker, DeterministicResult, CheckFailure all resolve cleanly
+
+### Iteration 19 — US-019: VerificationService
+- Created `orchestrator/modules/coordination/verification.py`
+- VerificationService class with async verify_task() method — two-stage pipeline
+- Stage 1: DeterministicChecker — if must_pass check fails, returns FAIL immediately (no LLM cost)
+- Stage 2: Cross-model LLM judge — selects verifier model from different family than executor
+- Cross-model selection via _select_verifier_model(): family detection (claude→anthropic, gpt→openai, etc) → COORDINATOR_VERIFIER_MODEL_MAPPING → fallback model
+- LLM judge prompt: task description + criteria + deterministic results + agent output → JSON scores
+- 4 scoring dimensions: relevance, completeness, accuracy, format_compliance (each 0.0-1.0)
+- Verdict computation (_compute_verdict): any score < 0.4 → FAIL; confidence < 0.5 → PARTIAL; all scores >= 0.7 → PASS; else PARTIAL
+- Deterministic-failure downgrade: if deterministic checks had non-must_pass failures and LLM says PASS → downgrade to PARTIAL
+- LLM judge retry: up to COORDINATOR_MAX_VERIFICATION_RETRIES (2) attempts; on all retries exhausted → PARTIAL (escalate to human)
+- Empty output → immediate FAIL without any checks
+- Output truncation: limits output to 12k chars in judge prompt to avoid context overflow
+- JSON extraction: handles markdown blocks and raw JSON (reuses planner pattern)
+- Immutable VerificationResult dataclass: verdict, scores, reasoning, confidence, deterministic_passed, deterministic_failures, tokens_used
+- Config constants added to config.py: COORDINATOR_MAX_VERIFICATION_RETRIES (2), COORDINATOR_VERIFICATION_PASS_THRESHOLD (0.7), COORDINATOR_VERIFICATION_FAIL_THRESHOLD (0.4), COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION (0.5), COORDINATOR_VERIFIER_MODEL_MAPPING (5 family→model pairs), COORDINATOR_VERIFIER_FALLBACK_MODEL (gpt-4o-mini)
+- 4 smoke tests passed: cross-model selection, verdict computation, empty output, deterministic short-circuit
+- Import validated: VerificationService, VerificationResult, VERDICT_PASS/FAIL/PARTIAL all resolve cleanly
