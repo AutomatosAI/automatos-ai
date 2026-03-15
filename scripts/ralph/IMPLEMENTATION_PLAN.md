@@ -15,7 +15,7 @@
 
 - [x] US-007: Create state transition service (`orchestrator/services/orchestration_state.py`) — transition_task(), transition_run(), emit_event(). Dual-write pattern: state change + OrchestrationEvent in same flush. Optimistic lock: catches StaleDataError → raises ConflictError. InvalidTransitionError for disallowed transitions. Timestamp updates: started_at on RUNNING, completed_at on terminal states. Internal helpers map TaskState/RunState to EventType for event creation. No internal commit — caller manages transaction.
 - [x] US-008: Create board bridge service (`orchestrator/services/orchestration_board_bridge.py`) — create_mission_board_task(), create_task_board_task(), sync_board_status(). Uses BOARD_STATUS_MAP → _ORCHESTRATION_TO_BOARD_STATUS secondary mapping (PRD terms like "backlog"/"blocked" → kanban terms like "inbox"/"review"). Also added orchestration_run_id and orchestration_task_id FK columns to BoardTask ORM model in core.py (migration already had them, ORM was missing them).
-- [ ] US-009: Create dependency resolver (`orchestrator/services/orchestration_deps.py`) — DependencyResolver with graphlib. validate_task_graph(), get_ready_tasks(), get_topological_order().
+- [x] US-009: Create dependency resolver (`orchestrator/services/orchestration_deps.py`) — DependencyResolver with graphlib. validate_task_graph() checks cycles + invalid refs via TopologicalSorter, get_ready_tasks() queries pending tasks whose all upstream deps are verified, get_topological_order() returns execution order. Custom exceptions: CyclicDependencyError, InvalidDependencyError. Batch queries deps and upstream states to minimize DB round-trips.
 
 ## Phase 3: Coordinator
 

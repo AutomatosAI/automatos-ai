@@ -87,3 +87,14 @@
 - Non-fatal: missing board tasks → log warning, don't crash
 - Discovery: BoardTask ORM model was missing orchestration_run_id and orchestration_task_id FK columns (migration had them). Added to core.py and to_dict()
 - Import validated: all 3 exports resolve cleanly
+
+### Iteration 9 — US-009: Dependency Resolver
+- Created `orchestrator/services/orchestration_deps.py`
+- DependencyResolver class with 3 static methods: validate_task_graph(), get_ready_tasks(), get_topological_order()
+- 2 custom exceptions: CyclicDependencyError, InvalidDependencyError
+- validate_task_graph(): builds adjacency graph, validates all dep refs exist, runs TopologicalSorter.prepare() for cycle detection
+- get_ready_tasks(): batch-queries pending tasks + their deps + upstream verified status; returns tasks whose all deps are verified, ordered by sequence_number
+- get_topological_order(): returns task UUIDs in valid execution order via TopologicalSorter.static_order()
+- Functional tests passed: linear DAG ordering, cycle detection, invalid dep detection, no-deps validation
+- Import validated: all 3 exports resolve cleanly
+- **Phase 2 complete** (US-007 through US-009)
