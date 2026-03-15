@@ -2,3 +2,8 @@
 # Branch: ralph/82a-mission-chat-mode
 # Started: 2026-03-16
 
+## Iteration 1 — US-001: Mission mode toggle button
+- Added Target icon import and useMissionStore to chat.tsx
+- Added Mission toggle button in BOTH quick link locations (welcome card ~line 970 and bottom input ~line 1122)
+- Button toggles isMissionMode on/off, orange highlight when active (bg-orange-500/20 ring-1 ring-orange-500/50)
+- Typecheck passes (no new errors in mission/chat files)
