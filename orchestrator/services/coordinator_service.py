@@ -81,6 +81,53 @@ class CoordinatorService:
 
     def __init__(self):
         self._tick_running: bool = False
+        self._scheduler = None
+        self._owns_scheduler: bool = False
+
+    # ------------------------------------------------------------------
+    # Scheduler lifecycle
+    # ------------------------------------------------------------------
+
+    async def start(self, scheduler=None) -> None:
+        """
+        Register the coordinator tick on the shared scheduler.
+
+        Args:
+            scheduler: Shared APScheduler instance from UnifiedScheduler.
+                       If None, creates a local scheduler (useful for tests).
+        """
+        if scheduler:
+            self._scheduler = scheduler
+            self._owns_scheduler = False
+        else:
+            from apscheduler.schedulers.asyncio import AsyncIOScheduler
+            from apscheduler.jobstores.memory import MemoryJobStore
+
+            self._scheduler = AsyncIOScheduler(
+                jobstores={"default": MemoryJobStore()},
+            )
+            self._scheduler.start()
+            self._owns_scheduler = True
+
+        self._scheduler.add_job(
+            self.tick,
+            "interval",
+            seconds=Config.COORDINATOR_TICK_INTERVAL_SECONDS,
+            id="coordinator_tick",
+            replace_existing=True,
+            max_instances=1,
+        )
+        logger.info(
+            "[Coordinator] Started tick loop (interval: %ds)",
+            Config.COORDINATOR_TICK_INTERVAL_SECONDS,
+        )
+
+    async def stop(self) -> None:
+        """Stop the scheduler if this service owns it."""
+        if self._scheduler and self._owns_scheduler:
+            self._scheduler.shutdown(wait=False)
+            self._scheduler = None
+        logger.info("[Coordinator] Service stopped")
 
     # ------------------------------------------------------------------
     # Tick (5s interval)
@@ -975,3 +1022,18 @@ class CoordinatorService:
                 run.id,
                 exc_info=True,
             )
+
+
+# ---------------------------------------------------------------------------
+# Singleton accessor (matches HeartbeatService pattern)
+# ---------------------------------------------------------------------------
+
+_coordinator_service: Optional[CoordinatorService] = None
+
+
+def get_coordinator_service() -> CoordinatorService:
+    """Get or create the singleton CoordinatorService."""
+    global _coordinator_service
+    if _coordinator_service is None:
+        _coordinator_service = CoordinatorService()
+    return _coordinator_service

@@ -165,3 +165,15 @@
 - Enum fix: added RETRYING to ALLOWED_TASK_TRANSITIONS[VERIFIED] — required for human rejection flow (PRD-82A Section 16)
 - DB pattern: SessionLocal per tick (no stored session on singleton), matching heartbeat_service pattern
 - Import validated: CoordinatorService resolves cleanly
+
+### Iteration 15 — US-015: Register Coordinator Tick on Scheduler
+- Added start()/stop() lifecycle methods to CoordinatorService (coordinator_service.py)
+  - start(scheduler=None): accepts shared APScheduler or creates local one (test mode)
+  - Registers interval job: coordinator_tick, seconds=COORDINATOR_TICK_INTERVAL_SECONDS, max_instances=1
+  - stop(): shuts down scheduler only if this service owns it
+- Added get_coordinator_service() singleton accessor (matches HeartbeatService pattern)
+- Modified main.py lifespan:
+  - Added COORDINATOR_ENABLED to scheduler guard condition (startup + shutdown)
+  - Registered CoordinatorService.start(scheduler=shared_sched) after ScheduledTaskService
+  - Non-fatal: catches and logs exceptions if coordinator fails to start
+- Import validated: CoordinatorService + get_coordinator_service both resolve cleanly
