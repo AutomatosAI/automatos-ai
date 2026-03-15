@@ -16,3 +16,22 @@
 - AnimatePresence + motion.div for smooth enter/exit animation (opacity + height)
 - X button calls setMissionMode(false)
 - Typecheck passes (no new errors in mission/chat files)
+
+## Iteration 3 — US-003: Intercept chat submit (already committed)
+- handleSendMessage wrapper in chat.tsx intercepts when isMissionMode is active
+- Calls createMission.mutate({ goal }) instead of normal chat flow
+- On success: sets activePlanningMissionId, exits mission mode, shows toast
+- On error: shows error toast, keeps mission mode active
+
+## Iteration 4 — US-004: Mission created card (already committed)
+- Created frontend/components/chatbot/mission-created-card.tsx
+- Uses useMission(missionId) to fetch data, MissionStatusBadge for state
+- Shows truncated goal, task count from plan, "Review Plan" CTA button
+- Glass-card styling with skeleton loading state
+
+## Iteration 5 — US-005: Render mission card in chat
+- Added activePlanningMissionId getter from useMissionStore
+- Imported MissionCreatedCard component
+- Renders card with fade-in animation (framer-motion) before messagesEndRef
+- Card appears in BOTH layout modes (widget layout and standard layout)
+- Typecheck passes (no new errors in mission/chat files)
