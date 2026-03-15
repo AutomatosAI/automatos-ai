@@ -6,6 +6,7 @@ section name strings to their classes.  Used by ``ContextService`` to
 instantiate sections from ``ModeConfig.sections`` lists.
 """
 
+from modules.context.sections.agent_roster import AgentRosterSection
 from modules.context.sections.base import BaseSection, SectionContext
 from modules.context.sections.composio import ComposioSection
 from modules.context.sections.conversation import ConversationSection
@@ -30,6 +31,7 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
     "platform_actions": PlatformActionsSection,
     "memory": MemorySection,
     "mission_context": MissionContextSection,
+    "agent_roster": AgentRosterSection,
     "tools": ToolsSection,
     "task_context": TaskContextSection,
     "recipe_context": RecipeContextSection,
@@ -39,6 +41,7 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
 }
 
 __all__ = [
+    "AgentRosterSection",
     "BaseSection",
     "SectionContext",
     "ComposioSection",

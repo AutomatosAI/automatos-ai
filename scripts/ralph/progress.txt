@@ -191,3 +191,16 @@
 - Registered MissionContextSection in SECTION_REGISTRY and __all__ in sections/__init__.py
 - Note: agent_roster section referenced in COORDINATOR mode sections but not yet created — ContextService logs warning and skips. US-017 creates it.
 - Import validated: all assertions pass (enum, ModeConfig, TokenBudget, SECTION_REGISTRY, render with mock data)
+
+### Iteration 17 — US-017: AgentRosterSection
+- Created `orchestrator/modules/context/sections/agent_roster.py` with AgentRosterSection class
+  - Priority 3 (high but trimmable after mission_context), max_tokens=6000
+  - Renders: agent id, name, type, status, model (from model_config.model_id), description (truncated to 200 chars), skills (from ORM relationship), tags
+  - Accepts data via ctx.kwargs["roster_agents"] (list of Agent ORM objects or dicts)
+  - _attr_or_key() helper handles both ORM attributes and dict keys (same pattern as MissionContextSection)
+  - _render_skills() extracts skill names from ORM Skill relationship or dict lists
+  - Returns "No agents available in this workspace" when no agents provided
+- Registered AgentRosterSection in SECTION_REGISTRY and __all__ in sections/__init__.py
+- Completes COORDINATOR context mode — all 6 sections now have implementations (identity, mission_context, agent_roster, platform_actions, task_context, datetime_context)
+- **Phase 3 complete** (US-010 through US-017)
+- Import validated: section registry includes agent_roster, render tests pass with mock data
