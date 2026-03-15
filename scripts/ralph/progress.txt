@@ -257,3 +257,20 @@
 - All ConflictError paths handled gracefully (log warning, continue)
 - **Phase 4 complete** (US-018 through US-020)
 - Import validated: async reconcile, new ReconcileResult fields, new EventType all resolve cleanly
+
+### Iteration 21 — US-021: Missions REST API Router
+- Created `orchestrator/api/missions.py` — 9 endpoints, all auth-protected, workspace-isolated
+- Pydantic request models: MissionCreateRequest (goal, config), MissionApproveRequest (modifications), MissionRejectRequest (reason), MissionReviewRequest (verdict, task_feedback)
+- Pydantic response models: TaskResponse, EventResponse, MissionResponse, MissionDetailResponse, MissionListResponse
+- POST /api/missions — creates mission via CoordinatorService.create_mission(), 201 status
+- GET /api/missions — list with pagination (limit/offset) + state filter, sorted by created_at desc
+- GET /api/missions/{id} — full detail: run + tasks (ordered by sequence_number) + last 50 events
+- POST /api/missions/{id}/approve — state guard: awaiting_approval required
+- POST /api/missions/{id}/reject — state guard: awaiting_approval required
+- POST /api/missions/{id}/review — state guard: awaiting_human required
+- POST /api/missions/{id}/pause — state guard: running required
+- POST /api/missions/{id}/resume — state guard: paused required
+- POST /api/missions/{id}/cancel — state guard: non-terminal required
+- Error handling: PlanValidationError→422, ConflictError/InvalidTransitionError→409, generic→500 with rollback
+- Helper functions: _run_to_response(), _task_to_response(), _event_to_response(), _get_run_for_workspace()
+- Import validated: 9 routes loaded successfully

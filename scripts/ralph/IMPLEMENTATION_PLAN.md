@@ -36,7 +36,7 @@
 
 ## Phase 5: API
 
-- [ ] US-021: Create missions REST API router (`orchestrator/api/missions.py`) — 9 endpoints, auth, workspace isolation, Pydantic models.
+- [x] US-021: Create missions REST API router (`orchestrator/api/missions.py`) — 9 endpoints (POST create, GET list, GET detail, POST approve/reject/review/pause/resume/cancel). Auth via get_request_context_hybrid, workspace isolation on all queries. Pydantic request/response models: MissionCreateRequest, MissionApproveRequest, MissionRejectRequest, MissionReviewRequest, TaskResponse, EventResponse, MissionResponse, MissionDetailResponse, MissionListResponse. State guards on lifecycle endpoints (approve requires awaiting_approval, review requires awaiting_human, pause requires running, resume requires paused, cancel requires non-terminal). ConflictError/InvalidTransitionError → 409. PlanValidationError → 422. GET detail returns tasks + last 50 events. GET list supports state filter + pagination.
 - [ ] US-022: Mount missions router in main app.
 
 ## Discovered Issues
