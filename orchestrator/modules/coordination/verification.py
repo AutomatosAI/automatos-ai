@@ -95,12 +95,21 @@ def _select_verifier_model(executor_model: Optional[str]) -> str:
         "meta": ["llama", "meta"],
     }
 
+    executor_family = None
     for family, keywords in family_keywords.items():
         if any(kw in model_lower for kw in keywords):
+            executor_family = family
             verifier = mapping.get(family)
             if verifier:
                 return verifier
             break
+
+    # Executor family has no dedicated mapping — pick any OTHER family's model
+    # to preserve the cross-model guarantee
+    if executor_family:
+        for family, model in mapping.items():
+            if family != executor_family:
+                return model
 
     return fallback
 
@@ -166,7 +175,9 @@ def _build_judge_prompt(
 {det_text}
 
 ## Agent Output
+<agent_output>
 {output_display}
+</agent_output>
 
 ## Required JSON Output
 Return ONLY a JSON object with this exact structure:

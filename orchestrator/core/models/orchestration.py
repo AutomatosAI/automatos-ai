@@ -31,7 +31,7 @@ from core.models.orchestration_enums import (
     TaskState,
     RUN_STATE_TYPE,
     TASK_STATE_TYPE,
-    TERMINAL_TASK_STATES,
+    DONE_TASK_STATES,
 )
 
 
@@ -65,7 +65,7 @@ class OrchestrationRun(Base):
     # Mission definition
     goal = Column(Text, nullable=False)
     plan = Column(JSONB, nullable=True)
-    config = Column(JSONB, nullable=True, server_default="{}")
+    config = Column(JSONB, nullable=True, server_default=text("'{}'"))
 
     # State machine (PRD-82A Section 4.1)
     state = Column(
@@ -131,7 +131,7 @@ class OrchestrationRun(Base):
     def __repr__(self) -> str:
         return (
             f"<OrchestrationRun id={self.id} state={self.state} "
-            f"goal={self.goal[:50] if self.goal else None!r}>"
+            f"goal={(self.goal[:50] if self.goal else None)!r}>"
         )
 
 
@@ -248,7 +248,7 @@ class OrchestrationTask(Base):
             "run_id",
             "state",
             postgresql_where=text(
-                f"state NOT IN ({', '.join(repr(s.value) for s in TERMINAL_TASK_STATES)})"
+                f"state NOT IN ({', '.join(repr(s.value) for s in DONE_TASK_STATES)})"
             ),
         ),
         CheckConstraint(
@@ -262,7 +262,7 @@ class OrchestrationTask(Base):
         return (
             f"<OrchestrationTask id={self.id} run_id={self.run_id} "
             f"seq={self.sequence_number} state={self.state} "
-            f"title={self.title[:40] if self.title else None!r}>"
+            f"title={(self.title[:40] if self.title else None)!r}>"
         )
 
 

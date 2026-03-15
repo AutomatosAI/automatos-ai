@@ -244,7 +244,7 @@ def _build_decomposition_prompt(
 ) -> str:
     """Build the user prompt for goal decomposition."""
     parts = [
-        f"## Goal\n{goal}\n",
+        f"## Goal\n<user_goal>\n{goal}\n</user_goal>\n",
         f"## Available Agents\n{agent_roster}\n",
         _OUTPUT_SCHEMA_INSTRUCTIONS,
     ]

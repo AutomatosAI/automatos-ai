@@ -186,7 +186,7 @@ TASK_STATE_TYPE: dict[TaskState, StateType] = {
     TaskState.RUNNING: StateType.ACTIVE,
     TaskState.COMPLETED: StateType.ACTIVE,      # NOT terminal — awaiting verification
     TaskState.VERIFYING: StateType.ACTIVE,
-    TaskState.VERIFIED: StateType.TERMINAL,
+    TaskState.VERIFIED: StateType.BLOCKED,     # done, but human can reject → RETRYING
     TaskState.FAILED: StateType.TERMINAL,
     TaskState.SKIPPED: StateType.TERMINAL,
     TaskState.STALLED: StateType.ACTIVE,
@@ -206,6 +206,13 @@ TERMINAL_TASK_STATES: frozenset[TaskState] = frozenset(
     s for s, t in TASK_STATE_TYPE.items() if t == StateType.TERMINAL
 )
 
+# Tasks that count as "done" for dependency resolution and mission completion.
+# VERIFIED is not TERMINAL (human can reject it back to RETRYING), but it IS
+# a success state for downstream dependency satisfaction.
+DONE_TASK_STATES: frozenset[TaskState] = frozenset(
+    {TaskState.VERIFIED, TaskState.FAILED, TaskState.SKIPPED}
+)
+
 
 # ===========================================================================
 # Allowed state transitions (PRD-82A Section 4.2)
@@ -218,10 +225,10 @@ ALLOWED_TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.RUNNING: frozenset({TaskState.COMPLETED, TaskState.STALLED, TaskState.FAILED, TaskState.SKIPPED}),
     TaskState.COMPLETED: frozenset({TaskState.VERIFYING, TaskState.SKIPPED}),
     TaskState.VERIFYING: frozenset({TaskState.VERIFIED, TaskState.RETRYING, TaskState.FAILED, TaskState.SKIPPED}),
-    TaskState.VERIFIED: frozenset({TaskState.RETRYING}),  # terminal except human rejection
+    TaskState.VERIFIED: frozenset({TaskState.RETRYING}),  # human rejection re-queues for retry
     TaskState.FAILED: frozenset(),    # terminal
     TaskState.SKIPPED: frozenset(),   # terminal
-    TaskState.STALLED: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED}),
+    TaskState.STALLED: frozenset({TaskState.QUEUED, TaskState.ASSIGNED, TaskState.SKIPPED}),
     TaskState.RETRYING: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED}),
 }
 

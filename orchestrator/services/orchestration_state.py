@@ -152,11 +152,10 @@ def transition_task(
     )
     db.add(event)
 
-    # Flush to trigger optimistic lock check
+    # Flush to trigger optimistic lock check — caller manages rollback
     try:
         db.flush()
     except StaleDataError:
-        db.rollback()
         raise ConflictError(entity_type="task", entity_id=task.id)
 
     logger.info(
@@ -249,11 +248,10 @@ def transition_run(
     )
     db.add(event)
 
-    # Flush to trigger optimistic lock check
+    # Flush to trigger optimistic lock check — caller manages rollback
     try:
         db.flush()
     except StaleDataError:
-        db.rollback()
         raise ConflictError(entity_type="run", entity_id=run.id)
 
     logger.info(

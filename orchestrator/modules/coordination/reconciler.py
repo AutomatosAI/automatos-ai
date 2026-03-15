@@ -35,6 +35,7 @@ from core.models.orchestration_enums import (
     RunState,
     TaskState,
     TERMINAL_TASK_STATES,
+    DONE_TASK_STATES,
 )
 from modules.coordination.verification import (
     VERDICT_FAIL,
@@ -132,11 +133,11 @@ class MissionReconciler:
             if not all_tasks:
                 return ReconcileResult(run_id=run_id)
 
-            terminal_tasks = [
+            done_tasks = [
                 t for t in all_tasks
-                if TaskState(t.state) in TERMINAL_TASK_STATES
+                if TaskState(t.state) in DONE_TASK_STATES
             ]
-            all_terminal = len(terminal_tasks) == len(all_tasks)
+            all_terminal = len(done_tasks) == len(all_tasks)
 
             # Count failures (tasks that exhausted retries)
             failed_tasks = [
@@ -393,15 +394,16 @@ class MissionReconciler:
             task.failure_reason_code = FailureReasonCode.VERIFICATION_FAIL.value
             task.attempt_number = attempt + 1
 
-            # Inject verification feedback into input_context for retry
-            feedback_context = task.input_context or {}
-            feedback_context["verification_feedback"] = {
-                "attempt": attempt + 1,
-                "reasoning": result.reasoning,
-                "scores": result.scores,
-                "failures": result.deterministic_failures,
+            # Inject verification feedback — immutable replace for JSONB detection
+            task.input_context = {
+                **(task.input_context or {}),
+                "verification_feedback": {
+                    "attempt": attempt + 1,
+                    "reasoning": result.reasoning,
+                    "scores": result.scores,
+                    "failures": result.deterministic_failures,
+                },
             }
-            task.input_context = feedback_context
 
             try:
                 transition_task(
@@ -599,7 +601,8 @@ class MissionReconciler:
                     )
                     continue
 
-                # Recover: transition STALLED → ASSIGNED for re-dispatch
+                # Recover: transition STALLED → QUEUED for re-dispatch (not ASSIGNED,
+        # which would block the dispatcher's has_active_task check)
                 recovered = MissionReconciler._recover_stalled_task(db, task)
                 if recovered:
                     stalls_recovered += 1
@@ -609,7 +612,7 @@ class MissionReconciler:
     @staticmethod
     def _recover_stalled_task(db: Session, task: OrchestrationTask) -> bool:
         """
-        Recover a stalled task by transitioning back to ASSIGNED for re-dispatch.
+        Recover a stalled task by transitioning back to QUEUED for re-dispatch.
 
         Increments the attempt_number. If max_retries exhausted, transitions
         to FAILED instead.
@@ -641,21 +644,22 @@ class MissionReconciler:
                 )
             return False
 
-        # Increment attempt and re-dispatch
+        # Increment attempt, clear agent, and re-queue for dispatch
         task.attempt_number = (task.attempt_number or 0) + 1
+        task.assigned_agent_id = None
 
         try:
             transition_task(
                 db=db,
                 task=task,
-                new_state=TaskState.ASSIGNED,
+                new_state=TaskState.QUEUED,
                 actor_type=ActorType.SCHEDULER,
                 actor_id="reconciler",
                 reason=f"Stall recovery (attempt {task.attempt_number})",
             )
             sync_board_status(db, task)
             logger.info(
-                "Recovered stalled task %s → assigned (attempt %d/%d)",
+                "Recovered stalled task %s → queued (attempt %d/%d)",
                 task.id,
                 task.attempt_number,
                 max_retries,

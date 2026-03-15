@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
@@ -64,8 +64,24 @@ class MissionCreateRequest(BaseModel):
     config: Optional[Dict[str, Any]] = Field(None, description="Optional mission config overrides")
 
 
+ALLOWED_MODIFICATION_KEYS = {"task_overrides", "notes", "agent_overrides"}
+
+
 class MissionApproveRequest(BaseModel):
     modifications: Optional[Dict[str, Any]] = Field(None, description="Optional plan modifications")
+
+    @validator("modifications")
+    def validate_modifications(cls, v):
+        if v is None:
+            return v
+        unknown = set(v.keys()) - ALLOWED_MODIFICATION_KEYS
+        if unknown:
+            raise ValueError(f"Unknown modification keys: {unknown}")
+        # Cap total serialised size to prevent memory abuse
+        import json
+        if len(json.dumps(v)) > 10_000:
+            raise ValueError("Modifications payload too large (max 10KB)")
+        return v
 
 
 class MissionRejectRequest(BaseModel):
@@ -78,6 +94,22 @@ class MissionReviewRequest(BaseModel):
         None,
         description="Map of task_id → feedback string. On reject, tasks with feedback get re-queued.",
     )
+
+    @validator("task_feedback")
+    def validate_task_feedback(cls, v):
+        if v is None:
+            return v
+        if len(v) > 50:
+            raise ValueError("Too many task feedback entries (max 50)")
+        from uuid import UUID as UUIDType
+        validated = {}
+        for k, val in v.items():
+            try:
+                UUIDType(k)
+            except ValueError:
+                raise ValueError(f"Invalid task ID (not a UUID): {k}")
+            validated[k] = val[:2000]  # cap feedback length
+        return validated
 
 
 class TaskResponse(BaseModel):

@@ -41,6 +41,7 @@ from .orchestration_enums import (  # noqa: F401
     ALLOWED_RUN_TRANSITIONS,
     TERMINAL_RUN_STATES,
     TERMINAL_TASK_STATES,
+    DONE_TASK_STATES,
     BOARD_STATUS_MAP,
 )
 

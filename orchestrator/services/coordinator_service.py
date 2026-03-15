@@ -39,7 +39,7 @@ from core.models.orchestration_enums import (
     RunState,
     TaskState,
     TERMINAL_RUN_STATES,
-    TERMINAL_TASK_STATES,
+    DONE_TASK_STATES,
 )
 from modules.coordination.dispatcher import MissionDispatcher
 from modules.coordination.planner import (
@@ -694,7 +694,7 @@ class CoordinatorService:
             emit_event(
                 db=db,
                 run_id=run.id,
-                event_type=EventType.RUN_AWAITING_HUMAN,
+                event_type=EventType.RUN_RESUMED,
                 actor_type=ActorType.HUMAN,
                 actor_id=actor_id,
                 payload={
@@ -942,10 +942,11 @@ class CoordinatorService:
         Injects feedback into task.input_context so the agent sees it
         on the next execution.
         """
-        # Inject feedback into input_context
-        context = dict(task.input_context) if task.input_context else {}
-        context["retry_feedback"] = feedback
-        task.input_context = context
+        # Inject feedback — immutable replace for JSONB dirty detection
+        task.input_context = {
+            **(task.input_context or {}),
+            "retry_feedback": feedback,
+        }
 
         task.failure_reason_code = FailureReasonCode.VERIFICATION_REJECT.value
         task.attempt_number = (task.attempt_number or 0) + 1
