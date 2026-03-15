@@ -16,7 +16,7 @@ Add Mission mode toggle to chat input, create missions from chat, show inline mi
 - [x] US-005: Render mission card in chat when activePlanningMissionId is set
 - [x] US-006: Add plan approval controls to mission detail page
 - [x] US-007: Set DAG canvas to plan mode when awaiting_approval
-- [ ] US-008: Handle /mission slash command in chat input
+- [x] US-008: Handle /mission slash command in chat input
 
 ---
 

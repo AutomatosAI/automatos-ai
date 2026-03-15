@@ -429,19 +429,43 @@ export function Chat({
 
   const regenerate = () => reload()
 
-  // PRD-82A US-003: Intercept chat submit in mission mode → create mission instead
+  // PRD-82A US-008: Handle /mission slash command + US-003: Mission mode intercept
   const handleSendMessage = useCallback(
     (message: any) => {
+      const text = typeof message === 'string' ? message : message?.content
+      const trimmedText = text?.trim() ?? ''
+
+      // US-008: /mission slash command takes priority over mission mode
+      if (trimmedText.toLowerCase().startsWith('/mission ')) {
+        const goal = trimmedText.slice(9).trim()
+        if (!goal) return
+
+        createMission.mutate(
+          { goal },
+          {
+            onSuccess: (mission) => {
+              setActivePlanningMissionId(mission.id)
+              setMissionMode(false)
+              toast.success('Mission created — plan is being generated')
+            },
+            onError: (err) => {
+              toast.error(err.message || 'Failed to create mission')
+            },
+          }
+        )
+        return
+      }
+
+      // US-003: Mission mode intercept
       if (!isMissionMode) {
         sendMessage(message)
         return
       }
 
-      const goal = typeof message === 'string' ? message : message?.content
-      if (!goal?.trim()) return
+      if (!trimmedText) return
 
       createMission.mutate(
-        { goal: goal.trim() },
+        { goal: trimmedText },
         {
           onSuccess: (mission) => {
             setActivePlanningMissionId(mission.id)
