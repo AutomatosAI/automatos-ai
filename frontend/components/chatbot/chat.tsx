@@ -33,6 +33,7 @@ import { analytics } from '@/lib/analytics'
 // PRD-82A: Mission mode
 import { useMissionStore } from '@/stores/mission-store'
 import { useCreateMission } from '@/hooks/use-missions-api'
+import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
 
 export interface ChatProps {
   id: string
@@ -72,6 +73,7 @@ export function Chat({
   const isMissionMode = useMissionStore((s) => s.isMissionMode)
   const setMissionMode = useMissionStore((s) => s.setMissionMode)
   const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
+  const activePlanningMissionId = useMissionStore((s) => s.activePlanningMissionId)
   const createMission = useCreateMission()
 
   // PRD-66: Workspace context for Code Canvas
@@ -802,6 +804,18 @@ export function Chat({
                           onDatabaseSelect={handleDatabaseSelect}
                         />
                       ))}
+
+                      {/* PRD-82A: Inline mission card after creation */}
+                      {activePlanningMissionId && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          <MissionCreatedCard missionId={activePlanningMissionId} />
+                        </motion.div>
+                      )}
+
                       <div ref={messagesEndRef} />
                     </div>
                   </div>
@@ -1136,6 +1150,17 @@ export function Chat({
                 </AnimatePresence>
 
                 {/* Typing indicator removed: we show "Thinking…" on the streaming message */}
+
+                {/* PRD-82A: Inline mission card after creation */}
+                {activePlanningMissionId && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <MissionCreatedCard missionId={activePlanningMissionId} />
+                  </motion.div>
+                )}
 
                 <div ref={messagesEndRef} />
               </div>
