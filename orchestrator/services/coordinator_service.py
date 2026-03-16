@@ -630,6 +630,7 @@ class CoordinatorService:
             reason=f"Plan rejected: {reason}",
         )
 
+        VerificationService.clear_cache(run.id)
         logger.info("Mission %s rejected by %s: %s", run_id, actor_id, reason)
         return run
 
@@ -670,6 +671,7 @@ class CoordinatorService:
                 actor_type=ActorType.HUMAN,
                 actor_id=actor_id,
             )
+            VerificationService.clear_cache(run.id)
             logger.info("Mission %s accepted by %s → completed", run_id, actor_id)
 
         elif verdict == "reject":
@@ -816,6 +818,7 @@ class CoordinatorService:
             reason="Mission cancelled",
         )
 
+        VerificationService.clear_cache(run.id)
         logger.info("Mission %s cancelled by %s", run_id, actor_id)
         return run
 

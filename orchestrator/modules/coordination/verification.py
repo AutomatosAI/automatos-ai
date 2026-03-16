@@ -12,10 +12,11 @@ Source: PRD-103 (Verification Quality)
         PRD-82A Section 5 (cross-model principle), Section 11 (retry guardrails)
 """
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from config import Config
@@ -253,11 +254,46 @@ class VerificationService:
     """
     Verifies task outputs using deterministic checks + cross-model LLM judge.
 
-    Stateless — all data comes from arguments.
+    Includes per-run output hash caching (PRD-82B US-007): if the same task
+    produces identical output on retry, the cached VerificationResult is
+    returned without a second LLM call.
+
+    Cache is class-level so it survives across VerificationService() instances
+    created per reconciler tick.  Keyed by (run_id, task_id, sha256(output)).
     """
+
+    # Class-level cache: {(run_id, task_id, output_hash): VerificationResult}
+    _cache: Dict[Tuple[UUID, UUID, str], "VerificationResult"] = {}
 
     def __init__(self) -> None:
         self._checker = DeterministicChecker()
+
+    # -------------------------------------------------------------------
+    # Cache helpers (PRD-82B US-007)
+    # -------------------------------------------------------------------
+
+    @classmethod
+    def _output_hash(cls, output: str) -> str:
+        """Compute SHA-256 hex digest of the raw output text."""
+        return hashlib.sha256(output.encode()).hexdigest()
+
+    @classmethod
+    def clear_cache(cls, run_id: UUID) -> int:
+        """
+        Remove all cached verification results for a given run.
+
+        Returns the number of entries removed.
+        """
+        keys_to_remove = [k for k in cls._cache if k[0] == run_id]
+        for k in keys_to_remove:
+            del cls._cache[k]
+        if keys_to_remove:
+            logger.info(
+                "Verification cache cleared for run %s (%d entries removed)",
+                run_id,
+                len(keys_to_remove),
+            )
+        return len(keys_to_remove)
 
     async def verify_task(
         self,
@@ -266,6 +302,9 @@ class VerificationService:
         output: str,
         verification_criteria: Optional[List[Dict[str, Any]]],
         executor_model: Optional[str] = None,
+        *,
+        run_id: Optional[UUID] = None,
+        task_id: Optional[UUID] = None,
     ) -> VerificationResult:
         """
         Verify a task's output.
@@ -276,6 +315,8 @@ class VerificationService:
             output: The agent's output text.
             verification_criteria: List of criterion dicts from task spec.
             executor_model: Model used by the executing agent (for cross-model selection).
+            run_id: Orchestration run ID (for caching scope).
+            task_id: Task ID (for cache key).
 
         Returns:
             VerificationResult with verdict, scores, and reasoning.
@@ -287,6 +328,22 @@ class VerificationService:
                 deterministic_passed=False,
             )
 
+        # ------------------------------------------------------------------
+        # Cache lookup (PRD-82B US-007)
+        # ------------------------------------------------------------------
+        cache_key: Optional[Tuple[UUID, UUID, str]] = None
+        if run_id is not None and task_id is not None:
+            output_hash = self._output_hash(output)
+            cache_key = (run_id, task_id, output_hash)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.info(
+                    "Verification cache hit for task %s (run %s)",
+                    task_id,
+                    run_id,
+                )
+                return cached
+
         # Stage 1: Deterministic checks
         det_result = self._checker.check(output, verification_criteria)
 
@@ -297,16 +354,19 @@ class VerificationService:
                 "Verification FAIL (deterministic short-circuit) for task '%s'",
                 task_title,
             )
-            return VerificationResult(
+            result = VerificationResult(
                 verdict=VERDICT_FAIL,
                 reasoning="Deterministic must_pass check failed: "
                 + "; ".join(det_failure_descriptions),
                 deterministic_passed=False,
                 deterministic_failures=det_failure_descriptions,
             )
+            if cache_key is not None:
+                self._cache[cache_key] = result
+            return result
 
         # Stage 2: Cross-model LLM judge
-        return await self._run_llm_judge(
+        result = await self._run_llm_judge(
             task_title=task_title,
             task_description=task_description,
             output=output,
@@ -315,6 +375,11 @@ class VerificationService:
             deterministic_result=det_result,
             deterministic_failures=det_failure_descriptions,
         )
+
+        # Store in cache
+        if cache_key is not None:
+            self._cache[cache_key] = result
+        return result
 
     async def _run_llm_judge(
         self,
