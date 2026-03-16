@@ -314,7 +314,7 @@ class Config:
     # Format: comma-separated family=model pairs
     COORDINATOR_VERIFIER_MODEL_MAPPING: str = os.getenv(
         "COORDINATOR_VERIFIER_MODEL_MAPPING",
-        "anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5-20251001,"
+        "anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5,"
         "google=openai/gpt-4o-mini,deepseek=openai/gpt-4o-mini,meta=openai/gpt-4o-mini",
     )
     COORDINATOR_VERIFIER_FALLBACK_MODEL: str = os.getenv(
