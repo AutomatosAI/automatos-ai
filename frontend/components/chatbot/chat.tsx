@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import Link from 'next/link'
-import { Bot, ArrowDown, Database, GitBranch, Wrench, Code2, Target, X } from 'lucide-react'
+import { ArrowDown, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
@@ -33,6 +32,12 @@ import { analytics } from '@/lib/analytics'
 // PRD-82A: Mission mode
 import { useMissionStore } from '@/stores/mission-store'
 import { useCreateMission } from '@/hooks/use-missions-api'
+
+// Chat Mode Bar (ralph/chat-mode-bar)
+import { ChatModeBar } from '@/components/chatbot/chat-mode-bar'
+import { PinAgentPicker } from '@/components/chatbot/pin-agent-picker'
+import { usePinnedAgents } from '@/hooks/use-pinned-agents'
+import { useAgents } from '@/hooks/use-agent-api'
 import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
 
 export interface ChatProps {
@@ -78,6 +83,11 @@ export function Chat({
 
   // PRD-66: Workspace context for Code Canvas
   const { workspace } = useWorkspace()
+
+  // Chat Mode Bar: pinned agents + agent roster
+  const { pinnedIds, pin, unpin } = usePinnedAgents(workspace?.id?.toString() ?? '')
+  const { data: agentsData } = useAgents()
+  const agents = agentsData ?? []
 
   const handleOpenCodeCanvas = useCallback(() => {
     if (!workspace?.id) {
@@ -787,13 +797,6 @@ export function Chat({
   const isTyping = status === 'streaming'
   const hasSentMessage = messages.length > 0
 
-  const quickLinks = [
-    { label: 'Create an Agent', href: '/agents', icon: Bot },
-    { label: 'Knowledge Base', href: '/documents', icon: Database },
-    { label: 'Recipes', href: '/activity', icon: GitBranch },
-    { label: 'Edit Tools', href: '/tools', icon: Wrench },
-  ] as const
-
   const showWelcomeCard = !hasSentMessage && !isTyping
 
   return (
@@ -1082,64 +1085,22 @@ export function Chat({
                   onToolIconClick={handleToolIconClick}
                 />
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2 pt-1">
-                  {/* PRD-66: Code Canvas quick action */}
-                  <button
-                    type="button"
-                    onClick={handleOpenCodeCanvas}
-                    title="Code"
-                    className={[
-                      'inline-flex items-center justify-center rounded-full',
-                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                      'gap-2 text-xs font-medium',
-                      'bg-black/10 backdrop-blur text-foreground/90',
-                      'hover:bg-orange-500/10 transition-colors',
-                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                    ].join(' ')}
-                  >
-                    <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                    <span className="hidden md:inline">Code</span>
-                  </button>
-                  {/* PRD-82A: Mission mode toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setMissionMode(!isMissionMode)}
-                    title="Mission"
-                    className={[
-                      'inline-flex items-center justify-center rounded-full',
-                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                      'gap-2 text-xs font-medium',
-                      isMissionMode
-                        ? 'bg-orange-500/20 ring-1 ring-orange-500/50 text-foreground/90'
-                        : 'bg-black/10 text-foreground/90',
-                      'backdrop-blur',
-                      'hover:bg-orange-500/10 transition-colors',
-                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                    ].join(' ')}
-                  >
-                    <Target className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                    <span className="hidden md:inline">Mission</span>
-                  </button>
-                  {quickLinks.map((item) => {
-                    const Icon = item.icon
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        title={item.label}
-                        className={[
-                          'inline-flex items-center justify-center rounded-full',
-                          'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                          'gap-2 text-xs font-medium',
-                          'bg-black/10 backdrop-blur text-foreground/90',
-                          'hover:bg-orange-500/10 transition-colors',
-                          'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                        ].join(' ')}
-                      >
-                        <Icon className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                        <span className="hidden md:inline">{item.label}</span>
-                      </Link>
-                    )
-                  })}
+                  <ChatModeBar
+                    isCodeActive={hasWidgets}
+                    isMissionActive={isMissionMode}
+                    onCodeClick={handleOpenCodeCanvas}
+                    onMissionClick={() => setMissionMode(!isMissionMode)}
+                    pinnedAgentIds={pinnedIds}
+                    agents={agents}
+                    selectedAgentId={selectedAgentId}
+                    onAgentSelect={handleAgentChange}
+                  />
+                  <PinAgentPicker
+                    agents={agents}
+                    pinnedIds={pinnedIds}
+                    onPin={pin}
+                    onUnpin={unpin}
+                  />
                 </div>
               </div>
             </div>
@@ -1267,64 +1228,22 @@ export function Chat({
                   onToolIconClick={handleToolIconClick}
                 />
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2">
-                  {/* PRD-66: Code Canvas quick action */}
-                  <button
-                    type="button"
-                    onClick={handleOpenCodeCanvas}
-                    title="Code"
-                    className={[
-                      'inline-flex items-center justify-center rounded-full',
-                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                      'gap-2 text-xs font-medium',
-                      'bg-black/10 backdrop-blur text-foreground/90',
-                      'hover:bg-orange-500/10 transition-colors',
-                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                    ].join(' ')}
-                  >
-                    <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                    <span className="hidden md:inline">Code</span>
-                  </button>
-                  {/* PRD-82A: Mission mode toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setMissionMode(!isMissionMode)}
-                    title="Mission"
-                    className={[
-                      'inline-flex items-center justify-center rounded-full',
-                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                      'gap-2 text-xs font-medium',
-                      isMissionMode
-                        ? 'bg-orange-500/20 ring-1 ring-orange-500/50 text-foreground/90'
-                        : 'bg-black/10 text-foreground/90',
-                      'backdrop-blur',
-                      'hover:bg-orange-500/10 transition-colors',
-                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                    ].join(' ')}
-                  >
-                    <Target className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                    <span className="hidden md:inline">Mission</span>
-                  </button>
-                  {quickLinks.map((item) => {
-                    const Icon = item.icon
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        title={item.label}
-                        className={[
-                          'inline-flex items-center justify-center rounded-full',
-                          'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                          'gap-2 text-xs font-medium',
-                          'bg-black/10 backdrop-blur text-foreground/90',
-                          'hover:bg-orange-500/10 transition-colors',
-                          'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                        ].join(' ')}
-                      >
-                        <Icon className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                        <span className="hidden md:inline">{item.label}</span>
-                      </Link>
-                    )
-                  })}
+                  <ChatModeBar
+                    isCodeActive={hasWidgets}
+                    isMissionActive={isMissionMode}
+                    onCodeClick={handleOpenCodeCanvas}
+                    onMissionClick={() => setMissionMode(!isMissionMode)}
+                    pinnedAgentIds={pinnedIds}
+                    agents={agents}
+                    selectedAgentId={selectedAgentId}
+                    onAgentSelect={handleAgentChange}
+                  />
+                  <PinAgentPicker
+                    agents={agents}
+                    pinnedIds={pinnedIds}
+                    onPin={pin}
+                    onUnpin={unpin}
+                  />
                 </div>
               </div>
             </div>

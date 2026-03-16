@@ -13,7 +13,7 @@ Replace navigation quick links with functional core modes (Code, Mission) and us
 - [x] US-002: Create ChatModeBar component with core modes
 - [x] US-003: Add pinned agent buttons to ChatModeBar
 - [x] US-004: Create PinAgentPicker dropdown for adding pins
-- [ ] US-005: Replace quickLinks with ChatModeBar in chat.tsx
+- [x] US-005: Replace quickLinks with ChatModeBar in chat.tsx
 - [ ] US-006: Add Pin to Chat menu item on agent cards
 
 ---
