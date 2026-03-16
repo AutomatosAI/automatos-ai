@@ -824,12 +824,41 @@ class RAGConfigResponse(BaseModel):
     updated_at: datetime
     created_by: Optional[str] = None
 
-class SystemHealthResponse(BaseModel):
+class ComponentHealth(BaseModel):
+    """Health status of individual system component"""
+    name: str
     status: str
-    timestamp: datetime
-    services: Dict[str, str]
-    metrics: Dict[str, Any]
+    last_check: datetime
+    metrics: Optional[Dict[str, Any]] = None
+
+class SystemHealthResponse(BaseModel):
+    """Comprehensive system health response"""
+    overall_status: str
+    components: List[ComponentHealth]
+    system_metrics: Dict[str, Any]
+    uptime: str
     version: str
+    timestamp: datetime
+
+class AgentStatistics(BaseModel):
+    """Agent statistics for dashboard"""
+    total_agents: int
+    active_agents: int
+    inactive_agents: int
+    agents_by_type: Dict[str, int]
+    average_performance: float
+    total_executions: int
+    successful_executions: int
+    failed_executions: int
+
+class SystemMetrics(BaseModel):
+    """System performance metrics"""
+    uptime: str
+    cpu_usage: float
+    memory_usage: float
+    active_connections: int
+    total_requests: int
+    error_rate: float
 
 class AgentTemplate(BaseModel):
     """Agent template for creation wizard"""
@@ -1487,6 +1516,8 @@ class BoardTask(Base):
     parent_task_id = Column(Integer, ForeignKey('board_tasks.id', ondelete='SET NULL'), nullable=True)
     source_type = Column(String(30), nullable=False, default='user', server_default='user')
     source_id = Column(String(255), nullable=True)
+    orchestration_run_id = Column(UUID(as_uuid=True), ForeignKey('orchestration_runs.id', ondelete='SET NULL'), nullable=True)
+    orchestration_task_id = Column(UUID(as_uuid=True), ForeignKey('orchestration_tasks.id', ondelete='SET NULL'), nullable=True)
     tags = Column(JSONB, default=list)
     result = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
@@ -1514,6 +1545,8 @@ class BoardTask(Base):
             "parent_task_id": self.parent_task_id,
             "source_type": self.source_type,
             "source_id": self.source_id,
+            "orchestration_run_id": str(self.orchestration_run_id) if self.orchestration_run_id else None,
+            "orchestration_task_id": str(self.orchestration_task_id) if self.orchestration_task_id else None,
             "tags": self.tags or [],
             "result": self.result,
             "error_message": self.error_message,

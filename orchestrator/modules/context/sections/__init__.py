@@ -6,6 +6,7 @@ section name strings to their classes.  Used by ``ContextService`` to
 instantiate sections from ``ModeConfig.sections`` lists.
 """
 
+from modules.context.sections.agent_roster import AgentRosterSection
 from modules.context.sections.base import BaseSection, SectionContext
 from modules.context.sections.composio import ComposioSection
 from modules.context.sections.conversation import ConversationSection
@@ -13,6 +14,7 @@ from modules.context.sections.custom import CustomSection
 from modules.context.sections.datetime_context import DatetimeContextSection
 from modules.context.sections.identity import IdentitySection
 from modules.context.sections.memory import MemorySection
+from modules.context.sections.mission_context import MissionContextSection
 from modules.context.sections.platform_actions import PlatformActionsSection
 from modules.context.sections.plugins import PluginsSection
 from modules.context.sections.recipe_context import RecipeContextSection
@@ -28,6 +30,8 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
     "plugins": PluginsSection,
     "platform_actions": PlatformActionsSection,
     "memory": MemorySection,
+    "mission_context": MissionContextSection,
+    "agent_roster": AgentRosterSection,
     "tools": ToolsSection,
     "task_context": TaskContextSection,
     "recipe_context": RecipeContextSection,
@@ -37,6 +41,7 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
 }
 
 __all__ = [
+    "AgentRosterSection",
     "BaseSection",
     "SectionContext",
     "ComposioSection",
@@ -45,6 +50,7 @@ __all__ = [
     "DatetimeContextSection",
     "IdentitySection",
     "MemorySection",
+    "MissionContextSection",
     "PlatformActionsSection",
     "PluginsSection",
     "RecipeContextSection",

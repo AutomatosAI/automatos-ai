@@ -6,16 +6,15 @@ Hierarchical memory system with episodic, semantic, procedural, and working memo
 Includes augmentation, consolidation, and access optimization.
 
 Usage:
-    from modules.memory import MemoryService, MemoryType, MemoryLevel
-    
-    service = MemoryService()
-    await service.store(session_id, content, memory_type=MemoryType.SEMANTIC)
-    memories = await service.retrieve(session_id, query="...")
+    from modules.memory.unified_memory_service import get_unified_memory_service
+
+    service = get_unified_memory_service()
+    await service.store_long_term(workspace_id, content)
+    results = await service.search_long_term(workspace_id, query)
 
 Sellable as: automatos-memory
 """
 
-from .service import MemoryService, MemoryConfig
 from .types import (
     MemoryType,
     MemoryLevel,
@@ -53,10 +52,6 @@ def get_embedding_dimension() -> int:
 
 
 __all__ = [
-    # Main Service
-    "MemoryService",
-    "MemoryConfig",
-    
     # Types
     "MemoryType",
     "MemoryLevel",

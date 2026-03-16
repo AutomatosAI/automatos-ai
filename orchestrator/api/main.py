@@ -41,7 +41,6 @@ from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
 from api.benchmarking import router as benchmarking_router
 from api.memory_stats import router as memory_stats_router
-from api.evaluation import router as evaluation_router
 from api.multi_agent import router as multi_agent_router
 from api.field_theory import router as field_theory_router
 from api.context_policy import router as context_policy_router
@@ -75,7 +74,6 @@ from api.solutions import router as solutions_router
 from api.synthesis import router as synthesis_router
 # WebSocket removed - using AI SDK SSE streaming instead
 from api.chatbot_llm import router as chatbot_router
-from api.document_processing import router as document_processing_router
 from api.agent_endpoints import router as agent_endpoints_router
 # redis_websocket removed - using AI SDK SSE streaming instead
 from api.models_endpoints import router as models_router  # PRD-15: Model management
@@ -84,7 +82,6 @@ from api.database_knowledge import router as database_knowledge_router  # PRD-21
 from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
 
 # PRD-37: SaaS Foundation
-from api.auth import router as auth_router
 from api.workspaces import router as workspaces_router
 from api.api_keys import router as api_keys_router
 
@@ -403,7 +400,6 @@ app.include_router(analytics_router)
 app.include_router(workflow_history_router)
 app.include_router(execution_history_router)  # Enhanced execution history API
 app.include_router(benchmarking_router)  # Workflow and agent analytics
-app.include_router(evaluation_router)
 app.include_router(multi_agent_router)
 app.include_router(field_theory_router)
 app.include_router(context_policy_router)
@@ -437,13 +433,11 @@ app.include_router(solutions_router)
 app.include_router(synthesis_router)
 # WebSocket routers removed - using AI SDK SSE streaming
 app.include_router(chatbot_router)
-app.include_router(document_processing_router)
 app.include_router(agent_endpoints_router)
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 
 # PRD-37: SaaS Foundation
-app.include_router(auth_router)
 app.include_router(workspaces_router)
 app.include_router(api_keys_router)
 app.include_router(heartbeat_router)  # PRD-55: Heartbeat management

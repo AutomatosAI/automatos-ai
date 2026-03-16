@@ -6,29 +6,28 @@ Implement ONE task from the plan, validate, commit, exit.
 
 Study with subagents:
 - @CLAUDE.md (how to build/test)
-- @docs/PRDS/81-MISSION-CLEANUP.md (full requirements)
+- @docs/PRDS/82A-SEQUENTIAL-MISSION-COORDINATOR.md (full requirements)
 - @scripts/ralph/IMPLEMENTATION_PLAN.md (current state)
 - @scripts/ralph/prd.json (acceptance criteria for each story)
 
 ### Key References
 
-- **ContextService**: `orchestrator/modules/context/service.py` — the unified context builder (PRD-80)
-- **Context sections**: `orchestrator/modules/context/sections/` — identity.py, skills.py, platform_actions.py, memory.py, etc.
+- **PRD-82A**: `docs/PRDS/82A-SEQUENTIAL-MISSION-COORDINATOR.md` — state machine (Section 4), board mapping (Section 4.3), dispatch claim pattern (Section 4.4), output summary (Section 6), failure codes (Section 8), budget tracking (Section 9)
+- **PRD-101**: `docs/PRDS/101-ORCHESTRATION-DATA-SCHEMA.md` — canonical schema definitions, column types, constraints
+- **PRD-102**: `docs/PRDS/102-COORDINATOR-ARCHITECTURE.md` — coordinator design, tick pattern, lifecycle methods
+- **PRD-103**: `docs/PRDS/103-VERIFICATION-QUALITY.md` — verification service, deterministic checks, cross-model judge
+- **Existing models**: `orchestrator/core/models/core.py` — Agent, BoardTask, Workspace models (reference for FK types, patterns)
+- **Model registry**: `orchestrator/core/models/__init__.py` — how models are exported
+- **AgentFactory**: `orchestrator/modules/agents/factory/agent_factory.py` — execute_with_prompt() signature
+- **Heartbeat service**: `orchestrator/services/heartbeat_service.py` — scheduler tick pattern to follow
+- **Board model**: `orchestrator/core/models/core.py` — BoardTask columns, source_type values
 - **Context modes**: `orchestrator/modules/context/modes.py` — ContextMode enum + MODE_CONFIGS
 - **Context budget**: `orchestrator/modules/context/budget.py` — TokenBudgetManager + DEFAULT_BUDGETS
+- **Context sections**: `orchestrator/modules/context/sections/` — identity.py, skills.py etc (pattern to follow)
 - **Section registry**: `orchestrator/modules/context/sections/__init__.py` — SECTION_REGISTRY dict
-- **AgentFactory**: `orchestrator/modules/agents/factory/agent_factory.py` — _build_agent_system_prompt (to delete), execute_with_prompt, activate_agent
-- **Heartbeat service**: `orchestrator/services/heartbeat_service.py` — _orchestrator_tick_llm, _agent_tick
-- **Recipe executor**: `orchestrator/api/recipe_executor.py` — _execute_step, _build_system_prompt
-- **Execution manager**: `orchestrator/modules/agents/execution/execution_manager.py` — _execute_subtask
-- **Tool router**: `orchestrator/modules/tools/tool_router.py` — get_tools_for_agent, get_agent_tools
-- **Plugin context**: `orchestrator/core/services/plugin_context_service.py` — PluginContextService
-- **Composio models**: `orchestrator/core/models/composio_cache.py` — AgentAppAssignment, ComposioAppCache, ComposioActionCache
-- **Personality**: `orchestrator/consumers/chatbot/personality.py` — AutomatosPersonality, get_platform_skill
-- **Smart tool router**: `orchestrator/consumers/chatbot/smart_tool_router.py` — SmartToolRouter
-- **Chatbot tool router**: `orchestrator/consumers/chatbot/tool_router.py` — get_chat_tools re-export
-- **System audit**: `docs/audits/SYSTEM-AUDIT-2026-03.md` — findings F1-F4, D1-D4, R1-R3
+- **Tool router**: `orchestrator/modules/tools/tool_router.py` — get_tools_for_agent()
 - **Config pattern**: `orchestrator/config.py` — ALL config constants live here, no os.getenv() elsewhere
+- **Existing API routers**: `orchestrator/api/` — pattern for auth, workspace isolation, Pydantic models
 
 ### Check for completion
 
@@ -52,29 +51,43 @@ grep -c "^\- \[ \]" scripts/ralph/IMPLEMENTATION_PLAN.md || echo 0
 
 - NO hardcoded config values — all constants in `config.py`
 - NO os.getenv() outside of `config.py`
+- workspace_id is UUID type, created_by is String (Clerk user ID like 'user_xxx')
+- All orchestration DB columns use `orchestration_*` naming, API uses `mission` naming
+- `completed` task state is NOT terminal — only `verified`, `failed`, `skipped` are terminal
+- Board task `done` status ONLY maps from `verified` state, NOT from `completed`
+- Follow existing SQLAlchemy model patterns in `core/models/core.py`
 - Follow existing section patterns in `modules/context/sections/` — each section has a `render()` method
 - DB sessions acquired per-request from async pool — NEVER stored on singleton
 - All methods include logging with exc_info=True on exceptions
 - Follow immutable data patterns — return new objects, don't mutate
-- BEFORE DELETING ANY CODE: grep EVERY file for callers. Remember the intent_classifier.py lesson — never delete code with live callers
-- When removing fields from dataclasses/NamedTuples: search ALL references across the entire codebase
+- Use datetime.now(timezone.utc) NOT datetime.utcnow()
+- BEFORE DELETING ANY CODE: grep EVERY file for callers
 
 ### Validation
 
-For backend changes:
+For new model imports:
 ```bash
-cd orchestrator && python -c "import api.main" 2>&1
+cd orchestrator && python -c "from core.models.orchestration_enums import RunState, TaskState" 2>&1
 ```
 
 For new modules:
 ```bash
-cd orchestrator && python -c "from modules.context.service import ContextService" 2>&1
+cd orchestrator && python -c "from services.orchestration_state import transition_task" 2>&1
 ```
 
-For grep audits (Phase 4+):
+For coordination modules:
 ```bash
-grep -rn "_build_agent_system_prompt" orchestrator/ --include="*.py" | grep -v __pycache__
-grep -rn "refresh_agent_prompt" orchestrator/ --include="*.py" | grep -v __pycache__
+cd orchestrator && python -c "from modules.coordination.planner import MissionPlanner" 2>&1
+```
+
+For API:
+```bash
+cd orchestrator && python -c "from api.missions import router" 2>&1
+```
+
+For migrations:
+```bash
+cd orchestrator && alembic upgrade head 2>&1
 ```
 
 If validation cannot run (e.g., missing deps), verify via grep that all imports resolve.
@@ -86,14 +99,13 @@ If validation cannot run (e.g., missing deps), verify via grep that all imports 
 - Add any discovered bugs or issues
 - Note new tasks discovered during implementation
 
-**Update CLAUDE.md** (if you learned something new):
-- Add correct commands or patterns discovered
-- Keep it brief and operational
+**Update scripts/ralph/progress.txt:**
+- Log what was completed this iteration
 
 ## Phase 3: Commit & Exit
 
 ```bash
-git add -A && git commit -m "feat(context): [description of what was implemented]"
+git add -A && git commit -m "feat(orchestration): [description of what was implemented]"
 ```
 
 Check remaining:

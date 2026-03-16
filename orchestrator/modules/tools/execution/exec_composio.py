@@ -1,0 +1,256 @@
+"""
+Composio tool executors -- direct action, meta-tool, and tool router.
+Extracted from unified_executor.py.
+"""
+
+import logging
+from typing import Any, Dict, Optional
+from uuid import UUID
+
+from modules.tools.registry.tool_registry import ToolSpec
+
+logger = logging.getLogger(__name__)
+
+
+async def execute_composio_tool(
+    executor,
+    tool_spec: ToolSpec,
+    parameters: Dict[str, Any],
+    agent_id: int,
+    workspace_id: Optional[UUID],
+    trace_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Execute a Composio action via ComposioToolExecutor."""
+    if not executor.composio_executor:
+        return {
+            "success": False,
+            "error": "Composio executor not available",
+            "tool": tool_spec.name
+        }
+
+    action = tool_spec.metadata.get("action") if tool_spec.metadata else None
+    if not action and tool_spec.name.startswith("composio_"):
+        action = tool_spec.name.replace("composio_", "", 1)
+
+    if not action:
+        return {
+            "success": False,
+            "error": "Missing Composio action name",
+            "tool": tool_spec.name
+        }
+
+    if not workspace_id:
+        return {
+            "success": False,
+            "error": "Workspace ID required for Composio tool execution",
+            "tool": tool_spec.name
+        }
+
+    params = parameters.get("params") if isinstance(parameters, dict) else None
+    if params is None:
+        params = parameters or {}
+    trace = trace_id or "no-trace"
+    logger.info(
+        f"[tool-trace {trace}] Composio execute action={action} "
+        f"agent={agent_id} workspace={workspace_id} params_keys={list(params.keys()) if isinstance(params, dict) else type(params).__name__}"
+    )
+
+    return await executor.composio_executor.execute(
+        action=action,
+        params=params,
+        agent_id=agent_id,
+        workspace_id=workspace_id
+    )
+
+
+async def execute_composio_execute(
+    executor,
+    tool_name: str,
+    parameters: Dict[str, Any],
+    agent_id: int,
+    workspace_id: Optional[UUID] = None,
+    trace_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Execute an arbitrary Composio action for an assigned/connected app.
+
+    Expected input:
+    - app_name: "GMAIL" / "SLACK" / ...
+    - action: action name as stored in composio_actions_cache (e.g., "GMAIL_LIST_EMAILS")
+    - params: object passed to the Composio action
+    """
+    if not executor.composio_executor:
+        return {"success": False, "error": "Composio executor not available", "tool": tool_name}
+    if not workspace_id:
+        return {"success": False, "error": "workspace_id required for Composio execution", "tool": tool_name}
+
+    if not isinstance(parameters, dict):
+        return {"success": False, "error": "Invalid parameters (expected object)", "tool": tool_name}
+
+    raw_action = parameters.get("action") or parameters.get("action_name")
+    # Accept both `params` (preferred) and `parameters` (some models emit this).
+    params = None
+    if isinstance(parameters.get("params"), dict):
+        params = parameters.get("params")
+    elif isinstance(parameters.get("parameters"), dict):
+        params = parameters.get("parameters")
+    else:
+        params = {}
+    app_name = parameters.get("app_name") or parameters.get("app")
+
+    # Defensive: LLMs frequently put action-specific params at the top level
+    # instead of nesting inside `params`. Remap any unknown keys into params.
+    _KNOWN_KEYS = {"action", "action_name", "params", "parameters", "app_name", "app"}
+    stray_params = {k: v for k, v in parameters.items() if k not in _KNOWN_KEYS}
+    if stray_params:
+        params = {**stray_params, **params}  # explicit params take precedence
+        logger.info(
+            f"[composio_execute] Remapped top-level keys into params: {list(stray_params.keys())}"
+        )
+
+    if not raw_action:
+        return {"success": False, "error": "Missing required field: action", "tool": tool_name}
+
+    # Normalize action name to uppercase (Composio actions are typically uppercase)
+    # This handles LLM inconsistency (e.g., "slack_send_message" vs "SLACK_SEND_MESSAGE")
+    action = str(raw_action).upper().strip()
+
+    trace = trace_id or "no-trace"
+    logger.info(
+        f"[tool-trace {trace}] Composio execute app={app_name} action={action} "
+        f"(raw: {raw_action}) agent={agent_id} workspace={workspace_id} params_keys={list(params.keys())}"
+    )
+
+    import time as _time
+    _exec_start = _time.monotonic()
+
+    result = await executor.composio_executor.execute(
+        action=action,
+        params=params,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+        app_name=str(app_name).upper().strip() if app_name else None,
+    )
+
+    _exec_ms = int((_time.monotonic() - _exec_start) * 1000)
+
+    # Log to tool_execution_logs (triggers auto-increment of AgentAppFeature.usage_count)
+    try:
+        from core.models.composio_cache import ToolExecutionLog
+        exec_status = "success" if result.get("success") else "error"
+        inferred_app = (app_name or action.split("_")[0]).upper() if action else "UNKNOWN"
+        log_entry = ToolExecutionLog(
+            agent_id=agent_id,
+            app_name=inferred_app,
+            action_name=action,
+            workspace_id=workspace_id,
+            input_parameters={"keys": list(params.keys())} if params else {},
+            status=exec_status,
+            error_message=result.get("error") if not result.get("success") else None,
+            execution_time_ms=_exec_ms,
+        )
+        executor.db.add(log_entry)
+        executor.db.commit()
+    except Exception as log_err:
+        logger.debug(f"[Composio] Tool execution log skipped: {log_err}")
+        try:
+            executor.db.rollback()
+        except Exception:
+            pass
+
+    # Schema-driven enhancement: Look up response_schema from cache
+    # This enables generic widget detection without hardcoding provider names
+    # Try both the original action and the actually-executed action (may differ due to auto-mapping)
+    try:
+        from core.models.composio_cache import ComposioActionCache
+        from sqlalchemy import or_
+
+        executed_action = result.get("action", action)  # May have been remapped
+        action_cache = executor.db.query(ComposioActionCache).filter(
+            or_(
+                ComposioActionCache.action_name == action,
+                ComposioActionCache.action_name == executed_action,
+                ComposioActionCache.action_slug == action.lower().replace("_", "-"),
+            )
+        ).first()
+
+        if action_cache:
+            if action_cache.response_schema:
+                result["response_schema"] = action_cache.response_schema
+                logger.info(f"[Composio] Attached response_schema for {action_cache.action_name}")
+            if action_cache.parameters:
+                result["parameters_schema"] = action_cache.parameters
+        else:
+            logger.warning(f"[Composio] No cache entry found for action={action} or executed={executed_action}")
+    except Exception as e:
+        logger.warning(f"[Composio] Could not lookup schema: {e}")
+
+    return result
+
+
+async def execute_composio_tool_router(
+    executor,
+    tool_name: str,
+    parameters: Dict[str, Any],
+    agent_id: int,
+    workspace_id: Optional[UUID] = None,
+    trace_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Execute Composio Tool Router meta-tools (search_tools, execute_tool).
+
+    Tool Router is scoped to agent's assigned apps for better action selection.
+    """
+    from modules.tools.execution.composio_router_executor import ComposioToolRouterExecutor
+
+    try:
+        # Initialize Tool Router executor for this agent
+        router_executor = ComposioToolRouterExecutor(
+            db_session=executor.db_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id
+        )
+
+        # Route to appropriate method
+        if tool_name == "composio_search_tools":
+            query = parameters.get("query")
+            max_results = parameters.get("max_results", 5)
+
+            if not query:
+                return {
+                    "success": False,
+                    "error": "Missing required parameter: query",
+                    "tool": tool_name
+                }
+
+            result = router_executor.search_tools(query, max_results)
+
+        elif tool_name == "composio_execute_tool":
+            action = parameters.get("action")
+            params = parameters.get("params", {})
+
+            if not action:
+                return {
+                    "success": False,
+                    "error": "Missing required parameter: action",
+                    "tool": tool_name
+                }
+
+            result = router_executor.execute_tool(action, params)
+
+        else:
+            return {
+                "success": False,
+                "error": f"Unknown Tool Router tool: {tool_name}",
+                "tool": tool_name
+            }
+
+        return result
+
+    except Exception as e:
+        logger.error(f"[Tool Router] Execution failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "tool": tool_name
+        }

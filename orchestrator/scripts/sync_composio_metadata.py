@@ -28,7 +28,7 @@ sys.path.insert(0, str(project_root))
 
 from core.database.database import SessionLocal
 from core.composio.client import get_composio_client
-from core.metadata_cache.sync_service import MetadataSyncService
+from services.metadata_sync_service import MetadataSyncService
 
 # Configure logging
 logging.basicConfig(

@@ -357,9 +357,9 @@ async def lifespan(app: FastAPI):
         await startup_dashboard(app)
         logger.info("Dashboard services initialized successfully")
 
-        # Unified Scheduler: single fcntl lock guards heartbeat + recipe schedulers
+        # Unified Scheduler: single fcntl lock guards heartbeat + recipe + coordinator
         # Only one uvicorn worker acquires the lock — prevents 4x duplicate executions
-        if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED:
+        if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED or config.COORDINATOR_ENABLED:
             try:
                 import fcntl
                 lock_path = "/tmp/automatos_scheduler.lock"
@@ -413,6 +413,15 @@ async def lifespan(app: FastAPI):
                     except Exception as _st_err:
                         logger.warning("Could not load scheduled tasks: %s", _st_err)
 
+                    # PRD-82A: Coordinator tick — sequential mission orchestration
+                    if config.COORDINATOR_ENABLED:
+                        try:
+                            from services.coordinator_service import get_coordinator_service
+                            await get_coordinator_service().start(scheduler=shared_sched)
+                            logger.info("CoordinatorService started on unified scheduler")
+                        except Exception as _cs_err:
+                            logger.warning("Could not start CoordinatorService: %s", _cs_err)
+
                     logger.info("Unified scheduler started (this worker owns it)")
                 except BlockingIOError:
                     lock_file.close()
@@ -439,8 +448,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Automotas AI API Server...")
 
-    # Stop unified scheduler (shuts down all heartbeat + recipe jobs at once)
-    if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED:
+    # Stop unified scheduler (shuts down all heartbeat + recipe + coordinator jobs at once)
+    if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED or config.COORDINATOR_ENABLED:
         try:
             from services.scheduler import get_unified_scheduler
             get_unified_scheduler().stop()
@@ -873,6 +882,13 @@ try:
     app.include_router(board_tasks_router)
 except ImportError as e:
     logger.warning("Could not load board tasks router: %s", e)
+
+# PRD-82A: Sequential Mission Coordinator
+try:
+    from api.missions import router as missions_router
+    app.include_router(missions_router)
+except ImportError as e:
+    logger.warning("Could not load missions router: %s", e)
 
 # PRD-77: Agent Self-Scheduling
 try:
