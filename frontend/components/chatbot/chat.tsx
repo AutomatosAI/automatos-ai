@@ -164,6 +164,7 @@ export function Chat({
     initialMessages,
     selectedModelId: currentModelId,
     selectedAgentId,
+    missionMode: isMissionMode,
     onData: (dataPart) => {
       if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
@@ -466,29 +467,11 @@ export function Chat({
         return
       }
 
-      // US-003: Mission mode intercept
-      if (!isMissionMode) {
-        sendMessage(message)
-        return
-      }
-
-      if (!trimmedText) return
-
-      createMission.mutate(
-        { goal: trimmedText },
-        {
-          onSuccess: (mission) => {
-            setActivePlanningMissionId(mission.id)
-            setMissionMode(false)
-            toast.success('Mission created — plan is being generated')
-          },
-          onError: (err) => {
-            toast.error(err.message || 'Failed to create mission')
-          },
-        }
-      )
+      // US-003: Mission mode — route through normal chat with missionMode flag
+      // Auto will converse about the mission, then create via /mission command
+      sendMessage(message)
     },
-    [isMissionMode, sendMessage, createMission, setActivePlanningMissionId, setMissionMode]
+    [sendMessage, createMission, setActivePlanningMissionId, setMissionMode]
   )
 
   // PRD-50: Handle agent change — fire correction API when overriding auto-routed agent
@@ -543,6 +526,43 @@ export function Chat({
       })
     }
   }, [status])
+
+  // PRD-82A: Detect /mission command in Auto's response during mission mode
+  const prevStatusRef = useRef(status)
+  useEffect(() => {
+    const wasStreaming = prevStatusRef.current === 'streaming'
+    prevStatusRef.current = status
+
+    if (!wasStreaming || status !== 'idle' || !isMissionMode) return
+
+    // Find last assistant message
+    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
+    if (!lastAssistant) return
+
+    const text = lastAssistant.parts
+      ?.filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map(p => p.text)
+      .join('') || ''
+    const match = text.match(/\/mission\s+(.+)/i)
+    if (!match) return
+
+    const goal = match[1].trim()
+    if (!goal) return
+
+    createMission.mutate(
+      { goal },
+      {
+        onSuccess: (mission) => {
+          setActivePlanningMissionId(mission.id)
+          setMissionMode(false)
+          toast.success('Mission created — plan is being generated')
+        },
+        onError: (err) => {
+          toast.error(err.message || 'Failed to create mission')
+        },
+      }
+    )
+  }, [status, messages, isMissionMode, createMission, setActivePlanningMissionId, setMissionMode])
 
   // Generate title
   useEffect(() => {
