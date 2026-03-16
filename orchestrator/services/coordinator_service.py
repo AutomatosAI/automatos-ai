@@ -17,7 +17,7 @@ Source: PRD-82A Sections 6, 8, 9, 12 (US-014)
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from config import Config
 from core.models.core import Agent
 from core.models.orchestration import (
+    OrchestrationArchive,
     OrchestrationEvent,
     OrchestrationRun,
     OrchestrationTask,
@@ -84,6 +85,7 @@ class CoordinatorService:
         self._tick_running: bool = False
         self._scheduler = None
         self._owns_scheduler: bool = False
+        self._last_archive_at: Optional[datetime] = None
 
     # ------------------------------------------------------------------
     # Scheduler lifecycle
@@ -170,9 +172,6 @@ class CoordinatorService:
                     .all()
                 )
 
-                if not active_runs:
-                    return summary
-
                 for run in active_runs:
                     try:
                         await self._process_run(db, run)
@@ -184,6 +183,9 @@ class CoordinatorService:
                         )
                         db.rollback()
                         summary["errors"].append(str(run.id))
+
+                # --- Archive phase (throttled to once per hour) ---
+                self._maybe_archive(db, summary)
 
             finally:
                 db.close()
@@ -1279,6 +1281,209 @@ class CoordinatorService:
                 task.id,
                 exc_info=True,
             )
+
+    # ------------------------------------------------------------------
+    # Archival (PRD-82B US-009)
+    # ------------------------------------------------------------------
+
+    def _maybe_archive(self, db: Session, summary: Dict[str, Any]) -> None:
+        """
+        Run archive_old_runs() if at least 1 hour since last archive attempt.
+
+        Throttled to avoid running every 5s tick. Errors are logged and
+        do not affect the rest of the tick.
+        """
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_archive_at is not None
+            and (now - self._last_archive_at).total_seconds() < 3600
+        ):
+            return
+
+        self._last_archive_at = now
+
+        try:
+            archived = self.archive_old_runs(db)
+            if archived > 0:
+                db.commit()
+                logger.info("[Coordinator] Archived %d old runs", archived)
+                summary["archived"] = archived
+        except Exception:
+            db.rollback()
+            logger.error(
+                "[Coordinator] Archive failed", exc_info=True,
+            )
+
+    @staticmethod
+    def archive_old_runs(
+        db: Session,
+        days: Optional[int] = None,
+    ) -> int:
+        """
+        Archive terminal runs older than ``days`` (default from config).
+
+        For each eligible run:
+          1. Serialize run + tasks + events + dependencies to JSONB snapshot
+          2. Insert into orchestration_archive
+          3. Delete from active tables (CASCADE handles tasks/events/deps)
+
+        Args:
+            db: SQLAlchemy session (caller manages transaction).
+            days: Retention period in days. Defaults to config value.
+
+        Returns:
+            Number of runs archived.
+        """
+        retention_days = days if days is not None else Config.COORDINATOR_ARCHIVE_AFTER_DAYS
+        batch_size = Config.COORDINATOR_ARCHIVE_BATCH_SIZE
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+
+        # Find terminal runs older than cutoff
+        terminal_state_values = [s.value for s in TERMINAL_RUN_STATES]
+        old_runs: List[OrchestrationRun] = (
+            db.query(OrchestrationRun)
+            .filter(
+                OrchestrationRun.state.in_(terminal_state_values),
+                OrchestrationRun.updated_at < cutoff,
+            )
+            .order_by(OrchestrationRun.updated_at.asc())
+            .limit(batch_size)
+            .all()
+        )
+
+        if not old_runs:
+            return 0
+
+        archived_count = 0
+        for run in old_runs:
+            run_id = run.id
+
+            # Check not already archived (idempotent)
+            existing = (
+                db.query(OrchestrationArchive.id)
+                .filter(OrchestrationArchive.original_run_id == run_id)
+                .first()
+            )
+            if existing:
+                # Already archived — just delete the active row
+                db.delete(run)
+                archived_count += 1
+                continue
+
+            # Load related data for snapshot
+            tasks: List[OrchestrationTask] = (
+                db.query(OrchestrationTask)
+                .filter(OrchestrationTask.run_id == run_id)
+                .order_by(OrchestrationTask.sequence_number)
+                .all()
+            )
+
+            events: List[OrchestrationEvent] = (
+                db.query(OrchestrationEvent)
+                .filter(OrchestrationEvent.run_id == run_id)
+                .order_by(OrchestrationEvent.created_at)
+                .all()
+            )
+
+            task_ids = [t.id for t in tasks]
+            dependencies: List[OrchestrationTaskDependency] = []
+            if task_ids:
+                dependencies = (
+                    db.query(OrchestrationTaskDependency)
+                    .filter(OrchestrationTaskDependency.task_id.in_(task_ids))
+                    .all()
+                )
+
+            # Build JSONB snapshot
+            archive_data = {
+                "run": {
+                    "id": str(run.id),
+                    "workspace_id": str(run.workspace_id),
+                    "goal": run.goal,
+                    "plan": run.plan,
+                    "config": run.config,
+                    "state": run.state,
+                    "state_type": run.state_type,
+                    "created_by": run.created_by,
+                    "assigned_coordinator_id": run.assigned_coordinator_id,
+                    "output_summary": run.output_summary,
+                    "token_budget_estimate": run.token_budget_estimate,
+                    "tokens_used": run.tokens_used,
+                    "max_retries": run.max_retries,
+                    "max_concurrent": run.max_concurrent,
+                    "replan_count": run.replan_count,
+                    "started_at": run.started_at.isoformat() if run.started_at else None,
+                    "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                    "created_at": run.created_at.isoformat() if run.created_at else None,
+                    "updated_at": run.updated_at.isoformat() if run.updated_at else None,
+                },
+                "tasks": [
+                    {
+                        "id": str(t.id),
+                        "title": t.title,
+                        "description": t.description,
+                        "task_type": t.task_type,
+                        "sequence_number": t.sequence_number,
+                        "agent_role": t.agent_role,
+                        "state": t.state,
+                        "assigned_agent_id": t.assigned_agent_id,
+                        "verification_criteria": t.verification_criteria,
+                        "input_context": t.input_context,
+                        "output": t.output,
+                        "output_metadata": t.output_metadata,
+                        "failure_reason_code": t.failure_reason_code,
+                        "failure_detail": t.failure_detail,
+                        "attempt_number": t.attempt_number,
+                        "tokens_used": t.tokens_used,
+                        "started_at": t.started_at.isoformat() if t.started_at else None,
+                        "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                        "created_at": t.created_at.isoformat() if t.created_at else None,
+                    }
+                    for t in tasks
+                ],
+                "events": [
+                    {
+                        "id": str(e.id),
+                        "task_id": str(e.task_id) if e.task_id else None,
+                        "event_type": e.event_type,
+                        "actor_type": e.actor_type,
+                        "actor_id": e.actor_id,
+                        "old_state": e.old_state,
+                        "new_state": e.new_state,
+                        "payload": e.payload,
+                        "created_at": e.created_at.isoformat() if e.created_at else None,
+                    }
+                    for e in events
+                ],
+                "dependencies": [
+                    {
+                        "id": str(d.id),
+                        "task_id": str(d.task_id),
+                        "depends_on_task_id": str(d.depends_on_task_id),
+                        "trigger_rule": d.trigger_rule,
+                    }
+                    for d in dependencies
+                ],
+            }
+
+            # Insert archive row
+            archive = OrchestrationArchive(
+                original_run_id=run_id,
+                goal=run.goal or "",
+                state=run.state,
+                workspace_id=run.workspace_id,
+                created_by=run.created_by,
+                created_at=run.created_at,
+                completed_at=run.completed_at,
+                archive_data=archive_data,
+            )
+            db.add(archive)
+
+            # Delete from active tables (CASCADE handles tasks/events/deps)
+            db.delete(run)
+            archived_count += 1
+
+        return archived_count
 
     async def _build_and_advance_to_awaiting_human(
         self,

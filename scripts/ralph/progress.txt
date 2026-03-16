@@ -121,3 +121,23 @@
   - SaveAsRoutineRequest/Response types in types/missions.ts
   - Success toast shows routine name and task count
 - All Python imports validate, TypeScript compiles clean, 67 tests pass (pre-existing failures only)
+
+## Iteration 9 — US-009: Add orchestration archive table and cleanup job
+- Added COORDINATOR_ARCHIVE_AFTER_DAYS (default 30) and COORDINATOR_ARCHIVE_BATCH_SIZE (default 50) to config.py
+- Added RUN_ARCHIVED event type to EventType enum
+- Created OrchestrationArchive model in orchestration.py:
+  - id (UUID PK), original_run_id (UUID, unique), goal, state, workspace_id (indexed), created_by
+  - created_at, completed_at (from original run), archive_data (JSONB full snapshot), archived_at
+- Created Alembic migration prd82b_us009_orchestration_archive (revises prd82b_us005_replan)
+- Implemented CoordinatorService.archive_old_runs() static method:
+  - Finds terminal runs (completed/failed/cancelled) where updated_at < (now - retention_days)
+  - Batch-limited (default 50) to avoid long transactions
+  - For each run: serializes run + tasks + events + dependencies into archive_data JSONB
+  - Inserts OrchestrationArchive row, then deletes from active tables (CASCADE handles children)
+  - Idempotent: skips already-archived runs, just deletes the active row
+- Wired _maybe_archive() into tick loop:
+  - Throttled to once per hour (tracks _last_archive_at timestamp on CoordinatorService instance)
+  - Runs in same tick session, commits separately, errors logged but don't block tick
+- Added GET /api/missions/archive endpoint — lists archived missions with search/state filter/pagination
+- Added GET /api/missions/archive/{archive_id} endpoint — returns full archived mission with snapshot data
+- All imports validated, 67 tests pass, no new failures

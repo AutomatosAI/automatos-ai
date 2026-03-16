@@ -44,6 +44,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import Agent, WorkflowTemplate
 from core.models.orchestration import (
+    OrchestrationArchive,
     OrchestrationEvent,
     OrchestrationRun,
     OrchestrationTask,
@@ -571,6 +572,118 @@ async def get_mission_stats(
         raise
     except Exception as exc:
         logger.error("Failed to get mission stats: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/archive")
+async def list_archived_missions(
+    search: Optional[str] = Query(None, description="Search archived missions by goal text"),
+    state: Optional[str] = Query(None, description="Filter by terminal state"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """List archived missions for the current workspace, with optional search and state filter."""
+    try:
+        query = db.query(OrchestrationArchive).filter(
+            OrchestrationArchive.workspace_id == ctx.workspace_id,
+        )
+
+        if state:
+            try:
+                RunState(state)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid state: '{state}'. Valid terminal states: completed, failed, cancelled",
+                )
+            query = query.filter(OrchestrationArchive.state == state)
+
+        if search:
+            query = query.filter(
+                OrchestrationArchive.goal.ilike(f"%{search}%"),
+            )
+
+        total = query.count()
+
+        archives = (
+            query
+            .order_by(OrchestrationArchive.archived_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        return {
+            "archives": [
+                {
+                    "id": str(a.id),
+                    "original_run_id": str(a.original_run_id),
+                    "goal": a.goal,
+                    "state": a.state,
+                    "created_by": a.created_by,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                    "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+                    "archived_at": a.archived_at.isoformat() if a.archived_at else None,
+                    "task_count": len(a.archive_data.get("tasks", [])) if a.archive_data else 0,
+                    "tokens_used": (
+                        a.archive_data.get("run", {}).get("tokens_used", 0)
+                        if a.archive_data
+                        else 0
+                    ),
+                }
+                for a in archives
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to list archived missions: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/archive/{archive_id}")
+async def get_archived_mission(
+    archive_id: UUID,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Get full archived mission detail including the complete snapshot."""
+    try:
+        archive = (
+            db.query(OrchestrationArchive)
+            .filter(
+                and_(
+                    OrchestrationArchive.id == archive_id,
+                    OrchestrationArchive.workspace_id == ctx.workspace_id,
+                )
+            )
+            .first()
+        )
+        if archive is None:
+            raise HTTPException(status_code=404, detail="Archived mission not found")
+
+        return {
+            "id": str(archive.id),
+            "original_run_id": str(archive.original_run_id),
+            "goal": archive.goal,
+            "state": archive.state,
+            "created_by": archive.created_by,
+            "created_at": archive.created_at.isoformat() if archive.created_at else None,
+            "completed_at": archive.completed_at.isoformat() if archive.completed_at else None,
+            "archived_at": archive.archived_at.isoformat() if archive.archived_at else None,
+            "archive_data": archive.archive_data,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to get archived mission %s: %s", archive_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

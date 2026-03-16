@@ -116,6 +116,9 @@ class EventType(str, Enum):
     # Cross-task consistency (PRD-82B US-006)
     CONSISTENCY_CHECKED = "consistency_checked"
 
+    # Archival (PRD-82B US-009)
+    RUN_ARCHIVED = "run_archived"
+
 
 # ---------------------------------------------------------------------------
 # ActorType — who triggered an orchestration event
