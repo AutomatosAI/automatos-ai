@@ -11,14 +11,15 @@ Study with subagents:
 
 ### Key References
 
-- **Chat component**: `frontend/components/chatbot/chat.tsx` — quick links (~line 790), Code button (~line 1010/1175), handleOpenCodeCanvas (~line 82), handleAgentChange, selectedAgentId state
-- **Chat input**: `frontend/components/chatbot/multimodal-input.tsx` — textarea + toolbar
-- **Agent selector**: `frontend/components/chatbot/agent-selector.tsx` — Agent interface (id: number, name, agent_type, status, description, skills, tools, is_system_agent, slug), dropdown
-- **Agent roster**: `frontend/components/agents/agent-roster.tsx` — agent cards with dropdown menus (View Details, Configure, Pause/Start, Delete)
-- **Agent hooks**: `frontend/hooks/use-agent-api.ts` — useAgents() hook for fetching roster
-- **Mission store**: `frontend/stores/mission-store.ts` — isMissionMode, setMissionMode
-- **Workspace store**: check for useWorkspaceStore or workspace-provider for workspace ID
-- **UI components**: `frontend/components/ui/dropdown-menu.tsx` — DropdownMenu family
+- **Coordination modules**: `orchestrator/modules/coordination/` — planner.py, dispatcher.py, reconciler.py, agent_matcher.py, verification.py, deterministic_checks.py
+- **Coordinator service**: `orchestrator/services/coordinator_service.py` — lifecycle methods, create_mission, approve_plan, review_mission
+- **Orchestration models**: `orchestrator/core/models/orchestration.py` — OrchestrationRun, OrchestrationTask, OrchestrationEvent
+- **State enums**: `orchestrator/core/models/orchestration_enums.py` — RunState, TaskState, EventType, StateType
+- **Missions API**: `orchestrator/api/missions.py` — existing REST endpoints (create, approve, reject, cancel, review, list, detail)
+- **Config**: `orchestrator/core/config.py` — ALL config constants go here
+- **Agent matcher**: `orchestrator/modules/coordination/agent_matcher.py` — _ROLE_SYNONYMS (line 62), _score_agent() (line 275), match() (line 105)
+- **Verification**: `orchestrator/modules/coordination/verification.py` — VerificationResult, VerificationService, VERIFIER_MODEL_SELECTION
+- **PRD**: `docs/PRDS/82B-MISSION-INTELLIGENCE-LAYER.md`
 
 ### Check for completion
 
@@ -36,33 +37,46 @@ grep -c "^\- \[ \]" scripts/ralph/IMPLEMENTATION_PLAN.md || echo 0
 3. **Search first** — Don't assume not implemented. Check if the component/service already exists
 4. **Read existing code** — Before creating or editing a file, read the files listed in the story notes and the Key References above to follow existing patterns
 5. **Implement** — ONE task only. Implement completely — no placeholders or stubs
-6. **Validate** — Run typecheck. All acceptance criteria must be met
+6. **Validate** — Run tests and import checks. All acceptance criteria must be met
 
 ### Architecture Rules (CRITICAL)
 
-- React Query v4 — use `isLoading` NOT `isPending` for loading states
-- Zustand for UI state (mission mode, selections), React Query for server state (fetching/mutations)
-- shadcn/ui components (Button, Skeleton, Input, Textarea, ScrollArea, etc.)
-- Lucide React icons EXCLUSIVELY — no other icon libraries
-- Dark surfaces, orange accents (#f97316 / orange-500)
-- Glass morphism: `backdrop-blur` + `bg-opacity` (e.g., `bg-card/50 backdrop-blur`)
-- Framer Motion for animations (already imported in chat.tsx)
-- `toast` from `'sonner'` for notifications
-- `useRouter` from `'next/navigation'` (App Router, NOT pages router)
-- Next.js strict route typing — use `as any` cast on `router.push()` for dynamic routes like `/missions/${id}`
-- Follow immutable data patterns — return new objects, don't mutate
+- Python 3.11+ with type hints on all public functions
+- SQLAlchemy ORM with sync Session (not async) — follow existing patterns in coordinator_service.py
+- FastAPI endpoints with Pydantic BaseModel for request/response
+- ALL config values go in orchestrator/core/config.py — NO os.getenv() anywhere else
+- Dual-write pattern: state change + orchestration_events append in SAME transaction
+- Optimistic locking via version_id column — check existing patterns in orchestration_state.py
+- Cross-model verification: verifier model family != executor model family
+- Agent roles in templates: use categories from _ROLE_SYNONYMS in agent_matcher.py (researcher, writer, analyst, reviewer, search, etc.)
+- NO hardcoded values — use config constants
+- Follow immutable data patterns — frozen dataclasses, no mutation
+- Error handling: log detailed context, raise clean HTTPExceptions for API layer
 - BEFORE DELETING ANY CODE: grep EVERY file for callers
 
 ### Validation
 
-For frontend TypeScript (check only mission/chat errors):
+For Python imports and basic syntax:
 ```bash
-cd frontend && npx tsc --noEmit 2>&1 | grep -iE "mission|chat\.tsx|mission-created" | head -20
+cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -c "
+from orchestrator.modules.coordination import templates, planner, agent_matcher, verification
+print('All coordination imports OK')
+" 2>&1 | tail -5
 ```
 
-Note: There are ~781 pre-existing TS errors in unrelated files (workflow-service, permissions, context-service, etc.). Mission and chat components are clean. Only check for NEW errors introduced by your changes.
+For tests (if any exist):
+```bash
+cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -m pytest orchestrator/tests/ -x -q --timeout=30 2>&1 | tail -20
+```
 
-If no mission/chat errors appear, validation passes.
+For frontend changes (US-008 only):
+```bash
+cd frontend && npx tsc --noEmit 2>&1 | grep -iE "mission-detail|save-as-routine" | head -10
+```
+
+Note: Pre-existing errors may exist in other files. Only check for NEW errors introduced by your changes.
+
+If no new errors appear, validation passes.
 
 ## Phase 2: Update & Learn
 

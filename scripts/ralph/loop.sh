@@ -144,7 +144,7 @@ handle_usage_limit() {
   CONSECUTIVE_FAILURES=0
 }
 
-echo -e "${GREEN}Ralph loop: BUILD mode — Chat Mode Bar (6 stories)${NC}"
+echo -e "${GREEN}Ralph loop: BUILD mode — PRD-82B Mission Intelligence (9 stories)${NC}"
 [[ $MAX_ITERATIONS -gt 0 ]] && echo "Max iterations: $MAX_ITERATIONS"
 echo "Press Ctrl+C to stop"
 echo "---"
@@ -219,7 +219,7 @@ while true; do
   if [[ "$RESULT_MSG" =~ RALPH_COMPLETE ]]; then
     echo ""
     echo -e "${GREEN}=== Ralph Complete ===${NC}"
-    echo -e "${GREEN}All 6 tasks finished!${NC}"
+    echo -e "${GREEN}All 9 tasks finished!${NC}"
     break
   fi
 

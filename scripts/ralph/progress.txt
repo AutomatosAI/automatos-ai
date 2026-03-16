@@ -1,4 +1,4 @@
-# Chat Mode Bar — Ralph Progress
-# Branch: ralph/chat-mode-bar
+# PRD-82B Mission Intelligence Layer — Ralph Progress
+# Branch: ralph/prd-82b-mission-intelligence
 # Started: 2026-03-16
 
