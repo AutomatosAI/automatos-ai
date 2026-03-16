@@ -107,6 +107,11 @@ class DeterministicChecker:
             check_value = criterion.get("value")
             must_pass = criterion.get("must_pass", False)
 
+            # required_sections can never short-circuit — LLM planner can't
+            # predict exact headings an agent will use
+            if check_type == "required_sections":
+                must_pass = False
+
             handler = self._handlers.get(check_type)
             if handler is None:
                 logger.warning(

@@ -459,4 +459,30 @@ class MissionDispatcher:
                     f"\n## Quality Requirements\n{verification_criteria}"
                 )
 
+            # Surface verification feedback from failed attempts
+            verification_feedback = task.input_context.get("verification_feedback")
+            if verification_feedback:
+                parts.append(
+                    f"\n## Feedback from Previous Attempt\n"
+                    f"Your previous output was rejected. Here is the feedback:\n"
+                    f"Reason: {verification_feedback.get('reasoning', 'Unknown')}\n"
+                    f"Failed checks: {', '.join(verification_feedback.get('failures', []))}"
+                )
+
+        # Inject required output format from verification_criteria
+        vc = task.verification_criteria if hasattr(task, 'verification_criteria') else None
+        if isinstance(vc, list):
+            section_checks = [
+                c for c in vc
+                if c.get("type") == "required_sections" and isinstance(c.get("value"), list)
+            ]
+            if section_checks:
+                sections = section_checks[0]["value"]
+                parts.append(
+                    "\n## Required Output Format\n"
+                    "Your response MUST include these markdown sections:\n"
+                    + "\n".join(f"- {s}" for s in sections)
+                    + "\n\nWrite comprehensive, detailed content under each section."
+                )
+
         return "\n".join(parts)
