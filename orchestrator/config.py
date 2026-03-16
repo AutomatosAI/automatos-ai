@@ -320,6 +320,9 @@ class Config:
     COORDINATOR_VERIFIER_FALLBACK_MODEL: str = os.getenv(
         "COORDINATOR_VERIFIER_FALLBACK_MODEL", "openai/gpt-4o-mini",
     )
+    # History-based agent scoring (PRD-82B US-003)
+    COORDINATOR_HISTORY_LOOKBACK_DAYS: int = int(os.getenv("COORDINATOR_HISTORY_LOOKBACK_DAYS", "30"))
+    COORDINATOR_HISTORY_MIN_DATAPOINTS: int = int(os.getenv("COORDINATOR_HISTORY_MIN_DATAPOINTS", "3"))
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING: bool = os.getenv("SEMANTIC_TOOL_ROUTING", "true").lower() == "true"
 

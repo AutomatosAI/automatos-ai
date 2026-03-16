@@ -9,7 +9,7 @@ Scoring weights (from PRD-102 Section 6.2, rebalanced for 82A):
   - tool_coverage:  0.25  — fraction of task's required tools the agent has
   - model_fit:      0.15  — agent's model context + capability for the task
   - availability:   0.10  — agent has no running tasks in current missions
-  - history:        0.10  — placeholder (0.5) until wired in 82B
+  - history:        0.10  — avg verification score from past tasks (82B US-003)
 
 Threshold: 0.4 minimum score to be considered a match.
 Returns the single best-scoring agent, or None.
@@ -20,16 +20,18 @@ Source: PRD-82A Section 12 (US-010), PRD-102 Section 6.2
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
+from config import Config
 from core.models.composio_cache import AgentAppAssignment
 from core.models.core import Agent
-from core.models.orchestration import OrchestrationTask
-from core.models.orchestration_enums import TaskState
+from core.models.orchestration import OrchestrationEvent, OrchestrationTask
+from core.models.orchestration_enums import EventType, TaskState
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,15 @@ class AgentMatcher:
         # Pre-fetch busy agent IDs (agents with ASSIGNED or RUNNING tasks)
         busy_agent_ids = _get_busy_agent_ids(db, agent_ids)
 
+        # Pre-fetch history-based scores (PRD-82B US-003)
+        history_map = _build_history_map(
+            db,
+            agent_ids,
+            agent_role=agent_role,
+            lookback_days=Config.COORDINATOR_HISTORY_LOOKBACK_DAYS,
+            min_datapoints=Config.COORDINATOR_HISTORY_MIN_DATAPOINTS,
+        )
+
         best: Optional[MatchResult] = None
         all_scores: List[MatchResult] = []
 
@@ -166,6 +177,7 @@ class AgentMatcher:
                 agent_tools=tool_map.get(agent.id, set()),
                 is_busy=agent.id in busy_agent_ids,
                 has_upstream=has_upstream,
+                history_score=history_map.get(agent.id, 0.5),
             )
             all_scores.append(scores)
 
@@ -181,7 +193,7 @@ class AgentMatcher:
             candidates_str = ", ".join(
                 f"{s.agent_name}(id={s.agent_id} skill={s.skill_match:.2f} "
                 f"tool={s.tool_coverage:.2f} model={s.model_fit:.2f} "
-                f"total={s.total_score:.3f})"
+                f"hist={s.history:.2f} total={s.total_score:.3f})"
                 for s in top_5
             )
             logger.info(
@@ -272,6 +284,98 @@ def _get_busy_agent_ids(
     return frozenset(row[0] for row in rows)
 
 
+def _build_history_map(
+    db: Session,
+    agent_ids: Sequence[int],
+    agent_role: Optional[str] = None,
+    lookback_days: int = 30,
+    min_datapoints: int = 3,
+) -> Dict[int, float]:
+    """
+    Batch-query verification scores for candidate agents.
+
+    Returns {agent_id: avg_score} for agents with enough data points.
+    Agents below min_datapoints get 0.5 (neutral).
+
+    Scores are extracted from TASK_VERIFICATION_COMPLETED event payloads
+    on verified tasks assigned to each agent.
+    """
+    if not agent_ids:
+        return {}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+
+    # Build base filter: verified tasks assigned to our candidate agents,
+    # updated within the lookback window
+    task_filters = [
+        OrchestrationTask.assigned_agent_id.in_(agent_ids),
+        OrchestrationTask.state == TaskState.VERIFIED.value,
+        OrchestrationTask.updated_at >= cutoff,
+    ]
+    if agent_role:
+        task_filters.append(OrchestrationTask.agent_role == agent_role)
+
+    # Get task IDs and their assigned agents in one query
+    task_rows = (
+        db.query(
+            OrchestrationTask.id,
+            OrchestrationTask.assigned_agent_id,
+        )
+        .filter(and_(*task_filters))
+        .all()
+    )
+
+    if not task_rows:
+        return {}
+
+    task_id_to_agent: Dict[str, int] = {
+        str(row[0]): row[1] for row in task_rows
+    }
+    task_ids = [row[0] for row in task_rows]
+
+    # Fetch verification events for those tasks
+    events = (
+        db.query(
+            OrchestrationEvent.task_id,
+            OrchestrationEvent.payload,
+        )
+        .filter(
+            and_(
+                OrchestrationEvent.task_id.in_(task_ids),
+                OrchestrationEvent.event_type == EventType.TASK_VERIFICATION_COMPLETED.value,
+            )
+        )
+        .all()
+    )
+
+    # Aggregate scores per agent
+    agent_scores: Dict[int, List[float]] = {}
+    for task_id, payload in events:
+        if not payload or not isinstance(payload, dict):
+            continue
+        scores = payload.get("scores", {})
+        if not scores:
+            continue
+        # Average across score dimensions (relevance, completeness, etc.)
+        dimension_values = [v for v in scores.values() if isinstance(v, (int, float))]
+        if not dimension_values:
+            continue
+        avg_score = sum(dimension_values) / len(dimension_values)
+        agent_id = task_id_to_agent.get(str(task_id))
+        if agent_id is not None:
+            agent_scores.setdefault(agent_id, []).append(avg_score)
+
+    # Build result map: only include agents with enough data
+    result: Dict[int, float] = {}
+    for agent_id, scores_list in agent_scores.items():
+        if len(scores_list) >= min_datapoints:
+            result[agent_id] = round(
+                sum(scores_list) / len(scores_list), 4
+            )
+
+    return result
+
+
 def _score_agent(
     *,
     agent: Agent,
@@ -281,6 +385,7 @@ def _score_agent(
     agent_tools: set,
     is_busy: bool,
     has_upstream: bool = False,
+    history_score: float = 0.5,
 ) -> MatchResult:
     """
     Compute weighted score for a single agent.
@@ -313,8 +418,8 @@ def _score_agent(
     # --- availability (0.10) ---
     availability_score = 0.5 if is_busy else 1.0
 
-    # --- history (0.10) — placeholder until 82B ---
-    history_score = 0.5
+    # --- history (0.10) — wired in 82B US-003 ---
+    # history_score is passed in from pre-computed history_map
 
     total = (
         WEIGHT_SKILL_MATCH * skill_score

@@ -20,3 +20,13 @@
 - If no template match: falls through to LLM (existing 82A behavior unchanged)
 - Logging: "template=%s matched" or "no template match, using LLM decomposition"
 - Structural validation (DAG, agent roles) still runs on template output
+
+## Iteration 3 — US-003: Wire history-based agent scoring in AgentMatcher
+- Added COORDINATOR_HISTORY_LOOKBACK_DAYS (default 30) and COORDINATOR_HISTORY_MIN_DATAPOINTS (default 3) to config.py
+- Implemented _build_history_map() — batch queries verified tasks + verification events in 2 queries (not N)
+- Scores extracted from TASK_VERIFICATION_COMPLETED event payloads (avg of relevance/completeness/accuracy/format_compliance)
+- Agents with < min_datapoints get neutral 0.5 (not enough data)
+- Wired into AgentMatcher.match() alongside _build_tool_map() and _get_busy_agent_ids()
+- _score_agent() now accepts history_score param (replaces hardcoded 0.5 placeholder)
+- Debug logging updated to include hist= score
+- Note: no verifier_score column exists on OrchestrationTask — scores live in event payloads, so query goes through OrchestrationEvent table
