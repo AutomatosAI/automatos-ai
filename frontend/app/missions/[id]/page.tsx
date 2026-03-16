@@ -1,15 +1,12 @@
-'use client'
-
-import { use } from 'react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { MissionDetailPage } from '@/components/missions/mission-detail-page'
 
-export default function MissionDetailRoute({
+export default async function MissionDetailRoute({
   params,
 }: {
   params: Promise<{ id: string }>
 }) {
-  const { id } = use(params)
+  const { id } = await params
 
   return (
     <MainLayout>

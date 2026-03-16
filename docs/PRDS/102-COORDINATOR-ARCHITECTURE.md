@@ -336,7 +336,7 @@ The coordinator tick runs on a configurable interval (default: 5 seconds, matchi
 Every 5 seconds:
     active_missions = SELECT * FROM orchestration_runs
                       WHERE workspace_id = :ws
-                      AND state_type IN ('running', 'paused')
+                      AND state = 'running'
 
     For each mission in active_missions:
         Phase A: Dispatch (find and launch ready tasks)
