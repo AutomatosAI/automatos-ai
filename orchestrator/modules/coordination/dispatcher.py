@@ -191,21 +191,24 @@ class MissionDispatcher:
                 skipped_reason="active_task_exists",
             )
 
-        # --- Find already-queued tasks first (e.g. from _queue_initial_tasks) ---
-        already_queued = (
+        # --- Find already-queued or retrying tasks first ---
+        actionable = (
             db.query(OrchestrationTask)
             .filter(
                 and_(
                     OrchestrationTask.run_id == run_id,
-                    OrchestrationTask.state == TaskState.QUEUED.value,
+                    OrchestrationTask.state.in_([
+                        TaskState.QUEUED.value,
+                        TaskState.RETRYING.value,
+                    ]),
                 )
             )
             .order_by(OrchestrationTask.sequence_number)
             .first()
         )
 
-        if already_queued:
-            task = already_queued
+        if actionable:
+            task = actionable
         else:
             # --- Find ready tasks (pending with all deps met) ---
             ready_tasks = DependencyResolver.get_ready_tasks(db, run_id)
