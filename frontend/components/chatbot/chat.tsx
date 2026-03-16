@@ -833,7 +833,7 @@ export function Chat({
                       ))}
 
                       {/* PRD-82A: Inline mission card after creation */}
-                      {activePlanningMissionId && (
+                      {isMissionMode && activePlanningMissionId && (
                         <motion.div
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -1137,7 +1137,7 @@ export function Chat({
                 {/* Typing indicator removed: we show "Thinking…" on the streaming message */}
 
                 {/* PRD-82A: Inline mission card after creation */}
-                {activePlanningMissionId && (
+                {isMissionMode && activePlanningMissionId && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
