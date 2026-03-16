@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Filter } from 'lucide-react'
+import { Search, Filter, Bot } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { PremiumIcon } from '@/components/shared'
 import {
   Select,
   SelectContent,
@@ -10,12 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useAgents } from '@/hooks/use-agent-api'
 import type { BoardFilters } from '@/hooks/use-board-tasks'
 import { cn } from '@/lib/utils'
 
 interface BoardFiltersBarProps {
   filters: BoardFilters
   onFiltersChange: (filters: BoardFilters) => void
+  selectedAgentId: number | null
+  onSelectAgent: (agentId: number | null) => void
   agentCount: number
   taskCount: number
   className?: string
@@ -24,11 +28,15 @@ interface BoardFiltersBarProps {
 export function BoardFiltersBar({
   filters,
   onFiltersChange,
+  selectedAgentId,
+  onSelectAgent,
   agentCount,
   taskCount,
   className,
 }: BoardFiltersBarProps) {
   const [searchValue, setSearchValue] = useState(filters.search ?? '')
+  const { data: rawAgents } = useAgents()
+  const agents = (rawAgents as any[]) ?? []
 
   const handleSearch = (value: string) => {
     setSearchValue(value)
@@ -71,6 +79,34 @@ export function BoardFiltersBar({
             <SelectItem value="all">All Types</SelectItem>
             <SelectItem value="routine">Routine</SelectItem>
             <SelectItem value="recipe">Task</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {/* Agent filter */}
+        <Select
+          value={selectedAgentId?.toString() ?? 'all'}
+          onValueChange={(v) => onSelectAgent(v === 'all' ? null : Number(v))}
+        >
+          <SelectTrigger className="w-40 h-8 text-xs bg-secondary/30">
+            <div className="flex items-center gap-1.5">
+              <Bot className="w-3 h-3 text-muted-foreground shrink-0" />
+              <SelectValue placeholder="Agent" />
+            </div>
+          </SelectTrigger>
+          <SelectContent className="max-h-64">
+            <SelectItem value="all">All Agents</SelectItem>
+            {agents.map((agent: any) => (
+              <SelectItem key={agent.id} value={agent.id.toString()}>
+                <div className="flex items-center gap-1.5">
+                  {agent.premium_icon ? (
+                    <PremiumIcon name={agent.premium_icon} size={14} />
+                  ) : (
+                    <Bot className="w-3.5 h-3.5 text-primary" />
+                  )}
+                  <span className="truncate">{agent.name}</span>
+                </div>
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
