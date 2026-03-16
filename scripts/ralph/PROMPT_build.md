@@ -11,14 +11,14 @@ Study with subagents:
 
 ### Key References
 
-- **Chat component**: `frontend/components/chatbot/chat.tsx` — main chat with quick links (~line 726), Code button (~line 947/1079), MultimodalInput (~line 1060)
-- **Chat input**: `frontend/components/chatbot/multimodal-input.tsx` — textarea + toolbar, handleSubmit, sendMessage callback
-- **Mission store**: `frontend/stores/mission-store.ts` — isMissionMode, activePlanningMissionId, setMissionMode, planModifications, taskFeedback
-- **Mission hooks**: `frontend/hooks/use-missions-api.ts` — useCreateMission, useApproveMission, useRejectMission, useMission, useMissions, etc.
-- **Mission types**: `frontend/types/missions.ts` — MissionResponse, RunState, TaskState, TERMINAL_RUN_STATES, RUN_STATE_CONFIG, computeMissionStats
-- **Mission components**: `frontend/components/missions/` — MissionStatusBadge, MissionDAGCanvas, MissionDetailPage, MissionTaskNode, MissionActivityFeed, TaskInspector, HumanReviewPanel, MissionList, MissionCard
-- **UX Spec**: `docs/UX/MISSION-CONTROL-UX-SPEC.md` — design decisions and interaction patterns
-- **Backend API**: POST /api/missions {goal, config?} → MissionResponse. GET /api/missions → paginated list. GET /api/missions/{id} → detail with tasks + events. POST .../approve, reject, review, pause, resume, cancel.
+- **Chat component**: `frontend/components/chatbot/chat.tsx` — quick links (~line 790), Code button (~line 1010/1175), handleOpenCodeCanvas (~line 82), handleAgentChange, selectedAgentId state
+- **Chat input**: `frontend/components/chatbot/multimodal-input.tsx` — textarea + toolbar
+- **Agent selector**: `frontend/components/chatbot/agent-selector.tsx` — Agent interface (id: number, name, agent_type, status, description, skills, tools, is_system_agent, slug), dropdown
+- **Agent roster**: `frontend/components/agents/agent-roster.tsx` — agent cards with dropdown menus (View Details, Configure, Pause/Start, Delete)
+- **Agent hooks**: `frontend/hooks/use-agent-api.ts` — useAgents() hook for fetching roster
+- **Mission store**: `frontend/stores/mission-store.ts` — isMissionMode, setMissionMode
+- **Workspace store**: check for useWorkspaceStore or workspace-provider for workspace ID
+- **UI components**: `frontend/components/ui/dropdown-menu.tsx` — DropdownMenu family
 
 ### Check for completion
 

@@ -1,0 +1,119 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/100-research-prd-factory",
+  "description": "PRD-107: Context Interface Abstraction — Full research + design PRD. Study hexagonal architecture, port/adapter patterns. Design the abstraction layer between coordinator and context system that allows Phase 3 to swap implementations without changing the coordinator.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Research abstraction boundary patterns",
+      "description": "As a researcher, I need to study how production systems abstract swappable subsystems so that our interface is well-designed",
+      "acceptanceCriteria": [
+        "Study Hexagonal Architecture (Ports & Adapters) — how ports define boundaries, adapters implement them",
+        "Study Clean Architecture — dependency rule, entity/use-case/interface layers",
+        "Study Repository Pattern for data access — how it abstracts storage backends",
+        "Study Strategy Pattern — runtime-swappable algorithms behind a common interface",
+        "Study how SQLAlchemy abstracts database backends — same interface, different engines",
+        "Document which pattern best fits our context swap (Phase 2 message-passing → Phase 3 neural field)",
+        "Write to PRD section: '## 2. Prior Art: Abstraction Boundary Patterns'",
+        "Include recommendation with rationale"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "The key insight: the coordinator shouldn't know whether context is being passed via messages or shared via neural fields. The interface must be narrow enough to be stable across this fundamental change. Study ContextService's current API — it already has render() and get_context() methods."
+    },
+    {
+      "id": "US-002",
+      "title": "Analyze current ContextService interface",
+      "description": "As a researcher, I need to understand every method the ContextService exposes so that the abstraction preserves needed functionality",
+      "acceptanceCriteria": [
+        "Read orchestrator/modules/context/service.py completely",
+        "Document every public method with signature and purpose",
+        "Document every ContextMode and what sections each mode includes",
+        "Document how callers use ContextService today: AgentFactory, heartbeat_service, chatbot pipeline, recipe_executor",
+        "Identify which methods are context-building (render system prompt) vs context-querying (read shared state)",
+        "Write to PRD section: '## 3. Current ContextService Analysis'",
+        "Include caller dependency map"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "This is an audit, not a design task. Read the actual code. The goal is understanding what the interface must preserve."
+    },
+    {
+      "id": "US-003",
+      "title": "Design the context interface (port)",
+      "description": "As a platform architect, I need the abstract context interface defined so that it serves both Phase 2 and Phase 3 implementations",
+      "acceptanceCriteria": [
+        "Define ContextPort abstract class (or Protocol) with methods:",
+        "  - inject_context(agent_id, context_type, content) → success — agent contributes findings to shared context",
+        "  - query_context(agent_id, query, relevance_threshold) → list[ContextItem] — agent reads relevant context",
+        "  - build_system_prompt(agent_id, mode, sections) → str — build the agent's system prompt (wraps current ContextService)",
+        "  - subscribe_to_updates(agent_id, callback) → subscription_id — get notified when relevant context changes",
+        "  - get_relevance_score(content_a, content_b) → float — how relevant two pieces of context are to each other",
+        "Define ContextItem dataclass: content, source_agent_id, timestamp, relevance_score, decay_factor",
+        "Write to PRD section: '## 4. Context Interface Design'",
+        "Address: is this interface narrow enough to be stable? Too narrow to be useful? Justify the API surface"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The trickiest part: build_system_prompt wraps existing ContextService (must not break anything), while inject_context and query_context are NEW capabilities for shared context. Phase 2 adapter implements inject/query via Redis pub/sub or simple DB. Phase 3 adapter implements them via neural field."
+    },
+    {
+      "id": "US-004",
+      "title": "Design Phase 2 adapter (message-passing)",
+      "description": "As a platform architect, I need the Phase 2 adapter designed so that missions work with existing infrastructure",
+      "acceptanceCriteria": [
+        "Define MessagePassingContextAdapter implementing ContextPort",
+        "build_system_prompt → delegates to existing ContextService.render() (thin wrapper)",
+        "inject_context → stores context in Redis hash (run-scoped key) or orchestration_tasks.output JSONB",
+        "query_context → reads from Redis/DB, filters by relevance using embedding similarity or keyword matching",
+        "subscribe_to_updates → Redis pub/sub on run-scoped channel (existing inter_agent.py pattern)",
+        "get_relevance_score → cosine similarity using existing embedding infrastructure",
+        "Write to PRD section: '## 5. Phase 2 Adapter: Message-Passing'",
+        "Include implementation complexity estimate (lines of code, dependencies)",
+        "Address: this adapter is simple and works — Phase 3 must demonstrably improve on it"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Read inter_agent.py for existing Redis pub/sub patterns. The Phase 2 adapter should be implementable in <500 lines. If it's more complex than that, the interface is too wide."
+    },
+    {
+      "id": "US-005",
+      "title": "Design Phase 3 adapter preview (neural field)",
+      "description": "As a platform architect, I need a preview of the Phase 3 adapter so that the interface is validated against both implementations",
+      "acceptanceCriteria": [
+        "Define NeuralFieldContextAdapter implementing ContextPort (sketch, not full design — that's PRD-110+)",
+        "inject_context → writes embedding to shared vector space with metadata (agent_id, timestamp, decay_rate)",
+        "query_context → queries vector space with resonance scoring (cosine × magnitude × recency)",
+        "build_system_prompt → reads relevant field state and incorporates into prompt (augmented context)",
+        "subscribe_to_updates → field change detection when new injections shift relevance landscape",
+        "get_relevance_score → resonance formula from PRD-100 Section 4",
+        "Write to PRD section: '## 6. Phase 3 Adapter Preview: Neural Field'",
+        "Verify the interface supports both adapters without changes",
+        "Identify any interface gaps that would require breaking changes for Phase 3"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "This is a SKETCH — just enough to validate the interface works for both phases. Full neural field design is PRD-110. Read Context Engineering repo 08_neural_fields_foundations.md for the theoretical model this adapter would implement."
+    },
+    {
+      "id": "US-006",
+      "title": "Write PRD-107 complete document",
+      "description": "As a document author, I need to write the complete PRD-107 document",
+      "acceptanceCriteria": [
+        "Create docs/PRDS/107-CONTEXT-INTERFACE-ABSTRACTION.md",
+        "Header, Problem Statement, synthesis of US-001 through US-005",
+        "Design Decisions Made table",
+        "Risk Register (over-abstraction, interface instability, Phase 3 unknown requirements)",
+        "Implementation Acceptance Criteria",
+        "Appendix: ContextPort Python Protocol definition",
+        "Appendix: MessagePassingContextAdapter class stub",
+        "Appendix: NeuralFieldContextAdapter class stub (sketch)",
+        "Final review pass",
+        "PRD-107 complete and ready for peer review"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "This is the BRIDGE PRD — it must satisfy both Phase 2 pragmatists ('just make it work') and Phase 3 visionaries ('don't paint us into a corner'). The interface is the contract between these two worlds."
+    }
+  ]
+}

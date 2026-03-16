@@ -1,0 +1,115 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/100-research-prd-factory",
+  "description": "PRD-104: Ephemeral Agents & Model Selection — Full research + design PRD. Study agent spawning patterns, model routing, cost optimization. Design contractor agent lifecycle and model-per-role strategy.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Research agent spawning and lifecycle patterns",
+      "description": "As a researcher, I need to study how existing systems create and destroy temporary agents so that our contractor model is informed by prior art",
+      "acceptanceCriteria": [
+        "Study Agent Zero's delegation model — how it spawns sub-agents, conversation sealing, cleanup",
+        "Study AutoGen's agent creation — dynamic agent instantiation, termination conditions",
+        "Study K8s Job lifecycle — create, run, complete, cleanup. TTL-after-finished pattern",
+        "Study serverless function lifecycle — cold start, warm pool, timeout, cleanup",
+        "Study CrewAI's agent definition — how roles/goals/backstory configure agent behavior",
+        "Comparison table: system, spawn time, lifecycle model, cleanup strategy, state persistence",
+        "Write to PRD section: '## 2. Prior Art: Agent Lifecycle Patterns'",
+        "Address PRD-100 Open Question #4: 'How fast can we spin up a contractor agent?'"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Key insight from PRD-100: contractors are mission-scoped, destroyed after. But their outputs (reports, board tasks, telemetry) persist. The question is whether they need a DB record (agents table row) or can be purely in-memory."
+    },
+    {
+      "id": "US-002",
+      "title": "Research model routing and selection",
+      "description": "As a researcher, I need to study model routing strategies so that our model-per-role design optimizes cost and quality",
+      "acceptanceCriteria": [
+        "Study Martian model routing — how it selects models based on task characteristics",
+        "Study Unify.ai's model selection — quality/cost/speed optimization",
+        "Study OpenRouter's model metadata — what info is available for programmatic selection",
+        "Research model benchmarks by task type: reasoning (MMLU, ARC), coding (HumanEval, SWE-bench), writing (creative/technical), research (retrieval, synthesis)",
+        "Document cost tiers: cheap models (<$1/M tokens), mid ($1-10/M), premium (>$10/M) with quality tradeoffs",
+        "Write to PRD section: '## 3. Model Routing & Selection'",
+        "Include decision matrix: task_type × quality_requirement → model tier",
+        "Address PRD-100 Open Question #6: cost difference between routing strategies"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Automatos has 340 models via OpenRouter. config.py has LLM_MODEL as default. The model-per-role strategy should recommend models but allow user override. Don't build a dynamic routing engine — start with a static mapping that can evolve."
+    },
+    {
+      "id": "US-003",
+      "title": "Design contractor agent lifecycle",
+      "description": "As a platform architect, I need the contractor agent lifecycle designed end-to-end",
+      "acceptanceCriteria": [
+        "Define lifecycle phases: request → configure → spawn → execute → report → cleanup",
+        "Define contractor configuration: role description, tools needed, model, context mode, memory scope (mission-only)",
+        "Define DB strategy: lightweight agents table row with is_contractor=true and mission_run_id FK, OR ephemeral (no DB record)",
+        "Recommend DB approach with rationale — consider: what if we need to query 'all contractors for run X'",
+        "Define cleanup: what happens when mission completes — mark inactive, remove from roster, archive config",
+        "Define what persists after cleanup: reports, board tasks, telemetry events, memory (none)",
+        "Write to PRD section: '## 4. Contractor Agent Lifecycle'",
+        "Include lifecycle state diagram"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The existing agents table has fields like: name, model, skill, personality, workspace_id. A contractor would need most of these but with a mission-scoped lifecycle. Adding is_contractor boolean + run_id FK is probably simplest. Read the agents model to decide."
+    },
+    {
+      "id": "US-004",
+      "title": "Design model-per-role configuration",
+      "description": "As a platform architect, I need model-per-role configuration designed so that users can optimize cost/quality per task type",
+      "acceptanceCriteria": [
+        "Define role taxonomy: planner, researcher, writer, coder, reviewer, verifier, coordinator",
+        "Define default model mapping per role — sensible defaults from OpenRouter catalog",
+        "Define override hierarchy: platform defaults → workspace settings → mission config → task override",
+        "Define cost estimation — given a model mapping and task count, estimate mission cost before execution",
+        "Connect to orchestration_runs.config JSONB (PRD-101) — where model prefs are stored",
+        "Write to PRD section: '## 5. Model-Per-Role Configuration'",
+        "Include default mapping table with model IDs, costs, and rationale",
+        "Include cost estimation formula"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "OpenRouter provides per-model pricing in its API. The cost estimation should use real pricing data. Start with 3 tiers: cheap (deepseek-chat), balanced (claude-sonnet), premium (claude-opus). User can customize per workspace."
+    },
+    {
+      "id": "US-005",
+      "title": "Design AgentFactory integration for contractors",
+      "description": "As a platform architect, I need to design how contractors use the existing AgentFactory without breaking it",
+      "acceptanceCriteria": [
+        "Define how coordinator calls AgentFactory for contractors — new method or existing execute_with_prompt",
+        "Define contractor tool assignment — does coordinator specify tools or does tool_router handle it",
+        "Define contractor context — which ContextService mode, what sections, what's in the system prompt",
+        "Address: contractors have no personality, no long-term memory, no skills — how does ContextService handle this",
+        "Define contractor output capture — how results flow back to coordinator",
+        "Write to PRD section: '## 6. AgentFactory Integration'",
+        "Include code flow diagram showing coordinator → AgentFactory → LLM → output → coordinator"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "AgentFactory.execute_with_prompt already handles the full tool loop. Contractors should use this same path. The key difference: contractors get mission-scoped context (goal, task description, prior task outputs) instead of personality-driven context. A new CONTRACTOR context mode in ContextService might be needed."
+    },
+    {
+      "id": "US-006",
+      "title": "Write PRD-104 opening, synthesis, and conclusion",
+      "description": "As a document author, I need to write the complete PRD-104 document",
+      "acceptanceCriteria": [
+        "Create docs/PRDS/104-EPHEMERAL-AGENTS-MODEL-SELECTION.md",
+        "Header, Problem Statement, synthesis of US-001 through US-005",
+        "Design Decisions Made table",
+        "Risk Register (at least 5 risks)",
+        "Implementation Acceptance Criteria",
+        "Appendix: Contractor configuration schema (JSON example)",
+        "Appendix: Default model mapping table",
+        "Final review pass — cross-references to PRD-101, PRD-102 valid",
+        "PRD-104 complete and ready for peer review"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Follow PRD-100 style. This PRD is smaller scope than 101/102 — don't pad it. 6 stories instead of 8."
+    }
+  ]
+}

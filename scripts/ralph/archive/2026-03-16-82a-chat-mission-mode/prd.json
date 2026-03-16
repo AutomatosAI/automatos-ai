@@ -1,0 +1,145 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/82a-mission-chat-mode",
+  "description": "PRD-82A Phase 6: Chat Mission Mode — Add Mission toggle to chat, create missions from chat input, show inline mission card with plan review CTA, wire plan approval/rejection on mission detail page. Completes the user-facing entry point for the Sequential Mission Coordinator.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add Mission mode toggle button to chat quick links",
+      "description": "As a user, I want a Mission button alongside Code/Create Agent/Knowledge Base/Recipes so I can enter mission mode from the chat.",
+      "acceptanceCriteria": [
+        "In frontend/components/chatbot/chat.tsx, add a 'Mission' toggle button next to the Code button (not a navigation Link — a toggle like Code)",
+        "Button appears in BOTH quick link locations: welcome card area (~line 945) and bottom input area (~line 1077)",
+        "Use Target icon from lucide-react (already imported in other mission components)",
+        "Import useMissionStore from @/stores/mission-store and use isMissionMode + setMissionMode",
+        "When mission mode is active, button gets orange highlight: 'bg-orange-500/20 ring-1 ring-orange-500/50' instead of 'bg-black/10'",
+        "Clicking toggles isMissionMode on/off in the Zustand store",
+        "Add Target to the lucide-react import at top of chat.tsx",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Pattern: follow the Code button's onClick toggle style (handleOpenCodeCanvas), not the Link navigation style. The Mission button is a STATE TOGGLE not a route change."
+    },
+    {
+      "id": "US-002",
+      "title": "Show mission mode indicator banner in chat",
+      "description": "As a user, I want a visual indicator when mission mode is active so I know my next message will create a mission.",
+      "acceptanceCriteria": [
+        "When isMissionMode is true, show a small banner/pill above the MultimodalInput component",
+        "Banner text: 'Mission Mode — Describe your goal and an AI team will execute it'",
+        "Banner uses orange accent styling: 'bg-orange-500/10 border border-orange-500/30 text-orange-400'",
+        "Banner has a small X button to deactivate mission mode (calls setMissionMode(false))",
+        "Banner includes Target icon on the left",
+        "Add this in chat.tsx above the MultimodalInput in both the widget layout (~line 830) and the standard layout (~line 1060)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Keep it minimal — a single-line pill/banner, not a large panel. Should feel like a mode indicator, not a modal."
+    },
+    {
+      "id": "US-003",
+      "title": "Intercept chat submit to create mission when in mission mode",
+      "description": "As a user, when I send a message in mission mode, I want it to create a mission via the API instead of sending a chat message.",
+      "acceptanceCriteria": [
+        "In chat.tsx, modify the sendMessage / handleSubmit flow to check isMissionMode from useMissionStore",
+        "When isMissionMode is true and user sends a message, call the createMission mutation from use-missions-api.ts instead of the normal chat flow",
+        "Import useCreateMission from @/hooks/use-missions-api",
+        "Pass the message text as the goal: createMission.mutate({ goal: messageText })",
+        "On success: store the returned mission ID via setActivePlanningMissionId, turn off mission mode (setMissionMode(false)), show a toast with 'Mission created — plan is being generated'",
+        "On error: show error toast, keep mission mode active",
+        "Do NOT add the message to the chat messages array — mission creation is a separate flow",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The useCreateMission hook already exists in frontend/hooks/use-missions-api.ts. It calls POST /api/missions with { goal, config? }. The backend planner generates the plan automatically. Use toast from 'sonner' for notifications."
+    },
+    {
+      "id": "US-004",
+      "title": "Show inline mission card in chat after creation",
+      "description": "As a user, after creating a mission from chat, I want to see an inline card showing the mission status with a link to review the plan.",
+      "acceptanceCriteria": [
+        "Create new component: frontend/components/chatbot/mission-created-card.tsx",
+        "Component takes props: missionId (string)",
+        "Uses useMission(missionId) hook from use-missions-api to fetch mission data",
+        "Shows: mission goal (truncated), current state via MissionStatusBadge, task count from plan",
+        "Shows a 'Review Plan' button that navigates to /missions/{missionId}",
+        "Card uses glass-card styling: 'bg-card/50 backdrop-blur border border-border rounded-xl p-4'",
+        "Loading state shows Skeleton placeholders",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Import MissionStatusBadge from @/components/missions/mission-status-badge. Import useMission from @/hooks/use-missions-api. Use useRouter from next/navigation for navigation."
+    },
+    {
+      "id": "US-005",
+      "title": "Render mission card in chat when activePlanningMissionId is set",
+      "description": "As a user, I want the mission card to appear in the chat area after I create a mission.",
+      "acceptanceCriteria": [
+        "In chat.tsx, read activePlanningMissionId from useMissionStore",
+        "When activePlanningMissionId is not null, render MissionCreatedCard at the bottom of the messages area (before messagesEndRef)",
+        "Import MissionCreatedCard from @/components/chatbot/mission-created-card",
+        "Card appears with a fade-in animation (use framer-motion's motion.div with initial={{ opacity: 0, y: 10 }})",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "framer-motion is already imported in chat.tsx. Place the card after the messages map and before messagesEndRef div. It should appear in BOTH layout modes (widget layout and standard layout)."
+    },
+    {
+      "id": "US-006",
+      "title": "Add plan approval controls to mission detail page",
+      "description": "As a user, when viewing a mission in awaiting_approval state, I want to see Approve and Reject buttons to act on the plan.",
+      "acceptanceCriteria": [
+        "In frontend/components/missions/mission-detail-page.tsx, add an approval bar when mission.state === 'awaiting_approval'",
+        "Show between the header and the main content (ResizablePanelGroup)",
+        "Approval bar contains: info text 'Review the plan below, then approve or reject', Approve button (green), Reject button (red outline)",
+        "Approve button calls useApproveMission mutation with missionId and planModifications from useMissionStore",
+        "Reject button shows a textarea for feedback (toggle visibility), then calls useRejectMission with { feedback: text }",
+        "Import useApproveMission and useRejectMission from @/hooks/use-missions-api",
+        "On approve success: show toast 'Plan approved — mission is running', clearPlanModifications()",
+        "On reject success: show toast 'Plan rejected — provide more details', clearPlanModifications()",
+        "Disable buttons while mutation is pending (isLoading)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "The approve mutation sends { task_overrides, agent_overrides, notes } from planModifications in the Zustand store. The reject mutation sends { feedback: string }. Both hooks exist in use-missions-api.ts. Use toast from 'sonner'."
+    },
+    {
+      "id": "US-007",
+      "title": "Set DAG canvas to plan mode when awaiting_approval",
+      "description": "As a user reviewing a plan, I want the DAG to show in plan mode so all nodes look neutral (not execution-colored).",
+      "acceptanceCriteria": [
+        "In mission-detail-page.tsx, pass mode='plan' to MissionDAGCanvas when mission.state === 'awaiting_approval'",
+        "Currently the mode logic is: isReviewable ? 'review' : 'execution'. Change to: mission.state === 'awaiting_approval' ? 'plan' : isReviewable ? 'review' : 'execution'",
+        "In mission-dag-canvas.tsx, verify that mode='plan' renders nodes with neutral styling (it should already — the MissionTaskNode handles this via its mode prop)",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Simple conditional change. The MissionTaskNode component already supports mode='plan' with neutral gray styling."
+    },
+    {
+      "id": "US-008",
+      "title": "Handle /mission slash command in chat input",
+      "description": "As a power user, I want to type /mission followed by my goal to create a mission without toggling mission mode.",
+      "acceptanceCriteria": [
+        "In chat.tsx, in the sendMessage/handleSubmit flow, check if message starts with '/mission ' (case insensitive)",
+        "If it does, extract the text after '/mission ' as the goal",
+        "Call createMission.mutate({ goal }) same as mission mode flow (US-003)",
+        "Set activePlanningMissionId on success, show toast",
+        "This should work regardless of whether isMissionMode is active",
+        "The /mission check should happen BEFORE the isMissionMode check",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Simple string prefix check. Use trimmedText.toLowerCase().startsWith('/mission '). Extract goal with trimmedText.slice(9).trim()."
+    }
+  ]
+}
