@@ -87,6 +87,12 @@ class OpenRouterProvider(BaseLLMProvider):
 
             response = await loop.run_in_executor(None, _call)
 
+            if not response.choices:
+                raise ValueError(
+                    f"OpenRouter returned empty choices (model={self.config.model}). "
+                    "This usually means the provider rejected the request."
+                )
+
             tool_calls = None
             finish_reason = response.choices[0].finish_reason
 
