@@ -9,9 +9,10 @@ import { cn } from '@/lib/utils'
 interface BoardColumnProps {
   column: BoardColumnType
   onOpenTask: (task: BoardTask) => void
+  onDeleteTask?: (taskId: string) => void
 }
 
-export function BoardColumn({ column, onOpenTask }: BoardColumnProps) {
+export function BoardColumn({ column, onOpenTask, onDeleteTask }: BoardColumnProps) {
   const statusConf = STATUS_CONFIG[column.status]
 
   return (
@@ -44,6 +45,7 @@ export function BoardColumn({ column, onOpenTask }: BoardColumnProps) {
                 task={task}
                 index={index}
                 onOpen={onOpenTask}
+                onDelete={onDeleteTask}
               />
             ))}
             {provided.placeholder}

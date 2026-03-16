@@ -10,6 +10,7 @@ import { BoardFiltersBar } from './board-filters'
 import { BoardTaskViewer } from './board-task-viewer'
 import { CreateTaskDialog } from './create-task-dialog'
 import { useBoardTasks, useUpdateTaskStatus, type BoardFilters } from '@/hooks/use-board-tasks'
+import { useDeleteTask } from '@/hooks/use-board-tasks-api'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { cn } from '@/lib/utils'
 
@@ -29,6 +30,11 @@ export function BoardView({ period, className }: BoardViewProps) {
   const activeFilters = { ...filters, agent_id: selectedAgentId }
   const { columns, isLoading, data } = useBoardTasks(activeFilters)
   const updateStatus = useUpdateTaskStatus()
+  const deleteTask = useDeleteTask()
+
+  const handleDeleteTask = useCallback((taskId: string) => {
+    deleteTask.mutate(taskId)
+  }, [deleteTask])
 
   const totalTasks = data?.total ?? 0
 
@@ -113,6 +119,7 @@ export function BoardView({ period, className }: BoardViewProps) {
                   key={column.status}
                   column={column}
                   onOpenTask={handleOpenTask}
+                  onDeleteTask={handleDeleteTask}
                 />
               ))
             )}
