@@ -2,3 +2,11 @@
 # Branch: ralph/prd-82b-mission-intelligence
 # Started: 2026-03-16
 
+## Iteration 1 — US-001: Create decomposition template library
+- Created orchestrator/modules/coordination/templates.py
+- 4 built-in templates: research_and_report (5 tasks), content_pipeline (4 tasks), competitive_analysis (4 tasks), data_investigation (3 tasks)
+- DecompositionTemplate + TaskTemplate frozen dataclasses
+- match_template() with keyword scoring (threshold=2)
+- render_template() outputs PlannedTask-compatible dicts
+- All agent roles match _ROLE_SYNONYMS: researcher, search, analyst, writer, reviewer
+- All 3 unit test ACs pass (research match, content match, no match)
