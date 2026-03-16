@@ -9,6 +9,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { pillBase, inactiveStyle } from './chat-mode-styles'
+import { MAX_PINNED } from '@/hooks/use-pinned-agents'
 
 interface PinAgentPickerAgent {
   id: number
@@ -24,16 +26,6 @@ interface PinAgentPickerProps {
   onUnpin: (agentId: number) => void
 }
 
-const pillBase = [
-  'inline-flex items-center justify-center rounded-full',
-  'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-  'gap-2 text-xs font-medium',
-  'backdrop-blur transition-colors',
-  'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-].join(' ')
-
-const inactiveStyle = 'bg-black/10 text-foreground/90 hover:bg-orange-500/10'
-
 export function PinAgentPicker({
   agents,
   pinnedIds,
@@ -41,7 +33,7 @@ export function PinAgentPicker({
   onUnpin,
 }: PinAgentPickerProps) {
   const activeAgents = agents.filter((a) => a.status === 'active')
-  const atMax = pinnedIds.length >= 6
+  const atMax = pinnedIds.length >= MAX_PINNED
 
   const handleClick = (agentId: number) => {
     if (pinnedIds.includes(agentId)) {
@@ -94,7 +86,7 @@ export function PinAgentPicker({
         })}
         {atMax && (
           <div className="px-2 py-1.5 text-xs text-muted-foreground text-center">
-            Max 6 pins
+            Max {MAX_PINNED} pins
           </div>
         )}
       </DropdownMenuContent>

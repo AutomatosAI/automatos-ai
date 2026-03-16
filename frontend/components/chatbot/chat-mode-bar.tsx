@@ -2,6 +2,7 @@
 
 import { Code2, Target } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { pillBase, inactiveStyle } from './chat-mode-styles'
 
 interface PinnedAgent {
   id: number
@@ -21,16 +22,7 @@ interface ChatModeBarProps {
   onAgentSelect?: (agentId: number | null) => void
 }
 
-const pillBase = [
-  'inline-flex items-center justify-center rounded-full',
-  'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-  'gap-2 text-xs font-medium',
-  'backdrop-blur transition-colors',
-  'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-].join(' ')
-
 const activeStyle = 'bg-orange-500/20 ring-1 ring-orange-500/50 text-foreground/90'
-const inactiveStyle = 'bg-black/10 text-foreground/90 hover:bg-orange-500/10'
 
 const agentActiveStyle = 'bg-primary/20 ring-1 ring-primary/50 text-foreground/90'
 

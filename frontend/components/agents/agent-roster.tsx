@@ -45,7 +45,8 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { useAgents, useStartAgent, useStopAgent } from '@/hooks/use-agent-api'
-import { usePinnedAgents } from '@/hooks/use-pinned-agents'
+import { usePinnedAgents, MAX_PINNED } from '@/hooks/use-pinned-agents'
+import { useWorkspace } from '@/components/workspace-provider'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { AgentConfigurationModal } from './agent-configuration-modal'
 import { AgentStatusControlModal } from './agent-status-control-modal'
@@ -216,10 +217,8 @@ export function AgentRoster({
   const [deleteModalAgentId, setDeleteModalAgentId] = useState<number | null>(null)
 
   // Pinned agents
-  const workspaceId = typeof window !== 'undefined'
-    ? localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org') || ''
-    : ''
-  const { pinnedIds, pin, unpin, isPinned } = usePinnedAgents(workspaceId)
+  const { workspace } = useWorkspace()
+  const { pinnedIds, pin, unpin, isPinned } = usePinnedAgents(workspace?.id?.toString() ?? '')
 
   // System icon mappings
   const { data: iconMappings = {} } = useSystemIcons()
@@ -352,8 +351,8 @@ export function AgentRoster({
                         Configure
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        disabled={!isPinned(Number(agent.id)) && pinnedIds.length >= 6}
-                        title={!isPinned(Number(agent.id)) && pinnedIds.length >= 6 ? 'Max 6 agents' : undefined}
+                        disabled={!isPinned(Number(agent.id)) && pinnedIds.length >= MAX_PINNED}
+                        title={!isPinned(Number(agent.id)) && pinnedIds.length >= MAX_PINNED ? `Max ${MAX_PINNED} agents` : undefined}
                         onClick={(e) => {
                           e.stopPropagation()
                           if (isPinned(Number(agent.id))) {
@@ -443,8 +442,8 @@ export function AgentRoster({
                         Configure
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        disabled={!isPinned(Number(agent.id)) && pinnedIds.length >= 6}
-                        title={!isPinned(Number(agent.id)) && pinnedIds.length >= 6 ? 'Max 6 agents' : undefined}
+                        disabled={!isPinned(Number(agent.id)) && pinnedIds.length >= MAX_PINNED}
+                        title={!isPinned(Number(agent.id)) && pinnedIds.length >= MAX_PINNED ? `Max ${MAX_PINNED} agents` : undefined}
                         onClick={(e) => {
                           e.stopPropagation()
                           if (isPinned(Number(agent.id))) {
