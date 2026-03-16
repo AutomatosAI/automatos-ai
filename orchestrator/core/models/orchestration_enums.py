@@ -113,6 +113,9 @@ class EventType(str, Enum):
     COST_SNAPSHOT = "cost_snapshot"
     BUDGET_WARNING = "budget_warning"
 
+    # Cross-task consistency (PRD-82B US-006)
+    CONSISTENCY_CHECKED = "consistency_checked"
+
 
 # ---------------------------------------------------------------------------
 # ActorType — who triggered an orchestration event

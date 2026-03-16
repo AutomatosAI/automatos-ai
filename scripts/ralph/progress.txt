@@ -62,3 +62,26 @@
 - Created Alembic migration prd82b_us005_replan for replan_count column + updated state CHECK constraint
 - Emits RUN_REPLANNED event with replan_number, new_task_count, token_estimate, user_notes
 - All imports validated, 67 tests pass, no new failures
+
+## Iteration 6 — US-006: Add cross-task consistency verification
+- Added COORDINATOR_CONSISTENCY_CHECK (default true) config flag to config.py
+- Added CONSISTENCY_CHECKED event type to EventType enum
+- Created ConsistencyIssue frozen dataclass (task_ids, description, severity)
+- Created ConsistencyResult frozen dataclass (passed, score, reasoning, issues, tokens_used)
+- Implemented VerificationService.verify_cross_task_consistency() — LLM-based cross-task check
+  - Uses cross-model verifier (different family from executor)
+  - Checks: contradictions, goal coverage, redundant duplication, logical coherence
+  - Retry logic matches existing verify_task pattern (max_retries from config)
+  - On all retries exhausted: defaults to passed (don't block human review)
+  - Single-task missions skip check (returns passed)
+- Implemented _build_consistency_prompt() — formats goal + all task outputs (4K char truncation per task)
+- Added _CONSISTENCY_SYSTEM_PROMPT — instructs LLM to return JSON with passed/score/reasoning/issues
+- Wired into coordinator_service.py:
+  - _build_and_advance_to_awaiting_human() now async (was sync), calls _run_consistency_check()
+  - _run_consistency_check() gathers verified task outputs, runs consistency verification
+  - Consistency result attached to output_summary["consistency"] for human review context
+  - Emits CONSISTENCY_CHECKED event with passed/score/reasoning/issue_count/high_severity_count
+  - Token usage tracked on run.tokens_used
+  - If consistency check disabled (config=false) or fails with exception: proceeds without blocking
+- Updated caller to await the now-async method
+- All 4 modified files pass Python syntax validation

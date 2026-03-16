@@ -48,6 +48,7 @@ from modules.coordination.planner import (
     PlanValidationError,
 )
 from modules.coordination.reconciler import MissionReconciler
+from modules.coordination.verification import ConsistencyResult, VerificationService
 from services.orchestration_board_bridge import (
     create_mission_board_task,
     create_task_board_task,
@@ -237,7 +238,7 @@ class CoordinatorService:
         # --- Check if run advanced to verifying → build summary ---
         db.refresh(run)
         if RunState(run.state) == RunState.VERIFYING:
-            self._build_and_advance_to_awaiting_human(db, run)
+            await self._build_and_advance_to_awaiting_human(db, run)
 
     async def _execute_task(
         self,
@@ -1276,17 +1277,41 @@ class CoordinatorService:
                 exc_info=True,
             )
 
-    def _build_and_advance_to_awaiting_human(
+    async def _build_and_advance_to_awaiting_human(
         self,
         db: Session,
         run: OrchestrationRun,
     ) -> None:
         """
-        Build output summary and transition run from verifying → awaiting_human.
+        Build output summary, run cross-task consistency check, and
+        transition run from verifying → awaiting_human.
         """
         try:
             summary = self.build_output_summary(db, run)
             run.output_summary = summary
+
+            # --- Cross-task consistency verification (PRD-82B US-006) ---
+            consistency_result = await self._run_consistency_check(db, run)
+            if consistency_result is not None:
+                # Attach consistency issues to the summary for human review
+                summary["consistency"] = {
+                    "passed": consistency_result.passed,
+                    "score": consistency_result.score,
+                    "reasoning": consistency_result.reasoning,
+                    "issues": [
+                        {
+                            "task_ids": issue.task_ids,
+                            "description": issue.description,
+                            "severity": issue.severity,
+                        }
+                        for issue in consistency_result.issues
+                    ],
+                }
+                run.output_summary = summary
+
+                # Track token usage from consistency check
+                if consistency_result.tokens_used > 0:
+                    run.tokens_used = (run.tokens_used or 0) + consistency_result.tokens_used
 
             transition_run(
                 db=db,
@@ -1306,6 +1331,7 @@ class CoordinatorService:
                 payload={
                     "tasks_completed": summary["tasks_completed"],
                     "total_duration_seconds": summary["total_duration_seconds"],
+                    "consistency": summary.get("consistency"),
                 },
             )
 
@@ -1322,6 +1348,86 @@ class CoordinatorService:
                 run.id,
                 exc_info=True,
             )
+
+    async def _run_consistency_check(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+    ) -> Optional[ConsistencyResult]:
+        """
+        Run cross-task consistency verification if enabled.
+
+        Returns ConsistencyResult or None if disabled/skipped.
+        """
+        if not Config.COORDINATOR_CONSISTENCY_CHECK:
+            logger.info(
+                "Consistency check disabled for run %s (COORDINATOR_CONSISTENCY_CHECK=false)",
+                run.id,
+            )
+            return None
+
+        # Gather verified task outputs
+        tasks: List[OrchestrationTask] = (
+            db.query(OrchestrationTask)
+            .filter(
+                and_(
+                    OrchestrationTask.run_id == run.id,
+                    OrchestrationTask.state == TaskState.VERIFIED.value,
+                )
+            )
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+
+        task_outputs = [
+            {
+                "task_id": str(t.id),
+                "title": t.title or "",
+                "output": t.output or "",
+            }
+            for t in tasks
+        ]
+
+        if len(task_outputs) < 2:
+            return None
+
+        verification_service = VerificationService()
+
+        try:
+            result = await verification_service.verify_cross_task_consistency(
+                run_id=run.id,
+                goal=run.goal or "",
+                task_outputs=task_outputs,
+            )
+
+            # Emit consistency event
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.CONSISTENCY_CHECKED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                payload={
+                    "passed": result.passed,
+                    "score": result.score,
+                    "reasoning": result.reasoning,
+                    "issue_count": len(result.issues),
+                    "high_severity_count": sum(
+                        1 for i in result.issues if i.severity == "high"
+                    ),
+                    "tokens_used": result.tokens_used,
+                },
+            )
+
+            return result
+
+        except Exception:
+            logger.error(
+                "Consistency check failed for run %s — proceeding without",
+                run.id,
+                exc_info=True,
+            )
+            return None
 
 
 # ---------------------------------------------------------------------------
