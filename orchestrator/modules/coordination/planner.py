@@ -1,19 +1,17 @@
 """
-Mission Planner — PRD-82A
-==========================
+Mission Planner — PRD-82A + 82B
+=================================
 
-LLM-based goal decomposition into a task DAG with structural validation.
+Goal decomposition into a task DAG with structural validation.
 
 The planner:
-  1. Builds a prompt describing the goal + available agents
-  2. Calls the LLM requesting structured JSON output
+  1. Tries template matching first (82B) — keyword-based, no LLM call
+  2. Falls back to LLM decomposition if no template matches
   3. Validates the plan (DAG acyclic, agents exist, task count in bounds)
-  4. Retries up to 3 times on validation failure
+  4. Retries LLM up to 3 times on validation failure
   5. Returns a DecompositionResult
 
-Template matching is deferred to 82B — LLM-only decomposition for v1.
-
-Source: PRD-82A Section 12 (US-011), PRD-102 Section 5
+Source: PRD-82A Section 12 (US-011), PRD-82B US-001/US-002
 """
 
 import json
@@ -26,6 +24,7 @@ from uuid import UUID, uuid4
 from core.llm import create_llm_manager
 from core.models.core import Agent
 from core.models.orchestration_enums import TaskType
+from modules.coordination.templates import match_template, render_template
 from services.orchestration_deps import (
     CyclicDependencyError,
     DependencyResolver,
@@ -79,6 +78,7 @@ class DecompositionResult:
     tasks: List[PlannedTask]
     dependencies: List[PlannedDependency]
     token_estimate: int
+    template_used: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +129,50 @@ class MissionPlanner:
         Raises:
             PlanValidationError: if all retry attempts fail structural validation.
         """
+        # --- Template matching (82B US-002) — try before LLM ---
+        template = match_template(goal)
+        if template is not None:
+            logger.info(
+                "MissionPlanner: template=%s matched for goal='%s'",
+                template.id,
+                goal[:80],
+            )
+            raw_tasks = render_template(template, goal)
+            parse_errors: List[str] = []
+            tasks, deps = _parse_plan({"tasks": raw_tasks}, parse_errors)
+            if not parse_errors:
+                validation_errors = _validate_plan(tasks, deps, agents)
+                if not validation_errors:
+                    token_estimate = len(tasks) * TOKENS_PER_TASK_ESTIMATE
+                    logger.info(
+                        "MissionPlanner: template=%s produced %d tasks",
+                        template.id,
+                        len(tasks),
+                    )
+                    return DecompositionResult(
+                        tasks=tasks,
+                        dependencies=deps,
+                        token_estimate=token_estimate,
+                        template_used=template.id,
+                    )
+                else:
+                    logger.warning(
+                        "MissionPlanner: template=%s failed validation: %s — falling through to LLM",
+                        template.id,
+                        validation_errors,
+                    )
+            else:
+                logger.warning(
+                    "MissionPlanner: template=%s failed parsing: %s — falling through to LLM",
+                    template.id,
+                    parse_errors,
+                )
+        else:
+            logger.info(
+                "MissionPlanner: no template match, using LLM decomposition"
+            )
+
+        # --- LLM decomposition fallback ---
         llm = create_llm_manager(service_name="orchestrator")
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []

@@ -10,3 +10,13 @@
 - render_template() outputs PlannedTask-compatible dicts
 - All agent roles match _ROLE_SYNONYMS: researcher, search, analyst, writer, reviewer
 - All 3 unit test ACs pass (research match, content match, no match)
+
+## Iteration 2 — US-002: Wire template matching into MissionPlanner
+- Added `template_used: Optional[str]` field to DecompositionResult (default None, backward-compatible)
+- Imported match_template + render_template from templates.py into planner.py
+- Template matching runs FIRST in MissionPlanner.decompose() before LLM call
+- If template matches: render → parse → validate → return (no LLM call)
+- If template fails validation: falls through to LLM with warning log
+- If no template match: falls through to LLM (existing 82A behavior unchanged)
+- Logging: "template=%s matched" or "no template match, using LLM decomposition"
+- Structural validation (DAG, agent roles) still runs on template output

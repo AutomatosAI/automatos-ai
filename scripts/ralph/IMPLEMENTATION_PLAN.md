@@ -10,7 +10,7 @@ Make missions smarter: decomposition templates, history-based agent scoring, rep
 ## Tasks
 
 - [x] US-001: Create decomposition template library (templates.py)
-- [ ] US-002: Wire template matching into MissionPlanner
+- [x] US-002: Wire template matching into MissionPlanner
 - [ ] US-003: Wire history-based agent scoring in AgentMatcher
 - [ ] US-004: Add telemetry query endpoints for missions
 - [ ] US-005: Add replanning state and replan endpoint
