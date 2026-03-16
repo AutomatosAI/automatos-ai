@@ -3,7 +3,7 @@
 import { useCallback } from 'react'
 import useLocalStorageState from 'use-local-storage-state'
 
-const MAX_PINNED = 6
+export const MAX_PINNED = 6
 
 export function usePinnedAgents(workspaceId: string) {
   const [pinnedIds, setPinnedIds] = useLocalStorageState<number[]>(
