@@ -14,6 +14,7 @@ import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, Docu
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
 import { useUser } from '@clerk/nextjs'
+import { useRouter } from 'next/navigation'
 
 // Widget Architecture (PRD-38.1)
 import { useWorkspaceStore } from '@/stores/workspace-store'
@@ -74,12 +75,13 @@ export function Chat({
   const dispatchMemoryStored = useWorkspaceStore((s) => s.dispatchMemoryStored)
   const dispatchWorkflowUpdate = useWorkspaceStore((s) => s.dispatchWorkflowUpdate)
 
-  // PRD-82A: Mission mode toggle
+  // PRD-82A: Mission mode
   const isMissionMode = useMissionStore((s) => s.isMissionMode)
   const setMissionMode = useMissionStore((s) => s.setMissionMode)
   const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
   const activePlanningMissionId = useMissionStore((s) => s.activePlanningMissionId)
   const createMission = useCreateMission()
+  const router = useRouter()
 
   // PRD-66: Workspace context for Code Canvas
   const { workspace } = useWorkspace()
@@ -526,43 +528,6 @@ export function Chat({
       })
     }
   }, [status])
-
-  // PRD-82A: Detect /mission command in Auto's response during mission mode
-  const prevStatusRef = useRef(status)
-  useEffect(() => {
-    const wasStreaming = prevStatusRef.current === 'streaming'
-    prevStatusRef.current = status
-
-    if (!wasStreaming || status !== 'idle' || !isMissionMode) return
-
-    // Find last assistant message
-    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
-    if (!lastAssistant) return
-
-    const text = lastAssistant.parts
-      ?.filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-      .map(p => p.text)
-      .join('') || ''
-    const match = text.match(/\/mission\s+(.+)/i)
-    if (!match) return
-
-    const goal = match[1].trim()
-    if (!goal) return
-
-    createMission.mutate(
-      { goal },
-      {
-        onSuccess: (mission) => {
-          setActivePlanningMissionId(mission.id)
-          setMissionMode(false)
-          toast.success('Mission created — plan is being generated')
-        },
-        onError: (err) => {
-          toast.error(err.message || 'Failed to create mission')
-        },
-      }
-    )
-  }, [status, messages, isMissionMode, createMission, setActivePlanningMissionId, setMissionMode])
 
   // Generate title
   useEffect(() => {
@@ -1109,7 +1074,7 @@ export function Chat({
                     isCodeActive={hasWidgets}
                     isMissionActive={isMissionMode}
                     onCodeClick={handleOpenCodeCanvas}
-                    onMissionClick={() => setMissionMode(!isMissionMode)}
+                    onMissionClick={() => router.push('/activity?tab=missions')}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}
@@ -1252,7 +1217,7 @@ export function Chat({
                     isCodeActive={hasWidgets}
                     isMissionActive={isMissionMode}
                     onCodeClick={handleOpenCodeCanvas}
-                    onMissionClick={() => setMissionMode(!isMissionMode)}
+                    onMissionClick={() => router.push('/activity?tab=missions')}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}

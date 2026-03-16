@@ -667,29 +667,6 @@ class StreamingChatService:
             },
         )
 
-        # PRD-82A: Mission mode — inject mission planning system prompt
-        if mission_mode:
-            llm_messages.insert(
-                insert_pos + 1,
-                {
-                    "role": "system",
-                    "content": (
-                        "MISSION PLANNING MODE\n"
-                        "You are in mission planning mode. The user wants to create an AI mission "
-                        "(a multi-step research or work task executed by a team of AI agents).\n\n"
-                        "Your role is to have a brief conversation to refine their goal:\n"
-                        "1. Understand what they want to accomplish\n"
-                        "2. Ask 1-2 clarifying questions if the goal is vague (scope, depth, output format, etc.)\n"
-                        "3. Suggest a clear mission name and description\n"
-                        "4. When you and the user agree on the mission, create it by outputting EXACTLY:\n"
-                        "   /mission <the refined goal statement>\n\n"
-                        "Keep the conversation natural and concise. Don't over-question — if the goal is "
-                        "already clear and specific, go straight to suggesting the mission and creating it.\n"
-                        "The /mission command will trigger mission creation with automatic task planning."
-                    ),
-                },
-            )
-
         # Context Window Guard
         from core.context_guard import ContextGuard
         _guard = ContextGuard()
