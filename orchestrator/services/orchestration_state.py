@@ -352,6 +352,7 @@ def _run_state_to_event_type(state: RunState) -> EventType:
         RunState.AWAITING_APPROVAL: EventType.RUN_PLAN_READY,
         RunState.RUNNING: EventType.RUN_STARTED,
         RunState.PAUSED: EventType.RUN_PAUSED,
+        RunState.REPLANNING: EventType.RUN_REPLANNING,
         RunState.VERIFYING: EventType.RUN_VERIFYING,
         RunState.AWAITING_HUMAN: EventType.RUN_AWAITING_HUMAN,
         RunState.COMPLETED: EventType.RUN_COMPLETED,

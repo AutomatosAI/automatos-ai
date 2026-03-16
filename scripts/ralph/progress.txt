@@ -42,3 +42,23 @@
 - All endpoints use workspace auth (get_request_context_hybrid)
 - Pydantic response models: MissionStatsResponse, MissionCostResponse, PaginatedEventsResponse, AgentMissionHistoryResponse, TopAgentStats, TaskCostBreakdown
 - 67 existing tests pass, 1 pre-existing failure (test_agents_api_plugins.py) — no new failures
+
+## Iteration 5 — US-005: Add replanning state and replan endpoint
+- Added REPLANNING to RunState enum with StateType.ACTIVE
+- Added RUN_REPLANNING + RUN_REPLANNED to EventType enum
+- Added transitions: running→replanning, replanning→running, replanning→failed, failed→replanning
+- Added RUN_STATE_TYPE mapping for REPLANNING
+- Added _run_state_to_event_type mapping for REPLANNING
+- Added replan_count (int, default 0) column to OrchestrationRun model
+- Added COORDINATOR_MAX_REPLANS (default 2) to config.py
+- Implemented MissionPlanner.replan() — LLM-based replanning with completed task context, failed task info, user notes
+- Added _REPLAN_SYSTEM_PROMPT and _build_replan_prompt() in planner.py
+- Implemented CoordinatorService.replan_mission() — full lifecycle: validate state/count → failed→replanning → gather outputs → planner.replan() → skip old failed/pending tasks → insert new tasks + deps → replanning→running → queue initial tasks
+- New tasks get sequence numbers starting after existing max (no collision)
+- Replan info stored in run.plan JSONB as replan_N key
+- Added POST /api/missions/{id}/replan endpoint with MissionReplanRequest (notes: Optional[str])
+- Endpoint validates: must be in 'failed' state, replan_count < max_replans
+- Added replan_count to MissionResponse and _run_to_response helper
+- Created Alembic migration prd82b_us005_replan for replan_count column + updated state CHECK constraint
+- Emits RUN_REPLANNED event with replan_number, new_task_count, token_estimate, user_notes
+- All imports validated, 67 tests pass, no new failures

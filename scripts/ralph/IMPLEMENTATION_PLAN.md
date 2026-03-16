@@ -13,7 +13,7 @@ Make missions smarter: decomposition templates, history-based agent scoring, rep
 - [x] US-002: Wire template matching into MissionPlanner
 - [x] US-003: Wire history-based agent scoring in AgentMatcher
 - [x] US-004: Add telemetry query endpoints for missions
-- [ ] US-005: Add replanning state and replan endpoint
+- [x] US-005: Add replanning state and replan endpoint
 - [ ] US-006: Add cross-task consistency verification
 - [ ] US-007: Add verification result caching
 - [ ] US-008: Add save-as-routine conversion endpoint

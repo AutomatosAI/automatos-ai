@@ -100,6 +100,9 @@ class OrchestrationRun(Base):
     max_retries = Column(Integer, nullable=False, server_default="3")
     max_concurrent = Column(Integer, nullable=False, server_default="1")
 
+    # Replan tracking (PRD-82B US-005)
+    replan_count = Column(Integer, nullable=False, server_default="0")
+
     # Timestamps
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)

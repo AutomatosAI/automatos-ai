@@ -5,7 +5,7 @@ Missions REST API — PRD-82A/82B Sequential Mission Coordinator
 CRUD + lifecycle + telemetry endpoints for missions. API uses "mission"
 terminology; DB/backend uses "orchestration" (PRD-82A Section 10).
 
-13 endpoints:
+14 endpoints:
   POST   /api/missions           — create mission
   GET    /api/missions           — list missions (paginated, filterable)
   GET    /api/missions/stats     — aggregate mission stats (PRD-82B US-004)
@@ -15,6 +15,7 @@ terminology; DB/backend uses "orchestration" (PRD-82A Section 10).
   POST   /api/missions/{id}/approve  — approve plan
   POST   /api/missions/{id}/reject   — reject plan
   POST   /api/missions/{id}/review   — submit human review
+  POST   /api/missions/{id}/replan   — replan failed mission (PRD-82B US-005)
   POST   /api/missions/{id}/pause    — pause mission
   POST   /api/missions/{id}/resume   — resume mission
   POST   /api/missions/{id}/cancel   — cancel mission
@@ -22,7 +23,7 @@ terminology; DB/backend uses "orchestration" (PRD-82A Section 10).
 Agent telemetry:
   GET    /api/agents/{agent_id}/mission-history  — agent mission perf (PRD-82B US-004)
 
-Source: PRD-82A Section 12, PRD-82B US-004
+Source: PRD-82A Section 12, PRD-82B US-004/US-005
 """
 
 import logging
@@ -170,6 +171,7 @@ class MissionResponse(BaseModel):
     token_budget_estimate: Optional[int] = None
     tokens_used: int = 0
     max_retries: int = 3
+    replan_count: int = 0
     created_by: str
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -264,6 +266,7 @@ def _run_to_response(run: OrchestrationRun) -> dict:
         "token_budget_estimate": run.token_budget_estimate,
         "tokens_used": run.tokens_used or 0,
         "max_retries": run.max_retries or 3,
+        "replan_count": run.replan_count or 0,
         "created_by": run.created_by,
         "started_at": run.started_at,
         "completed_at": run.completed_at,
@@ -814,6 +817,72 @@ async def review_mission(
     except Exception as exc:
         db.rollback()
         logger.error("Failed to review mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class MissionReplanRequest(BaseModel):
+    notes: Optional[str] = Field(
+        None,
+        max_length=5000,
+        description="Optional user guidance for the replanner",
+    )
+
+
+@router.post("/{mission_id}/replan")
+async def replan_mission(
+    mission_id: UUID,
+    body: MissionReplanRequest = MissionReplanRequest(),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Replan a failed mission — generate replacement tasks for the failed subtree."""
+    try:
+        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+
+        if RunState(run.state) != RunState.FAILED:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Mission is in '{run.state}' state, expected 'failed'",
+            )
+
+        max_replans = config.COORDINATOR_MAX_REPLANS
+        current_replans = run.replan_count or 0
+        if current_replans >= max_replans:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Mission has been replanned {current_replans} times, "
+                    f"maximum is {max_replans}"
+                ),
+            )
+
+        coordinator = get_coordinator_service()
+        run = await coordinator.replan_mission(
+            db=db,
+            run_id=run.id,
+            actor_id=ctx.user.id or "unknown",
+            notes=body.notes,
+        )
+        db.commit()
+        return _run_to_response(run)
+
+    except HTTPException:
+        raise
+    except PlanValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=f"Replan validation failed: {exc}",
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (ConflictError, InvalidTransitionError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to replan mission %s: %s", mission_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

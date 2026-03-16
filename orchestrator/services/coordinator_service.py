@@ -819,6 +819,294 @@ class CoordinatorService:
         return run
 
     # ------------------------------------------------------------------
+    # Lifecycle: replan_mission (PRD-82B US-005)
+    # ------------------------------------------------------------------
+
+    async def replan_mission(
+        self,
+        db: Session,
+        run_id: UUID,
+        actor_id: str,
+        notes: Optional[str] = None,
+    ) -> OrchestrationRun:
+        """
+        Replan a failed mission by generating replacement tasks for the failed
+        subtree while preserving completed/verified tasks.
+
+        Flow:
+          1. Validate: must be in 'failed' state, replan_count < max
+          2. Transition failed → replanning
+          3. Gather completed task outputs + identify failed task
+          4. Call planner.replan() to generate replacement tasks
+          5. Mark old failed/pending tasks as skipped
+          6. Insert new tasks + dependencies
+          7. Transition replanning → running
+          8. Queue initial new tasks
+
+        Args:
+            db: SQLAlchemy session (caller manages transaction).
+            run_id: Mission run UUID.
+            actor_id: Clerk user ID requesting the replan.
+            notes: Optional user guidance for the replanner.
+
+        Returns:
+            The updated OrchestrationRun.
+
+        Raises:
+            ValueError: if run not found or state/replan constraints violated.
+            PlanValidationError: if planner cannot produce a valid replan.
+        """
+        run = self._get_run(db, run_id)
+
+        # Validate state
+        if RunState(run.state) != RunState.FAILED:
+            raise ValueError(
+                f"Mission must be in 'failed' state to replan, "
+                f"currently in '{run.state}'"
+            )
+
+        # Validate replan count
+        current_replans = run.replan_count or 0
+        max_replans = Config.COORDINATOR_MAX_REPLANS
+        if current_replans >= max_replans:
+            raise ValueError(
+                f"Mission has been replanned {current_replans} times, "
+                f"maximum is {max_replans}"
+            )
+
+        # Transition failed → replanning
+        transition_run(
+            db=db,
+            run=run,
+            new_state=RunState.REPLANNING,
+            actor_type=ActorType.HUMAN,
+            actor_id=actor_id,
+            reason=f"Replan requested (attempt {current_replans + 1}/{max_replans})",
+        )
+
+        # Gather completed task outputs
+        all_tasks: list[OrchestrationTask] = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.run_id == run_id)
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+
+        completed_outputs: list[dict] = []
+        failed_task_title = "Unknown"
+        failed_task_reason = "Unknown"
+
+        for task in all_tasks:
+            task_state = TaskState(task.state)
+            if task_state == TaskState.VERIFIED:
+                completed_outputs.append({
+                    "task_id": str(task.id),
+                    "title": task.title,
+                    "output": task.output or "",
+                })
+            elif task_state == TaskState.FAILED:
+                failed_task_title = task.title
+                failed_task_reason = (
+                    task.failure_detail
+                    or task.failure_reason_code
+                    or "Unknown failure"
+                )
+
+        # Load roster agents
+        agents: list[Agent] = (
+            db.query(Agent)
+            .filter(
+                and_(
+                    Agent.workspace_id == run.workspace_id,
+                    Agent.status == "active",
+                )
+            )
+            .all()
+        )
+
+        # Call planner to generate replacement tasks
+        try:
+            decomposition = await MissionPlanner.replan(
+                goal=run.goal,
+                workspace_id=run.workspace_id,
+                agents=agents,
+                completed_outputs=completed_outputs,
+                failed_task_title=failed_task_title,
+                failed_task_reason=failed_task_reason,
+                user_notes=notes,
+            )
+        except PlanValidationError:
+            # Replan failed — transition back to failed
+            transition_run(
+                db=db,
+                run=run,
+                new_state=RunState.FAILED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                reason="Replan validation failed after all retries",
+            )
+            raise
+
+        # Mark old failed and pending/queued tasks as skipped
+        for task in all_tasks:
+            task_state = TaskState(task.state)
+            if task_state in (TaskState.FAILED, TaskState.PENDING, TaskState.QUEUED):
+                task.failure_reason_code = "replaced_by_replan"
+                task.failure_detail = f"Replaced during replan #{current_replans + 1}"
+                try:
+                    transition_task(
+                        db=db,
+                        task=task,
+                        new_state=TaskState.SKIPPED,
+                        actor_type=ActorType.COORDINATOR,
+                        actor_id="coordinator",
+                        reason=f"Replaced during replan #{current_replans + 1}",
+                    )
+                    sync_board_status(db, task)
+                except (ConflictError, InvalidTransitionError):
+                    logger.warning(
+                        "Could not skip task %s during replan", task.id,
+                        exc_info=True,
+                    )
+
+        # Compute new sequence numbers starting after existing max
+        max_seq = max(
+            (t.sequence_number for t in all_tasks),
+            default=0,
+        )
+
+        # Insert new tasks
+        temp_id_to_task: dict[str, OrchestrationTask] = {}
+        for planned in decomposition.tasks:
+            new_seq = max_seq + planned.sequence_number
+            task = OrchestrationTask(
+                run_id=run.id,
+                title=planned.title,
+                description=planned.description,
+                task_type=planned.task_type,
+                sequence_number=new_seq,
+                agent_role=planned.agent_role,
+                state=TaskState.PENDING.value,
+                state_type="initial",
+                verification_criteria=planned.verification_criteria or None,
+                input_context=(
+                    {"required_tools": planned.required_tools}
+                    if planned.required_tools
+                    else None
+                ),
+                max_retries=run.max_retries,
+            )
+            db.add(task)
+            db.flush()
+            temp_id_to_task[planned.temp_id] = task
+
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.TASK_CREATED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                task_id=task.id,
+                payload={
+                    "title": planned.title,
+                    "sequence_number": new_seq,
+                    "agent_role": planned.agent_role,
+                    "replan": True,
+                },
+            )
+
+        # Insert dependency edges for new tasks
+        for dep in decomposition.dependencies:
+            from_task = temp_id_to_task.get(dep.from_task_temp_id)
+            to_task = temp_id_to_task.get(dep.to_task_temp_id)
+            if from_task and to_task:
+                dep_row = OrchestrationTaskDependency(
+                    task_id=to_task.id,
+                    depends_on_task_id=from_task.id,
+                )
+                db.add(dep_row)
+
+        db.flush()
+
+        # Create board tasks for new tasks
+        try:
+            for task in temp_id_to_task.values():
+                create_task_board_task(db, run, task)
+        except Exception:
+            logger.warning(
+                "Failed to create board tasks during replan for mission %s",
+                run.id,
+                exc_info=True,
+            )
+
+        # Update replan count
+        run.replan_count = current_replans + 1
+
+        # Update the plan JSONB with replan info
+        run.plan = {
+            **(run.plan or {}),
+            f"replan_{current_replans + 1}": {
+                "tasks": [
+                    {
+                        "temp_id": t.temp_id,
+                        "title": t.title,
+                        "description": t.description,
+                        "agent_role": t.agent_role,
+                        "sequence_number": t.sequence_number,
+                        "task_type": t.task_type,
+                    }
+                    for t in decomposition.tasks
+                ],
+                "dependencies": [
+                    {"from": d.from_task_temp_id, "to": d.to_task_temp_id}
+                    for d in decomposition.dependencies
+                ],
+                "user_notes": notes,
+            },
+        }
+        run.token_budget_estimate = (
+            (run.token_budget_estimate or 0) + decomposition.token_estimate
+        )
+
+        # Emit replanned event
+        emit_event(
+            db=db,
+            run_id=run.id,
+            event_type=EventType.RUN_REPLANNED,
+            actor_type=ActorType.HUMAN,
+            actor_id=actor_id,
+            payload={
+                "replan_number": current_replans + 1,
+                "new_task_count": len(decomposition.tasks),
+                "token_estimate": decomposition.token_estimate,
+                "user_notes": notes,
+            },
+        )
+
+        # Transition replanning → running
+        transition_run(
+            db=db,
+            run=run,
+            new_state=RunState.RUNNING,
+            actor_type=ActorType.COORDINATOR,
+            actor_id="coordinator",
+            reason=f"Replan #{current_replans + 1} complete — resuming",
+        )
+
+        # Queue initial new tasks
+        self._queue_initial_tasks(db, run)
+
+        logger.info(
+            "Mission %s replanned (#%d) by %s — %d new tasks",
+            run_id,
+            current_replans + 1,
+            actor_id,
+            len(decomposition.tasks),
+        )
+
+        return run
+
+    # ------------------------------------------------------------------
     # Output summary builder (PRD-82A Section 6)
     # ------------------------------------------------------------------
 

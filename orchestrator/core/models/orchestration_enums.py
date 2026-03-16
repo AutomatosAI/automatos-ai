@@ -32,6 +32,7 @@ class RunState(str, Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     RUNNING = "running"
     PAUSED = "paused"
+    REPLANNING = "replanning"
     VERIFYING = "verifying"
     AWAITING_HUMAN = "awaiting_human"
     COMPLETED = "completed"
@@ -73,6 +74,8 @@ class EventType(str, Enum):
     RUN_STARTED = "run_started"
     RUN_PAUSED = "run_paused"
     RUN_RESUMED = "run_resumed"
+    RUN_REPLANNING = "run_replanning"
+    RUN_REPLANNED = "run_replanned"
     RUN_BUDGET_WARNING = "run_budget_warning"
     RUN_BUDGET_EXCEEDED = "run_budget_exceeded"
     RUN_BUDGET_INCREASED = "run_budget_increased"
@@ -172,6 +175,7 @@ RUN_STATE_TYPE: dict[RunState, StateType] = {
     RunState.AWAITING_APPROVAL: StateType.BLOCKED,
     RunState.RUNNING: StateType.ACTIVE,
     RunState.PAUSED: StateType.BLOCKED,
+    RunState.REPLANNING: StateType.ACTIVE,
     RunState.VERIFYING: StateType.ACTIVE,
     RunState.AWAITING_HUMAN: StateType.BLOCKED,
     RunState.COMPLETED: StateType.TERMINAL,
@@ -236,12 +240,13 @@ ALLOWED_RUN_TRANSITIONS: dict[RunState, frozenset[RunState]] = {
     RunState.PENDING: frozenset({RunState.PLANNING, RunState.CANCELLED}),
     RunState.PLANNING: frozenset({RunState.AWAITING_APPROVAL, RunState.RUNNING, RunState.FAILED, RunState.CANCELLED}),
     RunState.AWAITING_APPROVAL: frozenset({RunState.RUNNING, RunState.FAILED, RunState.CANCELLED}),
-    RunState.RUNNING: frozenset({RunState.PAUSED, RunState.VERIFYING, RunState.FAILED, RunState.CANCELLED}),
+    RunState.RUNNING: frozenset({RunState.PAUSED, RunState.REPLANNING, RunState.VERIFYING, RunState.FAILED, RunState.CANCELLED}),
     RunState.PAUSED: frozenset({RunState.RUNNING, RunState.CANCELLED}),
+    RunState.REPLANNING: frozenset({RunState.RUNNING, RunState.FAILED}),
     RunState.VERIFYING: frozenset({RunState.AWAITING_HUMAN, RunState.FAILED, RunState.CANCELLED}),
     RunState.AWAITING_HUMAN: frozenset({RunState.COMPLETED, RunState.RUNNING, RunState.CANCELLED}),
     RunState.COMPLETED: frozenset(),   # terminal
-    RunState.FAILED: frozenset(),      # terminal
+    RunState.FAILED: frozenset({RunState.REPLANNING}),  # replannable (PRD-82B US-005)
     RunState.CANCELLED: frozenset(),   # terminal
 }
 
