@@ -269,6 +269,17 @@ class CoordinatorService:
 
         # Execute via AgentFactory
         factory = AgentFactory(db_session=db)
+
+        # Ensure agent is activated so we can bump max_tokens for mission tasks
+        agent_runtime = factory.active_agents.get(agent_id)
+        if not agent_runtime:
+            agent_runtime = await factory.activate_agent(agent_id, workspace_dir="/tmp/automatos_workspace")
+
+        # Mission tasks need longer outputs than the 2000-token default
+        if agent_runtime and hasattr(agent_runtime, "llm_manager"):
+            original_max_tokens = agent_runtime.llm_manager.config.max_tokens
+            agent_runtime.llm_manager.config.max_tokens = max(original_max_tokens, 4096)
+
         try:
             result = await factory.execute_with_prompt(
                 agent=agent_id,
