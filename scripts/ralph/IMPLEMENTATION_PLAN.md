@@ -9,7 +9,7 @@ Replace navigation quick links with functional core modes (Code, Mission) and us
 
 ## Tasks
 
-- [ ] US-001: Create usePinnedAgents hook with localStorage
+- [x] US-001: Create usePinnedAgents hook with localStorage
 - [ ] US-002: Create ChatModeBar component with core modes
 - [ ] US-003: Add pinned agent buttons to ChatModeBar
 - [ ] US-004: Create PinAgentPicker dropdown for adding pins
