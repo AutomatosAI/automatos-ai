@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Ralph Wiggum Build Loop (Claude) — PRD-82A SEQUENTIAL MISSION COORDINATOR
+# Ralph Wiggum Build Loop (Claude) — Chat Mode Bar
 # Usage:
 #   ./loop.sh           # Build mode (default)
 #   ./loop.sh 10        # Max 10 iterations
@@ -144,7 +144,7 @@ handle_usage_limit() {
   CONSECUTIVE_FAILURES=0
 }
 
-echo -e "${GREEN}Ralph loop: BUILD mode — PRD-82A SEQUENTIAL MISSION COORDINATOR${NC}"
+echo -e "${GREEN}Ralph loop: BUILD mode — Chat Mode Bar (6 stories)${NC}"
 [[ $MAX_ITERATIONS -gt 0 ]] && echo "Max iterations: $MAX_ITERATIONS"
 echo "Press Ctrl+C to stop"
 echo "---"
@@ -219,7 +219,7 @@ while true; do
   if [[ "$RESULT_MSG" =~ RALPH_COMPLETE ]]; then
     echo ""
     echo -e "${GREEN}=== Ralph Complete ===${NC}"
-    echo -e "${GREEN}All 22 tasks finished!${NC}"
+    echo -e "${GREEN}All 6 tasks finished!${NC}"
     break
   fi
 

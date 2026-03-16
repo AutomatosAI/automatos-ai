@@ -128,7 +128,7 @@ export function MissionDAGCanvas({
   }, [layoutedEdges, setEdges])
 
   const onNodeClick = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
+    (_event: MouseEvent, node: Node) => {
       onTaskSelect(node.id)
     },
     [onTaskSelect],

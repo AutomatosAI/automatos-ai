@@ -1,0 +1,284 @@
+# PRD-82A: Sequential Mission Coordinator — Ralph Progress
+
+## Branch: ralph/82a-sequential-mission-coordinator
+
+---
+
+### Iteration 1 — US-001: Orchestration Enums
+- Created `orchestrator/core/models/orchestration_enums.py`
+- 8 enums: StateType(4), RunState(10), TaskState(11), EventType(39), ActorType(7), TaskType(5), TriggerRule(3), FailureReasonCode(8)
+- 7 mapping dicts/frozensets: RUN_STATE_TYPE, TASK_STATE_TYPE, TERMINAL_RUN_STATES, TERMINAL_TASK_STATES, ALLOWED_TASK_TRANSITIONS, ALLOWED_RUN_TRANSITIONS, BOARD_STATUS_MAP
+- Discovery: Python 3.10 environment — used `(str, Enum)` instead of `StrEnum`
+- All acceptance criteria validated via import + assertions
+
+### Iteration 2 — US-002: OrchestrationRun Model
+- Created `orchestrator/core/models/orchestration.py` with OrchestrationRun class
+- 19 columns: id (UUID PK), workspace_id (FK), goal, plan, config, state, state_type, created_by, assigned_coordinator_id (FK agents.id), output_summary (JSONB), token_budget_estimate, tokens_used, max_retries, max_concurrent, started_at, completed_at, created_at, updated_at, version_id
+- Optimistic locking via `__mapper_args__ = {'version_id_col': version_id}`
+- CHECK constraint on state column validates against all RunState values
+- Pattern: follows SQLAlchemy 1.x Column style matching core.py (not mapped_column)
+- workspace_id is UUID FK to workspaces.id, created_by is String (Clerk user ID)
+- Import validated: all columns, constraints, and mapper args verified
+
+### Iteration 3 — US-003: OrchestrationTask Model
+- Added OrchestrationTask to `orchestrator/core/models/orchestration.py`
+- 24 columns: id (UUID PK), run_id (FK orchestration_runs.id), title, description, task_type, sequence_number, agent_role, state, state_type, assigned_agent_id (FK agents.id), verification_criteria (JSONB), input_context (JSONB), output, output_metadata (JSONB), failure_reason_code, failure_detail, attempt_number, max_retries, tokens_used, started_at, completed_at, created_at, updated_at, version_id
+- Composite index: ix_orchestration_tasks_run_sequence on (run_id, sequence_number)
+- Partial index: ix_orchestration_tasks_active on (run_id, state) WHERE state NOT IN terminal states
+- CHECK constraint: ck_orchestration_tasks_state validates TaskState enum values
+- Optimistic locking: version_id_col wired in __mapper_args__
+- Bug caught: task_type default was accidentally set to TaskState.PENDING.value — fixed to "llm_generation"
+- Import validated: all 24 columns, 3 indexes, constraints, and mapper args verified
+
+### Iteration 4 — US-004: OrchestrationTaskDependency + OrchestrationEvent Models
+- Added OrchestrationTaskDependency to `orchestrator/core/models/orchestration.py`
+- 4 columns: id (UUID PK), task_id (FK orchestration_tasks.id), depends_on_task_id (FK orchestration_tasks.id), trigger_rule (default 'all_success')
+- Unique constraint: uq_orchestration_task_dep_pair on (task_id, depends_on_task_id)
+- Added OrchestrationEvent to `orchestrator/core/models/orchestration.py`
+- 10 columns: id (UUID PK), run_id (FK), task_id (FK nullable), event_type, actor_type, actor_id, old_state, new_state, payload (JSONB), created_at
+- Composite index: ix_orchestration_events_run_created on (run_id, created_at) for timeline queries
+- NO version_id — append-only table, never updated
+- Added UniqueConstraint import to sqlalchemy imports
+- Import validated: both models load, all columns/constraints/indexes verified
+
+### Iteration 5 — US-005: Alembic Migration
+- Created `orchestrator/alembic/versions/prd82a_orchestration_tables.py`
+- Standalone migration (down_revision = None) following existing PRD migration pattern
+- CREATE 4 tables: orchestration_runs, orchestration_tasks, orchestration_task_dependencies, orchestration_events
+- ALTER board_tasks: add orchestration_run_id (UUID FK), orchestration_task_id (UUID FK) — both nullable
+- ALTER agent_reports: add orchestration_task_id (UUID FK) — nullable
+- All operations idempotent (IF NOT EXISTS / DO $$ BEGIN ... END $$ guards)
+- CHECK constraints on state columns match Python enums exactly (verified programmatically)
+- Indexes: workspace_id, run_id, composite (run_id, sequence_number), partial active states, composite event timeline (run_id, created_at), partial indexes on FK columns of existing tables
+- Downgrade: drops FK columns from existing tables first, then drops 4 tables in reverse dependency order
+- Note: CONCURRENTLY not used for indexes on existing tables since alembic runs inside a transaction; used IF NOT EXISTS instead
+
+### Iteration 6 — US-006: Register Models in __init__.py
+- Added imports to `orchestrator/core/models/__init__.py`
+- 4 models: OrchestrationRun, OrchestrationTask, OrchestrationTaskDependency, OrchestrationEvent
+- 8 enums: StateType, RunState, TaskState, EventType, ActorType, TaskType, TriggerRule, FailureReasonCode
+- 5 mappings: ALLOWED_TASK_TRANSITIONS, ALLOWED_RUN_TRANSITIONS, TERMINAL_RUN_STATES, TERMINAL_TASK_STATES, BOARD_STATUS_MAP
+- Validated: `from core.models import OrchestrationRun` works, no circular imports
+- **Phase 1 complete** (US-001 through US-006)
+
+### Iteration 7 — US-007: State Transition Service
+- Created `orchestrator/services/orchestration_state.py`
+- 3 public functions: transition_task(), transition_run(), emit_event()
+- 2 custom exceptions: InvalidTransitionError (with entity_type, entity_id, current/target state), ConflictError (with entity_type, entity_id)
+- Dual-write pattern: state field updates + OrchestrationEvent creation in same db.flush()
+- Optimistic locking: catches SQLAlchemy StaleDataError → raises clean ConflictError
+- Transition validation: checks ALLOWED_TASK_TRANSITIONS / ALLOWED_RUN_TRANSITIONS before applying
+- Timestamp logic: started_at set on first entry to RUNNING, completed_at set on terminal states
+- emit_event() for non-transition events (budget warnings, stall detections) — no state validation
+- Internal helpers: _task_state_to_event_type(), _run_state_to_event_type() map states to EventType enums
+- No internal commit/rollback (except rollback on StaleDataError before re-raising)
+- Pattern follows existing board_task_bridge.py style (db: Session param, logging, typed returns)
+- Import validated: all 5 exports resolve cleanly
+
+### Iteration 8 — US-008: Board Bridge Service
+- Created `orchestrator/services/orchestration_board_bridge.py`
+- 3 public functions: create_mission_board_task(), create_task_board_task(), sync_board_status()
+- 1 internal helper: _resolve_board_status() — maps TaskState → BOARD_STATUS_MAP (PRD terms) → kanban status
+- Secondary mapping _ORCHESTRATION_TO_BOARD_STATUS bridges PRD vocabulary (backlog/todo/blocked/cancelled) to BoardTask vocabulary (inbox/in_progress/review/done)
+- create_mission_board_task(): source_type='orchestration', links via orchestration_run_id FK, idempotent
+- create_task_board_task(): source_type='orchestration_task', links via orchestration_task_id FK, parent_task_id set to mission board task, idempotent
+- sync_board_status(): reads task.state, maps to board status, updates linked BoardTask; syncs agent assignment, timestamps, result/error
+- All writes in caller's transaction (db.flush(), no commit)
+- Non-fatal: missing board tasks → log warning, don't crash
+- Discovery: BoardTask ORM model was missing orchestration_run_id and orchestration_task_id FK columns (migration had them). Added to core.py and to_dict()
+- Import validated: all 3 exports resolve cleanly
+
+### Iteration 9 — US-009: Dependency Resolver
+- Created `orchestrator/services/orchestration_deps.py`
+- DependencyResolver class with 3 static methods: validate_task_graph(), get_ready_tasks(), get_topological_order()
+- 2 custom exceptions: CyclicDependencyError, InvalidDependencyError
+- validate_task_graph(): builds adjacency graph, validates all dep refs exist, runs TopologicalSorter.prepare() for cycle detection
+- get_ready_tasks(): batch-queries pending tasks + their deps + upstream verified status; returns tasks whose all deps are verified, ordered by sequence_number
+- get_topological_order(): returns task UUIDs in valid execution order via TopologicalSorter.static_order()
+- Functional tests passed: linear DAG ordering, cycle detection, invalid dep detection, no-deps validation
+- Import validated: all 3 exports resolve cleanly
+- **Phase 2 complete** (US-007 through US-009)
+
+### Iteration 10 — US-010: Coordination Package + AgentMatcher
+- Created `orchestrator/modules/coordination/__init__.py` (package init)
+- Created `orchestrator/modules/coordination/agent_matcher.py`
+- AgentMatcher class with static match() method — deterministic scoring, no LLM calls
+- Immutable MatchResult dataclass (frozen=True): agent_id, agent_name, total_score, 5 component scores
+- 5 scoring weights (sum=1.0): tool_coverage=0.35, skill_match=0.25, model_fit=0.15, availability=0.10, history=0.15
+- Match threshold: 0.4 minimum total score
+- Batch queries: _build_tool_map() loads all AgentAppAssignment rows for candidates in 1 query
+- Batch queries: _get_busy_agent_ids() finds agents with ASSIGNED/RUNNING tasks in 1 query
+- Skill matching hierarchy: exact name match (1.0), substring in name/desc/skills (0.75), tag match (0.5), no match (0.0)
+- History score: placeholder 0.5 (wired in 82B when telemetry data available)
+- Tool coverage: fraction of required_tools matched against agent's app assignments
+- Model fit: 1.0 if preferred_model in agent's model_id, 0.5 otherwise
+- Availability: 1.0 if idle, 0.5 if busy (has ASSIGNED/RUNNING orchestration tasks)
+- Import validated: AgentMatcher, MatchResult, MATCH_THRESHOLD all resolve cleanly
+
+### Iteration 11 — US-011: MissionPlanner
+- Created `orchestrator/modules/coordination/planner.py`
+- MissionPlanner class with async decompose() static method — LLM decomposition + structural validation
+- 3 frozen dataclasses: DecompositionResult (tasks, dependencies, token_estimate), PlannedTask (12 fields), PlannedDependency (from/to temp_ids)
+- PlanValidationError exception with list of validation errors
+- LLM call via create_llm_manager("orchestrator"), structured JSON prompt with available agent roster
+- JSON extraction: handles markdown code blocks (```json ... ```), raw JSON, and brace-delimited fallback
+- Plan parsing: _parse_plan() converts raw JSON to typed PlannedTask/PlannedDependency lists with error collection
+- Validation (_validate_plan): 5 checks — task count (3-20), dep references valid, DAG acyclic (via DependencyResolver), agent roles match roster (fuzzy: name/skills/tags), no orphan tasks
+- Retry loop: up to 3 attempts, injects validation errors into next prompt for self-correction
+- Token estimate: TOKENS_PER_TASK_ESTIMATE (2000) × task count
+- Agent roster rendering: active agents with name, description, skills, tags, model_id
+- Uses DependencyResolver.validate_task_graph() with UUID stand-ins for cycle detection
+- Import validated: all exports resolve cleanly
+- Unit checks passed: JSON extraction, parse, validation (min task count error)
+
+### Iteration 12 — US-012: MissionDispatcher
+- (completed in prior session — see IMPLEMENTATION_PLAN.md)
+
+### Iteration 13 — US-013: MissionReconciler
+- Created `orchestrator/modules/coordination/reconciler.py`
+- MissionReconciler class with reconcile() static method — full reconciliation pass per mission run
+- Immutable ReconcileResult dataclass: run_id, stalls_detected, stalls_recovered, tasks_failed, run_advanced, run_new_state, error
+- Stall detection: finds ASSIGNED/RUNNING tasks exceeding configurable thresholds (60s/300s from config.py)
+- Stall recovery: stalled → assigned with attempt_number increment; if max_retries exhausted → failed
+- Completion check: all tasks terminal & all verified → run transitions to verifying; any failed → run fails
+- Fatal failure detection: max_retries_exhausted, no_agent_available, dependency_failed → skip remaining tasks + fail run
+- _skip_remaining_tasks(): transitions pending/queued tasks to skipped with dependency_failed reason
+- Config constants added to config.py: COORDINATOR_ASSIGNED_STALL_THRESHOLD_SECONDS (60), COORDINATOR_RUNNING_STALL_THRESHOLD_SECONDS (300), COORDINATOR_MAX_TASK_RETRIES (3), COORDINATOR_TICK_INTERVAL_SECONDS (5), COORDINATOR_ENABLED flag
+- Board status synced after every task state change via sync_board_status()
+- ConflictError handling on all transitions (optimistic locking awareness)
+- Import validated: MissionReconciler, ReconcileResult resolve cleanly
+
+### Iteration 14 — US-014: CoordinatorService
+- Created `orchestrator/services/coordinator_service.py`
+- CoordinatorService class with async tick() method — queries RUNNING missions, per-run dispatch + reconcile
+- Tick guard: _tick_running flag prevents concurrent ticks
+- _process_run(): loads workspace roster agents, calls MissionDispatcher.dispatch_next(), calls MissionReconciler.reconcile(), auto-builds output summary when run advances to VERIFYING
+- _execute_task(): AgentFactory.execute_with_prompt() integration, ASSIGNED→RUNNING→COMPLETED/FAILED transitions, run-level token tracking with BUDGET_WARNING event at >1.5× estimate
+- Lifecycle: create_mission() — PENDING→PLANNING→decompose()→create task+dep+board rows→AWAITING_APPROVAL (or RUNNING if auto_approve)
+- Lifecycle: approve_plan() — AWAITING_APPROVAL→RUNNING, queues root tasks (no deps) via DependencyResolver.get_ready_tasks()
+- Lifecycle: reject_plan() — →FAILED, skips all pending tasks
+- Lifecycle: review_mission() — accept→COMPLETED; reject→re-queue specific tasks with human feedback injected into input_context
+- Lifecycle: pause/resume/cancel with appropriate events and task skipping
+- build_output_summary(): structured aggregation per PRD-82A Section 6 (goal, task_summaries, duration, token counts)
+- Helper: _queue_initial_tasks() transitions PENDING→QUEUED for root tasks
+- Helper: _requeue_task_with_feedback() injects feedback into input_context, transitions VERIFIED→RETRYING→ASSIGNED
+- Enum fix: added RETRYING to ALLOWED_TASK_TRANSITIONS[VERIFIED] — required for human rejection flow (PRD-82A Section 16)
+- DB pattern: SessionLocal per tick (no stored session on singleton), matching heartbeat_service pattern
+- Import validated: CoordinatorService resolves cleanly
+
+### Iteration 15 — US-015: Register Coordinator Tick on Scheduler
+- Added start()/stop() lifecycle methods to CoordinatorService (coordinator_service.py)
+  - start(scheduler=None): accepts shared APScheduler or creates local one (test mode)
+  - Registers interval job: coordinator_tick, seconds=COORDINATOR_TICK_INTERVAL_SECONDS, max_instances=1
+  - stop(): shuts down scheduler only if this service owns it
+- Added get_coordinator_service() singleton accessor (matches HeartbeatService pattern)
+- Modified main.py lifespan:
+  - Added COORDINATOR_ENABLED to scheduler guard condition (startup + shutdown)
+  - Registered CoordinatorService.start(scheduler=shared_sched) after ScheduledTaskService
+  - Non-fatal: catches and logs exceptions if coordinator fails to start
+- Import validated: CoordinatorService + get_coordinator_service both resolve cleanly
+
+### Iteration 16 — US-016: COORDINATOR Context Mode + MissionContextSection
+- Added ContextMode.COORDINATOR to modes.py enum
+- Added COORDINATOR ModeConfig to MODE_CONFIGS: sections=[identity, mission_context, agent_roster, platform_actions, task_context, datetime_context], tool_loading=full, personality=False, max_tokens=131072
+- Added COORDINATOR TokenBudget to DEFAULT_BUDGETS in budget.py: total=131072, reserved_for_response=4096, reserved_for_messages=0
+- Created orchestrator/modules/context/sections/mission_context.py with MissionContextSection class
+  - Priority 2 (never dropped by budget manager), max_tokens=8000
+  - Renders: goal, state, run_id, plan summary, token budget usage, task statuses with sequence/title/state/agent_role/assigned_agent_id/attempt
+  - Accepts data via ctx.kwargs: mission_run (ORM or dict), mission_tasks (list of ORM or dict)
+  - _attr_or_key() helper handles both ORM attributes and dict keys
+  - Returns empty string when no mission_run provided (section skipped)
+- Registered MissionContextSection in SECTION_REGISTRY and __all__ in sections/__init__.py
+- Note: agent_roster section referenced in COORDINATOR mode sections but not yet created — ContextService logs warning and skips. US-017 creates it.
+- Import validated: all assertions pass (enum, ModeConfig, TokenBudget, SECTION_REGISTRY, render with mock data)
+
+### Iteration 17 — US-017: AgentRosterSection
+- Created `orchestrator/modules/context/sections/agent_roster.py` with AgentRosterSection class
+  - Priority 3 (high but trimmable after mission_context), max_tokens=6000
+  - Renders: agent id, name, type, status, model (from model_config.model_id), description (truncated to 200 chars), skills (from ORM relationship), tags
+  - Accepts data via ctx.kwargs["roster_agents"] (list of Agent ORM objects or dicts)
+  - _attr_or_key() helper handles both ORM attributes and dict keys (same pattern as MissionContextSection)
+  - _render_skills() extracts skill names from ORM Skill relationship or dict lists
+  - Returns "No agents available in this workspace" when no agents provided
+- Registered AgentRosterSection in SECTION_REGISTRY and __all__ in sections/__init__.py
+- Completes COORDINATOR context mode — all 6 sections now have implementations (identity, mission_context, agent_roster, platform_actions, task_context, datetime_context)
+- **Phase 3 complete** (US-010 through US-017)
+- Import validated: section registry includes agent_roster, render tests pass with mock data
+
+### Iteration 18 — US-018: DeterministicChecker
+- Created `orchestrator/modules/coordination/deterministic_checks.py`
+- DeterministicChecker class with check(output, criteria) method — runs all deterministic checks against task output
+- 8 check types: format_regex (re.search), min_length, max_length, required_sections (markdown headers + fallback text match), json_schema (type/required/property-type validation without jsonschema dep), url_valid (urlparse), contains_keywords (case-insensitive), word_count_range ([min, max])
+- must_pass short-circuit: if a must_pass check fails, immediately returns DeterministicResult(passed=False, short_circuited=True) — remaining checks are skipped
+- Immutable result dataclasses: DeterministicResult (passed, failures, short_circuited), CheckFailure (check_type, description, must_pass)
+- Handler registry pattern: _handlers dict maps check_type → handler function for extensibility
+- Unknown check types logged as warning and skipped (non-fatal)
+- Exception handling: if a handler raises, captures as a failure description (doesn't crash)
+- 14 smoke tests passed covering all check types, must_pass short-circuit, edge cases
+- Import validated: DeterministicChecker, DeterministicResult, CheckFailure all resolve cleanly
+
+### Iteration 19 — US-019: VerificationService
+- Created `orchestrator/modules/coordination/verification.py`
+- VerificationService class with async verify_task() method — two-stage pipeline
+- Stage 1: DeterministicChecker — if must_pass check fails, returns FAIL immediately (no LLM cost)
+- Stage 2: Cross-model LLM judge — selects verifier model from different family than executor
+- Cross-model selection via _select_verifier_model(): family detection (claude→anthropic, gpt→openai, etc) → COORDINATOR_VERIFIER_MODEL_MAPPING → fallback model
+- LLM judge prompt: task description + criteria + deterministic results + agent output → JSON scores
+- 4 scoring dimensions: relevance, completeness, accuracy, format_compliance (each 0.0-1.0)
+- Verdict computation (_compute_verdict): any score < 0.4 → FAIL; confidence < 0.5 → PARTIAL; all scores >= 0.7 → PASS; else PARTIAL
+- Deterministic-failure downgrade: if deterministic checks had non-must_pass failures and LLM says PASS → downgrade to PARTIAL
+- LLM judge retry: up to COORDINATOR_MAX_VERIFICATION_RETRIES (2) attempts; on all retries exhausted → PARTIAL (escalate to human)
+- Empty output → immediate FAIL without any checks
+- Output truncation: limits output to 12k chars in judge prompt to avoid context overflow
+- JSON extraction: handles markdown blocks and raw JSON (reuses planner pattern)
+- Immutable VerificationResult dataclass: verdict, scores, reasoning, confidence, deterministic_passed, deterministic_failures, tokens_used
+- Config constants added to config.py: COORDINATOR_MAX_VERIFICATION_RETRIES (2), COORDINATOR_VERIFICATION_PASS_THRESHOLD (0.7), COORDINATOR_VERIFICATION_FAIL_THRESHOLD (0.4), COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION (0.5), COORDINATOR_VERIFIER_MODEL_MAPPING (5 family→model pairs), COORDINATOR_VERIFIER_FALLBACK_MODEL (gpt-4o-mini)
+- 4 smoke tests passed: cross-model selection, verdict computation, empty output, deterministic short-circuit
+- Import validated: VerificationService, VerificationResult, VERDICT_PASS/FAIL/PARTIAL all resolve cleanly
+
+### Iteration 20 — US-020: Wire Verification into Reconciler
+- Modified `orchestrator/modules/coordination/reconciler.py` — wired VerificationService into reconcile loop
+- Made reconcile() and _verify_completed_tasks() async (VerificationService.verify_task() is async)
+- Updated `orchestrator/services/coordinator_service.py` — changed `MissionReconciler.reconcile(db, run)` call to `await MissionReconciler.reconcile(db, run)`
+- Added TASK_VERIFICATION_COMPLETED to EventType enum in orchestration_enums.py
+- New verification phase runs BEFORE stall detection in reconcile():
+  1. Finds all COMPLETED tasks for the run
+  2. Transitions each COMPLETED → VERIFYING (with board sync)
+  3. Resolves executor model from assigned agent's model_config
+  4. Calls VerificationService.verify_task() with task data + executor model
+  5. Emits TASK_VERIFICATION_COMPLETED event with scores, verdict, confidence
+  6. Updates tokens_used on task + run, emits BUDGET_WARNING if >1.5× estimate
+  7. Applies verdict: PASS→VERIFIED, FAIL→RETRYING (with feedback injected into input_context) or FAILED (max retries), PARTIAL→FAILED with escalation event
+- ReconcileResult extended with tasks_verified, tasks_verification_failed counts
+- _get_executor_model(): queries Agent by assigned_agent_id, returns model_config["model_id"]
+- _apply_verdict_pass(): VERIFYING → VERIFIED + board sync
+- _apply_verdict_fail(): retries < max → RETRYING with verification_feedback in input_context (reasoning, scores, failures); retries exhausted → FAILED with max_retries_exhausted
+- _apply_verdict_partial(): → FAILED with TASK_VERIFICATION_FAILED escalation event (escalation: True in payload)
+- All ConflictError paths handled gracefully (log warning, continue)
+- **Phase 4 complete** (US-018 through US-020)
+- Import validated: async reconcile, new ReconcileResult fields, new EventType all resolve cleanly
+
+### Iteration 21 — US-021: Missions REST API Router
+- Created `orchestrator/api/missions.py` — 9 endpoints, all auth-protected, workspace-isolated
+- Pydantic request models: MissionCreateRequest (goal, config), MissionApproveRequest (modifications), MissionRejectRequest (reason), MissionReviewRequest (verdict, task_feedback)
+- Pydantic response models: TaskResponse, EventResponse, MissionResponse, MissionDetailResponse, MissionListResponse
+- POST /api/missions — creates mission via CoordinatorService.create_mission(), 201 status
+- GET /api/missions — list with pagination (limit/offset) + state filter, sorted by created_at desc
+- GET /api/missions/{id} — full detail: run + tasks (ordered by sequence_number) + last 50 events
+- POST /api/missions/{id}/approve — state guard: awaiting_approval required
+- POST /api/missions/{id}/reject — state guard: awaiting_approval required
+- POST /api/missions/{id}/review — state guard: awaiting_human required
+- POST /api/missions/{id}/pause — state guard: running required
+- POST /api/missions/{id}/resume — state guard: paused required
+- POST /api/missions/{id}/cancel — state guard: non-terminal required
+- Error handling: PlanValidationError→422, ConflictError/InvalidTransitionError→409, generic→500 with rollback
+- Helper functions: _run_to_response(), _task_to_response(), _event_to_response(), _get_run_for_workspace()
+- Import validated: 9 routes loaded successfully
+
+### Iteration 22 — US-022: Mount Missions Router in Main App
+- Modified `orchestrator/main.py` — added try/except import + include_router block
+- Placed after board_tasks_router (PRD-72), before scheduled_tasks_router (PRD-77)
+- Follows existing pattern: try/except ImportError with logger.warning fallback
+- Import validated: router loads with prefix=/api/missions, 9 routes
+- **Phase 5 complete** (US-021 through US-022)
+- **ALL PHASES COMPLETE** — PRD-82A Sequential Mission Coordinator fully implemented

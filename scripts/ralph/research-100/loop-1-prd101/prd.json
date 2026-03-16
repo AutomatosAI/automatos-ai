@@ -1,0 +1,149 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/100-research-prd-factory",
+  "description": "PRD-101: Mission Schema & Data Model — Full research + design PRD. Study DAG resolution, state machines, event sourcing. Design orchestration_runs, orchestration_tasks, orchestration_events tables. Define dependency resolution algorithm and state machine transitions.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Research DAG execution patterns",
+      "description": "As a researcher, I need to study how production DAG systems model task graphs so that our schema is informed by battle-tested patterns",
+      "acceptanceCriteria": [
+        "Study Temporal workflow execution model — how it stores workflow runs, activities, and their relationships",
+        "Study Prefect flow runs — how it models task dependencies and state transitions",
+        "Study Airflow DAG runs — task instances, XCom for inter-task data, trigger rules",
+        "Study Dagster ops/jobs — asset materialization model, IO managers",
+        "Document key differences in a comparison table with columns: system, run model, task model, dependency model, state machine, failure handling",
+        "Write findings to PRD section: '## 2. Prior Art: DAG Execution Patterns'",
+        "Each system has at least 3 sentences of analysis, not just bullet points",
+        "Include specific schema/table examples from each system where available"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Use DeepWiki MCP to query these repos directly. Focus on their data models, not their execution engines — we're building our own executor. Key repos: temporalio/temporal, PrefectHQ/prefect, apache/airflow, dagster-io/dagster"
+    },
+    {
+      "id": "US-002",
+      "title": "Research state machine patterns for task lifecycle",
+      "description": "As a researcher, I need to understand state machine design for task lifecycle so that our status transitions are robust and well-defined",
+      "acceptanceCriteria": [
+        "Define all possible task states: pending, queued, assigned, running, paused, verifying, completed, failed, cancelled, skipped",
+        "Define valid transitions between states as a transition table",
+        "Study event sourcing vs CRUD for state tracking — pros/cons for our scale",
+        "Research how Symphony handles task lifecycle (continuation vs retry distinction from PRD-100)",
+        "Document findings in PRD section: '## 3. State Machine Design'",
+        "Include ASCII state diagram showing all transitions",
+        "Address: what triggers each transition, who triggers it (coordinator, agent, human, system), what side effects occur"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Our existing board_tasks have simple statuses (pending, in_progress, completed, failed). The orchestration state machine needs to be richer but must MAP to board_task statuses for UI display. Read the board_tasks model in orchestrator/core/models/."
+    },
+    {
+      "id": "US-003",
+      "title": "Design orchestration_runs table",
+      "description": "As a platform architect, I need the orchestration_runs table designed so that every mission has a traceable execution record",
+      "acceptanceCriteria": [
+        "Define orchestration_runs table with all columns, types, constraints, indexes",
+        "Required fields: id, workspace_id, title, description, goal (original user input), status enum, plan (JSONB — coordinator's decomposition), config (JSONB — autonomy level, budget, model prefs)",
+        "Tracking fields: total_cost, total_tokens, started_at, completed_at, duration_ms",
+        "Relationship fields: created_by (user_id), coordinator_agent_id (nullable — roster or system)",
+        "Foreign keys to workspaces table verified against existing schema",
+        "Include JSONB schema examples for plan and config fields",
+        "Write to PRD section: '## 4. Data Model: orchestration_runs'",
+        "Include example INSERT showing a real mission creation",
+        "Include Alembic migration pseudocode"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Check existing tables: workspaces, agents, board_tasks, recipes, agent_reports. The run must reference workspace_id (multi-tenant). Study how recipes store their config — similar pattern needed for mission config. Read alembic/versions/ for migration patterns used in this project."
+    },
+    {
+      "id": "US-004",
+      "title": "Design orchestration_tasks table",
+      "description": "As a platform architect, I need the orchestration_tasks table designed so that every subtask in a mission is tracked with dependencies",
+      "acceptanceCriteria": [
+        "Define orchestration_tasks table with all columns, types, constraints, indexes",
+        "Required fields: id, run_id (FK → orchestration_runs), title, description, status enum, task_type (research, analysis, writing, coding, verification, review)",
+        "Assignment fields: agent_id (FK → agents, nullable), agent_type (roster/contractor), model_override",
+        "Dependency fields: depends_on (array of task IDs or join table), dependency_type (strict/soft)",
+        "Result fields: output (JSONB), verifier_score (float), verified_by (agent_id or 'human'), tokens_used, cost, duration_ms",
+        "Board integration: board_task_id (FK → board_tasks) — every orchestration_task creates a board_task for UI visibility",
+        "Write to PRD section: '## 5. Data Model: orchestration_tasks'",
+        "Include dependency resolution algorithm (topological sort for execution ordering)",
+        "Address: how circular dependencies are detected and rejected"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Critical decision: array column for depends_on vs separate orchestration_task_dependencies join table. Join table is more relational but array is simpler for our scale. Research both. The board_task_id FK is key — it's how the existing UI shows mission progress without new UI work."
+    },
+    {
+      "id": "US-005",
+      "title": "Design orchestration_events table",
+      "description": "As a platform architect, I need an event log so that every state change in a mission is traceable for debugging and telemetry",
+      "acceptanceCriteria": [
+        "Define orchestration_events table: id, run_id, task_id (nullable), event_type enum, payload (JSONB), created_at",
+        "Define event_type enum: run_created, run_started, task_created, task_assigned, task_started, task_completed, task_failed, task_retried, verification_passed, verification_failed, human_approved, human_rejected, budget_warning, budget_exceeded, run_completed, run_failed",
+        "Write to PRD section: '## 6. Event Log & Audit Trail'",
+        "Explain append-only design — events are never updated or deleted",
+        "Include query examples: reconstruct mission timeline, find all failures, calculate time between assignment and completion",
+        "Address retention policy — how long to keep events, archival strategy",
+        "Connect to PRD-106 (telemetry) — events are the raw data for outcome analysis"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "This is lightweight event sourcing — we're not rebuilding state from events, we're logging them for observability. Keep it simple. The heartbeat_results JSONB in heartbeat_service already captures per-tick events — similar pattern but for missions."
+    },
+    {
+      "id": "US-006",
+      "title": "Design integration with existing tables",
+      "description": "As a platform architect, I need to document how orchestration tables integrate with existing board_tasks, agents, recipes, and reports",
+      "acceptanceCriteria": [
+        "Map orchestration_tasks → board_tasks: define which board_task fields are populated from orchestration_task fields",
+        "Map orchestration_runs → recipes: define 'save as routine' flow — how a completed mission becomes a recipe template",
+        "Map orchestration_tasks → agent_reports: define how task completion triggers report creation (connect to PRD-76 auto-report)",
+        "Document workspace isolation — all queries filtered by workspace_id",
+        "Write to PRD section: '## 7. Integration with Existing Schema'",
+        "Include ER diagram (ASCII or mermaid) showing relationships between all tables",
+        "List all new indexes needed for common query patterns",
+        "Address migration safety — no breaking changes to existing tables, only new tables + optional FKs"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Read the existing models: orchestrator/core/models/board.py, orchestrator/core/models/agent.py, orchestrator/core/models/recipe.py. Check if board_tasks already has a 'project' or 'label' field for grouping tasks under a mission. If not, that's a migration needed."
+    },
+    {
+      "id": "US-007",
+      "title": "Write PRD introduction and problem statement",
+      "description": "As a document author, I need to write the opening sections of PRD-101 so that readers understand the motivation and scope",
+      "acceptanceCriteria": [
+        "Create docs/PRDS/101-MISSION-SCHEMA-DATA-MODEL.md",
+        "Section 0: Header with version, type (Research + Design), status (Draft), priority, dependencies (PRD-100)",
+        "Section 1: Problem Statement — what doesn't exist, why it's needed, what it enables",
+        "Summarize findings from US-001 through US-006 in the introduction",
+        "Include 'What This PRD Delivers' checklist — the concrete artifacts (tables, migrations, models, indexes)",
+        "Include 'What This PRD Does NOT Cover' — explicitly scope out coordinator logic, verification, budget enforcement (those are separate PRDs)",
+        "Write '## 8. Open Questions' — any unresolved design decisions that need input"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "This is written LAST because it synthesizes all the research. Follow the style of PRD-100 — direct, honest, no marketing fluff. Include the 'We are not going blind this time' philosophy."
+    },
+    {
+      "id": "US-008",
+      "title": "Write PRD conclusion, risks, and acceptance criteria",
+      "description": "As a document author, I need to close PRD-101 with actionable acceptance criteria so that implementation PRD-82A can be written from it",
+      "acceptanceCriteria": [
+        "Write '## 9. Risk Register' — at least 5 risks specific to the schema design",
+        "Write '## 10. Implementation Acceptance Criteria' — testable criteria for when the schema is 'done'",
+        "Write '## 11. Dependencies & Sequencing' — what must be built first, what can be parallel",
+        "Write '## 12. Appendix: Full SQL DDL' — complete CREATE TABLE statements ready to convert to Alembic",
+        "Write '## 13. Appendix: SQLAlchemy Models' — Python model classes matching the DDL",
+        "Final review pass — ensure all sections reference each other correctly, no dangling references",
+        "PRD-101 is complete and ready for peer review"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "The SQL DDL and SQLAlchemy models are the bridge to implementation. They should be copy-pasteable into an Alembic migration and models file respectively. Use existing model patterns from orchestrator/core/models/ — same base class, same conventions."
+    }
+  ]
+}

@@ -1,0 +1,143 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/100-research-prd-factory",
+  "description": "PRD-103: Verification & Quality — Full research + design PRD. Study LLM-as-judge patterns, constitutional AI critique, eval frameworks. Design the verification layer that validates task outputs against success criteria.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Research LLM-as-judge patterns",
+      "description": "As a researcher, I need to study how LLMs evaluate other LLM outputs so that our verification is grounded in proven methodology",
+      "acceptanceCriteria": [
+        "Study MT-Bench evaluation methodology — pairwise comparison, scoring rubrics, judge prompt design",
+        "Study Chatbot Arena / LMSYS — how human preferences are captured and correlated with LLM judges",
+        "Study Constitutional AI critique patterns — self-critique, revision chains",
+        "Study DeepEval framework — metrics, test cases, evaluation datasets",
+        "Study RAGAS for RAG evaluation — faithfulness, answer relevancy, context recall",
+        "Study OpenAI Evals framework — eval structure, grading functions",
+        "Comparison table: framework, what it evaluates, accuracy, cost, integration effort",
+        "Write to PRD section: '## 2. Prior Art: LLM Evaluation & Judging'",
+        "Include false positive/negative rates where available from literature"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "PRD-100 Open Question #3: 'Can LLM-as-judge reliably assess task completion? What's the false positive rate?' This story answers that question. Use DeepWiki for deepeval (confident-ai/deepeval), ragas (explodinggradients/ragas)."
+    },
+    {
+      "id": "US-002",
+      "title": "Research FutureAGI integration opportunities",
+      "description": "As a researcher, I need to understand what FutureAGI already provides so that we don't rebuild evaluation capabilities that exist",
+      "acceptanceCriteria": [
+        "Read existing FutureAGI integration code in the Automatos codebase",
+        "Document what eval types FutureAGI supports: prompt scanning, output evaluation, hallucination detection",
+        "Identify which FutureAGI capabilities map to mission verification needs",
+        "Define integration strategy — use FutureAGI for what it does well, build custom for what it doesn't cover",
+        "Write to PRD section: '## 3. FutureAGI Integration'",
+        "Include API call examples for FutureAGI eval in mission context"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "FutureAGI is already in the codebase — search for 'futureagi' or 'fi_' imports. Don't propose adding a new eval framework if FutureAGI already handles the use case. Extend, don't replace."
+    },
+    {
+      "id": "US-003",
+      "title": "Design verification taxonomy",
+      "description": "As a platform architect, I need a verification taxonomy so that different task types get appropriate quality checks",
+      "acceptanceCriteria": [
+        "Define verification dimensions: completeness, accuracy, format compliance, relevance, consistency",
+        "Map task_types (from PRD-101) to verification strategies: research → factual accuracy + completeness, writing → quality + format, coding → correctness + tests, analysis → logic + evidence",
+        "Define scoring rubric: 1-5 scale with clear definitions for each level",
+        "Define pass/fail thresholds — configurable per mission autonomy level",
+        "Write to PRD section: '## 4. Verification Taxonomy'",
+        "Include rubric examples for 3 different task types"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The existing report grading (PRD-76) uses star ratings 1-5. Align the verification scoring with this existing pattern so the UI doesn't need separate display logic."
+    },
+    {
+      "id": "US-004",
+      "title": "Design verifier service",
+      "description": "As a platform architect, I need the VerifierService designed with clear interfaces and integration with the coordinator",
+      "acceptanceCriteria": [
+        "Define VerifierService class with methods: verify_task_output(task_id, output, criteria) → VerificationResult",
+        "Define VerificationResult: score (float), passed (bool), feedback (str), suggestions (list), dimensions (dict of dimension → score)",
+        "Define verifier prompt template — structured evaluation prompt with rubric injection",
+        "Define model selection — verifier should use a DIFFERENT model than the task executor (diversity principle)",
+        "Define integration with coordinator — when coordinator calls verifier, what happens on pass vs fail",
+        "Write to PRD section: '## 5. VerifierService Design'",
+        "Include sequence diagram for verify → pass and verify → fail → retry flows",
+        "Address: verification cost budget — verifier calls cost tokens too"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "The verifier is NOT an agent — it's a service like the coordinator. It uses an LLM call but doesn't go through AgentFactory. Keep it simple: structured prompt → LLM → parse response → VerificationResult. No tool calling needed for verification."
+    },
+    {
+      "id": "US-005",
+      "title": "Design success criteria specification",
+      "description": "As a platform architect, I need a way for users and coordinators to specify what 'done' looks like for each task",
+      "acceptanceCriteria": [
+        "Define success criteria format — structured (checklist) vs natural language vs hybrid",
+        "Define how coordinator generates criteria during task decomposition",
+        "Define how users can override/add criteria at mission creation",
+        "Define criteria types: output_format, content_requirements, quality_threshold, constraints",
+        "Connect to orchestration_tasks schema (PRD-101) — where criteria are stored",
+        "Write to PRD section: '## 6. Success Criteria Specification'",
+        "Include 3 examples of well-formed criteria for different task types",
+        "Address: overly strict criteria causing unnecessary failures"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Keep criteria simple. A list of strings with a threshold (e.g., 'pass if 4/5 criteria met') is better than a complex schema. The coordinator generates these during planning — they need to be LLM-writable."
+    },
+    {
+      "id": "US-006",
+      "title": "Design cross-agent consistency verification",
+      "description": "As a platform architect, I need a way to verify consistency across tasks in a mission so that outputs don't contradict each other",
+      "acceptanceCriteria": [
+        "Define consistency check triggers — when does cross-task verification happen",
+        "Define consistency dimensions: factual alignment, terminology consistency, conclusion coherence",
+        "Design lightweight consistency check — compare key claims across task outputs using embeddings or LLM",
+        "Address: cost of cross-task verification scales O(n²) — mitigation strategies",
+        "Write to PRD section: '## 7. Cross-Agent Consistency'",
+        "Include example: research agent says X, writer agent says not-X — how detected and resolved"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "This is a Phase 2 stretch goal — don't over-design. A simple 'final review' step where the verifier reads all task outputs together is probably sufficient. Save the semantic field approach for Phase 3 (PRD-108)."
+    },
+    {
+      "id": "US-007",
+      "title": "Write PRD-103 opening and synthesis",
+      "description": "As a document author, I need to write the complete PRD-103 document synthesizing all verification research",
+      "acceptanceCriteria": [
+        "Create docs/PRDS/103-VERIFICATION-QUALITY.md",
+        "Header: version, type, status, priority, dependencies (PRD-100, PRD-101, PRD-102)",
+        "Section 1: Problem Statement",
+        "Synthesize US-001 through US-006 into coherent narrative",
+        "Include 'Design Decisions Made' table",
+        "Include 'What This PRD Delivers' and 'What This PRD Does NOT Cover'"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Follow PRD-100 style."
+    },
+    {
+      "id": "US-008",
+      "title": "Write PRD-103 conclusion and implementation artifacts",
+      "description": "As a document author, I need to close PRD-103 with implementation-ready artifacts",
+      "acceptanceCriteria": [
+        "Write '## 8. Verifier Prompt Templates' — actual prompt text for different verification types",
+        "Write '## 9. Risk Register'",
+        "Write '## 10. Implementation Acceptance Criteria'",
+        "Write '## 11. Appendix: VerifierService Interface' — Python class stub",
+        "Write '## 12. Appendix: VerificationResult Schema' — dataclass definition",
+        "Final review pass",
+        "PRD-103 complete and ready for peer review"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "The verifier prompts are the key deliverable — they need to be production-quality, not sketches."
+    }
+  ]
+}

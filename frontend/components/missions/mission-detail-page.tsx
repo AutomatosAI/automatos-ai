@@ -1,11 +1,12 @@
 'use client'
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { ArrowLeft, Pause, Play, X, Eye, Target } from 'lucide-react'
+import { ArrowLeft, Pause, Play, X, Eye, Target, Check, XCircle } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -17,7 +18,7 @@ import { MissionDAGCanvas } from './mission-dag-canvas'
 import { MissionActivityFeed } from './mission-activity-feed'
 import { TaskInspector } from './task-inspector'
 import { HumanReviewPanel } from './human-review-panel'
-import { useMission, usePauseMission, useResumeMission, useCancelMission } from '@/hooks/use-missions-api'
+import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { computeMissionStats, TERMINAL_RUN_STATES } from '@/types/missions'
 import { Activity, ListChecks, Clock, Coins } from 'lucide-react'
@@ -32,11 +33,16 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const showReview = searchParams?.get('tab') === 'review'
 
   const { data: mission, isLoading } = useMission(missionId)
-  const { selectedTaskId, setSelectedTaskId } = useMissionStore()
+  const { selectedTaskId, setSelectedTaskId, planModifications, clearPlanModifications } = useMissionStore()
 
   const pauseMutation = usePauseMission()
   const resumeMutation = useResumeMission()
   const cancelMutation = useCancelMission()
+  const approveMutation = useApproveMission()
+  const rejectMutation = useRejectMission()
+
+  const [showRejectInput, setShowRejectInput] = useState(false)
+  const [rejectFeedback, setRejectFeedback] = useState('')
 
   const stats = useMemo(
     () => (mission ? computeMissionStats(mission) : null),
@@ -188,6 +194,93 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
         )}
       </div>
 
+      {/* Plan approval bar */}
+      {mission.state === 'awaiting_approval' && (
+        <div className="px-4 md:px-6 py-3 border-b border-orange-500/30 bg-orange-500/5">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-sm text-orange-400">
+              <Eye className="w-4 h-4 shrink-0" />
+              <span>Review the plan below, then approve or reject</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                onClick={() => setShowRejectInput((prev) => !prev)}
+              >
+                <XCircle className="w-3.5 h-3.5 mr-1.5" />
+                Reject
+              </Button>
+              <Button
+                size="sm"
+                className="bg-green-600 hover:bg-green-700 text-white"
+                disabled={approveMutation.isLoading}
+                onClick={() => {
+                  const hasModifications =
+                    Object.keys(planModifications.task_overrides).length > 0 ||
+                    Object.keys(planModifications.agent_overrides).length > 0 ||
+                    planModifications.notes.length > 0
+
+                  approveMutation.mutate(
+                    {
+                      id: missionId,
+                      body: hasModifications
+                        ? { modifications: planModifications }
+                        : undefined,
+                    },
+                    {
+                      onSuccess: () => {
+                        toast.success('Plan approved — mission is running')
+                        clearPlanModifications()
+                      },
+                      onError: (err) => toast.error(err.message),
+                    },
+                  )
+                }}
+              >
+                <Check className="w-3.5 h-3.5 mr-1.5" />
+                Approve
+              </Button>
+            </div>
+          </div>
+
+          {showRejectInput && (
+            <div className="mt-3 flex gap-2">
+              <Textarea
+                placeholder="Why should this plan be revised?"
+                value={rejectFeedback}
+                onChange={(e) => setRejectFeedback(e.target.value)}
+                className="min-h-[60px] text-sm bg-background/50"
+                rows={2}
+              />
+              <Button
+                variant="destructive"
+                size="sm"
+                className="self-end"
+                disabled={rejectMutation.isLoading || !rejectFeedback.trim()}
+                onClick={() =>
+                  rejectMutation.mutate(
+                    { id: missionId, body: { reason: rejectFeedback.trim() } },
+                    {
+                      onSuccess: () => {
+                        toast.success('Plan rejected — provide more details')
+                        clearPlanModifications()
+                        setRejectFeedback('')
+                        setShowRejectInput(false)
+                      },
+                      onError: (err) => toast.error(err.message),
+                    },
+                  )
+                }
+              >
+                Send
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Main content */}
       <div className="flex-1 min-h-0">
         <ResizablePanelGroup direction="horizontal" className="h-full">
@@ -196,7 +289,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
             <div className="relative h-full">
               <MissionDAGCanvas
                 tasks={mission.tasks}
-                mode={isReviewable ? 'review' : 'execution'}
+                mode={mission.state === 'awaiting_approval' ? 'plan' : isReviewable ? 'review' : 'execution'}
                 selectedTaskId={selectedTaskId}
                 onTaskSelect={handleTaskSelect}
                 className="h-full"

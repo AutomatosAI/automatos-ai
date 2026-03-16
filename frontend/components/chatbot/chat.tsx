@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import Link from 'next/link'
-import { Bot, ArrowDown, Database, GitBranch, Wrench, Code2 } from 'lucide-react'
+import { ArrowDown, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
@@ -29,6 +28,17 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/componen
 import { ToolSuggestionBar } from '@/components/suggestions/ToolSuggestionBar'
 import type { SuggestionResponse } from '@/components/suggestions/types'
 import { analytics } from '@/lib/analytics'
+
+// PRD-82A: Mission mode
+import { useMissionStore } from '@/stores/mission-store'
+import { useCreateMission } from '@/hooks/use-missions-api'
+
+// Chat Mode Bar (ralph/chat-mode-bar)
+import { ChatModeBar } from '@/components/chatbot/chat-mode-bar'
+import { PinAgentPicker } from '@/components/chatbot/pin-agent-picker'
+import { usePinnedAgents } from '@/hooks/use-pinned-agents'
+import { useAgents } from '@/hooks/use-agent-api'
+import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
 
 export interface ChatProps {
   id: string
@@ -64,8 +74,20 @@ export function Chat({
   const dispatchMemoryStored = useWorkspaceStore((s) => s.dispatchMemoryStored)
   const dispatchWorkflowUpdate = useWorkspaceStore((s) => s.dispatchWorkflowUpdate)
 
+  // PRD-82A: Mission mode toggle
+  const isMissionMode = useMissionStore((s) => s.isMissionMode)
+  const setMissionMode = useMissionStore((s) => s.setMissionMode)
+  const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
+  const activePlanningMissionId = useMissionStore((s) => s.activePlanningMissionId)
+  const createMission = useCreateMission()
+
   // PRD-66: Workspace context for Code Canvas
   const { workspace } = useWorkspace()
+
+  // Chat Mode Bar: pinned agents + agent roster
+  const { pinnedIds, pin, unpin } = usePinnedAgents(workspace?.id?.toString() ?? '')
+  const { data: agentsData } = useAgents()
+  const agents = agentsData ?? []
 
   const handleOpenCodeCanvas = useCallback(() => {
     if (!workspace?.id) {
@@ -417,6 +439,58 @@ export function Chat({
 
   const regenerate = () => reload()
 
+  // PRD-82A US-008: Handle /mission slash command + US-003: Mission mode intercept
+  const handleSendMessage = useCallback(
+    (message: any) => {
+      const text = typeof message === 'string' ? message : message?.content
+      const trimmedText = text?.trim() ?? ''
+
+      // US-008: /mission slash command takes priority over mission mode
+      if (trimmedText.toLowerCase().startsWith('/mission ')) {
+        const goal = trimmedText.slice(9).trim()
+        if (!goal) return
+
+        createMission.mutate(
+          { goal },
+          {
+            onSuccess: (mission) => {
+              setActivePlanningMissionId(mission.id)
+              setMissionMode(false)
+              toast.success('Mission created — plan is being generated')
+            },
+            onError: (err) => {
+              toast.error(err.message || 'Failed to create mission')
+            },
+          }
+        )
+        return
+      }
+
+      // US-003: Mission mode intercept
+      if (!isMissionMode) {
+        sendMessage(message)
+        return
+      }
+
+      if (!trimmedText) return
+
+      createMission.mutate(
+        { goal: trimmedText },
+        {
+          onSuccess: (mission) => {
+            setActivePlanningMissionId(mission.id)
+            setMissionMode(false)
+            toast.success('Mission created — plan is being generated')
+          },
+          onError: (err) => {
+            toast.error(err.message || 'Failed to create mission')
+          },
+        }
+      )
+    },
+    [isMissionMode, sendMessage, createMission, setActivePlanningMissionId, setMissionMode]
+  )
+
   // PRD-50: Handle agent change — fire correction API when overriding auto-routed agent
   const handleAgentChange = useCallback((newAgentId: number | null) => {
     const prev = lastRoutingDecision.current
@@ -549,11 +623,11 @@ export function Chat({
     })
 
     // Send the suggestion as a message
-    sendMessage(suggestion)
+    handleSendMessage(suggestion)
     // Close suggestions after use
     setActiveTool(null)
     setToolSuggestions([])
-  }, [sendMessage, activeTool])
+  }, [handleSendMessage, activeTool])
 
   // Handle selections
   const handleArtifactSelect = useCallback((artifact: Artifact) => {
@@ -723,13 +797,6 @@ export function Chat({
   const isTyping = status === 'streaming'
   const hasSentMessage = messages.length > 0
 
-  const quickLinks = [
-    { label: 'Create an Agent', href: '/agents', icon: Bot },
-    { label: 'Knowledge Base', href: '/documents', icon: Database },
-    { label: 'Recipes', href: '/activity', icon: GitBranch },
-    { label: 'Edit Tools', href: '/tools', icon: Wrench },
-  ] as const
-
   const showWelcomeCard = !hasSentMessage && !isTyping
 
   return (
@@ -764,6 +831,18 @@ export function Chat({
                           onDatabaseSelect={handleDatabaseSelect}
                         />
                       ))}
+
+                      {/* PRD-82A: Inline mission card after creation */}
+                      {activePlanningMissionId && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          <MissionCreatedCard missionId={activePlanningMissionId} />
+                        </motion.div>
+                      )}
+
                       <div ref={messagesEndRef} />
                     </div>
                   </div>
@@ -783,11 +862,32 @@ export function Chat({
                         isLoading={isLoadingSuggestions}
                         hasContext={hasContextSuggestions}
                       />
+                      {/* PRD-82A US-002: Mission mode indicator banner */}
+                      <AnimatePresence>
+                        {isMissionMode && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2 text-sm text-orange-400"
+                          >
+                            <Target className="h-4 w-4 shrink-0" />
+                            <span className="flex-1">Mission Mode — Describe your goal and an AI team will execute it</span>
+                            <button
+                              type="button"
+                              onClick={() => setMissionMode(false)}
+                              className="shrink-0 rounded p-0.5 hover:bg-orange-500/20 transition-colors"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                       <MultimodalInput
                         chatId={id}
                         status={status}
                         stop={stop}
-                        sendMessage={sendMessage}
+                        sendMessage={handleSendMessage}
                         selectedModelId={currentModelId}
                         onModelChange={setCurrentModelId}
                         selectedAgentId={selectedAgentId}
@@ -861,11 +961,32 @@ export function Chat({
                           }}
                           isLoading={isLoadingSuggestions}
                         />
+                        {/* PRD-82A US-002: Mission mode indicator banner */}
+                        <AnimatePresence>
+                          {isMissionMode && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2 text-sm text-orange-400"
+                            >
+                              <Target className="h-4 w-4 shrink-0" />
+                              <span className="flex-1">Mission Mode — Describe your goal and an AI team will execute it</span>
+                              <button
+                                type="button"
+                                onClick={() => setMissionMode(false)}
+                                className="shrink-0 rounded p-0.5 hover:bg-orange-500/20 transition-colors"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                         <MultimodalInput
                           chatId={id}
                           status={status}
                           stop={stop}
-                          sendMessage={sendMessage}
+                          sendMessage={handleSendMessage}
                           selectedModelId={currentModelId}
                           onModelChange={setCurrentModelId}
                           selectedAgentId={selectedAgentId}
@@ -929,11 +1050,32 @@ export function Chat({
                   }}
                   isLoading={isLoadingSuggestions}
                 />
+                {/* PRD-82A US-002: Mission mode indicator banner */}
+                <AnimatePresence>
+                  {isMissionMode && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2 text-sm text-orange-400"
+                    >
+                      <Target className="h-4 w-4 shrink-0" />
+                      <span className="flex-1">Mission Mode — Describe your goal and an AI team will execute it</span>
+                      <button
+                        type="button"
+                        onClick={() => setMissionMode(false)}
+                        className="shrink-0 rounded p-0.5 hover:bg-orange-500/20 transition-colors"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <MultimodalInput
                   chatId={id}
                   status={status}
                   stop={stop}
-                  sendMessage={sendMessage}
+                  sendMessage={handleSendMessage}
                   selectedModelId={currentModelId}
                   onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
@@ -943,44 +1085,22 @@ export function Chat({
                   onToolIconClick={handleToolIconClick}
                 />
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2 pt-1">
-                  {/* PRD-66: Code Canvas quick action */}
-                  <button
-                    type="button"
-                    onClick={handleOpenCodeCanvas}
-                    title="Code"
-                    className={[
-                      'inline-flex items-center justify-center rounded-full',
-                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                      'gap-2 text-xs font-medium',
-                      'bg-black/10 backdrop-blur text-foreground/90',
-                      'hover:bg-orange-500/10 transition-colors',
-                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                    ].join(' ')}
-                  >
-                    <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                    <span className="hidden md:inline">Code</span>
-                  </button>
-                  {quickLinks.map((item) => {
-                    const Icon = item.icon
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        title={item.label}
-                        className={[
-                          'inline-flex items-center justify-center rounded-full',
-                          'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                          'gap-2 text-xs font-medium',
-                          'bg-black/10 backdrop-blur text-foreground/90',
-                          'hover:bg-orange-500/10 transition-colors',
-                          'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                        ].join(' ')}
-                      >
-                        <Icon className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                        <span className="hidden md:inline">{item.label}</span>
-                      </Link>
-                    )
-                  })}
+                  <ChatModeBar
+                    isCodeActive={hasWidgets}
+                    isMissionActive={isMissionMode}
+                    onCodeClick={handleOpenCodeCanvas}
+                    onMissionClick={() => setMissionMode(!isMissionMode)}
+                    pinnedAgentIds={pinnedIds}
+                    agents={agents}
+                    selectedAgentId={selectedAgentId}
+                    onAgentSelect={handleAgentChange}
+                  />
+                  <PinAgentPicker
+                    agents={agents}
+                    pinnedIds={pinnedIds}
+                    onPin={pin}
+                    onUnpin={unpin}
+                  />
                 </div>
               </div>
             </div>
@@ -1015,6 +1135,17 @@ export function Chat({
                 </AnimatePresence>
 
                 {/* Typing indicator removed: we show "Thinking…" on the streaming message */}
+
+                {/* PRD-82A: Inline mission card after creation */}
+                {activePlanningMissionId && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <MissionCreatedCard missionId={activePlanningMissionId} />
+                  </motion.div>
+                )}
 
                 <div ref={messagesEndRef} />
               </div>
@@ -1061,11 +1192,33 @@ export function Chat({
                   isLoading={isLoadingSuggestions}
                 />
 
+                {/* PRD-82A US-002: Mission mode indicator banner */}
+                <AnimatePresence>
+                  {isMissionMode && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2 text-sm text-orange-400"
+                    >
+                      <Target className="h-4 w-4 shrink-0" />
+                      <span className="flex-1">Mission Mode — Describe your goal and an AI team will execute it</span>
+                      <button
+                        type="button"
+                        onClick={() => setMissionMode(false)}
+                        className="shrink-0 rounded p-0.5 hover:bg-orange-500/20 transition-colors"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <MultimodalInput
                   chatId={id}
                   status={status}
                   stop={stop}
-                  sendMessage={sendMessage}
+                  sendMessage={handleSendMessage}
                   selectedModelId={currentModelId}
                   onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
@@ -1075,44 +1228,22 @@ export function Chat({
                   onToolIconClick={handleToolIconClick}
                 />
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2">
-                  {/* PRD-66: Code Canvas quick action */}
-                  <button
-                    type="button"
-                    onClick={handleOpenCodeCanvas}
-                    title="Code"
-                    className={[
-                      'inline-flex items-center justify-center rounded-full',
-                      'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                      'gap-2 text-xs font-medium',
-                      'bg-black/10 backdrop-blur text-foreground/90',
-                      'hover:bg-orange-500/10 transition-colors',
-                      'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                    ].join(' ')}
-                  >
-                    <Code2 className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                    <span className="hidden md:inline">Code</span>
-                  </button>
-                  {quickLinks.map((item) => {
-                    const Icon = item.icon
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        title={item.label}
-                        className={[
-                          'inline-flex items-center justify-center rounded-full',
-                          'min-h-[44px] min-w-[44px] px-3 py-2 md:min-h-0 md:min-w-0 md:px-3 md:py-1.5',
-                          'gap-2 text-xs font-medium',
-                          'bg-black/10 backdrop-blur text-foreground/90',
-                          'hover:bg-orange-500/10 transition-colors',
-                          'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                        ].join(' ')}
-                      >
-                        <Icon className="h-4 w-4 md:h-3.5 md:w-3.5 text-orange-400" />
-                        <span className="hidden md:inline">{item.label}</span>
-                      </Link>
-                    )
-                  })}
+                  <ChatModeBar
+                    isCodeActive={hasWidgets}
+                    isMissionActive={isMissionMode}
+                    onCodeClick={handleOpenCodeCanvas}
+                    onMissionClick={() => setMissionMode(!isMissionMode)}
+                    pinnedAgentIds={pinnedIds}
+                    agents={agents}
+                    selectedAgentId={selectedAgentId}
+                    onAgentSelect={handleAgentChange}
+                  />
+                  <PinAgentPicker
+                    agents={agents}
+                    pinnedIds={pinnedIds}
+                    onPin={pin}
+                    onUnpin={unpin}
+                  />
                 </div>
               </div>
             </div>

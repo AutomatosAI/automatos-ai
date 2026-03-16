@@ -1,0 +1,139 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/100-research-prd-factory",
+  "description": "PRD-108: Memory Field Prototype — Full research + design PRD. Study shared vector spaces, resonance mechanics, decay algorithms. Design the experiment that tests whether shared semantic fields outperform message passing. This is the Phase 3 gate — if the prototype doesn't prove value, Phase 3 is reassessed.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Research shared vector space implementations",
+      "description": "As a researcher, I need to study production vector stores and shared memory patterns so that our prototype uses the right foundation",
+      "acceptanceCriteria": [
+        "Study FAISS — index types (IVF, HNSW), shared memory mode, multi-process access, Python bindings",
+        "Study Qdrant — collections, shared access, filtering, payload indexing, gRPC API",
+        "Study Redis vector search (RediSearch) — vector similarity, hybrid queries, pub/sub integration",
+        "Study Pinecone — namespaces, metadata filtering, serverless vs pod-based",
+        "Study existing S3 Vectors setup in Automatos — what's already configured",
+        "Study temporal decay in information retrieval — TF-IDF time decay, exponential forgetting curves",
+        "Comparison table: system, shared access model, latency, scale, cost, decay support",
+        "Write to PRD section: '## 2. Prior Art: Shared Vector Spaces'",
+        "Recommend vector store for prototype with rationale"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "S3 Vectors is already configured (automatos-vector-index). Redis is already running for sessions/pub-sub. FAISS is used by Agent Zero. Consider what's ALREADY AVAILABLE before adding new infrastructure. The prototype should work with existing infra if possible."
+    },
+    {
+      "id": "US-002",
+      "title": "Research resonance and decay mechanisms",
+      "description": "As a researcher, I need to study how information amplification and decay work in theory and practice",
+      "acceptanceCriteria": [
+        "Read Context Engineering repo: 08_neural_fields_foundations.md — neural field theory",
+        "Read Context Engineering repo: 09_persistence_and_resonance.md — resonance mechanics",
+        "Read Context Engineering repo: 11_emergence_and_attractor_dynamics.md — convergence",
+        "Study Hebbian learning: 'neurons that fire together wire together' — how it maps to semantic reinforcement",
+        "Study attention mechanisms in transformers — self-attention as a resonance computation",
+        "Study TF-IDF time decay variants — how relevance diminishes over time in IR systems",
+        "Define resonance formula with concrete parameters: R(A, B) = cos(θ) × |A| × |B| × S(A, B) from PRD-100",
+        "Define decay formula with concrete parameters: S(t) = S₀ × e^(-λt) from PRD-100",
+        "Write to PRD section: '## 3. Resonance & Decay: Theory to Implementation'",
+        "Include worked numerical examples showing resonance amplification and decay"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "The Context Engineering repo is at /Users/gkavanagh/Development/Automatos-AI-Platform/Context-Engineering/00_foundations/. This is where theory meets implementation — the formulas from PRD-100 need concrete parameter values. What's λ? How do we measure S(A, B)? These must be answerable."
+    },
+    {
+      "id": "US-003",
+      "title": "Design the prototype architecture",
+      "description": "As a platform architect, I need the prototype scoped as a minimal, testable experiment",
+      "acceptanceCriteria": [
+        "Define prototype scope: 2-3 agents, 1 shared field, 1 mission, controlled test",
+        "Define field operations: inject(embedding, metadata), query(embedding, k, min_relevance), decay_tick()",
+        "Define field data structure: vector + metadata (source_agent, timestamp, reinforcement_count, current_strength)",
+        "Define resonance computation: when agent B injects, check similarity with existing entries, amplify aligned entries",
+        "Define decay computation: periodic sweep that reduces strength, removes entries below threshold",
+        "Write to PRD section: '## 4. Prototype Architecture'",
+        "Include system diagram showing agents ↔ field ↔ vector store",
+        "Include Python pseudocode for core field operations (<100 lines)",
+        "Explicitly scope: what the prototype does NOT include (K8s, multiple fields, attractor detection)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The prototype must be simple enough to build in a few days. Think: a Python class (MemoryField) backed by FAISS or Redis vectors, with inject/query/decay methods. Agents call inject() after producing output, call query() before starting work. That's it."
+    },
+    {
+      "id": "US-004",
+      "title": "Design the experiment",
+      "description": "As a researcher, I need a rigorous experiment design so that the prototype test produces meaningful results",
+      "acceptanceCriteria": [
+        "Define experiment hypothesis: 'Shared semantic field produces higher quality multi-agent outputs than message passing for tasks requiring cross-agent context'",
+        "Define control condition: same mission, same agents, message-passing coordination (Phase 2 adapter from PRD-107)",
+        "Define treatment condition: same mission, same agents, shared field coordination (prototype field)",
+        "Define test mission: a multi-step task where cross-agent context matters (e.g., 'research topic X, then write report incorporating research')",
+        "Define evaluation metrics: output quality (human eval + LLM judge), context utilization (how much cross-agent context appears in outputs), token efficiency (total tokens used), latency",
+        "Define sample size: how many mission runs needed for meaningful comparison",
+        "Write to PRD section: '## 5. Experiment Design'",
+        "Include evaluation rubric for human assessors",
+        "Address: confirmation bias mitigation — blind evaluation, multiple evaluators"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "PRD-100 Risk #6: 'Context Engineering theory doesn't translate to code.' This experiment is the gate. Be honest about what constitutes a pass and a fail. If shared field is only marginally better or adds too much complexity, that's a valid finding."
+    },
+    {
+      "id": "US-005",
+      "title": "Design pass/fail criteria for Phase 3 gate",
+      "description": "As a platform architect, I need clear criteria for whether the prototype justifies continuing to Phase 3",
+      "acceptanceCriteria": [
+        "Define PASS criteria (proceed to Phase 3): measurable improvement in output quality, reasonable latency (<200ms field operations), manageable complexity",
+        "Define FAIL criteria (reassess Phase 3): no quality improvement, unacceptable latency, resonance/decay add noise not signal",
+        "Define PARTIAL criteria (modify Phase 3 scope): some improvements in specific scenarios, not universal",
+        "Define minimum bar: field must outperform message-passing on at least 2 of 4 metrics",
+        "Write to PRD section: '## 6. Phase 3 Gate Criteria'",
+        "Address: what 'reassess Phase 3' means practically — simplified version, delayed, or abandoned",
+        "Address PRD-100 Risk #8: 'Neural field resonance is just RAG with extra steps'"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Be intellectually honest here. PRD-100 Risk #10 says 'Phase 2 already delivers enough value, Phase 3 never starts' and calls this 'actually fine.' The gate criteria should reflect that — Phase 3 must earn its complexity budget."
+    },
+    {
+      "id": "US-006",
+      "title": "Design integration with PRD-107 context interface",
+      "description": "As a platform architect, I need the prototype to implement the ContextPort from PRD-107 so that it's a real adapter swap",
+      "acceptanceCriteria": [
+        "Show how MemoryField maps to ContextPort methods from PRD-107",
+        "inject_context → MemoryField.inject() with embedding generation",
+        "query_context → MemoryField.query() with resonance scoring",
+        "build_system_prompt → standard ContextService.render() + field-augmented context",
+        "Define embedding model for field operations — use existing qwen3-embedding-8b (2048 dims) from config",
+        "Write to PRD section: '## 7. Context Interface Integration'",
+        "Verify prototype can be tested via adapter swap without coordinator changes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "This is where PRD-107 and PRD-108 meet. The experiment (US-004) should work by swapping adapters: run mission with MessagePassingContextAdapter, then run same mission with NeuralFieldContextAdapter. Same coordinator, same agents, different context layer."
+    },
+    {
+      "id": "US-007",
+      "title": "Write PRD-108 complete document",
+      "description": "As a document author, I need to write the complete PRD-108 document",
+      "acceptanceCriteria": [
+        "Create docs/PRDS/108-MEMORY-FIELD-PROTOTYPE.md",
+        "Header, Problem Statement, synthesis of US-001 through US-006",
+        "Design Decisions Made table",
+        "Risk Register (prototype too simple, measuring wrong things, confirmation bias, complexity budget)",
+        "Implementation Acceptance Criteria (separate from experiment criteria)",
+        "Appendix: MemoryField Python class stub",
+        "Appendix: Experiment protocol step-by-step",
+        "Appendix: Evaluation rubric template",
+        "Appendix: References to Context Engineering repo sections",
+        "Final review pass",
+        "PRD-108 complete and ready for peer review"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "This is the most intellectually ambitious PRD in the set. It bridges working engineering (Phase 2) with research (Phase 3). The tone should be: 'here's a rigorous experiment to test a bold hypothesis, with honest criteria for success and failure.'"
+    }
+  ]
+}

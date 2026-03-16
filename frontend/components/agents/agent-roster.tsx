@@ -28,7 +28,9 @@ import {
   Wrench,
   Shield,
   Zap,
-  Cloud
+  Cloud,
+  Pin,
+  PinOff
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -43,6 +45,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { useAgents, useStartAgent, useStopAgent } from '@/hooks/use-agent-api'
+import { usePinnedAgents } from '@/hooks/use-pinned-agents'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { AgentConfigurationModal } from './agent-configuration-modal'
 import { AgentStatusControlModal } from './agent-status-control-modal'
@@ -212,6 +215,12 @@ export function AgentRoster({
   const [currentAgentStatus, setCurrentAgentStatus] = useState<string>('')
   const [deleteModalAgentId, setDeleteModalAgentId] = useState<number | null>(null)
 
+  // Pinned agents
+  const workspaceId = typeof window !== 'undefined'
+    ? localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org') || ''
+    : ''
+  const { pinnedIds, pin, unpin, isPinned } = usePinnedAgents(workspaceId)
+
   // System icon mappings
   const { data: iconMappings = {} } = useSystemIcons()
 
@@ -342,6 +351,24 @@ export function AgentRoster({
                         <Settings className="w-4 h-4 mr-2" />
                         Configure
                       </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={!isPinned(Number(agent.id)) && pinnedIds.length >= 6}
+                        title={!isPinned(Number(agent.id)) && pinnedIds.length >= 6 ? 'Max 6 agents' : undefined}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (isPinned(Number(agent.id))) {
+                            unpin(Number(agent.id))
+                          } else {
+                            pin(Number(agent.id))
+                          }
+                        }}
+                      >
+                        {isPinned(Number(agent.id)) ? (
+                          <><PinOff className="w-4 h-4 mr-2" />Unpin from Chat</>
+                        ) : (
+                          <><Pin className="w-4 h-4 mr-2" />Pin to Chat</>
+                        )}
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleToggleStatus(agent.id, agent.status) }}>
                         {agent.status === 'active' ? (
                           <><Pause className="w-4 h-4 mr-2" />Pause Agent</>
@@ -414,6 +441,24 @@ export function AgentRoster({
                       }}>
                         <Settings className="w-4 h-4 mr-2" />
                         Configure
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={!isPinned(Number(agent.id)) && pinnedIds.length >= 6}
+                        title={!isPinned(Number(agent.id)) && pinnedIds.length >= 6 ? 'Max 6 agents' : undefined}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (isPinned(Number(agent.id))) {
+                            unpin(Number(agent.id))
+                          } else {
+                            pin(Number(agent.id))
+                          }
+                        }}
+                      >
+                        {isPinned(Number(agent.id)) ? (
+                          <><PinOff className="w-4 h-4 mr-2" />Unpin from Chat</>
+                        ) : (
+                          <><Pin className="w-4 h-4 mr-2" />Pin to Chat</>
+                        )}
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={(e) => {
                         e.stopPropagation(); // Prevent card click

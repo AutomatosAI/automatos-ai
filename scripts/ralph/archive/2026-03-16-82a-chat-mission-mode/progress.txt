@@ -1,0 +1,50 @@
+# PRD-82A Phase 6: Chat Mission Mode — Ralph Progress
+# Branch: ralph/82a-mission-chat-mode
+# Started: 2026-03-16
+
+## Iteration 1 — US-001: Mission mode toggle button
+- Added Target icon import and useMissionStore to chat.tsx
+- Added Mission toggle button in BOTH quick link locations (welcome card ~line 970 and bottom input ~line 1122)
+- Button toggles isMissionMode on/off, orange highlight when active (bg-orange-500/20 ring-1 ring-orange-500/50)
+- Typecheck passes (no new errors in mission/chat files)
+
+## Iteration 2 — US-002: Mission mode indicator banner
+- Added animated banner above all 4 MultimodalInput instances in chat.tsx
+  - Widget layout (~line 793), legacy artifact viewer (~line 892), welcome card (~line 981), standard layout (~line 1154)
+- Banner shows: Target icon, "Mission Mode — Describe your goal and an AI team will execute it", X close button
+- Styled with orange accents: bg-orange-500/10 border-orange-500/30 text-orange-400
+- AnimatePresence + motion.div for smooth enter/exit animation (opacity + height)
+- X button calls setMissionMode(false)
+- Typecheck passes (no new errors in mission/chat files)
+
+## Iteration 3 — US-003: Intercept chat submit (already committed)
+- handleSendMessage wrapper in chat.tsx intercepts when isMissionMode is active
+- Calls createMission.mutate({ goal }) instead of normal chat flow
+- On success: sets activePlanningMissionId, exits mission mode, shows toast
+- On error: shows error toast, keeps mission mode active
+
+## Iteration 4 — US-004: Mission created card (already committed)
+- Created frontend/components/chatbot/mission-created-card.tsx
+- Uses useMission(missionId) to fetch data, MissionStatusBadge for state
+- Shows truncated goal, task count from plan, "Review Plan" CTA button
+- Glass-card styling with skeleton loading state
+
+## Iteration 5 — US-005: Render mission card in chat
+- Added activePlanningMissionId getter from useMissionStore
+- Imported MissionCreatedCard component
+- Renders card with fade-in animation (framer-motion) before messagesEndRef
+- Card appears in BOTH layout modes (widget layout and standard layout)
+- Typecheck passes (no new errors in mission/chat files)
+
+## Iteration 6 — US-006 + US-007: Plan approval controls & DAG plan mode
+- Added approval bar between header and main content in mission-detail-page.tsx
+  - Shows when mission.state === 'awaiting_approval'
+  - Info text with Eye icon, Approve (green) and Reject (red outline) buttons
+  - Approve calls useApproveMission with planModifications wrapped in { modifications }
+  - Reject toggles textarea for feedback, calls useRejectMission with { reason }
+  - Both show toast on success/error, clear planModifications
+  - Buttons disabled while mutation loading
+- Added Textarea import from @/components/ui/textarea
+- Changed DAG mode: awaiting_approval → 'plan', awaiting_human → 'review', else → 'execution'
+- US-007 was a single-line change in same file, implemented together
+- Typecheck passes (no new errors in mission/chat files)

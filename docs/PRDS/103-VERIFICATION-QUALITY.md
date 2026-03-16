@@ -649,6 +649,7 @@ async def verify_task(request: VerifyTaskRequest) -> VerifyTaskResponse:
         if c["criterion"] not in {cs.criterion for cs in criteria_scores}
     ]
 
+    llm_scores = []
     if remaining:
         llm_scores = await _llm_verify(
             task_description=request.task_description,
