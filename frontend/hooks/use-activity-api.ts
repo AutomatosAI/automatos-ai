@@ -174,7 +174,9 @@ export function useActivitySchedule(range: string = '7d') {
       apiClient.request<ScheduleResponse>(`/api/activity/schedule?range=${range}`),
     refetchInterval: 60000,
     staleTime: 30000,
-    keepPreviousData: true,  // Don't blank widget on transient empty refetch
+    keepPreviousData: true,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   })
 }
 

@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Calendar, RefreshCw, Zap } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { AlertCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useActivitySchedule } from '@/hooks/use-activity-api'
 import type { ScheduleItem } from '@/hooks/use-activity-api'
@@ -34,8 +34,15 @@ function parseIntervalMinutes(frequency: string): number | null {
 
 export function ActivityCalendar({ className }: ActivityCalendarProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('week')
-  const { data, isLoading, refetch } = useActivitySchedule('7d')
-  const items = data?.scheduled ?? []
+  const { data, isLoading, isError, refetch } = useActivitySchedule('7d')
+
+  // Cache last successful data so calendar never blanks on transient errors
+  const lastGoodData = useRef<ScheduleItem[]>([])
+  const freshItems = data?.scheduled ?? []
+  if (freshItems.length > 0) {
+    lastGoodData.current = freshItems
+  }
+  const items = freshItems.length > 0 ? freshItems : lastGoodData.current
 
   // Split into "always running" (< 60 min interval) and regular scheduled
   const { alwaysRunning, scheduled } = useMemo(() => {
@@ -97,6 +104,14 @@ export function ActivityCalendar({ className }: ActivityCalendarProps) {
           </Button>
         </div>
       </div>
+
+      {/* Error indicator (non-destructive — calendar still shows cached data) */}
+      {isError && items.length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-amber-400/80 px-1">
+          <AlertCircle className="h-3.5 w-3.5" />
+          <span>Showing cached schedule — refresh to retry</span>
+        </div>
+      )}
 
       {/* Always Running Section */}
       {alwaysRunning.length > 0 && (
