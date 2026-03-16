@@ -122,6 +122,18 @@ export interface MissionReviewRequest {
   task_feedback?: Record<string, string>
 }
 
+export interface SaveAsRoutineRequest {
+  name: string
+  description?: string
+  tags?: string[]
+}
+
+export interface SaveAsRoutineResponse {
+  template_id: string
+  name: string
+  task_count: number
+}
+
 // ── Frontend Display Helpers ──────────────────────────────────
 
 export const DONE_TASK_STATES: readonly TaskState[] = ['verified', 'failed', 'skipped'] as const

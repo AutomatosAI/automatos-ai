@@ -16,7 +16,7 @@ Make missions smarter: decomposition templates, history-based agent scoring, rep
 - [x] US-005: Add replanning state and replan endpoint
 - [x] US-006: Add cross-task consistency verification
 - [x] US-007: Add verification result caching
-- [ ] US-008: Add save-as-routine conversion endpoint
+- [x] US-008: Add save-as-routine conversion endpoint
 - [ ] US-009: Add orchestration archive table and cleanup job
 
 ---

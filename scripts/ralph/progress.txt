@@ -99,3 +99,25 @@
   - coordinator_service: review_mission(accept→completed), reject_plan(→failed), cancel_mission(→cancelled)
   - reconciler: _check_fatal_failure(→failed)
 - All imports validated, 307 tests pass (8 pre-existing failures in unrelated plugin/context tests)
+
+## Iteration 8 — US-008: Add save-as-routine conversion endpoint
+- Added POST /api/missions/{id}/save-as-routine endpoint in orchestrator/api/missions.py
+- SaveAsRoutineRequest: name (1-255), description (optional, max 2000), tags (optional, max 20)
+- SaveAsRoutineResponse: template_id, name, task_count
+- Endpoint validates: mission must be in 'completed' state
+- Extracts task graph structure from completed mission: roles, dependencies, verification criteria
+- Templatizes: replaces goal text in task titles/descriptions with {goal} placeholder
+- Maps task UUIDs to sequential temp_ids, resolves dependency graph to temp_ids
+- Generates unique slug-based template_id with collision avoidance (e.g., mission-weekly-research-report)
+- Saves as WorkflowTemplate record in workflow_recipes table with:
+  - workspace isolation (owner_type='workspace', workspace_id from context)
+  - template_definition JSONB containing full template structure
+  - steps array with step_id, order, agent_role, prompt_template, dependencies
+  - inputs schema ({goal: {type: string, required: true}})
+  - execution_config ({mode: sequential, max_retries: 3})
+- Frontend: Added "Save as Routine" button on mission detail page, visible only when state === 'completed'
+  - Dialog with name/description/tags fields
+  - useSaveAsRoutine hook in use-missions-api.ts
+  - SaveAsRoutineRequest/Response types in types/missions.ts
+  - Success toast shows routine name and task count
+- All Python imports validate, TypeScript compiles clean, 67 tests pass (pre-existing failures only)

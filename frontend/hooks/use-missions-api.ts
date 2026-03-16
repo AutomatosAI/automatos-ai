@@ -16,6 +16,8 @@ import type {
   MissionCreateRequest,
   MissionResponse,
   RunState,
+  SaveAsRoutineRequest,
+  SaveAsRoutineResponse,
 } from '@/types/missions'
 
 // ── Query Keys ────────────────────────────────────────────────
@@ -181,6 +183,24 @@ export function useCancelMission() {
         method: 'POST',
       }),
     onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.all })
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.detail(id) })
+    },
+  })
+}
+
+// ── Save as Routine (PRD-82B US-008) ─────────────────────────
+
+export function useSaveAsRoutine() {
+  const queryClient = useQueryClient()
+
+  return useMutation<SaveAsRoutineResponse, Error, { id: string; body: SaveAsRoutineRequest }>({
+    mutationFn: ({ id, body }) =>
+      apiClient.request<SaveAsRoutineResponse>(`/api/missions/${id}/save-as-routine`, {
+        method: 'POST',
+        body: body as unknown as BodyInit,
+      }),
+    onSuccess: (_data, { id }) => {
       queryClient.invalidateQueries({ queryKey: missionQueryKeys.all })
       queryClient.invalidateQueries({ queryKey: missionQueryKeys.detail(id) })
     },

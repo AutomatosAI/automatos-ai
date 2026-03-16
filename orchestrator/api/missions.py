@@ -5,7 +5,7 @@ Missions REST API — PRD-82A/82B Sequential Mission Coordinator
 CRUD + lifecycle + telemetry endpoints for missions. API uses "mission"
 terminology; DB/backend uses "orchestration" (PRD-82A Section 10).
 
-14 endpoints:
+15 endpoints:
   POST   /api/missions           — create mission
   GET    /api/missions           — list missions (paginated, filterable)
   GET    /api/missions/stats     — aggregate mission stats (PRD-82B US-004)
@@ -16,6 +16,7 @@ terminology; DB/backend uses "orchestration" (PRD-82A Section 10).
   POST   /api/missions/{id}/reject   — reject plan
   POST   /api/missions/{id}/review   — submit human review
   POST   /api/missions/{id}/replan   — replan failed mission (PRD-82B US-005)
+  POST   /api/missions/{id}/save-as-routine  — save completed mission as routine (PRD-82B US-008)
   POST   /api/missions/{id}/pause    — pause mission
   POST   /api/missions/{id}/resume   — resume mission
   POST   /api/missions/{id}/cancel   — cancel mission
@@ -23,10 +24,11 @@ terminology; DB/backend uses "orchestration" (PRD-82A Section 10).
 Agent telemetry:
   GET    /api/agents/{agent_id}/mission-history  — agent mission perf (PRD-82B US-004)
 
-Source: PRD-82A Section 12, PRD-82B US-004/US-005
+Source: PRD-82A Section 12, PRD-82B US-004/US-005/US-008
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -40,11 +42,12 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
-from core.models.core import Agent
+from core.models.core import Agent, WorkflowTemplate
 from core.models.orchestration import (
     OrchestrationEvent,
     OrchestrationRun,
     OrchestrationTask,
+    OrchestrationTaskDependency,
 )
 from core.models.orchestration_enums import (
     EventType,
@@ -883,6 +886,225 @@ async def replan_mission(
     except Exception as exc:
         db.rollback()
         logger.error("Failed to replan mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# Save-as-routine (PRD-82B US-008)
+# ---------------------------------------------------------------------------
+
+
+class SaveAsRoutineRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255, description="Routine name")
+    description: Optional[str] = Field(None, max_length=2000, description="Optional routine description")
+    tags: Optional[List[str]] = Field(default_factory=list, description="Optional tags for categorisation")
+
+    @validator("tags")
+    def validate_tags(cls, v: Optional[List[str]]) -> List[str]:
+        if v is None:
+            return []
+        if len(v) > 20:
+            raise ValueError("Too many tags (max 20)")
+        return [t.strip()[:50] for t in v if t.strip()]
+
+
+class SaveAsRoutineResponse(BaseModel):
+    template_id: str
+    name: str
+    task_count: int
+
+
+def _slugify(text: str, max_length: int = 80) -> str:
+    """Convert text to a URL-safe slug."""
+    slug = text.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"[\s-]+", "-", slug).strip("-")
+    return slug[:max_length]
+
+
+def _extract_routine_template(
+    tasks: List[OrchestrationTask],
+    dependencies: List[OrchestrationTaskDependency],
+    goal: str,
+) -> Dict[str, Any]:
+    """
+    Extract a reusable template definition from a completed mission's tasks.
+
+    Templatizes task descriptions by replacing goal-specific content with {goal}
+    placeholder, and preserves the dependency graph structure.
+    """
+    # Build dependency map: task_id -> list of prerequisite task_ids
+    dep_map: Dict[str, List[str]] = {}
+    for dep in dependencies:
+        task_id_str = str(dep.task_id)
+        depends_on_str = str(dep.depends_on_task_id)
+        dep_map.setdefault(task_id_str, []).append(depends_on_str)
+
+    # Map original task UUIDs to sequential temp_ids for the template
+    task_id_to_temp: Dict[str, str] = {}
+    sorted_tasks = sorted(tasks, key=lambda t: t.sequence_number)
+    for idx, task in enumerate(sorted_tasks, 1):
+        task_id_to_temp[str(task.id)] = f"task_{idx}"
+
+    task_templates = []
+    for task in sorted_tasks:
+        task_id_str = str(task.id)
+        temp_id = task_id_to_temp[task_id_str]
+
+        # Templatize: replace goal text in title/description with {goal}
+        title = (task.title or "").replace(goal, "{goal}")
+        description = (task.description or "").replace(goal, "{goal}")
+
+        # Resolve dependencies to temp_ids
+        depends_on = [
+            task_id_to_temp[dep_id]
+            for dep_id in dep_map.get(task_id_str, [])
+            if dep_id in task_id_to_temp
+        ]
+
+        task_templates.append({
+            "temp_id": temp_id,
+            "sequence": task.sequence_number,
+            "agent_role": task.agent_role or "researcher",
+            "title_pattern": title,
+            "description_pattern": description,
+            "required_tools": [],
+            "verification_criteria": task.verification_criteria or [],
+            "dependencies": depends_on,
+        })
+
+    return {
+        "id": None,  # Will be set to template_id after slug generation
+        "task_count": len(task_templates),
+        "output_format": "markdown",
+        "task_templates": task_templates,
+    }
+
+
+@router.post("/{mission_id}/save-as-routine", status_code=201)
+async def save_as_routine(
+    mission_id: UUID,
+    body: SaveAsRoutineRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Save a completed mission as a reusable routine template."""
+    try:
+        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+
+        if RunState(run.state) != RunState.COMPLETED:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Mission is in '{run.state}' state, expected 'completed'",
+            )
+
+        # Load tasks and dependencies for this run
+        tasks = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.run_id == run.id)
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+
+        if not tasks:
+            raise HTTPException(
+                status_code=400,
+                detail="Mission has no tasks to convert into a routine",
+            )
+
+        dependencies = (
+            db.query(OrchestrationTaskDependency)
+            .filter(
+                OrchestrationTaskDependency.task_id.in_(
+                    [t.id for t in tasks]
+                )
+            )
+            .all()
+        )
+
+        # Extract template definition
+        template_def = _extract_routine_template(tasks, dependencies, run.goal)
+
+        # Generate a unique template_id slug
+        base_slug = f"mission-{_slugify(body.name)}"
+        template_id_slug = base_slug
+
+        # Check for collisions and append suffix if needed
+        existing = (
+            db.query(WorkflowTemplate.template_id)
+            .filter(WorkflowTemplate.template_id.like(f"{base_slug}%"))
+            .all()
+        )
+        existing_ids = {row[0] for row in existing}
+        if template_id_slug in existing_ids:
+            counter = 2
+            while f"{base_slug}-{counter}" in existing_ids:
+                counter += 1
+            template_id_slug = f"{base_slug}-{counter}"
+
+        template_def["id"] = template_id_slug
+
+        # Build description from user input or generate from goal
+        description = body.description or f"Routine created from mission: {run.goal[:200]}"
+
+        # Create WorkflowTemplate record
+        recipe = WorkflowTemplate(
+            template_id=template_id_slug,
+            name=body.name,
+            description=description,
+            workspace_id=ctx.workspace_id,
+            owner_type="workspace",
+            owner_id=str(ctx.workspace_id),
+            tags=body.tags or [],
+            template_definition=template_def,
+            steps=[
+                {
+                    "step_id": tt["temp_id"],
+                    "order": tt["sequence"],
+                    "agent_id": None,  # Agent role, not a specific agent
+                    "agent_role": tt["agent_role"],
+                    "prompt_template": tt["description_pattern"],
+                    "dependencies": tt["dependencies"],
+                }
+                for tt in template_def["task_templates"]
+            ],
+            inputs={"goal": {"type": "string", "required": True}},
+            outputs={"report": {"type": "string"}},
+            execution_config={"mode": "sequential", "max_retries": 3},
+            created_by=ctx.user.id or "unknown",
+            is_public=False,
+            is_system=False,
+        )
+
+        db.add(recipe)
+        db.flush()
+
+        logger.info(
+            "Mission %s saved as routine '%s' (template_id=%s, %d tasks)",
+            mission_id,
+            body.name,
+            template_id_slug,
+            len(tasks),
+        )
+
+        db.commit()
+
+        return SaveAsRoutineResponse(
+            template_id=template_id_slug,
+            name=body.name,
+            task_count=len(tasks),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.error(
+            "Failed to save mission %s as routine: %s",
+            mission_id,
+            exc,
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
