@@ -1,7 +1,7 @@
 'use client'
 
 import { Draggable } from '@hello-pangea/dnd'
-import { Bot, AlertCircle, Workflow, ClipboardList } from 'lucide-react'
+import { Bot, AlertCircle, Workflow, ClipboardList, Trash2 } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow } from 'date-fns'
 import type { BoardTask } from '@/types/board'
@@ -12,9 +12,10 @@ interface BoardCardProps {
   task: BoardTask
   index: number
   onOpen: (task: BoardTask) => void
+  onDelete?: (taskId: string) => void
 }
 
-export function BoardCard({ task, index, onOpen }: BoardCardProps) {
+export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
   const priorityConf = PRIORITY_CONFIG[task.priority]
   const timeAgo = task.started_at
     ? formatDistanceToNow(new Date(task.started_at), { addSuffix: false })
@@ -32,7 +33,7 @@ export function BoardCard({ task, index, onOpen }: BoardCardProps) {
           {...provided.draggableProps}
           {...provided.dragHandleProps}
           className={cn(
-            'glass-card rounded-lg p-3 mb-2 cursor-grab active:cursor-grabbing transition-shadow',
+            'group glass-card rounded-lg p-3 mb-2 cursor-grab active:cursor-grabbing transition-shadow',
             'border-l-2',
             snapshot.isDragging && 'shadow-lg shadow-primary/10 ring-1 ring-primary/20',
             isFailed && 'border-l-destructive',
@@ -44,18 +45,33 @@ export function BoardCard({ task, index, onOpen }: BoardCardProps) {
           }}
           onClick={() => onOpen(task)}
         >
-          {/* Type badge */}
-          {task.type === 'recipe' ? (
-            <div className="flex items-center gap-1 mb-1">
-              <Workflow className="w-3 h-3 text-primary" />
-              <span className="text-[10px] font-medium text-primary uppercase tracking-wider">Recipe</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1 mb-1">
-              <ClipboardList className="w-3 h-3 text-muted-foreground" />
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Task</span>
-            </div>
-          )}
+          {/* Type badge + delete button */}
+          <div className="flex items-center justify-between mb-1">
+            {task.type === 'recipe' ? (
+              <div className="flex items-center gap-1">
+                <Workflow className="w-3 h-3 text-primary" />
+                <span className="text-[10px] font-medium text-primary uppercase tracking-wider">Recipe</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <ClipboardList className="w-3 h-3 text-muted-foreground" />
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Task</span>
+              </div>
+            )}
+
+            {onDelete && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete(task.id)
+                }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/10"
+                title="Delete task"
+              >
+                <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive" />
+              </button>
+            )}
+          </div>
 
           {/* Title */}
           <p className="text-sm font-medium line-clamp-2 mb-1">{task.name}</p>
