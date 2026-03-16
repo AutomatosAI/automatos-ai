@@ -191,32 +191,48 @@ class MissionDispatcher:
                 skipped_reason="active_task_exists",
             )
 
-        # --- Find ready tasks (pending with all deps met) ---
-        ready_tasks = DependencyResolver.get_ready_tasks(db, run_id)
-        if not ready_tasks:
-            return DispatchResult(
-                dispatched=False,
-                skipped_reason="no_ready_tasks",
+        # --- Find already-queued tasks first (e.g. from _queue_initial_tasks) ---
+        already_queued = (
+            db.query(OrchestrationTask)
+            .filter(
+                and_(
+                    OrchestrationTask.run_id == run_id,
+                    OrchestrationTask.state == TaskState.QUEUED.value,
+                )
             )
+            .order_by(OrchestrationTask.sequence_number)
+            .first()
+        )
 
-        # Pick first by sequence_number (already ordered by get_ready_tasks)
-        task = ready_tasks[0]
+        if already_queued:
+            task = already_queued
+        else:
+            # --- Find ready tasks (pending with all deps met) ---
+            ready_tasks = DependencyResolver.get_ready_tasks(db, run_id)
+            if not ready_tasks:
+                return DispatchResult(
+                    dispatched=False,
+                    skipped_reason="no_ready_tasks",
+                )
 
-        # --- Transition pending → queued ---
-        try:
-            transition_task(
-                db=db,
-                task=task,
-                new_state=TaskState.QUEUED,
-                actor_type=ActorType.COORDINATOR,
-                actor_id="dispatcher",
-            )
-        except ConflictError:
-            logger.warning("Conflict transitioning task %s to queued", task.id)
-            return DispatchResult(
-                dispatched=False,
-                skipped_reason="conflict_on_queue",
-            )
+            # Pick first by sequence_number (already ordered by get_ready_tasks)
+            task = ready_tasks[0]
+
+            # --- Transition pending → queued ---
+            try:
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.QUEUED,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="dispatcher",
+                )
+            except ConflictError:
+                logger.warning("Conflict transitioning task %s to queued", task.id)
+                return DispatchResult(
+                    dispatched=False,
+                    skipped_reason="conflict_on_queue",
+                )
 
         # --- Agent matching ---
         match_result: Optional[MatchResult] = AgentMatcher.match(
