@@ -125,7 +125,7 @@ class MissionDispatcher:
                     version_id = version_id + 1,
                     updated_at = NOW()
                 WHERE id = :task_id
-                  AND state = 'queued'
+                  AND state IN ('queued', 'retrying')
                   AND version_id = :expected_version
             """),
             {
