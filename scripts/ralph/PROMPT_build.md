@@ -6,26 +6,29 @@ Implement ONE task from the plan, validate, commit, exit.
 
 Study with subagents:
 - @CLAUDE.md (how to build/test)
-- @docs/PRDS/79-UNIFIED-MEMORY-CONTEXT-ARCHITECTURE.md (full requirements)
+- @docs/PRDS/81-MISSION-CLEANUP.md (full requirements)
 - @scripts/ralph/IMPLEMENTATION_PLAN.md (current state)
 - @scripts/ralph/prd.json (acceptance criteria for each story)
 
 ### Key References
 
-- **Existing Mem0Client**: `orchestrator/modules/memory/integrations/mem0_client.py` — HTTP wrapper, circuit breaker, retry
-- **SmartMemoryManager**: `orchestrator/consumers/chatbot/smart_memory.py` — primary chat memory path (854 lines)
-- **Redis client**: `orchestrator/core/redis/client.py` — get_redis_client() singleton
+- **ContextService**: `orchestrator/modules/context/service.py` — the unified context builder (PRD-80)
+- **Context sections**: `orchestrator/modules/context/sections/` — identity.py, skills.py, platform_actions.py, memory.py, etc.
+- **Context modes**: `orchestrator/modules/context/modes.py` — ContextMode enum + MODE_CONFIGS
+- **Context budget**: `orchestrator/modules/context/budget.py` — TokenBudgetManager + DEFAULT_BUDGETS
+- **Section registry**: `orchestrator/modules/context/sections/__init__.py` — SECTION_REGISTRY dict
+- **AgentFactory**: `orchestrator/modules/agents/factory/agent_factory.py` — _build_agent_system_prompt (to delete), execute_with_prompt, activate_agent
+- **Heartbeat service**: `orchestrator/services/heartbeat_service.py` — _orchestrator_tick_llm, _agent_tick
+- **Recipe executor**: `orchestrator/api/recipe_executor.py` — _execute_step, _build_system_prompt
+- **Execution manager**: `orchestrator/modules/agents/execution/execution_manager.py` — _execute_subtask
+- **Tool router**: `orchestrator/modules/tools/tool_router.py` — get_tools_for_agent, get_agent_tools
+- **Plugin context**: `orchestrator/core/services/plugin_context_service.py` — PluginContextService
+- **Composio models**: `orchestrator/core/models/composio_cache.py` — AgentAppAssignment, ComposioAppCache, ComposioActionCache
+- **Personality**: `orchestrator/consumers/chatbot/personality.py` — AutomatosPersonality, get_platform_skill
+- **Smart tool router**: `orchestrator/consumers/chatbot/smart_tool_router.py` — SmartToolRouter
+- **Chatbot tool router**: `orchestrator/consumers/chatbot/tool_router.py` — get_chat_tools re-export
+- **System audit**: `docs/audits/SYSTEM-AUDIT-2026-03.md` — findings F1-F4, D1-D4, R1-R3
 - **Config pattern**: `orchestrator/config.py` — ALL config constants live here, no os.getenv() elsewhere
-- **Platform tool pattern**: 3-file pattern — `platform_actions.py` (ActionDefinition), `platform_executor.py` (handler), `auto.py` (keywords)
-- **Memory module**: `orchestrator/modules/memory/` — operations/, storage/, types/, integrations/
-- **RecipeMemoryService**: `orchestrator/core/services/recipe_memory_service.py`
-- **Widget memory**: `orchestrator/api/widget_memory.py`
-- **Memory stats API**: `orchestrator/api/memory_stats.py`
-- **Platform executor**: `orchestrator/modules/tools/discovery/platform_executor.py` — 5 inline Mem0Client() calls
-- **Workflow memory**: `orchestrator/api/workflows.py` (~line 2075), `orchestrator/api/workflow_recipes.py` (~line 682)
-- **MemoryInjector (deprecated)**: `orchestrator/modules/memory/operations/injection.py`
-- **Mem0System adapter**: `orchestrator/modules/memory/storage/mem0_system.py`
-- **Alembic migrations**: `orchestrator/alembic/versions/`
 
 ### Check for completion
 
@@ -49,13 +52,12 @@ grep -c "^\- \[ \]" scripts/ralph/IMPLEMENTATION_PLAN.md || echo 0
 
 - NO hardcoded config values — all constants in `config.py`
 - NO os.getenv() outside of `config.py`
-- NO direct Mem0Client() instantiation outside UnifiedMemoryService
-- ALL memory user_ids built via MemoryNamespace helper — never raw string concatenation
+- Follow existing section patterns in `modules/context/sections/` — each section has a `render()` method
 - DB sessions acquired per-request from async pool — NEVER stored on singleton
-- Redis failures must NEVER break chat — always try/except with graceful degradation
-- Background writes (L2/L3 storage) use asyncio.create_task() — must not block TTFT
 - All methods include logging with exc_info=True on exceptions
 - Follow immutable data patterns — return new objects, don't mutate
+- BEFORE DELETING ANY CODE: grep EVERY file for callers. Remember the intent_classifier.py lesson — never delete code with live callers
+- When removing fields from dataclasses/NamedTuples: search ALL references across the entire codebase
 
 ### Validation
 
@@ -66,7 +68,13 @@ cd orchestrator && python -c "import api.main" 2>&1
 
 For new modules:
 ```bash
-cd orchestrator && python -c "from modules.memory.unified_memory_service import UnifiedMemoryService" 2>&1
+cd orchestrator && python -c "from modules.context.service import ContextService" 2>&1
+```
+
+For grep audits (Phase 4+):
+```bash
+grep -rn "_build_agent_system_prompt" orchestrator/ --include="*.py" | grep -v __pycache__
+grep -rn "refresh_agent_prompt" orchestrator/ --include="*.py" | grep -v __pycache__
 ```
 
 If validation cannot run (e.g., missing deps), verify via grep that all imports resolve.
@@ -85,7 +93,7 @@ If validation cannot run (e.g., missing deps), verify via grep that all imports 
 ## Phase 3: Commit & Exit
 
 ```bash
-git add -A && git commit -m "feat(memory): [description of what was implemented]"
+git add -A && git commit -m "feat(context): [description of what was implemented]"
 ```
 
 Check remaining:

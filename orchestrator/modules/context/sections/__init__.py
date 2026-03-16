@@ -7,12 +7,14 @@ instantiate sections from ``ModeConfig.sections`` lists.
 """
 
 from modules.context.sections.base import BaseSection, SectionContext
+from modules.context.sections.composio import ComposioSection
 from modules.context.sections.conversation import ConversationSection
 from modules.context.sections.custom import CustomSection
 from modules.context.sections.datetime_context import DatetimeContextSection
 from modules.context.sections.identity import IdentitySection
 from modules.context.sections.memory import MemorySection
 from modules.context.sections.platform_actions import PlatformActionsSection
+from modules.context.sections.plugins import PluginsSection
 from modules.context.sections.recipe_context import RecipeContextSection
 from modules.context.sections.skills import SkillsSection
 from modules.context.sections.task_context import TaskContextSection
@@ -22,6 +24,8 @@ from modules.context.sections.tools import ToolsSection
 SECTION_REGISTRY: dict[str, type[BaseSection]] = {
     "identity": IdentitySection,
     "skills": SkillsSection,
+    "composio": ComposioSection,
+    "plugins": PluginsSection,
     "platform_actions": PlatformActionsSection,
     "memory": MemorySection,
     "tools": ToolsSection,
@@ -35,12 +39,14 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
 __all__ = [
     "BaseSection",
     "SectionContext",
+    "ComposioSection",
     "ConversationSection",
     "CustomSection",
     "DatetimeContextSection",
     "IdentitySection",
     "MemorySection",
     "PlatformActionsSection",
+    "PluginsSection",
     "RecipeContextSection",
     "SkillsSection",
     "TaskContextSection",

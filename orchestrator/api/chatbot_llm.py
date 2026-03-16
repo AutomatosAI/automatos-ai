@@ -24,8 +24,8 @@ from core.llm import create_llm_manager
 from modules.tools.services.pandas_ai_service import get_pandasai_service
 from config import config
 
-# Import tools from consumers.chatbot (uses modules.tools - single source of truth)
-from consumers.chatbot import get_chatbot_tools, execute_tool as consumer_execute_tool
+# Import tools from modules.tools (single source of truth)
+from modules.tools.tool_router import get_tools_for_agent, execute_tool as consumer_execute_tool
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
@@ -244,9 +244,8 @@ async def query_database_tool(
         return {"success": False, "error": str(e)}
 
 
-# Tool definitions for LLM - from consumers.chatbot (uses modules.tools)
-# Single source of truth - no duplicate definitions
-TOOLS = get_chatbot_tools()
+# Tool definitions for LLM — single source of truth
+TOOLS = get_tools_for_agent()
 
 
 @router.get("/models")

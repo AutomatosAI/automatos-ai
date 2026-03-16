@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Ralph Wiggum Build Loop (Claude) — PRD-79 Unified Memory & Context Architecture
+# Ralph Wiggum Build Loop (Claude) — PRD-81 MISSION CLEANUP
 # Usage:
 #   ./loop.sh           # Build mode (default)
 #   ./loop.sh 10        # Max 10 iterations
@@ -144,7 +144,7 @@ handle_usage_limit() {
   CONSECUTIVE_FAILURES=0
 }
 
-echo -e "${GREEN}Ralph loop: BUILD mode — PRD-79 Unified Memory & Context Architecture${NC}"
+echo -e "${GREEN}Ralph loop: BUILD mode — PRD-81 MISSION CLEANUP${NC}"
 [[ $MAX_ITERATIONS -gt 0 ]] && echo "Max iterations: $MAX_ITERATIONS"
 echo "Press Ctrl+C to stop"
 echo "---"
@@ -219,7 +219,7 @@ while true; do
   if [[ "$RESULT_MSG" =~ RALPH_COMPLETE ]]; then
     echo ""
     echo -e "${GREEN}=== Ralph Complete ===${NC}"
-    echo -e "${GREEN}All 28 tasks finished!${NC}"
+    echo -e "${GREEN}All 14 tasks finished!${NC}"
     break
   fi
 

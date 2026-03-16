@@ -1,75 +1,76 @@
-# PRD-80: Unified Context Service — Implementation Plan
+# PRD-81: MISSION CLEANUP — Implementation Plan
 
-> **Scope**: Backend (orchestrator) | **Risk**: Medium (new module, then incremental migration) | **Branch**: `ralph/80-unified-context-service`
+> **Scope**: Backend (orchestrator) | **Risk**: Medium (cache removal changes all agent execution paths) | **Branch**: `ralph/81-mission-cleanup`
 
 ## Summary
 
-Replace 9 fragmented prompt-building code paths with a single `ContextService`. Composable sections (identity, skills, platform_actions, memory, tools, task_context, recipe_context, datetime, conversation, custom), token budget manager with priority-based trimming, mode-based declarative assembly.
+Complete the half-finished PRD-79 and PRD-80 unification. Kill the legacy `_build_agent_system_prompt()` cache that bypasses ContextService, add ComposioSection + PluginsSection, enable memory for task/recipe paths, and clean up ~270 lines of dead prompt-building code. After this, ALL 6 agent-facing code paths use ContextService exclusively.
 
 ## Reference
 
-- **PRD**: `docs/PRDS/80-UNIFIED-CONTEXT-SERVICE.md`
-- **Agent Factory**: `orchestrator/modules/agents/factory/agent_factory.py` (main execution path)
-- **Smart Orchestrator**: `orchestrator/consumers/chatbot/smart_orchestrator.py` (chatbot path)
-- **Personality**: `orchestrator/consumers/chatbot/personality.py` (get_happy_system_prompt)
-- **Smart Tool Router**: `orchestrator/consumers/chatbot/smart_tool_router.py` (intent filtering)
-- **Tool Router**: `orchestrator/modules/tools/discovery/tool_router.py` (get_tools_for_agent)
-- **Action Registry**: `orchestrator/modules/tools/discovery/action_registry.py` (build_prompt_summary, to_dispatcher_schema)
-- **Heartbeat Service**: `orchestrator/services/heartbeat_service.py` (inline prompt)
-- **Recipe Executor**: `orchestrator/api/recipe_executor.py` (recipe prompts)
-- **Execution Manager**: `orchestrator/modules/agents/execution/execution_manager.py` (thin wrapper)
-- **Universal Router**: `orchestrator/core/routing/engine.py` (tier prompts)
-- **Orchestrator Stages**: `orchestrator/modules/orchestrator/stages/*.py` (per-stage prompts)
-- **NL2SQL**: `orchestrator/modules/nl2sql/service.py` (schema prompts)
-- **Smart Memory**: `orchestrator/consumers/chatbot/smart_memory.py` (retrieve_memories)
-- **Config**: `orchestrator/config.py` (all constants here)
+- **PRD**: `docs/PRDS/81-MISSION-CLEANUP.md`
+- **System Audit**: `docs/audits/SYSTEM-AUDIT-2026-03.md` (findings F1-F4, D1-D4, R1-R3)
+- **ContextService**: `orchestrator/modules/context/service.py`
+- **Context sections**: `orchestrator/modules/context/sections/` (identity, skills, platform_actions, memory, tools, etc.)
+- **Context modes**: `orchestrator/modules/context/modes.py` (ContextMode enum + MODE_CONFIGS)
+- **Context budget**: `orchestrator/modules/context/budget.py` (TokenBudgetManager + DEFAULT_BUDGETS)
+- **Section registry**: `orchestrator/modules/context/sections/__init__.py` (SECTION_REGISTRY)
+- **Agent Factory**: `orchestrator/modules/agents/factory/agent_factory.py` (_build_agent_system_prompt, execute_with_prompt, activate_agent)
+- **Heartbeat Service**: `orchestrator/services/heartbeat_service.py` (_orchestrator_tick_llm, _agent_tick)
+- **Recipe Executor**: `orchestrator/api/recipe_executor.py` (_execute_step)
+- **Execution Manager**: `orchestrator/modules/agents/execution/execution_manager.py` (_execute_subtask, professional_system_prompt)
+- **Tool Router**: `orchestrator/modules/tools/tool_router.py` (get_tools_for_agent, get_agent_tools)
+- **Plugin Context**: `orchestrator/core/services/plugin_context_service.py`
+- **Composio Models**: `orchestrator/core/models/composio_cache.py` (AgentAppAssignment, ComposioAppCache, ComposioActionCache)
+- **Personality**: `orchestrator/consumers/chatbot/personality.py` (AutomatosPersonality, get_platform_skill)
+- **Smart Tool Router**: `orchestrator/consumers/chatbot/smart_tool_router.py`
+- **Chatbot Tool Router**: `orchestrator/consumers/chatbot/tool_router.py` (get_chat_tools re-export)
+- **Channel Adapter**: `orchestrator/channels/base.py` (delegates to factory.execute_with_prompt)
+- **Config**: `orchestrator/config.py`
 
 ## Tasks
 
-### Phase 1: Build the Module (No Breaking Changes)
+### Phase 1: Add Missing Sections + Mode Configs
 
-- [x] **US-001: Create package skeleton** — result.py (ContextResult frozen dataclass), modes.py (ContextMode enum + ModeConfig + MODE_CONFIGS), estimator.py (TokenEstimator), sections/__init__.py, __init__.py
-- [x] **US-002: Create BaseSection ABC** — sections/base.py with SectionContext dataclass, render() ABC, estimate_tokens(), truncate()
-- [x] **US-003: Create TokenBudgetManager** — budget.py with TokenBudget, RenderedSection, allocate() with priority-based trimming, DEFAULT_BUDGETS per mode
-- [x] **US-004: Create IdentitySection** — Agent name, role, persona, personality. Replaces get_happy_system_prompt() identity + _build_agent_system_prompt() opening
-- [x] **US-005: Create SkillsSection** — SKILL.md content from agent_skills → skills table. Replaces skill injection in agent_factory
-- [x] **US-006: Create PlatformActionsSection** — Wraps ActionRegistry.build_prompt_summary(). Replaces inline injection in 3 files
-- [x] **US-007: Create MemorySection** — Wraps SmartMemoryManager.retrieve_memories() + daily logs. Replaces memory injection in smart_orchestrator + agent_factory
-- [x] **US-008: Create ToolsSection** — Unified tool loading with 4 strategies (FULL/FILTERED/DISPATCHER_ONLY/NONE). Replaces get_tools_for_agent + smart_tool_router.route + inline to_dispatcher_schema
-- [x] **US-009: Create TaskContextSection** — Task description, status, priority, board context
-- [x] **US-010: Create RecipeContextSection** — Recipe step name, instructions, previous results
-- [x] **US-011: Create DatetimeContext + Conversation + Custom sections** — Three lightweight sections to complete the library. SECTION_REGISTRY (10 entries) exported from sections/__init__.py, all MODE_CONFIGS validated against it
-- [x] **US-012: Create ContextService.build_context()** — Main orchestrator: section composition, parallel rendering, budget allocation, tool loading, message formatting → ContextResult
+- [x] **US-001: Create ComposioSection and PluginsSection** — Port Composio app rendering from agent_factory.py lines 1247-1278 into modules/context/sections/composio.py. Port plugin tier1+tier2 rendering from lines 1222-1243 into modules/context/sections/plugins.py. Both follow existing section patterns (render() method, graceful error handling). Also registered both in SECTION_REGISTRY (__init__.py)
+- [x] **US-002: Register new sections and update mode configs** — Split ContextMode.HEARTBEAT into HEARTBEAT_ORCHESTRATOR (dispatcher_only, 8K max) and HEARTBEAT_AGENT (full tools + composio + plugins, 128K max). Added composio/plugins to CHATBOT, TASK_EXECUTION, RECIPE, HEARTBEAT_AGENT modes. Added memory to RECIPE. Updated DEFAULT_BUDGETS. Updated all tests (test_modes, test_service, test_budget_manager). SECTION_REGISTRY already had composio+plugins from US-001
+- [x] **US-003: Update heartbeat_service.py** — Changed ContextMode.HEARTBEAT to ContextMode.HEARTBEAT_ORCHESTRATOR (done as part of US-002, single reference at line 440)
 
-### Phase 2: Migrate Callers (One at a Time, Least Risk First)
+### Phase 2: Kill the Cache — ContextService Only Path
 
-- [x] **US-013: Migrate Heartbeat Service** — Replaced inline f-string prompt + to_dispatcher_schema() in _orchestrator_tick_llm with ContextService(HEARTBEAT). Added task_context to HEARTBEAT mode sections for heartbeat-specific instructions. Uses SimpleNamespace pseudo-agent for orchestrator identity. Single db session for both context building and tool execution
-- [x] **US-014: Migrate Agent Factory** — In execute_with_prompt(), when no explicit/cached system_prompt exists, uses ContextService(TASK_EXECUTION) for both prompt and tools. When caller provides system_prompt (execution_manager, channels), keeps existing behavior. _build_agent_system_prompt() NOT deleted (Phase 3). Composio hints, tool loop, retries all preserved unchanged
-- [x] **US-015: Migrate Recipe Executor** — Replaced _build_system_prompt() + get_chat_tools() in _execute_step() with ContextService(RECIPE). Added recipe_name and total_steps params to _execute_step(), builds recipe_step dict with previous_output from scratchpad. Base tools from ContextService, Composio overlay + scratchpad tools preserved. _build_system_prompt() is now dead code (Phase 3 cleanup). Scope instruction, memories, input data kept as additional system messages
-- [x] **US-016: Migrate Execution Manager** — Removed _build_agent_system_prompt() call and explicit system_prompt pass from _execute_with_retries(). Now omits system_prompt → factory uses ContextService(TASK_EXECUTION) for identity, skills, platform actions, memory, tools. Professional instructions + workspace guidance moved to user prompt prefix. Skill tool schemas no longer manually extracted (ContextService handles tool loading)
-- [x] **US-017: Migrate Smart Orchestrator (Chatbot)** — Replaced prepare_request() prompt/memory/tool assembly with ContextService(CHATBOT). Intent classification stays separate for response routing. Enhanced IdentitySection with full chatbot personality via AutomatosPersonality (base_system_prompt + platform_skill + tool_guidance + action_response + self_learning) when personality=True. Enhanced MemorySection with Context Router (PRD-79) support, skip_memory kwarg, and session hydration from Redis. Enhanced ToolsSection FILTERED strategy to always include platform_* tools (PRD-64 self-awareness). Added db_session passthrough: service.py → SmartChatIntegration → SmartChatOrchestrator → ContextService. Loads full Agent record from DB for SkillsSection. _build_compat_memory_result() provides backward compat for CTO override + SSE events. Removed imports: personality.py, smart_tool_router.py, ToolRoutingResult (all handled by ContextService sections). store_exchange() unchanged
-- [x] **US-018: Migrate Universal Router** — In _classify_with_llm() (Tier 3), replaced bare user-message LLM call with ContextService(ROUTER) system prompt (identity + datetime) + classification prompt as user message. SimpleNamespace pseudo-agent "Universal Router". Classification prompt, PromptRegistry fallback, agent descriptions, semantic hints, response parsing, caching all preserved unchanged. Only Tier 3 uses LLM; Tiers 0-2c are rule/cache/keyword-based with no prompt changes needed
-- [x] **US-019: Migrate Orchestrator Stages + NL2SQL** — Migrated 4 orchestrator stages with LLM calls (complexity_analyzer, task_decomposer, agent_negotiation, quality_assessor) to use ContextService(ORCHESTRATOR_STAGE) for system prompts. Each uses SimpleNamespace pseudo-agent with stage-specific role. Task decomposer preserves PromptRegistry override via task_description kwarg. agent_selector, result_aggregator, context_engineering, memory_integrator, prompt_optimization have no LLM calls — no migration needed. NL2SQL: added optional system_prompt param to NaturalLanguageToSQLService.generate_sql(); main async caller (DatabaseKnowledgeService.query_database) builds ContextService(NL2SQL) system prompt and passes it. Sync callers (benchmarks, intelligence/agent) unaffected (system_prompt defaults to None)
+- [x] **US-004: Remove system_prompt cache + delete legacy methods** — Removed system_prompt and skill_tool_schemas fields from AgentRuntime. Deleted _build_agent_system_prompt() (~176 lines). Deleted refresh_agent_prompt() (~18 lines). Updated activate_agent() to skip prompt building. Removed cached prompt branch from execute_with_prompt() (3-way → 2-way: explicit > ContextService). Removed skill_tool_schemas_from_prompt variable. Fixed chatbot/service.py _load_agent_context() (removed dead cache branch). Removed orphaned imports (get_skill_loader, ComposioActionCache). Updated comment in agent_endpoints.py. All 114 context tests pass
+- [x] **US-005: Make execute_with_prompt() always use ContextService** — Added context_mode: Optional[str] parameter to execute_with_prompt(). ContextService path uses `context_mode or ContextMode.TASK_EXECUTION` instead of hardcoded mode. Cached prompt branch already removed in US-004. context_result.tools already used (line 789). skill_tool_schemas_from_prompt already removed. Note: context_result.tool_choice exists but generate_response() interface doesn't accept tool_choice — documented as discovered issue for future LLM interface enhancement. All 114 context tests pass
+- [x] **US-006: Migrate heartbeat agent tick + verify channel adapters** — Passed context_mode=ContextMode.HEARTBEAT_AGENT to execute_with_prompt() in _agent_tick(). Removed use_memory=False (memory exclusion handled by HEARTBEAT_AGENT mode not including "memory" section; short-term conversation memory is empty for heartbeat agents anyway). Verified channels/base.py does NOT pass system_prompt= — will auto-use ContextService TASK_EXECUTION mode after cache removal
+- [x] **US-006b: Migrate execution_manager.py to ContextService** — ALREADY DONE (verified): No _build_agent_system_prompt() calls remain. No professional_system_prompt block exists. execute_with_prompt() called at line 869 without system_prompt= param, so ContextService TASK_EXECUTION mode handles identity/skills/tools/memory. Execution-specific guidance (professional instructions, workspace rules, conversion tool hints) lives in user prompt prefix (lines 822-865). Note: MemoryPromptInjector still used at line 550 to inject pre-fetched workflow memories into user prompt — potentially redundant with ContextService MemorySection (tracked for US-007)
 
-### Phase 3: Cleanup
+### Phase 3: Memory Gap Verification + Daily Logs
 
-- [x] **US-020: Dead code cleanup** — Deleted get_happy_system_prompt() + build_complete_system_prompt() from personality.py (zero callers — IdentitySection replaces). Deleted _build_system_prompt() from recipe_executor.py (zero callers — ContextService RECIPE mode replaces). KEPT: _build_agent_system_prompt in agent_factory.py (still called by activate_agent + refresh_agent_prompt). KEPT: smart_tool_router.py (still imported by ContextService ToolsSection for FILTERED strategy). KEPT: get_tools_for_agent (still used by service.py, agent_factory.py, ToolsSection). KEPT: build_prompt_summary (still used by PlatformActionsSection). All confirmed via grep before action
+- [x] **US-007: Verify and fix memory + daily logs** — Verified: TASK_EXECUTION and RECIPE modes both include "memory" in sections (lines 48 and 76 of modes.py). MemorySection renders daily logs via _retrieve_daily_logs() for all modes (uses workspace_id only, no chatbot dependency). _extract_query() falls back to task_description for non-chat modes. Added HEARTBEAT_AGENT memory exclusion comment to modes.py (PRD-81 Task 3.5/5.5). Recipe executor Mem0 injection (lines 206-217) is COMPLEMENTARY — uses RecipeMemoryService (recipe-scoped: past run learnings) vs MemorySection (workspace-scoped: user memories). Kept as-is. Execution manager MemoryPromptInjector (line 550) injects pre-fetched workflow-scoped memories into user prompt — different scope from MemorySection's live search but potential for duplicate content (tracked as DI-002)
 
-### Phase 4: Tests
+### Phase 4: Dead Code Cleanup
 
-- [x] **US-021: Unit tests** — 71 tests across 5 files in tests/test_context/: test_estimator.py (fast/precise estimates, empty strings, realistic prompts), test_budget_manager.py (TokenBudget computed property + frozen, RenderedSection, budget allocation within/over budget, priority-based dropping, never-drop priority 1-2, order preservation, DEFAULT_BUDGETS coverage), test_identity_section.py (name+role+workspace, description, custom/DB persona, None agent fallback, broken persona exception), test_memory_section.py (skip_memory, context router vs smart memory fallback, kwargs stash, exception resilience, _extract_query), test_modes.py (ContextMode enum, ModeConfig frozen, MODE_CONFIGS completeness, section names in SECTION_REGISTRY, tool_loading validity). All external deps mocked
-- [x] **US-022: Integration tests** — 40 tests in test_service.py covering all 7 modes: CHATBOT (identity, memory, platform actions, tools, messages, skills, memory_context SSE), TASK_EXECUTION (identity, task_description, tools, metadata), HEARTBEAT (token budget <8000, dispatcher-only tools, no messages, datetime), RECIPE (step info, previous output, full tools), ROUTER/ORCHESTRATOR_STAGE/NL2SQL (no tools, minimal sections). Failure resilience: section render failure skipped (skills raises → others still render), tool loading failure caught (internal _load_dispatcher_only raises → ToolsSection returns empty), memory failure caught (MemorySection.render raises → build continues). ContextResult immutability (frozen dataclass, FrozenInstanceError on mutation). Metadata: preparation_time_ms > 0, token_estimate positive, token_budget matches mode defaults (ROUTER=123904, HEARTBEAT=5952 with max_tokens override), sections_included/trimmed accurate. Edge cases: None agent, no messages, empty task_description, no db_session. All external deps mocked via patch.object on section classes (_build, render, load_tools)
+- [x] **US-008: Move legacy prompt instructions to sections** — Added dependency context instructions (DEPENDENCY CONTEXT handling + document writing guidance) to TaskContextSection._build() after task metadata. Added skill tool usage instructions to SkillsSection._build() — extracts tool names from skills' tools_schema JSONB field via new _extract_skill_tool_names() static method, appends "Using Your Skill Tools" block when tools exist. Added response formatting guidance to IdentitySection._build() (non-chatbot path only) — synthesize API results into prose, use bullet points. Bumped max_tokens: TaskContextSection 1000→1500, IdentitySection 500→600. Fixed test_identity_section.py max_tokens assertion. All 114 context tests pass
+- [x] **US-009: Orphaned imports + grep audit + test fixes** — Verified: PluginContextService, get_skill_loader, ComposioActionCache already removed in US-004. AgentAppAssignment + ComposioAppCache still live (used by _inject_composio_hints). All 5 grep audits pass with zero results: _build_agent_system_prompt (cleaned comment refs too), refresh_agent_prompt, professional_system_prompt, build_prompt_summary (non-ContextService), get_happy_system_prompt (non-ContextService). No broken tests found. Cleaned legacy method name references from docstrings/comments in identity.py, skills.py, task_context.py. All 114 context tests pass
+
+### Phase 5: Tech Debt
+
+- [x] **US-010: Consolidate tool loading aliases** — Deleted get_agent_tools() wrapper + _session_scope() from tool_router.py. Removed get_chat_tools/get_chatbot_tools re-exports from consumers/chatbot/tool_router.py. Removed get_tools()/CHAT_TOOLS lazy cache from consumers/chatbot/__init__.py. Removed get_chat_tools from consumers/__init__.py. Updated chatbot_llm.py to import get_tools_for_agent directly from modules.tools.tool_router. Removed get_agent_tools from modules/tools/__init__.py exports. Added SmartToolRouter future-plan comment (PRD-81 Task 5.3). Cleaned up stale docstring in get_tools_for_agent(). Note: mcp_executor.py:344 and composio_analytics.py:306 have their own get_agent_tools methods (different signatures, unrelated). All 114 context tests pass
+- [x] **US-011: Personality decisions + get_platform_skill() deletion** — get_platform_skill() NOT deleted: has 1 active caller (identity.py:157 in _build_chatbot_identity()). Documented personality=True/False rationale on every mode in modes.py. Key decision: personality stays CHATBOT-only because get_base_system_prompt() is chatbot-specific (greetings, conversation counts, "never show code" rules — inappropriate for task/heartbeat agents). HEARTBEAT_AGENT daily logs exclusion comment already present from US-007. All 114 context tests pass
+- [x] **US-012: Agent resolution utility** — Created get_agent_with_context() in modules/agents/queries.py with joinedload(skills, persona). Replaced bare db.query(Agent) in 3 ContextService paths: execute_with_prompt() (agent_factory.py:743), activate_agent() (agent_factory.py:579), _load_agent() (smart_orchestrator.py:264). Left non-ContextService paths alone (get_agent_status, admin endpoints, bulk queries). execution_manager.py already had joinedload(Agent.skills) at line 675. recipe_executor.py receives agent as param from bulk query — different pattern, left as-is. All 114 context tests pass
+- [x] **US-013: Composio hints evaluation + datetime cleanup** — Evaluated: _inject_composio_hints() and _inject_composio_recipe_hints() are COMPLEMENTARY to ComposioSection, NOT redundant. ComposioSection renders static app-level descriptions in system prompt. Hint methods do dynamic per-request work: semantic action matching via ComposioHintService + constraining composio_execute tool schema enum with matched actions. Both kept with detailed comment block (PRD-81 Task 5.7). Removed inline strftime Time: line from _agent_tick() prompt (line 690) — datetime now provided by DatetimeContextSection in HEARTBEAT_AGENT mode. Remaining strftime in heartbeat_service.py is in _orchestrator_tick (line 451, different method) and daily summary (lines 834/880, date formatting). All 114 context tests pass
 
 ---
 
 ## Discovered Issues
 
-_(populated during implementation)_
+- **DI-001: LLM interface missing tool_choice support** — `ContextResult.tool_choice` exists (default "auto") but `LLMManager.generate_response()` and all LLM client `generate_response()` methods only accept `messages` and `tools` — no `tool_choice` param. Adding it would require changes to the base class + all 8 client implementations. Low priority since "auto" is the default everywhere.
+- **DI-002: Execution manager MemoryPromptInjector may duplicate ContextService MemorySection** — `execution_manager.py:550` uses `MemoryPromptInjector.inject_memory_into_prompt()` to inject pre-fetched workflow memories into user prompt. Now that ContextService TASK_EXECUTION mode includes MemorySection (live Mem0 search in system prompt), agents may receive overlapping memory content from both paths. The scopes differ (workflow-planned vs live-search) but content could overlap. Future cleanup: either remove MemoryPromptInjector and rely on MemorySection, or add dedup logic.
 
 ## Notes
 
-- 22 stories total
-- Phase 1 creates all new code without touching existing paths — safe to ship at any point
-- Phase 2 migrates one caller at a time — can stop mid-phase
-- Phase 3 only after ALL callers migrated and verified
-- Each story follows acceptance criteria in prd.json exactly
+- 14 stories total across 5 phases
+- Phase 2 is the riskiest — changes prompt for every task-executing agent
+- US-006b is the key addition — execution_manager.py has its own prompt-building that would break when _build_agent_system_prompt() is deleted in US-004
+- PRD-80 US-016 may have partially migrated execution_manager already — Ralph should check before doing work
+- BEFORE DELETING CODE: always grep for callers (learn from intent_classifier.py deletion mistake)
+- PRD-80 is complete (all 22 stories done) — this PRD finishes what PRD-80 left behind

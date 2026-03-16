@@ -402,7 +402,7 @@ class TestBuildContextHeartbeat:
         """Heartbeat mode budget enforces small token usage."""
         svc = ContextService(mock_db)
         result = await svc.build_context(
-            mode=ContextMode.HEARTBEAT,
+            mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
             agent=agent,
             workspace_id="ws_test",
         )
@@ -416,7 +416,7 @@ class TestBuildContextHeartbeat:
         """Heartbeat mode loads only the platform_execute dispatcher."""
         svc = ContextService(mock_db)
         result = await svc.build_context(
-            mode=ContextMode.HEARTBEAT,
+            mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
             agent=agent,
             workspace_id="ws_test",
         )
@@ -430,7 +430,7 @@ class TestBuildContextHeartbeat:
         """Heartbeat mode has no conversation messages."""
         svc = ContextService(mock_db)
         result = await svc.build_context(
-            mode=ContextMode.HEARTBEAT,
+            mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
             agent=agent,
             workspace_id="ws_test",
         )
@@ -442,7 +442,7 @@ class TestBuildContextHeartbeat:
     ):
         svc = ContextService(mock_db)
         result = await svc.build_context(
-            mode=ContextMode.HEARTBEAT,
+            mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
             agent=agent,
             workspace_id="ws_test",
         )
@@ -455,7 +455,7 @@ class TestBuildContextHeartbeat:
         """Heartbeat includes datetime context."""
         svc = ContextService(mock_db)
         result = await svc.build_context(
-            mode=ContextMode.HEARTBEAT,
+            mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
             agent=agent,
             workspace_id="ws_test",
         )
@@ -613,7 +613,7 @@ class TestSectionFailureResilience:
         ):
             svc = ContextService(mock_db)
             result = await svc.build_context(
-                mode=ContextMode.HEARTBEAT,
+                mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
                 agent=agent,
                 workspace_id="ws_test",
             )
@@ -641,7 +641,7 @@ class TestSectionFailureResilience:
         ):
             svc = ContextService(mock_db)
             result = await svc.build_context(
-                mode=ContextMode.HEARTBEAT,
+                mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
                 agent=agent,
                 workspace_id="ws_test",
             )
@@ -754,7 +754,7 @@ class TestMetadataFields:
         """HEARTBEAT has max_tokens=8000 override."""
         svc = ContextService(mock_db)
         result = await svc.build_context(
-            mode=ContextMode.HEARTBEAT,
+            mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
             agent=agent,
             workspace_id="ws_test",
         )
@@ -769,7 +769,7 @@ class TestMetadataFields:
         """sections_included lists all sections that rendered non-empty content."""
         svc = ContextService(mock_db)
         result = await svc.build_context(
-            mode=ContextMode.HEARTBEAT,
+            mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
             agent=agent,
             workspace_id="ws_test",
         )

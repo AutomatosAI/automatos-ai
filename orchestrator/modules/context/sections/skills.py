@@ -1,9 +1,8 @@
 """
 SkillsSection — SKILL.md content for the agent's assigned skill.
 
-Priority 4. Replaces skill injection in agent_factory.py's
-_build_agent_system_prompt() and ensures heartbeat/recipe paths
-also get consistent skill content.
+Priority 4. Renders the agent's assigned SKILL.md content for all
+execution paths (chatbot, task, heartbeat, recipe).
 """
 
 from __future__ import annotations
@@ -66,9 +65,35 @@ class SkillsSection(BaseSection):
         # Join multiple skills with a separator
         combined = "\n\n---\n\n".join(parts) if len(parts) > 1 else parts[0]
 
+        # Skill tool usage instructions
+        skill_tool_names = self._extract_skill_tool_names(active_skills)
+        if skill_tool_names:
+            combined += (
+                "\n\n## Using Your Skill Tools\n"
+                f"You have access to: {', '.join(skill_tool_names)}\n"
+                "When your task requires capabilities provided by these tools, "
+                "you MUST use them via function calling. "
+                "Analyze your task, check if any tools match, and CALL them — "
+                "do not just describe what you would do."
+            )
+
         if self.max_tokens:
             combined = self.truncate(combined, self.max_tokens)
         return combined
+
+    @staticmethod
+    def _extract_skill_tool_names(skills) -> list[str]:
+        """Extract tool names from skill tools_schema fields."""
+        names: list[str] = []
+        for skill in skills:
+            schema = getattr(skill, "tools_schema", None)
+            if not schema or not isinstance(schema, dict):
+                continue
+            for tool_def in schema.get("tools", []):
+                name = tool_def.get("name")
+                if name:
+                    names.append(name)
+        return names
 
     @staticmethod
     def _get_skill_content(skill, ctx: SectionContext) -> str:

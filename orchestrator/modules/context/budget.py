@@ -160,9 +160,14 @@ DEFAULT_BUDGETS: dict[ContextMode, TokenBudget] = {
         reserved_for_response=4_096,
         reserved_for_messages=20_000,
     ),
-    ContextMode.HEARTBEAT: TokenBudget(
+    ContextMode.HEARTBEAT_ORCHESTRATOR: TokenBudget(
         total=128_000,
         reserved_for_response=2_048,
+        reserved_for_messages=0,
+    ),
+    ContextMode.HEARTBEAT_AGENT: TokenBudget(
+        total=128_000,
+        reserved_for_response=4_096,
         reserved_for_messages=0,
     ),
     ContextMode.RECIPE: TokenBudget(

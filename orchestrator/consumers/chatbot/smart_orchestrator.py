@@ -260,10 +260,8 @@ class SmartChatOrchestrator:
         """
         if self._db_session and self.agent_id:
             try:
-                from core.models import Agent
-                agent = self._db_session.query(Agent).filter(
-                    Agent.id == self.agent_id
-                ).first()
+                from modules.agents.queries import get_agent_with_context
+                agent = get_agent_with_context(self._db_session, self.agent_id)
                 if agent:
                     return agent
             except Exception:

@@ -437,7 +437,7 @@ class HeartbeatService:
         db = SessionLocal()
         try:
             context = await ContextService(db).build_context(
-                mode=ContextMode.HEARTBEAT,
+                mode=ContextMode.HEARTBEAT_ORCHESTRATOR,
                 agent=orchestrator_agent,
                 workspace_id=workspace_id,
                 task_description=task_description,
@@ -687,7 +687,6 @@ class HeartbeatService:
 
                 prompt = (
                     f"Scheduled heartbeat check. {heartbeat_prompt}\n"
-                    f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n"
                     "Use your tools to check. Reply with a SHORT plain-text summary (max 500 chars), no markdown.\n"
                     + (
                         "You may take action if needed."
@@ -701,12 +700,14 @@ class HeartbeatService:
                 try:
                     from modules.agents.factory.agent_factory import AgentFactory
 
+                    from modules.context.modes import ContextMode
+
                     factory = AgentFactory(db_session=db)
                     exec_result = await factory.execute_with_prompt(
                         agent=agent_id,
                         prompt=prompt,
                         context={"source": "heartbeat", "workspace_id": workspace_id},
-                        use_memory=False,  # keep context lean
+                        context_mode=ContextMode.HEARTBEAT_AGENT,
                     )
 
                     # Extract the actual text from nested result
