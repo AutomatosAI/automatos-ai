@@ -254,7 +254,7 @@ def sync_board_status(
 
     # Store task output as result when task completes
     if task_state == TaskState.VERIFIED and task.output:
-        board_task.result = task.output[:4000]
+        board_task.result = task.output
 
     # Store failure info
     if task_state in (TaskState.FAILED, TaskState.STALLED):

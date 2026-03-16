@@ -385,7 +385,7 @@ def _launch_task_execution(
 
             task = db.query(BoardTask).get(task_id)
             if task and task.status == "in_progress":
-                task.result = str(llm_text)[:4000] if llm_text else None
+                task.result = str(llm_text) if llm_text else None
                 task.status = "done" if review_mode == "auto" else "review"
                 task.completed_at = datetime.now(timezone.utc)
                 db.commit()

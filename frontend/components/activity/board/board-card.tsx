@@ -1,7 +1,7 @@
 'use client'
 
 import { Draggable } from '@hello-pangea/dnd'
-import { Bot, AlertCircle, Workflow, ClipboardList, Trash2 } from 'lucide-react'
+import { Bot, AlertCircle, Workflow, ClipboardList, Trash2, FolderKanban } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow } from 'date-fns'
 import type { BoardTask } from '@/types/board'
@@ -51,6 +51,13 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
               <div className="flex items-center gap-1">
                 <Workflow className="w-3 h-3 text-primary" />
                 <span className="text-[10px] font-medium text-primary uppercase tracking-wider">Recipe</span>
+              </div>
+            ) : task.type === 'project' ? (
+              <div className="flex items-center gap-1">
+                <FolderKanban className="w-3 h-3 text-[hsl(var(--info))]" />
+                <span className="text-[10px] font-medium text-[hsl(var(--info))] uppercase tracking-wider">
+                  Project{task.project_id ? ` ${task.project_id}` : ''}
+                </span>
               </div>
             ) : (
               <div className="flex items-center gap-1">
