@@ -1,14 +1,17 @@
 """
-Missions REST API — PRD-82A Sequential Mission Coordinator
-==========================================================
+Missions REST API — PRD-82A/82B Sequential Mission Coordinator
+===============================================================
 
-CRUD + lifecycle endpoints for missions. API uses "mission" terminology;
-DB/backend uses "orchestration" (PRD-82A Section 10).
+CRUD + lifecycle + telemetry endpoints for missions. API uses "mission"
+terminology; DB/backend uses "orchestration" (PRD-82A Section 10).
 
-9 endpoints:
+13 endpoints:
   POST   /api/missions           — create mission
   GET    /api/missions           — list missions (paginated, filterable)
+  GET    /api/missions/stats     — aggregate mission stats (PRD-82B US-004)
   GET    /api/missions/{id}      — get mission detail
+  GET    /api/missions/{id}/events  — paginated events (PRD-82B US-004)
+  GET    /api/missions/{id}/cost    — token/cost breakdown (PRD-82B US-004)
   POST   /api/missions/{id}/approve  — approve plan
   POST   /api/missions/{id}/reject   — reject plan
   POST   /api/missions/{id}/review   — submit human review
@@ -16,11 +19,14 @@ DB/backend uses "orchestration" (PRD-82A Section 10).
   POST   /api/missions/{id}/resume   — resume mission
   POST   /api/missions/{id}/cancel   — cancel mission
 
-Source: PRD-82A Section 12, Phase 5 (US-021)
+Agent telemetry:
+  GET    /api/agents/{agent_id}/mission-history  — agent mission perf (PRD-82B US-004)
+
+Source: PRD-82A Section 12, PRD-82B US-004
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -29,15 +35,18 @@ from pydantic import BaseModel, Field, validator
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
+from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
+from core.models.core import Agent
 from core.models.orchestration import (
     OrchestrationEvent,
     OrchestrationRun,
     OrchestrationTask,
 )
 from core.models.orchestration_enums import (
+    EventType,
     RunState,
     TaskState,
     TERMINAL_RUN_STATES,
@@ -181,6 +190,59 @@ class MissionListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ---------------------------------------------------------------------------
+# Telemetry response models (PRD-82B US-004)
+# ---------------------------------------------------------------------------
+
+
+class PaginatedEventsResponse(BaseModel):
+    events: List[EventResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class TaskCostBreakdown(BaseModel):
+    task_id: str
+    title: str
+    tokens_used: int
+
+
+class MissionCostResponse(BaseModel):
+    mission_id: str
+    total_tokens: int
+    estimated_cost: float
+    cost_per_1k_tokens: float
+    tasks: List[TaskCostBreakdown]
+
+
+class TopAgentStats(BaseModel):
+    agent_id: int
+    agent_name: str
+    tasks_completed: int
+    avg_tokens_per_task: float
+
+
+class MissionStatsResponse(BaseModel):
+    total_missions: int
+    success_rate: float
+    avg_duration_minutes: Optional[float] = None
+    avg_tokens_used: float
+    avg_tasks_per_mission: float
+    top_agents: List[TopAgentStats]
+    common_failure_reasons: Dict[str, int]
+    period: str
+
+
+class AgentMissionHistoryResponse(BaseModel):
+    agent_id: int
+    agent_name: str
+    tasks_completed: int
+    avg_tokens_per_task: float
+    failure_rate: float
+    recent_missions: List[Dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +417,157 @@ async def list_missions(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/stats")
+async def get_mission_stats(
+    period: str = Query("30d", pattern="^(7d|30d|90d|all)$", description="Stats period"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Aggregate mission statistics for the current workspace."""
+    try:
+        # Determine date cutoff
+        period_days = {"7d": 7, "30d": 30, "90d": 90, "all": None}
+        days = period_days.get(period)
+
+        base_filter = [OrchestrationRun.workspace_id == ctx.workspace_id]
+        if days is not None:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            base_filter.append(OrchestrationRun.created_at >= cutoff)
+
+        # Total missions
+        total_missions = (
+            db.query(func.count(OrchestrationRun.id))
+            .filter(*base_filter)
+            .scalar()
+        ) or 0
+
+        # Success rate
+        completed_count = (
+            db.query(func.count(OrchestrationRun.id))
+            .filter(*base_filter, OrchestrationRun.state == RunState.COMPLETED.value)
+            .scalar()
+        ) or 0
+
+        terminal_count = (
+            db.query(func.count(OrchestrationRun.id))
+            .filter(
+                *base_filter,
+                OrchestrationRun.state.in_(
+                    [s.value for s in TERMINAL_RUN_STATES]
+                ),
+            )
+            .scalar()
+        ) or 0
+
+        success_rate = round(completed_count / terminal_count, 4) if terminal_count > 0 else 0.0
+
+        # Average duration (completed missions only)
+        avg_duration_row = (
+            db.query(
+                func.avg(
+                    func.extract("epoch", OrchestrationRun.completed_at)
+                    - func.extract("epoch", OrchestrationRun.started_at)
+                )
+            )
+            .filter(
+                *base_filter,
+                OrchestrationRun.state == RunState.COMPLETED.value,
+                OrchestrationRun.started_at.isnot(None),
+                OrchestrationRun.completed_at.isnot(None),
+            )
+            .scalar()
+        )
+        avg_duration_minutes = round(avg_duration_row / 60.0, 2) if avg_duration_row else None
+
+        # Average tokens used
+        avg_tokens = (
+            db.query(func.avg(OrchestrationRun.tokens_used))
+            .filter(*base_filter)
+            .scalar()
+        )
+        avg_tokens_used = round(float(avg_tokens), 2) if avg_tokens else 0.0
+
+        # Average tasks per mission
+        task_counts = (
+            db.query(func.count(OrchestrationTask.id))
+            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+            .filter(*base_filter)
+            .scalar()
+        ) or 0
+        avg_tasks_per_mission = round(task_counts / total_missions, 2) if total_missions > 0 else 0.0
+
+        # Top agents (by tasks completed in verified state)
+        task_filter = [OrchestrationRun.workspace_id == ctx.workspace_id]
+        if days is not None:
+            task_filter.append(OrchestrationTask.created_at >= cutoff)
+
+        top_agent_rows = (
+            db.query(
+                OrchestrationTask.assigned_agent_id,
+                Agent.name,
+                func.count(OrchestrationTask.id).label("tasks_completed"),
+                func.avg(OrchestrationTask.tokens_used).label("avg_tokens"),
+            )
+            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+            .join(Agent, OrchestrationTask.assigned_agent_id == Agent.id)
+            .filter(
+                *task_filter,
+                OrchestrationTask.state == TaskState.VERIFIED.value,
+                OrchestrationTask.assigned_agent_id.isnot(None),
+            )
+            .group_by(OrchestrationTask.assigned_agent_id, Agent.name)
+            .order_by(func.count(OrchestrationTask.id).desc())
+            .limit(5)
+            .all()
+        )
+
+        top_agents = [
+            TopAgentStats(
+                agent_id=row[0],
+                agent_name=row[1],
+                tasks_completed=row[2],
+                avg_tokens_per_task=round(float(row[3] or 0), 2),
+            )
+            for row in top_agent_rows
+        ]
+
+        # Common failure reasons
+        failure_rows = (
+            db.query(
+                OrchestrationTask.failure_reason_code,
+                func.count(OrchestrationTask.id),
+            )
+            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+            .filter(
+                *task_filter,
+                OrchestrationTask.state == TaskState.FAILED.value,
+                OrchestrationTask.failure_reason_code.isnot(None),
+            )
+            .group_by(OrchestrationTask.failure_reason_code)
+            .order_by(func.count(OrchestrationTask.id).desc())
+            .limit(10)
+            .all()
+        )
+        common_failure_reasons = {row[0]: row[1] for row in failure_rows}
+
+        return MissionStatsResponse(
+            total_missions=total_missions,
+            success_rate=success_rate,
+            avg_duration_minutes=avg_duration_minutes,
+            avg_tokens_used=avg_tokens_used,
+            avg_tasks_per_mission=avg_tasks_per_mission,
+            top_agents=top_agents,
+            common_failure_reasons=common_failure_reasons,
+            period=period,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to get mission stats: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/{mission_id}")
 async def get_mission(
     mission_id: UUID,
@@ -389,6 +602,103 @@ async def get_mission(
         raise
     except Exception as exc:
         logger.error("Failed to get mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/{mission_id}/events")
+async def get_mission_events(
+    mission_id: UUID,
+    event_type: Optional[str] = Query(None, description="Filter by event_type"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Paginated events for a mission run, optionally filtered by event_type."""
+    try:
+        # Validate mission belongs to workspace
+        _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+
+        query = db.query(OrchestrationEvent).filter(
+            OrchestrationEvent.run_id == mission_id,
+        )
+
+        if event_type:
+            # Validate event_type value
+            valid_types = {e.value for e in EventType}
+            if event_type not in valid_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid event_type: '{event_type}'. Valid types: {sorted(valid_types)}",
+                )
+            query = query.filter(OrchestrationEvent.event_type == event_type)
+
+        total = query.count()
+
+        events = (
+            query
+            .order_by(OrchestrationEvent.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        return PaginatedEventsResponse(
+            events=[_event_to_response(e) for e in events],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to get events for mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/{mission_id}/cost")
+async def get_mission_cost(
+    mission_id: UUID,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Token usage breakdown and estimated cost for a mission."""
+    try:
+        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+
+        tasks = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.run_id == run.id)
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+
+        task_breakdowns = [
+            TaskCostBreakdown(
+                task_id=str(t.id),
+                title=t.title,
+                tokens_used=t.tokens_used or 0,
+            )
+            for t in tasks
+        ]
+
+        total_tokens = sum(tb.tokens_used for tb in task_breakdowns)
+        cost_rate = config.COORDINATOR_COST_PER_1K_TOKENS
+        estimated_cost = round((total_tokens / 1000.0) * cost_rate, 6)
+
+        return MissionCostResponse(
+            mission_id=str(run.id),
+            total_tokens=total_tokens,
+            estimated_cost=estimated_cost,
+            cost_per_1k_tokens=cost_rate,
+            tasks=task_breakdowns,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to get cost for mission %s: %s", mission_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -613,4 +923,128 @@ async def cancel_mission(
     except Exception as exc:
         db.rollback()
         logger.error("Failed to cancel mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# Agent telemetry router (PRD-82B US-004)
+# ---------------------------------------------------------------------------
+
+agent_telemetry_router = APIRouter(prefix="/api/agents", tags=["agent-telemetry"])
+
+
+@agent_telemetry_router.get("/{agent_id}/mission-history")
+async def get_agent_mission_history(
+    agent_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Agent mission performance: tasks completed, failure rate, recent missions."""
+    try:
+        # Verify agent exists and belongs to workspace
+        agent = (
+            db.query(Agent)
+            .filter(
+                Agent.id == agent_id,
+                Agent.workspace_id == ctx.workspace_id,
+            )
+            .first()
+        )
+        if agent is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        # All tasks assigned to this agent in this workspace
+        base_query = (
+            db.query(OrchestrationTask)
+            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+            .filter(
+                OrchestrationRun.workspace_id == ctx.workspace_id,
+                OrchestrationTask.assigned_agent_id == agent_id,
+            )
+        )
+
+        # Tasks completed (verified state)
+        tasks_completed = (
+            base_query
+            .filter(OrchestrationTask.state == TaskState.VERIFIED.value)
+            .count()
+        )
+
+        # Average tokens per task (verified tasks only)
+        avg_tokens = (
+            db.query(func.avg(OrchestrationTask.tokens_used))
+            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+            .filter(
+                OrchestrationRun.workspace_id == ctx.workspace_id,
+                OrchestrationTask.assigned_agent_id == agent_id,
+                OrchestrationTask.state == TaskState.VERIFIED.value,
+            )
+            .scalar()
+        )
+        avg_tokens_per_task = round(float(avg_tokens), 2) if avg_tokens else 0.0
+
+        # Failure rate
+        total_terminal = (
+            base_query
+            .filter(
+                OrchestrationTask.state.in_(
+                    [TaskState.VERIFIED.value, TaskState.FAILED.value]
+                )
+            )
+            .count()
+        )
+        failed_count = (
+            base_query
+            .filter(OrchestrationTask.state == TaskState.FAILED.value)
+            .count()
+        )
+        failure_rate = round(failed_count / total_terminal, 4) if total_terminal > 0 else 0.0
+
+        # Recent missions (last 10 distinct runs)
+        recent_tasks = (
+            db.query(
+                OrchestrationRun.id,
+                OrchestrationRun.goal,
+                OrchestrationRun.state,
+                OrchestrationTask.title,
+                OrchestrationTask.state.label("task_state"),
+                OrchestrationTask.tokens_used,
+                OrchestrationTask.completed_at,
+            )
+            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+            .filter(
+                OrchestrationRun.workspace_id == ctx.workspace_id,
+                OrchestrationTask.assigned_agent_id == agent_id,
+            )
+            .order_by(OrchestrationTask.created_at.desc())
+            .limit(10)
+            .all()
+        )
+
+        recent_missions = [
+            {
+                "mission_id": str(row[0]),
+                "goal": (row[1][:100] if row[1] else None),
+                "mission_state": row[2],
+                "task_title": row[3],
+                "task_state": row[4],
+                "tokens_used": row[5] or 0,
+                "completed_at": row[6].isoformat() if row[6] else None,
+            }
+            for row in recent_tasks
+        ]
+
+        return AgentMissionHistoryResponse(
+            agent_id=agent_id,
+            agent_name=agent.name,
+            tasks_completed=tasks_completed,
+            avg_tokens_per_task=avg_tokens_per_task,
+            failure_rate=failure_rate,
+            recent_missions=recent_missions,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to get mission history for agent %s: %s", agent_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

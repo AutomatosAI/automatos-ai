@@ -30,3 +30,15 @@
 - _score_agent() now accepts history_score param (replaces hardcoded 0.5 placeholder)
 - Debug logging updated to include hist= score
 - Note: no verifier_score column exists on OrchestrationTask — scores live in event payloads, so query goes through OrchestrationEvent table
+
+## Iteration 4 — US-004: Add telemetry query endpoints for missions
+- Added COORDINATOR_COST_PER_1K_TOKENS (default 0.003) to config.py
+- GET /api/missions/stats — aggregate stats: total_missions, success_rate, avg_duration_minutes, avg_tokens_used, avg_tasks_per_mission, top_agents (top 5 by verified tasks), common_failure_reasons. Filterable by period (7d/30d/90d/all)
+- GET /api/missions/{id}/events — paginated events with event_type filter, limit/offset (default 50)
+- GET /api/missions/{id}/cost — token usage breakdown per task + estimated cost using config rate
+- GET /api/agents/{agent_id}/mission-history — tasks_completed, avg_tokens_per_task, failure_rate, recent_missions (last 10 tasks)
+- Added agent_telemetry_router (separate prefix /api/agents) registered in main.py alongside missions_router
+- /stats route declared BEFORE /{mission_id} to avoid FastAPI path conflict
+- All endpoints use workspace auth (get_request_context_hybrid)
+- Pydantic response models: MissionStatsResponse, MissionCostResponse, PaginatedEventsResponse, AgentMissionHistoryResponse, TopAgentStats, TaskCostBreakdown
+- 67 existing tests pass, 1 pre-existing failure (test_agents_api_plugins.py) — no new failures
