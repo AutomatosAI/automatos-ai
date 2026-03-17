@@ -9,7 +9,7 @@ import { SearchInput } from '@/components/shared/search-input'
 import { MarketplaceToolsTab } from './marketplace-tools-tab'
 import { MarketplaceAgentsTab } from './marketplace-agents-tab'
 import { MarketplaceLlmsTab } from './marketplace-llms-tab'
-import { MarketplaceRecipesTab } from './marketplace-recipes-tab'
+import { MarketplacePlaybooksTab } from './marketplace-playbooks-tab'
 import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { MarketplaceSkillsTab } from './marketplace-skills-tab'
 import { apiClient } from '@/lib/api-client'
@@ -168,7 +168,7 @@ export function MarketplaceHomepage() {
         </TabsContent>
 
         <TabsContent value="recipes" className="mt-0">
-          <MarketplaceRecipesTab searchQuery={searchQuery} />
+          <MarketplacePlaybooksTab searchQuery={searchQuery} />
         </TabsContent>
 
         <TabsContent value="llms" className="mt-0">

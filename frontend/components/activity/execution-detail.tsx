@@ -26,7 +26,7 @@ import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import type { StatusVariant } from '@/components/shared/status-badge'
-import { useExecuteRecipe } from '@/hooks/use-recipe-api'
+import { useExecutePlaybook } from '@/hooks/use-playbook-api'
 import type { ActivityFeedItem, ActivityStepProgress } from '@/hooks/use-activity-api'
 
 // ─── Type Config ─────────────────────────────────────────
@@ -279,7 +279,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
   const TypeIcon = typeConfig.icon
   const logEntries = generateLogEntries(item)
 
-  const executeRecipe = useExecuteRecipe()
+  const executeRecipe = useExecutePlaybook()
 
   const handleBack = () => {
     if (onClose) {
@@ -292,7 +292,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
   const handleReRun = () => {
     if (item.type !== 'recipe' || !item.source_id) return
     executeRecipe.mutate(
-      { recipeId: item.source_id },
+      { playbookId: item.source_id },
       {
         onSuccess: () => {
           toast.success('Recipe execution started')

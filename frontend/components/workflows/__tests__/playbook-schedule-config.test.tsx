@@ -1,8 +1,8 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useForm, FormProvider } from 'react-hook-form'
-import { RecipeScheduleConfig } from '../recipe-schedule-config'
-import type { RecipeFormValues } from '../create-recipe-modal'
+import { PlaybookScheduleConfig } from '../playbook-schedule-config'
+import type { PlaybookFormValues } from '../create-playbook-modal'
 import { describe, it, expect, vi } from 'vitest'
 
 // Wrapper that provides react-hook-form context with default schedule_config
@@ -17,9 +17,9 @@ function Wrapper({
   webhookId?: string
   children?: React.ReactNode
 }) {
-  const methods = useForm<RecipeFormValues>({
+  const methods = useForm<PlaybookFormValues>({
     defaultValues: {
-      name: 'Test Recipe',
+      name: 'Test Playbook',
       description: 'Test',
       inputs: '{}',
       outputs: '{}',
@@ -43,7 +43,7 @@ function Wrapper({
 
   return (
     <FormProvider {...methods}>
-      <RecipeScheduleConfig webhookId={webhookId} />
+      <PlaybookScheduleConfig webhookId={webhookId} />
     </FormProvider>
   )
 }
@@ -52,7 +52,7 @@ function Wrapper({
 // Schedule type buttons
 // ---------------------------------------------------------------------------
 
-describe('RecipeScheduleConfig', () => {
+describe('PlaybookScheduleConfig', () => {
   it('renders all three schedule types', () => {
     render(<Wrapper />)
 

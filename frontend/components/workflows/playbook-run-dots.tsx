@@ -1,8 +1,8 @@
 'use client'
 
-import { useRecipeExecutions } from '@/hooks/use-recipe-api'
+import { usePlaybookExecutions } from '@/hooks/use-playbook-api'
 
-interface RecipeRunDotsProps {
+interface PlaybookRunDotsProps {
   recipeId: string
   useCount?: number
   compact?: boolean
@@ -36,8 +36,8 @@ function shortTimeAgo(dateStr: string | undefined): string {
   }
 }
 
-export function RecipeRunDots({ recipeId, useCount, compact, onClick }: RecipeRunDotsProps) {
-  const { data } = useRecipeExecutions(recipeId, { limit: 3 })
+export function PlaybookRunDots({ recipeId, useCount, compact, onClick }: PlaybookRunDotsProps) {
+  const { data } = usePlaybookExecutions(recipeId, { limit: 3 })
   const executions: any[] = (data as any)?.items || (Array.isArray(data) ? data : [])
 
   if (executions.length === 0) return null

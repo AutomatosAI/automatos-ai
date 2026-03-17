@@ -5,10 +5,10 @@ import { X, Eye, Lightbulb, Bot, Play, Share2, Code, Settings, Calendar, BarChar
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { RecipeSuggestionsPanel } from './recipe-suggestions-panel'
+import { PlaybookSuggestionsPanel } from './playbook-suggestions-panel'
 import { cn } from '@/lib/utils'
 
-interface RecipeExecutionHistoryItem {
+interface PlaybookExecutionHistoryItem {
   id: number | string
   execution_id?: string
   status: 'pending' | 'running' | 'completed' | 'failed'
@@ -19,12 +19,12 @@ interface RecipeExecutionHistoryItem {
   total_duration_ms?: number
 }
 
-interface ViewRecipeModalProps {
+interface ViewPlaybookModalProps {
   open: boolean
   onClose: () => void
   recipe: any
   suggestions?: any
-  executions?: RecipeExecutionHistoryItem[]
+  executions?: PlaybookExecutionHistoryItem[]
   executionsLoading?: boolean
   onEdit?: () => void
   onExecute?: () => void
@@ -32,7 +32,7 @@ interface ViewRecipeModalProps {
   onViewExecution?: (executionId: string) => void
 }
 
-export function ViewRecipeModal({
+export function ViewPlaybookModal({
   open,
   onClose,
   recipe,
@@ -43,7 +43,7 @@ export function ViewRecipeModal({
   onExecute,
   onShare,
   onViewExecution,
-}: ViewRecipeModalProps) {
+}: ViewPlaybookModalProps) {
   const [activeTab, setActiveTab] = React.useState<'details' | 'suggestions'>('details')
 
   if (!open || !recipe) return null
@@ -91,10 +91,10 @@ export function ViewRecipeModal({
                         size="sm"
                         onClick={onExecute}
                         disabled={isIncomplete}
-                        title={isIncomplete ? 'This recipe needs workflow steps to cook' : ''}
+                        title={isIncomplete ? 'This playbook needs workflow steps to run' : ''}
                       >
                         <Play className="w-3 h-3 mr-2" />
-                        Cook
+                        Run
                       </Button>
                     )}
                   </>
@@ -105,14 +105,14 @@ export function ViewRecipeModal({
               </div>
             </div>
 
-            {/* Warning Banner for Incomplete Recipe */}
+            {/* Warning Banner for Incomplete Playbook */}
             {isIncomplete && (
               <div className="mt-4 p-3 bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/30 rounded-2xl flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-[hsl(var(--warning))] shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <div className="text-sm font-semibold text-[hsl(var(--warning))]">Incomplete Recipe</div>
+                  <div className="text-sm font-semibold text-[hsl(var(--warning))]">Incomplete Playbook</div>
                   <div className="text-xs text-[hsl(var(--warning))]/80 mt-1">
-                    This recipe has no workflow steps configured. {!isMarketplaceRecipe && 'Click Edit to add steps and make it functional.'}
+                    This playbook has no workflow steps configured. {!isMarketplaceRecipe && 'Click Edit to add steps and make it functional.'}
                   </div>
                 </div>
               </div>
@@ -154,15 +154,15 @@ export function ViewRecipeModal({
             {/* Details Tab */}
             {activeTab === 'details' && (
               <div className="space-y-6">
-                {/* Recipe Overview */}
+                {/* Playbook Overview */}
                 <div className="glass-card rounded-xl p-6">
                   <h3 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
                     <Zap className="w-5 h-5 text-primary" />
-                    What This Recipe Does
+                    What This Playbook Does
                   </h3>
                   <p className="text-sm text-muted-foreground mb-4">{recipe.description || 'No description provided'}</p>
 
-                  {/* Recipe Stats */}
+                  {/* Playbook Stats */}
                   <div className="grid grid-cols-3 gap-4 p-4 bg-secondary/30 rounded-lg">
                     <div className="text-center">
                       <div className="text-2xl font-bold text-foreground">{recipe.steps?.length || 0}</div>
@@ -214,7 +214,7 @@ export function ViewRecipeModal({
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
                       <p className="text-sm">No workflow steps configured yet.</p>
-                      <p className="text-xs mt-1">This recipe needs to be set up with workflow steps before it can be used.</p>
+                      <p className="text-xs mt-1">This playbook needs to be set up with workflow steps before it can be used.</p>
                     </div>
                   )}
                 </div>
@@ -228,7 +228,7 @@ export function ViewRecipeModal({
                   {recipe.steps && recipe.steps.length > 0 ? (
                     <div className="space-y-3">
                       <div className="text-sm text-muted-foreground">
-                        This recipe uses <span className="font-semibold text-foreground">{new Set(recipe.steps.map((s: any) => s.agent_id)).size} AI agent(s)</span> to automate your workflow.
+                        This playbook uses <span className="font-semibold text-foreground">{new Set(recipe.steps.map((s: any) => s.agent_id)).size} AI agent(s)</span> to automate your workflow.
                       </div>
                       {recipe.metadata?.tool_names && recipe.metadata.tool_names.length > 0 && (
                         <div className="pt-3 border-t border-border/50">
@@ -338,7 +338,7 @@ export function ViewRecipeModal({
                     ) : (
                       <div className="text-center py-6 text-muted-foreground">
                         <p className="text-sm">No executions yet.</p>
-                        <p className="text-xs mt-1">Click Cook to run this recipe for the first time.</p>
+                        <p className="text-xs mt-1">Click Run to run this playbook for the first time.</p>
                       </div>
                     )}
                   </div>
@@ -349,7 +349,7 @@ export function ViewRecipeModal({
                   <div className="glass-card rounded-xl p-4 border border-[hsl(var(--success))]/20 bg-[hsl(var(--success))]/5">
                     <h3 className="text-sm font-semibold text-[hsl(var(--success))] mb-3 flex items-center gap-2">
                       <Star className="w-4 h-4" />
-                      Why People Love This Recipe
+                      Why People Love This Playbook
                     </h3>
                     <div className="grid grid-cols-3 gap-4">
                       <div className="text-center">
@@ -489,7 +489,7 @@ export function ViewRecipeModal({
 
             {/* Suggestions Tab */}
             {activeTab === 'suggestions' && (
-              <RecipeSuggestionsPanel
+              <PlaybookSuggestionsPanel
                 data={suggestions || {
                   recipe_id: recipe.template_id || recipe.id,
                   quality_score: recipe.quality_score,
@@ -499,7 +499,7 @@ export function ViewRecipeModal({
                   last_analyzed_at: recipe.learning_data?.last_analyzed_at || null,
                   analysis_count: recipe.learning_data?.analyses?.length || 0,
                 }}
-                recipeName={recipe.name}
+                playbookName={recipe.name}
                 onApplyPromptRewrite={(suggestion) => {
                   onEdit?.()
                 }}

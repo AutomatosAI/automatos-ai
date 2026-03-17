@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import type { RecipeFormValues } from './create-recipe-modal'
+import type { PlaybookFormValues } from './create-playbook-modal'
 
 const SCHEDULE_TYPES = [
   { value: 'manual', label: 'Manual', icon: Play, description: 'Run on demand with a button click' },
@@ -83,19 +83,19 @@ function getNextCronRuns(expression: string, count: number): string[] {
   return runs
 }
 
-interface RecipeScheduleConfigProps {
+interface PlaybookScheduleConfigProps {
   webhookId?: string
 }
 
-export function RecipeScheduleConfig({ webhookId }: RecipeScheduleConfigProps) {
-  const methods = useFormContext<RecipeFormValues>()
+export function PlaybookScheduleConfig({ webhookId }: PlaybookScheduleConfigProps) {
+  const methods = useFormContext<PlaybookFormValues>()
   const scheduleConfig = methods.watch('schedule_config')
   const [copied, setCopied] = React.useState(false)
   const [cronQuick, setCronQuick] = React.useState('')
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-  const updateSchedule = (field: keyof RecipeFormValues['schedule_config'], value: unknown) => {
+  const updateSchedule = (field: keyof PlaybookFormValues['schedule_config'], value: unknown) => {
     methods.setValue('schedule_config', { ...scheduleConfig, [field]: value })
   }
 
@@ -161,7 +161,7 @@ export function RecipeScheduleConfig({ webhookId }: RecipeScheduleConfigProps) {
             <span className="text-base">▶</span> Manual Execution
           </h4>
           <p className="text-sm text-muted-foreground">
-            This recipe will be executed manually. Use the Execute button on the recipe detail page or call the API directly.
+            This recipe will be executed manually. Use the Execute button on the playbook detail page or call the API directly.
           </p>
           <div className="p-4 rounded-xl bg-secondary/30 border border-border/20">
             <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
@@ -169,7 +169,7 @@ export function RecipeScheduleConfig({ webhookId }: RecipeScheduleConfigProps) {
               <span>Test Run</span>
             </div>
             <p className="text-xs text-muted-foreground/70">
-              After saving, you can test this recipe from the recipe detail view using the Execute button.
+              After saving, you can test this playbook from the playbook detail view using the Execute button.
             </p>
             <Button
               type="button"
@@ -301,7 +301,7 @@ export function RecipeScheduleConfig({ webhookId }: RecipeScheduleConfigProps) {
                   Save the recipe to generate a webhook URL
                 </p>
                 <p className="text-xs text-muted-foreground/50 mt-1">
-                  A unique, persistent URL will be created when this recipe is saved.
+                  A unique, persistent URL will be created when this playbook is saved.
                 </p>
               </div>
             )}
@@ -314,7 +314,7 @@ export function RecipeScheduleConfig({ webhookId }: RecipeScheduleConfigProps) {
             </h4>
             <div className="p-4 rounded-xl bg-secondary/30 border border-border/20 space-y-2">
               <p className="text-xs text-muted-foreground">
-                Send a POST request to trigger this recipe. The JSON body is passed as input data.
+                Send a POST request to trigger this playbook. The JSON body is passed as input data.
               </p>
               <div className="font-mono text-xs text-muted-foreground/80 bg-secondary/50 rounded-lg p-3">
                 <span className="text-primary">POST</span> {webhookUrl || `{webhook_url}`}

@@ -47,10 +47,10 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
         >
           {/* Type badge + delete button */}
           <div className="flex items-center justify-between mb-1">
-            {task.type === 'recipe' ? (
+            {task.type === 'playbook' ? (
               <div className="flex items-center gap-1">
                 <Workflow className="w-3 h-3 text-primary" />
-                <span className="text-[10px] font-medium text-primary uppercase tracking-wider">Recipe</span>
+                <span className="text-[10px] font-medium text-primary uppercase tracking-wider">Playbook</span>
               </div>
             ) : (
               <div className="flex items-center gap-1">

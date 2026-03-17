@@ -41,8 +41,8 @@ import {
   type QualityData,
   type MemoryData,
 } from './theater/theater-self-learning-panel'
-import { RecipeSuggestionsPanel, type SuggestionsData } from './recipe-suggestions-panel'
-import { RecipeStepProgress, type RecipeStepResult } from './recipe-step-progress'
+import { PlaybookSuggestionsPanel, type SuggestionsData } from './playbook-suggestions-panel'
+import { PlaybookStepProgress, type PlaybookStepResult } from './playbook-step-progress'
 
 interface ExecutionKitchenProps {
   workflowId: number
@@ -508,7 +508,7 @@ export function ExecutionKitchen({
   // Recipe direct execution state
   const [recipeExecId, setRecipeExecId] = useState<string | undefined>(initialRecipeExecutionId)
   const [recipeExecData, setRecipeExecData] = useState<any>(null)
-  const [recipeStepResults, setRecipeStepResults] = useState<RecipeStepResult[]>([])
+  const [recipeStepResults, setPlaybookStepResults] = useState<PlaybookStepResult[]>([])
 
   // Recipe execution polling — stops when status is completed/failed
   const recipePollingRef = useRef<NodeJS.Timeout | null>(null)
@@ -528,7 +528,7 @@ export function ExecutionKitchen({
         const data: any = await apiClient.getRecipeExecution(recipeId, recipeExecId!)
         if (stopped) return
         setRecipeExecData(data)
-        setRecipeStepResults(data.step_results || [])
+        setPlaybookStepResults(data.step_results || [])
         setExecutionData((prev: any) => ({
           ...prev,
           name: data.recipe_name || prev?.name || 'Recipe',
@@ -1118,7 +1118,7 @@ export function ExecutionKitchen({
       {/* Recipe Mode: Step Progress | Workflow Mode: 9-Stage Pipeline */}
       {isRecipeMode ? (
         <div className="px-6 py-4">
-          <RecipeStepProgress
+          <PlaybookStepProgress
             currentStep={recipeExecData?.current_step || 0}
             totalSteps={recipeExecData?.total_steps || recipeSteps?.length || 0}
             status={
@@ -1197,9 +1197,9 @@ export function ExecutionKitchen({
                   Dismiss
                 </Button>
               </div>
-              <RecipeSuggestionsPanel
+              <PlaybookSuggestionsPanel
                 data={suggestionsData}
-                recipeName={executionData?.name}
+                playbookName={executionData?.name}
                 onApplyPromptRewrite={(suggestion) => {
                   toast({
                     title: 'Prompt Rewrite',

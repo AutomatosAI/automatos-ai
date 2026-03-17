@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { apiClient } from '@/lib/api-client'
 
-export interface RecipeStepResult {
+export interface PlaybookStepResult {
   step_id: string
   order: number
   agent_id: number
@@ -42,17 +42,17 @@ export interface RecipeStepResult {
   log_url?: string
 }
 
-interface RecipeStepProgressProps {
+interface PlaybookStepProgressProps {
   currentStep: number
   totalSteps: number
   status: 'pending' | 'running' | 'completed' | 'failed'
-  stepResults: RecipeStepResult[]
+  stepResults: PlaybookStepResult[]
   steps?: Array<{ step_id: string; order: number; prompt_template: string; agent_id: number }>
   recipeId?: string
   executionId?: string
 }
 
-export function RecipeStepProgress({
+export function PlaybookStepProgress({
   currentStep,
   totalSteps,
   status,
@@ -60,7 +60,7 @@ export function RecipeStepProgress({
   steps,
   recipeId,
   executionId,
-}: RecipeStepProgressProps) {
+}: PlaybookStepProgressProps) {
   const [expandedSteps, setExpandedSteps] = React.useState<Set<number>>(new Set())
   const [fullLogs, setFullLogs] = React.useState<Record<number, any>>({})
   const [loadingLogs, setLoadingLogs] = React.useState<Set<number>>(new Set())
@@ -100,7 +100,7 @@ export function RecipeStepProgress({
       agentName: string
       agentId: number
       status: 'pending' | 'running' | 'success' | 'failed'
-      result?: RecipeStepResult
+      result?: PlaybookStepResult
     }> = []
 
     for (let i = 0; i < totalSteps; i++) {
@@ -140,7 +140,7 @@ export function RecipeStepProgress({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Zap className="w-5 h-5 text-primary" />
-          <h3 className="font-semibold text-sm">Recipe Execution</h3>
+          <h3 className="font-semibold text-sm">Playbook Execution</h3>
         </div>
         <div className="flex items-center gap-2">
           <Badge

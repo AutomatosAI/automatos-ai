@@ -1,10 +1,10 @@
 """
-Recipe Quality Service - Stage 7 (Quality)
-===========================================
+Playbook Quality Service - Stage 7 (Quality)
+=============================================
 
-Performs 5-dimensional quality assessment of recipe executions:
+Performs 5-dimensional quality assessment of playbook executions:
 completeness, accuracy, efficiency, reliability, and cost.
-Updates the recipe's quality_score field with the average score.
+Updates the playbook's quality_score field with the average score.
 """
 
 import logging
@@ -19,15 +19,15 @@ from core.models.core import RecipeExecution, WorkflowTemplate
 logger = logging.getLogger(__name__)
 
 
-class RecipeQualityService:
+class PlaybookQualityService:
     """
-    Performs 5-dimensional quality assessment of recipe executions.
-    Updates the recipe's quality_score with a rolling average.
+    Performs 5-dimensional quality assessment of playbook executions.
+    Updates the playbook's quality_score with a rolling average.
     """
 
     def __init__(self, db: Session):
         if db is None:
-            raise ValueError("RecipeQualityService requires an injected DB session")
+            raise ValueError("PlaybookQualityService requires an injected DB session")
         self.db = db
 
     def assess_quality(
@@ -35,11 +35,11 @@ class RecipeQualityService:
         workspace_id: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
-        Perform a 5-dimensional quality assessment of a recipe execution.
+        Perform a 5-dimensional quality assessment of a playbook execution.
 
         Args:
             execution_id: The execution_id string (e.g. "exec-abc123def456")
-            learnings: Optional learnings dict from RecipeLearningService.analyze_execution()
+            learnings: Optional learnings dict from PlaybookLearningService.analyze_execution()
             workspace_id: Optional workspace UUID for isolation filtering
 
         Returns:
@@ -56,23 +56,23 @@ class RecipeQualityService:
         if not execution:
             raise ValueError(f"Execution not found: {execution_id}")
 
-        # Fetch the associated recipe
-        recipe_query = self.db.query(WorkflowTemplate).filter(
+        # Fetch the associated playbook
+        playbook_query = self.db.query(WorkflowTemplate).filter(
             WorkflowTemplate.id == execution.recipe_id
         )
         if workspace_id:
-            recipe_query = recipe_query.filter(WorkflowTemplate.workspace_id == workspace_id)
-        recipe = recipe_query.first()
+            playbook_query = playbook_query.filter(WorkflowTemplate.workspace_id == workspace_id)
+        playbook = playbook_query.first()
 
-        if not recipe:
-            raise ValueError(f"Recipe not found for execution: {execution_id}")
+        if not playbook:
+            raise ValueError(f"Playbook not found for execution: {execution_id}")
 
         # Calculate 5 quality dimensions
-        completeness = self._assess_completeness(execution, recipe)
-        accuracy = self._assess_accuracy(execution, recipe)
-        efficiency = self._assess_efficiency(execution, recipe)
+        completeness = self._assess_completeness(execution, playbook)
+        accuracy = self._assess_accuracy(execution, playbook)
+        efficiency = self._assess_efficiency(execution, playbook)
         reliability = self._assess_reliability(execution, learnings)
-        cost = self._assess_cost(execution, recipe)
+        cost = self._assess_cost(execution, playbook)
 
         breakdown = {
             "completeness": completeness,
@@ -100,13 +100,13 @@ class RecipeQualityService:
             "bottlenecks": bottlenecks,
         }
 
-        # Update recipe's quality_score with rolling average
-        self._update_quality_score(recipe, quality_score)
+        # Update playbook's quality_score with rolling average
+        self._update_quality_score(playbook, quality_score)
 
         return result
 
     def _assess_completeness(
-        self, execution: RecipeExecution, recipe: WorkflowTemplate
+        self, execution: RecipeExecution, playbook: WorkflowTemplate
     ) -> float:
         """
         Assess completeness: Did all steps execute and produce output?
@@ -117,8 +117,8 @@ class RecipeQualityService:
         - Whether all required steps ran
         """
         step_results = execution.step_results or []
-        recipe_steps = recipe.steps or []
-        total_expected = len(recipe_steps) if recipe_steps else len(step_results)
+        playbook_steps = playbook.steps or []
+        total_expected = len(playbook_steps) if playbook_steps else len(step_results)
 
         if total_expected == 0:
             return 1.0 if execution.status == 'completed' else 0.0
@@ -144,7 +144,7 @@ class RecipeQualityService:
         return (step_completion_score * 0.5) + (output_score * 0.3) + (execution_score * 0.2)
 
     def _assess_accuracy(
-        self, execution: RecipeExecution, recipe: WorkflowTemplate
+        self, execution: RecipeExecution, playbook: WorkflowTemplate
     ) -> float:
         """
         Assess accuracy: Did the execution produce correct/valid results?
@@ -168,7 +168,7 @@ class RecipeQualityService:
         error_free_score = error_free_steps / total_steps
 
         # Score: output schema conformance
-        output_schema = recipe.outputs or {}
+        output_schema = playbook.outputs or {}
         output_data = execution.output_data or {}
         schema_score = 1.0
         if output_schema and isinstance(output_schema, dict):
@@ -183,7 +183,7 @@ class RecipeQualityService:
         return (error_free_score * 0.5) + (schema_score * 0.3) + (no_error_score * 0.2)
 
     def _assess_efficiency(
-        self, execution: RecipeExecution, recipe: WorkflowTemplate
+        self, execution: RecipeExecution, playbook: WorkflowTemplate
     ) -> float:
         """
         Assess efficiency: How well did the execution use time and resources?
@@ -194,7 +194,7 @@ class RecipeQualityService:
         - Retry overhead
         """
         step_results = execution.step_results or []
-        execution_config = recipe.execution_config or {}
+        execution_config = playbook.execution_config or {}
 
         # Get configured timeouts — normalise to ms for quality scoring
         # Threshold: 10000+ is clearly ms (e.g. 120000ms). Below that is seconds.
@@ -304,7 +304,7 @@ class RecipeQualityService:
         return (status_score * 0.4) + (pattern_score * 0.3) + (step_reliability * 0.3)
 
     def _assess_cost(
-        self, execution: RecipeExecution, recipe: WorkflowTemplate
+        self, execution: RecipeExecution, playbook: WorkflowTemplate
     ) -> float:
         """
         Assess cost efficiency: How well did the execution use resources vs results?
@@ -315,7 +315,7 @@ class RecipeQualityService:
         - Execution metadata cost data if available
         """
         step_results = execution.step_results or []
-        recipe_steps = recipe.steps or []
+        playbook_steps = playbook.steps or []
         total_steps = len(step_results)
 
         if total_steps == 0:
@@ -341,7 +341,7 @@ class RecipeQualityService:
         utilization_score = useful_steps / total_steps if total_steps > 0 else 0.0
 
         # Score: actual vs expected step count
-        expected_steps = len(recipe_steps) if recipe_steps else total_steps
+        expected_steps = len(playbook_steps) if playbook_steps else total_steps
         if expected_steps > 0:
             step_efficiency = min(1.0, expected_steps / max(total_steps, 1))
         else:
@@ -436,25 +436,25 @@ class RecipeQualityService:
         return bottlenecks
 
     def _update_quality_score(
-        self, recipe: WorkflowTemplate, new_score: float
+        self, playbook: WorkflowTemplate, new_score: float
     ) -> None:
         """
-        Update the recipe's quality_score with a rolling average.
+        Update the playbook's quality_score with a rolling average.
 
         Uses exponential moving average to weight recent executions more heavily.
         Alpha = 0.3 means 30% weight on new score, 70% on existing average.
         """
         alpha = 0.3
 
-        if recipe.quality_score is not None:
-            updated_score = (alpha * new_score) + ((1 - alpha) * recipe.quality_score)
+        if playbook.quality_score is not None:
+            updated_score = (alpha * new_score) + ((1 - alpha) * playbook.quality_score)
         else:
             updated_score = new_score
 
-        recipe.quality_score = round(updated_score, 4)
+        playbook.quality_score = round(updated_score, 4)
         self.db.commit()
 
         logger.info(
-            f"Updated quality_score for recipe {recipe.id}: "
-            f"{recipe.quality_score} (grade: {self._calculate_grade(recipe.quality_score)})"
+            f"Updated quality_score for playbook {playbook.id}: "
+            f"{playbook.quality_score} (grade: {self._calculate_grade(playbook.quality_score)})"
         )

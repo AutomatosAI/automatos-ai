@@ -36,36 +36,36 @@ import { useViewMode } from '@/hooks/use-view-mode'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import {
-  useWorkflowRecipes,
-  useDeleteRecipe,
-  useRecordRecipeUsage,
-  useExecuteRecipe,
-  useSubmitRecipeToMarketplace,
-  useRecipeSuggestions,
-  useRecipeExecutions
-} from '@/hooks/use-recipe-api'
+  useWorkflowPlaybooks,
+  useDeletePlaybook,
+  useRecordPlaybookUsage,
+  useExecutePlaybook,
+  useSubmitPlaybookToMarketplace,
+  usePlaybookSuggestions,
+  usePlaybookExecutions
+} from '@/hooks/use-playbook-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { useAgents } from '@/hooks/use-agent-api'
 import { useToast } from '@/hooks/use-toast'
-import { CreateRecipeModal } from './create-recipe-modal'
-import { ViewRecipeModal } from './view-recipe-modal'
-import { RecipeSuggestionsPanel } from './recipe-suggestions-panel'
-import { RecipeRunDots } from './recipe-run-dots'
+import { CreatePlaybookModal } from './create-playbook-modal'
+import { ViewPlaybookModal } from './view-playbook-modal'
+import { PlaybookSuggestionsPanel } from './playbook-suggestions-panel'
+import { PlaybookRunDots } from './playbook-run-dots'
 
-interface RecipeExecutionInfo {
+interface PlaybookExecutionInfo {
   recipeExecutionId: string
   recipeId: string
   recipeSteps: Array<{ step_id: string; order: number; prompt_template: string; agent_id: number }>
   recipeName: string
 }
 
-interface RecipesTabProps {
+interface PlaybooksTabProps {
   searchTerm?: string
   viewMode?: 'grid' | 'list'
   externalCreateOpen?: boolean
   onCreateModalClosed?: () => void
   onUseRecipe: (recipe: any) => void
-  onExecuteRecipe?: (workflowId: number, recipeExecInfo?: RecipeExecutionInfo) => void
+  onExecuteRecipe?: (workflowId: number, recipeExecInfo?: PlaybookExecutionInfo) => void
 }
 
 // Generate a consistent color from agent_id
@@ -85,7 +85,7 @@ function agentColor(id: number): string {
 
 /** Small icon button linking to the Execution Kitchen for the latest run. */
 function LatestRunLink({ recipeId }: { recipeId: string }) {
-  const { data } = useRecipeExecutions(recipeId, { limit: 1 })
+  const { data } = usePlaybookExecutions(recipeId, { limit: 1 })
   const executions: any[] = (data as any)?.items || (Array.isArray(data) ? data : [])
   const latest = executions[0]
   if (!latest) return null
@@ -107,28 +107,28 @@ function LatestRunLink({ recipeId }: { recipeId: string }) {
   )
 }
 
-export function RecipesTab({
+export function PlaybooksTab({
   searchTerm: externalSearchTerm,
   viewMode: viewModeProp,
   externalCreateOpen,
   onCreateModalClosed,
   onUseRecipe,
   onExecuteRecipe,
-}: RecipesTabProps) {
+}: PlaybooksTabProps) {
   const [viewModeLocal] = useViewMode('wf-recipes')
   const viewMode = viewModeProp || viewModeLocal
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
-  const [sharingRecipeId, setSharingRecipeId] = useState<string | null>(null)
-  const [cookingRecipeId, setCookingRecipeId] = useState<string | null>(null)
-  const [editRecipeData, setEditRecipeData] = useState<any>(null)
-  const [editRecipeId, setEditRecipeId] = useState<string | null>(null)
+  const [selectedPlaybook, setSelectedPlaybook] = useState<any>(null)
+  const [sharingPlaybookId, setSharingPlaybookId] = useState<string | null>(null)
+  const [cookingPlaybookId, setCookingPlaybookId] = useState<string | null>(null)
+  const [editPlaybookData, setEditPlaybookData] = useState<any>(null)
+  const [editPlaybookId, setEditPlaybookId] = useState<string | null>(null)
   const { data: iconMappings = {} } = useSystemIcons()
   const { data: agents = [] } = useAgents()
 
-  // Build agent lookup by ID for recipe avatar icons
+  // Build agent lookup by ID for playbook avatar icons
   const agentMap = useMemo(() => {
     const map = new Map<number, any>()
     for (const agent of agents as any[]) {
@@ -140,98 +140,98 @@ export function RecipesTab({
   // Sync external create modal open state
   useEffect(() => {
     if (externalCreateOpen) {
-      setEditRecipeData(null)
-      setEditRecipeId(null)
+      setEditPlaybookData(null)
+      setEditPlaybookId(null)
       setShowCreateModal(true)
     }
   }, [externalCreateOpen])
 
-  // Fetch recipes with filtering
-  const { data: recipesData, isLoading, error, refetch } = useWorkflowRecipes({
+  // Fetch playbooks with filtering
+  const { data: playbooksData, isLoading, error, refetch } = useWorkflowPlaybooks({
     search: externalSearchTerm || undefined,
     limit: 100
   })
 
-  const deleteMutation = useDeleteRecipe()
-  const recordUsageMutation = useRecordRecipeUsage()
-  const executeRecipeMutation = useExecuteRecipe()
-  const submitToMarketplaceMutation = useSubmitRecipeToMarketplace()
+  const deleteMutation = useDeletePlaybook()
+  const recordUsageMutation = useRecordPlaybookUsage()
+  const executePlaybookMutation = useExecutePlaybook()
+  const submitToMarketplaceMutation = useSubmitPlaybookToMarketplace()
   const { toast } = useToast()
   const cookingRef = useRef(false)
 
-  // Fetch suggestions for the selected recipe when viewing
-  const { data: selectedRecipeSuggestions } = useRecipeSuggestions(
-    showViewModal ? selectedRecipe?.template_id || selectedRecipe?.recipe_id : undefined
+  // Fetch suggestions for the selected playbook when viewing
+  const { data: selectedPlaybookSuggestions } = usePlaybookSuggestions(
+    showViewModal ? selectedPlaybook?.template_id || selectedPlaybook?.recipe_id : undefined
   )
 
-  // Fetch recent executions for the selected recipe when viewing
-  const selectedRecipeId = showViewModal ? selectedRecipe?.template_id || selectedRecipe?.recipe_id : undefined
-  const { data: selectedRecipeExecutions, isLoading: executionsLoading } = useRecipeExecutions(
-    selectedRecipeId,
+  // Fetch recent executions for the selected playbook when viewing
+  const selectedPlaybookId = showViewModal ? selectedPlaybook?.template_id || selectedPlaybook?.recipe_id : undefined
+  const { data: selectedPlaybookExecutions, isLoading: executionsLoading } = usePlaybookExecutions(
+    selectedPlaybookId,
     { limit: 5 }
   )
 
-  const recipes = (recipesData as any)?.items || []
+  const playbooks = (playbooksData as any)?.items || []
 
-  const handleDeleteRecipe = async () => {
-    if (!selectedRecipe) return
+  const handleDeletePlaybook = async () => {
+    if (!selectedPlaybook) return
     try {
-      await deleteMutation.mutateAsync(selectedRecipe.template_id || selectedRecipe.id)
+      await deleteMutation.mutateAsync(selectedPlaybook.template_id || selectedPlaybook.id)
       setShowDeleteDialog(false)
-      setSelectedRecipe(null)
+      setSelectedPlaybook(null)
       refetch()
     } catch (error) {
-      console.error('Error deleting recipe:', error)
+      console.error('Error deleting playbook:', error)
     }
   }
 
-  const handleCookRecipe = async (recipe: any) => {
+  const handleRunPlaybook = async (playbook: any) => {
     if (cookingRef.current) return
     cookingRef.current = true
-    const recipeId = recipe.template_id || recipe.id?.toString()
-    setCookingRecipeId(recipeId)
+    const playbookId = playbook.template_id || playbook.id?.toString()
+    setCookingPlaybookId(playbookId)
     try {
-      const result: any = await executeRecipeMutation.mutateAsync({ recipeId })
+      const result: any = await executePlaybookMutation.mutateAsync({ playbookId: playbookId })
       toast({
-        title: 'Recipe Started',
-        description: `"${recipe.name}" is now cooking.`,
+        title: 'Playbook Started',
+        description: `"${playbook.name}" is now running.`,
         variant: 'default',
       })
       if (onExecuteRecipe && result?.recipe_execution_id) {
         onExecuteRecipe(0, {
           recipeExecutionId: result.recipe_execution_id,
-          recipeId: recipeId,
-          recipeSteps: (recipe.steps || []).map((s: any, i: number) => ({
+          recipeId: playbookId,
+          recipeSteps: (playbook.steps || []).map((s: any, i: number) => ({
             step_id: s.step_id || `step-${i + 1}`,
             order: s.order || i + 1,
             prompt_template: s.prompt_template || '',
             agent_id: s.agent_id,
           })),
-          recipeName: recipe.name,
+          recipeName: playbook.name,
         })
       }
     } catch (error: any) {
       toast({
         title: 'Execution Failed',
-        description: error?.message || 'Failed to start recipe execution',
+        description: error?.message || 'Failed to start playbook execution',
         variant: 'destructive',
       })
     } finally {
-      setCookingRecipeId(null)
+      setCookingPlaybookId(null)
       cookingRef.current = false
     }
   }
 
-  const handleViewClick = (recipe: any) => {
-    setSelectedRecipe(recipe)
+  const handleViewClick = (playbook: any) => {
+    setSelectedPlaybook(playbook)
     setShowViewModal(true)
   }
 
-  const handleEditClick = (recipe: any) => {
-    const backendConfig = recipe.execution_config || {}
-    const backendSchedule = recipe.schedule_config || {}
+  const handleEditClick = (playbook: any) => {
+    const backendConfig = playbook.execution_config || {}
+    const backendSchedule = playbook.schedule_config || {}
 
-    const formSteps = (recipe.steps || []).map((step: any, idx: number) => ({
+    const formSteps = (playbook.steps || []).map((step: any, idx: number) => ({
       step_id: step.step_id || `step-${idx + 1}`,
       order: step.order ?? idx + 1,
       agent_id: step.agent_id != null ? String(step.agent_id) : '',
@@ -242,10 +242,10 @@ export function RecipesTab({
     }))
 
     const initialData = {
-      name: recipe.name || '',
-      description: recipe.description || '',
-      inputs: typeof recipe.inputs === 'string' ? recipe.inputs : JSON.stringify(recipe.inputs || {}, null, 2),
-      outputs: typeof recipe.outputs === 'string' ? recipe.outputs : JSON.stringify(recipe.outputs || {}, null, 2),
+      name: playbook.name || '',
+      description: playbook.description || '',
+      inputs: typeof playbook.inputs === 'string' ? playbook.inputs : JSON.stringify(playbook.inputs || {}, null, 2),
+      outputs: typeof playbook.outputs === 'string' ? playbook.outputs : JSON.stringify(playbook.outputs || {}, null, 2),
       steps: formSteps,
       execution_config: {
         mode: backendConfig.mode || 'sequential',
@@ -264,42 +264,42 @@ export function RecipesTab({
       },
     }
 
-    setEditRecipeData(initialData)
-    setEditRecipeId(recipe.template_id || recipe.id?.toString())
+    setEditPlaybookData(initialData)
+    setEditPlaybookId(playbook.template_id || playbook.id?.toString())
     setShowCreateModal(true)
   }
 
-  const handleDeleteClick = (recipe: any) => {
-    setSelectedRecipe(recipe)
+  const handleDeleteClick = (playbook: any) => {
+    setSelectedPlaybook(playbook)
     setShowDeleteDialog(true)
   }
 
-  const handleShareToMarketplace = async (recipe: any) => {
-    setSharingRecipeId(recipe.template_id || recipe.id?.toString())
+  const handleShareToMarketplace = async (playbook: any) => {
+    setSharingPlaybookId(playbook.template_id || playbook.id?.toString())
     try {
       const result: any = await submitToMarketplaceMutation.mutateAsync({
-        recipe_id: recipe.template_id,
-        category: recipe.category,
-        icon: recipe.icon
+        recipe_id: playbook.template_id,
+        category: playbook.category,
+        icon: playbook.icon
       })
 
       if (result.auto_approved) {
-        toast({ title: 'Published to Marketplace', description: 'Your recipe is now live in the marketplace!', variant: 'default' })
+        toast({ title: 'Published to Marketplace', description: 'Your playbook is now live in the marketplace!', variant: 'default' })
       } else {
-        toast({ title: 'Submitted for Approval', description: 'Your recipe has been submitted and is awaiting approval.', variant: 'default' })
+        toast({ title: 'Submitted for Approval', description: 'Your playbook has been submitted and is awaiting approval.', variant: 'default' })
       }
       refetch()
     } catch (error: any) {
-      toast({ title: 'Submission Failed', description: error?.message || 'Failed to submit recipe to marketplace', variant: 'destructive' })
+      toast({ title: 'Submission Failed', description: error?.message || 'Failed to submit playbook to marketplace', variant: 'destructive' })
     } finally {
-      setSharingRecipeId(null)
+      setSharingPlaybookId(null)
     }
   }
 
   const closeCreateModal = () => {
     setShowCreateModal(false)
-    setEditRecipeData(null)
-    setEditRecipeId(null)
+    setEditPlaybookData(null)
+    setEditPlaybookId(null)
     onCreateModalClosed?.()
   }
 
@@ -308,7 +308,7 @@ export function RecipesTab({
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading recipes...</p>
+          <p className="text-muted-foreground">Loading playbooks...</p>
         </div>
       </div>
     )
@@ -319,7 +319,7 @@ export function RecipesTab({
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
           <AlertTriangle className="h-8 w-8 text-[hsl(var(--destructive))] mx-auto mb-4" />
-          <p className="text-[hsl(var(--destructive))]">Error loading recipes</p>
+          <p className="text-[hsl(var(--destructive))]">Error loading playbooks</p>
         </div>
       </div>
     )
@@ -327,71 +327,71 @@ export function RecipesTab({
 
   return (
     <div className="space-y-6">
-      {/* Recipes Grid — 4 per row */}
-      {recipes.length === 0 ? (
+      {/* Playbooks Grid — 4 per row */}
+      {playbooks.length === 0 ? (
         <div className="text-center py-12">
           <GitBranch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <p className="text-muted-foreground">No recipes found</p>
-          <p className="text-xs text-muted-foreground mt-1">Create your first recipe to get started</p>
+          <p className="text-muted-foreground">No playbooks found</p>
+          <p className="text-xs text-muted-foreground mt-1">Create your first playbook to get started</p>
         </div>
       ) : viewMode === 'list' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {recipes.map((recipe: any) => {
-            const steps = recipe.steps || []
+          {playbooks.map((playbook: any) => {
+            const steps = playbook.steps || []
             const stepCount = steps.length
             const agentIds = [...new Set(steps.map((s: any) => s.agent_id).filter(Boolean))] as number[]
-            const isCooking = cookingRecipeId === (recipe.template_id || recipe.id?.toString())
+            const isRunning = cookingPlaybookId === (playbook.template_id || playbook.id?.toString())
 
             return (
               <Card
-                key={recipe.id}
+                key={playbook.id}
                 data-testid="workflow-card"
                 className="glass-card hover:border-primary/20 transition-all cursor-pointer"
-                onClick={() => handleViewClick(recipe)}
+                onClick={() => handleViewClick(playbook)}
               >
                 <CardContent className="p-3">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-lg">
                       {(() => {
-                        const premiumIconName = iconMappings[recipe.marketplace_category] || iconMappings['global_recipe'] || null
+                        const premiumIconName = iconMappings[playbook.marketplace_category] || iconMappings['global_recipe'] || null
                         return premiumIconName ? (
                           <PremiumIcon name={premiumIconName} size={20} className="text-primary" />
                         ) : (
-                          recipe.icon || '🍳'
+                          playbook.icon || '🍳'
                         )
                       })()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm truncate">{recipe.name}</span>
+                        <span className="font-semibold text-sm truncate">{playbook.name}</span>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                         <span>{stepCount} Steps</span>
                         <span>&middot;</span>
                         <span>{agentIds.length} Agents</span>
                         <span>&middot;</span>
-                        <span>{recipe.use_count || 0} Runs</span>
-                        <RecipeRunDots
-                          recipeId={recipe.template_id || String(recipe.id || '')}
+                        <span>{playbook.use_count || 0} Runs</span>
+                        <PlaybookRunDots
+                          recipeId={playbook.template_id || String(playbook.id || '')}
                           compact
-                          onClick={() => handleViewClick(recipe)}
+                          onClick={() => handleViewClick(playbook)}
                         />
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      <LatestRunLink recipeId={recipe.template_id || String(recipe.id || '')} />
+                      <LatestRunLink recipeId={playbook.template_id || String(playbook.id || '')} />
                       <Button
                         className="h-8 text-xs"
                         size="sm"
-                        onClick={(e) => { e.stopPropagation(); handleCookRecipe(recipe) }}
-                        disabled={isCooking}
+                        onClick={(e) => { e.stopPropagation(); handleRunPlaybook(playbook) }}
+                        disabled={isRunning}
                       >
-                        {isCooking ? (
+                        {isRunning ? (
                           <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                         ) : (
                           <Play className="w-3 h-3 mr-1" />
                         )}
-                        Cook
+                        Run
                       </Button>
                     </div>
                   </div>
@@ -402,19 +402,19 @@ export function RecipesTab({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {recipes.map((recipe: any, index: number) => {
-            const steps = recipe.steps || []
+          {playbooks.map((playbook: any, index: number) => {
+            const steps = playbook.steps || []
             const agentIds = [...new Set(steps.map((s: any) => s.agent_id).filter(Boolean))] as number[]
             const stepCount = steps.length
-            const qualityScore = recipe.quality_score
+            const qualityScore = playbook.quality_score
             const qualityPct = qualityScore != null ? Math.round(qualityScore * 100) : null
-            const tools = recipe.required_tools || []
-            const isCooking = cookingRecipeId === (recipe.template_id || recipe.id?.toString())
-            const isSharing = sharingRecipeId === (recipe.template_id || recipe.id?.toString())
+            const tools = playbook.required_tools || []
+            const isRunning = cookingPlaybookId === (playbook.template_id || playbook.id?.toString())
+            const isSharing = sharingPlaybookId === (playbook.template_id || playbook.id?.toString())
 
             return (
               <motion.div
-                key={recipe.id}
+                key={playbook.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: index * 0.05 }}
@@ -425,42 +425,42 @@ export function RecipesTab({
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-xl">
                         {(() => {
-                          const premiumIconName = iconMappings[recipe.marketplace_category] || iconMappings['global_recipe'] || null
+                          const premiumIconName = iconMappings[playbook.marketplace_category] || iconMappings['global_recipe'] || null
                           return premiumIconName ? (
                             <PremiumIcon name={premiumIconName} size={24} className="text-primary" />
                           ) : (
-                            recipe.icon || '🍳'
+                            playbook.icon || '🍳'
                           )
                         })()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <CardTitle className="text-sm font-semibold leading-tight truncate">{recipe.name}</CardTitle>
+                        <CardTitle className="text-sm font-semibold leading-tight truncate">{playbook.name}</CardTitle>
                         <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
-                          {recipe.description || 'No description'}
+                          {playbook.description || 'No description'}
                         </p>
                       </div>
                     </div>
 
                     {/* Badges row */}
                     <div className="flex flex-wrap gap-1.5 mt-3">
-                      {recipe.marketplace_category && (
+                      {playbook.marketplace_category && (
                         <Badge variant="outline" className="text-[10px] h-5 bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20">
-                          {recipe.marketplace_category}
+                          {playbook.marketplace_category}
                         </Badge>
                       )}
-                      {recipe.is_system && (
+                      {playbook.is_system && (
                         <Badge variant="outline" className="text-[10px] h-5 bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))] border-[hsl(var(--agent))]/20">
                           System
                         </Badge>
                       )}
-                      {recipe.learning_data?.latest_suggestions?.length > 0 && (
+                      {playbook.learning_data?.latest_suggestions?.length > 0 && (
                         <Badge
                           variant="outline"
                           className="text-[10px] h-5 bg-primary/10 text-primary border-primary/20 cursor-pointer hover:bg-primary/20"
-                          onClick={(e) => { e.stopPropagation(); handleViewClick(recipe) }}
+                          onClick={(e) => { e.stopPropagation(); handleViewClick(playbook) }}
                         >
                           <Lightbulb className="w-2.5 h-2.5 mr-0.5" />
-                          {recipe.learning_data.latest_suggestions.length}
+                          {playbook.learning_data.latest_suggestions.length}
                         </Badge>
                       )}
                     </div>
@@ -500,16 +500,16 @@ export function RecipesTab({
                         <div className="text-[10px] text-muted-foreground">Agents</div>
                       </div>
                       <div className="text-center">
-                        <div className="text-lg font-bold text-foreground">{recipe.use_count || 0}</div>
+                        <div className="text-lg font-bold text-foreground">{playbook.use_count || 0}</div>
                         <div className="text-[10px] text-muted-foreground">Runs</div>
                       </div>
                     </div>
 
                     {/* Run history dots */}
-                    <RecipeRunDots
-                      recipeId={recipe.template_id || String(recipe.id || '')}
-                      useCount={recipe.use_count}
-                      onClick={() => handleViewClick(recipe)}
+                    <PlaybookRunDots
+                      recipeId={playbook.template_id || String(playbook.id || '')}
+                      useCount={playbook.use_count}
+                      onClick={() => handleViewClick(playbook)}
                     />
 
                     {/* Agent avatars */}
@@ -569,20 +569,20 @@ export function RecipesTab({
                     {/* Action buttons */}
                     <Separator />
                     <div className="flex items-center justify-between">
-                      <Button variant="ghost" size="sm" onClick={() => handleViewClick(recipe)}
+                      <Button variant="ghost" size="sm" onClick={() => handleViewClick(playbook)}
                         className="text-muted-foreground hover:text-foreground p-0 h-auto">
                         Details
                       </Button>
                       <div className="flex items-center gap-1">
-                        <LatestRunLink recipeId={recipe.template_id || String(recipe.id || '')} />
-                        {!recipe.is_system && (
+                        <LatestRunLink recipeId={playbook.template_id || String(playbook.id || '')} />
+                        {!playbook.is_system && (
                           <>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEditClick(recipe)} title="Edit">
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEditClick(playbook)} title="Edit">
                               <Edit className="w-3.5 h-3.5" />
                             </Button>
                             <Button
                               variant="ghost" size="sm" className="h-8 w-8 p-0 text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]/80"
-                              onClick={() => handleDeleteClick(recipe)}
+                              onClick={() => handleDeleteClick(playbook)}
                               title="Delete"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -593,15 +593,15 @@ export function RecipesTab({
                           size="sm"
                           variant="outline"
                           className="w-24"
-                          onClick={() => handleCookRecipe(recipe)}
-                          disabled={isCooking}
+                          onClick={() => handleRunPlaybook(playbook)}
+                          disabled={isRunning}
                         >
-                          {isCooking ? (
+                          {isRunning ? (
                             <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
                           ) : (
                             <Play className="w-3 h-3 mr-1.5" />
                           )}
-                          {isCooking ? 'Starting...' : 'Cook'}
+                          {isRunning ? 'Starting...' : 'Run'}
                         </Button>
                       </div>
                     </div>
@@ -613,55 +613,55 @@ export function RecipesTab({
         </div>
       )}
 
-      {/* Create/Edit Recipe Modal (4-step wizard) */}
+      {/* Create/Edit Playbook Modal (4-step wizard) */}
 
-      <CreateRecipeModal
+      <CreatePlaybookModal
         open={showCreateModal}
         onClose={closeCreateModal}
         onSave={() => {
           closeCreateModal()
           refetch()
         }}
-        initialData={editRecipeData}
-        recipeId={editRecipeId || undefined}
+        initialData={editPlaybookData}
+        recipeId={editPlaybookId || undefined}
       />
 
-      {/* View Recipe Modal */}
-      <ViewRecipeModal
+      {/* View Playbook Modal */}
+      <ViewPlaybookModal
         open={showViewModal}
         onClose={() => {
           setShowViewModal(false)
-          setSelectedRecipe(null)
+          setSelectedPlaybook(null)
         }}
-        recipe={selectedRecipe}
-        suggestions={selectedRecipeSuggestions}
-        executions={(selectedRecipeExecutions as any)?.items || (selectedRecipeExecutions as any) || []}
+        recipe={selectedPlaybook}
+        suggestions={selectedPlaybookSuggestions}
+        executions={(selectedPlaybookExecutions as any)?.items || (selectedPlaybookExecutions as any) || []}
         executionsLoading={executionsLoading}
         onEdit={() => {
           setShowViewModal(false)
-          handleEditClick(selectedRecipe)
+          handleEditClick(selectedPlaybook)
         }}
         onExecute={() => {
           setShowViewModal(false)
-          handleCookRecipe(selectedRecipe)
+          handleRunPlaybook(selectedPlaybook)
         }}
-        onShare={!selectedRecipe?.is_system && !selectedRecipe?.is_marketplace_item
-          ? () => handleShareToMarketplace(selectedRecipe)
+        onShare={!selectedPlaybook?.is_system && !selectedPlaybook?.is_marketplace_item
+          ? () => handleShareToMarketplace(selectedPlaybook)
           : undefined
         }
         onViewExecution={(executionId) => {
-          if (!selectedRecipe) return
+          if (!selectedPlaybook) return
           setShowViewModal(false)
           onExecuteRecipe?.(0, {
             recipeExecutionId: executionId,
-            recipeId: selectedRecipe.template_id,
-            recipeSteps: (selectedRecipe.steps || []).map((s: any) => ({
+            recipeId: selectedPlaybook.template_id,
+            recipeSteps: (selectedPlaybook.steps || []).map((s: any) => ({
               step_id: s.step_id,
               order: s.order,
               prompt_template: s.prompt_template || '',
               agent_id: s.agent_id ?? 0,
             })),
-            recipeName: selectedRecipe.name,
+            recipeName: selectedPlaybook.name,
           })
         }}
       />
@@ -670,9 +670,9 @@ export function RecipesTab({
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Recipe?</DialogTitle>
+            <DialogTitle>Delete Playbook?</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete &quot;{selectedRecipe?.name}&quot;? This action cannot be undone.
+              Are you sure you want to delete &quot;{selectedPlaybook?.name}&quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
 
@@ -681,17 +681,17 @@ export function RecipesTab({
               variant="outline"
               onClick={() => {
                 setShowDeleteDialog(false)
-                setSelectedRecipe(null)
+                setSelectedPlaybook(null)
               }}
             >
               Cancel
             </Button>
             <Button
               variant="destructive"
-              onClick={handleDeleteRecipe}
+              onClick={handleDeletePlaybook}
               disabled={deleteMutation.isLoading}
             >
-              {deleteMutation.isLoading ? 'Deleting...' : 'Delete Recipe'}
+              {deleteMutation.isLoading ? 'Deleting...' : 'Delete Playbook'}
             </Button>
           </div>
         </DialogContent>

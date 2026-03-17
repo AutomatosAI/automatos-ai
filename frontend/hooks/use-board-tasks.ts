@@ -126,7 +126,7 @@ export function useUpdateTaskStatus() {
 function mapTaskToBoardTask(item: any): BoardTask {
   return {
     id: String(item.id),
-    type: item.source_type === 'recipe' ? 'recipe' : (item.type ?? 'task'),
+    type: (item.source_type === 'recipe' || item.source_type === 'playbook') ? 'playbook' : (item.type ?? 'task'),
     name: item.title ?? 'Untitled',
     description: item.description ?? undefined,
     status: (item.status as BoardStatus) ?? 'inbox',
@@ -145,7 +145,12 @@ function mapTaskToBoardTask(item: any): BoardTask {
     error_message: item.error_message ?? undefined,
     source_id: item.source_id ?? String(item.id),
     step_progress: item.planning_data?.step_progress ?? undefined,
-    planning_data: item.planning_data ?? undefined,
+    planning_data: item.planning_data ? {
+      // Normalize recipe_id (legacy) to playbook_id
+      playbook_id: item.planning_data.playbook_id ?? item.planning_data.recipe_id,
+      execution_id: item.planning_data.execution_id,
+      step_progress: item.planning_data.step_progress,
+    } : undefined,
     result: item.result,
   }
 }

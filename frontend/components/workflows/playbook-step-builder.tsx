@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useAgents } from '@/hooks/use-agent-api'
-import type { RecipeFormValues } from './create-recipe-modal'
+import type { PlaybookFormValues } from './create-playbook-modal'
 
 interface Agent {
   id: number
@@ -106,8 +106,8 @@ function VariableHighlightTextarea({
   )
 }
 
-export function RecipeStepBuilder() {
-  const methods = useFormContext<RecipeFormValues>()
+export function PlaybookStepBuilder() {
+  const methods = useFormContext<PlaybookFormValues>()
   const steps = methods.watch('steps')
   const { data: agentsData, isLoading: agentsLoading } = useAgents()
 
@@ -158,7 +158,7 @@ export function RecipeStepBuilder() {
     methods.setValue('steps', reordered)
   }
 
-  const updateStep = (index: number, field: keyof RecipeFormValues['steps'][0], value: string | undefined) => {
+  const updateStep = (index: number, field: keyof PlaybookFormValues['steps'][0], value: string | undefined) => {
     const updated = [...steps]
     updated[index] = { ...updated[index], [field]: value }
     methods.setValue('steps', updated)

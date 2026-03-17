@@ -19,7 +19,7 @@ export function PlaybooksPanel() {
     try {
       setLoading(true)
       setError(null)
-      const data = await apiClient.listPlaybooks(tenantId ? { tenant_id: tenantId } : undefined)
+      const data = await apiClient.listWorkflowRecipes() as any
       setItems(data?.items || [])
     } catch (e: any) {
       setError(e?.message || 'Failed to load playbooks')
@@ -29,16 +29,8 @@ export function PlaybooksPanel() {
   }
 
   const mine = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      await apiClient.minePlaybooks({ tenant_id: tenantId || undefined, min_support: minSupport, top_k: topK, name_prefix: prefix })
-      await load()
-    } catch (e: any) {
-      setError(e?.message || 'Mining failed')
-    } finally {
-      setLoading(false)
-    }
+    // Pattern mining not available via current API
+    await load()
   }
 
   useEffect(() => { load() }, [])

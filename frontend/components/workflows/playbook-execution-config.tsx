@@ -5,7 +5,7 @@ import { useFormContext } from 'react-hook-form'
 import { Label } from '@/components/ui/label'
 import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Input } from '@/components/ui/input'
-import type { RecipeFormValues } from './create-recipe-modal'
+import type { PlaybookFormValues } from './create-playbook-modal'
 
 const MEMORY_ISOLATION_OPTIONS = [
   { value: 'shared', label: 'Shared' },
@@ -18,12 +18,12 @@ function formatMs(ms: number): string {
   return `${(ms / 60000).toFixed(1)}min`
 }
 
-export function RecipeExecutionConfig() {
-  const methods = useFormContext<RecipeFormValues>()
+export function PlaybookExecutionConfig() {
+  const methods = useFormContext<PlaybookFormValues>()
   const config = methods.watch('execution_config')
   const steps = methods.watch('steps')
 
-  const updateConfig = (field: keyof RecipeFormValues['execution_config'], value: string | number | boolean) => {
+  const updateConfig = (field: keyof PlaybookFormValues['execution_config'], value: string | number | boolean) => {
     methods.setValue('execution_config', { ...config, [field]: value })
   }
 
@@ -179,8 +179,8 @@ function AdvancedSection({
   config,
   updateConfig,
 }: {
-  config: RecipeFormValues['execution_config']
-  updateConfig: (field: keyof RecipeFormValues['execution_config'], value: string | number | boolean) => void
+  config: PlaybookFormValues['execution_config']
+  updateConfig: (field: keyof PlaybookFormValues['execution_config'], value: string | number | boolean) => void
 }) {
   const [expanded, setExpanded] = React.useState(false)
 

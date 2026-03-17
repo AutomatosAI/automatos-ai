@@ -1,8 +1,8 @@
 """
-Recipe Learning Service - Stage 6 (Learn)
-==========================================
+Playbook Learning Service - Stage 6 (Learn)
+============================================
 
-Analyzes recipe executions to extract improvement patterns and generate
+Analyzes playbook executions to extract improvement patterns and generate
 suggestions for prompt rewrites, model upgrades, and tool additions.
 """
 
@@ -18,10 +18,10 @@ from core.models.core import RecipeExecution, WorkflowTemplate
 logger = logging.getLogger(__name__)
 
 
-class RecipeLearningService:
+class PlaybookLearningService:
     """
-    Analyzes recipe executions and extracts improvement patterns.
-    Stores results in the recipe's learning_data JSONB field.
+    Analyzes playbook executions and extracts improvement patterns.
+    Stores results in the playbook's learning_data JSONB field.
     """
 
     def __init__(self, db: Optional[Session] = None):
@@ -45,13 +45,13 @@ class RecipeLearningService:
         if not execution:
             raise ValueError(f"Execution not found: {execution_id}")
 
-        # Fetch the associated recipe
-        recipe = self.db.query(WorkflowTemplate).filter(
+        # Fetch the associated playbook
+        playbook = self.db.query(WorkflowTemplate).filter(
             WorkflowTemplate.id == execution.recipe_id
         ).first()
 
-        if not recipe:
-            raise ValueError(f"Recipe not found for execution: {execution_id}")
+        if not playbook:
+            raise ValueError(f"Playbook not found for execution: {execution_id}")
 
         # Extract patterns from execution trace
         patterns = self._extract_patterns(execution)
@@ -70,8 +70,8 @@ class RecipeLearningService:
             "performance_metrics": performance_metrics,
         }
 
-        # Store results in recipe's learning_data
-        self._update_learning_data(recipe, result)
+        # Store results in playbook's learning_data
+        self._update_learning_data(playbook, result)
 
         return result
 
@@ -150,11 +150,11 @@ class RecipeLearningService:
 
         # Pattern: Input data issues
         input_data = execution.input_data or {}
-        recipe = self.db.query(WorkflowTemplate).filter(
+        playbook = self.db.query(WorkflowTemplate).filter(
             WorkflowTemplate.id == execution.recipe_id
         ).first()
-        if recipe and recipe.inputs:
-            for param_name, param_config in recipe.inputs.items():
+        if playbook and playbook.inputs:
+            for param_name, param_config in playbook.inputs.items():
                 if isinstance(param_config, dict) and param_config.get("required"):
                     if param_name not in input_data or input_data[param_name] is None:
                         patterns.append({
@@ -312,15 +312,15 @@ class RecipeLearningService:
         }
 
     def _update_learning_data(
-        self, recipe: WorkflowTemplate, analysis_result: Dict[str, Any]
+        self, playbook: WorkflowTemplate, analysis_result: Dict[str, Any]
     ) -> None:
         """
-        Merge analysis results into the recipe's learning_data JSONB field.
+        Merge analysis results into the playbook's learning_data JSONB field.
 
         Maintains a rolling history of analyses, appending new entries
         and capping history to the most recent 50 entries.
         """
-        existing_data = recipe.learning_data or {}
+        existing_data = playbook.learning_data or {}
 
         # Initialize structure if empty
         if not existing_data.get("analyses"):
@@ -344,11 +344,11 @@ class RecipeLearningService:
         existing_data["latest_performance"] = analysis_result["performance_metrics"]
         existing_data["last_analyzed_at"] = analysis_result["analyzed_at"]
 
-        # Update recipe
-        recipe.learning_data = existing_data
+        # Update playbook
+        playbook.learning_data = existing_data
         self.db.commit()
         logger.info(
-            f"Updated learning_data for recipe {recipe.id} "
+            f"Updated learning_data for playbook {playbook.id} "
             f"({len(analysis_result['patterns'])} patterns, "
             f"{len(analysis_result['suggestions'])} suggestions)"
         )

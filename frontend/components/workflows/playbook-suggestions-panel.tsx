@@ -55,12 +55,12 @@ export interface SuggestionsData {
   analysis_count: number
 }
 
-interface RecipeSuggestionsPanelProps {
+interface PlaybookSuggestionsPanelProps {
   data: SuggestionsData
   onApplyPromptRewrite?: (suggestion: Suggestion) => void
   onApplyModelUpgrade?: (suggestion: Suggestion) => void
   onApplyToolAddition?: (suggestion: Suggestion) => void
-  recipeName?: string
+  playbookName?: string
 }
 
 const SUGGESTION_TYPE_CONFIG: Record<string, { icon: typeof Lightbulb; label: string; color: string }> = {
@@ -81,13 +81,13 @@ const SEVERITY_CONFIG: Record<string, { color: string; icon: typeof AlertTriangl
   low: { color: 'text-[hsl(var(--info))] bg-[hsl(var(--info))]/10 border-[hsl(var(--info))]/30', icon: TrendingUp },
 }
 
-export function RecipeSuggestionsPanel({
+export function PlaybookSuggestionsPanel({
   data,
   onApplyPromptRewrite,
   onApplyModelUpgrade,
   onApplyToolAddition,
-  recipeName,
-}: RecipeSuggestionsPanelProps) {
+  playbookName,
+}: PlaybookSuggestionsPanelProps) {
   const [showPatterns, setShowPatterns] = useState(false)
   const [showPerformance, setShowPerformance] = useState(false)
   const [applyingIndex, setApplyingIndex] = useState<number | null>(null)
@@ -123,7 +123,7 @@ export function RecipeSuggestionsPanel({
       <div className="text-center py-8 text-muted-foreground">
         <Lightbulb className="w-8 h-8 mx-auto mb-3 opacity-50" />
         <p className="text-sm">No suggestions yet</p>
-        <p className="text-xs mt-1">Execute this recipe to generate improvement suggestions</p>
+        <p className="text-xs mt-1">Execute this playbook to generate improvement suggestions</p>
       </div>
     )
   }

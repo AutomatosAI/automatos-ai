@@ -58,7 +58,7 @@ import { ActiveWorkflowsPanel } from './active-workflows-panel'
 import { toast } from '@/components/ui/use-toast'
 import { HistoryTab } from './history-tab'
 // MonitoringTab removed — analytics consolidated into /analytics
-import { RecipesTab } from './recipes-tab'
+import { PlaybooksTab } from './playbooks-tab'
 import { ExecutionKitchen } from './execution-kitchen'
 
 // Real data will be loaded from backend
@@ -645,7 +645,7 @@ export function WorkflowManagement() {
             {/* Active Workflows Panel - handles its own empty state */}
             <ActiveWorkflowsPanel
               onWorkflowClick={handleWorkflowClick}
-              onRecipeRunClick={(run) => {
+              onPlaybookRunClick={(run) => {
                 if (!run.recipe_template_id) return
                 setRecipeExecInfo({
                   recipeExecutionId: run.execution_id,
@@ -666,7 +666,7 @@ export function WorkflowManagement() {
           </SharedTabsContent>
 
           <SharedTabsContent value="templates" className="space-y-6">
-            <RecipesTab
+            <PlaybooksTab
               searchTerm={recipeSearchTerm}
               viewMode={viewMode}
               externalCreateOpen={recipeCreateOpen}
