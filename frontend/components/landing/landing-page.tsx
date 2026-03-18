@@ -63,80 +63,80 @@ const itemVariants = {
 const coreFeatures = [
   {
     icon: Bot,
-    title: 'Multi-Agent Orchestration',
-    description: 'Advanced AI agents working in perfect harmony with real-time coordination and intelligent task distribution.',
+    title: 'Mission Control',
+    description: 'Describe a goal and Automatos decomposes it into tasks, assigns specialist agents, executes, verifies, and reports back.',
     gradient: 'from-orange-500 to-red-500',
-    features: ['Real-time Communication', 'Intelligent Task Routing', 'Performance Monitoring', 'Scalable Architecture']
+    features: ['Intelligent Task Decomposition', 'Automated Agent Assignment', 'Built-in Verification', 'Real-time Progress Tracking']
   },
   {
     icon: Brain,
-    title: 'Context Engineering',
-    description: 'RAG-powered knowledge system with vector embeddings and semantic search for context-aware intelligence.',
+    title: 'Business Knowledge',
+    description: 'Upload your documents, connect your data sources. Every agent understands your business context from day one.',
     gradient: 'from-purple-500 to-pink-500',
-    features: ['Vector Embeddings', 'Semantic Search', 'Learning Engine', 'Context Awareness']
+    features: ['Document Understanding', 'Semantic Search', 'Continuous Learning', 'Context-Aware Agents']
   },
   {
     icon: Workflow,
-    title: 'Visual Workflow Builder',
-    description: 'Intuitive drag-and-drop interface for creating complex multi-agent workflows with visual execution tracking.',
+    title: 'Playbooks',
+    description: 'Save successful missions as reusable playbooks. Schedule them to run daily, weekly, or trigger on demand.',
     gradient: 'from-blue-500 to-cyan-500',
-    features: ['Visual Builder', 'Execution Tracking', 'Template Library', 'Version Control']
+    features: ['Save from Missions', 'Scheduled Execution', 'Template Library', 'One-Click Replay']
   },
   {
     icon: Shield,
-    title: 'Enterprise Security',
-    description: 'Production-grade security with advanced authentication, authorization, and comprehensive audit trails.',
+    title: 'You Stay in Control',
+    description: 'Review every plan before it runs. Approve, reject, or redirect. Full audit trail of every decision.',
     gradient: 'from-green-500 to-emerald-500',
-    features: ['Authentication', 'Authorization', 'Audit Trails', 'Data Encryption']
+    features: ['Plan Approval Gate', 'Human-in-the-Loop Review', 'Complete Audit Trail', 'Workspace Isolation']
   }
 ]
 
 const cognitiveFunctions = [
   {
     icon: Target,
-    title: 'Task Breakdown',
-    description: 'Intelligent decomposition of complex objectives into manageable, actionable tasks.'
+    title: 'Plan & Decompose',
+    description: 'Give a high-level goal and watch it break into verified, sequenced tasks automatically.'
   },
   {
     icon: FileText,
-    title: 'Content Generation',
-    description: 'Advanced content creation capabilities with context-aware generation and optimization.'
+    title: 'Research & Report',
+    description: 'Deep research across sources with structured deliverables your team can act on.'
   },
   {
     icon: Code,
-    title: 'File Operations',
-    description: 'Comprehensive file management, processing, and transformation capabilities.'
+    title: 'Build & Automate',
+    description: 'Agents that write, test, and deploy code — or process documents, data, and files.'
   },
   {
     icon: GitBranch,
-    title: 'Git Integration',
-    description: 'Seamless version control integration with automated commit and collaboration features.'
+    title: 'Learn & Improve',
+    description: 'Every mission makes your agents smarter. History-based scoring surfaces your best performers.'
   }
 ]
 
 const dashboardFeatures = [
   {
     icon: BarChart3,
-    title: 'Performance Analytics',
-    description: 'Real-time insights into agent performance, workflow execution, and system health.',
+    title: 'Mission Analytics',
+    description: 'Track success rates, token costs, and agent performance across every mission.',
     color: 'text-blue-400'
   },
   {
     icon: Eye,
-    title: 'Real-time Monitoring',
-    description: 'Live system monitoring with alerts, logging, and comprehensive visibility.',
+    title: 'Live Command Centre',
+    description: 'See every agent, every task, every mission in real-time. Know what needs your attention.',
     color: 'text-green-400'
   },
   {
     icon: Database,
-    title: 'Document Management',
-    description: 'Advanced document processing with OCR, extraction, and knowledge indexing.',
+    title: 'Knowledge Base',
+    description: 'Upload documents, sync cloud drives. Your agents search and reference your business data.',
     color: 'text-purple-400'
   },
   {
     icon: MessageSquare,
-    title: 'Agent Communication',
-    description: 'Visualize and manage inter-agent communication patterns and coordination.',
+    title: 'Agent Reports',
+    description: 'Daily standups, task reports, and deliverables from every agent — graded and searchable.',
     color: 'text-orange-400'
   }
 ]
@@ -144,35 +144,35 @@ const dashboardFeatures = [
 const enterpriseFeatures = [
   {
     icon: Globe,
-    title: 'Production Ready',
-    description: 'Docker deployment, microservices architecture, and enterprise scalability.',
-    stats: '99.9% Uptime'
+    title: 'Any LLM Provider',
+    description: 'OpenRouter, OpenAI, Anthropic, Google, or self-hosted. Mix models per agent.',
+    stats: '200+ Models'
   },
   {
     icon: Database,
-    title: 'PostgreSQL + pgvector',
-    description: 'Robust database with vector extensions for high-performance semantic search.',
-    stats: '1M+ Vectors'
+    title: 'Your Data, Your Control',
+    description: 'Workspace isolation, encrypted storage, and full data residency options.',
+    stats: 'Multi-Tenant'
   },
   {
     icon: Zap,
-    title: '25+ API Endpoints',
-    description: 'Comprehensive RESTful API with extensive documentation and SDKs.',
-    stats: '100ms Response'
+    title: 'API-First',
+    description: 'Every feature available via REST API. Build custom integrations or use the dashboard.',
+    stats: 'Full API'
   },
   {
     icon: Lock,
-    title: 'Advanced Security',
-    description: 'Enterprise-grade authentication, authorization, and data protection.',
+    title: 'Enterprise Security',
+    description: 'SSO, role-based access, comprehensive audit trails, and workspace-level permissions.',
     stats: 'SOC2 Ready'
   }
 ]
 
 const metrics = [
-  { label: 'Active Agents', value: '24+', icon: Bot },
-  { label: 'Workflows Executed', value: '10K+', icon: Workflow },
-  { label: 'Documents Processed', value: '50K+', icon: FileText },
-  { label: 'API Calls/Day', value: '1M+', icon: Zap }
+  { label: 'Minutes to First Mission', value: '5', icon: Zap },
+  { label: 'Plan, Execute, Verify', value: 'Auto', icon: Target },
+  { label: 'Agents Get Smarter', value: 'Always', icon: Brain },
+  { label: 'You Approve Everything', value: '100%', icon: Shield }
 ]
 
 export function LandingPage() {
@@ -196,17 +196,17 @@ export function LandingPage() {
         <motion.div variants={itemVariants} className="space-y-4">
           <Badge variant="secondary" className="px-4 py-2 text-sm">
             <Sparkles className="w-4 h-4 mr-2" />
-            World-Class Enterprise AI Platform
+            The Autonomous Business Operating System
           </Badge>
           <h1 className="text-6xl md:text-7xl font-bold leading-tight">
-            Welcome to{' '}
+            Your AI Team That{' '}
             <span className="gradient-text bg-gradient-to-r from-orange-500 via-red-500 to-pink-500">
-              Automotas AI
+              Runs Your Business
             </span>
           </h1>
           <p className="text-xl md:text-2xl text-muted-foreground max-w-4xl mx-auto leading-relaxed">
-            The most advanced multi-agent orchestration platform with intelligent coordination, 
-            context engineering, and beautiful enterprise dashboards. Built for production scale.
+            Tell Automatos what you need done. It plans the work, assigns specialist agents,
+            executes, verifies, and reports back. You stay in control.
           </p>
         </motion.div>
 
@@ -214,13 +214,13 @@ export function LandingPage() {
           <Link href="/agents">
             <Button size="lg" className="text-lg px-8 py-4 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600">
               <Play className="w-5 h-5 mr-2" />
-              Launch Platform
+              Start Your First Mission
             </Button>
           </Link>
-          <Link href="/documents">
+          <Link href="/activity?tab=missions">
             <Button variant="outline" size="lg" className="text-lg px-8 py-4">
               <Eye className="w-5 h-5 mr-2" />
-              View Dashboard
+              See It In Action
             </Button>
           </Link>
         </motion.div>
@@ -258,10 +258,10 @@ export function LandingPage() {
       >
         <motion.div variants={itemVariants} className="text-center space-y-4">
           <h2 className="text-4xl md:text-5xl font-bold">
-            <span className="gradient-text">World-Class Features</span>
+            <span className="gradient-text">How It Works</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-            Enterprise-grade capabilities that set new standards for AI orchestration platforms
+            From goal to deliverable — Automatos handles the planning, execution, and quality control
           </p>
         </motion.div>
 
@@ -314,10 +314,10 @@ export function LandingPage() {
       >
         <motion.div variants={itemVariants} className="text-center space-y-4">
           <h2 className="text-4xl md:text-5xl font-bold">
-            Advanced <span className="gradient-text">Cognitive Functions</span>
+            What Your <span className="gradient-text">Agents Can Do</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-            Four core AI capabilities that power intelligent orchestration and automation
+            Specialist agents that plan, research, build, and learn — so you can focus on decisions
           </p>
         </motion.div>
 
@@ -356,10 +356,10 @@ export function LandingPage() {
       >
         <motion.div variants={itemVariants} className="text-center space-y-4">
           <h2 className="text-4xl md:text-5xl font-bold">
-            Beautiful <span className="gradient-text">Management Dashboards</span>
+            Your <span className="gradient-text">Command Centre</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-            Stunning, intuitive interfaces that make complex AI orchestration simple and visual
+            See every agent, every task, every mission in real-time. Know what needs your attention.
           </p>
         </motion.div>
 
@@ -395,7 +395,7 @@ export function LandingPage() {
           <Link href="/analytics">
             <Button size="lg" variant="outline" className="px-8">
               <BarChart3 className="w-5 h-5 mr-2" />
-              Explore Analytics Dashboard
+              Open Command Centre
               <ArrowRight className="w-5 h-5 ml-2" />
             </Button>
           </Link>
@@ -412,10 +412,10 @@ export function LandingPage() {
       >
         <motion.div variants={itemVariants} className="text-center space-y-4">
           <h2 className="text-4xl md:text-5xl font-bold">
-            <span className="gradient-text">Enterprise-Ready</span> Architecture
+            <span className="gradient-text">Built for</span> Production
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-            Production-grade infrastructure built for scale, security, and reliability
+            Flexible infrastructure that adapts to your stack, your models, and your security requirements
           </p>
         </motion.div>
 
@@ -463,24 +463,24 @@ export function LandingPage() {
             className="space-y-6"
           >
             <h2 className="text-4xl md:text-5xl font-bold">
-              Ready to Transform Your
-              <span className="gradient-text block">AI Operations?</span>
+              Ready to Put Your
+              <span className="gradient-text block">Business on Autopilot?</span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              Join the future of AI orchestration with our world-class platform. 
-              Start building intelligent multi-agent workflows today.
+              Upload your business docs, launch your first mission, and watch
+              Automatos build your AI team and get to work.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
               <Link href="/agents">
                 <Button size="lg" className="text-lg px-12 py-4 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600">
                   <Zap className="w-5 h-5 mr-2" />
-                  Get Started Now
+                  Start Your First Mission
                 </Button>
               </Link>
-              <Link href="/activity">
+              <Link href="/activity?tab=missions">
                 <Button variant="outline" size="lg" className="text-lg px-12 py-4">
                   <Workflow className="w-5 h-5 mr-2" />
-                  Explore Workflows
+                  See Missions in Action
                 </Button>
               </Link>
             </div>
