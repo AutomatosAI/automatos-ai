@@ -327,6 +327,8 @@ class Config:
     COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
     # Replanning limits (PRD-82B US-005)
     COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))
+    # Max tokens for mission task LLM calls (agents default to 2000, missions need more)
+    COORDINATOR_TASK_MAX_TOKENS: int = int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "16384"))
     # Cross-task consistency verification (PRD-82B US-006)
     COORDINATOR_CONSISTENCY_CHECK: bool = os.getenv("COORDINATOR_CONSISTENCY_CHECK", "true").lower() in ("true", "1", "yes")
     # Archival: move terminal runs to archive after N days (PRD-82B US-009)

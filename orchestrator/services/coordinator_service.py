@@ -281,7 +281,9 @@ class CoordinatorService:
         # Mission tasks need longer outputs than the 2000-token default
         if agent_runtime and hasattr(agent_runtime, "llm_manager"):
             original_max_tokens = agent_runtime.llm_manager.config.max_tokens
-            agent_runtime.llm_manager.config.max_tokens = max(original_max_tokens, 4096)
+            agent_runtime.llm_manager.config.max_tokens = max(
+                original_max_tokens, Config.COORDINATOR_TASK_MAX_TOKENS
+            )
 
         try:
             result = await factory.execute_with_prompt(
