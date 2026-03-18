@@ -200,6 +200,16 @@ def _build_judge_prompt(
     if len(output_clean) > max_output_chars:
         output_display += f"\n\n... (truncated, {len(output_clean)} total characters)"
 
+    # Detect research/web-search tasks — the judge cannot verify external sources
+    _title_lower = (task_title or "").lower()
+    _desc_lower = (task_description or "").lower()
+    _is_research = any(
+        kw in _title_lower or kw in _desc_lower
+        for kw in ("research", "web search", "websearch", "find articles",
+                    "search for", "gather information", "discussion points",
+                    "talking points", "find recent")
+    )
+
     # Adjust instructions for media-producing tasks
     media_note = ""
     if _has_image:
@@ -211,11 +221,24 @@ def _build_judge_prompt(
             "the image URL/reference IS the asset.\n"
         )
 
+    # Adjust instructions for research tasks — judge cannot verify external sources
+    research_note = ""
+    if _is_research:
+        research_note = (
+            "\n**NOTE:** This is a research/web-search task. The agent gathered "
+            "information from external sources that you cannot access or verify. "
+            "For the `accuracy` dimension, evaluate whether the claims are "
+            "internally consistent, properly attributed to sources, and plausible "
+            "— NOT whether you can independently confirm them. Do NOT penalise "
+            "accuracy for information you simply cannot verify. If the research "
+            "cites sources and the claims are plausible, score accuracy >= 0.7.\n"
+        )
+
     return f"""\
 ## Task
 **Title:** {task_title}
 **Description:** {task_description}
-{media_note}
+{media_note}{research_note}
 ## Verification Criteria
 {criteria_text}
 
