@@ -282,8 +282,23 @@ class CoordinatorService:
                 .order_by(OrchestrationTask.sequence_number)
                 .all()
             )
+            import re as _re
+            _MAX_UPSTREAM_CHARS = 8000  # per task — prevent context blow-up
+
+            def _sanitize_upstream(raw: str) -> str:
+                """Strip base64 images and truncate for downstream context."""
+                # Replace base64 image data with a reference marker
+                cleaned = _re.sub(
+                    r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+",
+                    "[image — see generated-images API]",
+                    raw,
+                )
+                if len(cleaned) > _MAX_UPSTREAM_CHARS:
+                    cleaned = cleaned[:_MAX_UPSTREAM_CHARS] + "\n\n... (truncated)"
+                return cleaned
+
             upstream_outputs = [
-                {"title": dt.title, "output": dt.output or ""}
+                {"title": dt.title, "output": _sanitize_upstream(dt.output)}
                 for dt in dep_tasks
                 if dt.output
             ]

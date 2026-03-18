@@ -179,17 +179,43 @@ def _build_judge_prompt(
         )
     )
 
+    # Detect media output (images, files, etc.)
+    import re as _re
+    _has_image = bool(
+        _re.search(r"!\[.*?\]\(.*?\)", output or "")
+        or _re.search(r"data:image/", output or "")
+        or _re.search(r"/api/generated-images/", output or "")
+    )
+
+    # Strip base64 data to avoid blowing up context
+    output_clean = _re.sub(
+        r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+",
+        "[BASE64_IMAGE_DATA]",
+        output or "",
+    )
+
     # Truncate output to avoid exceeding context limits
     max_output_chars = 12000
-    output_display = output[:max_output_chars]
-    if len(output) > max_output_chars:
-        output_display += f"\n\n... (truncated, {len(output)} total characters)"
+    output_display = output_clean[:max_output_chars]
+    if len(output_clean) > max_output_chars:
+        output_display += f"\n\n... (truncated, {len(output_clean)} total characters)"
+
+    # Adjust instructions for media-producing tasks
+    media_note = ""
+    if _has_image:
+        media_note = (
+            "\n**NOTE:** This task produces visual/media output (images). "
+            "The agent output contains image references (URLs or markdown image tags). "
+            "Verify that image references are present and the surrounding text is relevant. "
+            "Do NOT penalise for missing text sections like 'Final image asset' — "
+            "the image URL/reference IS the asset.\n"
+        )
 
     return f"""\
 ## Task
 **Title:** {task_title}
 **Description:** {task_description}
-
+{media_note}
 ## Verification Criteria
 {criteria_text}
 
