@@ -75,6 +75,7 @@ export interface TaskResponse {
   failure_reason_code: string | null
   failure_detail: string | null
   output_excerpt: string | null
+  output: string | null
   started_at: string | null
   completed_at: string | null
   created_at: string | null

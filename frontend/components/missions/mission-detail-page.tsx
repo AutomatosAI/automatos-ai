@@ -29,6 +29,7 @@ import { MissionDAGCanvas } from './mission-dag-canvas'
 import { MissionActivityFeed } from './mission-activity-feed'
 import { TaskInspector } from './task-inspector'
 import { HumanReviewPanel } from './human-review-panel'
+import { MissionResultsPanel } from './mission-results-panel'
 import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { computeMissionStats, TERMINAL_RUN_STATES } from '@/types/missions'
@@ -419,12 +420,17 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
 
           <ResizableHandle withHandle />
 
-          {/* Right panel: Activity Feed or Review */}
-          <ResizablePanel defaultSize={showReview || isReviewable ? 50 : 40} minSize={25}>
+          {/* Right panel: Results / Review / Activity Feed */}
+          <ResizablePanel defaultSize={showReview || isReviewable || isTerminal ? 50 : 40} minSize={25}>
             {(showReview || isReviewable) ? (
               <HumanReviewPanel
                 missionId={missionId}
                 tasks={mission.tasks}
+                className="h-full"
+              />
+            ) : isTerminal ? (
+              <MissionResultsPanel
+                mission={mission}
                 className="h-full"
               />
             ) : (

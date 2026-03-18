@@ -141,6 +141,7 @@ class TaskResponse(BaseModel):
     failure_reason_code: Optional[str] = None
     failure_detail: Optional[str] = None
     output_excerpt: Optional[str] = None
+    output: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
@@ -296,6 +297,7 @@ def _task_to_response(task: OrchestrationTask) -> dict:
         "failure_reason_code": task.failure_reason_code,
         "failure_detail": task.failure_detail,
         "output_excerpt": (task.output[:500] if task.output else None),
+        "output": task.output,
         "started_at": task.started_at,
         "completed_at": task.completed_at,
         "created_at": task.created_at,
