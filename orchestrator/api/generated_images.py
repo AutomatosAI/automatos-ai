@@ -4,14 +4,15 @@ Generated Images API
 
 Serves generated images stored in S3 or local filesystem.
 GET /api/generated-images/{image_id}
+
+Public endpoint — image IDs are unguessable UUIDs, and <img> tags in
+rendered markdown cannot send auth headers.
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from core.auth.dependencies import RequestContext
-from core.auth.hybrid import get_request_context_hybrid
 from core.services.image_store import get_image_store
 
 logger = logging.getLogger(__name__)
@@ -20,13 +21,11 @@ router = APIRouter(prefix="/api/generated-images", tags=["Generated Images"])
 
 
 @router.get("/{image_id}")
-async def get_generated_image(
-    image_id: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-):
-    """Fetch a generated image by its UUID, scoped to caller's workspace."""
+async def get_generated_image(image_id: str):
+    """Fetch a generated image by its UUID (public, unguessable ID)."""
     store = get_image_store()
-    result = await store.get_image(image_id, workspace_id=str(ctx.workspace_id))
+    # workspace_id=None searches all workspaces — safe because UUIDs are unguessable
+    result = await store.get_image(image_id, workspace_id=None)
     if result is None:
         raise HTTPException(status_code=404, detail="Image not found")
     image_bytes, content_type = result
