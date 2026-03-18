@@ -267,6 +267,37 @@ class CoordinatorService:
             )
             return
 
+        # Inject upstream task outputs into input_context so the agent
+        # can see what previous tasks produced (dependency chain context)
+        upstream_deps = (
+            db.query(OrchestrationTaskDependency)
+            .filter(OrchestrationTaskDependency.task_id == task.id)
+            .all()
+        )
+        if upstream_deps:
+            dep_task_ids = [d.depends_on_task_id for d in upstream_deps]
+            dep_tasks = (
+                db.query(OrchestrationTask)
+                .filter(OrchestrationTask.id.in_(dep_task_ids))
+                .order_by(OrchestrationTask.sequence_number)
+                .all()
+            )
+            upstream_outputs = [
+                {"title": dt.title, "output": dt.output or ""}
+                for dt in dep_tasks
+                if dt.output
+            ]
+            if upstream_outputs:
+                task.input_context = {
+                    **(task.input_context or {}),
+                    "upstream_outputs": upstream_outputs,
+                }
+                logger.info(
+                    "Injected %d upstream outputs into task %s",
+                    len(upstream_outputs),
+                    task.id,
+                )
+
         # Build the prompt
         prompt = MissionDispatcher.build_task_prompt(task)
 
