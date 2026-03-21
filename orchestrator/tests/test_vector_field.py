@@ -59,6 +59,25 @@ _fake_config_for_import.FIELD_ARCHIVAL_THRESHOLD = 0.05
 _fake_config_for_import.FIELD_BOUNDARY_PERMEABILITY = 1.0
 _fake_config_for_import.FIELD_EMBEDDING_DIM = 2048
 
+# Import the real SharedContextPort ABC BEFORE stubbing core.*
+# (vector_field.py subclasses it — MagicMock would break object.__new__)
+from core.ports.context import SharedContextPort  # noqa: E402
+
+# Stub heavy transitive imports so we don't need the full dep tree
+_config_mod = MagicMock()
+_config_mod.config = _fake_config_for_import
+sys.modules.setdefault("config", _config_mod)
+
+# Stub core.llm chain so EmbeddingManager import doesn't pull the world
+_core_stub = MagicMock()
+sys.modules.setdefault("core.llm", _core_stub)
+sys.modules.setdefault("core.llm.embedding_manager", _core_stub)
+
+# Re-register the real ports module so the subclass import resolves
+_ports_ctx_mod = MagicMock()
+_ports_ctx_mod.SharedContextPort = SharedContextPort
+sys.modules["core.ports.context"] = _ports_ctx_mod
+
 with (
     patch("modules.context.adapters.vector_field.AsyncQdrantClient", return_value=MagicMock()),
     patch("modules.context.adapters.vector_field.EmbeddingManager", return_value=MagicMock()),
@@ -106,6 +125,13 @@ def _make_scored_hit(point_id: str, cosine: float, **payload_kwargs) -> MagicMoc
     return hit
 
 
+def _mock_query_response(points: list) -> MagicMock:
+    """Wrap a list of ScoredPoint mocks in a QueryResponse-like object."""
+    resp = MagicMock()
+    resp.points = points
+    return resp
+
+
 @pytest.fixture
 def mock_qdrant():
     """Patch AsyncQdrantClient for every test that uses it."""
@@ -114,7 +140,9 @@ def mock_qdrant():
     client.create_collection = AsyncMock()
     client.create_payload_index = AsyncMock()
     client.upsert = AsyncMock()
-    client.search = AsyncMock(return_value=[])
+    _empty_response = MagicMock()
+    _empty_response.points = []
+    client.query_points = AsyncMock(return_value=_empty_response)
     client.scroll = AsyncMock(return_value=([], None))
     client.retrieve = AsyncMock(return_value=[])
     client.set_payload = AsyncMock()
@@ -404,7 +432,7 @@ class TestQuery:
         cosine = 0.9
         strength = 1.0
         hit = _make_scored_hit("pt-1", cosine=cosine, strength=strength, access_count=0)
-        mock_qdrant.search.return_value = [hit]
+        mock_qdrant.query_points.return_value = _mock_query_response([hit])
         mock_qdrant.retrieve.return_value = [hit]
 
         results = await adapter.query("ctx-1", "query text", agent_id=1, top_k=5)
@@ -423,7 +451,7 @@ class TestQuery:
         weak_hit = _make_scored_hit(
             "pt-weak", cosine=0.99, strength=0.04, access_count=0, last_accessed=old_time
         )
-        mock_qdrant.search.return_value = [weak_hit]
+        mock_qdrant.query_points.return_value = _mock_query_response([weak_hit])
 
         results = await adapter.query("ctx-1", "query", agent_id=1)
 
@@ -435,7 +463,7 @@ class TestQuery:
     ):
         # strength=1.0, age=0 → decayed_strength=1.0 > 0.05
         strong_hit = _make_scored_hit("pt-strong", cosine=0.8, strength=1.0, access_count=0)
-        mock_qdrant.search.return_value = [strong_hit]
+        mock_qdrant.query_points.return_value = _mock_query_response([strong_hit])
         mock_qdrant.retrieve.return_value = [strong_hit]
 
         results = await adapter.query("ctx-1", "query", agent_id=1)
@@ -449,7 +477,7 @@ class TestQuery:
         hit_a = _make_scored_hit("pt-a", cosine=0.5, strength=1.0, access_count=0)
         hit_b = _make_scored_hit("pt-b", cosine=0.9, strength=1.0, access_count=0)
         hit_c = _make_scored_hit("pt-c", cosine=0.7, strength=1.0, access_count=0)
-        mock_qdrant.search.return_value = [hit_a, hit_b, hit_c]
+        mock_qdrant.query_points.return_value = _mock_query_response([hit_a, hit_b, hit_c])
         mock_qdrant.retrieve.return_value = [hit_a, hit_b, hit_c]
 
         results = await adapter.query("ctx-1", "query", agent_id=1)
@@ -465,7 +493,7 @@ class TestQuery:
             _make_scored_hit(f"pt-{i}", cosine=0.9 - i * 0.01, strength=1.0, access_count=0)
             for i in range(10)
         ]
-        mock_qdrant.search.return_value = hits
+        mock_qdrant.query_points.return_value = _mock_query_response(hits)
         mock_qdrant.retrieve.return_value = hits
 
         results = await adapter.query("ctx-1", "query", agent_id=1, top_k=3)
@@ -477,7 +505,7 @@ class TestQuery:
         self, adapter, mock_qdrant, mock_embedder
     ):
         hit = _make_scored_hit("pt-1", cosine=0.8, strength=1.0, access_count=0)
-        mock_qdrant.search.return_value = [hit]
+        mock_qdrant.query_points.return_value = _mock_query_response([hit])
         mock_qdrant.retrieve.return_value = [hit]
 
         results = await adapter.query("ctx-1", "query", agent_id=1)
@@ -496,7 +524,7 @@ class TestQuery:
         self, adapter, mock_qdrant, mock_embedder
     ):
         hit = _make_scored_hit("pt-1", cosine=0.8, strength=1.0, access_count=0)
-        mock_qdrant.search.return_value = [hit]
+        mock_qdrant.query_points.return_value = _mock_query_response([hit])
         mock_qdrant.retrieve.return_value = [hit]
 
         await adapter.query("ctx-1", "query", agent_id=1)
@@ -508,27 +536,27 @@ class TestQuery:
     async def test_no_hebbian_when_no_results(
         self, adapter, mock_qdrant, mock_embedder
     ):
-        mock_qdrant.search.return_value = []
+        mock_qdrant.query_points.return_value = _mock_query_response([])
 
         await adapter.query("ctx-1", "query", agent_id=1)
 
         mock_qdrant.set_payload.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_search_overfetches_3x_top_k(
+    async def test_query_points_overfetches_3x_top_k(
         self, adapter, mock_qdrant, mock_embedder
     ):
-        mock_qdrant.search.return_value = []
+        mock_qdrant.query_points.return_value = _mock_query_response([])
         await adapter.query("ctx-1", "query", agent_id=1, top_k=7)
 
-        search_call = mock_qdrant.search.call_args
-        assert search_call.kwargs["limit"] == 21  # 7 × 3
+        qp_call = mock_qdrant.query_points.call_args
+        assert qp_call.kwargs["limit"] == 21  # 7 × 3
 
     @pytest.mark.asyncio
     async def test_query_uses_embedding_of_query_string(
         self, adapter, mock_qdrant, mock_embedder
     ):
-        mock_qdrant.search.return_value = []
+        mock_qdrant.query_points.return_value = _mock_query_response([])
         await adapter.query("ctx-1", "what is the plan?", agent_id=1)
         mock_embedder.generate_embedding.assert_awaited_once_with("what is the plan?")
 

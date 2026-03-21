@@ -37,9 +37,11 @@ async def field_query(
         }
 
     try:
-        from modules.context.adapters.vector_field import VectorFieldSharedContext
+        from modules.context.factory import get_shared_context
 
-        field = VectorFieldSharedContext()
+        field = get_shared_context()
+        if not field:
+            return {"success": False, "error": "Shared context backend unavailable"}
         results = await field.query(
             context_id=field_id,
             query=query_text,
@@ -99,9 +101,11 @@ async def field_inject(
         }
 
     try:
-        from modules.context.adapters.vector_field import VectorFieldSharedContext
+        from modules.context.factory import get_shared_context
 
-        field = VectorFieldSharedContext()
+        field = get_shared_context()
+        if not field:
+            return {"success": False, "error": "Shared context backend unavailable"}
         await field.inject(
             context_id=field_id,
             key=key,
@@ -136,10 +140,12 @@ async def field_stability(
         }
 
     try:
-        from modules.context.adapters.vector_field import VectorFieldSharedContext
+        from modules.context.factory import get_shared_context
 
-        field = VectorFieldSharedContext()
-        stats = await field.measure_stability(field_id)
+        field = get_shared_context()
+        if not field:
+            return {"success": False, "error": "Shared context backend unavailable"}
+        stats = await field._inner.measure_stability(field_id) if hasattr(field._inner, "measure_stability") else {}
 
         return {
             "success": True,

@@ -87,17 +87,18 @@ class CoordinatorService:
         self._scheduler = None
         self._owns_scheduler: bool = False
         self._last_archive_at: Optional[datetime] = None
-        self._field: Optional["VectorFieldSharedContext"] = None
+        self._field = None  # Lazy-init via factory
 
     def _get_field(self):
-        """Lazy-init the PRD-108 vector field adapter."""
+        """Lazy-init the PRD-108 shared context backend (vector_field or redis)."""
         if self._field is None:
             try:
-                from modules.context.adapters.vector_field import VectorFieldSharedContext
-                self._field = VectorFieldSharedContext()
-                logger.info("[PRD-108] Vector field adapter initialized")
+                from modules.context.factory import get_shared_context
+                self._field = get_shared_context()
+                if self._field:
+                    logger.info("[PRD-108] Shared context backend initialized: %s", self._field._backend_name)
             except Exception as e:
-                logger.warning("[PRD-108] Vector field unavailable: %s", e)
+                logger.warning("[PRD-108] Shared context unavailable: %s", e)
         return self._field
 
     async def _create_mission_field(

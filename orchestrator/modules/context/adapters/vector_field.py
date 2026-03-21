@@ -167,11 +167,12 @@ class VectorFieldSharedContext(SharedContextPort):
         query_embedding = await self._embedder.generate_embedding(query)
 
         # Over-fetch — decay filtering will reduce the set
-        raw_results = await self._client.search(
+        response = await self._client.query_points(
             collection_name=f"field_{context_id}",
-            query_vector=query_embedding,
+            query=query_embedding,
             limit=top_k * 3,
         )
+        raw_results = response.points
 
         now = datetime.now(timezone.utc)
         scored: list[dict[str, Any]] = []
