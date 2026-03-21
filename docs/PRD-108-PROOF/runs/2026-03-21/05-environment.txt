@@ -1,0 +1,33 @@
+PRD-108 Evidence Run — 2026-03-21
+==================================
+
+Commit SHA: b0097dae95609a9016e4e1d18c5f6837b35b609a
+Branch:      ralph/prd-82b-mission-intelligence
+
+Environment:
+  OS:              macOS Darwin 25.2.0
+  Python:          3.10.9
+  qdrant-client:   1.17.1
+  pytest:          9.0.2
+  pytest-asyncio:  1.3.0
+
+Qdrant Mode: In-memory (AsyncQdrantClient(":memory:"))
+Embeddings:  Bag-of-words (128-dim, deterministic, no external API)
+
+Results Summary:
+  01-proof-suite.txt     33/33 passed   (1.55s)
+  02-unit-tests.txt      57/57 passed   (0.33s)
+  03-ab-comparison.txt   Vector Field 86% vs Message Passing 43%
+  04-stress-tests.txt    16/16 passed   (755 qps at 150 patterns)
+
+Total Assertions: 106 (33 + 57 + 16), all passed
+A/B Coverage Gap: +43 percentage points (86% vs 43%)
+Information Loss: Vector field lost 1/7, message passing lost 4/7
+
+Reproduction:
+  cd automatos-ai/orchestrator
+  pip install qdrant-client pytest pytest-asyncio
+  python -m pytest tests/test_prd108_proof.py -v
+  python -m pytest tests/test_vector_field.py -q
+  python tests/demo_ab_comparison.py
+  python tests/demo_field_stress.py

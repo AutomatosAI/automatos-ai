@@ -1,0 +1,62 @@
+======================================================================
+PRD-108 A/B EXPERIMENT — VECTOR FIELD vs REDIS BASELINE
+======================================================================
+
+----------------------------------------------------------------------
+Running Vector Field backend...
+----------------------------------------------------------------------
+Running Redis Baseline backend...
+----------------------------------------------------------------------
+
+======================================================================
+RESULTS
+======================================================================
+
+Metric                                 Vector Field  Redis Baseline
+----------------------------------- --------------- ---------------
+Patterns injected                                13              13
+Patterns available                               13               6
+Queries executed                                  7               7
+Total results returned                           35              35
+Avg query latency                             0.20ms           0.01ms
+
+======================================================================
+CONTEXT COVERAGE — Did Agent C find what it needed?
+======================================================================
+
+Query                                                 VF   Redis
+-------------------------------------------------- ----- -------
+  What are the penalties for non-compliance with t  MISS   FOUND
+  Are there any biometric surveillance restriction FOUND    MISS
+  What about social scoring systems?               FOUND    MISS
+  How does this affect employee monitoring AI?     FOUND    MISS
+  What do foundation model providers need to do?   FOUND   FOUND
+  What are the transparency requirements?          FOUND    MISS
+  What risk tier do SaaS chatbots fall into?       FOUND   FOUND
+
+  Vector Field: 6/7 found (86%)
+  Redis:        3/7 found (43%)
+
+======================================================================
+INFORMATION LOSS — The Telephone Game Metric
+======================================================================
+
+  Vector Field lost: 1/7 queries
+    Missing: ['penalties']
+  Redis lost:        4/7 queries
+    Missing: ['biometric_ban', 'social_scoring', 'employee_monitoring', 'transparency_rules']
+
+======================================================================
+VERDICT
+======================================================================
+
+  VECTOR FIELD WINS on context coverage: +3 more queries answered
+  VECTOR FIELD WINS on information loss: 3 fewer findings lost
+
+  Vector Field: Agent C queried 13 patterns (ALL agent contributions)
+  Message Pass: Agent C could only see 6 patterns (only what B forwarded)
+  B referenced: 10 of 10 research findings — the rest were LOST
+
+  The telephone game cost message-passing 4 missed findings.
+  The vector field found 6/7 by semantic meaning alone.
+======================================================================
