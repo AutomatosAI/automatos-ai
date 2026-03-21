@@ -222,6 +222,8 @@ Agent A injects 10 research findings. Agent B queries, references only findings 
 
 PRD-108's hypothesis: *"Agents sharing a continuous semantic field produce higher-quality collaborative output than agents passing discrete messages."*
 
+> **Editorial comment:** The implementation and tests support the claim that the mechanism works and that it improves retrieval in the scenarios tested. A stricter phrasing would avoid presenting this as fully proven across all workloads until broader A/B evaluation is complete.
+
 The stress tests confirm the mechanics work:
 1. Relevance surfaces by meaning, not by chain position
 2. Time naturally filters stale information
@@ -230,6 +232,8 @@ The stress tests confirm the mechanics work:
 5. Performance holds at scale (4,000 qps with 150 patterns)
 
 The telephone game is dead. Agents share a brain.
+
+> **Editorial comment:** Strong line, but rhetorically stronger than the current evidence base. For a more defensible technical document, consider reframing this as: "In the tested scenarios, the shared field substantially reduces information loss from sequential handoff."
 
 ---
 

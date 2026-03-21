@@ -977,6 +977,8 @@ Pattern is now in the field. ANY agent can find it by semantic query.
 
 Same 3-agent EU AI Act mission. 10 research findings, 3 analyses, 7 test queries.
 
+> **Editorial comment:** This is best described as a **controlled preliminary A/B comparison**, not a general proof of superiority across all missions. The measured result is useful evidence for the mechanism, but broader claims still require more mission types, larger samples, and production-scale evaluation.
+
 | Metric | Vector Field | Message Passing |
 |--------|-------------|-----------------|
 | Context coverage | **86% (6/7)** | 43% (3/7) |
@@ -986,6 +988,8 @@ Same 3-agent EU AI Act mission. 10 research findings, 3 analyses, 7 test queries
 **Findings lost by message passing:** biometric_ban, social_scoring, employee_monitoring, transparency_rules — all findings Agent B never referenced but Agent C needed.
 
 **Finding lost by vector field:** penalties — a bag-of-words embedding limitation, not a system limitation. Real 2048-dim embeddings would likely resolve this.
+
+> **Editorial comment:** The sentence above is a reasonable hypothesis, but it is still a hypothesis. If you want this document to read as strictly evidentiary, say that the miss may be attributable to the embedding choice used in the test, rather than stating that better embeddings would resolve it.
 
 ---
 

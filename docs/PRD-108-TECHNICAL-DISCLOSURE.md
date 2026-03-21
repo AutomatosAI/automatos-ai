@@ -442,7 +442,9 @@ FIELD_BOUNDARY_PERMEABILITY=1.0
 
 ## 11. Future Work
 
-1. **A/B Comparison** — Same mission executed with Redis message-passing (PRD-107) and Vector Field (this invention), measured on context quality, task accuracy, token efficiency, and latency.
+> **Editorial comment:** This section should distinguish between a **preliminary controlled A/B demonstration** already documented elsewhere and a **broader production-grade A/B evaluation** that remains future work. Without that distinction, a reader may see an avoidable contradiction between the implementation/spec docs and this disclosure.
+
+1. **Expanded A/B Comparison** — Same mission executed with Redis message-passing (PRD-107) and Vector Field (this invention), measured on context quality, task accuracy, token efficiency, and latency across a broader set of mission types and production-like runs.
 2. **Cross-Mission Field Persistence** — Allowing fields from completed missions to be queried by future missions, creating organizational memory.
 3. **Adaptive Decay Rate** — Adjusting lambda based on mission urgency or field stability.
 4. **Attention-Weighted Injection** — Using the querying agent's task description to weight which aspects of an injection are most relevant.
