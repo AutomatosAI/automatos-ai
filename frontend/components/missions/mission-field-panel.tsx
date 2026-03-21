@@ -5,6 +5,7 @@ import { Brain, Zap, TrendingDown, Eye, Users, Activity, Clock, BarChart3 } from
 import { cn } from '@/lib/utils'
 import { useMissionField } from '@/hooks/use-missions-api'
 import type { FieldPattern } from '@/hooks/use-missions-api'
+import { MissionFieldViz } from './mission-field-viz'
 
 interface MissionFieldPanelProps {
   missionId: string
@@ -225,44 +226,15 @@ export function MissionFieldPanel({ missionId, className }: MissionFieldPanelPro
         )}
       </div>
 
-      {/* Pattern list */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {activePatterns.length === 0 && archivedPatterns.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
-            <Brain className="w-8 h-8 mb-2 opacity-30" />
+      {/* Neural field visualization */}
+      <div className="flex-1 min-h-0 relative">
+        {patterns.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <Brain className="w-8 h-8 mb-2 opacity-30 animate-pulse" />
             <span className="text-xs">Field is empty. Waiting for agent activity...</span>
           </div>
         ) : (
-          <>
-            {activePatterns.map((pattern) => (
-              <PatternCard
-                key={pattern.id}
-                pattern={pattern}
-                agentIndex={agentMap.get(pattern.agent_id) ?? 0}
-                maxStrength={maxStrength}
-              />
-            ))}
-
-            {archivedPatterns.length > 0 && (
-              <>
-                <div className="flex items-center gap-2 pt-2">
-                  <TrendingDown className="w-3 h-3 text-muted-foreground/40" />
-                  <span className="text-[10px] text-muted-foreground/40 uppercase tracking-wider">
-                    Decayed ({archivedPatterns.length})
-                  </span>
-                  <div className="flex-1 h-px bg-border/30" />
-                </div>
-                {archivedPatterns.map((pattern) => (
-                  <PatternCard
-                    key={pattern.id}
-                    pattern={pattern}
-                    agentIndex={agentMap.get(pattern.agent_id) ?? 0}
-                    maxStrength={maxStrength}
-                  />
-                ))}
-              </>
-            )}
-          </>
+          <MissionFieldViz patterns={patterns} className="absolute inset-0" />
         )}
       </div>
     </div>
