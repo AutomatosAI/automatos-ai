@@ -261,6 +261,45 @@ class VectorFieldSharedContext(SharedContextPort):
             "decayed_patterns": sum(1 for s in strengths if s < self._archival_threshold),
         }
 
+    # ── Pattern listing (for field visualizer) ─────────────────
+
+    async def get_patterns(self, context_id: str) -> list[dict[str, Any]]:
+        """Return all patterns in the field with computed decayed strength.
+
+        Used by the field visualizer API to show the live state of the field.
+        Does NOT trigger Hebbian reinforcement (read-only).
+        """
+        collection = f"field_{context_id}"
+        try:
+            points, _ = await self._client.scroll(collection, limit=10000)
+        except Exception:
+            return []
+
+        now = datetime.now(timezone.utc)
+        patterns = []
+        for p in points:
+            payload = p.payload
+            age_hours = (now - datetime.fromisoformat(payload["last_accessed"])).total_seconds() / 3600
+            decayed = self._compute_decayed_strength(
+                payload["strength"], age_hours, payload["access_count"],
+            )
+            patterns.append({
+                "id": str(p.id),
+                "key": payload["key"],
+                "value": payload["value"][:500],  # truncate for UI
+                "agent_id": payload["agent_id"],
+                "strength": payload["strength"],
+                "decayed_strength": round(decayed, 4),
+                "access_count": payload["access_count"],
+                "created_at": payload["created_at"],
+                "last_accessed": payload["last_accessed"],
+                "is_archived": decayed < self._archival_threshold,
+            })
+
+        # Sort by decayed strength descending (strongest patterns first)
+        patterns.sort(key=lambda x: x["decayed_strength"], reverse=True)
+        return patterns
+
     # ── Internals ───────────────────────────────────────────────
 
     def _compute_decayed_strength(

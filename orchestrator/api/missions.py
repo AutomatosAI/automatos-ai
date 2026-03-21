@@ -823,6 +823,67 @@ async def get_mission_cost(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/{mission_id}/field")
+async def get_mission_field(
+    mission_id: UUID,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Get the live state of the mission's shared semantic field (PRD-108).
+
+    Returns all patterns with decayed strengths, stability metrics,
+    and instrumentation data for the field visualizer.
+    """
+    try:
+        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+        field_id = (run.config or {}).get("field_id")
+
+        if not field_id:
+            return {
+                "field_id": None,
+                "backend": None,
+                "patterns": [],
+                "stability": {"stability": 0.0, "pattern_count": 0},
+                "metrics": None,
+            }
+
+        from modules.context.factory import get_shared_context
+
+        field = get_shared_context()
+        if not field:
+            raise HTTPException(status_code=503, detail="Shared context backend unavailable")
+
+        # Get patterns and stability from the inner (unwrapped) backend
+        inner = field._inner
+        patterns = []
+        stability = {"stability": 0.0, "pattern_count": 0}
+
+        if hasattr(inner, "get_patterns"):
+            patterns = await inner.get_patterns(field_id)
+        if hasattr(inner, "measure_stability"):
+            stability = await inner.measure_stability(field_id)
+
+        # Get instrumentation metrics if available
+        metrics_data = None
+        metrics = field.get_metrics(field_id)
+        if metrics:
+            metrics_data = metrics.to_dict()
+
+        return {
+            "field_id": field_id,
+            "backend": field._backend_name,
+            "patterns": patterns,
+            "stability": stability,
+            "metrics": metrics_data,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to get field for mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.post("/{mission_id}/approve")
 async def approve_plan(
     mission_id: UUID,

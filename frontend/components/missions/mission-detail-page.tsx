@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { ArrowLeft, Pause, Play, X, Eye, Target, Check, XCircle, Save } from 'lucide-react'
 import Link from 'next/link'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,10 +31,11 @@ import { MissionActivityFeed } from './mission-activity-feed'
 import { TaskInspector } from './task-inspector'
 import { HumanReviewPanel } from './human-review-panel'
 import { MissionResultsPanel } from './mission-results-panel'
+import { MissionFieldPanel } from './mission-field-panel'
 import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { computeMissionStats, TERMINAL_RUN_STATES } from '@/types/missions'
-import { Activity, ListChecks, Clock, Coins } from 'lucide-react'
+import { Activity, ListChecks, Clock, Coins, Brain } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface MissionDetailPageProps {
@@ -55,6 +57,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
 
   const saveAsRoutineMutation = useSaveAsRoutine()
 
+  const [rightTab, setRightTab] = useState<'activity' | 'field'>('activity')
   const [showRejectInput, setShowRejectInput] = useState(false)
   const [rejectFeedback, setRejectFeedback] = useState('')
   const [showSaveRoutine, setShowSaveRoutine] = useState(false)
@@ -429,21 +432,76 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 className="h-full"
               />
             ) : isTerminal ? (
-              <MissionResultsPanel
-                mission={mission}
-                className="h-full"
-              />
+              <div className="h-full flex flex-col">
+                <div className="p-3 border-b border-border flex items-center gap-1">
+                  <button
+                    onClick={() => setRightTab('activity')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors',
+                      rightTab === 'activity'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    Results
+                  </button>
+                  <button
+                    onClick={() => setRightTab('field')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+                      rightTab === 'field'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Brain className="w-3 h-3" />
+                    Field
+                  </button>
+                </div>
+                {rightTab === 'field' ? (
+                  <MissionFieldPanel missionId={missionId} className="flex-1" />
+                ) : (
+                  <MissionResultsPanel
+                    mission={mission}
+                    className="flex-1"
+                  />
+                )}
+              </div>
             ) : (
               <div className="h-full flex flex-col">
-                <div className="p-3 border-b border-border">
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Activity Feed
-                  </h3>
+                <div className="p-3 border-b border-border flex items-center gap-1">
+                  <button
+                    onClick={() => setRightTab('activity')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors',
+                      rightTab === 'activity'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    Activity
+                  </button>
+                  <button
+                    onClick={() => setRightTab('field')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+                      rightTab === 'field'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Brain className="w-3 h-3" />
+                    Field
+                  </button>
                 </div>
-                <MissionActivityFeed
-                  events={mission.recent_events}
-                  className="flex-1"
-                />
+                {rightTab === 'field' ? (
+                  <MissionFieldPanel missionId={missionId} className="flex-1" />
+                ) : (
+                  <MissionActivityFeed
+                    events={mission.recent_events}
+                    className="flex-1"
+                  />
+                )}
               </div>
             )}
           </ResizablePanel>
