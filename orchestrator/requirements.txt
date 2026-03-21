@@ -55,6 +55,9 @@ isort==5.12.0
 
 # Redis & SSH
 redis>=4.5.0
+
+# Qdrant — PRD-108 shared mission field
+qdrant-client>=1.12.0
 paramiko>=2.9.0
 jsonschema>=4.0.0
 

@@ -388,6 +388,18 @@ class Config:
     MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
 
     # =============================================================================
+    # QDRANT — PRD-108 Memory Field (Shared Semantic Context)
+    # =============================================================================
+    QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
+    QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
+    FIELD_EMBEDDING_DIM: int = int(os.getenv("FIELD_EMBEDDING_DIM", "2048"))
+    FIELD_DECAY_RATE: float = float(os.getenv("FIELD_DECAY_RATE", "0.1"))
+    FIELD_REINFORCE_BONUS: float = float(os.getenv("FIELD_REINFORCE_BONUS", "0.05"))
+    FIELD_REINFORCE_CAP: float = float(os.getenv("FIELD_REINFORCE_CAP", "2.0"))
+    FIELD_ARCHIVAL_THRESHOLD: float = float(os.getenv("FIELD_ARCHIVAL_THRESHOLD", "0.05"))
+    FIELD_BOUNDARY_PERMEABILITY: float = float(os.getenv("FIELD_BOUNDARY_PERMEABILITY", "1.0"))
+
+    # =============================================================================
     # EMBEDDINGS
     # =============================================================================
     EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER")

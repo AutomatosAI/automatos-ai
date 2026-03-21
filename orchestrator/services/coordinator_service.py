@@ -78,6 +78,7 @@ class CoordinatorService:
 
     - ``tick()`` runs every 5s: dispatches next tasks + reconciles active runs.
     - Lifecycle methods: create, approve, reject, review, pause, resume, cancel.
+    - PRD-108: missions get a shared vector field (Qdrant) for inter-agent context.
     - No stored DB session — each method/tick acquires its own via SessionLocal.
     """
 
@@ -86,6 +87,127 @@ class CoordinatorService:
         self._scheduler = None
         self._owns_scheduler: bool = False
         self._last_archive_at: Optional[datetime] = None
+        self._field: Optional["VectorFieldSharedContext"] = None
+
+    def _get_field(self):
+        """Lazy-init the PRD-108 vector field adapter."""
+        if self._field is None:
+            try:
+                from modules.context.adapters.vector_field import VectorFieldSharedContext
+                self._field = VectorFieldSharedContext()
+                logger.info("[PRD-108] Vector field adapter initialized")
+            except Exception as e:
+                logger.warning("[PRD-108] Vector field unavailable: %s", e)
+        return self._field
+
+    async def _create_mission_field(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+    ) -> Optional[str]:
+        """Create a shared vector field for a mission. Returns field_id or None."""
+        field = self._get_field()
+        if not field:
+            return None
+
+        try:
+            # Get agent IDs from the roster
+            agents = (
+                db.query(Agent)
+                .filter(
+                    and_(
+                        Agent.workspace_id == run.workspace_id,
+                        Agent.status == "active",
+                    )
+                )
+                .all()
+            )
+            team_ids = [a.id for a in agents]
+
+            # Seed the field with the mission goal
+            field_id = await field.create_context(
+                team_agent_ids=team_ids,
+                initial_data={"mission_goal": run.goal},
+            )
+
+            # Store field_id in run config (no migration needed — JSONB)
+            run.config = {**(run.config or {}), "field_id": field_id}
+            db.flush()
+
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.TASK_CREATED,  # Closest match
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                payload={"field_id": field_id, "event": "field.created"},
+            )
+
+            logger.info("[PRD-108] Created field %s for mission %s", field_id, run.id)
+            return field_id
+        except Exception as e:
+            logger.warning("[PRD-108] Failed to create field for mission %s: %s", run.id, e, exc_info=True)
+            return None
+
+    async def _destroy_mission_field(self, run: OrchestrationRun) -> None:
+        """Destroy the shared field when a mission ends."""
+        field = self._get_field()
+        field_id = (run.config or {}).get("field_id")
+        if not field or not field_id:
+            return
+        try:
+            await field.destroy_context(field_id)
+            logger.info("[PRD-108] Destroyed field %s for mission %s", field_id, run.id)
+        except Exception as e:
+            logger.warning("[PRD-108] Failed to destroy field %s: %s", field_id, e)
+
+    async def _inject_task_output_into_field(
+        self,
+        run: OrchestrationRun,
+        task: OrchestrationTask,
+        agent_id: int,
+    ) -> None:
+        """After a task completes, inject its output into the shared field."""
+        field = self._get_field()
+        field_id = (run.config or {}).get("field_id")
+        if not field or not field_id or not task.output:
+            return
+        try:
+            await field.inject(
+                context_id=field_id,
+                key=task.title or f"task_{task.sequence_number}",
+                value=str(task.output)[:4000],  # Cap to prevent embedding blow-up
+                agent_id=agent_id,
+                strength=1.0,
+            )
+            logger.info(
+                "[PRD-108] Injected output from task %s into field %s",
+                task.id, field_id,
+            )
+        except Exception as e:
+            logger.warning("[PRD-108] Failed to inject task output: %s", e)
+
+    async def _cleanup_terminal_fields(self, db: Session) -> None:
+        """Destroy fields for missions that have ended."""
+        terminal_with_fields = (
+            db.query(OrchestrationRun)
+            .filter(
+                OrchestrationRun.state.in_([s.value for s in TERMINAL_RUN_STATES]),
+                OrchestrationRun.config["field_id"].astext.isnot(None),
+            )
+            .limit(5)  # Throttle — max 5 cleanups per tick
+            .all()
+        )
+        for run in terminal_with_fields:
+            field_id = (run.config or {}).get("field_id")
+            if not field_id:
+                continue
+            await self._destroy_mission_field(run)
+            # Remove field_id from config so we don't try again
+            updated_config = {**(run.config or {})}
+            updated_config.pop("field_id", None)
+            run.config = updated_config
+            db.flush()
 
     # ------------------------------------------------------------------
     # Scheduler lifecycle
@@ -184,6 +306,9 @@ class CoordinatorService:
                         db.rollback()
                         summary["errors"].append(str(run.id))
 
+                # --- PRD-108: Clean up fields for terminal runs ---
+                await self._cleanup_terminal_fields(db)
+
                 # --- Archive phase (throttled to once per hour) ---
                 self._maybe_archive(db, summary)
 
@@ -207,6 +332,10 @@ class CoordinatorService:
         Process a single active mission run: dispatch phase + reconcile phase.
         """
         workspace_id = run.workspace_id
+
+        # --- PRD-108: Ensure field exists (lazy create for manual-approve path) ---
+        if not (run.config or {}).get("field_id"):
+            await self._create_mission_field(db, run)
 
         # Load roster agents for this workspace
         agents: List[Agent] = (
@@ -313,6 +442,14 @@ class CoordinatorService:
                     task.id,
                 )
 
+        # PRD-108: Pass field_id so agent can query the shared field
+        field_id = (run.config or {}).get("field_id")
+        if field_id:
+            task.input_context = {
+                **(task.input_context or {}),
+                "field_id": field_id,
+            }
+
         # Build the prompt
         prompt = MissionDispatcher.build_task_prompt(task)
 
@@ -349,6 +486,11 @@ class CoordinatorService:
 
         # Record completion/failure
         MissionDispatcher.record_task_completion(db, task, result)
+
+        # PRD-108: Inject completed task output into shared field
+        if result.get("status") == "success":
+            db.refresh(task)  # Ensure task.output is populated
+            await self._inject_task_output_into_field(run, task, agent_id)
 
         # Update run-level token tracking (PRD-82A Section 9)
         task_tokens = result.get("execution", {}).get("tokens_used", 0)
@@ -583,6 +725,7 @@ class CoordinatorService:
                 reason="Auto-approved",
             )
             self._queue_initial_tasks(db, run)
+            await self._create_mission_field(db, run)
             logger.info("Mission %s auto-approved → running", run.id)
         else:
             transition_run(

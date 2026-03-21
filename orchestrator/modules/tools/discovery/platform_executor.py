@@ -106,6 +106,11 @@ from modules.tools.discovery.handlers_assignments import (
 from modules.tools.discovery.handlers_activity import (
     get_activity_feed,
 )
+from modules.tools.discovery.handlers_field import (
+    field_query,
+    field_inject,
+    field_stability,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +202,10 @@ class PlatformActionExecutor:
             # PRD-77: Memory Browsing
             "platform_browse_memories": browse_memories,
             "platform_delete_memory": delete_memory,
+            # PRD-108: Shared Mission Field
+            "platform_field_query": field_query,
+            "platform_field_inject": field_inject,
+            "platform_field_stability": field_stability,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
