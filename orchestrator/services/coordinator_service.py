@@ -839,6 +839,7 @@ class CoordinatorService:
         actor_id: str,
         verdict: str,
         task_feedback: Optional[Dict[str, str]] = None,
+        feedback: Optional[str] = None,
     ) -> OrchestrationRun:
         """
         Submit human review after all tasks are verified.
@@ -847,6 +848,7 @@ class CoordinatorService:
             verdict: 'accept' or 'reject'
             task_feedback: Optional dict mapping task_id → feedback string.
                           On reject, tasks with feedback get re-queued.
+            feedback: Optional general rejection feedback (no per-task flags needed).
         """
         run = self._get_run(db, run_id)
 
@@ -872,7 +874,7 @@ class CoordinatorService:
             # Re-queue specific tasks with feedback
             requeued_count = 0
             if task_feedback:
-                for task_id_str, feedback in task_feedback.items():
+                for task_id_str, fb in task_feedback.items():
                     task = (
                         db.query(OrchestrationTask)
                         .filter(
@@ -885,9 +887,17 @@ class CoordinatorService:
                     )
                     if task:
                         self._requeue_task_with_feedback(
-                            db, task, feedback, actor_id,
+                            db, task, fb, actor_id,
                         )
                         requeued_count += 1
+
+            # Build reason string
+            if requeued_count > 0:
+                reason = f"Human rejected — {requeued_count} tasks re-queued"
+            elif feedback:
+                reason = f"Human rejected with feedback: {feedback[:200]}"
+            else:
+                reason = "Human rejected"
 
             # Transition run back to running for re-execution
             transition_run(
@@ -896,8 +906,15 @@ class CoordinatorService:
                 new_state=RunState.RUNNING,
                 actor_type=ActorType.HUMAN,
                 actor_id=actor_id,
-                reason=f"Human rejected — {requeued_count} tasks re-queued",
+                reason=reason,
             )
+
+            event_payload: Dict[str, object] = {
+                "verdict": "reject",
+                "tasks_requeued": requeued_count,
+            }
+            if feedback:
+                event_payload["feedback"] = feedback
 
             emit_event(
                 db=db,
@@ -905,17 +922,15 @@ class CoordinatorService:
                 event_type=EventType.RUN_RESUMED,
                 actor_type=ActorType.HUMAN,
                 actor_id=actor_id,
-                payload={
-                    "verdict": "reject",
-                    "tasks_requeued": requeued_count,
-                },
+                payload=event_payload,
             )
 
             logger.info(
-                "Mission %s rejected by %s — %d tasks re-queued",
+                "Mission %s rejected by %s — %d tasks re-queued, general_feedback=%s",
                 run_id,
                 actor_id,
                 requeued_count,
+                bool(feedback),
             )
 
         return run

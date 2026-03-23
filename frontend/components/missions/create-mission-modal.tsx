@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { Target, Loader2 } from 'lucide-react'
+import { useState, useCallback } from 'react'
+import { useDropzone } from 'react-dropzone'
+import { Target, Loader2, Upload, X, FileText, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -18,6 +19,38 @@ import { useCreateMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
+import { cn } from '@/lib/utils'
+
+interface MissionAttachment {
+  key: string
+  filename: string
+  size: number
+  content_type: string
+}
+
+interface UploadingFile {
+  file: File
+  status: 'uploading' | 'done' | 'error'
+  attachment?: MissionAttachment
+  error?: string
+}
+
+const ALLOWED_TYPES: Record<string, string[]> = {
+  'application/pdf': ['.pdf'],
+  'text/plain': ['.txt'],
+  'text/markdown': ['.md'],
+  'application/json': ['.json'],
+  'text/csv': ['.csv'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+  'application/msword': ['.doc'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+}
+
+const ACCEPT_MAP = Object.fromEntries(
+  Object.entries(ALLOWED_TYPES).map(([mime, exts]) => [mime, exts]),
+)
+
+const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
 
 interface CreateMissionModalProps {
   open: boolean
@@ -32,8 +65,103 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [tags, setTags] = useState('')
+  const [files, setFiles] = useState<UploadingFile[]>([])
 
   const isSubmitting = createMission.isLoading
+  const isUploading = files.some((f) => f.status === 'uploading')
+  const attachments = files
+    .filter((f) => f.status === 'done' && f.attachment)
+    .map((f) => f.attachment!)
+
+  const uploadFile = useCallback(async (file: File): Promise<MissionAttachment> => {
+    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const headers: Record<string, string> = {}
+    const workspaceId = typeof window !== 'undefined'
+      ? localStorage.getItem('automatos_workspace_id')
+      : null
+    if (workspaceId) headers['X-Workspace-ID'] = workspaceId
+
+    // Get auth token from clerk
+    try {
+      const { default: Clerk } = await import('@clerk/nextjs')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const clerkWindow = (window as any).__clerk_frontend_api
+        ? (window as any).Clerk
+        : null
+      if (clerkWindow?.session) {
+        const token = await clerkWindow.session.getToken()
+        if (token) headers['Authorization'] = `Bearer ${token}`
+      }
+    } catch {
+      // No clerk available
+    }
+
+    const res = await fetch(`${BACKEND_URL}/api/missions/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Upload failed' }))
+      throw new Error(err.detail || `Upload failed (${res.status})`)
+    }
+
+    return res.json()
+  }, [])
+
+  const onDrop = useCallback(
+    (acceptedFiles: File[]) => {
+      const newFiles: UploadingFile[] = acceptedFiles.map((file) => ({
+        file,
+        status: 'uploading' as const,
+      }))
+
+      setFiles((prev) => [...prev, ...newFiles])
+
+      // Upload each file
+      acceptedFiles.forEach((file, i) => {
+        uploadFile(file)
+          .then((attachment) => {
+            setFiles((prev) =>
+              prev.map((f) =>
+                f.file === file ? { ...f, status: 'done' as const, attachment } : f,
+              ),
+            )
+          })
+          .catch((err) => {
+            setFiles((prev) =>
+              prev.map((f) =>
+                f.file === file
+                  ? { ...f, status: 'error' as const, error: err.message }
+                  : f,
+              ),
+            )
+            toast.error(`Failed to upload ${file.name}: ${err.message}`)
+          })
+      })
+    },
+    [uploadFile],
+  )
+
+  const removeFile = useCallback((index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index))
+  }, [])
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: ACCEPT_MAP,
+    maxSize: MAX_FILE_SIZE,
+    onDropRejected: (rejections) => {
+      rejections.forEach((r) => {
+        const msg = r.errors.map((e) => e.message).join(', ')
+        toast.error(`${r.file.name}: ${msg}`)
+      })
+    },
+  })
 
   const handleSubmit = () => {
     const goalParts: string[] = []
@@ -54,6 +182,7 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
       .filter(Boolean)
     if (tagList.length > 0) config.tags = tagList
     if (name.trim()) config.name = name.trim()
+    if (attachments.length > 0) config.attachments = attachments
 
     createMission.mutate(
       { goal, ...(Object.keys(config).length > 0 ? { config } : {}) },
@@ -76,19 +205,26 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
     setName('')
     setDescription('')
     setTags('')
+    setFiles([])
+  }
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes}B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Target className="w-5 h-5 text-primary" />
             New Mission
           </DialogTitle>
           <DialogDescription>
-            Define a goal for your AI workforce. The system will decompose it into tasks,
-            assign agents, and generate a plan for your approval.
+            Define a goal for your AI workforce. Attach files like PRDs, design docs,
+            or data to give agents context.
           </DialogDescription>
         </DialogHeader>
 
@@ -115,6 +251,76 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
             />
           </div>
 
+          {/* File upload zone */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5">
+              <Paperclip className="w-3.5 h-3.5" />
+              Attachments
+              <span className="text-muted-foreground font-normal">(optional)</span>
+            </Label>
+            <div
+              {...getRootProps()}
+              className={cn(
+                'border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors',
+                isDragActive
+                  ? 'border-primary bg-primary/5'
+                  : 'border-muted-foreground/20 hover:border-muted-foreground/40',
+              )}
+            >
+              <input {...getInputProps()} />
+              <Upload className="w-5 h-5 mx-auto mb-1.5 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">
+                {isDragActive
+                  ? 'Drop files here...'
+                  : 'Drop files or click to browse'}
+              </p>
+              <p className="text-[10px] text-muted-foreground/60 mt-1">
+                PDF, Markdown, Text, Word, JSON, CSV, Excel (max 20MB each)
+              </p>
+            </div>
+
+            {/* File list */}
+            {files.length > 0 && (
+              <div className="space-y-1.5">
+                {files.map((f, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      'flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs',
+                      f.status === 'error'
+                        ? 'border-destructive/30 bg-destructive/5'
+                        : f.status === 'done'
+                          ? 'border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5'
+                          : 'border-border bg-secondary/10',
+                    )}
+                  >
+                    <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="truncate flex-1">{f.file.name}</span>
+                    <span className="text-muted-foreground shrink-0">
+                      {formatSize(f.file.size)}
+                    </span>
+                    {f.status === 'uploading' && (
+                      <Loader2 className="w-3 h-3 animate-spin text-primary shrink-0" />
+                    )}
+                    {f.status === 'error' && (
+                      <span className="text-destructive text-[10px] shrink-0">Failed</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeFile(i)
+                      }}
+                      className="text-muted-foreground hover:text-foreground shrink-0"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="mission-tags">Tags</Label>
             <Input
@@ -131,7 +337,10 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={isSubmitting || (!name.trim() && !description.trim())}>
+          <Button
+            onClick={handleSubmit}
+            disabled={isSubmitting || isUploading || (!name.trim() && !description.trim())}
+          >
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -141,6 +350,11 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
               <>
                 <Target className="w-4 h-4 mr-2" />
                 Create Mission
+                {attachments.length > 0 && (
+                  <span className="ml-1 text-[10px] opacity-70">
+                    ({attachments.length} file{attachments.length !== 1 ? 's' : ''})
+                  </span>
+                )}
               </>
             )}
           </Button>

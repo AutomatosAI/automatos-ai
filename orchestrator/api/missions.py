@@ -27,13 +27,15 @@ Agent telemetry:
 Source: PRD-82A Section 12, PRD-82B US-004/US-005/US-008
 """
 
+import asyncio
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
@@ -57,6 +59,9 @@ from core.models.orchestration_enums import (
     TERMINAL_RUN_STATES,
 )
 from modules.coordination.planner import PlanValidationError
+import boto3
+from botocore.config import Config as BotoConfig
+
 from services.coordinator_service import get_coordinator_service
 from services.orchestration_state import (
     ConflictError,
@@ -107,6 +112,11 @@ class MissionReviewRequest(BaseModel):
     task_feedback: Optional[Dict[str, str]] = Field(
         None,
         description="Map of task_id → feedback string. On reject, tasks with feedback get re-queued.",
+    )
+    feedback: Optional[str] = Field(
+        None,
+        max_length=5000,
+        description="General rejection feedback (when rejecting without flagging specific tasks).",
     )
 
     @validator("task_feedback")
@@ -689,6 +699,84 @@ async def get_archived_mission(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# ---------------------------------------------------------------------------
+# File upload
+# ---------------------------------------------------------------------------
+
+_UPLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20 MB
+_UPLOAD_ALLOWED_EXTS = {".pdf", ".md", ".txt", ".doc", ".docx", ".json", ".csv", ".xlsx"}
+
+
+@router.post("/upload")
+async def upload_mission_file(
+    file: UploadFile = File(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Upload a file attachment for use in a mission.
+
+    Max 20 MB. Allowed types: pdf, md, txt, doc, docx, json, csv, xlsx.
+    Returns the S3 key and file metadata (no DB record created).
+    """
+    # --- validate extension ---------------------------------------------------
+    filename = file.filename or "upload"
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    if ext not in _UPLOAD_ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not allowed. Accepted: {sorted(_UPLOAD_ALLOWED_EXTS)}",
+        )
+
+    # --- read & validate size -------------------------------------------------
+    content = await file.read()
+    if len(content) > _UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large ({len(content)} bytes). Max {_UPLOAD_MAX_BYTES} bytes (20 MB).",
+        )
+
+    # --- build S3 key ---------------------------------------------------------
+    file_id = uuid4()
+    s3_key = f"workspaces/{ctx.workspace_id}/missions/attachments/{file_id}{ext}"
+    content_type = file.content_type or "application/octet-stream"
+
+    # --- upload to S3 (non-blocking) ------------------------------------------
+    boto_cfg = BotoConfig(region_name=config.AWS_REGION)
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
+        config=boto_cfg,
+    )
+
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: s3_client.put_object(
+                Bucket=config.S3_DOCUMENTS_BUCKET,
+                Key=s3_key,
+                Body=content,
+                ContentType=content_type,
+            ),
+        )
+    except Exception as exc:
+        logger.error("S3 upload failed for %s: %s", s3_key, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="File upload failed")
+
+    return {
+        "key": s3_key,
+        "filename": filename,
+        "size": len(content),
+        "content_type": content_type,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Mission detail & telemetry
+# ---------------------------------------------------------------------------
+
+
 @router.get("/{mission_id}")
 async def get_mission(
     mission_id: UUID,
@@ -984,6 +1072,7 @@ async def review_mission(
             actor_id=ctx.user.id or "unknown",
             verdict=body.verdict,
             task_feedback=body.task_feedback,
+            feedback=body.feedback,
         )
         db.commit()
         return _run_to_response(run)
