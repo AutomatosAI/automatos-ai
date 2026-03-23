@@ -133,10 +133,10 @@ interface ActiveWorkflowsData {
 
 interface ActiveWorkflowsPanelProps {
   onWorkflowClick?: (workflowId: number) => void
-  onRecipeRunClick?: (run: RecipeRun) => void
+  onPlaybookRunClick?: (run: RecipeRun) => void
 }
 
-export function ActiveWorkflowsPanel({ onWorkflowClick, onRecipeRunClick }: ActiveWorkflowsPanelProps) {
+export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRecipeRunClick }: ActiveWorkflowsPanelProps) {
   const [selectedWorkflow, setSelectedWorkflow] = useState<{ id: number, name: string } | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [showCleanupDialog, setShowCleanupDialog] = useState(false)

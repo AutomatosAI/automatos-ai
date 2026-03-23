@@ -20,25 +20,25 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useToast } from '@/hooks/use-toast'
 import { useUser } from '@clerk/nextjs'
-import { useInstallRecipeFromMarketplace } from '@/hooks/use-recipe-api'
-import { ViewRecipeModal } from '@/components/workflows/view-recipe-modal'
+import { useInstallPlaybookFromMarketplace } from '@/hooks/use-playbook-api'
+import { ViewPlaybookModal } from '@/components/workflows/view-playbook-modal'
 
-interface MarketplaceRecipesTabProps {
+interface MarketplacePlaybooksTabProps {
   searchQuery: string
 }
 
-export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProps) {
+export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTabProps) {
   const [viewMode, setViewMode] = useViewMode('mp-recipes')
   const [selectedType, setSelectedType] = useState('all')
-  const [installingRecipeId, setInstallingRecipeId] = useState<number | null>(null)
-  const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
+  const [installingPlaybookId, setInstallingRecipeId] = useState<number | null>(null)
+  const [selectedPlaybook, setSelectedRecipe] = useState<any>(null)
   const [showViewModal, setShowViewModal] = useState(false)
   const [approvingId, setApprovingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const { toast } = useToast()
   const { user } = useUser()
   const queryClient = useQueryClient()
-  const installMutation = useInstallRecipeFromMarketplace()
+  const installMutation = useInstallPlaybookFromMarketplace()
   const { data: iconMappings = {} } = useSystemIcons()
 
   // Admin check (same pattern as agents tab)
@@ -49,8 +49,8 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
     setApprovingId(recipeId)
     try {
       await apiClient.post(`/api/marketplace/items/${recipeId}/approve`)
-      toast({ title: 'Recipe approved and published to marketplace!' })
-      queryClient.invalidateQueries({ queryKey: ['marketplaceRecipes'] })
+      toast({ title: 'Playbook approved and published to marketplace!' })
+      queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
     } catch (error: any) {
       toast({
         title: 'Failed to approve recipe',
@@ -62,14 +62,14 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
     }
   }
 
-  const handleDeleteRecipe = async (e: React.MouseEvent, recipeId: number) => {
+  const handleDeletePlaybook = async (e: React.MouseEvent, recipeId: number) => {
     e.stopPropagation()
     if (!confirm('Are you sure you want to delete this marketplace recipe?')) return
     setDeletingId(recipeId)
     try {
       await apiClient.delete(`/api/marketplace/items/${recipeId}`)
-      toast({ title: 'Recipe removed from marketplace' })
-      queryClient.invalidateQueries({ queryKey: ['marketplaceRecipes'] })
+      toast({ title: 'Playbook removed from marketplace' })
+      queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
     } catch (error: any) {
       toast({
         title: 'Failed to delete recipe',
@@ -82,7 +82,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
   }
 
   const { data: recipes = [], isLoading } = useQuery({
-    queryKey: ['marketplaceRecipes', selectedType, searchQuery],
+    queryKey: ['marketplacePlaybooks', selectedType, searchQuery],
     queryFn: async () => {
       const params = new URLSearchParams({
         type: 'recipe',
@@ -93,7 +93,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
     },
   })
 
-  const handleViewRecipe = (recipe: any) => {
+  const handleViewPlaybook = (recipe: any) => {
     setSelectedRecipe(recipe)
     setShowViewModal(true)
   }
@@ -105,7 +105,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
       const data = await installMutation.mutateAsync(recipeId)
 
       toast({
-        title: 'Recipe Added to Workspace',
+        title: 'Playbook Added to Workspace',
         description: data.message || 'Recipe added successfully',
         variant: 'default'
       })
@@ -122,11 +122,11 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
       }
 
       // Also invalidate marketplace queries for updated install counts
-      queryClient.invalidateQueries({ queryKey: ['marketplaceRecipes'] })
+      queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
     } catch (error: any) {
       toast({
         title: 'Installation Failed',
-        description: error?.message || 'Failed to add recipe to workspace',
+        description: error?.message || 'Failed to add playbook to workspace',
         variant: 'destructive'
       })
     } finally {
@@ -148,7 +148,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                 : 'border-secondary text-muted-foreground hover:bg-secondary'
             }`}
           >
-            All Recipes
+            All Playbooks
           </Button>
           <Button
             variant={selectedType === 'simple' ? 'default' : 'outline'}
@@ -195,7 +195,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
       ) : recipes.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-          <p>No recipes found. Recipes will be available soon!</p>
+          <p>No playbooks found. Playbooks will be available soon!</p>
         </div>
       ) : viewMode === 'list' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -203,7 +203,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
             <Card
               key={recipe.id}
               className="glass-card hover:border-primary/20 transition-all cursor-pointer"
-              onClick={() => handleViewRecipe(recipe)}
+              onClick={() => handleViewPlaybook(recipe)}
             >
               <CardContent className="p-3">
                 <div className="flex items-center gap-3">
@@ -237,9 +237,9 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                     size="sm"
                     className="h-8 w-8 p-0 shrink-0"
                     onClick={(e) => { e.stopPropagation(); handleInstall(e, recipe.id) }}
-                    disabled={installingRecipeId === recipe.id}
+                    disabled={installingPlaybookId === recipe.id}
                   >
-                    {installingRecipeId === recipe.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    {installingPlaybookId === recipe.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                   </Button>
                 </div>
               </CardContent>
@@ -252,7 +252,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
             <Card
               key={recipe.id}
               className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
-              onClick={() => handleViewRecipe(recipe)}
+              onClick={() => handleViewPlaybook(recipe)}
             >
               <CardHeader className="pb-3">
                 {/* Icon INLINE with Title - EXACTLY like Agent */}
@@ -289,13 +289,13 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleViewRecipe(recipe) }}>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleViewPlaybook(recipe) }}>
                         <Eye className="w-4 h-4 mr-2" />
                         View Details
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleInstall(e as any, recipe.id) }} disabled={installingRecipeId === recipe.id}>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleInstall(e as any, recipe.id) }} disabled={installingPlaybookId === recipe.id}>
                         <Download className="w-4 h-4 mr-2" />
-                        {installingRecipeId === recipe.id ? 'Adding...' : 'Add to Workspace'}
+                        {installingPlaybookId === recipe.id ? 'Adding...' : 'Add to Workspace'}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -343,16 +343,16 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
       )}
 
       {/* View Recipe Modal */}
-      <ViewRecipeModal
+      <ViewPlaybookModal
         open={showViewModal}
         onClose={() => {
           setShowViewModal(false)
           setSelectedRecipe(null)
         }}
-        recipe={selectedRecipe}
+        recipe={selectedPlaybook}
         onExecute={(e) => {
-          if (selectedRecipe) {
-            handleInstall(e as any, selectedRecipe.id)
+          if (selectedPlaybook) {
+            handleInstall(e as any, selectedPlaybook.id)
           }
         }}
       />

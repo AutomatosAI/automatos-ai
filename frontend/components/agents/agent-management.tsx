@@ -29,7 +29,7 @@ import { AgentRoster } from './agent-roster'
 
 import { AgentConfiguration } from './agent-configuration'
 import { AgentCoordination } from './agent-coordination'
-import { RecipesTab } from '@/components/workflows/recipes-tab'
+import { PlaybooksTab } from '@/components/workflows/playbooks-tab'
 import { CreateAgentModal } from './create-agent-modal'
 import { AgentDetailsModal } from './agent-details-modal'
 
@@ -273,7 +273,7 @@ export function AgentManagement() {
           </TabsContent>
 
           <TabsContent value="recipes" className="space-y-6">
-            <RecipesTab onUseRecipe={() => {}} onExecuteRecipe={handleExecuteRecipe} />
+            <PlaybooksTab onUseRecipe={() => {}} onExecuteRecipe={handleExecuteRecipe} />
           </TabsContent>
         </FilterTabs>
       </motion.div>

@@ -1,8 +1,8 @@
 """
-RecipeContextSection — Recipe step name, instructions, previous results.
+PlaybookContextSection — Playbook step name, instructions, previous results.
 
-Priority 2 (never dropped). Provides the agent with its current recipe
-step so it knows what to execute during multi-step recipe workflows.
+Priority 2 (never dropped). Provides the agent with its current playbook
+step so it knows what to execute during multi-step playbook workflows.
 """
 
 from __future__ import annotations
@@ -15,23 +15,23 @@ from modules.context.sections.base import BaseSection, SectionContext
 logger = logging.getLogger(__name__)
 
 
-class RecipeContextSection(BaseSection):
-    """Recipe step instructions for multi-step workflows.
+class PlaybookContextSection(BaseSection):
+    """Playbook step instructions for multi-step workflows.
 
     Included in RECIPE mode. Priority 2 ensures it's never dropped by
     the budget manager — the agent must know which step it's executing.
     """
 
-    name: str = "recipe_context"
+    name: str = "playbook_context"
     priority: int = 2
     max_tokens: Optional[int] = 2000
 
     async def render(self, ctx: SectionContext) -> str:
-        """Build the recipe context block for the system prompt."""
+        """Build the playbook context block for the system prompt."""
         try:
             return self._build(ctx)
         except Exception:
-            logger.exception("RecipeContextSection.render failed")
+            logger.exception("PlaybookContextSection.render failed")
             return ""
 
     # ------------------------------------------------------------------
@@ -58,9 +58,9 @@ class RecipeContextSection(BaseSection):
         # Header
         parts: list[str] = []
         if name:
-            parts.append(f"## Recipe: {name}")
+            parts.append(f"## Playbook: {name}")
         else:
-            parts.append("## Recipe Step")
+            parts.append("## Playbook Step")
 
         # Step progress line
         if step_number is not None and total_steps is not None:

@@ -356,7 +356,7 @@ function DoneContent({ task, onStatusChange }: { task: BoardTask; onStatusChange
       </div>
 
       {/* Actions */}
-      {task.type !== 'recipe' && (
+      {task.type !== 'playbook' && (
         <div className="flex gap-3 pt-2 border-t border-border/30">
           <Button
             variant="outline"
@@ -384,10 +384,10 @@ function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: Re
 
 function ExecutionKitchenLink({ task, onClose }: { task: BoardTask; onClose: () => void }) {
   const router = useRouter()
-  if (task.type !== 'recipe' || !task.planning_data?.execution_id) return null
+  if (task.type !== 'playbook' || !task.planning_data?.execution_id) return null
 
   const execId = task.planning_data.execution_id
-  const recipeId = task.planning_data.recipe_id
+  const playbookId = task.planning_data.playbook_id
 
   return (
     <Button
@@ -395,7 +395,7 @@ function ExecutionKitchenLink({ task, onClose }: { task: BoardTask; onClose: () 
       className="w-full"
       onClick={() => {
         onClose()
-        router.push(`/activity/execution?id=${execId}&recipeId=${recipeId}`)
+        router.push(`/activity/execution?id=${execId}&recipeId=${String(playbookId ?? '')}` as any)
       }}
     >
       <ExternalLink className="w-4 h-4 mr-2" />
@@ -452,11 +452,11 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
                   <span className="capitalize">{task.priority}</span>
                 </span>
 
-                {/* Recipe badge */}
-                {task.type === 'recipe' && (
+                {/* Playbook badge */}
+                {task.type === 'playbook' && (
                   <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary">
                     <Workflow className="w-3 h-3" />
-                    Recipe
+                    Playbook
                   </span>
                 )}
 

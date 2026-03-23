@@ -14,7 +14,7 @@ import {
   BarChart3,
 } from 'lucide-react'
 import { useAgents } from '@/hooks/use-agent-api'
-import type { RecipeFormValues } from './create-recipe-modal'
+import type { PlaybookFormValues } from './create-playbook-modal'
 
 interface Agent {
   id: number
@@ -35,9 +35,9 @@ const SCHEDULE_LABELS: Record<string, { label: string; icon: typeof Play }> = {
 }
 
 function calculateComplexity(
-  steps: RecipeFormValues['steps'],
-  config: RecipeFormValues['execution_config'],
-  schedule: RecipeFormValues['schedule_config']
+  steps: PlaybookFormValues['steps'],
+  config: PlaybookFormValues['execution_config'],
+  schedule: PlaybookFormValues['schedule_config']
 ): { score: number; label: string; color: string } {
   let score = 0
 
@@ -67,8 +67,8 @@ function calculateComplexity(
   return { score, label: 'Advanced', color: 'text-[hsl(var(--destructive))]' }
 }
 
-export function RecipePreviewPanel() {
-  const methods = useFormContext<RecipeFormValues>()
+export function PlaybookPreviewPanel() {
+  const methods = useFormContext<PlaybookFormValues>()
   const name = methods.watch('name')
   const description = methods.watch('description')
   const steps = methods.watch('steps')
@@ -125,7 +125,7 @@ export function RecipePreviewPanel() {
       {/* Recipe Name & Description */}
       <div className="glass-card rounded-2xl p-4 border border-border/20 space-y-2">
         <div className="text-sm font-medium text-foreground truncate">
-          {name || <span className="text-muted-foreground/50 italic">Untitled Recipe</span>}
+          {name || <span className="text-muted-foreground/50 italic">Untitled Playbook</span>}
         </div>
         {description && (
           <p className="text-xs text-muted-foreground line-clamp-3">{description}</p>

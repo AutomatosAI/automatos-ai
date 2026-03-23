@@ -1,14 +1,14 @@
 """
-Recipe Scratchpad - Ephemeral Inter-Step Context
-=================================================
+Playbook Scratchpad - Ephemeral Inter-Step Context
+===================================================
 
 Redis-backed hash per execution that replaces verbose text dumps between
-recipe steps.  Falls back to an in-memory dict when Redis is unavailable.
+playbook steps.  Falls back to an in-memory dict when Redis is unavailable.
 
 Key layout (Redis HASH):
-    recipe_exec:{execution_id}
+    playbook_exec:{execution_id}
         _input:{key}              -> trigger/user input values
-        _meta:recipe_id           -> recipe PK
+        _meta:playbook_id         -> playbook PK
         _meta:total_steps         -> step count
         step_{N}:tool_results     -> JSON array of auto-extracted tool summaries
         step_{N}:output_summary   -> first 500 chars of agent response
@@ -30,9 +30,9 @@ _URL_RE = re.compile(r'https?://[^\s\'"<>]+')
 _KV_RE = re.compile(r'^([A-Z][A-Za-z_ ]{1,30}):\s+(.+)$', re.MULTILINE)
 
 
-class RecipeScratchpad:
+class PlaybookScratchpad:
     """
-    Ephemeral scratchpad for a single recipe execution.
+    Ephemeral scratchpad for a single playbook execution.
 
     Provides structured context to downstream steps instead of dumping
     full agent output text (80-90% token savings).
@@ -55,7 +55,7 @@ class RecipeScratchpad:
             except Exception:
                 pass
 
-        self._key = f"recipe_exec:{execution_id}"
+        self._key = f"playbook_exec:{execution_id}"
 
         if self._redis:
             logger.info("[scratchpad] Using Redis for execution %s", execution_id)
@@ -105,9 +105,9 @@ class RecipeScratchpad:
                 continue
             self._hset(f"_input:{key}", str(value))
 
-    def write_meta(self, recipe_id: int, total_steps: int) -> None:
-        """Store recipe metadata."""
-        self._hset("_meta:recipe_id", str(recipe_id))
+    def write_meta(self, playbook_id: int, total_steps: int) -> None:
+        """Store playbook metadata."""
+        self._hset("_meta:playbook_id", str(playbook_id))
         self._hset("_meta:total_steps", str(total_steps))
 
     def write_step_results(

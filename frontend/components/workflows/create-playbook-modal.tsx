@@ -10,12 +10,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { RecipeInputBuilder } from './recipe-input-builder'
-import { RecipeStepBuilder } from './recipe-step-builder'
-import { RecipeExecutionConfig } from './recipe-execution-config'
-import { RecipeScheduleConfig } from './recipe-schedule-config'
-import { RecipePreviewPanel } from './recipe-preview-panel'
-import { useRecipeForm } from '@/hooks/use-recipe-form'
+import { PlaybookInputBuilder } from './playbook-input-builder'
+import { PlaybookStepBuilder } from './playbook-step-builder'
+import { PlaybookExecutionConfig } from './playbook-execution-config'
+import { PlaybookScheduleConfig } from './playbook-schedule-config'
+import { PlaybookPreviewPanel } from './playbook-preview-panel'
+import { usePlaybookForm } from '@/hooks/use-playbook-form'
 
 const STEPS = [
   { id: 'basic', label: 'Basic Configuration', icon: ChefHat },
@@ -26,7 +26,7 @@ const STEPS = [
 
 type StepId = (typeof STEPS)[number]['id']
 
-export interface RecipeFormValues {
+export interface PlaybookFormValues {
   name: string
   description: string
   inputs: string
@@ -57,21 +57,21 @@ export interface RecipeFormValues {
   }
 }
 
-interface CreateRecipeModalProps {
+interface CreatePlaybookModalProps {
   open: boolean
   onClose: () => void
-  onSave?: (data: RecipeFormValues) => void
-  initialData?: RecipeFormValues
+  onSave?: (data: PlaybookFormValues) => void
+  initialData?: PlaybookFormValues
   recipeId?: string
 }
 
-export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId }: CreateRecipeModalProps) {
+export function CreatePlaybookModal({ open, onClose, onSave, initialData, recipeId }: CreatePlaybookModalProps) {
   const [currentStep, setCurrentStep] = React.useState(0)
   const [inputsValid, setInputsValid] = React.useState(true)
-  const { isSubmitting, lastSavedWebhookId, submitRecipe, updateRecipe } = useRecipeForm()
+  const { isSubmitting, lastSavedWebhookId, submitPlaybook, updatePlaybook } = usePlaybookForm()
   const isEditMode = !!recipeId
 
-  const methods = useForm<RecipeFormValues>({
+  const methods = useForm<PlaybookFormValues>({
     defaultValues: {
       name: '',
       description: '',
@@ -145,12 +145,12 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
   const handleSave = async () => {
     const data = methods.getValues()
     if (isEditMode && recipeId) {
-      await updateRecipe(recipeId, data, () => {
+      await updatePlaybook(recipeId, data, () => {
         onSave?.(data)
         handleClose()
       })
     } else {
-      await submitRecipe(data, () => {
+      await submitPlaybook(data, () => {
         onSave?.(data)
         // For trigger recipes, stay open so user can see/copy the webhook URL
         if (data.schedule_config.type !== 'trigger') {
@@ -193,7 +193,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
               <CardHeader className="flex flex-row items-center justify-between border-b border-border/30 pb-4 flex-shrink-0">
                 <CardTitle className="flex items-center space-x-2">
                   <ChefHat className="w-6 h-6 text-primary" />
-                  <span>{isEditMode ? 'Edit' : 'Create'} <span className="gradient-text">Recipe</span></span>
+                  <span>{isEditMode ? 'Edit' : 'Create'} <span className="gradient-text">Playbook</span></span>
                 </CardTitle>
                 <Button variant="ghost" size="icon" onClick={handleClose}>
                   <X className="w-5 h-5" />
@@ -241,13 +241,13 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             <div className="glass-card rounded-2xl p-6 space-y-4">
                               <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Basic Information</h3>
                               <div>
-                                <Label htmlFor="recipe-name">
-                                  Recipe Name <span className="text-red-400">*</span>
+                                <Label htmlFor="playbook-name">
+                                  Playbook Name <span className="text-red-400">*</span>
                                 </Label>
                                 <Input
-                                  id="recipe-name"
+                                  id="playbook-name"
                                   {...methods.register('name', { required: true, minLength: 3 })}
-                                  placeholder="My Workflow Recipe"
+                                  placeholder="My Workflow Playbook"
                                   className="bg-secondary/50 rounded-2xl"
                                 />
                                 {watchedName.length > 0 && watchedName.length < 3 && (
@@ -255,9 +255,9 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                                 )}
                               </div>
                               <div>
-                                <Label htmlFor="recipe-description">Description</Label>
+                                <Label htmlFor="playbook-description">Description</Label>
                                 <Textarea
-                                  id="recipe-description"
+                                  id="playbook-description"
                                   {...methods.register('description')}
                                   placeholder="Describe what this recipe does..."
                                   className="bg-secondary/50 rounded-2xl min-h-[80px]"
@@ -266,7 +266,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             </div>
 
                             <div className="glass-card rounded-2xl p-6 space-y-4">
-                              <RecipeInputBuilder
+                              <PlaybookInputBuilder
                                 value={watchedInputs}
                                 onChange={(val) => methods.setValue('inputs', val)}
                                 onValidation={(valid) => setInputsValid(valid)}
@@ -285,7 +285,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             className="space-y-4"
                           >
                             <div className="glass-card rounded-2xl p-6">
-                              <RecipeStepBuilder />
+                              <PlaybookStepBuilder />
                             </div>
                           </motion.div>
                         </TabsContent>
@@ -298,7 +298,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             transition={{ duration: 0.3 }}
                             className="space-y-4"
                           >
-                            <RecipeExecutionConfig />
+                            <PlaybookExecutionConfig />
                           </motion.div>
                         </TabsContent>
 
@@ -310,7 +310,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             transition={{ duration: 0.3 }}
                             className="space-y-4"
                           >
-                            <RecipeScheduleConfig webhookId={lastSavedWebhookId || (initialData?.schedule_config?.webhook_id as string | undefined)} />
+                            <PlaybookScheduleConfig webhookId={lastSavedWebhookId || (initialData?.schedule_config?.webhook_id as string | undefined)} />
                           </motion.div>
                         </TabsContent>
                       </Tabs>
@@ -357,7 +357,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                                 ) : (
                                   <Save className="w-4 h-4 mr-2" />
                                 )}
-                                {isSubmitting ? (isEditMode ? 'Updating...' : 'Saving...') : (isEditMode ? 'Update Recipe' : 'Save Recipe')}
+                                {isSubmitting ? (isEditMode ? 'Updating...' : 'Saving...') : (isEditMode ? 'Update Playbook' : 'Save Playbook')}
                               </Button>
                             </motion.div>
                           )}
@@ -367,7 +367,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
 
                     {/* Right: Preview Panel */}
                     <div className="hidden lg:block w-72 flex-shrink-0 border-l border-border/20 pl-6 overflow-y-auto max-h-[calc(90vh-8rem)]">
-                      <RecipePreviewPanel />
+                      <PlaybookPreviewPanel />
                     </div>
                   </div>
                 </FormProvider>

@@ -1,91 +1,91 @@
-"""Recipe/workflow ActionDefinitions (list, get, create, update, steps, execute, delete)."""
+"""Playbook/workflow ActionDefinitions (list, get, create, update, steps, execute, delete)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
 
 
-def register_recipes_actions(registry: ActionRegistry) -> None:
-    """Register all recipe-related platform actions."""
+def register_playbooks_actions(registry: ActionRegistry) -> None:
+    """Register all playbook-related platform actions."""
 
     # ── Read ─────────────────────────────────────────────────────────
 
     registry.register(ActionDefinition(
-        name="platform_list_recipes",
+        name="platform_list_playbooks",
         description=(
-            "List all workflow recipes in the current workspace. Returns recipe names, "
+            "List all playbooks in the current workspace. Returns playbook names, "
             "trigger types, status, and step counts. Use when the user asks about their "
-            "recipes, workflows, or automations."
+            "playbooks, workflows, or automations."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
                 "status_filter": {
                     "type": "string",
                     "enum": ["active", "inactive", "all"],
-                    "description": "Filter recipes by status. Defaults to 'all'.",
+                    "description": "Filter playbooks by status. Defaults to 'all'.",
                 },
             },
             "required": [],
         },
         permission_level="read",
-        tags=["recipes", "workflows", "automations"],
+        tags=["playbooks", "workflows", "automations"],
         examples=[
-            "what recipes do I have?",
+            "what playbooks do I have?",
             "list my workflows",
             "show automations",
         ],
     ))
 
     registry.register(ActionDefinition(
-        name="platform_get_recipe",
+        name="platform_get_playbook",
         description=(
-            "Get detailed information about a specific recipe including its steps, "
+            "Get detailed information about a specific playbook including its steps, "
             "trigger configuration, and execution history. Use when the user asks "
-            "about a specific recipe's details."
+            "about a specific playbook's details."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
-                "recipe_name": {
+                "playbook_name": {
                     "type": "string",
-                    "description": "Name of the recipe to look up.",
+                    "description": "Name of the playbook to look up.",
                 },
-                "recipe_id": {
+                "playbook_id": {
                     "type": "integer",
-                    "description": "ID of the recipe (alternative to name).",
+                    "description": "ID of the playbook (alternative to name).",
                 },
             },
             "required": [],
         },
         permission_level="read",
-        tags=["recipes", "details", "steps"],
+        tags=["playbooks", "details", "steps"],
         examples=[
-            "show me the Jira Bug Triage recipe",
-            "what does recipe 3 do?",
+            "show me the Jira Bug Triage playbook",
+            "what does playbook 3 do?",
         ],
     ))
 
     # ── Write ────────────────────────────────────────────────────────
 
     registry.register(ActionDefinition(
-        name="platform_create_recipe",
+        name="platform_create_playbook",
         description=(
-            "Create a new workflow recipe in the workspace. Requires a name and "
-            "description. The recipe starts as a draft with no steps — steps can "
-            "be added later. Use when the user asks to create a new recipe or automation."
+            "Create a new playbook in the workspace. Requires a name and "
+            "description. The playbook starts as a draft with no steps — steps can "
+            "be added later. Use when the user asks to create a new playbook or automation."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Name for the new recipe.",
+                    "description": "Name for the new playbook.",
                 },
                 "description": {
                     "type": "string",
-                    "description": "What the recipe does.",
+                    "description": "What the playbook does.",
                 },
                 "tags": {
                     "type": "array",
@@ -97,31 +97,31 @@ def register_recipes_actions(registry: ActionRegistry) -> None:
         },
         permission_level="write",
         requires_confirmation=False,
-        tags=["recipes", "create", "write"],
+        tags=["playbooks", "create", "write"],
         examples=[
-            "create a recipe for daily standup summaries",
+            "create a playbook for daily standup summaries",
             "make an automation for code review",
         ],
     ))
 
     registry.register(ActionDefinition(
-        name="platform_update_recipe",
+        name="platform_update_playbook",
         description=(
-            "Update an existing recipe's metadata. Can change name, description, tags, "
+            "Update an existing playbook's metadata. Can change name, description, tags, "
             "execution_config, or schedule_config. Use when the user asks to rename, "
-            "update, or reconfigure a recipe."
+            "update, or reconfigure a playbook."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
-                "recipe_id": {
+                "playbook_id": {
                     "type": "integer",
-                    "description": "ID of the recipe to update.",
+                    "description": "ID of the playbook to update.",
                 },
                 "name": {
                     "type": "string",
-                    "description": "New name for the recipe.",
+                    "description": "New name for the playbook.",
                 },
                 "description": {
                     "type": "string",
@@ -130,7 +130,7 @@ def register_recipes_actions(registry: ActionRegistry) -> None:
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Replace the recipe's tags with this list.",
+                    "description": "Replace the playbook's tags with this list.",
                 },
                 "execution_config": {
                     "type": "object",
@@ -141,32 +141,32 @@ def register_recipes_actions(registry: ActionRegistry) -> None:
                     "description": "Schedule config: { type: 'manual'|'cron'|'trigger', cron_expression, trigger_config }.",
                 },
             },
-            "required": ["recipe_id"],
+            "required": ["playbook_id"],
         },
         permission_level="write",
         requires_confirmation=False,
-        tags=["recipes", "update", "write"],
+        tags=["playbooks", "update", "write"],
         examples=[
-            "rename recipe 5 to Daily Digest",
-            "update the bug triage recipe description",
-            "set recipe 3 to run on a cron schedule",
+            "rename playbook 5 to Daily Digest",
+            "update the bug triage playbook description",
+            "set playbook 3 to run on a cron schedule",
         ],
     ))
 
     registry.register(ActionDefinition(
-        name="platform_add_recipe_step",
+        name="platform_add_playbook_step",
         description=(
-            "Add a new step to an existing recipe. The step is appended to the end "
+            "Add a new step to an existing playbook. The step is appended to the end "
             "by default, or inserted at a specific order position. Use when the user "
-            "asks to add a step to a recipe or workflow."
+            "asks to add a step to a playbook or workflow."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
-                "recipe_id": {
+                "playbook_id": {
                     "type": "integer",
-                    "description": "ID of the recipe to add the step to.",
+                    "description": "ID of the playbook to add the step to.",
                 },
                 "prompt_template": {
                     "type": "string",
@@ -190,31 +190,31 @@ def register_recipes_actions(registry: ActionRegistry) -> None:
                     "description": "Key name to store this step's output under (for referencing in later steps).",
                 },
             },
-            "required": ["recipe_id", "prompt_template"],
+            "required": ["playbook_id", "prompt_template"],
         },
         permission_level="write",
         requires_confirmation=False,
-        tags=["recipes", "steps", "add", "write"],
+        tags=["playbooks", "steps", "add", "write"],
         examples=[
-            "add a step to recipe 3 that summarizes the results",
-            "add a code review step to the bug triage recipe",
+            "add a step to playbook 3 that summarizes the results",
+            "add a code review step to the bug triage playbook",
         ],
     ))
 
     registry.register(ActionDefinition(
-        name="platform_update_recipe_step",
+        name="platform_update_playbook_step",
         description=(
-            "Update an existing step in a recipe. Specify the step by its 0-based index. "
+            "Update an existing step in a playbook. Specify the step by its 0-based index. "
             "Can change the prompt, agent, order, error handling, or output key. "
-            "Use when the user asks to modify or edit a recipe step."
+            "Use when the user asks to modify or edit a playbook step."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
-                "recipe_id": {
+                "playbook_id": {
                     "type": "integer",
-                    "description": "ID of the recipe containing the step.",
+                    "description": "ID of the playbook containing the step.",
                 },
                 "step_index": {
                     "type": "integer",
@@ -242,146 +242,146 @@ def register_recipes_actions(registry: ActionRegistry) -> None:
                     "description": "New output key name.",
                 },
             },
-            "required": ["recipe_id", "step_index"],
+            "required": ["playbook_id", "step_index"],
         },
         permission_level="write",
         requires_confirmation=False,
-        tags=["recipes", "steps", "update", "write"],
+        tags=["playbooks", "steps", "update", "write"],
         examples=[
-            "update step 2 of recipe 5 to use agent 3",
-            "change the prompt in step 1 of the bug fixer recipe",
+            "update step 2 of playbook 5 to use agent 3",
+            "change the prompt in step 1 of the bug fixer playbook",
         ],
     ))
 
     registry.register(ActionDefinition(
-        name="platform_delete_recipe_step",
+        name="platform_delete_playbook_step",
         description=(
-            "Delete a step from a recipe by its 0-based index. Remaining steps are "
+            "Delete a step from a playbook by its 0-based index. Remaining steps are "
             "re-ordered automatically. Use when the user asks to remove a step."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
-                "recipe_id": {
+                "playbook_id": {
                     "type": "integer",
-                    "description": "ID of the recipe to remove the step from.",
+                    "description": "ID of the playbook to remove the step from.",
                 },
                 "step_index": {
                     "type": "integer",
                     "description": "0-based index of the step to delete.",
                 },
             },
-            "required": ["recipe_id", "step_index"],
+            "required": ["playbook_id", "step_index"],
         },
         permission_level="write",
         requires_confirmation=False,
-        tags=["recipes", "steps", "delete", "write"],
+        tags=["playbooks", "steps", "delete", "write"],
         examples=[
-            "delete step 3 from recipe 5",
-            "remove the last step from the bug fixer recipe",
+            "delete step 3 from playbook 5",
+            "remove the last step from the bug fixer playbook",
         ],
     ))
 
     # ── Execution ────────────────────────────────────────────────────
 
     registry.register(ActionDefinition(
-        name="platform_execute_recipe",
+        name="platform_execute_playbook",
         description=(
-            "Trigger a recipe run asynchronously. Returns an execution_id immediately "
+            "Trigger a playbook run asynchronously. Returns an execution_id immediately "
             "that can be used to check status later. Use when the user asks to run, "
-            "execute, or trigger a recipe or automation."
+            "execute, or trigger a playbook or automation."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
-                "recipe_id": {
+                "playbook_id": {
                     "type": "integer",
-                    "description": "ID of the recipe to execute.",
+                    "description": "ID of the playbook to execute.",
                 },
-                "recipe_name": {
+                "playbook_name": {
                     "type": "string",
-                    "description": "Name of the recipe to execute (alternative to ID).",
+                    "description": "Name of the playbook to execute (alternative to ID).",
                 },
                 "input_data": {
                     "type": "object",
-                    "description": "Input data to pass to the recipe (key-value pairs).",
+                    "description": "Input data to pass to the playbook (key-value pairs).",
                 },
             },
             "required": [],
         },
         permission_level="write",
         requires_confirmation=False,
-        tags=["recipes", "execute", "run", "write"],
+        tags=["playbooks", "execute", "run", "write"],
         examples=[
-            "run the daily digest recipe",
-            "execute recipe 5",
+            "run the daily digest playbook",
+            "execute playbook 5",
             "trigger the bug triage automation",
         ],
     ))
 
     registry.register(ActionDefinition(
-        name="platform_get_recipe_execution",
+        name="platform_get_playbook_execution",
         description=(
-            "Check the status and results of a recipe execution. Returns execution "
+            "Check the status and results of a playbook execution. Returns execution "
             "status, step results summary, and timing. Use when the user asks about "
-            "a recipe run's status or results."
+            "a playbook run's status or results."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
                 "execution_id": {
                     "type": "string",
-                    "description": "The execution_id returned from platform_execute_recipe.",
+                    "description": "The execution_id returned from platform_execute_playbook.",
                 },
-                "recipe_id": {
+                "playbook_id": {
                     "type": "integer",
-                    "description": "Recipe ID to list recent executions for (if no execution_id).",
+                    "description": "Playbook ID to list recent executions for (if no execution_id).",
                 },
             },
             "required": [],
         },
         permission_level="read",
-        tags=["recipes", "execution", "status", "results"],
+        tags=["playbooks", "execution", "status", "results"],
         examples=[
-            "what's the status of that recipe run?",
-            "check recipe execution abc123",
-            "did the recipe run successfully?",
+            "what's the status of that playbook run?",
+            "check playbook execution abc123",
+            "did the playbook run successfully?",
         ],
     ))
 
     # ── Destructive ──────────────────────────────────────────────────
 
     registry.register(ActionDefinition(
-        name="platform_delete_recipe",
+        name="platform_delete_playbook",
         description=(
-            "Delete a recipe with full cleanup — trigger subscriptions, scheduler, "
-            "and memory. System recipes cannot be deleted. This is permanent. "
-            "Use only when the user explicitly asks to delete a recipe."
+            "Delete a playbook with full cleanup — trigger subscriptions, scheduler, "
+            "and memory. System playbooks cannot be deleted. This is permanent. "
+            "Use only when the user explicitly asks to delete a playbook."
         ),
-        category="recipes",
+        category="playbooks",
         parameters={
             "type": "object",
             "properties": {
-                "recipe_id": {
+                "playbook_id": {
                     "type": "integer",
-                    "description": "ID of the recipe to delete.",
+                    "description": "ID of the playbook to delete.",
                 },
-                "recipe_name": {
+                "playbook_name": {
                     "type": "string",
-                    "description": "Name of the recipe to delete (alternative to ID).",
+                    "description": "Name of the playbook to delete (alternative to ID).",
                 },
             },
             "required": [],
         },
         permission_level="destructive",
         requires_confirmation=True,
-        tags=["recipes", "delete", "destructive"],
+        tags=["playbooks", "delete", "destructive"],
         examples=[
-            "delete the test recipe",
-            "remove recipe 5",
+            "delete the test playbook",
+            "remove playbook 5",
             "delete automation 3",
         ],
     ))

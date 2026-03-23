@@ -1,4 +1,4 @@
-"""Recipe CRUD + execution handlers for PlatformActionExecutor."""
+"""Playbook CRUD + execution handlers for PlatformActionExecutor."""
 
 import logging
 from typing import Any, Dict
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
-async def list_recipes(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+async def list_playbooks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
 
     query = db.query(WorkflowTemplate).filter(
@@ -20,11 +20,11 @@ async def list_recipes(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     if status_filter != "all" and hasattr(WorkflowTemplate, "status"):
         query = query.filter(WorkflowTemplate.status == status_filter)
 
-    recipes = query.order_by(WorkflowTemplate.id).all()
+    playbooks = query.order_by(WorkflowTemplate.id).all()
 
     return {
         "success": True,
-        "recipes": [
+        "playbooks": [
             {
                 "id": r.id,
                 "name": r.name,
@@ -33,31 +33,31 @@ async def list_recipes(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
                 "tags": r.tags or [],
                 "created_at": r.created_at.isoformat() if hasattr(r, "created_at") and r.created_at else None,
             }
-            for r in recipes
+            for r in playbooks
         ],
-        "count": len(recipes),
+        "count": len(playbooks),
     }
 
 
-async def get_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+async def get_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
 
-    recipe_id = params.get("recipe_id")
-    recipe_name = params.get("recipe_name")
+    playbook_id = params.get("playbook_id")
+    playbook_name = params.get("playbook_name")
 
     query = db.query(WorkflowTemplate).filter(
         WorkflowTemplate.workspace_id == workspace_id
     )
-    if recipe_id:
-        query = query.filter(WorkflowTemplate.id == recipe_id)
-    elif recipe_name:
-        query = query.filter(WorkflowTemplate.name.ilike(f"%{recipe_name}%"))
+    if playbook_id:
+        query = query.filter(WorkflowTemplate.id == playbook_id)
+    elif playbook_name:
+        query = query.filter(WorkflowTemplate.name.ilike(f"%{playbook_name}%"))
     else:
-        return {"success": False, "error": "Provide recipe_name or recipe_id"}
+        return {"success": False, "error": "Provide playbook_name or playbook_id"}
 
-    recipe = query.first()
-    if not recipe:
-        return {"success": False, "error": "Recipe not found"}
+    playbook = query.first()
+    if not playbook:
+        return {"success": False, "error": "Playbook not found"}
 
     # Count executions
     exec_count = 0
@@ -65,22 +65,22 @@ async def get_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
         from core.models.core import RecipeExecution
         exec_count = (
             db.query(RecipeExecution)
-            .filter(RecipeExecution.recipe_id == recipe.id)
+            .filter(RecipeExecution.recipe_id == playbook.id)
             .count()
         )
     except Exception:
         pass
 
-    steps = recipe.steps or []
+    steps = playbook.steps or []
 
     return {
         "success": True,
-        "recipe": {
-            "id": recipe.id,
-            "name": recipe.name,
-            "template_id": recipe.template_id,
-            "description": recipe.description,
-            "tags": recipe.tags or [],
+        "playbook": {
+            "id": playbook.id,
+            "name": playbook.name,
+            "template_id": playbook.template_id,
+            "description": playbook.description,
+            "tags": playbook.tags or [],
             "step_count": len(steps),
             "steps": [
                 {
@@ -98,7 +98,7 @@ async def get_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     }
 
 
-async def create_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+async def create_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
     import uuid
 
@@ -110,7 +110,7 @@ async def create_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any])
     tags = params.get("tags", [])
     template_id = f"custom-{uuid.uuid4().hex[:8]}"
 
-    recipe = WorkflowTemplate(
+    playbook = WorkflowTemplate(
         name=name,
         template_id=template_id,
         description=description,
@@ -121,94 +121,94 @@ async def create_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any])
         tags=tags,
         template_definition={"steps": [], "agents": [], "config": {}, "variables": []},
     )
-    db.add(recipe)
+    db.add(playbook)
     db.flush()
 
-    logger.info(f"[PlatformExecutor] Created recipe '{name}' (id={recipe.id}) in workspace {workspace_id}")
+    logger.info(f"[PlatformExecutor] Created playbook '{name}' (id={playbook.id}) in workspace {workspace_id}")
 
     return {
         "success": True,
-        "recipe": {
-            "id": recipe.id,
-            "name": recipe.name,
-            "template_id": recipe.template_id,
-            "description": recipe.description,
+        "playbook": {
+            "id": playbook.id,
+            "name": playbook.name,
+            "template_id": playbook.template_id,
+            "description": playbook.description,
         },
-        "message": f"Recipe '{name}' created successfully. Add steps via the recipe editor.",
+        "message": f"Playbook '{name}' created successfully. Add steps via the playbook editor.",
     }
 
 
-async def update_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+async def update_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
 
-    recipe_id = params.get("recipe_id")
-    if not recipe_id:
-        return {"success": False, "error": "Missing required parameter: recipe_id"}
+    playbook_id = params.get("playbook_id")
+    if not playbook_id:
+        return {"success": False, "error": "Missing required parameter: playbook_id"}
 
-    recipe = (
+    playbook = (
         db.query(WorkflowTemplate)
         .filter(
-            WorkflowTemplate.id == recipe_id,
+            WorkflowTemplate.id == playbook_id,
             WorkflowTemplate.workspace_id == workspace_id,
         )
         .first()
     )
-    if not recipe:
-        return {"success": False, "error": "Recipe not found"}
+    if not playbook:
+        return {"success": False, "error": "Playbook not found"}
 
     changes = []
     if params.get("name"):
-        recipe.name = params["name"]
+        playbook.name = params["name"]
         changes.append(f"name -> '{params['name']}'")
     if params.get("description") is not None:
-        recipe.description = params["description"]
+        playbook.description = params["description"]
         changes.append("description updated")
     if params.get("tags") is not None:
-        recipe.tags = params["tags"]
+        playbook.tags = params["tags"]
         changes.append(f"tags -> {params['tags']}")
     if params.get("execution_config") is not None:
-        recipe.execution_config = params["execution_config"]
+        playbook.execution_config = params["execution_config"]
         changes.append("execution_config updated")
     if params.get("schedule_config") is not None:
-        recipe.schedule_config = params["schedule_config"]
+        playbook.schedule_config = params["schedule_config"]
         changes.append("schedule_config updated")
 
     if not changes:
-        return {"success": True, "message": "No changes specified", "recipe_id": recipe.id}
+        return {"success": True, "message": "No changes specified", "playbook_id": playbook.id}
 
     db.flush()
-    logger.info(f"[PlatformExecutor] Updated recipe {recipe.id}: {', '.join(changes)}")
+    logger.info(f"[PlatformExecutor] Updated playbook {playbook.id}: {', '.join(changes)}")
 
     return {
         "success": True,
-        "recipe_id": recipe.id,
+        "playbook_id": playbook.id,
         "changes": changes,
-        "message": f"Recipe '{recipe.name}' updated: {', '.join(changes)}",
+        "message": f"Playbook '{playbook.name}' updated: {', '.join(changes)}",
     }
 
 
-async def add_recipe_step(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+async def add_playbook_step(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
     from sqlalchemy.orm.attributes import flag_modified
     import uuid
 
-    recipe_id = params.get("recipe_id")
+    playbook_id = params.get("playbook_id")
     prompt_template = params.get("prompt_template")
-    if not recipe_id or not prompt_template:
-        return {"success": False, "error": "Missing required: recipe_id and prompt_template"}
+    if not playbook_id or not prompt_template:
+        return {"success": False, "error": "Missing required: playbook_id and prompt_template"}
 
-    recipe = (
+    playbook = (
         db.query(WorkflowTemplate)
         .filter(
-            WorkflowTemplate.id == recipe_id,
+            WorkflowTemplate.id == playbook_id,
             WorkflowTemplate.workspace_id == workspace_id,
         )
         .first()
     )
-    if not recipe:
-        return {"success": False, "error": "Recipe not found"}
+    if not playbook:
+        return {"success": False, "error": "Playbook not found"}
 
-    steps = list(recipe.steps or [])
+    steps = list(playbook.steps or [])
     order = params.get("order", len(steps))
 
     step = {
@@ -229,42 +229,42 @@ async def add_recipe_step(db: Session, workspace_id: UUID, params: Dict[str, Any
     for i, s in enumerate(steps):
         s["step_number"] = i + 1
 
-    recipe.steps = steps
-    flag_modified(recipe, "steps")
+    playbook.steps = steps
+    flag_modified(playbook, "steps")
     db.flush()
 
-    logger.info(f"[PlatformExecutor] Added step to recipe {recipe.id} (now {len(steps)} steps)")
+    logger.info(f"[PlatformExecutor] Added step to playbook {playbook.id} (now {len(steps)} steps)")
 
     return {
         "success": True,
-        "recipe_id": recipe.id,
+        "playbook_id": playbook.id,
         "step_index": order if order < len(steps) else len(steps) - 1,
         "total_steps": len(steps),
-        "message": f"Step added to recipe '{recipe.name}' (now {len(steps)} steps).",
+        "message": f"Step added to playbook '{playbook.name}' (now {len(steps)} steps).",
     }
 
 
-async def update_recipe_step(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+async def update_playbook_step(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
     from sqlalchemy.orm.attributes import flag_modified
 
-    recipe_id = params.get("recipe_id")
+    playbook_id = params.get("playbook_id")
     step_index = params.get("step_index")
-    if recipe_id is None or step_index is None:
-        return {"success": False, "error": "Missing required: recipe_id and step_index"}
+    if playbook_id is None or step_index is None:
+        return {"success": False, "error": "Missing required: playbook_id and step_index"}
 
-    recipe = (
+    playbook = (
         db.query(WorkflowTemplate)
         .filter(
-            WorkflowTemplate.id == recipe_id,
+            WorkflowTemplate.id == playbook_id,
             WorkflowTemplate.workspace_id == workspace_id,
         )
         .first()
     )
-    if not recipe:
-        return {"success": False, "error": "Recipe not found"}
+    if not playbook:
+        return {"success": False, "error": "Playbook not found"}
 
-    steps = list(recipe.steps or [])
+    steps = list(playbook.steps or [])
     if step_index < 0 or step_index >= len(steps):
         return {"success": False, "error": f"step_index {step_index} out of range (0-{len(steps)-1})"}
 
@@ -277,44 +277,44 @@ async def update_recipe_step(db: Session, workspace_id: UUID, params: Dict[str, 
             changes.append(f"{field} updated")
 
     if not changes:
-        return {"success": True, "message": "No changes specified", "recipe_id": recipe.id}
+        return {"success": True, "message": "No changes specified", "playbook_id": playbook.id}
 
-    recipe.steps = steps
-    flag_modified(recipe, "steps")
+    playbook.steps = steps
+    flag_modified(playbook, "steps")
     db.flush()
 
-    logger.info(f"[PlatformExecutor] Updated step {step_index} of recipe {recipe.id}: {', '.join(changes)}")
+    logger.info(f"[PlatformExecutor] Updated step {step_index} of playbook {playbook.id}: {', '.join(changes)}")
 
     return {
         "success": True,
-        "recipe_id": recipe.id,
+        "playbook_id": playbook.id,
         "step_index": step_index,
         "changes": changes,
-        "message": f"Step {step_index} of '{recipe.name}' updated: {', '.join(changes)}",
+        "message": f"Step {step_index} of '{playbook.name}' updated: {', '.join(changes)}",
     }
 
 
-async def delete_recipe_step(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+async def delete_playbook_step(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models.core import WorkflowTemplate
     from sqlalchemy.orm.attributes import flag_modified
 
-    recipe_id = params.get("recipe_id")
+    playbook_id = params.get("playbook_id")
     step_index = params.get("step_index")
-    if recipe_id is None or step_index is None:
-        return {"success": False, "error": "Missing required: recipe_id and step_index"}
+    if playbook_id is None or step_index is None:
+        return {"success": False, "error": "Missing required: playbook_id and step_index"}
 
-    recipe = (
+    playbook = (
         db.query(WorkflowTemplate)
         .filter(
-            WorkflowTemplate.id == recipe_id,
+            WorkflowTemplate.id == playbook_id,
             WorkflowTemplate.workspace_id == workspace_id,
         )
         .first()
     )
-    if not recipe:
-        return {"success": False, "error": "Recipe not found"}
+    if not playbook:
+        return {"success": False, "error": "Playbook not found"}
 
-    steps = list(recipe.steps or [])
+    steps = list(playbook.steps or [])
     if step_index < 0 or step_index >= len(steps):
         return {"success": False, "error": f"step_index {step_index} out of range (0-{len(steps)-1})"}
 
@@ -324,44 +324,44 @@ async def delete_recipe_step(db: Session, workspace_id: UUID, params: Dict[str, 
     for i, s in enumerate(steps):
         s["step_number"] = i + 1
 
-    recipe.steps = steps
-    flag_modified(recipe, "steps")
+    playbook.steps = steps
+    flag_modified(playbook, "steps")
     db.flush()
 
-    logger.info(f"[PlatformExecutor] Deleted step {step_index} from recipe {recipe.id} (now {len(steps)} steps)")
+    logger.info(f"[PlatformExecutor] Deleted step {step_index} from playbook {playbook.id} (now {len(steps)} steps)")
 
     return {
         "success": True,
-        "recipe_id": recipe.id,
+        "playbook_id": playbook.id,
         "deleted_step_index": step_index,
         "remaining_steps": len(steps),
-        "message": f"Step {step_index} removed from '{recipe.name}' ({len(steps)} steps remaining).",
+        "message": f"Step {step_index} removed from '{playbook.name}' ({len(steps)} steps remaining).",
     }
 
 
-async def execute_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Trigger a recipe run asynchronously. Returns execution_id immediately."""
+async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Trigger a playbook run asynchronously. Returns execution_id immediately."""
     from core.models.core import WorkflowTemplate, RecipeExecution
     import uuid
 
-    recipe_id = params.get("recipe_id")
-    recipe_name = params.get("recipe_name")
+    playbook_id = params.get("playbook_id")
+    playbook_name = params.get("playbook_name")
     input_data = params.get("input_data") or {}
 
-    # Resolve recipe
+    # Resolve playbook
     query = db.query(WorkflowTemplate).filter(
         WorkflowTemplate.workspace_id == workspace_id
     )
-    if recipe_id:
-        query = query.filter(WorkflowTemplate.id == recipe_id)
-    elif recipe_name:
-        query = query.filter(WorkflowTemplate.name.ilike(f"%{recipe_name}%"))
+    if playbook_id:
+        query = query.filter(WorkflowTemplate.id == playbook_id)
+    elif playbook_name:
+        query = query.filter(WorkflowTemplate.name.ilike(f"%{playbook_name}%"))
     else:
-        return {"success": False, "error": "Provide recipe_id or recipe_name"}
+        return {"success": False, "error": "Provide playbook_id or playbook_name"}
 
-    recipe = query.first()
-    if not recipe:
-        return {"success": False, "error": "Recipe not found"}
+    playbook = query.first()
+    if not playbook:
+        return {"success": False, "error": "Playbook not found"}
 
     # Concurrency guard -- return error to agent if workspace is at capacity
     from services.concurrency_guard import check_concurrency
@@ -377,7 +377,7 @@ async def execute_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any]
     execution_id = f"exec-{uuid.uuid4().hex[:12]}"
     execution = RecipeExecution(
         execution_id=execution_id,
-        recipe_id=recipe.id,
+        recipe_id=playbook.id,
         workspace_id=workspace_id,
         status="pending",
         input_data=input_data,
@@ -391,39 +391,39 @@ async def execute_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any]
         from api.recipe_executor import launch_recipe_task
         launch_recipe_task(
             recipe_execution_id=execution_id,
-            recipe_id=recipe.id,
+            recipe_id=playbook.id,
             workspace_id=workspace_id,
             input_data=input_data,
         )
     except Exception as e:
-        logger.error("[PlatformExecutor] Failed to launch recipe task: %s", e)
+        logger.error("[PlatformExecutor] Failed to launch playbook task: %s", e)
         # Mark execution as failed so it doesn't stay "pending" forever
         execution.status = "failed"
         execution.error_message = f"Failed to enqueue: {str(e)[:500]}"
         db.commit()
-        return {"success": False, "error": f"Recipe triggered but failed to launch: {str(e)[:200]}"}
+        return {"success": False, "error": f"Playbook triggered but failed to launch: {str(e)[:200]}"}
 
     logger.info(
-        "[PlatformExecutor] Triggered recipe '%s' (id=%d) -- execution_id=%s",
-        recipe.name, recipe.id, execution_id,
+        "[PlatformExecutor] Triggered playbook '%s' (id=%d) -- execution_id=%s",
+        playbook.name, playbook.id, execution_id,
     )
 
     return {
         "success": True,
         "execution_id": execution_id,
-        "recipe_id": recipe.id,
-        "recipe_name": recipe.name,
+        "playbook_id": playbook.id,
+        "playbook_name": playbook.name,
         "status": "pending",
-        "message": f"Recipe '{recipe.name}' triggered. Track with execution_id: {execution_id}",
+        "message": f"Playbook '{playbook.name}' triggered. Track with execution_id: {execution_id}",
     }
 
 
-async def get_recipe_execution(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Check status/results of a recipe execution."""
+async def get_playbook_execution(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Check status/results of a playbook execution."""
     from core.models.core import RecipeExecution
 
     execution_id = params.get("execution_id")
-    recipe_id = params.get("recipe_id")
+    playbook_id = params.get("playbook_id")
 
     if execution_id:
         execution = (
@@ -452,7 +452,7 @@ async def get_recipe_execution(db: Session, workspace_id: UUID, params: Dict[str
             "success": True,
             "execution": {
                 "execution_id": execution.execution_id,
-                "recipe_id": execution.recipe_id,
+                "playbook_id": execution.recipe_id,
                 "status": execution.status,
                 "started_at": execution.started_at.isoformat() if execution.started_at else None,
                 "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
@@ -462,12 +462,12 @@ async def get_recipe_execution(db: Session, workspace_id: UUID, params: Dict[str
             },
         }
 
-    elif recipe_id:
-        # List recent executions for this recipe
+    elif playbook_id:
+        # List recent executions for this playbook
         executions = (
             db.query(RecipeExecution)
             .filter(
-                RecipeExecution.recipe_id == recipe_id,
+                RecipeExecution.recipe_id == playbook_id,
                 RecipeExecution.workspace_id == workspace_id,
             )
             .order_by(RecipeExecution.started_at.desc())
@@ -490,44 +490,44 @@ async def get_recipe_execution(db: Session, workspace_id: UUID, params: Dict[str
             "count": len(executions),
         }
 
-    return {"success": False, "error": "Provide execution_id or recipe_id"}
+    return {"success": False, "error": "Provide execution_id or playbook_id"}
 
 
-async def delete_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Delete a recipe with full cleanup."""
+async def delete_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Delete a playbook with full cleanup."""
     from core.models.core import WorkflowTemplate
 
-    recipe_id = params.get("recipe_id")
-    recipe_name = params.get("recipe_name")
+    playbook_id = params.get("playbook_id")
+    playbook_name = params.get("playbook_name")
 
     query = db.query(WorkflowTemplate).filter(
         WorkflowTemplate.workspace_id == workspace_id
     )
-    if recipe_id:
-        query = query.filter(WorkflowTemplate.id == recipe_id)
-    elif recipe_name:
-        query = query.filter(WorkflowTemplate.name.ilike(f"%{recipe_name}%"))
+    if playbook_id:
+        query = query.filter(WorkflowTemplate.id == playbook_id)
+    elif playbook_name:
+        query = query.filter(WorkflowTemplate.name.ilike(f"%{playbook_name}%"))
     else:
-        return {"success": False, "error": "Provide recipe_id or recipe_name"}
+        return {"success": False, "error": "Provide playbook_id or playbook_name"}
 
-    recipe = query.first()
-    if not recipe:
-        return {"success": False, "error": "Recipe not found"}
+    playbook = query.first()
+    if not playbook:
+        return {"success": False, "error": "Playbook not found"}
 
-    # Guard against system recipes
-    if getattr(recipe, "is_system", False):
-        return {"success": False, "error": "System recipes cannot be deleted"}
+    # Guard against system playbooks
+    if getattr(playbook, "is_system", False):
+        return {"success": False, "error": "System playbooks cannot be deleted"}
 
-    recipe_info = {"id": recipe.id, "name": recipe.name}
+    playbook_info = {"id": playbook.id, "name": playbook.name}
     cleanup_notes = []
 
     # Trigger subscription cleanup (non-fatal)
     try:
         from api.workflow_recipes import _cleanup_trigger_subscriptions
-        _cleanup_trigger_subscriptions(recipe.id, db)
+        _cleanup_trigger_subscriptions(playbook.id, db)
         cleanup_notes.append("Trigger subscriptions deactivated")
     except Exception as e:
-        logger.warning("[PlatformExecutor] Trigger cleanup failed for recipe %d: %s", recipe.id, e)
+        logger.warning("[PlatformExecutor] Trigger cleanup failed for playbook %d: %s", playbook.id, e)
         cleanup_notes.append(f"Trigger cleanup failed: {e}")
 
     # Mem0 memory cleanup (non-fatal)
@@ -543,23 +543,23 @@ async def delete_recipe(db: Session, workspace_id: UUID, params: Dict[str, Any])
                     headers["Authorization"] = f"Bearer {config.MEM0_API_KEY}"
                 await client.delete(
                     f"{mem0_url}/api/v1/memories/",
-                    params={"user_id": f"recipe-{recipe.id}"},
+                    params={"user_id": f"playbook-{playbook.id}"},
                     headers=headers,
                 )
-            cleanup_notes.append("Recipe memories cleaned up")
+            cleanup_notes.append("Playbook memories cleaned up")
     except Exception as e:
-        logger.debug("[PlatformExecutor] Mem0 cleanup skipped for recipe %d: %s", recipe.id, e)
+        logger.debug("[PlatformExecutor] Mem0 cleanup skipped for playbook %d: %s", playbook.id, e)
 
-    # Delete the recipe (cascades to executions via FK)
-    db.delete(recipe)
+    # Delete the playbook (cascades to executions via FK)
+    db.delete(playbook)
     db.flush()
     cleanup_notes.append("Database record deleted")
 
-    logger.info("[PlatformExecutor] Deleted recipe %s -- %s", recipe_info, ", ".join(cleanup_notes))
+    logger.info("[PlatformExecutor] Deleted playbook %s -- %s", playbook_info, ", ".join(cleanup_notes))
 
     return {
         "success": True,
-        "deleted_recipe": recipe_info,
+        "deleted_playbook": playbook_info,
         "cleanup": cleanup_notes,
-        "message": f"Recipe '{recipe_info['name']}' (ID {recipe_info['id']}) deleted.",
+        "message": f"Playbook '{playbook_info['name']}' (ID {playbook_info['id']}) deleted.",
     }

@@ -1,16 +1,16 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { useCreateRecipe, useUpdateRecipe } from './use-recipe-api'
+import { useCreatePlaybook, useUpdatePlaybook } from './use-playbook-api'
 import { toast } from './use-toast'
-import type { RecipeFormValues } from '@/components/workflows/create-recipe-modal'
+import type { PlaybookFormValues } from '@/components/workflows/create-playbook-modal'
 
 /**
- * Transforms frontend RecipeFormValues into the API request body
+ * Transforms frontend PlaybookFormValues into the API request body
  * expected by POST /api/workflow-recipes
  */
-function transformFormToApiPayload(data: RecipeFormValues) {
-  // Generate a slug-style template_id from the recipe name
+function transformFormToApiPayload(data: PlaybookFormValues) {
+  // Generate a slug-style template_id from the playbook name
   const templateId = data.name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -105,10 +105,10 @@ function transformFormToApiPayload(data: RecipeFormValues) {
  * Validates form data before submission.
  * Returns null if valid, or an error message string if invalid.
  */
-function validateFormData(data: RecipeFormValues): string | null {
+function validateFormData(data: PlaybookFormValues): string | null {
   // Name validation
   if (!data.name || data.name.trim().length < 3) {
-    return 'Recipe name must be at least 3 characters'
+    return 'Playbook name must be at least 3 characters'
   }
 
   // Steps validation
@@ -146,25 +146,25 @@ function validateFormData(data: RecipeFormValues): string | null {
   return null
 }
 
-export interface UseRecipeFormReturn {
+export interface UsePlaybookFormReturn {
   isSubmitting: boolean
   lastSavedWebhookId: string | null
-  submitRecipe: (data: RecipeFormValues, onSuccess?: () => void) => Promise<void>
-  updateRecipe: (recipeId: string, data: RecipeFormValues, onSuccess?: () => void) => Promise<void>
+  submitPlaybook: (data: PlaybookFormValues, onSuccess?: () => void) => Promise<void>
+  updatePlaybook: (playbookId: string, data: PlaybookFormValues, onSuccess?: () => void) => Promise<void>
 }
 
 /**
- * Hook for managing recipe form submission.
+ * Hook for managing playbook form submission.
  * Handles validation, API call, toast notifications, and query invalidation.
  */
-export function useRecipeForm(): UseRecipeFormReturn {
-  const createRecipeMutation = useCreateRecipe()
-  const updateRecipeMutation = useUpdateRecipe()
+export function usePlaybookForm(): UsePlaybookFormReturn {
+  const createPlaybookMutation = useCreatePlaybook()
+  const updatePlaybookMutation = useUpdatePlaybook()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [lastSavedWebhookId, setLastSavedWebhookId] = useState<string | null>(null)
 
-  const submitRecipe = useCallback(
-    async (data: RecipeFormValues, onSuccess?: () => void) => {
+  const submitPlaybook = useCallback(
+    async (data: PlaybookFormValues, onSuccess?: () => void) => {
       // Validate form data
       const validationError = validateFormData(data)
       if (validationError) {
@@ -181,16 +181,16 @@ export function useRecipeForm(): UseRecipeFormReturn {
       try {
         const payload = transformFormToApiPayload(data)
 
-        const result = await createRecipeMutation.mutateAsync(payload)
+        const result = await createPlaybookMutation.mutateAsync(payload) as any
 
         // Extract webhook_id from server response for display
-        const webhookId = result?.recipe?.schedule_config?.webhook_id
+        const webhookId = result?.playbook?.schedule_config?.webhook_id
         if (webhookId) {
           setLastSavedWebhookId(webhookId)
         }
 
         toast({
-          title: 'Recipe Created',
+          title: 'Playbook Created',
           description: `"${data.name}" has been created successfully.`,
         })
 
@@ -201,10 +201,10 @@ export function useRecipeForm(): UseRecipeFormReturn {
             ? err.message
             : typeof err === 'object' && err !== null && 'detail' in err
               ? String((err as { detail: unknown }).detail)
-              : 'Failed to create recipe. Please try again.'
+              : 'Failed to create playbook. Please try again.'
 
         toast({
-          title: 'Error Creating Recipe',
+          title: 'Error Creating Playbook',
           description: message,
           variant: 'destructive',
         })
@@ -212,11 +212,11 @@ export function useRecipeForm(): UseRecipeFormReturn {
         setIsSubmitting(false)
       }
     },
-    [createRecipeMutation]
+    [createPlaybookMutation]
   )
 
-  const updateRecipe = useCallback(
-    async (recipeId: string, data: RecipeFormValues, onSuccess?: () => void) => {
+  const updatePlaybook = useCallback(
+    async (playbookId: string, data: PlaybookFormValues, onSuccess?: () => void) => {
       // Validate form data
       const validationError = validateFormData(data)
       if (validationError) {
@@ -233,16 +233,16 @@ export function useRecipeForm(): UseRecipeFormReturn {
       try {
         const payload = transformFormToApiPayload(data)
 
-        const result = await updateRecipeMutation.mutateAsync({ recipeId, recipeData: payload })
+        const result = await updatePlaybookMutation.mutateAsync({ playbookId, playbookData: payload }) as any
 
         // Extract webhook_id from server response for display
-        const webhookId = result?.recipe?.schedule_config?.webhook_id
+        const webhookId = result?.playbook?.schedule_config?.webhook_id
         if (webhookId) {
           setLastSavedWebhookId(webhookId)
         }
 
         toast({
-          title: 'Recipe Updated',
+          title: 'Playbook Updated',
           description: `"${data.name}" has been updated successfully.`,
         })
 
@@ -253,10 +253,10 @@ export function useRecipeForm(): UseRecipeFormReturn {
             ? err.message
             : typeof err === 'object' && err !== null && 'detail' in err
               ? String((err as { detail: unknown }).detail)
-              : 'Failed to update recipe. Please try again.'
+              : 'Failed to update playbook. Please try again.'
 
         toast({
-          title: 'Error Updating Recipe',
+          title: 'Error Updating Playbook',
           description: message,
           variant: 'destructive',
         })
@@ -264,13 +264,13 @@ export function useRecipeForm(): UseRecipeFormReturn {
         setIsSubmitting(false)
       }
     },
-    [updateRecipeMutation]
+    [updatePlaybookMutation]
   )
 
   return {
     isSubmitting,
     lastSavedWebhookId,
-    submitRecipe,
-    updateRecipe,
+    submitPlaybook,
+    updatePlaybook,
   }
 }

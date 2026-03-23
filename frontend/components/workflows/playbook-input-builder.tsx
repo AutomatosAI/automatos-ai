@@ -22,11 +22,11 @@ export interface InputField {
   default: string
 }
 
-interface RecipeInputBuilderProps {
+interface PlaybookInputBuilderProps {
   value: string // JSON string of inputs schema
   onChange: (value: string) => void
   onValidation?: (valid: boolean) => void
-  hasTrigger?: boolean // Recipe has a trigger attached — inputs come from webhook
+  hasTrigger?: boolean // Playbook has a trigger attached — inputs come from webhook
 }
 
 function parseInputsSchema(jsonStr: string): InputField[] {
@@ -59,7 +59,7 @@ function fieldsToSchema(fields: InputField[]): string {
   return JSON.stringify(schema)
 }
 
-export function RecipeInputBuilder({ value, onChange, onValidation, hasTrigger }: RecipeInputBuilderProps) {
+export function PlaybookInputBuilder({ value, onChange, onValidation, hasTrigger }: PlaybookInputBuilderProps) {
   const [fields, setFields] = React.useState<InputField[]>(() => parseInputsSchema(value))
 
   // Sync incoming value prop -> local fields when parent updates value externally
@@ -101,7 +101,7 @@ export function RecipeInputBuilder({ value, onChange, onValidation, hasTrigger }
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <Label className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-          Recipe Inputs
+          Playbook Inputs
         </Label>
         <Button
           type="button"
@@ -118,16 +118,16 @@ export function RecipeInputBuilder({ value, onChange, onValidation, hasTrigger }
       {hasTrigger && (
         <div className="bg-primary/5 border border-primary/20 rounded-lg px-3 py-2">
           <p className="text-xs text-primary/80">
-            This recipe has a trigger attached. Trigger data (e.g. ticket details, event metadata)
+            This playbook has a trigger attached. Trigger data (e.g. ticket details, event metadata)
             is passed to each step automatically — no inputs needed for that.
-            Only add inputs here if you need extra parameters when running this recipe manually.
+            Only add inputs here if you need extra parameters when running this playbook manually.
           </p>
         </div>
       )}
 
       {fields.length === 0 && !hasTrigger && (
         <p className="text-xs text-muted-foreground py-4 text-center">
-          No inputs defined. Add inputs to create a form that users fill in when running this recipe manually.
+          No inputs defined. Add inputs to create a form that users fill in when running this playbook manually.
         </p>
       )}
 

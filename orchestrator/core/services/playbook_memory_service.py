@@ -1,8 +1,8 @@
 """
-Recipe Memory Service - Stage 8 (Memory)
-=========================================
+Playbook Memory Service - Stage 8 (Memory)
+===========================================
 
-Stores execution experiences in Mem0 with workspace+recipe+agent scoping.
+Stores execution experiences in Mem0 with workspace+playbook+agent scoping.
 Retrieves relevant memories for pre-execution context enhancement.
 
 All Mem0 calls delegate to UnifiedMemoryService (shared singleton).
@@ -26,9 +26,9 @@ from modules.memory.unified_memory_service import (
 logger = logging.getLogger(__name__)
 
 
-class RecipeMemoryService:
+class PlaybookMemoryService:
     """
-    Stores execution experiences in Mem0 with workspace+recipe+agent scoping.
+    Stores execution experiences in Mem0 with workspace+playbook+agent scoping.
     Retrieves relevant memories for pre-execution context enhancement.
 
     Delegates all Mem0 operations to UnifiedMemoryService singleton.
@@ -36,7 +36,7 @@ class RecipeMemoryService:
 
     def __init__(self, db: Session):
         if db is None:
-            raise ValueError("RecipeMemoryService requires an injected DB session")
+            raise ValueError("PlaybookMemoryService requires an injected DB session")
         self.db = db
         self._unified = get_unified_memory_service()
 
@@ -47,16 +47,16 @@ class RecipeMemoryService:
         quality_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Store execution experience in Mem0 with workspace+recipe+agent scoping.
+        Store execution experience in Mem0 with workspace+playbook+agent scoping.
 
         Stores successful patterns, failed patterns, quality trends, and
-        performance data as memories scoped to the workspace, recipe, and
+        performance data as memories scoped to the workspace, playbook, and
         individual agents involved.
 
         Args:
             execution_id: The execution_id string (e.g. "exec-abc123def456")
-            learnings: Optional learnings dict from RecipeLearningService.analyze_execution()
-            quality_data: Optional quality dict from RecipeQualityService.assess_quality()
+            learnings: Optional learnings dict from PlaybookLearningService.analyze_execution()
+            quality_data: Optional quality dict from PlaybookQualityService.assess_quality()
 
         Returns:
             Dict with stored_memories count, scopes used, and any errors.
@@ -68,64 +68,64 @@ class RecipeMemoryService:
         if not execution:
             raise ValueError(f"Execution not found: {execution_id}")
 
-        recipe = self.db.query(WorkflowTemplate).filter(
+        playbook = self.db.query(WorkflowTemplate).filter(
             WorkflowTemplate.id == execution.recipe_id
         ).first()
 
-        if not recipe:
-            raise ValueError(f"Recipe not found for execution: {execution_id}")
+        if not playbook:
+            raise ValueError(f"Playbook not found for execution: {execution_id}")
 
         workspace_id = str(execution.workspace_id)
-        recipe_id = recipe.template_id or str(recipe.id)
+        playbook_id = playbook.template_id or str(playbook.id)
         ns = MemoryNamespace(workspace_id=workspace_id)
         stored_memories: List[Dict[str, Any]] = []
         errors: List[str] = []
 
-        # 1. Store recipe-level memory (workspace + recipe scope)
-        recipe_user_id = ns.recipe(recipe_id)
-        recipe_memory = self._build_recipe_memory(execution, learnings, quality_data)
+        # 1. Store playbook-level memory (workspace + playbook scope)
+        playbook_user_id = ns.recipe(playbook_id)
+        playbook_memory = self._build_playbook_memory(execution, learnings, quality_data)
 
-        if recipe_memory:
-            result = await self._store_memory(recipe_user_id, recipe_memory, {
-                "type": "recipe_execution",
+        if playbook_memory:
+            result = await self._store_memory(playbook_user_id, playbook_memory, {
+                "type": "playbook_execution",
                 "execution_id": execution_id,
-                "recipe_id": recipe_id,
+                "playbook_id": playbook_id,
                 "workspace_id": workspace_id,
                 "status": execution.status,
             })
             if result.get("error"):
-                errors.append(f"Recipe scope: {result['error']}")
+                errors.append(f"Playbook scope: {result['error']}")
             else:
                 stored_memories.append({
-                    "scope": recipe_user_id,
-                    "type": "recipe_execution",
+                    "scope": playbook_user_id,
+                    "type": "playbook_execution",
                 })
 
-            # L2: Store recipe summary in short-term memory (fire-and-forget)
+            # L2: Store playbook summary in short-term memory (fire-and-forget)
             try:
                 asyncio.create_task(
                     self._unified.store_short_term(
                         workspace_id=workspace_id,
-                        content=recipe_memory[:1500],
-                        content_type="recipe_summary",
+                        content=playbook_memory[:1500],
+                        content_type="playbook_summary",
                         importance=0.6,
                         metadata={
                             "execution_id": execution_id,
-                            "recipe_id": recipe_id,
+                            "playbook_id": playbook_id,
                             "status": execution.status,
                         },
                     )
                 )
             except Exception:
                 logger.debug(
-                    "[RecipeMemory] L2 store_short_term failed for recipe ws=%s",
+                    "[PlaybookMemory] L2 store_short_term failed for playbook ws=%s",
                     workspace_id,
                     exc_info=True,
                 )
 
-        # 2. Store per-agent memories (workspace + recipe + agent scope)
+        # 2. Store per-agent memories (workspace + playbook + agent scope)
         step_results = execution.step_results or []
-        recipe_steps = recipe.steps or []
+        playbook_steps = playbook.steps or []
 
         for idx, step_result in enumerate(step_results):
             if not isinstance(step_result, dict):
@@ -133,21 +133,21 @@ class RecipeMemoryService:
 
             agent_id = step_result.get("agent_id")
             if not agent_id:
-                # Try to get agent_id from recipe step definition
-                if idx < len(recipe_steps) and isinstance(recipe_steps[idx], dict):
-                    agent_id = recipe_steps[idx].get("agent_id")
+                # Try to get agent_id from playbook step definition
+                if idx < len(playbook_steps) and isinstance(playbook_steps[idx], dict):
+                    agent_id = playbook_steps[idx].get("agent_id")
 
             if not agent_id:
                 continue
 
-            agent_user_id = ns.recipe_agent(recipe_id, agent_id)
+            agent_user_id = ns.recipe_agent(playbook_id, agent_id)
             agent_memory = self._build_agent_step_memory(idx, step_result, execution)
 
             if agent_memory:
                 result = await self._store_memory(agent_user_id, agent_memory, {
                     "type": "agent_step_execution",
                     "execution_id": execution_id,
-                    "recipe_id": recipe_id,
+                    "playbook_id": playbook_id,
                     "agent_id": agent_id,
                     "step_index": idx,
                     "workspace_id": workspace_id,
@@ -169,12 +169,12 @@ class RecipeMemoryService:
                         self._unified.store_short_term(
                             workspace_id=workspace_id,
                             content=agent_memory[:1500],
-                            content_type="recipe_summary",
+                            content_type="playbook_summary",
                             agent_id=agent_id_int,
                             importance=0.5,
                             metadata={
                                 "execution_id": execution_id,
-                                "recipe_id": recipe_id,
+                                "playbook_id": playbook_id,
                                 "agent_id": agent_id,
                                 "step_index": idx,
                             },
@@ -182,7 +182,7 @@ class RecipeMemoryService:
                     )
                 except Exception:
                     logger.debug(
-                        "[RecipeMemory] L2 store_short_term failed for agent step ws=%s agent=%s",
+                        "[PlaybookMemory] L2 store_short_term failed for agent step ws=%s agent=%s",
                         workspace_id,
                         agent_id,
                         exc_info=True,
@@ -211,53 +211,53 @@ class RecipeMemoryService:
 
     async def retrieve_relevant_memories(
         self,
-        recipe_id: int,
+        playbook_id: int,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Retrieve relevant memories for pre-execution context enhancement.
 
-        Searches Mem0 for past execution experiences scoped to the recipe
+        Searches Mem0 for past execution experiences scoped to the playbook
         and its agents to provide context before a new execution.
 
         Args:
-            recipe_id: The integer recipe ID (WorkflowTemplate.id)
+            playbook_id: The integer playbook ID (WorkflowTemplate.id)
             context: Optional context dict with keys like 'input_data', 'agent_ids'
 
         Returns:
-            Dict with recipe_memories, agent_memories, and summary.
+            Dict with playbook_memories, agent_memories, and summary.
         """
-        recipe = self.db.query(WorkflowTemplate).filter(
-            WorkflowTemplate.id == recipe_id
+        playbook = self.db.query(WorkflowTemplate).filter(
+            WorkflowTemplate.id == playbook_id
         ).first()
 
-        if not recipe:
-            raise ValueError(f"Recipe not found: {recipe_id}")
+        if not playbook:
+            raise ValueError(f"Playbook not found: {playbook_id}")
 
-        # Resolve workspace_id: prefer context, then recipe
-        workspace_id = str((context or {}).get("workspace_id") or recipe.workspace_id or "")
+        # Resolve workspace_id: prefer context, then playbook
+        workspace_id = str((context or {}).get("workspace_id") or playbook.workspace_id or "")
         if not workspace_id:
             logger.warning(
-                "No workspace_id for recipe %d (marketplace recipe?), memory retrieval may be incomplete",
-                recipe_id,
+                "No workspace_id for playbook %d (marketplace playbook?), memory retrieval may be incomplete",
+                playbook_id,
             )
-        template_id = recipe.template_id or str(recipe.id)
+        template_id = playbook.template_id or str(playbook.id)
         context = context or {}
         ns = MemoryNamespace(workspace_id=workspace_id)
 
-        # 1. Retrieve recipe-level memories
-        recipe_user_id = ns.recipe(template_id)
+        # 1. Retrieve playbook-level memories
+        playbook_user_id = ns.recipe(template_id)
         query = self._build_retrieval_query(context)
-        recipe_memories = await self._unified.search_long_term_scoped(
-            user_id=recipe_user_id, query=query, limit=10,
+        playbook_memories = await self._unified.search_long_term_scoped(
+            user_id=playbook_user_id, query=query, limit=10,
         )
 
-        # 2. Retrieve per-agent memories for agents in the recipe steps
+        # 2. Retrieve per-agent memories for agents in the playbook steps
         agent_memories: Dict[str, List[Dict]] = {}
-        recipe_steps = recipe.steps or []
+        playbook_steps = playbook.steps or []
 
         agent_ids = set()
-        for step in recipe_steps:
+        for step in playbook_steps:
             if isinstance(step, dict) and step.get("agent_id"):
                 agent_ids.add(step["agent_id"])
 
@@ -281,22 +281,22 @@ class RecipeMemoryService:
                     agent_memories[aid] = memories
 
         # Build summary
-        total_memories = len(recipe_memories) + sum(
+        total_memories = len(playbook_memories) + sum(
             len(mems) for mems in agent_memories.values()
         )
 
         result = {
-            "recipe_id": recipe_id,
+            "playbook_id": playbook_id,
             "retrieved_at": datetime.utcnow().isoformat(),
-            "recipe_memories": recipe_memories,
+            "playbook_memories": playbook_memories,
             "agent_memories": agent_memories,
             "total_memories": total_memories,
-            "summary": self._build_memory_summary(recipe_memories, agent_memories),
+            "summary": self._build_memory_summary(playbook_memories, agent_memories),
         }
 
         logger.info(
-            "Retrieved %d memories for recipe %d (%d recipe, %d agents)",
-            total_memories, recipe_id, len(recipe_memories), len(agent_memories),
+            "Retrieved %d memories for playbook %d (%d playbook, %d agents)",
+            total_memories, playbook_id, len(playbook_memories), len(agent_memories),
         )
 
         return result
@@ -313,14 +313,14 @@ class RecipeMemoryService:
         can extract factual memories from the execution data.
         """
         messages = [
-            {"role": "user", "content": "Remember the following facts about this recipe execution."},
+            {"role": "user", "content": "Remember the following facts about this playbook execution."},
             {"role": "assistant", "content": text},
         ]
         return await self._unified.store_long_term_messages(
             user_id=user_id, messages=messages, metadata=metadata,
         )
 
-    def _build_recipe_memory(
+    def _build_playbook_memory(
         self,
         execution: RecipeExecution,
         learnings: Optional[Dict[str, Any]],
@@ -332,7 +332,7 @@ class RecipeMemoryService:
         # Execution outcome as a fact
         status = execution.status
         parts.append(
-            f"The recipe execution {execution.execution_id} {status}"
+            f"The playbook execution {execution.execution_id} {status}"
         )
 
         if execution.error_message:
@@ -432,7 +432,7 @@ class RecipeMemoryService:
     def _build_retrieval_query(self, context: Optional[Dict[str, Any]]) -> str:
         """Build a search query for Mem0 based on the retrieval context."""
         if not context:
-            return "recipe execution patterns and results"
+            return "playbook execution patterns and results"
 
         parts: List[str] = []
 
@@ -445,22 +445,22 @@ class RecipeMemoryService:
             parts.append(str(context["focus"]))
 
         if not parts:
-            return "recipe execution patterns and results"
+            return "playbook execution patterns and results"
 
         return "; ".join(parts)
 
     def _build_memory_summary(
         self,
-        recipe_memories: List[Dict],
+        playbook_memories: List[Dict],
         agent_memories: Dict[str, List[Dict]],
     ) -> str:
         """Build a human-readable summary of retrieved memories."""
         parts: List[str] = []
 
-        if recipe_memories:
-            parts.append(f"{len(recipe_memories)} recipe-level memories found")
+        if playbook_memories:
+            parts.append(f"{len(playbook_memories)} playbook-level memories found")
             # Extract key themes from recent memories
-            recent = recipe_memories[:3]
+            recent = playbook_memories[:3]
             for mem in recent:
                 content = mem.get("memory", "")
                 if content:
