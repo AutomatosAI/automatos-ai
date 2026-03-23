@@ -873,6 +873,17 @@ class AgentFactory:
                             ])
                             response.content = f"Based on the tool results:\n\n{tool_summary}"
 
+                    # Warn if LLM output was truncated (hit max_tokens limit)
+                    if response and getattr(response, "finish_reason", None) == "length":
+                        completion_tokens = (response.usage or {}).get("completion_tokens", 0)
+                        self.logger.warning(
+                            "LLM output TRUNCATED (finish_reason=length) for agent %s. "
+                            "completion_tokens=%s, max_tokens=%s. Output may be incomplete.",
+                            agent_id,
+                            completion_tokens,
+                            getattr(agent_runtime.llm_manager.config, "max_tokens", "?"),
+                        )
+
                     if response and response.content:
                         tokens_used = response.usage.get("total_tokens", 0) if response.usage else 0
                         agent_runtime.update_metrics(execution_time, tokens_used, True)

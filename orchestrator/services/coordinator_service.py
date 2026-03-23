@@ -17,7 +17,7 @@ Source: PRD-82A Sections 6, 8, 9, 12 (US-014)
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from config import Config
 from core.models.core import Agent
 from core.models.orchestration import (
+    OrchestrationArchive,
     OrchestrationEvent,
     OrchestrationRun,
     OrchestrationTask,
@@ -48,6 +49,7 @@ from modules.coordination.planner import (
     PlanValidationError,
 )
 from modules.coordination.reconciler import MissionReconciler
+from modules.coordination.verification import ConsistencyResult, VerificationService
 from services.orchestration_board_bridge import (
     create_mission_board_task,
     create_task_board_task,
@@ -76,6 +78,7 @@ class CoordinatorService:
 
     - ``tick()`` runs every 5s: dispatches next tasks + reconciles active runs.
     - Lifecycle methods: create, approve, reject, review, pause, resume, cancel.
+    - PRD-108: missions get a shared vector field (Qdrant) for inter-agent context.
     - No stored DB session — each method/tick acquires its own via SessionLocal.
     """
 
@@ -83,6 +86,129 @@ class CoordinatorService:
         self._tick_running: bool = False
         self._scheduler = None
         self._owns_scheduler: bool = False
+        self._last_archive_at: Optional[datetime] = None
+        self._field = None  # Lazy-init via factory
+
+    def _get_field(self):
+        """Lazy-init the PRD-108 shared context backend (vector_field or redis)."""
+        if self._field is None:
+            try:
+                from modules.context.factory import get_shared_context
+                self._field = get_shared_context()
+                if self._field:
+                    logger.info("[PRD-108] Shared context backend initialized: %s", self._field._backend_name)
+            except Exception as e:
+                logger.warning("[PRD-108] Shared context unavailable: %s", e)
+        return self._field
+
+    async def _create_mission_field(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+    ) -> Optional[str]:
+        """Create a shared vector field for a mission. Returns field_id or None."""
+        field = self._get_field()
+        if not field:
+            return None
+
+        try:
+            # Get agent IDs from the roster
+            agents = (
+                db.query(Agent)
+                .filter(
+                    and_(
+                        Agent.workspace_id == run.workspace_id,
+                        Agent.status == "active",
+                    )
+                )
+                .all()
+            )
+            team_ids = [a.id for a in agents]
+
+            # Seed the field with the mission goal
+            field_id = await field.create_context(
+                team_agent_ids=team_ids,
+                initial_data={"mission_goal": run.goal},
+            )
+
+            # Store field_id in run config (no migration needed — JSONB)
+            run.config = {**(run.config or {}), "field_id": field_id}
+            db.flush()
+
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.TASK_CREATED,  # Closest match
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                payload={"field_id": field_id, "event": "field.created"},
+            )
+
+            logger.info("[PRD-108] Created field %s for mission %s", field_id, run.id)
+            return field_id
+        except Exception as e:
+            logger.warning("[PRD-108] Failed to create field for mission %s: %s", run.id, e, exc_info=True)
+            return None
+
+    async def _destroy_mission_field(self, run: OrchestrationRun) -> None:
+        """Destroy the shared field when a mission ends."""
+        field = self._get_field()
+        field_id = (run.config or {}).get("field_id")
+        if not field or not field_id:
+            return
+        try:
+            await field.destroy_context(field_id)
+            logger.info("[PRD-108] Destroyed field %s for mission %s", field_id, run.id)
+        except Exception as e:
+            logger.warning("[PRD-108] Failed to destroy field %s: %s", field_id, e)
+
+    async def _inject_task_output_into_field(
+        self,
+        run: OrchestrationRun,
+        task: OrchestrationTask,
+        agent_id: int,
+    ) -> None:
+        """After a task completes, inject its output into the shared field."""
+        field = self._get_field()
+        field_id = (run.config or {}).get("field_id")
+        if not field or not field_id or not task.output:
+            return
+        try:
+            await field.inject(
+                context_id=field_id,
+                key=task.title or f"task_{task.sequence_number}",
+                value=str(task.output)[:4000],  # Cap to prevent embedding blow-up
+                agent_id=agent_id,
+                strength=1.0,
+            )
+            logger.info(
+                "[PRD-108] Injected output from task %s into field %s",
+                task.id, field_id,
+            )
+        except Exception as e:
+            logger.warning("[PRD-108] Failed to inject task output: %s", e)
+
+    async def _cleanup_terminal_fields(self, db: Session) -> None:
+        """Destroy fields for missions that have ended."""
+        terminal_with_fields = (
+            db.query(OrchestrationRun)
+            .filter(
+                OrchestrationRun.state.in_([s.value for s in TERMINAL_RUN_STATES]),
+                OrchestrationRun.config["field_id"].astext.isnot(None),
+            )
+            .limit(5)  # Throttle — max 5 cleanups per tick
+            .all()
+        )
+        for run in terminal_with_fields:
+            field_id = (run.config or {}).get("field_id")
+            if not field_id:
+                continue
+            await self._destroy_mission_field(run)
+            # Remove field_id from config so we don't try again
+            updated_config = {**(run.config or {})}
+            updated_config.pop("field_id", None)
+            run.config = updated_config
+            db.flush()
 
     # ------------------------------------------------------------------
     # Scheduler lifecycle
@@ -169,9 +295,6 @@ class CoordinatorService:
                     .all()
                 )
 
-                if not active_runs:
-                    return summary
-
                 for run in active_runs:
                     try:
                         await self._process_run(db, run)
@@ -183,6 +306,12 @@ class CoordinatorService:
                         )
                         db.rollback()
                         summary["errors"].append(str(run.id))
+
+                # --- PRD-108: Clean up fields for terminal runs ---
+                await self._cleanup_terminal_fields(db)
+
+                # --- Archive phase (throttled to once per hour) ---
+                self._maybe_archive(db, summary)
 
             finally:
                 db.close()
@@ -204,6 +333,10 @@ class CoordinatorService:
         Process a single active mission run: dispatch phase + reconcile phase.
         """
         workspace_id = run.workspace_id
+
+        # --- PRD-108: Ensure field exists (lazy create for manual-approve path) ---
+        if not (run.config or {}).get("field_id"):
+            await self._create_mission_field(db, run)
 
         # Load roster agents for this workspace
         agents: List[Agent] = (
@@ -237,7 +370,7 @@ class CoordinatorService:
         # --- Check if run advanced to verifying → build summary ---
         db.refresh(run)
         if RunState(run.state) == RunState.VERIFYING:
-            self._build_and_advance_to_awaiting_human(db, run)
+            await self._build_and_advance_to_awaiting_human(db, run)
 
     async def _execute_task(
         self,
@@ -264,6 +397,60 @@ class CoordinatorService:
             )
             return
 
+        # Inject upstream task outputs into input_context so the agent
+        # can see what previous tasks produced (dependency chain context)
+        upstream_deps = (
+            db.query(OrchestrationTaskDependency)
+            .filter(OrchestrationTaskDependency.task_id == task.id)
+            .all()
+        )
+        if upstream_deps:
+            dep_task_ids = [d.depends_on_task_id for d in upstream_deps]
+            dep_tasks = (
+                db.query(OrchestrationTask)
+                .filter(OrchestrationTask.id.in_(dep_task_ids))
+                .order_by(OrchestrationTask.sequence_number)
+                .all()
+            )
+            import re as _re
+            _MAX_UPSTREAM_CHARS = 8000  # per task — prevent context blow-up
+
+            def _sanitize_upstream(raw: str) -> str:
+                """Strip base64 images and truncate for downstream context."""
+                # Replace base64 image data with a reference marker
+                cleaned = _re.sub(
+                    r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+",
+                    "[image — see generated-images API]",
+                    raw,
+                )
+                if len(cleaned) > _MAX_UPSTREAM_CHARS:
+                    cleaned = cleaned[:_MAX_UPSTREAM_CHARS] + "\n\n... (truncated)"
+                return cleaned
+
+            upstream_outputs = [
+                {"title": dt.title, "output": _sanitize_upstream(dt.output)}
+                for dt in dep_tasks
+                if dt.output
+            ]
+            if upstream_outputs:
+                task.input_context = {
+                    **(task.input_context or {}),
+                    "upstream_outputs": upstream_outputs,
+                }
+                logger.info(
+                    "Injected %d upstream outputs into task %s",
+                    len(upstream_outputs),
+                    task.id,
+                )
+
+        # PRD-108: Pass field_id so agent can query the shared field
+        field_id = (run.config or {}).get("field_id")
+        if field_id:
+            task.input_context = {
+                **(task.input_context or {}),
+                "field_id": field_id,
+            }
+
         # Build the prompt
         prompt = MissionDispatcher.build_task_prompt(task)
 
@@ -278,7 +465,9 @@ class CoordinatorService:
         # Mission tasks need longer outputs than the 2000-token default
         if agent_runtime and hasattr(agent_runtime, "llm_manager"):
             original_max_tokens = agent_runtime.llm_manager.config.max_tokens
-            agent_runtime.llm_manager.config.max_tokens = max(original_max_tokens, 4096)
+            agent_runtime.llm_manager.config.max_tokens = max(
+                original_max_tokens, Config.COORDINATOR_TASK_MAX_TOKENS
+            )
 
         try:
             result = await factory.execute_with_prompt(
@@ -298,6 +487,11 @@ class CoordinatorService:
 
         # Record completion/failure
         MissionDispatcher.record_task_completion(db, task, result)
+
+        # PRD-108: Inject completed task output into shared field
+        if result.get("status") == "success":
+            db.refresh(task)  # Ensure task.output is populated
+            await self._inject_task_output_into_field(run, task, agent_id)
 
         # Update run-level token tracking (PRD-82A Section 9)
         task_tokens = result.get("execution", {}).get("tokens_used", 0)
@@ -532,6 +726,7 @@ class CoordinatorService:
                 reason="Auto-approved",
             )
             self._queue_initial_tasks(db, run)
+            await self._create_mission_field(db, run)
             logger.info("Mission %s auto-approved → running", run.id)
         else:
             transition_run(
@@ -629,6 +824,7 @@ class CoordinatorService:
             reason=f"Plan rejected: {reason}",
         )
 
+        VerificationService.clear_cache(run.id)
         logger.info("Mission %s rejected by %s: %s", run_id, actor_id, reason)
         return run
 
@@ -669,6 +865,7 @@ class CoordinatorService:
                 actor_type=ActorType.HUMAN,
                 actor_id=actor_id,
             )
+            VerificationService.clear_cache(run.id)
             logger.info("Mission %s accepted by %s → completed", run_id, actor_id)
 
         elif verdict == "reject":
@@ -815,7 +1012,296 @@ class CoordinatorService:
             reason="Mission cancelled",
         )
 
+        VerificationService.clear_cache(run.id)
         logger.info("Mission %s cancelled by %s", run_id, actor_id)
+        return run
+
+    # ------------------------------------------------------------------
+    # Lifecycle: replan_mission (PRD-82B US-005)
+    # ------------------------------------------------------------------
+
+    async def replan_mission(
+        self,
+        db: Session,
+        run_id: UUID,
+        actor_id: str,
+        notes: Optional[str] = None,
+    ) -> OrchestrationRun:
+        """
+        Replan a failed mission by generating replacement tasks for the failed
+        subtree while preserving completed/verified tasks.
+
+        Flow:
+          1. Validate: must be in 'failed' state, replan_count < max
+          2. Transition failed → replanning
+          3. Gather completed task outputs + identify failed task
+          4. Call planner.replan() to generate replacement tasks
+          5. Mark old failed/pending tasks as skipped
+          6. Insert new tasks + dependencies
+          7. Transition replanning → running
+          8. Queue initial new tasks
+
+        Args:
+            db: SQLAlchemy session (caller manages transaction).
+            run_id: Mission run UUID.
+            actor_id: Clerk user ID requesting the replan.
+            notes: Optional user guidance for the replanner.
+
+        Returns:
+            The updated OrchestrationRun.
+
+        Raises:
+            ValueError: if run not found or state/replan constraints violated.
+            PlanValidationError: if planner cannot produce a valid replan.
+        """
+        run = self._get_run(db, run_id)
+
+        # Validate state
+        if RunState(run.state) != RunState.FAILED:
+            raise ValueError(
+                f"Mission must be in 'failed' state to replan, "
+                f"currently in '{run.state}'"
+            )
+
+        # Validate replan count
+        current_replans = run.replan_count or 0
+        max_replans = Config.COORDINATOR_MAX_REPLANS
+        if current_replans >= max_replans:
+            raise ValueError(
+                f"Mission has been replanned {current_replans} times, "
+                f"maximum is {max_replans}"
+            )
+
+        # Transition failed → replanning
+        transition_run(
+            db=db,
+            run=run,
+            new_state=RunState.REPLANNING,
+            actor_type=ActorType.HUMAN,
+            actor_id=actor_id,
+            reason=f"Replan requested (attempt {current_replans + 1}/{max_replans})",
+        )
+
+        # Gather completed task outputs
+        all_tasks: list[OrchestrationTask] = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.run_id == run_id)
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+
+        completed_outputs: list[dict] = []
+        failed_task_title = "Unknown"
+        failed_task_reason = "Unknown"
+
+        for task in all_tasks:
+            task_state = TaskState(task.state)
+            if task_state == TaskState.VERIFIED:
+                completed_outputs.append({
+                    "task_id": str(task.id),
+                    "title": task.title,
+                    "output": task.output or "",
+                })
+            elif task_state == TaskState.FAILED:
+                failed_task_title = task.title
+                failed_task_reason = (
+                    task.failure_detail
+                    or task.failure_reason_code
+                    or "Unknown failure"
+                )
+
+        # Load roster agents
+        agents: list[Agent] = (
+            db.query(Agent)
+            .filter(
+                and_(
+                    Agent.workspace_id == run.workspace_id,
+                    Agent.status == "active",
+                )
+            )
+            .all()
+        )
+
+        # Call planner to generate replacement tasks
+        try:
+            decomposition = await MissionPlanner.replan(
+                goal=run.goal,
+                workspace_id=run.workspace_id,
+                agents=agents,
+                completed_outputs=completed_outputs,
+                failed_task_title=failed_task_title,
+                failed_task_reason=failed_task_reason,
+                user_notes=notes,
+            )
+        except PlanValidationError:
+            # Replan failed — transition back to failed
+            transition_run(
+                db=db,
+                run=run,
+                new_state=RunState.FAILED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                reason="Replan validation failed after all retries",
+            )
+            raise
+
+        # Mark old failed and pending/queued tasks as skipped
+        for task in all_tasks:
+            task_state = TaskState(task.state)
+            if task_state in (TaskState.FAILED, TaskState.PENDING, TaskState.QUEUED):
+                task.failure_reason_code = "replaced_by_replan"
+                task.failure_detail = f"Replaced during replan #{current_replans + 1}"
+                try:
+                    transition_task(
+                        db=db,
+                        task=task,
+                        new_state=TaskState.SKIPPED,
+                        actor_type=ActorType.COORDINATOR,
+                        actor_id="coordinator",
+                        reason=f"Replaced during replan #{current_replans + 1}",
+                    )
+                    sync_board_status(db, task)
+                except (ConflictError, InvalidTransitionError):
+                    logger.warning(
+                        "Could not skip task %s during replan", task.id,
+                        exc_info=True,
+                    )
+
+        # Compute new sequence numbers starting after existing max
+        max_seq = max(
+            (t.sequence_number for t in all_tasks),
+            default=0,
+        )
+
+        # Insert new tasks
+        temp_id_to_task: dict[str, OrchestrationTask] = {}
+        for planned in decomposition.tasks:
+            new_seq = max_seq + planned.sequence_number
+            task = OrchestrationTask(
+                run_id=run.id,
+                title=planned.title,
+                description=planned.description,
+                task_type=planned.task_type,
+                sequence_number=new_seq,
+                agent_role=planned.agent_role,
+                state=TaskState.PENDING.value,
+                state_type="initial",
+                verification_criteria=planned.verification_criteria or None,
+                input_context=(
+                    {"required_tools": planned.required_tools}
+                    if planned.required_tools
+                    else None
+                ),
+                max_retries=run.max_retries,
+            )
+            db.add(task)
+            db.flush()
+            temp_id_to_task[planned.temp_id] = task
+
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.TASK_CREATED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                task_id=task.id,
+                payload={
+                    "title": planned.title,
+                    "sequence_number": new_seq,
+                    "agent_role": planned.agent_role,
+                    "replan": True,
+                },
+            )
+
+        # Insert dependency edges for new tasks
+        for dep in decomposition.dependencies:
+            from_task = temp_id_to_task.get(dep.from_task_temp_id)
+            to_task = temp_id_to_task.get(dep.to_task_temp_id)
+            if from_task and to_task:
+                dep_row = OrchestrationTaskDependency(
+                    task_id=to_task.id,
+                    depends_on_task_id=from_task.id,
+                )
+                db.add(dep_row)
+
+        db.flush()
+
+        # Create board tasks for new tasks
+        try:
+            for task in temp_id_to_task.values():
+                create_task_board_task(db, run, task)
+        except Exception:
+            logger.warning(
+                "Failed to create board tasks during replan for mission %s",
+                run.id,
+                exc_info=True,
+            )
+
+        # Update replan count
+        run.replan_count = current_replans + 1
+
+        # Update the plan JSONB with replan info
+        run.plan = {
+            **(run.plan or {}),
+            f"replan_{current_replans + 1}": {
+                "tasks": [
+                    {
+                        "temp_id": t.temp_id,
+                        "title": t.title,
+                        "description": t.description,
+                        "agent_role": t.agent_role,
+                        "sequence_number": t.sequence_number,
+                        "task_type": t.task_type,
+                    }
+                    for t in decomposition.tasks
+                ],
+                "dependencies": [
+                    {"from": d.from_task_temp_id, "to": d.to_task_temp_id}
+                    for d in decomposition.dependencies
+                ],
+                "user_notes": notes,
+            },
+        }
+        run.token_budget_estimate = (
+            (run.token_budget_estimate or 0) + decomposition.token_estimate
+        )
+
+        # Emit replanned event
+        emit_event(
+            db=db,
+            run_id=run.id,
+            event_type=EventType.RUN_REPLANNED,
+            actor_type=ActorType.HUMAN,
+            actor_id=actor_id,
+            payload={
+                "replan_number": current_replans + 1,
+                "new_task_count": len(decomposition.tasks),
+                "token_estimate": decomposition.token_estimate,
+                "user_notes": notes,
+            },
+        )
+
+        # Transition replanning → running
+        transition_run(
+            db=db,
+            run=run,
+            new_state=RunState.RUNNING,
+            actor_type=ActorType.COORDINATOR,
+            actor_id="coordinator",
+            reason=f"Replan #{current_replans + 1} complete — resuming",
+        )
+
+        # Queue initial new tasks
+        self._queue_initial_tasks(db, run)
+
+        logger.info(
+            "Mission %s replanned (#%d) by %s — %d new tasks",
+            run_id,
+            current_replans + 1,
+            actor_id,
+            len(decomposition.tasks),
+        )
+
         return run
 
     # ------------------------------------------------------------------
@@ -988,17 +1474,244 @@ class CoordinatorService:
                 exc_info=True,
             )
 
-    def _build_and_advance_to_awaiting_human(
+    # ------------------------------------------------------------------
+    # Archival (PRD-82B US-009)
+    # ------------------------------------------------------------------
+
+    def _maybe_archive(self, db: Session, summary: Dict[str, Any]) -> None:
+        """
+        Run archive_old_runs() if at least 1 hour since last archive attempt.
+
+        Throttled to avoid running every 5s tick. Errors are logged and
+        do not affect the rest of the tick.
+        """
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_archive_at is not None
+            and (now - self._last_archive_at).total_seconds() < 3600
+        ):
+            return
+
+        self._last_archive_at = now
+
+        try:
+            archived = self.archive_old_runs(db)
+            if archived > 0:
+                db.commit()
+                logger.info("[Coordinator] Archived %d old runs", archived)
+                summary["archived"] = archived
+        except Exception:
+            db.rollback()
+            logger.error(
+                "[Coordinator] Archive failed", exc_info=True,
+            )
+
+    @staticmethod
+    def archive_old_runs(
+        db: Session,
+        days: Optional[int] = None,
+    ) -> int:
+        """
+        Archive terminal runs older than ``days`` (default from config).
+
+        For each eligible run:
+          1. Serialize run + tasks + events + dependencies to JSONB snapshot
+          2. Insert into orchestration_archive
+          3. Delete from active tables (CASCADE handles tasks/events/deps)
+
+        Args:
+            db: SQLAlchemy session (caller manages transaction).
+            days: Retention period in days. Defaults to config value.
+
+        Returns:
+            Number of runs archived.
+        """
+        retention_days = days if days is not None else Config.COORDINATOR_ARCHIVE_AFTER_DAYS
+        batch_size = Config.COORDINATOR_ARCHIVE_BATCH_SIZE
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+
+        # Find terminal runs older than cutoff
+        terminal_state_values = [s.value for s in TERMINAL_RUN_STATES]
+        old_runs: List[OrchestrationRun] = (
+            db.query(OrchestrationRun)
+            .filter(
+                OrchestrationRun.state.in_(terminal_state_values),
+                OrchestrationRun.updated_at < cutoff,
+            )
+            .order_by(OrchestrationRun.updated_at.asc())
+            .limit(batch_size)
+            .all()
+        )
+
+        if not old_runs:
+            return 0
+
+        archived_count = 0
+        for run in old_runs:
+            run_id = run.id
+
+            # Check not already archived (idempotent)
+            existing = (
+                db.query(OrchestrationArchive.id)
+                .filter(OrchestrationArchive.original_run_id == run_id)
+                .first()
+            )
+            if existing:
+                # Already archived — just delete the active row
+                db.delete(run)
+                archived_count += 1
+                continue
+
+            # Load related data for snapshot
+            tasks: List[OrchestrationTask] = (
+                db.query(OrchestrationTask)
+                .filter(OrchestrationTask.run_id == run_id)
+                .order_by(OrchestrationTask.sequence_number)
+                .all()
+            )
+
+            events: List[OrchestrationEvent] = (
+                db.query(OrchestrationEvent)
+                .filter(OrchestrationEvent.run_id == run_id)
+                .order_by(OrchestrationEvent.created_at)
+                .all()
+            )
+
+            task_ids = [t.id for t in tasks]
+            dependencies: List[OrchestrationTaskDependency] = []
+            if task_ids:
+                dependencies = (
+                    db.query(OrchestrationTaskDependency)
+                    .filter(OrchestrationTaskDependency.task_id.in_(task_ids))
+                    .all()
+                )
+
+            # Build JSONB snapshot
+            archive_data = {
+                "run": {
+                    "id": str(run.id),
+                    "workspace_id": str(run.workspace_id),
+                    "goal": run.goal,
+                    "plan": run.plan,
+                    "config": run.config,
+                    "state": run.state,
+                    "state_type": run.state_type,
+                    "created_by": run.created_by,
+                    "assigned_coordinator_id": run.assigned_coordinator_id,
+                    "output_summary": run.output_summary,
+                    "token_budget_estimate": run.token_budget_estimate,
+                    "tokens_used": run.tokens_used,
+                    "max_retries": run.max_retries,
+                    "max_concurrent": run.max_concurrent,
+                    "replan_count": run.replan_count,
+                    "started_at": run.started_at.isoformat() if run.started_at else None,
+                    "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                    "created_at": run.created_at.isoformat() if run.created_at else None,
+                    "updated_at": run.updated_at.isoformat() if run.updated_at else None,
+                },
+                "tasks": [
+                    {
+                        "id": str(t.id),
+                        "title": t.title,
+                        "description": t.description,
+                        "task_type": t.task_type,
+                        "sequence_number": t.sequence_number,
+                        "agent_role": t.agent_role,
+                        "state": t.state,
+                        "assigned_agent_id": t.assigned_agent_id,
+                        "verification_criteria": t.verification_criteria,
+                        "input_context": t.input_context,
+                        "output": t.output,
+                        "output_metadata": t.output_metadata,
+                        "failure_reason_code": t.failure_reason_code,
+                        "failure_detail": t.failure_detail,
+                        "attempt_number": t.attempt_number,
+                        "tokens_used": t.tokens_used,
+                        "started_at": t.started_at.isoformat() if t.started_at else None,
+                        "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                        "created_at": t.created_at.isoformat() if t.created_at else None,
+                    }
+                    for t in tasks
+                ],
+                "events": [
+                    {
+                        "id": str(e.id),
+                        "task_id": str(e.task_id) if e.task_id else None,
+                        "event_type": e.event_type,
+                        "actor_type": e.actor_type,
+                        "actor_id": e.actor_id,
+                        "old_state": e.old_state,
+                        "new_state": e.new_state,
+                        "payload": e.payload,
+                        "created_at": e.created_at.isoformat() if e.created_at else None,
+                    }
+                    for e in events
+                ],
+                "dependencies": [
+                    {
+                        "id": str(d.id),
+                        "task_id": str(d.task_id),
+                        "depends_on_task_id": str(d.depends_on_task_id),
+                        "trigger_rule": d.trigger_rule,
+                    }
+                    for d in dependencies
+                ],
+            }
+
+            # Insert archive row
+            archive = OrchestrationArchive(
+                original_run_id=run_id,
+                goal=run.goal or "",
+                state=run.state,
+                workspace_id=run.workspace_id,
+                created_by=run.created_by,
+                created_at=run.created_at,
+                completed_at=run.completed_at,
+                archive_data=archive_data,
+            )
+            db.add(archive)
+
+            # Delete from active tables (CASCADE handles tasks/events/deps)
+            db.delete(run)
+            archived_count += 1
+
+        return archived_count
+
+    async def _build_and_advance_to_awaiting_human(
         self,
         db: Session,
         run: OrchestrationRun,
     ) -> None:
         """
-        Build output summary and transition run from verifying → awaiting_human.
+        Build output summary, run cross-task consistency check, and
+        transition run from verifying → awaiting_human.
         """
         try:
             summary = self.build_output_summary(db, run)
             run.output_summary = summary
+
+            # --- Cross-task consistency verification (PRD-82B US-006) ---
+            consistency_result = await self._run_consistency_check(db, run)
+            if consistency_result is not None:
+                # Attach consistency issues to the summary for human review
+                summary["consistency"] = {
+                    "passed": consistency_result.passed,
+                    "score": consistency_result.score,
+                    "reasoning": consistency_result.reasoning,
+                    "issues": [
+                        {
+                            "task_ids": issue.task_ids,
+                            "description": issue.description,
+                            "severity": issue.severity,
+                        }
+                        for issue in consistency_result.issues
+                    ],
+                }
+                run.output_summary = summary
+
+                # Track token usage from consistency check
+                if consistency_result.tokens_used > 0:
+                    run.tokens_used = (run.tokens_used or 0) + consistency_result.tokens_used
 
             transition_run(
                 db=db,
@@ -1018,6 +1731,7 @@ class CoordinatorService:
                 payload={
                     "tasks_completed": summary["tasks_completed"],
                     "total_duration_seconds": summary["total_duration_seconds"],
+                    "consistency": summary.get("consistency"),
                 },
             )
 
@@ -1034,6 +1748,86 @@ class CoordinatorService:
                 run.id,
                 exc_info=True,
             )
+
+    async def _run_consistency_check(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+    ) -> Optional[ConsistencyResult]:
+        """
+        Run cross-task consistency verification if enabled.
+
+        Returns ConsistencyResult or None if disabled/skipped.
+        """
+        if not Config.COORDINATOR_CONSISTENCY_CHECK:
+            logger.info(
+                "Consistency check disabled for run %s (COORDINATOR_CONSISTENCY_CHECK=false)",
+                run.id,
+            )
+            return None
+
+        # Gather verified task outputs
+        tasks: List[OrchestrationTask] = (
+            db.query(OrchestrationTask)
+            .filter(
+                and_(
+                    OrchestrationTask.run_id == run.id,
+                    OrchestrationTask.state == TaskState.VERIFIED.value,
+                )
+            )
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+
+        task_outputs = [
+            {
+                "task_id": str(t.id),
+                "title": t.title or "",
+                "output": t.output or "",
+            }
+            for t in tasks
+        ]
+
+        if len(task_outputs) < 2:
+            return None
+
+        verification_service = VerificationService()
+
+        try:
+            result = await verification_service.verify_cross_task_consistency(
+                run_id=run.id,
+                goal=run.goal or "",
+                task_outputs=task_outputs,
+            )
+
+            # Emit consistency event
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.CONSISTENCY_CHECKED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                payload={
+                    "passed": result.passed,
+                    "score": result.score,
+                    "reasoning": result.reasoning,
+                    "issue_count": len(result.issues),
+                    "high_severity_count": sum(
+                        1 for i in result.issues if i.severity == "high"
+                    ),
+                    "tokens_used": result.tokens_used,
+                },
+            )
+
+            return result
+
+        except Exception:
+            logger.error(
+                "Consistency check failed for run %s — proceeding without",
+                run.id,
+                exc_info=True,
+            )
+            return None
 
 
 # ---------------------------------------------------------------------------

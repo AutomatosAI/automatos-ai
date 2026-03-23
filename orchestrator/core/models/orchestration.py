@@ -100,6 +100,9 @@ class OrchestrationRun(Base):
     max_retries = Column(Integer, nullable=False, server_default="3")
     max_concurrent = Column(Integer, nullable=False, server_default="1")
 
+    # Replan tracking (PRD-82B US-005)
+    replan_count = Column(Integer, nullable=False, server_default="0")
+
     # Timestamps
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -326,6 +329,61 @@ class OrchestrationTaskDependency(Base):
         return (
             f"<OrchestrationTaskDependency task={self.task_id} "
             f"depends_on={self.depends_on_task_id} rule={self.trigger_rule}>"
+        )
+
+
+class OrchestrationArchive(Base):
+    """
+    Archived orchestration runs — full snapshot of terminal missions.
+
+    Terminal runs (completed, failed, cancelled) older than the configured
+    retention period are serialized into ``archive_data`` (JSONB) and moved
+    here so the active tables stay fast.
+
+    Source: PRD-82B US-009
+    """
+
+    __tablename__ = "orchestration_archive"
+
+    # Primary key
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+
+    # Reference to the original run (informational — the run row is deleted after archive)
+    original_run_id = Column(UUID(as_uuid=True), nullable=False, unique=True)
+
+    # Denormalized fields for search/filter without unpacking JSONB
+    goal = Column(Text, nullable=False)
+    state = Column(String(30), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    created_by = Column(String(255), nullable=False)
+
+    # Timestamps from original run
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Full snapshot: run fields + all tasks + all events + dependencies
+    archive_data = Column(JSONB, nullable=False)
+
+    # When this record was archived
+    archived_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_orchestration_archive_workspace", "workspace_id"),
+        {"extend_existing": True},
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<OrchestrationArchive id={self.id} "
+            f"original_run={self.original_run_id} state={self.state}>"
         )
 
 

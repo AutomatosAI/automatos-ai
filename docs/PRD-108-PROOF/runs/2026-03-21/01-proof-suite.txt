@@ -1,0 +1,43 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.10.9, pytest-9.0.2, pluggy-1.6.0 -- /Users/gkavanagh/.pyenv/versions/myenv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator
+plugins: asyncio-1.3.0, anyio-4.4.0
+asyncio: mode=strict, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 33 items
+
+tests/test_prd108_proof.py::TestSemanticRetrieval::test_relevant_pattern_ranks_first PASSED [  3%]
+tests/test_prd108_proof.py::TestSemanticRetrieval::test_semantic_similarity_not_random PASSED [  6%]
+tests/test_prd108_proof.py::TestSemanticRetrieval::test_embedding_determinism PASSED [  9%]
+tests/test_prd108_proof.py::TestSemanticRetrieval::test_embedding_similarity_tracks_word_overlap PASSED [ 12%]
+tests/test_prd108_proof.py::TestTemporalDecay::test_decay_formula_math PASSED [ 15%]
+tests/test_prd108_proof.py::TestTemporalDecay::test_decay_is_monotonically_decreasing PASSED [ 18%]
+tests/test_prd108_proof.py::TestTemporalDecay::test_fresh_pattern_outranks_stale PASSED [ 21%]
+tests/test_prd108_proof.py::TestTemporalDecay::test_archival_threshold_72h PASSED [ 24%]
+tests/test_prd108_proof.py::TestHebbianReinforcement::test_reinforcement_formula PASSED [ 27%]
+tests/test_prd108_proof.py::TestHebbianReinforcement::test_reinforcement_cap PASSED [ 30%]
+tests/test_prd108_proof.py::TestHebbianReinforcement::test_reinforcement_incremental PASSED [ 33%]
+tests/test_prd108_proof.py::TestHebbianReinforcement::test_accessed_pattern_wins_in_field PASSED [ 36%]
+tests/test_prd108_proof.py::TestResonanceScoring::test_resonance_components PASSED [ 39%]
+tests/test_prd108_proof.py::TestResonanceScoring::test_squaring_amplifies_relevance_gap PASSED [ 42%]
+tests/test_prd108_proof.py::TestResonanceScoring::test_resonance_zero_when_irrelevant PASSED [ 45%]
+tests/test_prd108_proof.py::TestDeduplication::test_same_content_same_hash PASSED [ 48%]
+tests/test_prd108_proof.py::TestDeduplication::test_different_content_different_hash PASSED [ 51%]
+tests/test_prd108_proof.py::TestDeduplication::test_duplicate_detection_in_field PASSED [ 54%]
+tests/test_prd108_proof.py::TestTelephoneGame::test_vector_field_finds_patterns_b_never_saw PASSED [ 57%]
+tests/test_prd108_proof.py::TestTelephoneGame::test_message_passing_loses_information PASSED [ 60%]
+tests/test_prd108_proof.py::TestTelephoneGame::test_vector_field_beats_message_passing PASSED [ 63%]
+tests/test_prd108_proof.py::TestTelephoneGame::test_all_agents_patterns_visible PASSED [ 66%]
+tests/test_prd108_proof.py::TestScaleAndPerformance::test_50_agents_150_patterns PASSED [ 69%]
+tests/test_prd108_proof.py::TestScaleAndPerformance::test_query_speed PASSED [ 72%]
+tests/test_prd108_proof.py::TestScaleAndPerformance::test_cross_agent_query_returns_results PASSED [ 75%]
+tests/test_prd108_proof.py::TestFieldStability::test_empty_field_zero_stability PASSED [ 78%]
+tests/test_prd108_proof.py::TestFieldStability::test_uniform_strengths_high_stability PASSED [ 81%]
+tests/test_prd108_proof.py::TestFieldStability::test_mixed_strengths_lower_stability PASSED [ 84%]
+tests/test_prd108_proof.py::TestFieldStability::test_decayed_field_lower_avg PASSED [ 87%]
+tests/test_prd108_proof.py::TestSharedInterface::test_port_has_required_methods PASSED [ 90%]
+tests/test_prd108_proof.py::TestSuiteIntegrity::test_embeddings_are_not_random PASSED [ 93%]
+tests/test_prd108_proof.py::TestSuiteIntegrity::test_keyword_baseline_is_fair PASSED [ 96%]
+tests/test_prd108_proof.py::TestSuiteIntegrity::test_query_set_is_not_cherry_picked PASSED [100%]
+
+============================== 33 passed in 1.55s ==============================

@@ -11,7 +11,7 @@ export type ReviewMode = 'human' | 'llm' | 'auto'
 
 export interface BoardTask {
   id: string
-  type: 'routine' | 'recipe' | 'task'
+  type: 'routine' | 'recipe' | 'task' | 'project'
   name: string
   description?: string
   status: BoardStatus
@@ -32,7 +32,7 @@ export interface BoardTask {
   error_message?: string
   report_id?: string
   source_id: string
-  project_id?: number
+  project_id?: string
   planning_data?: { recipe_id?: number; execution_id?: string; step_progress?: { current: number; total: number } }
   result?: any
 }

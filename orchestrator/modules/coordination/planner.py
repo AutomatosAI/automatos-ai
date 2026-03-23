@@ -1,19 +1,17 @@
 """
-Mission Planner — PRD-82A
-==========================
+Mission Planner — PRD-82A + 82B
+=================================
 
-LLM-based goal decomposition into a task DAG with structural validation.
+Goal decomposition into a task DAG with structural validation.
 
 The planner:
-  1. Builds a prompt describing the goal + available agents
-  2. Calls the LLM requesting structured JSON output
+  1. Tries template matching first (82B) — keyword-based, no LLM call
+  2. Falls back to LLM decomposition if no template matches
   3. Validates the plan (DAG acyclic, agents exist, task count in bounds)
-  4. Retries up to 3 times on validation failure
+  4. Retries LLM up to 3 times on validation failure
   5. Returns a DecompositionResult
 
-Template matching is deferred to 82B — LLM-only decomposition for v1.
-
-Source: PRD-82A Section 12 (US-011), PRD-102 Section 5
+Source: PRD-82A Section 12 (US-011), PRD-82B US-001/US-002
 """
 
 import json
@@ -26,6 +24,7 @@ from uuid import UUID, uuid4
 from core.llm import create_llm_manager
 from core.models.core import Agent
 from core.models.orchestration_enums import TaskType
+from modules.coordination.templates import match_template, render_template
 from services.orchestration_deps import (
     CyclicDependencyError,
     DependencyResolver,
@@ -79,6 +78,7 @@ class DecompositionResult:
     tasks: List[PlannedTask]
     dependencies: List[PlannedDependency]
     token_estimate: int
+    template_used: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +108,124 @@ class MissionPlanner:
     """
 
     @staticmethod
+    async def replan(
+        goal: str,
+        workspace_id: UUID,
+        agents: Sequence[Agent],
+        completed_outputs: List[Dict[str, Any]],
+        failed_task_title: str,
+        failed_task_reason: str,
+        user_notes: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> DecompositionResult:
+        """
+        Replan a failed mission — generate replacement tasks for the failed
+        subtree while preserving completed/verified tasks.
+
+        Args:
+            goal: Original mission goal.
+            workspace_id: Owning workspace UUID.
+            agents: Available roster agents.
+            completed_outputs: List of dicts with keys: task_id, title, output
+                               (summaries of already-completed tasks).
+            failed_task_title: Title of the task that failed.
+            failed_task_reason: Reason the task failed.
+            user_notes: Optional user guidance for replanning.
+            config: Optional overrides.
+
+        Returns:
+            DecompositionResult with replacement tasks and dependencies.
+
+        Raises:
+            PlanValidationError: if all retry attempts fail structural validation.
+        """
+        llm = create_llm_manager(service_name="orchestrator")
+        agent_roster = _render_agent_roster(agents)
+        last_errors: List[str] = []
+
+        for attempt in range(1, MAX_PLAN_RETRIES + 1):
+            logger.info(
+                "MissionPlanner.replan: attempt %d/%d for goal='%s' workspace=%s",
+                attempt,
+                MAX_PLAN_RETRIES,
+                goal[:80],
+                workspace_id,
+            )
+
+            prompt = _build_replan_prompt(
+                goal=goal,
+                agent_roster=agent_roster,
+                completed_outputs=completed_outputs,
+                failed_task_title=failed_task_title,
+                failed_task_reason=failed_task_reason,
+                user_notes=user_notes,
+                validation_errors=last_errors if attempt > 1 else None,
+            )
+
+            messages = [
+                {"role": "system", "content": _REPLAN_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ]
+
+            try:
+                response = await llm.generate_response(messages)
+            except Exception:
+                logger.error(
+                    "MissionPlanner.replan: LLM call failed on attempt %d",
+                    attempt,
+                    exc_info=True,
+                )
+                last_errors = ["LLM call failed — retrying"]
+                continue
+
+            raw = _extract_json(response.content)
+            if raw is None:
+                last_errors = [
+                    "LLM response did not contain valid JSON. "
+                    "Ensure your response is a single JSON object."
+                ]
+                logger.warning(
+                    "MissionPlanner.replan: no JSON in LLM response on attempt %d",
+                    attempt,
+                )
+                continue
+
+            parse_errors: List[str] = []
+            tasks, deps = _parse_plan(raw, parse_errors)
+            if parse_errors:
+                last_errors = parse_errors
+                logger.warning(
+                    "MissionPlanner.replan: parse errors on attempt %d: %s",
+                    attempt,
+                    parse_errors,
+                )
+                continue
+
+            validation_errors = _validate_plan(tasks, deps, agents)
+            if validation_errors:
+                last_errors = validation_errors
+                logger.warning(
+                    "MissionPlanner.replan: validation errors on attempt %d: %s",
+                    attempt,
+                    validation_errors,
+                )
+                continue
+
+            token_estimate = len(tasks) * TOKENS_PER_TASK_ESTIMATE
+            logger.info(
+                "MissionPlanner.replan: generated %d replacement tasks (attempt %d)",
+                len(tasks),
+                attempt,
+            )
+            return DecompositionResult(
+                tasks=tasks,
+                dependencies=deps,
+                token_estimate=token_estimate,
+            )
+
+        raise PlanValidationError(last_errors)
+
+    @staticmethod
     async def decompose(
         goal: str,
         workspace_id: UUID,
@@ -129,6 +247,50 @@ class MissionPlanner:
         Raises:
             PlanValidationError: if all retry attempts fail structural validation.
         """
+        # --- Template matching (82B US-002) — try before LLM ---
+        template = match_template(goal)
+        if template is not None:
+            logger.info(
+                "MissionPlanner: template=%s matched for goal='%s'",
+                template.id,
+                goal[:80],
+            )
+            raw_tasks = render_template(template, goal)
+            parse_errors: List[str] = []
+            tasks, deps = _parse_plan({"tasks": raw_tasks}, parse_errors)
+            if not parse_errors:
+                validation_errors = _validate_plan(tasks, deps, agents)
+                if not validation_errors:
+                    token_estimate = len(tasks) * TOKENS_PER_TASK_ESTIMATE
+                    logger.info(
+                        "MissionPlanner: template=%s produced %d tasks",
+                        template.id,
+                        len(tasks),
+                    )
+                    return DecompositionResult(
+                        tasks=tasks,
+                        dependencies=deps,
+                        token_estimate=token_estimate,
+                        template_used=template.id,
+                    )
+                else:
+                    logger.warning(
+                        "MissionPlanner: template=%s failed validation: %s — falling through to LLM",
+                        template.id,
+                        validation_errors,
+                    )
+            else:
+                logger.warning(
+                    "MissionPlanner: template=%s failed parsing: %s — falling through to LLM",
+                    template.id,
+                    parse_errors,
+                )
+        else:
+            logger.info(
+                "MissionPlanner: no template match, using LLM decomposition"
+            )
+
+        # --- LLM decomposition fallback ---
         llm = create_llm_manager(service_name="orchestrator")
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
@@ -299,6 +461,68 @@ Return ONLY a JSON object with this exact structure:
 Valid task_type values: llm_generation, tool_execution, analysis, synthesis, review
 Dependencies reference temp_id values of upstream tasks that must complete first.
 """
+
+
+_REPLAN_SYSTEM_PROMPT = """\
+You are a mission replanner for an AI agent platform. A mission has partially \
+completed but one or more tasks failed. Your job is to generate REPLACEMENT \
+tasks that pick up where the mission left off, taking into account what has \
+already been accomplished.
+
+Rules:
+- Do NOT duplicate work already completed by verified tasks.
+- Generate only the tasks needed to replace the failed task and complete the goal.
+- Each task must be atomic — completable by ONE agent in ONE execution.
+- Tasks execute sequentially. Use dependencies to encode ordering.
+- Every task must specify an agent_role matching one of the available agents.
+- The plan MUST contain between 3 and 20 tasks inclusive.
+- Return ONLY a single JSON object (no markdown, no explanation).
+"""
+
+
+def _build_replan_prompt(
+    *,
+    goal: str,
+    agent_roster: str,
+    completed_outputs: List[Dict[str, Any]],
+    failed_task_title: str,
+    failed_task_reason: str,
+    user_notes: Optional[str] = None,
+    validation_errors: Optional[List[str]] = None,
+) -> str:
+    """Build the user prompt for replanning a failed mission."""
+    completed_summary = ""
+    if completed_outputs:
+        lines = []
+        for co in completed_outputs:
+            title = co.get("title", "Unknown")
+            output = co.get("output", "")
+            excerpt = output[:300] if output else "(no output)"
+            lines.append(f"- **{title}**: {excerpt}")
+        completed_summary = "\n".join(lines)
+    else:
+        completed_summary = "(No tasks completed yet)"
+
+    parts = [
+        f"## Original Goal\n<user_goal>\n{goal}\n</user_goal>\n",
+        f"## Completed Tasks (DO NOT REDO)\n{completed_summary}\n",
+        f"## Failed Task\n- **Title**: {failed_task_title}\n- **Failure Reason**: {failed_task_reason}\n",
+    ]
+
+    if user_notes:
+        parts.append(f"## User Guidance for Replan\n{user_notes}\n")
+
+    parts.append(f"## Available Agents\n{agent_roster}\n")
+    parts.append(_OUTPUT_SCHEMA_INSTRUCTIONS)
+
+    if validation_errors:
+        error_text = "\n".join(f"- {e}" for e in validation_errors)
+        parts.append(
+            f"\n## Previous Attempt Failed Validation\n"
+            f"Fix these errors in your next response:\n{error_text}\n"
+        )
+
+    return "\n".join(parts)
 
 
 def _render_agent_roster(agents: Sequence[Agent]) -> str:

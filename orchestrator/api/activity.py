@@ -8,14 +8,17 @@ and recipe executions.
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
+from core.models.core import Agent, BoardTask
 from services.activity_service import ActivityService
 
 logger = logging.getLogger(__name__)
@@ -100,6 +103,122 @@ async def get_agent_reports(
     except Exception as e:
         logger.error("Agent reports error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch agent reports")
+
+
+@router.get("/board/stats")
+async def get_board_stats(
+    period: str = Query(
+        "1d",
+        description="Time window: 1d, 7d, 30d, 90d",
+    ),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Return board-level stats for dashboard widgets (status, priority, types, workload)."""
+    try:
+        days_map = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
+        days = days_map.get(period, 7)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        base_q = db.query(BoardTask).filter(
+            BoardTask.workspace_id == ctx.workspace_id,
+            BoardTask.created_at >= cutoff,
+        )
+
+        # Status columns
+        status_rows = (
+            base_q
+            .with_entities(BoardTask.status, func.count(BoardTask.id))
+            .group_by(BoardTask.status)
+            .all()
+        )
+        all_statuses = ["inbox", "assigned", "in_progress", "review", "done"]
+        status_map = dict(status_rows)
+        columns = [
+            {"status": s, "count": status_map.get(s, 0)}
+            for s in all_statuses
+        ]
+        total_tasks = sum(c["count"] for c in columns)
+
+        # Priority breakdown
+        priority_rows = (
+            base_q
+            .with_entities(BoardTask.priority, func.count(BoardTask.id))
+            .group_by(BoardTask.priority)
+            .all()
+        )
+        priorities = [
+            {"priority": p, "count": c}
+            for p, c in priority_rows
+        ]
+
+        # Types of work (source_type: user, mission, recipe, routine, heartbeat)
+        type_rows = (
+            base_q
+            .with_entities(BoardTask.source_type, func.count(BoardTask.id))
+            .group_by(BoardTask.source_type)
+            .all()
+        )
+        # Map source_type to widget categories
+        type_map = {
+            "user": "recipe",
+            "recipe": "recipe",
+            "mission": "mission",
+            "heartbeat": "routine",
+            "routine": "routine",
+        }
+        type_counts: dict[str, int] = {}
+        for source_type, count in type_rows:
+            category = type_map.get(source_type, "recipe")
+            type_counts[category] = type_counts.get(category, 0) + count
+        types = [
+            {
+                "type": t,
+                "count": c,
+                "percentage": round((c / total_tasks) * 100, 1) if total_tasks > 0 else 0,
+            }
+            for t, c in type_counts.items()
+        ]
+
+        # Agent workload
+        workload_rows = (
+            base_q
+            .filter(BoardTask.assigned_agent_id.isnot(None))
+            .with_entities(
+                BoardTask.assigned_agent_id,
+                func.count(BoardTask.id),
+            )
+            .group_by(BoardTask.assigned_agent_id)
+            .order_by(func.count(BoardTask.id).desc())
+            .limit(10)
+            .all()
+        )
+        agent_ids = [r[0] for r in workload_rows]
+        agents_by_id = {}
+        if agent_ids:
+            agents = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+            agents_by_id = {a.id: a for a in agents}
+
+        workload = []
+        for agent_id, task_count in workload_rows:
+            agent = agents_by_id.get(agent_id)
+            workload.append({
+                "agent_id": agent_id,
+                "agent_name": agent.name if agent else f"Agent {agent_id}",
+                "agent_icon": agent.marketplace_icon if agent else None,
+                "task_count": task_count,
+            })
+
+        return {
+            "columns": columns,
+            "total_tasks": total_tasks,
+            "priorities": priorities,
+            "types": types,
+            "workload": workload,
+        }
+    except Exception as e:
+        logger.error("Board stats error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch board stats")
 
 
 @router.get("/stats")

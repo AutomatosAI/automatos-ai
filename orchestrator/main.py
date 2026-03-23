@@ -885,8 +885,9 @@ except ImportError as e:
 
 # PRD-82A: Sequential Mission Coordinator
 try:
-    from api.missions import router as missions_router
+    from api.missions import router as missions_router, agent_telemetry_router
     app.include_router(missions_router)
+    app.include_router(agent_telemetry_router)
 except ImportError as e:
     logger.warning("Could not load missions router: %s", e)
 

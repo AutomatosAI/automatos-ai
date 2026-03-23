@@ -113,7 +113,7 @@ def complete_recipe_board_task(
     task.completed_at = datetime.now(timezone.utc)
 
     if result:
-        task.result = result[:4000]
+        task.result = result
     if error_message:
         task.error_message = error_message
 

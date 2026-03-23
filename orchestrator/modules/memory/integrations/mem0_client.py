@@ -210,11 +210,15 @@ class Mem0Client:
         Returns:
             List of memory items
         """
-        # OpenMemory OSS: GET /api/v1/memories/?user_id=...
-        # This server version has no /search endpoint — list + filter is the search.
+        # OpenMemory API supports:
+        #   GET  /api/v1/memories/?user_id=...&search_query=...  (text filter)
+        #   POST /api/v1/memories/filter  (body-based, supports search_query)
+        # Use GET with search_query param for compatibility with both endpoints.
         url = f"{self.api_url}/memories/"
         params = {
             "user_id": user_id,
+            "search_query": query,
+            "size": min(limit, 100),
         }
 
         logger.debug("[Mem0] Searching memories for user=%s query=%r", user_id, query)
@@ -233,8 +237,8 @@ class Mem0Client:
             logger.error("[Mem0] Search failed to parse JSON for user_id=%s body=%s", user_id, (resp.text or "")[:200], exc_info=True)
             return []
 
-        # Search endpoint returns a list of results (with scores) or a
-        # dict wrapper with "results" key depending on Mem0 version.
+        # Response may be a paginated dict with "items" key, a dict with
+        # "results" key, or a plain list depending on Mem0 version.
         if isinstance(data, dict):
             items = data.get("results", data.get("items", []))
         elif isinstance(data, list):
@@ -243,7 +247,7 @@ class Mem0Client:
             logger.warning("[Mem0] Unexpected search response format: %s", type(data))
             return []
 
-        logger.info("[Mem0] Search returned %d results", len(items))
+        logger.info("[Mem0] Search returned %d results for query=%r", len(items), query[:60])
 
         results = []
         for m in items:

@@ -2,11 +2,23 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { ArrowLeft, Pause, Play, X, Eye, Target, Check, XCircle } from 'lucide-react'
+import { ArrowLeft, Pause, Play, X, Eye, Target, Check, XCircle, Save } from 'lucide-react'
 import Link from 'next/link'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -18,10 +30,12 @@ import { MissionDAGCanvas } from './mission-dag-canvas'
 import { MissionActivityFeed } from './mission-activity-feed'
 import { TaskInspector } from './task-inspector'
 import { HumanReviewPanel } from './human-review-panel'
-import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission } from '@/hooks/use-missions-api'
+import { MissionResultsPanel } from './mission-results-panel'
+import { MissionFieldPanel } from './mission-field-panel'
+import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { computeMissionStats, TERMINAL_RUN_STATES } from '@/types/missions'
-import { Activity, ListChecks, Clock, Coins } from 'lucide-react'
+import { Activity, ListChecks, Clock, Coins, Brain } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface MissionDetailPageProps {
@@ -41,8 +55,15 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const approveMutation = useApproveMission()
   const rejectMutation = useRejectMission()
 
+  const saveAsRoutineMutation = useSaveAsRoutine()
+
+  const [rightTab, setRightTab] = useState<'activity' | 'field'>('activity')
   const [showRejectInput, setShowRejectInput] = useState(false)
   const [rejectFeedback, setRejectFeedback] = useState('')
+  const [showSaveRoutine, setShowSaveRoutine] = useState(false)
+  const [routineName, setRoutineName] = useState('')
+  const [routineDescription, setRoutineDescription] = useState('')
+  const [routineTags, setRoutineTags] = useState('')
 
   const stats = useMemo(
     () => (mission ? computeMissionStats(mission) : null),
@@ -157,6 +178,100 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 <X className="w-3.5 h-3.5 mr-1.5" />
                 Cancel
               </Button>
+            )}
+            {mission.state === 'completed' && (
+              <Dialog open={showSaveRoutine} onOpenChange={setShowSaveRoutine}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Save className="w-3.5 h-3.5 mr-1.5" />
+                    Save as Routine
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Save as Routine</DialogTitle>
+                    <DialogDescription>
+                      Save this mission&apos;s task structure as a reusable routine template.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="routine-name">Name</Label>
+                      <Input
+                        id="routine-name"
+                        placeholder="e.g. Weekly Research Report"
+                        value={routineName}
+                        onChange={(e) => setRoutineName(e.target.value)}
+                        maxLength={255}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="routine-description">Description (optional)</Label>
+                      <Textarea
+                        id="routine-description"
+                        placeholder="Describe what this routine does..."
+                        value={routineDescription}
+                        onChange={(e) => setRoutineDescription(e.target.value)}
+                        rows={3}
+                        maxLength={2000}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="routine-tags">Tags (optional, comma-separated)</Label>
+                      <Input
+                        id="routine-tags"
+                        placeholder="research, report, weekly"
+                        value={routineTags}
+                        onChange={(e) => setRoutineTags(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowSaveRoutine(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={!routineName.trim() || saveAsRoutineMutation.isLoading}
+                      onClick={() => {
+                        const tags = routineTags
+                          .split(',')
+                          .map((t) => t.trim())
+                          .filter(Boolean)
+
+                        saveAsRoutineMutation.mutate(
+                          {
+                            id: missionId,
+                            body: {
+                              name: routineName.trim(),
+                              description: routineDescription.trim() || undefined,
+                              tags: tags.length > 0 ? tags : undefined,
+                            },
+                          },
+                          {
+                            onSuccess: (data) => {
+                              toast.success(
+                                `Routine "${data.name}" saved (${data.task_count} tasks)`,
+                              )
+                              setShowSaveRoutine(false)
+                              setRoutineName('')
+                              setRoutineDescription('')
+                              setRoutineTags('')
+                            },
+                            onError: (err) => toast.error(err.message),
+                          },
+                        )
+                      }}
+                    >
+                      {saveAsRoutineMutation.isLoading ? 'Saving...' : 'Save Routine'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             )}
           </div>
         </div>
@@ -308,25 +423,85 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
 
           <ResizableHandle withHandle />
 
-          {/* Right panel: Activity Feed or Review */}
-          <ResizablePanel defaultSize={showReview || isReviewable ? 50 : 40} minSize={25}>
+          {/* Right panel: Results / Review / Activity Feed */}
+          <ResizablePanel defaultSize={showReview || isReviewable || isTerminal ? 50 : 40} minSize={25}>
             {(showReview || isReviewable) ? (
               <HumanReviewPanel
                 missionId={missionId}
                 tasks={mission.tasks}
                 className="h-full"
               />
+            ) : isTerminal ? (
+              <div className="h-full flex flex-col">
+                <div className="p-3 border-b border-border flex items-center gap-1">
+                  <button
+                    onClick={() => setRightTab('activity')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors',
+                      rightTab === 'activity'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    Results
+                  </button>
+                  <button
+                    onClick={() => setRightTab('field')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+                      rightTab === 'field'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Brain className="w-3 h-3" />
+                    Field
+                  </button>
+                </div>
+                {rightTab === 'field' ? (
+                  <MissionFieldPanel missionId={missionId} className="flex-1" />
+                ) : (
+                  <MissionResultsPanel
+                    mission={mission}
+                    className="flex-1"
+                  />
+                )}
+              </div>
             ) : (
               <div className="h-full flex flex-col">
-                <div className="p-3 border-b border-border">
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Activity Feed
-                  </h3>
+                <div className="p-3 border-b border-border flex items-center gap-1">
+                  <button
+                    onClick={() => setRightTab('activity')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors',
+                      rightTab === 'activity'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    Activity
+                  </button>
+                  <button
+                    onClick={() => setRightTab('field')}
+                    className={cn(
+                      'px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+                      rightTab === 'field'
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Brain className="w-3 h-3" />
+                    Field
+                  </button>
                 </div>
-                <MissionActivityFeed
-                  events={mission.recent_events}
-                  className="flex-1"
-                />
+                {rightTab === 'field' ? (
+                  <MissionFieldPanel missionId={missionId} className="flex-1" />
+                ) : (
+                  <MissionActivityFeed
+                    events={mission.recent_events}
+                    className="flex-1"
+                  />
+                )}
               </div>
             )}
           </ResizablePanel>

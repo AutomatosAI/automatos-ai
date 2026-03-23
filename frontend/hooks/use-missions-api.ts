@@ -16,6 +16,8 @@ import type {
   MissionCreateRequest,
   MissionResponse,
   RunState,
+  SaveAsRoutineRequest,
+  SaveAsRoutineResponse,
 } from '@/types/missions'
 
 // ── Query Keys ────────────────────────────────────────────────
@@ -24,6 +26,7 @@ export const missionQueryKeys = {
   all: ['missions'] as const,
   list: (filters: MissionFilters) => ['missions', 'list', filters] as const,
   detail: (id: string) => ['missions', id] as const,
+  field: (id: string) => ['missions', id, 'field'] as const,
 }
 
 // ── Filter Types ──────────────────────────────────────────────
@@ -62,6 +65,57 @@ export function useMission(id: string | null) {
     enabled: !!id,
     staleTime: 5_000,
     refetchInterval: 10_000,
+  })
+}
+
+// ── Mission Field (PRD-108 Visualizer) ───────────────────────
+
+export interface FieldPattern {
+  id: string
+  key: string
+  value: string
+  agent_id: number
+  strength: number
+  decayed_strength: number
+  access_count: number
+  created_at: string
+  last_accessed: string
+  is_archived: boolean
+}
+
+export interface FieldStability {
+  stability: number
+  pattern_count: number
+  avg_strength: number
+  organization?: number
+  active_patterns?: number
+  decayed_patterns?: number
+}
+
+export interface FieldMetrics {
+  total_injections: number
+  total_queries: number
+  avg_query_latency_ms: number
+  avg_results_per_query: number
+  injections_by_agent: Record<number, number>
+  queries_by_agent: Record<number, number>
+}
+
+export interface MissionFieldResponse {
+  field_id: string | null
+  backend: string | null
+  patterns: FieldPattern[]
+  stability: FieldStability
+  metrics: FieldMetrics | null
+}
+
+export function useMissionField(id: string | null, enabled = true) {
+  return useQuery<MissionFieldResponse>({
+    queryKey: missionQueryKeys.field(id!),
+    queryFn: () => apiClient.request<MissionFieldResponse>(`/api/missions/${id}/field`),
+    enabled: !!id && enabled,
+    staleTime: 5_000,
+    refetchInterval: 8_000,
   })
 }
 
@@ -181,6 +235,24 @@ export function useCancelMission() {
         method: 'POST',
       }),
     onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.all })
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.detail(id) })
+    },
+  })
+}
+
+// ── Save as Routine (PRD-82B US-008) ─────────────────────────
+
+export function useSaveAsRoutine() {
+  const queryClient = useQueryClient()
+
+  return useMutation<SaveAsRoutineResponse, Error, { id: string; body: SaveAsRoutineRequest }>({
+    mutationFn: ({ id, body }) =>
+      apiClient.request<SaveAsRoutineResponse>(`/api/missions/${id}/save-as-routine`, {
+        method: 'POST',
+        body: body as unknown as BodyInit,
+      }),
+    onSuccess: (_data, { id }) => {
       queryClient.invalidateQueries({ queryKey: missionQueryKeys.all })
       queryClient.invalidateQueries({ queryKey: missionQueryKeys.detail(id) })
     },

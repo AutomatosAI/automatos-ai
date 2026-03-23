@@ -1,0 +1,35 @@
+==============================================================================
+PRD-108 MULTI-SCENARIO A/B COMPARISON
+5 domains — same harness — same measurements
+==============================================================================
+
+Scenario                           VF       MP      Gap    MP Lost
+---------------------------- -------- -------- -------- ----------
+EU AI Act Compliance             71%     43%    +29%          4
+Cybersecurity Assessment         88%     38%    +50%          5
+Market Research                  50%     12%    +38%          7
+Product Launch                   62%     38%    +25%          5
+Incident Response                38%     12%    +25%          7
+---------------------------- -------- -------- -------- ----------
+AVERAGE                          62%     29%    +33%         28
+
+==============================================================================
+VECTOR FIELD WINS: 5/5 scenarios
+AVERAGE COVERAGE GAP: +33%
+TOTAL INFORMATION LOST BY MESSAGE PASSING: 28 findings
+==============================================================================
+
+  [EU AI Act Compliance] Message passing lost: ['biometric_ban', 'social_scoring', 'employee_monitoring', 'transparency_rules']
+  [EU AI Act Compliance] Vector field lost: ['penalties', 'biometric_ban']
+
+  [Cybersecurity Assessment] Message passing lost: ['s3_public', 'dns_zone_transfer', 'smtp_open_relay', 'api_keys_exposed', 'no_rate_limit']
+  [Cybersecurity Assessment] Vector field lost: ['outdated_deps']
+
+  [Market Research] Message passing lost: ['patent_landscape', 'open_source_threat', 'talent_shortage', 'pricing_trends', 'customer_churn', 'competitor_c_pivot', 'regulatory_impact']
+  [Market Research] Vector field lost: ['talent_shortage', 'pricing_trends', 'customer_churn', 'regulatory_impact']
+
+  [Product Launch] Message passing lost: ['security_audit', 'data_migration', 'accessibility_gaps', 'localization_incomplete', 'pricing_change']
+  [Product Launch] Vector field lost: ['accessibility_gaps', 'pricing_change', 'competitor_launch']
+
+  [Incident Response] Message passing lost: ['certificate_expiry', 'queue_backlog', 'disk_space', 'upstream_api', 'config_drift', 'health_check', 'rollback_blocked']
+  [Incident Response] Vector field lost: ['certificate_expiry', 'queue_backlog', 'disk_space', 'upstream_api', 'config_drift']

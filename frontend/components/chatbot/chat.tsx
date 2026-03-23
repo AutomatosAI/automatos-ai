@@ -14,6 +14,7 @@ import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, Docu
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
 import { useUser } from '@clerk/nextjs'
+import { useRouter } from 'next/navigation'
 
 // Widget Architecture (PRD-38.1)
 import { useWorkspaceStore } from '@/stores/workspace-store'
@@ -74,12 +75,13 @@ export function Chat({
   const dispatchMemoryStored = useWorkspaceStore((s) => s.dispatchMemoryStored)
   const dispatchWorkflowUpdate = useWorkspaceStore((s) => s.dispatchWorkflowUpdate)
 
-  // PRD-82A: Mission mode toggle
+  // PRD-82A: Mission mode
   const isMissionMode = useMissionStore((s) => s.isMissionMode)
   const setMissionMode = useMissionStore((s) => s.setMissionMode)
   const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
   const activePlanningMissionId = useMissionStore((s) => s.activePlanningMissionId)
   const createMission = useCreateMission()
+  const router = useRouter()
 
   // PRD-66: Workspace context for Code Canvas
   const { workspace } = useWorkspace()
@@ -164,6 +166,7 @@ export function Chat({
     initialMessages,
     selectedModelId: currentModelId,
     selectedAgentId,
+    missionMode: isMissionMode,
     onData: (dataPart) => {
       if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
@@ -466,29 +469,11 @@ export function Chat({
         return
       }
 
-      // US-003: Mission mode intercept
-      if (!isMissionMode) {
-        sendMessage(message)
-        return
-      }
-
-      if (!trimmedText) return
-
-      createMission.mutate(
-        { goal: trimmedText },
-        {
-          onSuccess: (mission) => {
-            setActivePlanningMissionId(mission.id)
-            setMissionMode(false)
-            toast.success('Mission created — plan is being generated')
-          },
-          onError: (err) => {
-            toast.error(err.message || 'Failed to create mission')
-          },
-        }
-      )
+      // US-003: Mission mode — route through normal chat with missionMode flag
+      // Auto will converse about the mission, then create via /mission command
+      sendMessage(message)
     },
-    [isMissionMode, sendMessage, createMission, setActivePlanningMissionId, setMissionMode]
+    [sendMessage, createMission, setActivePlanningMissionId, setMissionMode]
   )
 
   // PRD-50: Handle agent change — fire correction API when overriding auto-routed agent
@@ -833,7 +818,7 @@ export function Chat({
                       ))}
 
                       {/* PRD-82A: Inline mission card after creation */}
-                      {isMissionMode && activePlanningMissionId && (
+                      {activePlanningMissionId && (
                         <motion.div
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -1089,7 +1074,7 @@ export function Chat({
                     isCodeActive={hasWidgets}
                     isMissionActive={isMissionMode}
                     onCodeClick={handleOpenCodeCanvas}
-                    onMissionClick={() => setMissionMode(!isMissionMode)}
+                    onMissionClick={() => router.push('/activity?tab=missions')}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}
@@ -1137,7 +1122,7 @@ export function Chat({
                 {/* Typing indicator removed: we show "Thinking…" on the streaming message */}
 
                 {/* PRD-82A: Inline mission card after creation */}
-                {isMissionMode && activePlanningMissionId && (
+                {activePlanningMissionId && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -1232,7 +1217,7 @@ export function Chat({
                     isCodeActive={hasWidgets}
                     isMissionActive={isMissionMode}
                     onCodeClick={handleOpenCodeCanvas}
-                    onMissionClick={() => setMissionMode(!isMissionMode)}
+                    onMissionClick={() => router.push('/activity?tab=missions')}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}
