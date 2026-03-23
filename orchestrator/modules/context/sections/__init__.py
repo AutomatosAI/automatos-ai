@@ -17,7 +17,7 @@ from modules.context.sections.memory import MemorySection
 from modules.context.sections.mission_context import MissionContextSection
 from modules.context.sections.platform_actions import PlatformActionsSection
 from modules.context.sections.plugins import PluginsSection
-from modules.context.sections.recipe_context import RecipeContextSection
+from modules.context.sections.playbook_context import PlaybookContextSection
 from modules.context.sections.skills import SkillsSection
 from modules.context.sections.task_context import TaskContextSection
 from modules.context.sections.tools import ToolsSection
@@ -34,7 +34,7 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
     "agent_roster": AgentRosterSection,
     "tools": ToolsSection,
     "task_context": TaskContextSection,
-    "recipe_context": RecipeContextSection,
+    "playbook_context": PlaybookContextSection,
     "datetime_context": DatetimeContextSection,
     "conversation": ConversationSection,
     "custom": CustomSection,
@@ -53,7 +53,7 @@ __all__ = [
     "MissionContextSection",
     "PlatformActionsSection",
     "PluginsSection",
-    "RecipeContextSection",
+    "PlaybookContextSection",
     "SkillsSection",
     "TaskContextSection",
     "ToolsSection",

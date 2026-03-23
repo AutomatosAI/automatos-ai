@@ -91,7 +91,7 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         sections=[
             "identity", "skills", "composio", "plugins",
             "platform_actions", "memory",
-            "recipe_context", "datetime_context",
+            "playbook_context", "datetime_context",
         ],
         tool_loading="full",
         personality=False,
