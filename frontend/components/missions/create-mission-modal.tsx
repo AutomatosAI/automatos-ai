@@ -23,7 +23,7 @@ import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
 interface MissionAttachment {
-  key: string
+  document_id: number
   filename: string
   size: number
   content_type: string

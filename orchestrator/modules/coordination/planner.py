@@ -71,6 +71,49 @@ async def _fetch_attachment_contents(
     results: List[Dict[str, str]] = []
 
     for att in attachments:
+        # New format: document_id (from DocumentManager pipeline)
+        doc_id = att.get("document_id")
+        if doc_id:
+            try:
+                from core.database.database import SessionLocal
+                from core.models.core import Document
+                db = SessionLocal()
+                try:
+                    doc = db.query(Document).filter(Document.id == doc_id).first()
+                    if doc and doc.file_path:
+                        s3_path = doc.file_path
+                        if s3_path.startswith("s3://"):
+                            parts = s3_path[5:].split("/", 1)
+                            bucket, key = parts[0], parts[1] if len(parts) > 1 else ""
+                        else:
+                            bucket, key = Config.S3_DOCUMENTS_BUCKET, s3_path
+                        response = await loop.run_in_executor(
+                            None,
+                            lambda b=bucket, k=key: s3.get_object(Bucket=b, Key=k),
+                        )
+                        raw = response["Body"].read()
+                        fname = doc.filename or att.get("filename", f"doc_{doc_id}")
+                        if fname.lower().endswith(".pdf"):
+                            try:
+                                import fitz
+                                pdf_doc = fitz.open(stream=raw, filetype="pdf")
+                                content = "\n\n".join(p.get_text() for p in pdf_doc)
+                                pdf_doc.close()
+                            except ImportError:
+                                content = raw.decode("utf-8", errors="replace")
+                        else:
+                            content = raw.decode("utf-8", errors="replace")
+                        results.append({"filename": fname, "content": content})
+                        logger.info("Fetched attachment doc_id=%s: %s (%d chars)", doc_id, fname, len(content))
+                    else:
+                        logger.warning("Attachment doc_id=%s not found or no file_path", doc_id)
+                finally:
+                    db.close()
+            except Exception as exc:
+                logger.warning("Failed to fetch attachment doc_id=%s: %s", doc_id, exc)
+            continue
+
+        # Legacy format: S3 key directly
         s3_key = att.get("key", "")
         filename = att.get("filename", "unknown")
         content_type = att.get("content_type", "")

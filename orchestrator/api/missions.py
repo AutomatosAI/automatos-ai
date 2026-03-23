@@ -711,12 +711,17 @@ _UPLOAD_ALLOWED_EXTS = {".pdf", ".md", ".txt", ".doc", ".docx", ".json", ".csv",
 async def upload_mission_file(
     file: UploadFile = File(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
 ):
     """Upload a file attachment for use in a mission.
 
     Max 20 MB. Allowed types: pdf, md, txt, doc, docx, json, csv, xlsx.
-    Returns the S3 key and file metadata (no DB record created).
+    Runs through DocumentManager pipeline (S3 + chunking + embedding for RAG).
+    Returns document_id and file metadata.
     """
+    from pathlib import Path
+    from api.documents import get_document_manager
+
     # --- validate extension ---------------------------------------------------
     filename = file.filename or "upload"
     _, ext = os.path.splitext(filename)
@@ -735,41 +740,37 @@ async def upload_mission_file(
             detail=f"File too large ({len(content)} bytes). Max {_UPLOAD_MAX_BYTES} bytes (20 MB).",
         )
 
-    # --- build S3 key ---------------------------------------------------------
-    file_id = uuid4()
-    s3_key = f"workspaces/{ctx.workspace_id}/missions/attachments/{file_id}{ext}"
-    content_type = file.content_type or "application/octet-stream"
+    # --- write to temp file for DocumentManager -------------------------------
+    upload_dir = Path("/tmp/automatos_mission_uploads")
+    upload_dir.mkdir(exist_ok=True)
+    temp_filename = f"{uuid4().hex}{ext}"
+    temp_path = upload_dir / temp_filename
 
-    # --- upload to S3 (non-blocking) ------------------------------------------
-    boto_cfg = BotoConfig(region_name=config.AWS_REGION)
-    s3_client = boto3.client(
-        "s3",
-        aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
-        config=boto_cfg,
-    )
-
-    loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(
-            None,
-            lambda: s3_client.put_object(
-                Bucket=config.S3_DOCUMENTS_BUCKET,
-                Key=s3_key,
-                Body=content,
-                ContentType=content_type,
-            ),
-        )
-    except Exception as exc:
-        logger.error("S3 upload failed for %s: %s", s3_key, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="File upload failed")
+        with open(temp_path, "wb") as f:
+            f.write(content)
 
-    return {
-        "key": s3_key,
-        "filename": filename,
-        "size": len(content),
-        "content_type": content_type,
-    }
+        doc_manager = get_document_manager(str(ctx.workspace_id))
+        document_id = await doc_manager.upload_document(
+            file_path=str(temp_path),
+            filename=filename,
+            tags=["mission-attachment"],
+            description="Uploaded as mission reference document",
+            created_by=ctx.user.id if ctx.user else "system",
+        )
+
+        return {
+            "document_id": document_id,
+            "filename": filename,
+            "size": len(content),
+            "content_type": file.content_type or "application/octet-stream",
+        }
+    except Exception as exc:
+        logger.error("Mission upload failed for %s: %s", filename, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="File upload failed")
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 # ---------------------------------------------------------------------------
