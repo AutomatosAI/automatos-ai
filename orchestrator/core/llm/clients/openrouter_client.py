@@ -83,7 +83,19 @@ class OpenRouterProvider(BaseLLMProvider):
                         )
                         kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
 
-                return self.client.chat.completions.create(**kwargs)
+                try:
+                    return self.client.chat.completions.create(**kwargs)
+                except Exception as exc:
+                    err_str = str(exc)
+                    if tools and ("not support tool use" in err_str or "No endpoints found that support tool" in err_str):
+                        logger.warning(
+                            "Model %s does not support tool use — retrying without tools",
+                            self.config.model,
+                        )
+                        kwargs.pop("tools", None)
+                        kwargs.pop("tool_choice", None)
+                        return self.client.chat.completions.create(**kwargs)
+                    raise
 
             response = await loop.run_in_executor(None, _call)
 

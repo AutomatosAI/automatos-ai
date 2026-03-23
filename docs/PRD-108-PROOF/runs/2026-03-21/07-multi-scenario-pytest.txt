@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.10.9, pytest-9.0.2, pluggy-1.6.0 -- /Users/gkavanagh/.pyenv/versions/myenv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator
+plugins: asyncio-1.3.0, anyio-4.4.0
+asyncio: mode=strict, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 13 items
+
+tests/test_prd108_scenarios.py::TestScenario1_EUAIAct::test_vector_field_beats_message_passing PASSED [  7%]
+tests/test_prd108_scenarios.py::TestScenario1_EUAIAct::test_message_passing_loses_information PASSED [ 15%]
+tests/test_prd108_scenarios.py::TestScenario2_Cybersecurity::test_vector_field_beats_message_passing PASSED [ 23%]
+tests/test_prd108_scenarios.py::TestScenario2_Cybersecurity::test_message_passing_loses_information PASSED [ 30%]
+tests/test_prd108_scenarios.py::TestScenario3_MarketResearch::test_vector_field_beats_message_passing PASSED [ 38%]
+tests/test_prd108_scenarios.py::TestScenario3_MarketResearch::test_message_passing_loses_information PASSED [ 46%]
+tests/test_prd108_scenarios.py::TestScenario4_ProductLaunch::test_vector_field_beats_message_passing PASSED [ 53%]
+tests/test_prd108_scenarios.py::TestScenario4_ProductLaunch::test_message_passing_loses_information PASSED [ 61%]
+tests/test_prd108_scenarios.py::TestScenario5_IncidentResponse::test_vector_field_beats_message_passing PASSED [ 69%]
+tests/test_prd108_scenarios.py::TestScenario5_IncidentResponse::test_message_passing_loses_information PASSED [ 76%]
+tests/test_prd108_scenarios.py::TestCrossScenario::test_vector_field_wins_all_5_scenarios PASSED [ 84%]
+tests/test_prd108_scenarios.py::TestCrossScenario::test_average_coverage_gap_significant PASSED [ 92%]
+tests/test_prd108_scenarios.py::TestCrossScenario::test_message_passing_always_loses_more PASSED [100%]
+
+============================== 13 passed in 1.66s ==============================

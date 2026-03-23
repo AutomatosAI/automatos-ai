@@ -144,6 +144,9 @@ function mapTaskToBoardTask(item: any): BoardTask {
     completed_at: item.completed_at ?? undefined,
     error_message: item.error_message ?? undefined,
     source_id: item.source_id ?? String(item.id),
+    project_id: item.orchestration_run_id
+      ? item.orchestration_run_id.slice(0, 8)
+      : undefined,
     step_progress: item.planning_data?.step_progress ?? undefined,
     planning_data: item.planning_data ? {
       // Normalize recipe_id (legacy) to playbook_id

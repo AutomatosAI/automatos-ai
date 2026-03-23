@@ -10,6 +10,7 @@ export function useChat({
   initialMessages = [],
   selectedModelId = 'gpt-4',
   selectedAgentId,
+  missionMode = false,
   onData,
   onChatIdUpdate,
   onRoutingDecision,
@@ -18,6 +19,7 @@ export function useChat({
   initialMessages?: ChatMessage[]
   selectedModelId?: string
   selectedAgentId?: number | null
+  missionMode?: boolean
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
   onRoutingDecision?: (info: RoutingInfo) => void
@@ -111,6 +113,8 @@ export function useChat({
             // PRD: Unified Agent-Chat System - Send agentId if selected
             ...(selectedAgentId ? { agentId: selectedAgentId } : { selectedChatModel: selectedModelId }),
             selectedVisibilityType: 'private',
+            // PRD-82A: Mission mode — conversational mission planning
+            ...(missionMode ? { missionMode: true } : {}),
           }),
           signal: abortControllerRef.current.signal,
         })

@@ -320,6 +320,20 @@ class Config:
     COORDINATOR_VERIFIER_FALLBACK_MODEL: str = os.getenv(
         "COORDINATOR_VERIFIER_FALLBACK_MODEL", "openai/gpt-4o-mini",
     )
+    # History-based agent scoring (PRD-82B US-003)
+    COORDINATOR_HISTORY_LOOKBACK_DAYS: int = int(os.getenv("COORDINATOR_HISTORY_LOOKBACK_DAYS", "30"))
+    COORDINATOR_HISTORY_MIN_DATAPOINTS: int = int(os.getenv("COORDINATOR_HISTORY_MIN_DATAPOINTS", "3"))
+    # Telemetry: cost estimation per 1K tokens (PRD-82B US-004)
+    COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
+    # Replanning limits (PRD-82B US-005)
+    COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))
+    # Max tokens for mission task LLM calls (agents default to 2000, missions need more)
+    COORDINATOR_TASK_MAX_TOKENS: int = int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "16384"))
+    # Cross-task consistency verification (PRD-82B US-006)
+    COORDINATOR_CONSISTENCY_CHECK: bool = os.getenv("COORDINATOR_CONSISTENCY_CHECK", "true").lower() in ("true", "1", "yes")
+    # Archival: move terminal runs to archive after N days (PRD-82B US-009)
+    COORDINATOR_ARCHIVE_AFTER_DAYS: int = int(os.getenv("COORDINATOR_ARCHIVE_AFTER_DAYS", "30"))
+    COORDINATOR_ARCHIVE_BATCH_SIZE: int = int(os.getenv("COORDINATOR_ARCHIVE_BATCH_SIZE", "50"))
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING: bool = os.getenv("SEMANTIC_TOOL_ROUTING", "true").lower() == "true"
 
@@ -372,6 +386,19 @@ class Config:
     RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
     MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
     MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
+
+    # =============================================================================
+    # QDRANT — PRD-108 Memory Field (Shared Semantic Context)
+    # =============================================================================
+    QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
+    QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
+    FIELD_EMBEDDING_DIM: int = int(os.getenv("FIELD_EMBEDDING_DIM", "2048"))
+    FIELD_DECAY_RATE: float = float(os.getenv("FIELD_DECAY_RATE", "0.1"))
+    FIELD_REINFORCE_BONUS: float = float(os.getenv("FIELD_REINFORCE_BONUS", "0.05"))
+    FIELD_REINFORCE_CAP: float = float(os.getenv("FIELD_REINFORCE_CAP", "2.0"))
+    FIELD_ARCHIVAL_THRESHOLD: float = float(os.getenv("FIELD_ARCHIVAL_THRESHOLD", "0.05"))
+    FIELD_BOUNDARY_PERMEABILITY: float = float(os.getenv("FIELD_BOUNDARY_PERMEABILITY", "1.0"))
+    SHARED_CONTEXT_BACKEND: str = os.getenv("SHARED_CONTEXT_BACKEND", "vector_field")  # "vector_field" or "redis"
 
     # =============================================================================
     # EMBEDDINGS

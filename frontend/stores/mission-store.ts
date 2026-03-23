@@ -43,10 +43,7 @@ const EMPTY_MODIFICATIONS: PlanModifications = {
 export const useMissionStore = create<MissionStore>((set) => ({
   // ── Chat integration ──
   isMissionMode: false,
-  setMissionMode: (on) => set(on ? { isMissionMode: true } : {
-    isMissionMode: false,
-    activePlanningMissionId: null,
-  }),
+  setMissionMode: (on) => set({ isMissionMode: on }),
   activePlanningMissionId: null,
   setActivePlanningMissionId: (id) => set({ activePlanningMissionId: id }),
 

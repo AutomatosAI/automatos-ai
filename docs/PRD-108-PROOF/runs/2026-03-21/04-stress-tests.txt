@@ -1,0 +1,76 @@
+
+============================================================
+TEST 1: Resonance ranking — most relevant pattern wins
+============================================================
+  Query: 'What programming language is best for machine learning?'
+  Ranking: ['javascript_dom', 'python_ml', 'python_basics', 'rust_memory', 'go_concurrency']
+    1. javascript_dom (score=0.4088)
+    2. python_ml (score=0.3891)
+    3. python_basics (score=0.2634)
+    4. rust_memory (score=0.0801)
+    5. go_concurrency (score=-0.0985)
+  PASS  Python-related pattern in top 2 for ML query
+  PASS  Go concurrency is NOT #1 for ML query
+
+============================================================
+TEST 2: Temporal decay — old patterns score lower
+============================================================
+  Fresh pattern: age=0.0h, decay_strength=1.0000, resonance=0.044834
+  Stale pattern: age=24.0h, decay_strength=0.0907, resonance=0.000242
+  PASS  Fresh pattern has higher decayed strength than 24h-old pattern
+  PASS  24h-old pattern strength below 0.15 (expected ~0.09)
+
+============================================================
+TEST 3: Hebbian reinforcement — accessed patterns get stronger
+============================================================
+  Popular: accesses=10, age=0.0h, strength=1.5000
+  Lonely:  accesses=0, age=6.0h, strength=0.5488
+  PASS  Popular has 10 accesses
+  PASS  Lonely has 0 accesses
+  PASS  Popular pattern stronger than lonely after reinforcement
+
+============================================================
+TEST 4: Archival threshold — dead patterns filtered
+============================================================
+  Dead pattern strength: 0.000747 (threshold: 0.05)
+  PASS  Alive pattern returned
+  PASS  Dead pattern (72h old) decayed below archival threshold
+
+============================================================
+TEST 5: 50-agent stress — field handles many contributors
+============================================================
+  Total patterns in field: 150
+  PASS  150 patterns from 50 agents × 3 findings
+  Query results for agent 25: 5 patterns
+  PASS  Returns 5 results from 150 patterns
+  100 queries in 0.13s (755 queries/sec)
+  PASS  Query speed > 50 qps (got 755)
+
+============================================================
+TEST 6: Field stability changes with contributions
+============================================================
+  Empty:       stability=0.0000 patterns=0
+  PASS  Empty field has zero stability
+  1 pattern:   stability=1.0000 patterns=1
+  PASS  One pattern → non-zero stability
+  11 patterns: stability=1.0000 patterns=11 avg_strength=1.0000
+  16 patterns: stability=0.5667 patterns=16 avg_strength=0.7008
+  (Mixed ages = lower avg strength, stability drops)
+  PASS  Adding old patterns reduces avg strength or stability
+
+============================================================
+TEST 7: Cross-agent visibility — Agent C sees Agent A directly
+============================================================
+  (The telephone game test)
+============================================================
+  Agent C queried: 'research finding about subtopic 7'
+  Results: ['research_6', 'analysis', 'research_7', 'research_1', 'research_8']
+  PASS  Agent C found research_7 — the finding Agent B NEVER referenced
+
+  THIS IS THE POINT.
+  In message-passing, finding #7 would be lost because B didn't mention it.
+  In the shared field, C queries directly and finds it by semantic relevance.
+
+============================================================
+ALL 16 ASSERTIONS PASSED
+============================================================

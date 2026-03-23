@@ -75,6 +75,7 @@ export interface TaskResponse {
   failure_reason_code: string | null
   failure_detail: string | null
   output_excerpt: string | null
+  output: string | null
   started_at: string | null
   completed_at: string | null
   created_at: string | null
@@ -120,6 +121,18 @@ export interface MissionRejectRequest {
 export interface MissionReviewRequest {
   verdict: 'accept' | 'reject'
   task_feedback?: Record<string, string>
+}
+
+export interface SaveAsRoutineRequest {
+  name: string
+  description?: string
+  tags?: string[]
+}
+
+export interface SaveAsRoutineResponse {
+  template_id: string
+  name: string
+  task_count: number
 }
 
 // ── Frontend Display Helpers ──────────────────────────────────

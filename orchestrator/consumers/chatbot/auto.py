@@ -387,6 +387,20 @@ _PLATFORM_KEYWORDS = {
         "delete memory", "remove memory", "forget this",
         "erase memory", "clear memory",
     ],
+    # PRD-108: Shared Mission Field
+    "platform_field_query": [
+        "query field", "search field", "what did other agents find",
+        "shared context", "field results", "mission findings",
+        "what's in the field", "check the field",
+    ],
+    "platform_field_inject": [
+        "share finding", "inject into field", "add to field",
+        "share with team", "publish finding", "contribute to field",
+    ],
+    "platform_field_stability": [
+        "field stability", "how converged", "field status",
+        "is the field stable", "convergence check",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]

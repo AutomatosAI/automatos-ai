@@ -272,6 +272,8 @@ class MissionReconciler:
                     output=task.output or "",
                     verification_criteria=criteria,
                     executor_model=executor_model,
+                    run_id=run_id,
+                    task_id=task.id,
                 )
             except Exception:
                 logger.error(
@@ -844,6 +846,7 @@ class MissionReconciler:
                             "failure_reason": task.failure_reason_code,
                         },
                     )
+                    VerificationService.clear_cache(run.id)
                     logger.info(
                         "Run %s failed due to fatal task failure: %s (%s)",
                         run.id,

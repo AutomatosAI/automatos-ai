@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { MissionCard } from './mission-card'
+import { CreateMissionModal } from './create-mission-modal'
 import { cn } from '@/lib/utils'
 import { useMissions, type MissionFilters } from '@/hooks/use-missions-api'
 import type { RunState } from '@/types/missions'
@@ -28,6 +29,7 @@ export function MissionList() {
   const prefersReducedMotion = useReducedMotion()
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all')
   const [search, setSearch] = useState('')
+  const [showCreateModal, setShowCreateModal] = useState(false)
 
   // Build query filters
   const filters: MissionFilters = {}
@@ -85,15 +87,25 @@ export function MissionList() {
           />
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="ml-auto shrink-0"
-          onClick={() => refetch()}
-        >
-          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-          <span className="hidden sm:inline">Refresh</span>
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => refetch()}
+          >
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+            <span className="hidden sm:inline">Refresh</span>
+          </Button>
+          <Button
+            size="sm"
+            className="shrink-0"
+            onClick={() => setShowCreateModal(true)}
+          >
+            <Plus className="w-3.5 h-3.5 mr-1.5" />
+            New Mission
+          </Button>
+        </div>
       </div>
 
       {/* Loading state */}
@@ -136,13 +148,19 @@ export function MissionList() {
           </div>
 
           {!search && activeFilter === 'all' && (
-            <Button variant="outline" className="border-primary/30 hover:border-primary/50" disabled>
+            <Button
+              variant="outline"
+              className="border-primary/30 hover:border-primary/50"
+              onClick={() => setShowCreateModal(true)}
+            >
               <Target className="w-4 h-4 mr-2" />
               New Mission
             </Button>
           )}
         </motion.div>
       )}
+
+      <CreateMissionModal open={showCreateModal} onOpenChange={setShowCreateModal} />
     </div>
   )
 }
