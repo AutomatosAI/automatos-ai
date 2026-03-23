@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { useAuth } from '@clerk/nextjs'
 import { useDropzone } from 'react-dropzone'
 import { Target, Loader2, Upload, X, FileText, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -59,6 +60,7 @@ interface CreateMissionModalProps {
 
 export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalProps) {
   const router = useRouter()
+  const { getToken } = useAuth()
   const createMission = useCreateMission()
   const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
 
@@ -84,20 +86,8 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
       : null
     if (workspaceId) headers['X-Workspace-ID'] = workspaceId
 
-    // Get auth token from clerk
-    try {
-      const { default: Clerk } = await import('@clerk/nextjs')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const clerkWindow = (window as any).__clerk_frontend_api
-        ? (window as any).Clerk
-        : null
-      if (clerkWindow?.session) {
-        const token = await clerkWindow.session.getToken()
-        if (token) headers['Authorization'] = `Bearer ${token}`
-      }
-    } catch {
-      // No clerk available
-    }
+    const token = await getToken()
+    if (token) headers['Authorization'] = `Bearer ${token}`
 
     const res = await fetch(`${BACKEND_URL}/api/missions/upload`, {
       method: 'POST',
@@ -111,7 +101,7 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
     }
 
     return res.json()
-  }, [])
+  }, [getToken])
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
