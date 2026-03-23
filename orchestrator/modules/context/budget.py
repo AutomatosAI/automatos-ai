@@ -118,7 +118,7 @@ class TokenBudgetManager:
         for section in droppable:
             if total_tokens <= available:
                 break
-            # Never drop priority 1-2 (identity, task_context, recipe_context).
+            # Never drop priority 1-2 (identity, task_context, playbook_context).
             if section.priority <= 2:
                 continue
             dropped_names.add(section.name)

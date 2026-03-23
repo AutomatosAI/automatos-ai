@@ -494,7 +494,7 @@ class TestBuildContextRecipe:
         assert "2/5" in result.system_prompt
         assert "Research Phase" in result.system_prompt
         assert "Search for recent AI developments" in result.system_prompt
-        assert "recipe_context" in result.sections_included
+        assert "playbook_context" in result.sections_included
 
     @pytest.mark.asyncio
     async def test_recipe_has_tools(

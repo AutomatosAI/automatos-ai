@@ -112,7 +112,7 @@ class TestSectionRegistry:
     EXPECTED_SECTIONS = {
         "identity", "skills", "composio", "plugins",
         "platform_actions", "memory", "tools",
-        "task_context", "recipe_context", "datetime_context",
+        "task_context", "playbook_context", "datetime_context",
         "conversation", "custom",
     }
 
