@@ -48,6 +48,10 @@ export interface MissionResponse {
   token_budget_estimate: number | null
   tokens_used: number
   max_retries: number
+  max_concurrent: number
+  complexity_tier: string | null
+  parallel_groups: string[]
+  has_synthesis_tasks: boolean
   created_by: string
   started_at: string | null
   completed_at: string | null
@@ -72,6 +76,9 @@ export interface TaskResponse {
   assigned_agent_id: number | null
   attempt_number: number
   tokens_used: number
+  estimated_tokens: number
+  complexity: string | null
+  parallel_group: string | null
   failure_reason_code: string | null
   failure_detail: string | null
   output_excerpt: string | null
@@ -112,6 +119,8 @@ export interface MissionApproveRequest {
     notes?: string
     agent_overrides?: Record<string, number>
   }
+  max_concurrent_override?: number
+  token_budget_override?: number
 }
 
 export interface MissionRejectRequest {

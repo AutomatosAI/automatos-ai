@@ -27,7 +27,7 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 - [x] US-009: Wire budget admission gate. Pre-dispatch can_afford() check. Graduated response. Pause on exceeded.
 
 ### Phase 5: API & Frontend
-- [ ] US-010: Enrich plan approval API with budget estimate, max_concurrent override.
+- [x] US-010: Enrich plan approval API with budget estimate, max_concurrent override.
 - [ ] US-011: Budget bar component, parallel DAG rendering, approval overrides.
 
 ### Phase 6: Wiring Tests

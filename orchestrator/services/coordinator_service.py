@@ -909,6 +909,8 @@ class CoordinatorService:
                     "agent_role": t.agent_role,
                     "sequence_number": t.sequence_number,
                     "task_type": t.task_type,
+                    "complexity": getattr(t, "complexity", "moderate"),
+                    "parallel_group": getattr(t, "parallel_group", None),
                 }
                 for t in decomposition.tasks
             ],
