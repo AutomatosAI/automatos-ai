@@ -147,6 +147,27 @@ class TaskType(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# ComplexityTier — task complexity classification (PRD-82C)
+# ---------------------------------------------------------------------------
+
+class ComplexityTier(str, Enum):
+    SIMPLE = "simple"
+    MODERATE = "moderate"
+    COMPLEX = "complex"
+
+
+# ---------------------------------------------------------------------------
+# BudgetStatus — mission budget health indicator (PRD-82C)
+# ---------------------------------------------------------------------------
+
+class BudgetStatus(str, Enum):
+    HEALTHY = "healthy"
+    WARNING = "warning"
+    CRITICAL = "critical"
+    EXCEEDED = "exceeded"
+
+
+# ---------------------------------------------------------------------------
 # TriggerRule — when a task's dependencies are considered met
 # ---------------------------------------------------------------------------
 

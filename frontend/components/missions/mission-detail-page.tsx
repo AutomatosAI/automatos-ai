@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/resizable'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { MissionStatusBadge } from './mission-status-badge'
+import { MissionBudgetBar } from './mission-budget-bar'
 import { MissionDAGCanvas } from './mission-dag-canvas'
 import { MissionActivityFeed } from './mission-activity-feed'
 import { TaskInspector } from './task-inspector'
@@ -35,7 +36,14 @@ import { MissionFieldPanel } from './mission-field-panel'
 import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine, useReplanMission, useRerunMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { computeMissionStats, TERMINAL_RUN_STATES } from '@/types/missions'
-import { Activity, ListChecks, Clock, Coins, Brain } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Activity, ListChecks, Clock, Coins, Brain, Zap } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface MissionDetailPageProps {
@@ -65,6 +73,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const [rejectFeedback, setRejectFeedback] = useState('')
   const [showReplan, setShowReplan] = useState(false)
   const [replanNotes, setReplanNotes] = useState('')
+  const [maxConcurrentOverride, setMaxConcurrentOverride] = useState<string | null>(null)
   const [showSaveRoutine, setShowSaveRoutine] = useState(false)
   const [routineName, setRoutineName] = useState('')
   const [routineDescription, setRoutineDescription] = useState('')
@@ -398,7 +407,23 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 icon: Coins,
                 iconColor: 'text-[hsl(var(--warning))]',
               },
+              ...(mission.max_concurrent > 1
+                ? [{
+                    label: 'Parallel',
+                    value: `${mission.max_concurrent}x`,
+                    icon: Zap,
+                    iconColor: 'text-purple-400',
+                  }]
+                : []),
             ]}
+          />
+        )}
+
+        {/* Budget bar */}
+        {mission.token_budget_estimate != null && mission.token_budget_estimate > 0 && (
+          <MissionBudgetBar
+            tokensUsed={mission.tokens_used}
+            tokenBudgetEstimate={mission.token_budget_estimate}
           />
         )}
       </div>
@@ -407,11 +432,45 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
       {mission.state === 'awaiting_approval' && (
         <div className="px-4 md:px-6 py-3 border-b border-orange-500/30 bg-orange-500/5">
           <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-sm text-orange-400">
-              <Eye className="w-4 h-4 shrink-0" />
-              <span>Review the plan below, then approve or reject</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 text-sm text-orange-400">
+                <Eye className="w-4 h-4 shrink-0" />
+                <span>Review the plan below, then approve or reject</span>
+              </div>
+              {/* Parallel info + budget estimate */}
+              <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground">
+                {mission.complexity_tier && (
+                  <span>Complexity: <span className="font-medium text-foreground">{mission.complexity_tier}</span></span>
+                )}
+                {mission.token_budget_estimate != null && mission.token_budget_estimate > 0 && (
+                  <span>Est. tokens: <span className="font-medium text-foreground">{mission.token_budget_estimate.toLocaleString()}</span></span>
+                )}
+                {Array.isArray(mission.parallel_groups) && mission.parallel_groups.length > 0 && (
+                  <span>Parallel groups: <span className="font-medium text-foreground">{mission.parallel_groups.join(', ')}</span></span>
+                )}
+                {mission.has_synthesis_tasks && (
+                  <span className="text-purple-400">Has synthesis tasks</span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              {/* Max concurrent override */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground whitespace-nowrap">Parallel:</span>
+                <Select
+                  value={maxConcurrentOverride ?? String(mission.max_concurrent)}
+                  onValueChange={(v) => setMaxConcurrentOverride(v)}
+                >
+                  <SelectTrigger className="h-7 w-16 text-xs !rounded-md">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1</SelectItem>
+                    <SelectItem value="2">2</SelectItem>
+                    <SelectItem value="3">3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 variant="outline"
                 size="sm"
@@ -431,17 +490,26 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                     Object.keys(planModifications.agent_overrides).length > 0 ||
                     planModifications.notes.length > 0
 
+                  const overrideVal = maxConcurrentOverride != null
+                    ? parseInt(maxConcurrentOverride, 10)
+                    : undefined
+                  const hasOverride = overrideVal != null && overrideVal !== mission.max_concurrent
+
                   approveMutation.mutate(
                     {
                       id: missionId,
-                      body: hasModifications
-                        ? { modifications: planModifications }
+                      body: hasModifications || hasOverride
+                        ? {
+                            ...(hasModifications ? { modifications: planModifications } : {}),
+                            ...(hasOverride ? { max_concurrent_override: overrideVal } : {}),
+                          }
                         : undefined,
                     },
                     {
                       onSuccess: () => {
                         toast.success('Plan approved — mission is running')
                         clearPlanModifications()
+                        setMaxConcurrentOverride(null)
                       },
                       onError: (err) => toast.error(err.message),
                     },

@@ -88,6 +88,12 @@ ALLOWED_MODIFICATION_KEYS = {"task_overrides", "notes", "agent_overrides"}
 
 class MissionApproveRequest(BaseModel):
     modifications: Optional[Dict[str, Any]] = Field(None, description="Optional plan modifications")
+    max_concurrent_override: Optional[int] = Field(
+        None, ge=1, le=10, description="Override max_concurrent for this mission"
+    )
+    token_budget_override: Optional[int] = Field(
+        None, ge=1000, description="Override token budget estimate for this mission"
+    )
 
     @validator("modifications")
     def validate_modifications(cls, v):
@@ -148,6 +154,9 @@ class TaskResponse(BaseModel):
     assigned_agent_id: Optional[int] = None
     attempt_number: int = 0
     tokens_used: int = 0
+    estimated_tokens: int = 4000
+    complexity: Optional[str] = None
+    parallel_group: Optional[str] = None
     failure_reason_code: Optional[str] = None
     failure_detail: Optional[str] = None
     output_excerpt: Optional[str] = None
@@ -186,7 +195,11 @@ class MissionResponse(BaseModel):
     token_budget_estimate: Optional[int] = None
     tokens_used: int = 0
     max_retries: int = 3
+    max_concurrent: int = 1
     replan_count: int = 0
+    complexity_tier: Optional[str] = None
+    parallel_groups: List[str] = []
+    has_synthesis_tasks: bool = False
     created_by: str
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -269,6 +282,27 @@ class AgentMissionHistoryResponse(BaseModel):
 
 def _run_to_response(run: OrchestrationRun) -> dict:
     """Convert an OrchestrationRun ORM object to a dict matching MissionResponse."""
+    # Extract parallel groups and synthesis info from tasks in the plan JSONB
+    plan = run.plan or {}
+    plan_tasks = plan.get("tasks", [])
+    parallel_groups = sorted({
+        t.get("parallel_group")
+        for t in plan_tasks
+        if t.get("parallel_group")
+    })
+    has_synthesis_tasks = any(
+        t.get("task_type") == "synthesis" for t in plan_tasks
+    )
+
+    # Derive complexity tier from max_concurrent
+    max_concurrent = run.max_concurrent or 1
+    if max_concurrent >= 3:
+        complexity_tier = "complex"
+    elif max_concurrent >= 2:
+        complexity_tier = "moderate"
+    else:
+        complexity_tier = "simple"
+
     return {
         "id": str(run.id),
         "workspace_id": str(run.workspace_id),
@@ -281,7 +315,11 @@ def _run_to_response(run: OrchestrationRun) -> dict:
         "token_budget_estimate": run.token_budget_estimate,
         "tokens_used": run.tokens_used or 0,
         "max_retries": run.max_retries or 3,
+        "max_concurrent": max_concurrent,
         "replan_count": run.replan_count or 0,
+        "complexity_tier": complexity_tier,
+        "parallel_groups": parallel_groups,
+        "has_synthesis_tasks": has_synthesis_tasks,
         "created_by": run.created_by,
         "started_at": run.started_at,
         "completed_at": run.completed_at,
@@ -304,6 +342,9 @@ def _task_to_response(task: OrchestrationTask) -> dict:
         "assigned_agent_id": task.assigned_agent_id,
         "attempt_number": task.attempt_number or 0,
         "tokens_used": task.tokens_used or 0,
+        "estimated_tokens": getattr(task, "estimated_tokens", None) or 4000,
+        "complexity": getattr(task, "complexity", None),
+        "parallel_group": getattr(task, "parallel_group", None),
         "failure_reason_code": task.failure_reason_code,
         "failure_detail": task.failure_detail,
         "output_excerpt": (task.output[:500] if task.output else None),
@@ -989,6 +1030,12 @@ async def approve_plan(
                 status_code=400,
                 detail=f"Mission is in '{run.state}' state, expected 'awaiting_approval'",
             )
+
+        # Apply overrides before approval
+        if body.max_concurrent_override is not None:
+            run.max_concurrent = body.max_concurrent_override
+        if body.token_budget_override is not None:
+            run.token_budget_estimate = body.token_budget_override
 
         coordinator = get_coordinator_service()
         run = coordinator.approve_plan(

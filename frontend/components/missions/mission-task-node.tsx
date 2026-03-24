@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from 'reactflow'
 import {
   Circle, Clock, UserCheck, Loader2, CheckCircle2, Search,
   ShieldCheck, XCircle, SkipForward, AlertTriangle, RefreshCw,
+  Merge, Coins,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TaskState } from '@/types/missions'
@@ -31,6 +32,9 @@ export interface MissionTaskNodeData {
   agentRole: string | null
   sequenceNumber: number
   state: TaskState
+  taskType?: string | null
+  tokensUsed?: number
+  estimatedTokens?: number
   isSelected: boolean
   mode: 'plan' | 'execution' | 'review'
   outputExcerpt?: string | null
@@ -40,6 +44,7 @@ export interface MissionTaskNodeData {
 function MissionTaskNodeInner({ data }: NodeProps<MissionTaskNodeData>) {
   const config = TASK_STATE_CONFIG[data.state]
   const IconComponent = ICON_MAP[config.icon] ?? Circle
+  const isSynthesis = data.taskType === 'synthesis'
 
   // In plan mode, all nodes look neutral (not yet running)
   const isPlanMode = data.mode === 'plan'
@@ -51,6 +56,7 @@ function MissionTaskNodeInner({ data }: NodeProps<MissionTaskNodeData>) {
         isPlanMode
           ? 'border-muted-foreground/20 bg-muted/5'
           : `${config.borderClass} ${config.bgClass}`,
+        isSynthesis && 'border-purple-500/40 bg-purple-500/5',
         data.isSelected && 'ring-2 ring-primary shadow-[0_0_12px_rgba(249,115,22,0.15)]',
       )}
     >
@@ -58,8 +64,12 @@ function MissionTaskNodeInner({ data }: NodeProps<MissionTaskNodeData>) {
 
       {/* Header: icon + sequence + title */}
       <div className="flex items-start gap-2">
-        <div className={cn('mt-0.5 shrink-0', isPlanMode ? 'text-muted-foreground' : config.color)}>
-          <IconComponent className={cn('w-4 h-4', config.animate)} />
+        <div className={cn('mt-0.5 shrink-0', isSynthesis ? 'text-purple-400' : isPlanMode ? 'text-muted-foreground' : config.color)}>
+          {isSynthesis ? (
+            <Merge className="w-4 h-4" />
+          ) : (
+            <IconComponent className={cn('w-4 h-4', config.animate)} />
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold leading-tight line-clamp-2">{data.title}</p>
@@ -94,10 +104,21 @@ function MissionTaskNodeInner({ data }: NodeProps<MissionTaskNodeData>) {
         </div>
       )}
 
+      {/* Token usage (execution/review mode) */}
+      {!isPlanMode && ((data.tokensUsed != null && data.tokensUsed > 0) || (data.estimatedTokens != null && data.estimatedTokens > 0)) && (
+        <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+          <Coins className="w-3 h-3" />
+          <span className="font-mono">
+            {(data.tokensUsed ?? 0).toLocaleString()}
+            {data.estimatedTokens ? ` / ${data.estimatedTokens.toLocaleString()}` : ''}
+          </span>
+        </div>
+      )}
+
       {/* Status label (execution/review mode) */}
       {!isPlanMode && (
-        <div className={cn('mt-1.5 text-[10px] font-medium', config.color)}>
-          {config.label}
+        <div className={cn('mt-1 text-[10px] font-medium', isSynthesis ? 'text-purple-400' : config.color)}>
+          {isSynthesis && 'Synthesis · '}{config.label}
         </div>
       )}
 

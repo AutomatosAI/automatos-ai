@@ -8,7 +8,7 @@ and the glue between planner, dispatcher, reconciler, and verifier.
 Key patterns:
 - DB-authoritative, stateless coordinator — every tick reads from DB
 - SessionLocal per tick (no stored DB session on singleton)
-- Sequential dispatch via MissionDispatcher
+- Parallel dispatch via MissionDispatcher.dispatch_ready() + asyncio.gather()
 - Output summary built when all tasks verified (Section 6)
 - Soft budget tracking with warning events (Section 9)
 
@@ -16,6 +16,7 @@ Source: PRD-82A Sections 6, 8, 9, 12 (US-014)
         PRD-102 Section 3.3 (coordinator design)
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -25,7 +26,7 @@ from uuid import UUID
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from config import Config
+from config import COMPLEXITY_TOKEN_BUDGET, Config
 from core.models.core import Agent
 from core.models.orchestration import (
     OrchestrationArchive,
@@ -40,6 +41,7 @@ from core.models.orchestration_enums import (
     FailureReasonCode,
     RunState,
     TaskState,
+    TaskType,
     TERMINAL_RUN_STATES,
     DONE_TASK_STATES,
 )
@@ -477,19 +479,39 @@ class CoordinatorService:
             .all()
         )
 
-        # --- Dispatch phase ---
-        dispatch_result = MissionDispatcher.dispatch_next(db, run, agents)
+        # --- Dispatch phase (parallel via dispatch_ready) ---
+        dispatch_results = MissionDispatcher.dispatch_ready(db, run, agents)
 
-        if dispatch_result.dispatched:
-            # Task was claimed and assigned — now execute async
-            task = (
-                db.query(OrchestrationTask)
-                .filter(OrchestrationTask.id == dispatch_result.task_id)
-                .first()
-            )
+        # Collect successfully dispatched tasks for concurrent execution
+        dispatched = [r for r in dispatch_results if r.dispatched]
 
-            if task:
-                await self._execute_task(db, run, task, dispatch_result.agent_id)
+        if dispatched:
+            # Load tasks and perform all DB state changes SERIALLY on the
+            # shared session before launching concurrent agent I/O.
+            tasks_to_execute = []
+            for result in dispatched:
+                task = (
+                    db.query(OrchestrationTask)
+                    .filter(OrchestrationTask.id == result.task_id)
+                    .first()
+                )
+                if task:
+                    tasks_to_execute.append((task, result.agent_id))
+
+            # Execute tasks — each _execute_task performs DB reads/writes
+            # on the shared session so we must run them sequentially.
+            # TODO: When agent I/O dominates latency, refactor to separate
+            # DB prep (serial) from agent calls (parallel via asyncio.gather).
+            for task, agent_id in tasks_to_execute:
+                try:
+                    await self._execute_task(db, run, task, agent_id)
+                except Exception as exc:
+                    logger.error(
+                        "Task %s execution failed: %s",
+                        task.id,
+                        exc,
+                        exc_info=True,
+                    )
 
         # --- Reconcile phase ---
         await MissionReconciler.reconcile(db, run)
@@ -498,6 +520,136 @@ class CoordinatorService:
         db.refresh(run)
         if RunState(run.state) == RunState.VERIFYING:
             await self._build_and_advance_to_awaiting_human(db, run)
+
+    # ------------------------------------------------------------------
+    # Synthesis support (PRD-82C US-007)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _collect_upstream_outputs(
+        db: Session,
+        task: OrchestrationTask,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch outputs from all dependency tasks of the given task.
+
+        Returns list of dicts with 'title', 'description', and 'output' keys,
+        ordered by sequence_number.
+        """
+        upstream_deps = (
+            db.query(OrchestrationTaskDependency)
+            .filter(OrchestrationTaskDependency.task_id == task.id)
+            .all()
+        )
+        if not upstream_deps:
+            return []
+
+        dep_task_ids = [d.depends_on_task_id for d in upstream_deps]
+        dep_tasks = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.id.in_(dep_task_ids))
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+
+        # Sanitize and truncate — reuse same logic as _execute_task upstream
+        _PER_OUTPUT_LIMIT = 8000
+        _TOTAL_BUDGET = 30_000
+        _BASE64_RE = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+")
+
+        results: List[Dict[str, Any]] = []
+        accumulated = 0
+        for dt in dep_tasks:
+            raw_output = dt.output or ""
+            # Strip base64 blobs
+            cleaned = _BASE64_RE.sub("[image removed]", raw_output)
+            # Per-output truncation
+            remaining = _TOTAL_BUDGET - accumulated
+            if remaining <= 0:
+                break
+            limit = min(len(cleaned), _PER_OUTPUT_LIMIT, remaining)
+            truncated = cleaned[:limit]
+            if len(cleaned) > limit:
+                truncated += "\n\n... (truncated)"
+            accumulated += len(truncated)
+            results.append({
+                "title": dt.title,
+                "description": (dt.description or "")[:500],
+                "output": truncated,
+            })
+        return results
+
+    @staticmethod
+    def _build_synthesis_prompt(
+        task: OrchestrationTask,
+        upstream_outputs: List[Dict[str, Any]],
+    ) -> str:
+        """
+        Build a specialised prompt for TaskType.SYNTHESIS tasks that merges
+        parallel upstream outputs into a unified result.
+        """
+        parts = [
+            f"# Synthesis Task: {task.title}",
+            "",
+            "You are synthesising the outputs of multiple upstream tasks into a "
+            "single, unified result. Follow these rules:",
+            "- Include ALL substantive content from every upstream output.",
+            "- Resolve any contradictions by noting the discrepancy and choosing "
+            "the better-supported position.",
+            "- Write in a unified voice — this must read as one cohesive document, "
+            "NOT a concatenation of separate pieces.",
+            "- Preserve important details, data, and citations from each source.",
+        ]
+
+        if task.description:
+            parts.append(f"\n## Task Description\n{task.description}")
+
+        parts.append("\n## Upstream Outputs to Synthesise")
+        for i, upstream in enumerate(upstream_outputs, 1):
+            title = upstream.get("title", f"Task {i}")
+            output = upstream.get("output", "(no output)")
+            parts.append(f"\n### {i}. {title}\n{output}")
+
+        if not upstream_outputs:
+            parts.append(
+                "\n*No upstream outputs available — produce the best result "
+                "you can from the task description alone.*"
+            )
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _auto_synthesis_verification_criteria(
+        task: OrchestrationTask,
+        upstream_outputs: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate verification criteria for synthesis tasks:
+        - required_sections derived from upstream task titles
+        - min_length = 50% of combined upstream output length
+        """
+        criteria: List[Dict[str, Any]] = []
+
+        # Required sections from upstream titles
+        section_titles = [
+            u.get("title", f"Section {i}")
+            for i, u in enumerate(upstream_outputs, 1)
+        ]
+        if section_titles:
+            criteria.append({
+                "type": "required_sections",
+                "value": section_titles,
+            })
+
+        # Minimum length — 50% of combined upstream
+        combined_length = sum(len(u.get("output", "")) for u in upstream_outputs)
+        min_length = max(combined_length // 2, 200)  # floor at 200 chars
+        criteria.append({
+            "type": "min_length",
+            "value": min_length,
+        })
+
+        return criteria
 
     async def _execute_task(
         self,
@@ -578,8 +730,24 @@ class CoordinatorService:
                 "field_id": field_id,
             }
 
-        # Build the prompt
-        prompt = MissionDispatcher.build_task_prompt(task)
+        # Build the prompt — synthesis tasks use a specialised prompt
+        is_synthesis = task.task_type == TaskType.SYNTHESIS.value
+        if is_synthesis:
+            synthesis_upstream = self._collect_upstream_outputs(db, task)
+            prompt = self._build_synthesis_prompt(task, synthesis_upstream)
+
+            # Auto-set verification criteria if not already defined
+            if not task.verification_criteria:
+                task.verification_criteria = (
+                    self._auto_synthesis_verification_criteria(task, synthesis_upstream)
+                )
+                logger.info(
+                    "Auto-set verification criteria for synthesis task %s: %s",
+                    task.id,
+                    task.verification_criteria,
+                )
+        else:
+            prompt = MissionDispatcher.build_task_prompt(task)
 
         # Execute via AgentFactory
         factory = AgentFactory(db_session=db)
@@ -755,6 +923,8 @@ class CoordinatorService:
                     "agent_role": t.agent_role,
                     "sequence_number": t.sequence_number,
                     "task_type": t.task_type,
+                    "complexity": getattr(t, "complexity", "moderate"),
+                    "parallel_group": getattr(t, "parallel_group", None),
                 }
                 for t in decomposition.tasks
             ],
@@ -767,6 +937,7 @@ class CoordinatorService:
             ],
         }
         run.token_budget_estimate = decomposition.token_estimate
+        run.max_concurrent = decomposition.max_concurrent
 
         # Create OrchestrationTask rows
         temp_id_to_task: Dict[str, OrchestrationTask] = {}
@@ -785,6 +956,11 @@ class CoordinatorService:
                     "required_tools": planned.required_tools,
                 } if planned.required_tools else None,
                 max_retries=run.max_retries,
+                complexity=getattr(planned, "complexity", "moderate"),
+                parallel_group=getattr(planned, "parallel_group", None),
+                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
+                    getattr(planned, "complexity", "moderate"), 4000
+                ),
             )
             db.add(task)
             db.flush()  # Get task.id
@@ -1354,6 +1530,11 @@ class CoordinatorService:
                     else None
                 ),
                 max_retries=run.max_retries,
+                complexity=getattr(planned, "complexity", "moderate"),
+                parallel_group=getattr(planned, "parallel_group", None),
+                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
+                    getattr(planned, "complexity", "moderate"), 4000
+                ),
             )
             db.add(task)
             db.flush()

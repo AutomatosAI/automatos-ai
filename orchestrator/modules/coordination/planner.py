@@ -22,9 +22,10 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID, uuid4
 
+from config import COMPLEXITY_TOKEN_BUDGET
 from core.llm import create_llm_manager
 from core.models.core import Agent
-from core.models.orchestration_enums import TaskType
+from core.models.orchestration_enums import ComplexityTier, TaskType
 from modules.coordination.templates import match_template, render_template
 from services.orchestration_deps import (
     CyclicDependencyError,
@@ -217,7 +218,119 @@ async def _fetch_attachment_contents(
 MIN_TASKS = 3
 MAX_TASKS = 20
 MAX_PLAN_RETRIES = 3
-TOKENS_PER_TASK_ESTIMATE = 2000
+TOKENS_PER_TASK_ESTIMATE = 2000  # legacy fallback
+
+
+def _estimate_token_budget(tasks: List["PlannedTask"]) -> int:
+    """Sum token budgets based on each task's complexity tier."""
+    return sum(
+        COMPLEXITY_TOKEN_BUDGET.get(t.complexity, TOKENS_PER_TASK_ESTIMATE)
+        for t in tasks
+    )
+
+# Deliverable keywords for complexity scoring
+_DELIVERABLE_KEYWORDS = frozenset({
+    "report", "paper", "app", "application", "analysis",
+    "presentation", "dashboard", "pipeline", "system",
+})
+
+# Domain topic clusters for breadth estimation.
+# Multi-word terms use substring matching; single-word terms use word-boundary matching.
+_DOMAIN_CLUSTERS: List[frozenset[str]] = [
+    frozenset({"ai", "machine learning", "ml", "deep learning", "neural", "llm", "nlp", "gpt", "coordination"}),
+    frozenset({"web", "frontend", "backend", "api", "rest", "graphql", "react", "html", "css"}),
+    frozenset({"data", "database", "sql", "analytics", "etl", "warehouse", "visualization"}),
+    frozenset({"security", "authentication", "encryption", "oauth", "compliance"}),
+    frozenset({"cloud", "aws", "azure", "gcp", "kubernetes", "docker", "devops", "ci/cd"}),
+    frozenset({"mobile", "ios", "android", "swift", "kotlin", "flutter"}),
+    frozenset({"business", "marketing", "finance", "strategy", "revenue", "growth"}),
+    frozenset({"research", "experiment", "prior art", "literature", "survey", "implications"}),
+    frozenset({"design", "ux", "figma", "wireframe", "prototype"}),
+    frozenset({"testing", "qa", "automation", "performance", "load testing"}),
+]
+
+
+# ---------------------------------------------------------------------------
+# Complexity detection (PRD-82C US-004)
+# ---------------------------------------------------------------------------
+
+
+def _count_deliverables(goal: str) -> int:
+    """Count how many deliverable keywords appear in the goal."""
+    goal_lower = goal.lower()
+    return sum(1 for kw in _DELIVERABLE_KEYWORDS if kw in goal_lower)
+
+
+def _estimate_domains(goal: str) -> int:
+    """Count how many distinct topic clusters the goal spans."""
+    goal_lower = goal.lower()
+    goal_words = set(re.findall(r"[a-z0-9/\-]+", goal_lower))
+
+    def _cluster_matches(cluster: frozenset[str]) -> bool:
+        for term in cluster:
+            if " " in term:
+                # Multi-word: substring match
+                if term in goal_lower:
+                    return True
+            else:
+                # Single-word: word-boundary match
+                if term in goal_words:
+                    return True
+        return False
+
+    return sum(1 for cluster in _DOMAIN_CLUSTERS if _cluster_matches(cluster))
+
+
+def _detect_complexity(
+    goal: str,
+    attachments: Optional[List[Any]] = None,
+) -> ComplexityTier:
+    """
+    Score goal complexity and return the appropriate tier.
+
+    Signals:
+      - word_count > 50 → +1
+      - deliverable_count >= 1 → +1, >= 3 → +1 (bonus)
+      - domain_breadth >= 2 → +1, >= 4 → +1 (bonus)
+      - attachment_count > 0 → +1
+
+    Score >= 3 → COMPLEX, >= 1 → MODERATE, else SIMPLE.
+    """
+    score = 0
+
+    if len(goal.split()) > 50:
+        score += 1
+
+    deliverable_count = _count_deliverables(goal)
+    if deliverable_count >= 1:
+        score += 1
+    if deliverable_count >= 3:
+        score += 1
+
+    domain_count = _estimate_domains(goal)
+    if domain_count >= 2:
+        score += 1
+    if domain_count >= 4:
+        score += 1
+
+    if attachments and len(attachments) > 0:
+        score += 1
+
+    if score >= 3:
+        return ComplexityTier.COMPLEX
+    elif score >= 1:
+        return ComplexityTier.MODERATE
+    else:
+        return ComplexityTier.SIMPLE
+
+
+def _complexity_to_max_concurrent(tier: ComplexityTier) -> int:
+    """Map complexity tier to max_concurrent value."""
+    if tier == ComplexityTier.COMPLEX:
+        return 3
+    elif tier == ComplexityTier.MODERATE:
+        return 2
+    return 1
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +351,8 @@ class PlannedTask:
     verification_criteria: List[Dict[str, Any]]
     required_tools: List[str]
     dependencies: List[str]  # temp_ids of upstream tasks
+    complexity: str = "moderate"
+    parallel_group: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -256,6 +371,7 @@ class DecompositionResult:
     dependencies: List[PlannedDependency]
     token_estimate: int
     template_used: Optional[str] = None
+    max_concurrent: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +494,7 @@ class MissionPlanner:
                 )
                 continue
 
+            tasks, deps = _ensure_synthesis_tasks(tasks, deps)
             validation_errors = _validate_plan(tasks, deps, agents)
             if validation_errors:
                 last_errors = validation_errors
@@ -388,16 +505,22 @@ class MissionPlanner:
                 )
                 continue
 
-            token_estimate = len(tasks) * TOKENS_PER_TASK_ESTIMATE
+            token_estimate = _estimate_token_budget(tasks)
+            # Compute max_concurrent same as decompose()
+            max_concurrent = _complexity_to_max_concurrent(
+                _detect_complexity(goal, None)
+            )
             logger.info(
-                "MissionPlanner.replan: generated %d replacement tasks (attempt %d)",
+                "MissionPlanner.replan: generated %d replacement tasks (attempt %d, max_concurrent=%d)",
                 len(tasks),
                 attempt,
+                max_concurrent,
             )
             return DecompositionResult(
                 tasks=tasks,
                 dependencies=deps,
                 token_estimate=token_estimate,
+                max_concurrent=max_concurrent,
             )
 
         raise PlanValidationError(last_errors)
@@ -424,6 +547,17 @@ class MissionPlanner:
         Raises:
             PlanValidationError: if all retry attempts fail structural validation.
         """
+        # --- Complexity detection (82C US-004) ---
+        raw_attachments_list = (config or {}).get("attachments")
+        complexity = _detect_complexity(goal, raw_attachments_list)
+        max_concurrent = _complexity_to_max_concurrent(complexity)
+        logger.info(
+            "MissionPlanner: complexity=%s max_concurrent=%d for goal='%s'",
+            complexity.value,
+            max_concurrent,
+            goal[:80],
+        )
+
         # --- Template matching (82B US-002) — try before LLM ---
         template = match_template(goal)
         if template is not None:
@@ -436,9 +570,10 @@ class MissionPlanner:
             parse_errors: List[str] = []
             tasks, deps = _parse_plan({"tasks": raw_tasks}, parse_errors)
             if not parse_errors:
+                tasks, deps = _ensure_synthesis_tasks(tasks, deps)
                 validation_errors = _validate_plan(tasks, deps, agents)
                 if not validation_errors:
-                    token_estimate = len(tasks) * TOKENS_PER_TASK_ESTIMATE
+                    token_estimate = _estimate_token_budget(tasks)
                     logger.info(
                         "MissionPlanner: template=%s produced %d tasks",
                         template.id,
@@ -449,6 +584,7 @@ class MissionPlanner:
                         dependencies=deps,
                         token_estimate=token_estimate,
                         template_used=template.id,
+                        max_concurrent=max_concurrent,
                     )
                 else:
                     logger.warning(
@@ -538,6 +674,9 @@ class MissionPlanner:
                 )
                 continue
 
+            # Auto-insert synthesis tasks for parallel convergence (82C US-008)
+            tasks, deps = _ensure_synthesis_tasks(tasks, deps)
+
             # Structural validation
             validation_errors = _validate_plan(tasks, deps, agents)
             if validation_errors:
@@ -550,7 +689,7 @@ class MissionPlanner:
                 continue
 
             # Success
-            token_estimate = len(tasks) * TOKENS_PER_TASK_ESTIMATE
+            token_estimate = _estimate_token_budget(tasks)
             logger.info(
                 "MissionPlanner: decomposed goal into %d tasks (attempt %d)",
                 len(tasks),
@@ -560,6 +699,7 @@ class MissionPlanner:
                 tasks=tasks,
                 dependencies=deps,
                 token_estimate=token_estimate,
+                max_concurrent=max_concurrent,
             )
 
         # All retries exhausted
@@ -572,18 +712,28 @@ class MissionPlanner:
 
 _SYSTEM_PROMPT = """\
 You are a mission planner for an AI agent platform. Your job is to decompose \
-a user's goal into a sequential plan of discrete tasks that can be executed \
-by the available agents.
+a user's goal into a task DAG that can be executed by the available agents. \
+Tasks may run in parallel when they are independent.
 
 Rules:
 - Each task must be atomic — completable by ONE agent in ONE execution.
-- Tasks execute sequentially (one at a time). Use dependencies to encode ordering.
+- Each task should produce at most ~4000 words of output.
+- Use dependencies to encode ordering. Tasks with no dependencies on each other \
+can run in parallel.
+- Assign a complexity tier to each task: "simple" (~1000 tokens), "moderate" \
+(~4000 tokens), or "complex" (~8000 tokens).
+- Group independent tasks that can run in parallel under the same parallel_group \
+name (e.g. "research", "analysis"). Tasks in the same parallel_group MUST NOT \
+depend on each other.
+- After parallel groups converge, include a "synthesis" task (task_type="synthesis") \
+that merges and integrates the outputs of the parallel tasks.
 - Every task must specify an agent_role matching one of the available agents.
 - The plan MUST contain between 3 and 20 tasks inclusive.
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
 
 _VALID_TASK_TYPES = frozenset(t.value for t in TaskType)
+_VALID_COMPLEXITIES = frozenset({"simple", "moderate", "complex", "synthesis"})
 
 
 def _build_decomposition_prompt(
@@ -649,6 +799,8 @@ Return ONLY a JSON object with this exact structure:
       "agent_role": "researcher",
       "sequence_number": 1,
       "task_type": "llm_generation",
+      "complexity": "moderate",
+      "parallel_group": "research",
       "verification_criteria": [
         {"type": "min_length", "value": 200, "must_pass": true},
         {"type": "required_sections", "value": ["## Summary", "## Findings"], "must_pass": false}
@@ -658,21 +810,40 @@ Return ONLY a JSON object with this exact structure:
     },
     {
       "temp_id": "task_2",
-      "title": "...",
+      "title": "Research secondary sources",
       "description": "...",
-      "agent_role": "writer",
-      "sequence_number": 2,
+      "agent_role": "researcher",
+      "sequence_number": 1,
       "task_type": "llm_generation",
+      "complexity": "moderate",
+      "parallel_group": "research",
       "verification_criteria": [],
       "required_tools": [],
-      "dependencies": ["task_1"]
+      "dependencies": []
+    },
+    {
+      "temp_id": "task_3",
+      "title": "Synthesize research findings",
+      "description": "Merge and integrate all research outputs into a coherent whole",
+      "agent_role": "writer",
+      "sequence_number": 2,
+      "task_type": "synthesis",
+      "complexity": "moderate",
+      "parallel_group": null,
+      "verification_criteria": [],
+      "required_tools": [],
+      "dependencies": ["task_1", "task_2"]
     }
   ]
 }
 ```
 
 Valid task_type values: llm_generation, tool_execution, analysis, synthesis, review
+Valid complexity values: simple, moderate, complex
 Dependencies reference temp_id values of upstream tasks that must complete first.
+parallel_group: string name grouping independent parallel tasks (null if sequential).
+Tasks in the same parallel_group MUST NOT depend on each other.
+After parallel groups converge, include a synthesis task that merges the outputs.
 """
 
 
@@ -686,7 +857,13 @@ Rules:
 - Do NOT duplicate work already completed by verified tasks.
 - Generate only the tasks needed to replace the failed task and complete the goal.
 - Each task must be atomic — completable by ONE agent in ONE execution.
-- Tasks execute sequentially. Use dependencies to encode ordering.
+- Each task should produce at most ~4000 words of output.
+- Use dependencies to encode ordering. Independent tasks can run in parallel.
+- Assign a complexity tier to each task: "simple", "moderate", or "complex".
+- Group independent parallel tasks under the same parallel_group name. \
+Tasks in the same parallel_group MUST NOT depend on each other.
+- After parallel groups converge, include a "synthesis" task (task_type="synthesis") \
+that merges the parallel outputs.
 - Every task must specify an agent_role matching one of the available agents.
 - The plan MUST contain between 3 and 20 tasks inclusive.
 - Return ONLY a single JSON object (no markdown, no explanation).
@@ -882,6 +1059,14 @@ def _parse_plan(
         if not isinstance(task_deps, list):
             task_deps = []
 
+        # PRD-82C: complexity and parallel_group
+        complexity = str(rt.get("complexity", "moderate")).lower()
+        if complexity not in _VALID_COMPLEXITIES:
+            complexity = "moderate"
+
+        raw_pg = rt.get("parallel_group")
+        parallel_group = str(raw_pg).strip() if raw_pg else None
+
         tasks.append(
             PlannedTask(
                 temp_id=temp_id,
@@ -893,6 +1078,8 @@ def _parse_plan(
                 verification_criteria=verification_criteria,
                 required_tools=[str(t) for t in required_tools],
                 dependencies=[str(d) for d in task_deps],
+                complexity=complexity,
+                parallel_group=parallel_group,
             )
         )
 
@@ -905,6 +1092,184 @@ def _parse_plan(
             )
 
     return tasks, deps
+
+
+# ---------------------------------------------------------------------------
+# Synthesis auto-insertion (PRD-82C US-008)
+# ---------------------------------------------------------------------------
+
+
+def _ensure_synthesis_tasks(
+    tasks: List[PlannedTask],
+    deps: List[PlannedDependency],
+) -> tuple:
+    """
+    Auto-insert synthesis tasks when parallel branches converge without one.
+
+    For each parallel_group with 2+ tasks, check whether any downstream task
+    depends on members of that group. If the downstream task is NOT a synthesis
+    task, insert an auto-generated synthesis task between the group and the
+    downstream consumer.
+
+    Returns a new (tasks, deps) tuple — inputs are not mutated.
+    """
+    # Index parallel groups with 2+ members
+    group_members: Dict[str, List[PlannedTask]] = {}
+    for task in tasks:
+        if task.parallel_group:
+            group_members.setdefault(task.parallel_group, []).append(task)
+
+    # Only consider groups that actually have parallelism
+    parallel_groups = {
+        name: members
+        for name, members in group_members.items()
+        if len(members) >= 2
+    }
+
+    if not parallel_groups:
+        return tasks, deps
+
+    # Check which groups already have explicit synthesis tasks downstream
+    member_ids_by_group: Dict[str, frozenset] = {
+        name: frozenset(t.temp_id for t in members)
+        for name, members in parallel_groups.items()
+    }
+
+    # For each group, find downstream tasks that depend on ANY member
+    deps_by_target: Dict[str, List[str]] = {}
+    for dep in deps:
+        deps_by_target.setdefault(dep.to_task_temp_id, []).append(
+            dep.from_task_temp_id
+        )
+
+    task_by_id = {t.temp_id: t for t in tasks}
+
+    # Track which groups already have a synthesis consumer
+    groups_with_synthesis: set = set()
+    for task in tasks:
+        if task.task_type == TaskType.SYNTHESIS.value:
+            task_upstream = set(deps_by_target.get(task.temp_id, []))
+            for group_name, member_ids in member_ids_by_group.items():
+                if task_upstream & member_ids:
+                    groups_with_synthesis.add(group_name)
+
+    groups_needing_synthesis = set(parallel_groups.keys()) - groups_with_synthesis
+    if not groups_needing_synthesis:
+        return tasks, deps
+
+    # Build new task and dep lists (immutable approach)
+    new_tasks = list(tasks)
+    new_deps = list(deps)
+
+    for group_name in sorted(groups_needing_synthesis):
+        member_ids = member_ids_by_group[group_name]
+        members = parallel_groups[group_name]
+
+        # Max sequence in this group — synthesis goes right after
+        max_group_seq = max(t.sequence_number for t in members)
+        synth_seq = max_group_seq + 1
+
+        synth_id = f"synth_{group_name}"
+        # Ensure unique temp_id
+        existing_ids = {t.temp_id for t in new_tasks}
+        suffix = 0
+        while synth_id in existing_ids:
+            suffix += 1
+            synth_id = f"synth_{group_name}_{suffix}"
+
+        synth_task = PlannedTask(
+            temp_id=synth_id,
+            title=f"Synthesize {group_name} outputs",
+            description=(
+                f"Merge and synthesize the outputs from the '{group_name}' "
+                f"parallel tasks into a unified, coherent result."
+            ),
+            agent_role="writer",
+            sequence_number=synth_seq,
+            task_type=TaskType.SYNTHESIS.value,
+            verification_criteria=[],
+            required_tools=[],
+            dependencies=sorted(member_ids),
+            complexity="synthesis",
+            parallel_group=None,
+        )
+
+        new_tasks.append(synth_task)
+
+        # Add deps: each parallel member → synth task
+        for mid in sorted(member_ids):
+            new_deps.append(
+                PlannedDependency(
+                    from_task_temp_id=mid,
+                    to_task_temp_id=synth_id,
+                )
+            )
+
+        # Re-point downstream tasks: any task that depended on a group member
+        # should now depend on the synthesis task instead
+        updated_deps: List[PlannedDependency] = []
+        tasks_to_repoint: set = set()
+        for dep in new_deps:
+            # Skip deps we just added (member → synth)
+            if dep.to_task_temp_id == synth_id:
+                updated_deps.append(dep)
+                continue
+            # If a non-member task depends on a group member, repoint to synth
+            if (
+                dep.from_task_temp_id in member_ids
+                and dep.to_task_temp_id not in member_ids
+            ):
+                if dep.to_task_temp_id not in tasks_to_repoint:
+                    tasks_to_repoint.add(dep.to_task_temp_id)
+                    updated_deps.append(
+                        PlannedDependency(
+                            from_task_temp_id=synth_id,
+                            to_task_temp_id=dep.to_task_temp_id,
+                        )
+                    )
+                # Drop the old direct dep (replaced by synth → downstream)
+            else:
+                updated_deps.append(dep)
+
+        new_deps = updated_deps
+
+        # Update repointed tasks' dependencies field for consistency
+        updated_tasks: List[PlannedTask] = []
+        for task in new_tasks:
+            if task.temp_id in tasks_to_repoint:
+                # Replace group member deps with synth dep
+                old_deps_set = set(task.dependencies)
+                new_task_deps = sorted(
+                    (old_deps_set - member_ids) | {synth_id}
+                )
+                updated_tasks.append(
+                    PlannedTask(
+                        temp_id=task.temp_id,
+                        title=task.title,
+                        description=task.description,
+                        agent_role=task.agent_role,
+                        sequence_number=task.sequence_number,
+                        task_type=task.task_type,
+                        verification_criteria=task.verification_criteria,
+                        required_tools=task.required_tools,
+                        dependencies=new_task_deps,
+                        complexity=task.complexity,
+                        parallel_group=task.parallel_group,
+                    )
+                )
+            else:
+                updated_tasks.append(task)
+        new_tasks = updated_tasks
+
+    # Bump sequence numbers for tasks that come after inserted synthesis tasks
+    # to maintain proper ordering
+    logger.info(
+        "_ensure_synthesis_tasks: auto-inserted %d synthesis task(s) for groups: %s",
+        len(groups_needing_synthesis),
+        sorted(groups_needing_synthesis),
+    )
+
+    return new_tasks, new_deps
 
 
 # ---------------------------------------------------------------------------
@@ -1010,7 +1375,23 @@ def _validate_plan(
                 f"which does not match any active agent"
             )
 
-    # 5. Orphan check — every task should be reachable from a root
+    # 5. Parallel group cross-dependency check (PRD-82C)
+    #    Tasks in the same parallel_group must NOT depend on each other.
+    group_members: Dict[str, set] = {}
+    for task in tasks:
+        if task.parallel_group:
+            group_members.setdefault(task.parallel_group, set()).add(task.temp_id)
+
+    dep_set = {(d.from_task_temp_id, d.to_task_temp_id) for d in deps}
+    for group_name, members in group_members.items():
+        for dep_from, dep_to in dep_set:
+            if dep_from in members and dep_to in members:
+                errors.append(
+                    f"Tasks in parallel_group '{group_name}' have a "
+                    f"cross-dependency: {dep_from} → {dep_to}"
+                )
+
+    # 6. Orphan check — every task should be reachable from a root
     #    (a root is a task with no dependencies)
     children_of: Dict[str, List[str]] = {t.temp_id: [] for t in tasks}
     for dep in deps:

@@ -1,24 +1,26 @@
 """
-Mission Dispatcher — PRD-82A Sequential Mission Coordinator
-============================================================
+Mission Dispatcher — PRD-82A/82C Parallel Mission Coordinator
+==============================================================
 
-Sequential dispatch of orchestration tasks to roster agents via
-execute_with_prompt(). Enforces one-task-at-a-time execution per mission.
+Parallel dispatch of orchestration tasks to roster agents via
+execute_with_prompt(). Dispatches up to max_concurrent tasks simultaneously.
 
 Key patterns:
 - Optimistic claim: raw SQL UPDATE with version_id check prevents double-dispatch
-- Sequential enforcement: skip dispatch if any task is ASSIGNED or RUNNING
+- Parallel dispatch: dispatch_ready() sends up to max_concurrent tasks per tick
 - AgentMatcher selects best agent; no match → immediate fail with NO_AGENT_AVAILABLE
 - Board task created before dispatch for kanban visibility
 - Agent output stored on task.output; tokens tracked per task and per run
 
 Source: PRD-82A Sections 4.4 (claim pattern), 8 (failure codes), 9 (budget tracking)
+        PRD-82C Section US-002 (parallel dispatch)
         PRD-102 Section 6 (dispatcher design)
 """
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Sequence
+import warnings
+from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 
 from sqlalchemy import and_, text
@@ -29,9 +31,12 @@ from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import (
     ActorType,
+    BudgetStatus,
     EventType,
     FailureReasonCode,
+    RunState,
     TaskState,
+    TaskType,
 )
 from modules.coordination.agent_matcher import AgentMatcher, MatchResult
 from services.orchestration_board_bridge import create_task_board_task, sync_board_status
@@ -39,6 +44,7 @@ from services.orchestration_deps import DependencyResolver
 from services.orchestration_state import (
     ConflictError,
     emit_event,
+    transition_run,
     transition_task,
 )
 
@@ -75,13 +81,13 @@ class MissionDispatcher:
     """
 
     @staticmethod
-    def has_active_task(db: Session, run_id: UUID) -> bool:
+    def count_active_tasks(db: Session, run_id: UUID) -> int:
         """
-        Check if any task for this run is currently ASSIGNED or RUNNING.
+        Count tasks in ASSIGNED or RUNNING state for this run.
 
-        Sequential enforcement: only one task at a time per mission.
+        Used by dispatch_ready() to determine available dispatch slots.
         """
-        active_count = (
+        return (
             db.query(OrchestrationTask.id)
             .filter(
                 and_(
@@ -94,7 +100,21 @@ class MissionDispatcher:
             )
             .count()
         )
-        return active_count > 0
+
+    @staticmethod
+    def has_active_task(db: Session, run_id: UUID) -> bool:
+        """
+        Check if any task for this run is currently ASSIGNED or RUNNING.
+
+        .. deprecated:: 82C
+            Use :meth:`count_active_tasks` with :meth:`dispatch_ready` instead.
+        """
+        warnings.warn(
+            "has_active_task() is deprecated, use count_active_tasks() + dispatch_ready()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return MissionDispatcher.count_active_tasks(db, run_id) > 0
 
     @staticmethod
     def claim_task(
@@ -166,14 +186,11 @@ class MissionDispatcher:
         """
         Find and dispatch the next queued task for a mission run.
 
-        Enforces sequential execution: if any task is ASSIGNED or RUNNING,
-        returns without dispatching. Otherwise, finds the first ready task
-        (dependencies met), selects an agent, claims the task, and emits
-        the TASK_ASSIGNED event.
+        .. deprecated:: 82C
+            Use :meth:`dispatch_ready` for parallel dispatch.
 
-        This method does NOT call execute_with_prompt() — that is the
-        responsibility of the CoordinatorService, which runs the async
-        execution after dispatch succeeds.
+        Enforces sequential execution: if any task is ASSIGNED or RUNNING,
+        returns without dispatching.
 
         Args:
             db: SQLAlchemy session (caller manages transaction).
@@ -183,10 +200,15 @@ class MissionDispatcher:
         Returns:
             DispatchResult with dispatch outcome.
         """
+        warnings.warn(
+            "dispatch_next() is deprecated, use dispatch_ready() for parallel dispatch",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         run_id = run.id
 
-        # --- Sequential enforcement ---
-        if MissionDispatcher.has_active_task(db, run_id):
+        # --- Sequential enforcement (legacy behavior) ---
+        if MissionDispatcher.count_active_tasks(db, run_id) > 0:
             return DispatchResult(
                 dispatched=False,
                 skipped_reason="active_task_exists",
@@ -218,11 +240,36 @@ class MissionDispatcher:
                     dispatched=False,
                     skipped_reason="no_ready_tasks",
                 )
-
-            # Pick first by sequence_number (already ordered by get_ready_tasks)
             task = ready_tasks[0]
 
-            # --- Transition pending → queued ---
+        return MissionDispatcher._dispatch_single(db, run, task, agents)
+
+    @staticmethod
+    def _dispatch_single(
+        db: Session,
+        run: OrchestrationRun,
+        task: OrchestrationTask,
+        agents: Sequence[Agent],
+    ) -> DispatchResult:
+        """
+        Dispatch a single task: transition to queued, match agent, claim, emit event.
+
+        Extracted from dispatch_next() so both dispatch_next() and dispatch_ready()
+        share identical dispatch logic.
+
+        Args:
+            db: SQLAlchemy session (caller manages transaction).
+            run: The OrchestrationRun.
+            task: The task to dispatch (must be PENDING, QUEUED, or RETRYING).
+            agents: Candidate roster agents.
+
+        Returns:
+            DispatchResult with dispatch outcome.
+        """
+        run_id = run.id
+
+        # If task is pending, transition to queued first
+        if task.state == TaskState.PENDING.value:
             try:
                 transition_task(
                     db=db,
@@ -254,7 +301,6 @@ class MissionDispatcher:
         )
 
         if match_result is None:
-            # No agent available — fail task immediately
             task.failure_reason_code = FailureReasonCode.NO_AGENT_AVAILABLE.value
             task.failure_detail = (
                 f"No roster agent matched for role '{task.agent_role}'. "
@@ -287,7 +333,7 @@ class MissionDispatcher:
                 skipped_reason="claim_failed",
             )
 
-        # --- Emit TASK_ASSIGNED event (claim bypasses transition_task) ---
+        # --- Emit TASK_ASSIGNED event ---
         emit_event(
             db=db,
             run_id=run_id,
@@ -312,7 +358,6 @@ class MissionDispatcher:
                 exc_info=True,
             )
 
-        # Sync board status to reflect assigned state
         sync_board_status(db, task)
 
         logger.info(
@@ -330,6 +375,236 @@ class MissionDispatcher:
             agent_id=match_result.agent_id,
             agent_name=match_result.agent_name,
         )
+
+    @staticmethod
+    def _get_budget_status(run: OrchestrationRun) -> BudgetStatus:
+        """
+        Compute the budget health status for a run.
+
+        Returns HEALTHY if no budget is set (unlimited).
+        """
+        budget = run.token_budget_estimate
+        if not budget or budget <= 0:
+            return BudgetStatus.HEALTHY
+
+        used = run.tokens_used or 0
+        pct = (used / budget) * 100
+
+        if pct > 100:
+            return BudgetStatus.EXCEEDED
+        if pct >= 80:
+            return BudgetStatus.CRITICAL
+        if pct >= 50:
+            return BudgetStatus.WARNING
+        return BudgetStatus.HEALTHY
+
+    @staticmethod
+    def _pre_dispatch_budget_check(
+        db: Session,
+        run: OrchestrationRun,
+        task: OrchestrationTask,
+    ) -> str:
+        """
+        Budget admission gate — check if the run can afford this task.
+
+        Returns:
+            'allow' — dispatch the task.
+            'defer' — skip this task but continue checking others.
+            'block' — stop dispatching entirely, pause the run.
+        """
+        budget = run.token_budget_estimate
+        if not budget or budget <= 0:
+            return "allow"
+
+        status = MissionDispatcher._get_budget_status(run)
+        task_type = getattr(task, "task_type", None) or ""
+
+        # Priority task types that dispatch even at CRITICAL budget
+        priority_types = {TaskType.SYNTHESIS.value, TaskType.REVIEW.value}
+
+        if status == BudgetStatus.HEALTHY:
+            return "allow"
+
+        if status == BudgetStatus.WARNING:
+            logger.warning(
+                "Budget WARNING for run %s: %d/%d tokens used — dispatching task %s anyway",
+                run.id, run.tokens_used or 0, budget, task.id,
+            )
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_BUDGET_WARNING,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="dispatcher",
+                payload={
+                    "tokens_used": run.tokens_used or 0,
+                    "token_budget_estimate": budget,
+                    "task_id": str(task.id),
+                },
+            )
+            return "allow"
+
+        if status == BudgetStatus.CRITICAL:
+            if task_type in priority_types:
+                logger.warning(
+                    "Budget CRITICAL for run %s — allowing priority task %s (type=%s)",
+                    run.id, task.id, task_type,
+                )
+                return "allow"
+            logger.warning(
+                "Budget CRITICAL for run %s — deferring non-priority task %s (type=%s)",
+                run.id, task.id, task_type,
+            )
+            return "defer"
+
+        # EXCEEDED
+        logger.warning(
+            "Budget EXCEEDED for run %s: %d/%d tokens — blocking dispatch",
+            run.id, run.tokens_used or 0, budget,
+        )
+        return "block"
+
+    @staticmethod
+    def dispatch_ready(
+        db: Session,
+        run: OrchestrationRun,
+        agents: Sequence[Agent],
+    ) -> List[DispatchResult]:
+        """
+        Dispatch up to (max_concurrent - active_count) ready tasks.
+
+        Parallel dispatch: finds all ready tasks (dependencies met), dispatches
+        up to the available slot count. Each task gets its own agent via
+        AgentMatcher.
+
+        Args:
+            db: SQLAlchemy session (caller manages transaction).
+            run: The OrchestrationRun to dispatch for.
+            agents: Candidate roster agents for the workspace.
+
+        Returns:
+            List of DispatchResult — one per dispatch attempt.
+        """
+        run_id = run.id
+        max_concurrent = run.max_concurrent or 1
+
+        # --- Calculate available slots ---
+        active_count = MissionDispatcher.count_active_tasks(db, run_id)
+        available_slots = max_concurrent - active_count
+
+        if available_slots <= 0:
+            return [
+                DispatchResult(
+                    dispatched=False,
+                    skipped_reason="max_concurrent_reached",
+                )
+            ]
+
+        # --- Find already-queued or retrying tasks ---
+        actionable = (
+            db.query(OrchestrationTask)
+            .filter(
+                and_(
+                    OrchestrationTask.run_id == run_id,
+                    OrchestrationTask.state.in_([
+                        TaskState.QUEUED.value,
+                        TaskState.RETRYING.value,
+                    ]),
+                )
+            )
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+
+        # --- Find ready tasks (pending with all deps met) ---
+        ready_tasks = DependencyResolver.get_ready_tasks(db, run_id)
+
+        # Combine: actionable first, then ready (deduplicated)
+        seen_ids = set()
+        candidates: List[OrchestrationTask] = []
+        for task in actionable:
+            if task.id not in seen_ids:
+                seen_ids.add(task.id)
+                candidates.append(task)
+        for task in ready_tasks:
+            if task.id not in seen_ids:
+                seen_ids.add(task.id)
+                candidates.append(task)
+
+        if not candidates:
+            return [
+                DispatchResult(
+                    dispatched=False,
+                    skipped_reason="no_ready_tasks",
+                )
+            ]
+
+        # --- Dispatch up to available_slots with budget gate ---
+        results: List[DispatchResult] = []
+        dispatched_count = 0
+        for task in candidates:
+            if dispatched_count >= available_slots:
+                break
+
+            # Budget admission gate
+            budget_decision = MissionDispatcher._pre_dispatch_budget_check(
+                db, run, task,
+            )
+
+            if budget_decision == "block":
+                # Pause the run and stop dispatching
+                emit_event(
+                    db=db,
+                    run_id=run_id,
+                    event_type=EventType.RUN_BUDGET_EXCEEDED,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="dispatcher",
+                    payload={
+                        "tokens_used": run.tokens_used or 0,
+                        "token_budget_estimate": run.token_budget_estimate,
+                        "blocked_task_id": str(task.id),
+                    },
+                )
+                transition_run(
+                    db=db,
+                    run=run,
+                    new_state=RunState.PAUSED,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="dispatcher",
+                    reason="Budget exceeded — mission paused",
+                )
+                results.append(DispatchResult(
+                    dispatched=False,
+                    task_id=task.id,
+                    skipped_reason="budget_exceeded",
+                ))
+                break
+
+            if budget_decision == "defer":
+                results.append(DispatchResult(
+                    dispatched=False,
+                    task_id=task.id,
+                    skipped_reason="budget_critical_deferred",
+                ))
+                continue
+
+            # budget_decision == "allow"
+            result = MissionDispatcher._dispatch_single(db, run, task, agents)
+            results.append(result)
+            if result.dispatched:
+                dispatched_count += 1
+
+        logger.info(
+            "dispatch_ready(run=%s): %d candidates, %d slots, %d dispatched",
+            run_id,
+            len(candidates),
+            available_slots,
+            dispatched_count,
+        )
+
+        return results if results else [
+            DispatchResult(dispatched=False, skipped_reason="no_ready_tasks")
+        ]
 
     @staticmethod
     def record_task_completion(

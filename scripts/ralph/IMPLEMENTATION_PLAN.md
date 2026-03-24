@@ -1,71 +1,96 @@
-# PRD-82B Mission Intelligence Layer — Implementation Plan
+# PRD-82C Parallel Execution, Budget & Decomposition — Implementation Plan
 
 ## Overview
-Make missions smarter: decomposition templates, history-based agent scoring, replanning on failure, telemetry queries, cross-task consistency verification, verification caching, save-as-routine, and archival.
+Make missions parallel, budget-aware, and intelligently decomposed. Wire all scaffolded-but-unused code from 82A/B. Every story includes wiring tests that prove the code is called, not just defined.
 
-## Branch: ralph/prd-82b-mission-intelligence
+## Branch: ralph/prd-82c-parallel-budget-decomposition
 
 ---
 
 ## Tasks
 
-- [x] US-001: Create decomposition template library (templates.py)
-- [x] US-002: Wire template matching into MissionPlanner
-- [x] US-003: Wire history-based agent scoring in AgentMatcher
-- [x] US-004: Add telemetry query endpoints for missions
-- [x] US-005: Add replanning state and replan endpoint
-- [x] US-006: Add cross-task consistency verification
-- [x] US-007: Add verification result caching
-- [x] US-008: Add save-as-routine conversion endpoint
-- [x] US-009: Add orchestration archive table and cleanup job
+### Phase 1: Schema & Foundation
+- [x] US-001: Add complexity, parallel_group, estimated_tokens columns. ComplexityTier + BudgetStatus enums. COMPLEXITY_TOKEN_BUDGET config. Change max_concurrent default to 3.
+
+### Phase 2: Parallel Dispatch
+- [x] US-002: Replace has_active_task() with count_active_tasks(). Add dispatch_ready() for multi-task dispatch.
+- [x] US-003: Wire dispatch_ready() into coordinator tick. Execute via asyncio.gather().
+
+### Phase 3: Intelligent Decomposition
+- [x] US-004: Add _detect_complexity() to planner. Set max_concurrent on DecompositionResult.
+- [x] US-005: Update planner system prompt for parallel groups + complexity. Parse new fields. Validate parallel_group cross-deps.
+- [x] US-006: Rewrite all 4 templates with parallel groups and synthesis tasks.
+
+### Phase 4: Synthesis & Budget
+- [x] US-007: Build synthesis executor. _build_synthesis_prompt(). Detect TaskType.SYNTHESIS in _execute_task().
+- [x] US-008: Auto-insert synthesis tasks when parallel branches converge without explicit synthesis.
+- [x] US-009: Wire budget admission gate. Pre-dispatch can_afford() check. Graduated response. Pause on exceeded.
+
+### Phase 5: API & Frontend
+- [x] US-010: Enrich plan approval API with budget estimate, max_concurrent override.
+- [x] US-011: Budget bar component, parallel DAG rendering, approval overrides.
+
+### Phase 6: Wiring Tests
+- [x] US-012: Dedicated test suite proving all 82C features are wired end-to-end.
 
 ---
 
 ## Key References
 
-- **Coordination modules**: `orchestrator/modules/coordination/` — planner.py, dispatcher.py, reconciler.py, agent_matcher.py, verification.py, deterministic_checks.py
-- **Coordinator service**: `orchestrator/services/coordinator_service.py` — lifecycle methods, tick loop
-- **Orchestration models**: `orchestrator/core/models/orchestration.py` — OrchestrationRun, OrchestrationTask, OrchestrationEvent, OrchestrationTaskDependency
-- **State enums**: `orchestrator/core/models/orchestration_enums.py` — RunState, TaskState, EventType
-- **Missions API**: `orchestrator/api/missions.py` — REST endpoints
-- **Config**: `orchestrator/core/config.py` — all config constants
-- **Agent matcher synonyms**: `orchestrator/modules/coordination/agent_matcher.py` — _ROLE_SYNONYMS dict (line 62)
-- **Verification models**: `orchestrator/modules/coordination/verification.py` — VerificationResult, VERIFIER_MODEL_SELECTION
-- **Board bridge**: `orchestrator/services/orchestration_board_bridge.py` — board task creation/sync
-- **PRD**: `docs/PRDS/82B-MISSION-INTELLIGENCE-LAYER.md`
+| File | Purpose |
+|------|---------|
+| `orchestrator/modules/coordination/dispatcher.py` | Task dispatch — has_active_task (line ~78), dispatch_next |
+| `orchestrator/modules/coordination/planner.py` | Goal decomposition — _SYSTEM_PROMPT (line ~530), _parse_plan (line ~769), _validate_plan (line ~862) |
+| `orchestrator/modules/coordination/templates.py` | Template library — TaskTemplate (line ~30), TEMPLATE_REGISTRY (line ~60), render_template (line ~448) |
+| `orchestrator/services/coordinator_service.py` | Tick loop — _process_run(), _execute_task(), token tracking (line ~624) |
+| `orchestrator/services/orchestration_deps.py` | DAG resolution — DependencyResolver.get_ready_tasks() |
+| `orchestrator/core/models/orchestration.py` | DB models — OrchestrationRun, OrchestrationTask |
+| `orchestrator/core/models/orchestration_enums.py` | State machine — RunState, TaskState, TaskType, EventType |
+| `orchestrator/core/config.py` | All config constants |
+| `orchestrator/modules/orchestrator/stages/token_budget_manager.py` | Budget (exists but unwired — can_afford() never called) |
+| `orchestrator/modules/coordination/verification.py` | Verification — VerificationService, ConsistencyResult |
+| `frontend/components/missions/mission-detail-page.tsx` | Mission detail UI |
+| `frontend/components/missions/mission-dag-canvas.tsx` | DAG visualization |
+| `frontend/hooks/use-missions-api.ts` | React Query hooks |
+| `frontend/types/missions.ts` | TypeScript interfaces |
+| `docs/PRDS/82C-PARALLEL-EXECUTION-BUDGET-DECOMPOSITION.md` | Full PRD with architecture details |
 
-## Architecture Notes
+## Architecture Rules (CRITICAL)
 
-- Python 3.11+ with SQLAlchemy ORM (sync sessions via `Session`)
-- FastAPI endpoints with Pydantic request/response models
-- Alembic for migrations (orchestrator/alembic/versions/)
-- All DB writes use dual-write pattern: state change + orchestration_events append in same transaction
-- Optimistic locking via version_id column on runs and tasks
-- Config: ALL config values in orchestrator/core/config.py — NO os.getenv() elsewhere
-- Cross-model verification: verifier must use different model family from executor
-- Agent roles in templates must match _ROLE_SYNONYMS categories in agent_matcher.py
+- Python 3.11+ with type hints on all public functions
+- SQLAlchemy ORM with sync Session — follow existing patterns
+- FastAPI endpoints with Pydantic BaseModel
+- ALL config values go in orchestrator/core/config.py — NO os.getenv() anywhere else
+- Dual-write pattern: state change + orchestration_events append in SAME transaction
+- Optimistic locking via version_id column
+- Agent roles in templates: use categories from _ROLE_SYNONYMS in agent_matcher.py
+- NO hardcoded values — use config constants
+- Frozen dataclasses for immutable data
+- BEFORE DELETING ANY CODE: grep EVERY file for callers
 - React Query v4 on frontend (isLoading not isPending)
-- Existing test patterns: check orchestrator/tests/ for conventions
 
 ## Validation
 
-For backend Python:
+Backend Python imports:
 ```bash
 cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -c "
-import orchestrator.modules.coordination.templates as t
-import orchestrator.modules.coordination.planner as p
-import orchestrator.modules.coordination.agent_matcher as am
-import orchestrator.modules.coordination.verification as v
+from orchestrator.modules.coordination import templates, planner, dispatcher, agent_matcher, verification
+from orchestrator.services.coordinator_service import CoordinatorService
+from orchestrator.core.models.orchestration_enums import TaskType, ComplexityTier, BudgetStatus
 print('All imports OK')
-"
+" 2>&1 | tail -5
 ```
 
-For any new tests:
+Tests:
 ```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -m pytest orchestrator/tests/ -x -q 2>&1 | tail -20
+cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -m pytest orchestrator/tests/ -x -q --timeout=30 2>&1 | tail -20
 ```
 
-For frontend changes (US-008 only):
+Frontend:
 ```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/frontend && npx tsc --noEmit 2>&1 | grep -iE "mission-detail|save-as-routine" | head -10
+cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/frontend && npx tsc --noEmit 2>&1 | grep -iE "mission-detail|mission-dag|budget-bar" | head -10
 ```
+
+## Discovered Issues
+
+(Ralph will log issues here during implementation)

@@ -331,6 +331,13 @@ class Config:
     COORDINATOR_TASK_MAX_TOKENS: int = int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "16384"))
     # Cross-task consistency verification (PRD-82B US-006)
     COORDINATOR_CONSISTENCY_CHECK: bool = os.getenv("COORDINATOR_CONSISTENCY_CHECK", "true").lower() in ("true", "1", "yes")
+    # Parallel execution & budget governance (PRD-82C)
+    # Token budgets per complexity tier — used for task estimation and budget gate
+    COMPLEXITY_TOKEN_BUDGET_SIMPLE: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_SIMPLE", "1000"))
+    COMPLEXITY_TOKEN_BUDGET_MODERATE: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_MODERATE", "4000"))
+    COMPLEXITY_TOKEN_BUDGET_COMPLEX: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_COMPLEX", "8000"))
+    COMPLEXITY_TOKEN_BUDGET_SYNTHESIS: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_SYNTHESIS", "6000"))
+
     # Archival: move terminal runs to archive after N days (PRD-82B US-009)
     COORDINATOR_ARCHIVE_AFTER_DAYS: int = int(os.getenv("COORDINATOR_ARCHIVE_AFTER_DAYS", "30"))
     COORDINATOR_ARCHIVE_BATCH_SIZE: int = int(os.getenv("COORDINATOR_ARCHIVE_BATCH_SIZE", "50"))
@@ -560,6 +567,17 @@ class Config:
 
 # Singleton instance
 config = Config()
+
+# ---------------------------------------------------------------------------
+# PRD-82C: Complexity tier → token budget lookup
+# Keys match ComplexityTier enum values (simple, moderate, complex) + "synthesis"
+# ---------------------------------------------------------------------------
+COMPLEXITY_TOKEN_BUDGET: dict[str, int] = {
+    "simple": config.COMPLEXITY_TOKEN_BUDGET_SIMPLE,
+    "moderate": config.COMPLEXITY_TOKEN_BUDGET_MODERATE,
+    "complex": config.COMPLEXITY_TOKEN_BUDGET_COMPLEX,
+    "synthesis": config.COMPLEXITY_TOKEN_BUDGET_SYNTHESIS,
+}
 
 # Backward compatibility alias
 orchestrator_config = config

@@ -19,7 +19,13 @@ Study with subagents:
 - **Config**: `orchestrator/core/config.py` — ALL config constants go here
 - **Agent matcher**: `orchestrator/modules/coordination/agent_matcher.py` — _ROLE_SYNONYMS (line 62), _score_agent() (line 275), match() (line 105)
 - **Verification**: `orchestrator/modules/coordination/verification.py` — VerificationResult, VerificationService, VERIFIER_MODEL_SELECTION
-- **PRD**: `docs/PRDS/82B-MISSION-INTELLIGENCE-LAYER.md`
+- **Templates**: `orchestrator/modules/coordination/templates.py` — DecompositionTemplate, TaskTemplate, match_template, render_template
+- **Dependencies**: `orchestrator/services/orchestration_deps.py` — DependencyResolver.get_ready_tasks()
+- **Budget manager**: `orchestrator/modules/orchestrator/stages/token_budget_manager.py` — TokenBudgetManager (exists but unwired)
+- **Frontend missions**: `frontend/components/missions/` — mission-detail-page.tsx, mission-dag-canvas.tsx, mission-task-node.tsx
+- **Frontend hooks**: `frontend/hooks/use-missions-api.ts` — React Query hooks
+- **Frontend types**: `frontend/types/missions.ts` — TypeScript interfaces
+- **PRD**: `docs/PRDS/82C-PARALLEL-EXECUTION-BUDGET-DECOMPOSITION.md`
 
 ### Check for completion
 
@@ -69,9 +75,9 @@ For tests (if any exist):
 cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -m pytest orchestrator/tests/ -x -q --timeout=30 2>&1 | tail -20
 ```
 
-For frontend changes (US-008 only):
+For frontend changes (US-011 only):
 ```bash
-cd frontend && npx tsc --noEmit 2>&1 | grep -iE "mission-detail|save-as-routine" | head -10
+cd frontend && npx tsc --noEmit 2>&1 | grep -iE "mission-detail|mission-dag|budget-bar" | head -10
 ```
 
 Note: Pre-existing errors may exist in other files. Only check for NEW errors introduced by your changes.

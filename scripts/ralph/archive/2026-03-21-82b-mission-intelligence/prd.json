@@ -1,0 +1,202 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/prd-82b-mission-intelligence",
+  "description": "PRD-82B Mission Intelligence Layer — Make missions smarter with decomposition templates, history-based agent scoring, replanning on failure, telemetry queries, cross-task consistency verification, and save-as-routine conversion.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create decomposition template library",
+      "description": "As a coordinator, I want pre-built decomposition templates so common mission types (research, content, analysis) produce consistent high-quality task graphs.",
+      "acceptanceCriteria": [
+        "Create orchestrator/modules/coordination/templates.py",
+        "Define DecompositionTemplate frozen dataclass with fields: id (str), name (str), description (str), keywords (list[str]), task_templates (list[TaskTemplate]), min_tasks (int), max_tasks (int), output_format (str)",
+        "Define TaskTemplate frozen dataclass with fields: sequence (int), agent_role (str), title_pattern (str), description_pattern (str), required_tools (list[str]), expected_output (str), verification_criteria (list[str])",
+        "Define TEMPLATE_REGISTRY: list of 4 built-in templates: research_and_report (5 tasks), content_pipeline (4 tasks), competitive_analysis (4 tasks), data_investigation (3 tasks)",
+        "research_and_report keywords: ['research', 'compare', 'evaluate', 'benchmark', 'framework', 'survey', 'review']",
+        "content_pipeline keywords: ['write', 'blog', 'article', 'content', 'draft', 'copywrite', 'newsletter']",
+        "competitive_analysis keywords: ['competitive', 'market analysis', 'compare companies', 'industry', 'landscape', 'players']",
+        "data_investigation keywords: ['investigate', 'audit', 'diagnose', 'track', 'monitor', 'analyze data', 'find']",
+        "Define match_template(goal: str) -> Optional[DecompositionTemplate] — keyword-based matching, threshold: 2+ keyword hits. Returns highest-scoring template or None",
+        "Define render_template(template: DecompositionTemplate, goal: str) -> list[dict] — fills in title_pattern and description_pattern placeholders with {goal}, returns task dicts compatible with planner output format",
+        "Agent roles in templates MUST match real roster categories: 'researcher', 'writer', 'analyst', 'reviewer', 'search' (from _ROLE_SYNONYMS in agent_matcher.py)",
+        "Unit test: match_template('Research top AI agent frameworks and compare them') returns research_and_report",
+        "Unit test: match_template('Write a blog post about machine learning') returns content_pipeline",
+        "Unit test: match_template('Hello world') returns None (below threshold)",
+        "All tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Reference: PRD-102 Section 5.3 for template spec. Agent roles must align with _ROLE_SYNONYMS in orchestrator/modules/coordination/agent_matcher.py. The render_template output should match the format returned by MissionPlanner._parse_plan_response() — list of dicts with keys: title, description, agent_role, required_tools, depends_on, verification_criteria."
+    },
+    {
+      "id": "US-002",
+      "title": "Wire template matching into MissionPlanner",
+      "description": "As a coordinator, I want the planner to try template matching before LLM decomposition so common patterns get consistent results.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/planner.py, import match_template and render_template from templates.py",
+        "In MissionPlanner.decompose(), add template matching as FIRST step before LLM call",
+        "If match_template(goal) returns a template: call render_template() to get task list, skip LLM decomposition, set template_used field on DecompositionResult",
+        "If no template match: fall through to existing LLM decomposition (82A behavior unchanged)",
+        "Add template_used: Optional[str] field to DecompositionResult dataclass if not already present",
+        "Log the decision: logger.info('MissionPlanner: template=%s matched for goal', template.id) or logger.info('MissionPlanner: no template match, using LLM decomposition')",
+        "Structural validation (DAG validation, agent role checks) still runs on template output — same as LLM output",
+        "Existing LLM decomposition tests still pass",
+        "New test: decompose('Research and compare top 5 AI frameworks') uses research_and_report template",
+        "New test: decompose('What is 2+2') falls through to LLM"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "The planner is at orchestrator/modules/coordination/planner.py. DecompositionResult is a dataclass in the same file. The decompose() method signature: async def decompose(self, db, goal, workspace_id, config) -> DecompositionResult. Don't change the signature — just add the template check inside the method body before the LLM call."
+    },
+    {
+      "id": "US-003",
+      "title": "Wire history-based agent scoring in AgentMatcher",
+      "description": "As a coordinator, I want agents with good verification track records on similar tasks to score higher so the best agents are selected.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/agent_matcher.py, implement _score_history() function",
+        "Signature: _score_history(db: Session, agent_id: int, agent_role: Optional[str], lookback_days: int = 30) -> float",
+        "Query OrchestrationTask for tasks where assigned_agent_id = agent_id, state = 'verified', verifier_score IS NOT NULL, updated_at >= (now - lookback_days)",
+        "If agent_role provided, also filter by agent_role matching",
+        "If fewer than 3 data points, return 0.5 (neutral — not enough data)",
+        "Otherwise return average verifier_score rounded to 4 decimal places",
+        "In _score_agent(), replace 'history_score = 0.5' with call to _score_history()",
+        "Batch optimization: add _build_history_map(db, agent_ids, agent_role) that queries all candidates in one query, returns Dict[int, float]. Call this in AgentMatcher.match() alongside _build_tool_map() and _get_busy_agent_ids()",
+        "Pass the history_map into _score_agent() instead of making per-agent queries",
+        "Update MatchResult debug logging to include history score",
+        "Config: use COORDINATOR_HISTORY_LOOKBACK_DAYS from config (default 30), COORDINATOR_HISTORY_MIN_DATAPOINTS (default 3)",
+        "Add config entries to orchestrator/core/config.py if not present",
+        "All existing agent_matcher tests still pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "CRITICAL: Batch the query. Do NOT make N queries for N agents. Use a single query with .filter(assigned_agent_id.in_(agent_ids)) and group by agent_id. The _score_agent() function currently does NOT accept db session — you'll need to change its signature to accept the pre-computed history_map dict instead. Reference: agent_matcher.py lines 275-336 for _score_agent(), lines 105-211 for match()."
+    },
+    {
+      "id": "US-004",
+      "title": "Add telemetry query endpoints for missions",
+      "description": "As a platform operator, I want to query mission events, costs, and agent performance so I have visibility into how missions are performing.",
+      "acceptanceCriteria": [
+        "Add GET /api/missions/{id}/events endpoint — returns paginated events for a mission run, filterable by event_type query param",
+        "Add GET /api/missions/{id}/cost endpoint — returns token usage breakdown: total tokens, per-task breakdown [{task_id, title, tokens_used}], estimated cost",
+        "Add GET /api/missions/stats endpoint — returns aggregate stats: total_missions, success_rate, avg_duration_minutes, avg_tokens_used, avg_tasks_per_mission, top_agents (top 5 by tasks completed with avg verifier_score), common_failure_reasons",
+        "Add GET /api/agents/{agent_id}/mission-history endpoint — returns agent mission performance: tasks_completed, avg_verifier_score, failure_rate, recent_missions (last 10)",
+        "All endpoints require workspace authentication (use get_request_context_hybrid)",
+        "Events endpoint: paginate with limit/offset query params, default limit=50",
+        "Stats endpoint: accept period query param (7d, 30d, 90d, all), default 30d",
+        "Cost endpoint: calculate estimated_cost using config.COORDINATOR_COST_PER_1K_TOKENS (default 0.003)",
+        "Add COORDINATOR_COST_PER_1K_TOKENS to config.py",
+        "All endpoints return proper JSON responses with appropriate status codes",
+        "Test: GET /api/missions/stats returns valid JSON with all required fields"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Add endpoints to orchestrator/api/missions.py. Query models from orchestrator/core/models/orchestration.py — OrchestrationRun, OrchestrationTask, OrchestrationEvent. Events table has: id, run_id, task_id, event_type, actor_type, payload (JSONB), created_at. Use SQLAlchemy func.avg(), func.count() for aggregations. Follow existing endpoint patterns in missions.py."
+    },
+    {
+      "id": "US-005",
+      "title": "Add replanning state and replan endpoint",
+      "description": "As a user, I want failed missions to be replannable so I don't have to start from scratch when one task fails.",
+      "acceptanceCriteria": [
+        "Add 'replanning' to RunState enum in orchestrator/core/models/orchestration_enums.py with state_type = StateType.ACTIVE",
+        "Add valid transitions: running -> replanning, replanning -> running, replanning -> failed",
+        "In orchestrator/modules/coordination/planner.py, implement replan() method",
+        "Signature: async def replan(self, db, run: OrchestrationRun, failed_task: OrchestrationTask, completed_outputs: list[dict], user_notes: Optional[str] = None) -> DecompositionResult",
+        "Replan prompt includes: original goal, completed task summaries, failure reason, user notes",
+        "Replan only generates replacement tasks for the failed task and its downstream dependents — completed/verified tasks are locked",
+        "Add POST /api/missions/{id}/replan endpoint in orchestrator/api/missions.py",
+        "Request body: { notes?: string } — optional user guidance for replan",
+        "Endpoint validates: mission must be in 'failed' state, replan_count < max_replans",
+        "Add replan_count (int, default 0) field to OrchestrationRun model if not present",
+        "Add COORDINATOR_MAX_REPLANS to config.py (default 2)",
+        "In coordinator_service.py, add replan_mission() method that: transitions to replanning, calls planner.replan(), inserts new tasks, marks old failed/pending tasks as skipped, transitions back to running",
+        "Emit orchestration.mission.replanned event",
+        "Test: replan generates new tasks, old failed task is skipped, mission resumes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "This is the most complex story. The key insight: only replan the FAILED subtree. Completed/verified tasks stay as-is. New tasks get new IDs, new sequence numbers (starting after the last existing sequence), and proper dependencies. The replan prompt should include summaries of completed tasks so the LLM knows what's already done. Reference: planner.py for decompose() pattern, coordinator_service.py for lifecycle methods, orchestration_enums.py for state machine."
+    },
+    {
+      "id": "US-006",
+      "title": "Add cross-task consistency verification",
+      "description": "As a coordinator, I want to check that all task outputs are consistent with each other before presenting the mission for human review.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/verification.py, implement verify_cross_task_consistency() method",
+        "Signature: async def verify_cross_task_consistency(self, db, run_id: UUID, goal: str, task_outputs: list[dict]) -> VerificationResult",
+        "Each task_output dict has: task_id, title, output (text)",
+        "LLM prompt checks for: contradictions between outputs, missing goal coverage, redundant duplication, logical coherence",
+        "Returns VerificationResult with: passed (bool), score (float 0-1), reasoning (str), issues (list of {task_ids, description, severity})",
+        "Uses cross-model verification — different model family from executor agents",
+        "In orchestrator/modules/coordination/reconciler.py, after the last task is verified (all tasks verified), call verify_cross_task_consistency()",
+        "If consistency check passes: proceed to awaiting_human (existing behavior)",
+        "If consistency check fails with high-severity issues: still proceed to awaiting_human but include issues in the review context (don't block — flag for human)",
+        "Add COORDINATOR_CONSISTENCY_CHECK config flag (default true) — skip if false",
+        "Log consistency check result",
+        "Emit orchestration.consistency.checked event with result"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Reference: PRD-103 Section 3.1 and Section 10.2 for prompt template. The VerificationResult dataclass already exists in verification.py — reuse it or extend it. The reconciler checks task completion in _check_all_tasks_done() or similar — that's where to wire the consistency check. Use VERIFIER_MODEL_SELECTION from verification.py for cross-model selection."
+    },
+    {
+      "id": "US-007",
+      "title": "Add verification result caching",
+      "description": "As a coordinator, I want to skip re-verifying identical task output on retry to save tokens and time.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/verification.py, add output hash caching before LLM verification call",
+        "Before calling LLM verifier, compute sha256 hash of the task output text",
+        "Cache key: (task_id, output_hash) — store in a dict on the VerificationService instance",
+        "If cache hit: return cached VerificationResult, log 'Verification cache hit for task {task_id}'",
+        "If cache miss: call LLM verifier as normal, store result in cache",
+        "Cache scope: per-mission-run (cleared when run completes or fails)",
+        "Add clear_cache(run_id) method to clean up after run completion",
+        "Wire clear_cache() call in coordinator_service.py when run reaches terminal state",
+        "Test: verify same output twice → second call returns cached result without LLM call"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Simple in-memory dict cache scoped to the run. Don't use Redis or external cache — this is ephemeral per-run state. The hash should be of the raw output text, not the full task object. Use hashlib.sha256(output.encode()).hexdigest()."
+    },
+    {
+      "id": "US-008",
+      "title": "Add save-as-routine conversion endpoint",
+      "description": "As a user, I want to save a successful mission as a reusable routine so I can re-run similar missions with one click.",
+      "acceptanceCriteria": [
+        "Add POST /api/missions/{id}/save-as-routine endpoint in orchestrator/api/missions.py",
+        "Request body: { name: str, description?: str, tags?: list[str] }",
+        "Endpoint validates: mission must be in 'completed' state",
+        "Extract task graph structure from the completed mission: task roles, dependencies, verification criteria, tool requirements",
+        "Templatize: replace specific content in task descriptions with {goal} placeholder",
+        "Save as a new record — use existing recipes/routines table if available, or create a new orchestration_templates table",
+        "Response: { template_id: str, name: str, task_count: int }",
+        "The saved template can be used by match_template() in future decompositions (add to registry or query from DB)",
+        "Add frontend button: 'Save as Routine' on mission detail page, only visible when mission state is 'completed'",
+        "Button opens a small dialog with name/description/tags fields, calls the endpoint",
+        "Frontend: orchestrator/components/missions/mission-detail-page.tsx — add button in the header actions area",
+        "Test: save a completed mission as routine, verify template structure matches original task graph"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Check if there's an existing recipes table (there is — board_tasks has recipe-related fields). The save-as-routine should create something compatible with the template library from US-001. Simplest approach: save to a new JSON column on an existing table, or create orchestration_templates table with: id, name, description, tags, template_json (JSONB), source_run_id (FK), created_at. The template_json stores the DecompositionTemplate as JSON."
+    },
+    {
+      "id": "US-009",
+      "title": "Add orchestration archive table and cleanup job",
+      "description": "As a platform operator, I want terminal missions older than 30 days archived so the active tables stay fast.",
+      "acceptanceCriteria": [
+        "Create Alembic migration for orchestration_archive table: id (UUID PK), original_run_id (UUID), goal (text), state (varchar), workspace_id (UUID), created_at, completed_at, archive_data (JSONB — contains full run + tasks + events snapshot), archived_at (timestamp)",
+        "Add OrchestrationArchive SQLAlchemy model in orchestrator/core/models/orchestration.py",
+        "In coordinator_service.py, add archive_old_runs(db, days=30) method",
+        "Method finds terminal runs (completed, failed, cancelled) older than days param",
+        "For each: serialize run + tasks + events to JSON, insert into archive, delete from active tables (cascade tasks, events, dependencies)",
+        "Add COORDINATOR_ARCHIVE_AFTER_DAYS to config.py (default 30)",
+        "Add archive trigger: call archive_old_runs() at the start of reconciler tick (throttled to once per hour)",
+        "Add GET /api/missions/archive endpoint — lists archived missions with search",
+        "Test: create a fake old completed run, run archive_old_runs(), verify it moves to archive table and is removed from active table"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Use a throttle mechanism so archive doesn't run every 5s tick — check last_archive_at timestamp, only run if > 1 hour ago. The JSONB archive_data should contain everything needed to reconstruct the mission view: run fields, all tasks with their outputs, all events. This is a full snapshot, not a reference. Alembic migration goes in orchestrator/alembic/versions/."
+    }
+  ]
+}
