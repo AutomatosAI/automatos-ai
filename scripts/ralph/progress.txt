@@ -116,3 +116,21 @@
     - Cards now clickable (cursor-pointer + onClick → setSelectedSlug)
     - AgentTemplateDetail modal rendered at bottom, controlled by selectedSlug state
   - Validated: TypeScript passes (no new errors)
+
+2026-03-24: US-010 COMPLETED
+  - Added "admin" role to _ROLE_SYNONYMS in agent_matcher.py
+    - Synonyms: admin, operations, ops, configure, setup, workspace
+  - Added business_plan template to TEMPLATE_REGISTRY in templates.py:
+    - 12 tasks across 8 sequence numbers (4 logical phases)
+    - Phase 1 (seq 1): 3 parallel research tasks (market research, competitive analysis, financial modeling) in bp_research group
+    - Phase 1→2 synthesis (seq 2): merges all research into integrated foundation
+    - Phase 2 (seq 3-6): sequential document generation (exec summary → market analysis → financial projections → full plan synthesis)
+    - Phase 3 (seq 7): 3 parallel workspace config tasks in bp_workspace_config group
+      - Create agents: platform_create_agent, platform_install_skill
+      - Create playbooks: platform_create_playbook
+      - Board tasks + heartbeats: platform_board_summary, platform_configure_agent_heartbeat
+    - Phase 4 (seq 8): review/verification task
+  - Keywords: "business plan", "business idea", "business model", "launch a business", "start a company", "business", "plan", "startup", "venture", "company", "launch"
+  - Validated: match_template correctly matches "business plan", "start a company", "startup business idea"
+  - Validated: render_template produces 12 tasks with parallel groups in Phase 1 and 3, platform tools in Phase 3
+  - Validated: no false positives on unrelated queries

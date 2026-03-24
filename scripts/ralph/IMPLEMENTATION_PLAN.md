@@ -25,7 +25,7 @@ Import ~65 professional agent skills from agency-agents, build agent templates m
 - [x] US-009: Agent template detail modal + one-click deploy button
 
 ### Phase 4: Business Plan Template & Wiring
-- [ ] US-010: Business Plan mission template in TEMPLATE_REGISTRY (4 phases, parallel groups)
+- [x] US-010: Business Plan mission template in TEMPLATE_REGISTRY (4 phases, parallel groups)
 - [ ] US-011: Mission template selector in create-mission-modal + backend template_id hint
 - [ ] US-012: Integration tests + catalog validation
 

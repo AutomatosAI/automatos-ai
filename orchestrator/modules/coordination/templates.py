@@ -558,6 +558,324 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             ),
         ],
     ),
+    # ── business_plan (14 tasks) ─────────────────────────────────────
+    # Phase 1 (research — 3 parallel tasks + synthesis)
+    # Phase 2 (document generation — sequential: exec summary, market
+    #          analysis, financial projections, synthesis into full doc)
+    # Phase 3 (workspace config — 3 parallel tasks)
+    # Phase 4 (verification — summary report)
+    DecompositionTemplate(
+        id="business_plan",
+        name="Business Plan",
+        description=(
+            "Research, analyze, and produce a comprehensive business plan "
+            "with market research, financial modeling, and workspace "
+            "configuration for ongoing operations."
+        ),
+        keywords=[
+            "business plan", "business idea", "business model",
+            "launch a business", "start a company",
+            "business", "plan", "startup", "venture",
+            "company", "launch",
+        ],
+        min_tasks=14,
+        max_tasks=16,
+        output_format="markdown",
+        task_templates=[
+            # ── Phase 1: Research (3 parallel + 1 synthesis) ──────────
+            TaskTemplate(
+                sequence=1,
+                agent_role="researcher",
+                title_pattern="Market research for: {goal}",
+                description_pattern=(
+                    "Research the target market for: {goal}. Identify market "
+                    "size, growth trends, customer segments, demand drivers, "
+                    "and key demographics. Produce a market research brief "
+                    "with data-backed findings."
+                ),
+                expected_output="Market research brief with data and trends",
+                complexity="moderate",
+                parallel_group="bp_research",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 400, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": ["Market Size", "Customer Segments"],
+                        "must_pass": False,
+                    },
+                ],
+            ),
+            TaskTemplate(
+                sequence=1,
+                agent_role="analyst",
+                title_pattern="Competitive analysis for: {goal}",
+                description_pattern=(
+                    "Identify and analyze competitors relevant to: {goal}. "
+                    "For each competitor, document strengths, weaknesses, "
+                    "pricing, market position, and differentiators. Identify "
+                    "market gaps and competitive advantages."
+                ),
+                expected_output="Competitive landscape analysis",
+                complexity="moderate",
+                parallel_group="bp_research",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 400, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": ["Competitors", "Market Gaps"],
+                        "must_pass": False,
+                    },
+                ],
+            ),
+            TaskTemplate(
+                sequence=1,
+                agent_role="analyst",
+                title_pattern="Financial modeling for: {goal}",
+                description_pattern=(
+                    "Build financial projections for: {goal}. Include "
+                    "revenue model, cost structure, break-even analysis, "
+                    "and 3-year P&L forecast. Identify key assumptions "
+                    "and financial risks."
+                ),
+                expected_output="Financial model with projections and assumptions",
+                complexity="complex",
+                parallel_group="bp_research",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 400, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": ["Revenue Model", "Cost Structure"],
+                        "must_pass": False,
+                    },
+                ],
+            ),
+            TaskTemplate(
+                sequence=2,
+                agent_role="writer",
+                title_pattern="Synthesize research findings for: {goal}",
+                description_pattern=(
+                    "Merge market research, competitive analysis, and "
+                    "financial modeling into a unified research synthesis. "
+                    "Resolve contradictions, highlight key insights, and "
+                    "produce an integrated research foundation for the "
+                    "business plan."
+                ),
+                expected_output="Integrated research synthesis",
+                complexity="moderate",
+                task_type="synthesis",
+                depends_on=["task_1", "task_2", "task_3"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 600, "must_pass": True},
+                ],
+            ),
+            # ── Phase 2: Document Generation (sequential) ─────────────
+            TaskTemplate(
+                sequence=3,
+                agent_role="writer",
+                title_pattern="Write executive summary for: {goal}",
+                description_pattern=(
+                    "Using the research synthesis, write a compelling "
+                    "executive summary for: {goal}. Cover the business "
+                    "concept, value proposition, target market, revenue "
+                    "model, and funding requirements. Keep it concise "
+                    "and persuasive."
+                ),
+                expected_output="Executive summary (1-2 pages)",
+                complexity="moderate",
+                depends_on=["task_4"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 400, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": ["Value Proposition", "Revenue Model"],
+                        "must_pass": False,
+                    },
+                ],
+            ),
+            TaskTemplate(
+                sequence=4,
+                agent_role="writer",
+                title_pattern="Write market analysis section for: {goal}",
+                description_pattern=(
+                    "Write the detailed market analysis section of the "
+                    "business plan for: {goal}. Include industry overview, "
+                    "target market analysis, customer personas, competitive "
+                    "landscape, and market entry strategy."
+                ),
+                expected_output="Market analysis section",
+                complexity="moderate",
+                depends_on=["task_5"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 600, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": [
+                            "Industry Overview",
+                            "Target Market",
+                            "Competitive Landscape",
+                        ],
+                        "must_pass": True,
+                    },
+                ],
+            ),
+            TaskTemplate(
+                sequence=5,
+                agent_role="analyst",
+                title_pattern="Write financial projections section for: {goal}",
+                description_pattern=(
+                    "Write the financial projections section for: {goal}. "
+                    "Include detailed revenue forecasts, expense budgets, "
+                    "cash flow projections, break-even analysis, and "
+                    "funding requirements with use of proceeds."
+                ),
+                expected_output="Financial projections section",
+                complexity="complex",
+                depends_on=["task_6"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 600, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": [
+                            "Revenue Forecast",
+                            "Cash Flow",
+                            "Break-Even Analysis",
+                        ],
+                        "must_pass": True,
+                    },
+                ],
+            ),
+            TaskTemplate(
+                sequence=6,
+                agent_role="writer",
+                title_pattern="Synthesize full business plan document for: {goal}",
+                description_pattern=(
+                    "Merge the executive summary, market analysis, and "
+                    "financial projections into a complete, cohesive "
+                    "business plan document for: {goal}. Add table of "
+                    "contents, operations plan, team structure, and "
+                    "implementation timeline. Ensure consistent tone "
+                    "and formatting throughout."
+                ),
+                expected_output="Complete business plan document",
+                complexity="complex",
+                task_type="synthesis",
+                depends_on=["task_5", "task_6", "task_7"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 1500, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": [
+                            "Executive Summary",
+                            "Market Analysis",
+                            "Financial Projections",
+                            "Operations Plan",
+                        ],
+                        "must_pass": True,
+                    },
+                ],
+            ),
+            # ── Phase 3: Workspace Configuration (3 parallel) ────────
+            TaskTemplate(
+                sequence=7,
+                agent_role="admin",
+                title_pattern="Create workspace agents from catalog for: {goal}",
+                description_pattern=(
+                    "Configure the workspace for ongoing operations by "
+                    "deploying relevant agents from the marketplace catalog. "
+                    "Based on the business plan for: {goal}, deploy agents "
+                    "for key roles: marketing strategist, sales outreach, "
+                    "content writer, financial analyst, and project manager. "
+                    "Use platform_create_agent and platform_install_skill "
+                    "to set up each agent."
+                ),
+                required_tools=[
+                    "platform_create_agent",
+                    "platform_install_skill",
+                ],
+                expected_output="List of created agents with roles and skills",
+                complexity="moderate",
+                parallel_group="bp_workspace_config",
+                depends_on=["task_8"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 200, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=7,
+                agent_role="admin",
+                title_pattern="Create operational playbooks for: {goal}",
+                description_pattern=(
+                    "Create playbooks to automate recurring business "
+                    "operations for: {goal}. Include playbooks for: "
+                    "weekly market monitoring, monthly financial review, "
+                    "content publishing pipeline, and customer outreach "
+                    "cadence. Use platform_create_playbook for each."
+                ),
+                required_tools=["platform_create_playbook"],
+                expected_output="List of created playbooks with schedules",
+                complexity="moderate",
+                parallel_group="bp_workspace_config",
+                depends_on=["task_8"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 200, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=7,
+                agent_role="admin",
+                title_pattern="Create board tasks and configure heartbeats for: {goal}",
+                description_pattern=(
+                    "Set up the task board with initial action items derived "
+                    "from the business plan for: {goal}. Create board tasks "
+                    "for key milestones and next steps. Configure agent "
+                    "heartbeats for autonomous monitoring. Use "
+                    "platform_board_summary and "
+                    "platform_configure_agent_heartbeat."
+                ),
+                required_tools=[
+                    "platform_board_summary",
+                    "platform_configure_agent_heartbeat",
+                ],
+                expected_output="Board tasks and heartbeat configurations",
+                complexity="moderate",
+                parallel_group="bp_workspace_config",
+                depends_on=["task_8"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 200, "must_pass": True},
+                ],
+            ),
+            # ── Phase 4: Verification ─────────────────────────────────
+            TaskTemplate(
+                sequence=8,
+                agent_role="reviewer",
+                title_pattern="Review business plan and workspace setup for: {goal}",
+                description_pattern=(
+                    "Review the complete business plan document and "
+                    "workspace configuration for: {goal}. Verify the "
+                    "plan's internal consistency, check financial "
+                    "projections for reasonableness, confirm all workspace "
+                    "agents and playbooks are properly configured, and "
+                    "produce a final summary report with any "
+                    "recommendations."
+                ),
+                expected_output="Final review report with summary and recommendations",
+                complexity="moderate",
+                task_type="review",
+                depends_on=["task_9", "task_10", "task_11"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 400, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": ["Summary", "Recommendations"],
+                        "must_pass": False,
+                    },
+                ],
+            ),
+        ],
+    ),
 ]
 
 
