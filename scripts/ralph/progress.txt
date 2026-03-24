@@ -98,3 +98,21 @@ US-007 COMPLETED (2026-03-24)
   - _execute_task uses synthesis prompt for SYNTHESIS tasks (integration)
   - _execute_task uses standard prompt for non-SYNTHESIS tasks (regression)
 - 447 tests pass across non-broken test files, no regressions from US-007
+
+US-008 COMPLETED (2026-03-24)
+- Added _ensure_synthesis_tasks(tasks, deps) to planner.py — auto-inserts synthesis tasks when parallel branches converge without explicit synthesis
+- Detects parallel_groups with 2+ members, checks if downstream consumers are already synthesis tasks
+- For groups needing synthesis: creates synth_{group_name} task with agent_role="writer", task_type="synthesis", complexity="synthesis"
+- Repoints downstream task dependencies from group members to the new synthesis task
+- Immutable approach: returns new (tasks, deps) tuple without mutating inputs
+- Wired into all 3 pipeline paths: template decompose, LLM decompose, and replan
+- Added "synthesis" to _VALID_COMPLEXITIES frozenset so auto-inserted tasks pass validation
+- Created tests/test_synthesis_auto_insert.py with 7 wiring tests:
+  - Auto-inserts synthesis between parallel group and non-synthesis downstream
+  - Downstream task dependencies repointed to synth task
+  - Synth task has correct sequence_number (max group seq + 1)
+  - Skips groups that already have explicit synthesis tasks
+  - Single-member groups don't trigger insertion
+  - Sequential plans pass through unchanged
+  - Auto-inserted plan passes _validate_plan
+- 454 tests pass across non-broken test files, no regressions from US-008

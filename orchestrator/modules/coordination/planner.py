@@ -451,6 +451,7 @@ class MissionPlanner:
                 )
                 continue
 
+            tasks, deps = _ensure_synthesis_tasks(tasks, deps)
             validation_errors = _validate_plan(tasks, deps, agents)
             if validation_errors:
                 last_errors = validation_errors
@@ -520,6 +521,7 @@ class MissionPlanner:
             parse_errors: List[str] = []
             tasks, deps = _parse_plan({"tasks": raw_tasks}, parse_errors)
             if not parse_errors:
+                tasks, deps = _ensure_synthesis_tasks(tasks, deps)
                 validation_errors = _validate_plan(tasks, deps, agents)
                 if not validation_errors:
                     token_estimate = _estimate_token_budget(tasks)
@@ -623,6 +625,9 @@ class MissionPlanner:
                 )
                 continue
 
+            # Auto-insert synthesis tasks for parallel convergence (82C US-008)
+            tasks, deps = _ensure_synthesis_tasks(tasks, deps)
+
             # Structural validation
             validation_errors = _validate_plan(tasks, deps, agents)
             if validation_errors:
@@ -679,7 +684,7 @@ that merges and integrates the outputs of the parallel tasks.
 """
 
 _VALID_TASK_TYPES = frozenset(t.value for t in TaskType)
-_VALID_COMPLEXITIES = frozenset({"simple", "moderate", "complex"})
+_VALID_COMPLEXITIES = frozenset({"simple", "moderate", "complex", "synthesis"})
 
 
 def _build_decomposition_prompt(
@@ -1028,6 +1033,184 @@ def _parse_plan(
             )
 
     return tasks, deps
+
+
+# ---------------------------------------------------------------------------
+# Synthesis auto-insertion (PRD-82C US-008)
+# ---------------------------------------------------------------------------
+
+
+def _ensure_synthesis_tasks(
+    tasks: List[PlannedTask],
+    deps: List[PlannedDependency],
+) -> tuple:
+    """
+    Auto-insert synthesis tasks when parallel branches converge without one.
+
+    For each parallel_group with 2+ tasks, check whether any downstream task
+    depends on members of that group. If the downstream task is NOT a synthesis
+    task, insert an auto-generated synthesis task between the group and the
+    downstream consumer.
+
+    Returns a new (tasks, deps) tuple — inputs are not mutated.
+    """
+    # Index parallel groups with 2+ members
+    group_members: Dict[str, List[PlannedTask]] = {}
+    for task in tasks:
+        if task.parallel_group:
+            group_members.setdefault(task.parallel_group, []).append(task)
+
+    # Only consider groups that actually have parallelism
+    parallel_groups = {
+        name: members
+        for name, members in group_members.items()
+        if len(members) >= 2
+    }
+
+    if not parallel_groups:
+        return tasks, deps
+
+    # Check which groups already have explicit synthesis tasks downstream
+    member_ids_by_group: Dict[str, frozenset] = {
+        name: frozenset(t.temp_id for t in members)
+        for name, members in parallel_groups.items()
+    }
+
+    # For each group, find downstream tasks that depend on ANY member
+    deps_by_target: Dict[str, List[str]] = {}
+    for dep in deps:
+        deps_by_target.setdefault(dep.to_task_temp_id, []).append(
+            dep.from_task_temp_id
+        )
+
+    task_by_id = {t.temp_id: t for t in tasks}
+
+    # Track which groups already have a synthesis consumer
+    groups_with_synthesis: set = set()
+    for task in tasks:
+        if task.task_type == TaskType.SYNTHESIS.value:
+            task_upstream = set(deps_by_target.get(task.temp_id, []))
+            for group_name, member_ids in member_ids_by_group.items():
+                if task_upstream & member_ids:
+                    groups_with_synthesis.add(group_name)
+
+    groups_needing_synthesis = set(parallel_groups.keys()) - groups_with_synthesis
+    if not groups_needing_synthesis:
+        return tasks, deps
+
+    # Build new task and dep lists (immutable approach)
+    new_tasks = list(tasks)
+    new_deps = list(deps)
+
+    for group_name in sorted(groups_needing_synthesis):
+        member_ids = member_ids_by_group[group_name]
+        members = parallel_groups[group_name]
+
+        # Max sequence in this group — synthesis goes right after
+        max_group_seq = max(t.sequence_number for t in members)
+        synth_seq = max_group_seq + 1
+
+        synth_id = f"synth_{group_name}"
+        # Ensure unique temp_id
+        existing_ids = {t.temp_id for t in new_tasks}
+        suffix = 0
+        while synth_id in existing_ids:
+            suffix += 1
+            synth_id = f"synth_{group_name}_{suffix}"
+
+        synth_task = PlannedTask(
+            temp_id=synth_id,
+            title=f"Synthesize {group_name} outputs",
+            description=(
+                f"Merge and synthesize the outputs from the '{group_name}' "
+                f"parallel tasks into a unified, coherent result."
+            ),
+            agent_role="writer",
+            sequence_number=synth_seq,
+            task_type=TaskType.SYNTHESIS.value,
+            verification_criteria=[],
+            required_tools=[],
+            dependencies=sorted(member_ids),
+            complexity="synthesis",
+            parallel_group=None,
+        )
+
+        new_tasks.append(synth_task)
+
+        # Add deps: each parallel member → synth task
+        for mid in sorted(member_ids):
+            new_deps.append(
+                PlannedDependency(
+                    from_task_temp_id=mid,
+                    to_task_temp_id=synth_id,
+                )
+            )
+
+        # Re-point downstream tasks: any task that depended on a group member
+        # should now depend on the synthesis task instead
+        updated_deps: List[PlannedDependency] = []
+        tasks_to_repoint: set = set()
+        for dep in new_deps:
+            # Skip deps we just added (member → synth)
+            if dep.to_task_temp_id == synth_id:
+                updated_deps.append(dep)
+                continue
+            # If a non-member task depends on a group member, repoint to synth
+            if (
+                dep.from_task_temp_id in member_ids
+                and dep.to_task_temp_id not in member_ids
+            ):
+                if dep.to_task_temp_id not in tasks_to_repoint:
+                    tasks_to_repoint.add(dep.to_task_temp_id)
+                    updated_deps.append(
+                        PlannedDependency(
+                            from_task_temp_id=synth_id,
+                            to_task_temp_id=dep.to_task_temp_id,
+                        )
+                    )
+                # Drop the old direct dep (replaced by synth → downstream)
+            else:
+                updated_deps.append(dep)
+
+        new_deps = updated_deps
+
+        # Update repointed tasks' dependencies field for consistency
+        updated_tasks: List[PlannedTask] = []
+        for task in new_tasks:
+            if task.temp_id in tasks_to_repoint:
+                # Replace group member deps with synth dep
+                old_deps_set = set(task.dependencies)
+                new_task_deps = sorted(
+                    (old_deps_set - member_ids) | {synth_id}
+                )
+                updated_tasks.append(
+                    PlannedTask(
+                        temp_id=task.temp_id,
+                        title=task.title,
+                        description=task.description,
+                        agent_role=task.agent_role,
+                        sequence_number=task.sequence_number,
+                        task_type=task.task_type,
+                        verification_criteria=task.verification_criteria,
+                        required_tools=task.required_tools,
+                        dependencies=new_task_deps,
+                        complexity=task.complexity,
+                        parallel_group=task.parallel_group,
+                    )
+                )
+            else:
+                updated_tasks.append(task)
+        new_tasks = updated_tasks
+
+    # Bump sequence numbers for tasks that come after inserted synthesis tasks
+    # to maintain proper ordering
+    logger.info(
+        "_ensure_synthesis_tasks: auto-inserted %d synthesis task(s) for groups: %s",
+        len(groups_needing_synthesis),
+        sorted(groups_needing_synthesis),
+    )
+
+    return new_tasks, new_deps
 
 
 # ---------------------------------------------------------------------------
