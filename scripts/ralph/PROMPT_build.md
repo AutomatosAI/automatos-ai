@@ -11,21 +11,23 @@ Study with subagents:
 
 ### Key References
 
-- **Coordination modules**: `orchestrator/modules/coordination/` — planner.py, dispatcher.py, reconciler.py, agent_matcher.py, verification.py, deterministic_checks.py
-- **Coordinator service**: `orchestrator/services/coordinator_service.py` — lifecycle methods, create_mission, approve_plan, review_mission
-- **Orchestration models**: `orchestrator/core/models/orchestration.py` — OrchestrationRun, OrchestrationTask, OrchestrationEvent
-- **State enums**: `orchestrator/core/models/orchestration_enums.py` — RunState, TaskState, EventType, StateType
-- **Missions API**: `orchestrator/api/missions.py` — existing REST endpoints (create, approve, reject, cancel, review, list, detail)
+- **Marketplace API**: `orchestrator/api/marketplace.py` — existing router at /api/marketplace
+- **Skills API**: `orchestrator/api/skills.py` — skill management (PRD-22)
+- **Agents API**: `orchestrator/api/agents.py` — agent CRUD endpoints
+- **Missions API**: `orchestrator/api/missions.py` — create, approve, list, detail endpoints
+- **Core models**: `orchestrator/core/models/core.py` — Agent, AgentTemplate (Pydantic, line ~863), BoardTask
+- **Templates**: `orchestrator/modules/coordination/templates.py` — TEMPLATE_REGISTRY, TaskTemplate, match_template, render_template
+- **Agent matcher**: `orchestrator/modules/coordination/agent_matcher.py` — _ROLE_SYNONYMS for role matching
+- **Platform tools**: `orchestrator/modules/tools/discovery/platform_actions.py` — ActionDefinition registration
+- **Platform executor**: `orchestrator/modules/tools/discovery/platform_executor.py` — tool handlers
+- **Playbook tools**: `orchestrator/modules/tools/discovery/actions_playbooks.py` — platform_create_playbook (EXISTS)
+- **Board task tools**: `orchestrator/modules/tools/discovery/actions_board_tasks.py` — platform_board_summary
 - **Config**: `orchestrator/core/config.py` — ALL config constants go here
-- **Agent matcher**: `orchestrator/modules/coordination/agent_matcher.py` — _ROLE_SYNONYMS (line 62), _score_agent() (line 275), match() (line 105)
-- **Verification**: `orchestrator/modules/coordination/verification.py` — VerificationResult, VerificationService, VERIFIER_MODEL_SELECTION
-- **Templates**: `orchestrator/modules/coordination/templates.py` — DecompositionTemplate, TaskTemplate, match_template, render_template
-- **Dependencies**: `orchestrator/services/orchestration_deps.py` — DependencyResolver.get_ready_tasks()
-- **Budget manager**: `orchestrator/modules/orchestrator/stages/token_budget_manager.py` — TokenBudgetManager (exists but unwired)
-- **Frontend missions**: `frontend/components/missions/` — mission-detail-page.tsx, mission-dag-canvas.tsx, mission-task-node.tsx
+- **Frontend missions**: `frontend/components/missions/create-mission-modal.tsx` — mission creation UI
 - **Frontend hooks**: `frontend/hooks/use-missions-api.ts` — React Query hooks
 - **Frontend types**: `frontend/types/missions.ts` — TypeScript interfaces
-- **PRD**: `docs/PRDS/82C-PARALLEL-EXECUTION-BUDGET-DECOMPOSITION.md`
+- **Skills directory**: `automatos-skills/skills/{category}/{slug}/SKILL.md` — imported skill files
+- **PRD**: `docs/PRDS/120-SKILLS-MARKETPLACE-AGENT-CATALOG.md`
 
 ### Check for completion
 
@@ -65,8 +67,9 @@ grep -c "^\- \[ \]" scripts/ralph/IMPLEMENTATION_PLAN.md || echo 0
 For Python imports and basic syntax:
 ```bash
 cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -c "
-from orchestrator.modules.coordination import templates, planner, agent_matcher, verification
-print('All coordination imports OK')
+from orchestrator.modules.coordination import templates, planner, dispatcher, agent_matcher
+from orchestrator.api import marketplace
+print('All imports OK')
 " 2>&1 | tail -5
 ```
 
@@ -75,9 +78,14 @@ For tests (if any exist):
 cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -m pytest orchestrator/tests/ -x -q --timeout=30 2>&1 | tail -20
 ```
 
-For frontend changes (US-011 only):
+For frontend changes (US-008, US-009, US-011):
 ```bash
-cd frontend && npx tsc --noEmit 2>&1 | grep -iE "mission-detail|mission-dag|budget-bar" | head -10
+cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/frontend && npx tsc --noEmit 2>&1 | grep -iE "marketplace|agent-template|create-mission" | head -10
+```
+
+Skill count check:
+```bash
+find automatos-skills/skills -name "SKILL.md" | wc -l
 ```
 
 Note: Pre-existing errors may exist in other files. Only check for NEW errors introduced by your changes.

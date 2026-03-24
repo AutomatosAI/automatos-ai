@@ -1,37 +1,33 @@
-# PRD-82C Parallel Execution, Budget & Decomposition — Implementation Plan
+# PRD-120 Skills Marketplace & Agent Catalog — Implementation Plan
 
 ## Overview
-Make missions parallel, budget-aware, and intelligently decomposed. Wire all scaffolded-but-unused code from 82A/B. Every story includes wiring tests that prove the code is called, not just defined.
+Import ~65 professional agent skills from agency-agents, build agent templates marketplace with one-click deploy, and create the Business Plan Mission Template that configures entire workspaces.
 
-## Branch: ralph/prd-82c-parallel-budget-decomposition
+## Branch: ralph/prd-120-skills-marketplace-agent-catalog
 
 ---
 
 ## Tasks
 
-### Phase 1: Schema & Foundation
-- [x] US-001: Add complexity, parallel_group, estimated_tokens columns. ComplexityTier + BudgetStatus enums. COMPLEXITY_TOKEN_BUDGET config. Change max_concurrent default to 3.
+### Phase 1: Skill Import Infrastructure
+- [ ] US-001: Create automatos-skills/ directory structure + Python import/conversion script
+- [ ] US-002: Clone agency-agents, import Engineering + Design skills (~21 skills)
+- [ ] US-003: Import Marketing, Sales, Product, PM, Support skills (~36 skills)
+- [ ] US-004: Import Tier 2 selective skills (Testing, Paid Media, Specialized ~11 skills) + CATALOG.md
 
-### Phase 2: Parallel Dispatch
-- [x] US-002: Replace has_active_task() with count_active_tasks(). Add dispatch_ready() for multi-task dispatch.
-- [x] US-003: Wire dispatch_ready() into coordinator tick. Execute via asyncio.gather().
+### Phase 2: Database & API
+- [ ] US-005: Add agent_catalog_templates DB table + Alembic migration + SQLAlchemy model
+- [ ] US-006: Seed agent catalog templates from imported SKILL.md files (55+ rows)
+- [ ] US-007: Marketplace API endpoints (browse, search, categories, deploy)
 
-### Phase 3: Intelligent Decomposition
-- [x] US-004: Add _detect_complexity() to planner. Set max_concurrent on DecompositionResult.
-- [x] US-005: Update planner system prompt for parallel groups + complexity. Parse new fields. Validate parallel_group cross-deps.
-- [x] US-006: Rewrite all 4 templates with parallel groups and synthesis tasks.
+### Phase 3: Frontend
+- [ ] US-008: Marketplace page with category grid + agent cards + search
+- [ ] US-009: Agent template detail modal + one-click deploy button
 
-### Phase 4: Synthesis & Budget
-- [x] US-007: Build synthesis executor. _build_synthesis_prompt(). Detect TaskType.SYNTHESIS in _execute_task().
-- [x] US-008: Auto-insert synthesis tasks when parallel branches converge without explicit synthesis.
-- [x] US-009: Wire budget admission gate. Pre-dispatch can_afford() check. Graduated response. Pause on exceeded.
-
-### Phase 5: API & Frontend
-- [x] US-010: Enrich plan approval API with budget estimate, max_concurrent override.
-- [x] US-011: Budget bar component, parallel DAG rendering, approval overrides.
-
-### Phase 6: Wiring Tests
-- [x] US-012: Dedicated test suite proving all 82C features are wired end-to-end.
+### Phase 4: Business Plan Template & Wiring
+- [ ] US-010: Business Plan mission template in TEMPLATE_REGISTRY (4 phases, parallel groups)
+- [ ] US-011: Mission template selector in create-mission-modal + backend template_id hint
+- [ ] US-012: Integration tests + catalog validation
 
 ---
 
@@ -39,21 +35,23 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 
 | File | Purpose |
 |------|---------|
-| `orchestrator/modules/coordination/dispatcher.py` | Task dispatch — has_active_task (line ~78), dispatch_next |
-| `orchestrator/modules/coordination/planner.py` | Goal decomposition — _SYSTEM_PROMPT (line ~530), _parse_plan (line ~769), _validate_plan (line ~862) |
-| `orchestrator/modules/coordination/templates.py` | Template library — TaskTemplate (line ~30), TEMPLATE_REGISTRY (line ~60), render_template (line ~448) |
-| `orchestrator/services/coordinator_service.py` | Tick loop — _process_run(), _execute_task(), token tracking (line ~624) |
-| `orchestrator/services/orchestration_deps.py` | DAG resolution — DependencyResolver.get_ready_tasks() |
-| `orchestrator/core/models/orchestration.py` | DB models — OrchestrationRun, OrchestrationTask |
-| `orchestrator/core/models/orchestration_enums.py` | State machine — RunState, TaskState, TaskType, EventType |
-| `orchestrator/core/config.py` | All config constants |
-| `orchestrator/modules/orchestrator/stages/token_budget_manager.py` | Budget (exists but unwired — can_afford() never called) |
-| `orchestrator/modules/coordination/verification.py` | Verification — VerificationService, ConsistencyResult |
-| `frontend/components/missions/mission-detail-page.tsx` | Mission detail UI |
-| `frontend/components/missions/mission-dag-canvas.tsx` | DAG visualization |
-| `frontend/hooks/use-missions-api.ts` | React Query hooks |
-| `frontend/types/missions.ts` | TypeScript interfaces |
-| `docs/PRDS/82C-PARALLEL-EXECUTION-BUDGET-DECOMPOSITION.md` | Full PRD with architecture details |
+| `orchestrator/api/marketplace.py` | Existing marketplace router at /api/marketplace |
+| `orchestrator/api/marketplace_plugins.py` | Plugin marketplace (separate from agent catalog) |
+| `orchestrator/api/skills.py` | Skill management API (PRD-22) |
+| `orchestrator/api/agents.py` | Agent CRUD endpoints |
+| `orchestrator/api/missions.py` | Mission create/approve/list endpoints |
+| `orchestrator/core/models/core.py` | SQLAlchemy models — Agent, AgentTemplate (Pydantic, line ~863), BoardTask |
+| `orchestrator/modules/coordination/templates.py` | Mission templates — TEMPLATE_REGISTRY, TaskTemplate, render_template |
+| `orchestrator/modules/coordination/agent_matcher.py` | _ROLE_SYNONYMS for agent role matching |
+| `orchestrator/modules/tools/discovery/platform_actions.py` | Platform tool registration (ActionDefinitions) |
+| `orchestrator/modules/tools/discovery/platform_executor.py` | Platform tool handlers |
+| `orchestrator/modules/tools/discovery/actions_playbooks.py` | platform_create_playbook (ALREADY EXISTS) |
+| `orchestrator/modules/tools/discovery/actions_board_tasks.py` | platform_board_summary (board task tools) |
+| `orchestrator/core/config.py` | ALL config constants |
+| `frontend/components/missions/create-mission-modal.tsx` | Mission creation UI |
+| `frontend/hooks/use-missions-api.ts` | Mission React Query hooks |
+| `frontend/types/missions.ts` | Mission TypeScript interfaces |
+| `docs/PRDS/120-SKILLS-MARKETPLACE-AGENT-CATALOG.md` | Full PRD |
 
 ## Architecture Rules (CRITICAL)
 
@@ -61,22 +59,21 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 - SQLAlchemy ORM with sync Session — follow existing patterns
 - FastAPI endpoints with Pydantic BaseModel
 - ALL config values go in orchestrator/core/config.py — NO os.getenv() anywhere else
-- Dual-write pattern: state change + orchestration_events append in SAME transaction
-- Optimistic locking via version_id column
 - Agent roles in templates: use categories from _ROLE_SYNONYMS in agent_matcher.py
 - NO hardcoded values — use config constants
 - Frozen dataclasses for immutable data
 - BEFORE DELETING ANY CODE: grep EVERY file for callers
 - React Query v4 on frontend (isLoading not isPending)
+- Skills go in automatos-skills/skills/{category}/{slug}/SKILL.md
+- Agent catalog templates keyed by slug matching skill directory name
 
 ## Validation
 
 Backend Python imports:
 ```bash
 cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -c "
-from orchestrator.modules.coordination import templates, planner, dispatcher, agent_matcher, verification
-from orchestrator.services.coordinator_service import CoordinatorService
-from orchestrator.core.models.orchestration_enums import TaskType, ComplexityTier, BudgetStatus
+from orchestrator.modules.coordination import templates, planner, dispatcher, agent_matcher
+from orchestrator.api import marketplace
 print('All imports OK')
 " 2>&1 | tail -5
 ```
@@ -88,8 +85,15 @@ cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -m 
 
 Frontend:
 ```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/frontend && npx tsc --noEmit 2>&1 | grep -iE "mission-detail|mission-dag|budget-bar" | head -10
+cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/frontend && npx tsc --noEmit 2>&1 | grep -iE "marketplace|agent-template|create-mission" | head -10
 ```
+
+Skill count check:
+```bash
+find automatos-skills/skills -name "SKILL.md" | wc -l
+```
+
+Note: Pre-existing errors may exist in other files. Only check for NEW errors introduced by your changes.
 
 ## Discovered Issues
 
