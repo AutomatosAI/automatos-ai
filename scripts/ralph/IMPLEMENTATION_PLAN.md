@@ -10,7 +10,7 @@ Import ~65 professional agent skills from agency-agents, build agent templates m
 ## Tasks
 
 ### Phase 1: Skill Import Infrastructure
-- [ ] US-001: Create automatos-skills/ directory structure + Python import/conversion script
+- [x] US-001: Create automatos-skills/ directory structure + Python import/conversion script
 - [ ] US-002: Clone agency-agents, import Engineering + Design skills (~21 skills)
 - [ ] US-003: Import Marketing, Sales, Product, PM, Support skills (~36 skills)
 - [ ] US-004: Import Tier 2 selective skills (Testing, Paid Media, Specialized ~11 skills) + CATALOG.md
@@ -97,4 +97,7 @@ Note: Pre-existing errors may exist in other files. Only check for NEW errors in
 
 ## Discovered Issues
 
-(Ralph will log issues here during implementation)
+- agency-agents filenames include division prefix (e.g., `engineering-backend-architect.md`). Import script strips this to produce clean slugs.
+- agency-agents has `strategy` and `academic` divisions not listed in PRD — skipped (not in DIVISION_TO_CATEGORY).
+- Total unfiltered count across all divisions: 121 agents. US-002/003/004 filtering will narrow to ~65.
+- Python import validation requires venv with sqlalchemy etc. — pre-existing, not caused by this change.

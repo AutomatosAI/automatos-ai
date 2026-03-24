@@ -1,1 +1,12 @@
 # PRD-120 Skills Marketplace & Agent Catalog — Progress Log
+
+2026-03-24: US-001 COMPLETED
+  - Created automatos-skills/skills/ with 10 category subdirectories
+  - Created automatos-skills/README.md with skill format spec
+  - Created scripts/import_agency_skills.py (stdlib-only conversion script)
+    - YAML frontmatter parsing, tool mapping, model assignment
+    - Platform reference stripping, section extraction/mapping
+    - --source-dir, --output-dir, --category, --dry-run flags
+  - Cloned agency-agents to scripts/vendor/ (gitignored)
+  - Verified dry-run: 21 engineering + 8 design skills planned
+  - Added scripts/vendor/ to .gitignore
