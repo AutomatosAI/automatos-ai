@@ -260,6 +260,76 @@ async def handle_request(
         logger.error(f"Error uploading document: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@router.get("/{document_id}/download")
+async def download_document_by_id(
+    document_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Download a document by ID. Generates a pre-signed S3 URL and redirects.
+    Falls back to local file if not on S3.
+    """
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    filename = doc.original_filename or doc.filename
+
+    # Try S3 first
+    try:
+        from config import config as app_config
+        import boto3
+        from botocore.config import Config as BotoConfig
+        from fastapi.responses import RedirectResponse
+
+        if not app_config.AWS_ACCESS_KEY_ID or not app_config.AWS_SECRET_ACCESS_KEY:
+            raise ValueError("No AWS credentials")
+
+        bucket = app_config.S3_DOCUMENTS_BUCKET
+        # file_path may be an S3 key or local path
+        s3_key = doc.file_path
+        if s3_key and s3_key.startswith("/"):
+            # Local path — try constructing S3 key from workspace
+            s3_key = f"workspaces/{doc.workspace_id}/documents/{doc.filename}"
+
+        boto_cfg = BotoConfig(
+            region_name=app_config.AWS_REGION or "us-east-1",
+            signature_version="v4",
+        )
+        client = boto3.client(
+            "s3",
+            aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
+            config=boto_cfg,
+        )
+
+        client.head_object(Bucket=bucket, Key=s3_key)
+
+        presigned_url = client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": bucket,
+                "Key": s3_key,
+                "ResponseContentDisposition": f'attachment; filename="{filename}"',
+            },
+            ExpiresIn=3600,
+        )
+        return RedirectResponse(url=presigned_url, status_code=302)
+
+    except Exception as e:
+        logger.warning(f"S3 download failed for doc {document_id}: {e}")
+
+    # Fallback: local file
+    if doc.file_path and os.path.exists(doc.file_path):
+        return FileResponse(
+            path=doc.file_path,
+            filename=filename,
+            media_type="application/octet-stream",
+        )
+
+    raise HTTPException(status_code=404, detail="Document file not found in storage")
+
+
 @router.get("/download")
 async def download_document(path: str = Query(..., description="Full path to document")):
     """
