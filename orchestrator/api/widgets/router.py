@@ -41,3 +41,9 @@ try:
     router.include_router(data_router)
 except ImportError as e:
     logger.warning(f"Widget data router not available: {e}")
+
+try:
+    from api.widgets.blog import router as blog_router
+    router.include_router(blog_router)
+except ImportError as e:
+    logger.warning(f"Widget blog router not available: {e}")
