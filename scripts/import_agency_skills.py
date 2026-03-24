@@ -574,12 +574,36 @@ recommended_model: {skill.recommended_model}
 
     if skill.workflow:
         sections.append(f"## Workflow\n\n{skill.workflow}")
+    else:
+        sections.append(
+            f"## Workflow\n\n"
+            f"1. Analyze the task requirements and constraints\n"
+            f"2. Research relevant context and existing solutions\n"
+            f"3. Develop and implement the solution iteratively\n"
+            f"4. Validate output quality and completeness\n"
+            f"5. Document decisions and deliver results"
+        )
 
     if skill.deliverables:
         sections.append(f"## Deliverables\n\n{skill.deliverables}")
+    else:
+        sections.append(
+            f"## Deliverables\n\n"
+            f"- Completed work artifacts relevant to the task\n"
+            f"- Documentation of approach and key decisions\n"
+            f"- Summary of findings or changes made"
+        )
 
     if skill.rules:
         sections.append(f"## Rules\n\n{skill.rules}")
+    else:
+        sections.append(
+            f"## Rules\n\n"
+            f"- Follow established best practices for {skill.category}\n"
+            f"- Validate all work before marking complete\n"
+            f"- Document assumptions and trade-offs\n"
+            f"- Ask for clarification when requirements are ambiguous"
+        )
 
     body = "\n\n".join(sections)
 
