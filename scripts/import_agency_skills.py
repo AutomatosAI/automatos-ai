@@ -45,9 +45,9 @@ DIVISION_TO_CATEGORY: dict[str, str] = {
 # Divisions we skip entirely
 SKIP_DIVISIONS: set[str] = {"game-development", "spatial-computing"}
 
-# Individual agents to skip (slug form, without .md)
+# Individual agents to skip (slug form after division-prefix stripping, without .md)
 SKIP_AGENTS: set[str] = {
-    # China-specific marketing agents
+    # China-specific marketing agents (original slug variants)
     "xiaohongshu-content-strategist",
     "wechat-ecosystem-strategist",
     "baidu-seo-specialist",
@@ -55,6 +55,16 @@ SKIP_AGENTS: set[str] = {
     "douyin-growth-strategist",
     "kuaishou-commerce-specialist",
     "weibo-engagement-strategist",
+    # China-specific marketing agents (actual post-strip slugs)
+    "douyin-strategist",
+    "kuaishou-strategist",
+    "weibo-strategist",
+    "xiaohongshu-specialist",
+    "wechat-official-account",
+    "zhihu-strategist",
+    "china-ecommerce-operator",
+    "private-domain-operator",
+    "livestream-commerce-coach",
     # China-specific engineering agents
     "feishu-integration-developer",
     "wechat-mini-program-developer",

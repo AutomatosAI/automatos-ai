@@ -17,3 +17,14 @@
   - Total: 29 SKILL.md files in automatos-skills/skills/engineering/ and design/
   - Updated import script: added fallback content generation for missing Workflow/Deliverables/Rules sections
   - Validated: all frontmatter fields, all 5 sections, no non-Automatos references, all valid tool names
+
+2026-03-24: US-003 COMPLETED
+  - Updated SKIP_AGENTS with 9 additional China-specific post-strip slugs (douyin, kuaishou, weibo, xiaohongshu, wechat, zhihu, china-ecommerce, private-domain, livestream-commerce)
+  - Imported 16 Marketing skills (filtered 11 China-specific agents)
+  - Imported 8 Sales skills
+  - Imported 5 Product skills
+  - Imported 6 Project Management skills
+  - Imported 6 Support skills
+  - Total new: 41 SKILL.md files across 5 categories
+  - Grand total: 70 SKILL.md files
+  - Validated: all frontmatter valid, all 5 sections present, no banned platform refs, all recommended_tools valid
