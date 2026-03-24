@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle2, XCircle, AlertTriangle, ChevronDown } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertTriangle, ChevronDown, MessageSquare } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -18,6 +20,9 @@ import type { TaskResponse } from '@/types/missions'
 import { TASK_STATE_CONFIG } from '@/types/missions'
 import { toast } from 'sonner'
 
+const proseClass =
+  'prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-p:text-foreground prose-a:text-orange-500 dark:prose-a:text-orange-300 prose-li:text-foreground prose-strong:text-foreground'
+
 interface HumanReviewPanelProps {
   missionId: string
   tasks: TaskResponse[]
@@ -27,6 +32,8 @@ interface HumanReviewPanelProps {
 export function HumanReviewPanel({ missionId, tasks, className }: HumanReviewPanelProps) {
   const { taskFeedback, setTaskFeedback, removeTaskFeedback, clearTaskFeedback } = useMissionStore()
   const reviewMutation = useReviewMission()
+  const [showRejectAll, setShowRejectAll] = useState(false)
+  const [generalFeedback, setGeneralFeedback] = useState('')
 
   // Only show verified/completed tasks for review
   const reviewableTasks = tasks.filter((t) =>
@@ -34,7 +41,7 @@ export function HumanReviewPanel({ missionId, tasks, className }: HumanReviewPan
   )
 
   const flaggedCount = Object.keys(taskFeedback).length
-  const canReject = flaggedCount > 0
+  const canRejectFlagged = flaggedCount > 0
 
   const handleAccept = () => {
     reviewMutation.mutate(
@@ -49,8 +56,8 @@ export function HumanReviewPanel({ missionId, tasks, className }: HumanReviewPan
     )
   }
 
-  const handleReject = () => {
-    if (!canReject) return
+  const handleRejectFlagged = () => {
+    if (!canRejectFlagged) return
     reviewMutation.mutate(
       {
         id: missionId,
@@ -63,6 +70,28 @@ export function HumanReviewPanel({ missionId, tasks, className }: HumanReviewPan
         onSuccess: () => {
           clearTaskFeedback()
           toast.success('Mission rejected — flagged tasks will be retried')
+        },
+        onError: (err) => toast.error(err.message || 'Failed to reject mission'),
+      },
+    )
+  }
+
+  const handleRejectWithFeedback = () => {
+    if (!generalFeedback.trim()) return
+    reviewMutation.mutate(
+      {
+        id: missionId,
+        body: {
+          verdict: 'reject',
+          feedback: generalFeedback.trim(),
+        },
+      },
+      {
+        onSuccess: () => {
+          clearTaskFeedback()
+          setGeneralFeedback('')
+          setShowRejectAll(false)
+          toast.success('Mission rejected with feedback — tasks will be retried')
         },
         onError: (err) => toast.error(err.message || 'Failed to reject mission'),
       },
@@ -108,6 +137,35 @@ export function HumanReviewPanel({ missionId, tasks, className }: HumanReviewPan
           </div>
         )}
 
+        {showRejectAll && (
+          <div className="space-y-2">
+            <Textarea
+              value={generalFeedback}
+              onChange={(e) => setGeneralFeedback(e.target.value)}
+              placeholder="What needs to change? Provide general feedback for the mission..."
+              className="text-xs min-h-[80px] bg-secondary/20"
+            />
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={handleRejectWithFeedback}
+                disabled={!generalFeedback.trim() || reviewMutation.isLoading}
+              >
+                Send Rejection
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setShowRejectAll(false); setGeneralFeedback('') }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-2">
           <Button
             variant="outline"
@@ -121,16 +179,24 @@ export function HumanReviewPanel({ missionId, tasks, className }: HumanReviewPan
           <Button
             variant="outline"
             className="flex-1 border-destructive/30 text-destructive hover:bg-destructive/10"
-            onClick={handleReject}
-            disabled={!canReject || reviewMutation.isLoading}
+            onClick={handleRejectFlagged}
+            disabled={!canRejectFlagged || reviewMutation.isLoading}
           >
             <XCircle className="w-4 h-4 mr-1.5" />
             Reject Flagged
           </Button>
+          <Button
+            variant="outline"
+            className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10"
+            onClick={() => setShowRejectAll(!showRejectAll)}
+            disabled={reviewMutation.isLoading}
+          >
+            <MessageSquare className="w-4 h-4" />
+          </Button>
         </div>
 
         <p className="text-[10px] text-muted-foreground text-center">
-          Rejecting sends flagged tasks back for retry with your feedback
+          Flag individual tasks or use the feedback button to reject with general notes
         </p>
       </div>
     </div>
@@ -175,15 +241,17 @@ function TaskReviewItem({ task, feedback, onFeedbackChange }: TaskReviewItemProp
       </div>
 
       {/* Output preview */}
-      {task.output_excerpt && (
+      {task.output && (
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>
           <CollapsibleTrigger className="flex items-center gap-1 mt-2 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer">
             <ChevronDown className={cn('w-3 h-3 transition-transform', isOpen && 'rotate-180')} />
             {isOpen ? 'Hide output' : 'Show output'}
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="mt-2 rounded bg-secondary/30 p-2 text-[11px] font-mono leading-relaxed max-h-[120px] overflow-auto whitespace-pre-wrap">
-              {task.output_excerpt}
+            <div className={cn(proseClass, 'mt-2 rounded bg-secondary/30 p-2 text-[11px] leading-relaxed max-h-[300px] overflow-auto')}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {task.output}
+              </ReactMarkdown>
             </div>
           </CollapsibleContent>
         </Collapsible>

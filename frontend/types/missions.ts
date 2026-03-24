@@ -121,6 +121,7 @@ export interface MissionRejectRequest {
 export interface MissionReviewRequest {
   verdict: 'accept' | 'reject'
   task_feedback?: Record<string, string>
+  feedback?: string
 }
 
 export interface SaveAsRoutineRequest {
