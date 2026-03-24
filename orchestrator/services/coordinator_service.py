@@ -793,6 +793,7 @@ class CoordinatorService:
             ],
         }
         run.token_budget_estimate = decomposition.token_estimate
+        run.max_concurrent = decomposition.max_concurrent
 
         # Create OrchestrationTask rows
         temp_id_to_task: Dict[str, OrchestrationTask] = {}

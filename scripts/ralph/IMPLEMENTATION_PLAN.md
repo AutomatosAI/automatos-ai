@@ -17,7 +17,7 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 - [x] US-003: Wire dispatch_ready() into coordinator tick. Execute via asyncio.gather().
 
 ### Phase 3: Intelligent Decomposition
-- [ ] US-004: Add _detect_complexity() to planner. Set max_concurrent on DecompositionResult.
+- [x] US-004: Add _detect_complexity() to planner. Set max_concurrent on DecompositionResult.
 - [ ] US-005: Update planner system prompt for parallel groups + complexity. Parse new fields. Validate parallel_group cross-deps.
 - [ ] US-006: Rewrite all 4 templates with parallel groups and synthesis tasks.
 

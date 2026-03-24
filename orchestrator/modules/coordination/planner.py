@@ -24,7 +24,7 @@ from uuid import UUID, uuid4
 
 from core.llm import create_llm_manager
 from core.models.core import Agent
-from core.models.orchestration_enums import TaskType
+from core.models.orchestration_enums import ComplexityTier, TaskType
 from modules.coordination.templates import match_template, render_template
 from services.orchestration_deps import (
     CyclicDependencyError,
@@ -176,6 +176,110 @@ MAX_TASKS = 20
 MAX_PLAN_RETRIES = 3
 TOKENS_PER_TASK_ESTIMATE = 2000
 
+# Deliverable keywords for complexity scoring
+_DELIVERABLE_KEYWORDS = frozenset({
+    "report", "paper", "app", "application", "analysis",
+    "presentation", "dashboard", "pipeline", "system",
+})
+
+# Domain topic clusters for breadth estimation.
+# Multi-word terms use substring matching; single-word terms use word-boundary matching.
+_DOMAIN_CLUSTERS: List[frozenset[str]] = [
+    frozenset({"ai", "machine learning", "ml", "deep learning", "neural", "llm", "nlp", "gpt", "coordination"}),
+    frozenset({"web", "frontend", "backend", "api", "rest", "graphql", "react", "html", "css"}),
+    frozenset({"data", "database", "sql", "analytics", "etl", "warehouse", "visualization"}),
+    frozenset({"security", "authentication", "encryption", "oauth", "compliance"}),
+    frozenset({"cloud", "aws", "azure", "gcp", "kubernetes", "docker", "devops", "ci/cd"}),
+    frozenset({"mobile", "ios", "android", "swift", "kotlin", "flutter"}),
+    frozenset({"business", "marketing", "finance", "strategy", "revenue", "growth"}),
+    frozenset({"research", "experiment", "prior art", "literature", "survey", "implications"}),
+    frozenset({"design", "ux", "figma", "wireframe", "prototype"}),
+    frozenset({"testing", "qa", "automation", "performance", "load testing"}),
+]
+
+
+# ---------------------------------------------------------------------------
+# Complexity detection (PRD-82C US-004)
+# ---------------------------------------------------------------------------
+
+
+def _count_deliverables(goal: str) -> int:
+    """Count how many deliverable keywords appear in the goal."""
+    goal_lower = goal.lower()
+    return sum(1 for kw in _DELIVERABLE_KEYWORDS if kw in goal_lower)
+
+
+def _estimate_domains(goal: str) -> int:
+    """Count how many distinct topic clusters the goal spans."""
+    goal_lower = goal.lower()
+    goal_words = set(re.findall(r"[a-z0-9/\-]+", goal_lower))
+
+    def _cluster_matches(cluster: frozenset[str]) -> bool:
+        for term in cluster:
+            if " " in term:
+                # Multi-word: substring match
+                if term in goal_lower:
+                    return True
+            else:
+                # Single-word: word-boundary match
+                if term in goal_words:
+                    return True
+        return False
+
+    return sum(1 for cluster in _DOMAIN_CLUSTERS if _cluster_matches(cluster))
+
+
+def _detect_complexity(
+    goal: str,
+    attachments: Optional[List[Any]] = None,
+) -> ComplexityTier:
+    """
+    Score goal complexity and return the appropriate tier.
+
+    Signals:
+      - word_count > 50 → +1
+      - deliverable_count >= 1 → +1, >= 3 → +1 (bonus)
+      - domain_breadth >= 2 → +1, >= 4 → +1 (bonus)
+      - attachment_count > 0 → +1
+
+    Score >= 3 → COMPLEX, >= 1 → MODERATE, else SIMPLE.
+    """
+    score = 0
+
+    if len(goal.split()) > 50:
+        score += 1
+
+    deliverable_count = _count_deliverables(goal)
+    if deliverable_count >= 1:
+        score += 1
+    if deliverable_count >= 3:
+        score += 1
+
+    domain_count = _estimate_domains(goal)
+    if domain_count >= 2:
+        score += 1
+    if domain_count >= 4:
+        score += 1
+
+    if attachments and len(attachments) > 0:
+        score += 1
+
+    if score >= 3:
+        return ComplexityTier.COMPLEX
+    elif score >= 1:
+        return ComplexityTier.MODERATE
+    else:
+        return ComplexityTier.SIMPLE
+
+
+def _complexity_to_max_concurrent(tier: ComplexityTier) -> int:
+    """Map complexity tier to max_concurrent value."""
+    if tier == ComplexityTier.COMPLEX:
+        return 3
+    elif tier == ComplexityTier.MODERATE:
+        return 2
+    return 1
+
 
 # ---------------------------------------------------------------------------
 # Result dataclasses
@@ -213,6 +317,7 @@ class DecompositionResult:
     dependencies: List[PlannedDependency]
     token_estimate: int
     template_used: Optional[str] = None
+    max_concurrent: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +486,17 @@ class MissionPlanner:
         Raises:
             PlanValidationError: if all retry attempts fail structural validation.
         """
+        # --- Complexity detection (82C US-004) ---
+        raw_attachments_list = (config or {}).get("attachments")
+        complexity = _detect_complexity(goal, raw_attachments_list)
+        max_concurrent = _complexity_to_max_concurrent(complexity)
+        logger.info(
+            "MissionPlanner: complexity=%s max_concurrent=%d for goal='%s'",
+            complexity.value,
+            max_concurrent,
+            goal[:80],
+        )
+
         # --- Template matching (82B US-002) — try before LLM ---
         template = match_template(goal)
         if template is not None:
@@ -406,6 +522,7 @@ class MissionPlanner:
                         dependencies=deps,
                         token_estimate=token_estimate,
                         template_used=template.id,
+                        max_concurrent=max_concurrent,
                     )
                 else:
                     logger.warning(
@@ -517,6 +634,7 @@ class MissionPlanner:
                 tasks=tasks,
                 dependencies=deps,
                 token_estimate=token_estimate,
+                max_concurrent=max_concurrent,
             )
 
         # All retries exhausted
