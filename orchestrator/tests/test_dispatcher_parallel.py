@@ -61,6 +61,8 @@ def _make_run(*, run_id=None, max_concurrent=1):
     run = MagicMock()
     run.id = run_id or uuid4()
     run.max_concurrent = max_concurrent
+    run.token_budget_estimate = None  # No budget = unlimited
+    run.tokens_used = 0
     return run
 
 

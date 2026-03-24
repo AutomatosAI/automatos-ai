@@ -116,3 +116,20 @@ US-008 COMPLETED (2026-03-24)
   - Sequential plans pass through unchanged
   - Auto-inserted plan passes _validate_plan
 - 454 tests pass across non-broken test files, no regressions from US-008
+
+US-009 COMPLETED (2026-03-24)
+- Added _get_budget_status(run) -> BudgetStatus to MissionDispatcher — computes HEALTHY/WARNING/CRITICAL/EXCEEDED from tokens_used/token_budget_estimate
+- Added _pre_dispatch_budget_check(db, run, task) -> str to MissionDispatcher — graduated response: allow/defer/block
+- HEALTHY (<50%): allow all tasks
+- WARNING (50-80%): allow all + emit RUN_BUDGET_WARNING event
+- CRITICAL (80-100%): allow synthesis/review tasks, defer others
+- EXCEEDED (>100%): block all + emit RUN_BUDGET_EXCEEDED event + transition run to PAUSED
+- No budget set (None or 0): always allow (unlimited)
+- Wired budget gate into dispatch_ready() loop — checks each candidate before dispatch
+- Block breaks dispatch loop immediately; defer skips task but continues checking others
+- Fixed test_dispatcher_parallel.py _make_run() helper: added token_budget_estimate=None and tokens_used=0 to prevent MagicMock truthy issues
+- Created tests/test_budget_gate.py with 16 wiring tests:
+  - _get_budget_status: 6 threshold tests (no budget, zero, <50%, 50%, 80%, >100%)
+  - _pre_dispatch_budget_check: 7 unit tests (no budget, healthy, warning+event, critical defer, critical allow synthesis, critical allow review, exceeded block)
+  - dispatch_ready integration: 3 tests (exceeded blocks+pauses, critical allows synthesis defers heavy, no budget dispatches normally)
+- 54 tests pass across 82C test files (5 files), no regressions

@@ -24,7 +24,7 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 ### Phase 4: Synthesis & Budget
 - [x] US-007: Build synthesis executor. _build_synthesis_prompt(). Detect TaskType.SYNTHESIS in _execute_task().
 - [x] US-008: Auto-insert synthesis tasks when parallel branches converge without explicit synthesis.
-- [ ] US-009: Wire budget admission gate. Pre-dispatch can_afford() check. Graduated response. Pause on exceeded.
+- [x] US-009: Wire budget admission gate. Pre-dispatch can_afford() check. Graduated response. Pause on exceeded.
 
 ### Phase 5: API & Frontend
 - [ ] US-010: Enrich plan approval API with budget estimate, max_concurrent override.

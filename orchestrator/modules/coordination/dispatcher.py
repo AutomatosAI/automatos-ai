@@ -31,9 +31,12 @@ from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import (
     ActorType,
+    BudgetStatus,
     EventType,
     FailureReasonCode,
+    RunState,
     TaskState,
+    TaskType,
 )
 from modules.coordination.agent_matcher import AgentMatcher, MatchResult
 from services.orchestration_board_bridge import create_task_board_task, sync_board_status
@@ -41,6 +44,7 @@ from services.orchestration_deps import DependencyResolver
 from services.orchestration_state import (
     ConflictError,
     emit_event,
+    transition_run,
     transition_task,
 )
 
@@ -373,6 +377,94 @@ class MissionDispatcher:
         )
 
     @staticmethod
+    def _get_budget_status(run: OrchestrationRun) -> BudgetStatus:
+        """
+        Compute the budget health status for a run.
+
+        Returns HEALTHY if no budget is set (unlimited).
+        """
+        budget = run.token_budget_estimate
+        if not budget or budget <= 0:
+            return BudgetStatus.HEALTHY
+
+        used = run.tokens_used or 0
+        pct = (used / budget) * 100
+
+        if pct > 100:
+            return BudgetStatus.EXCEEDED
+        if pct >= 80:
+            return BudgetStatus.CRITICAL
+        if pct >= 50:
+            return BudgetStatus.WARNING
+        return BudgetStatus.HEALTHY
+
+    @staticmethod
+    def _pre_dispatch_budget_check(
+        db: Session,
+        run: OrchestrationRun,
+        task: OrchestrationTask,
+    ) -> str:
+        """
+        Budget admission gate — check if the run can afford this task.
+
+        Returns:
+            'allow' — dispatch the task.
+            'defer' — skip this task but continue checking others.
+            'block' — stop dispatching entirely, pause the run.
+        """
+        budget = run.token_budget_estimate
+        if not budget or budget <= 0:
+            return "allow"
+
+        status = MissionDispatcher._get_budget_status(run)
+        task_type = getattr(task, "task_type", None) or ""
+
+        # Priority task types that dispatch even at CRITICAL budget
+        priority_types = {TaskType.SYNTHESIS.value, TaskType.REVIEW.value}
+
+        if status == BudgetStatus.HEALTHY:
+            return "allow"
+
+        if status == BudgetStatus.WARNING:
+            logger.warning(
+                "Budget WARNING for run %s: %d/%d tokens used — dispatching task %s anyway",
+                run.id, run.tokens_used or 0, budget, task.id,
+            )
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_BUDGET_WARNING,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="dispatcher",
+                payload={
+                    "tokens_used": run.tokens_used or 0,
+                    "token_budget_estimate": budget,
+                    "task_id": str(task.id),
+                },
+            )
+            return "allow"
+
+        if status == BudgetStatus.CRITICAL:
+            if task_type in priority_types:
+                logger.warning(
+                    "Budget CRITICAL for run %s — allowing priority task %s (type=%s)",
+                    run.id, task.id, task_type,
+                )
+                return "allow"
+            logger.warning(
+                "Budget CRITICAL for run %s — deferring non-priority task %s (type=%s)",
+                run.id, task.id, task_type,
+            )
+            return "defer"
+
+        # EXCEEDED
+        logger.warning(
+            "Budget EXCEEDED for run %s: %d/%d tokens — blocking dispatch",
+            run.id, run.tokens_used or 0, budget,
+        )
+        return "block"
+
+    @staticmethod
     def dispatch_ready(
         db: Session,
         run: OrchestrationRun,
@@ -447,18 +539,67 @@ class MissionDispatcher:
                 )
             ]
 
-        # --- Dispatch up to available_slots ---
+        # --- Dispatch up to available_slots with budget gate ---
         results: List[DispatchResult] = []
-        for task in candidates[:available_slots]:
+        dispatched_count = 0
+        for task in candidates:
+            if dispatched_count >= available_slots:
+                break
+
+            # Budget admission gate
+            budget_decision = MissionDispatcher._pre_dispatch_budget_check(
+                db, run, task,
+            )
+
+            if budget_decision == "block":
+                # Pause the run and stop dispatching
+                emit_event(
+                    db=db,
+                    run_id=run_id,
+                    event_type=EventType.RUN_BUDGET_EXCEEDED,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="dispatcher",
+                    payload={
+                        "tokens_used": run.tokens_used or 0,
+                        "token_budget_estimate": run.token_budget_estimate,
+                        "blocked_task_id": str(task.id),
+                    },
+                )
+                transition_run(
+                    db=db,
+                    run=run,
+                    new_state=RunState.PAUSED,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="dispatcher",
+                    reason="Budget exceeded — mission paused",
+                )
+                results.append(DispatchResult(
+                    dispatched=False,
+                    task_id=task.id,
+                    skipped_reason="budget_exceeded",
+                ))
+                break
+
+            if budget_decision == "defer":
+                results.append(DispatchResult(
+                    dispatched=False,
+                    task_id=task.id,
+                    skipped_reason="budget_critical_deferred",
+                ))
+                continue
+
+            # budget_decision == "allow"
             result = MissionDispatcher._dispatch_single(db, run, task, agents)
             results.append(result)
+            if result.dispatched:
+                dispatched_count += 1
 
         logger.info(
             "dispatch_ready(run=%s): %d candidates, %d slots, %d dispatched",
             run_id,
             len(candidates),
             available_slots,
-            sum(1 for r in results if r.dispatched),
+            dispatched_count,
         )
 
         return results if results else [
