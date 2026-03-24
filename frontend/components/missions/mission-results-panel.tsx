@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { ChevronDown, CheckCircle2, XCircle, Copy, Check, FileText, Download } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -30,6 +30,10 @@ type ResultsView = 'combined' | 'per-task'
 export function MissionResultsPanel({ mission, className }: MissionResultsPanelProps) {
   const isTerminal = ['completed', 'failed', 'cancelled'].includes(mission.state)
   const [view, setView] = useState<ResultsView>(isTerminal ? 'combined' : 'per-task')
+
+  useEffect(() => {
+    if (isTerminal) setView('combined')
+  }, [isTerminal])
 
   const completedTasks = mission.tasks
     .filter((t) => ['verified', 'completed', 'failed'].includes(t.state))
@@ -143,7 +147,7 @@ export function MissionResultsPanel({ mission, className }: MissionResultsPanelP
           <div className="p-4">
             {combinedMarkdown ? (
               <div className={cn(proseClass, 'text-xs leading-relaxed')}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} unwrapDisallowed>
                   {combinedMarkdown}
                 </ReactMarkdown>
               </div>
@@ -244,7 +248,7 @@ function TaskResultItem({ task }: { task: TaskResponse }) {
             {/* Markdown output */}
             {task.output ? (
               <div className={cn(proseClass, 'text-xs leading-relaxed')}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} unwrapDisallowed>
                   {task.output}
                 </ReactMarkdown>
               </div>

@@ -40,6 +40,29 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _extract_office_text(raw: bytes, filename_lower: str) -> str:
+    """Extract text from Office documents (.docx, .xlsx)."""
+    import io
+    if filename_lower.endswith(".docx"):
+        from docx import Document as DocxDocument
+        doc = DocxDocument(io.BytesIO(raw))
+        return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    elif filename_lower.endswith(".xlsx") or filename_lower.endswith(".xls"):
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        lines = []
+        for ws in wb.worksheets:
+            lines.append(f"## Sheet: {ws.title}")
+            for row in ws.iter_rows(values_only=True):
+                cells = [str(c) if c is not None else "" for c in row]
+                if any(cells):
+                    lines.append(" | ".join(cells))
+        wb.close()
+        return "\n".join(lines)
+    else:
+        return f"[Office file: unsupported format]"
+
+
 async def _fetch_attachment_contents(
     attachments: List[Dict[str, Any]],
 ) -> List[Dict[str, str]]:
@@ -118,14 +141,27 @@ async def _fetch_attachment_contents(
         filename = att.get("filename", "unknown")
         content_type = att.get("content_type", "")
 
-        # Only extract text-readable files
+        # Validate S3 key — must be under workspaces/ prefix
+        if s3_key and not s3_key.startswith("workspaces/"):
+            logger.warning("Skipping attachment with disallowed S3 key prefix: %s", s3_key[:100])
+            results.append({
+                "filename": filename,
+                "content": f"[Attachment skipped — invalid storage path]",
+            })
+            continue
+
+        # Determine extractable file types
         text_types = {
             "text/", "application/json", "application/pdf",
             "text/csv", "text/markdown", "text/plain",
         }
+        office_extensions = {".docx", ".xlsx", ".doc", ".xls"}
         is_text = any(content_type.startswith(t) for t in text_types)
+        fname_lower = filename.lower()
+        is_office = any(fname_lower.endswith(ext) for ext in office_extensions)
+        is_pdf = "pdf" in fname_lower or content_type == "application/pdf"
 
-        if not is_text and "pdf" not in filename.lower():
+        if not is_text and not is_pdf and not is_office:
             results.append({
                 "filename": filename,
                 "content": f"[Binary file: {filename} ({content_type}) — content not extracted]",
@@ -142,7 +178,7 @@ async def _fetch_attachment_contents(
             raw = response["Body"].read()
 
             # PDF extraction
-            if filename.lower().endswith(".pdf") or content_type == "application/pdf":
+            if is_pdf:
                 try:
                     import fitz  # PyMuPDF
                     doc = fitz.open(stream=raw, filetype="pdf")
@@ -151,6 +187,13 @@ async def _fetch_attachment_contents(
                     content = "\n\n".join(text_parts)
                 except ImportError:
                     content = "[PDF file — PyMuPDF not available for text extraction]"
+            # Office document extraction
+            elif is_office:
+                try:
+                    content = _extract_office_text(raw, fname_lower)
+                except Exception as exc:
+                    logger.warning("Office extraction failed for %s: %s", filename, exc)
+                    content = f"[Office file: {filename} — text extraction failed]"
             else:
                 content = raw.decode("utf-8", errors="replace")
 
@@ -558,12 +601,22 @@ def _build_decomposition_prompt(
     # Inject attachment content so the LLM has full context
     if attachment_contents:
         parts.append("## Attached Reference Documents\n")
+        total_budget = 90_000  # Global budget for all attachments combined
+        per_file_limit = 30_000
+        accumulated = 0
         for att in attachment_contents:
+            remaining = total_budget - accumulated
+            if remaining <= 0:
+                parts.append(
+                    "\n[... further attachments skipped — total attachment budget exceeded ...]\n"
+                )
+                break
             filename = att.get("filename", "unknown")
             content = att.get("content", "")
-            # Truncate very large files to avoid blowing the context
-            if len(content) > 30_000:
-                content = content[:30_000] + "\n\n[... truncated ...]"
+            limit = min(len(content), per_file_limit, remaining)
+            if len(content) > limit:
+                content = content[:limit] + "\n\n[... truncated ...]"
+            accumulated += len(content)
             parts.append(
                 f"### {filename}\n<attachment>\n{content}\n</attachment>\n"
             )

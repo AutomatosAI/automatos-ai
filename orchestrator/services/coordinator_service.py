@@ -1018,6 +1018,25 @@ class CoordinatorService:
                         )
                         requeued_count += 1
 
+            # Feedback-only rejection: re-queue the last verified task with the feedback
+            if requeued_count == 0 and feedback:
+                last_task = (
+                    db.query(OrchestrationTask)
+                    .filter(
+                        and_(
+                            OrchestrationTask.run_id == run_id,
+                            OrchestrationTask.state == TaskState.VERIFIED.value,
+                        )
+                    )
+                    .order_by(OrchestrationTask.sequence_number.desc())
+                    .first()
+                )
+                if last_task:
+                    self._requeue_task_with_feedback(
+                        db, last_task, feedback, actor_id,
+                    )
+                    requeued_count += 1
+
             # Build reason string
             if requeued_count > 0:
                 reason = f"Human rejected — {requeued_count} tasks re-queued"

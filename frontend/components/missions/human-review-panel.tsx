@@ -140,6 +140,8 @@ export function HumanReviewPanel({ missionId, tasks, className }: HumanReviewPan
         {showRejectAll && (
           <div className="space-y-2">
             <Textarea
+              id="general-rejection-feedback"
+              aria-label="General rejection feedback"
               value={generalFeedback}
               onChange={(e) => setGeneralFeedback(e.target.value)}
               placeholder="What needs to change? Provide general feedback for the mission..."
@@ -190,6 +192,8 @@ export function HumanReviewPanel({ missionId, tasks, className }: HumanReviewPan
             className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10"
             onClick={() => setShowRejectAll(!showRejectAll)}
             disabled={reviewMutation.isLoading}
+            aria-label="Reject with general feedback"
+            aria-pressed={showRejectAll}
           >
             <MessageSquare className="w-4 h-4" />
           </Button>
@@ -249,7 +253,7 @@ function TaskReviewItem({ task, feedback, onFeedbackChange }: TaskReviewItemProp
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className={cn(proseClass, 'mt-2 rounded bg-secondary/30 p-2 text-[11px] leading-relaxed max-h-[300px] overflow-auto')}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} unwrapDisallowed>
                 {task.output}
               </ReactMarkdown>
             </div>
