@@ -16,7 +16,7 @@ Import ~65 professional agent skills from agency-agents, build agent templates m
 - [x] US-004: Import Tier 2 selective skills (Testing, Paid Media, Specialized ~11 skills) + CATALOG.md
 
 ### Phase 2: Database & API
-- [ ] US-005: Add agent_catalog_templates DB table + Alembic migration + SQLAlchemy model
+- [x] US-005: Add agent_catalog_templates DB table + Alembic migration + SQLAlchemy model
 - [ ] US-006: Seed agent catalog templates from imported SKILL.md files (55+ rows)
 - [ ] US-007: Marketplace API endpoints (browse, search, categories, deploy)
 
