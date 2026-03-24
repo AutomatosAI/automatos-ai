@@ -8,7 +8,7 @@ and the glue between planner, dispatcher, reconciler, and verifier.
 Key patterns:
 - DB-authoritative, stateless coordinator — every tick reads from DB
 - SessionLocal per tick (no stored DB session on singleton)
-- Sequential dispatch via MissionDispatcher
+- Parallel dispatch via MissionDispatcher.dispatch_ready() + asyncio.gather()
 - Output summary built when all tasks verified (Section 6)
 - Soft budget tracking with warning events (Section 9)
 
@@ -16,6 +16,7 @@ Source: PRD-82A Sections 6, 8, 9, 12 (US-014)
         PRD-102 Section 3.3 (coordinator design)
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -477,19 +478,44 @@ class CoordinatorService:
             .all()
         )
 
-        # --- Dispatch phase ---
-        dispatch_result = MissionDispatcher.dispatch_next(db, run, agents)
+        # --- Dispatch phase (parallel via dispatch_ready) ---
+        dispatch_results = MissionDispatcher.dispatch_ready(db, run, agents)
 
-        if dispatch_result.dispatched:
-            # Task was claimed and assigned — now execute async
-            task = (
-                db.query(OrchestrationTask)
-                .filter(OrchestrationTask.id == dispatch_result.task_id)
-                .first()
-            )
+        # Collect successfully dispatched tasks for concurrent execution
+        dispatched = [r for r in dispatch_results if r.dispatched]
 
-            if task:
-                await self._execute_task(db, run, task, dispatch_result.agent_id)
+        if dispatched:
+            # Load tasks from DB for each dispatch result
+            tasks_to_execute = []
+            for result in dispatched:
+                task = (
+                    db.query(OrchestrationTask)
+                    .filter(OrchestrationTask.id == result.task_id)
+                    .first()
+                )
+                if task:
+                    tasks_to_execute.append((task, result.agent_id))
+
+            # Execute concurrently via asyncio.gather — return_exceptions
+            # ensures one task failure doesn't cancel others
+            if tasks_to_execute:
+                outcomes = await asyncio.gather(
+                    *(
+                        self._execute_task(db, run, task, agent_id)
+                        for task, agent_id in tasks_to_execute
+                    ),
+                    return_exceptions=True,
+                )
+                # Log any exceptions without crashing the tick
+                for i, outcome in enumerate(outcomes):
+                    if isinstance(outcome, Exception):
+                        task, agent_id = tasks_to_execute[i]
+                        logger.error(
+                            "Task %s execution failed: %s",
+                            task.id,
+                            outcome,
+                            exc_info=outcome,
+                        )
 
         # --- Reconcile phase ---
         await MissionReconciler.reconcile(db, run)

@@ -16,3 +16,16 @@ US-002 COMPLETED (2026-03-24)
 - Created tests/test_dispatcher_parallel.py with 9 wiring tests (all pass)
 - 159 tests pass across non-broken test files, no regressions
 - coordinator_service.py:481 still calls dispatch_next() — will be wired to dispatch_ready() in US-003
+
+US-003 COMPLETED (2026-03-24)
+- Replaced dispatch_next() with dispatch_ready() in coordinator_service.py _process_run()
+- Multiple dispatched tasks execute concurrently via asyncio.gather(return_exceptions=True)
+- Per-task exception handling: one failure logs error but doesn't crash tick or prevent reconciliation
+- Reconcile phase always runs after dispatch, regardless of task outcomes
+- Created tests/test_coordinator_parallel.py with 5 wiring tests:
+  - 2 tasks both execute concurrently (call_count == 2)
+  - Sequential (max_concurrent=1) still dispatches 1 task
+  - No dispatch still reconciles
+  - Exception in one task doesn't crash tick
+  - dispatch_ready called, not deprecated dispatch_next
+- 406 tests pass across non-broken test files, no regressions from US-003

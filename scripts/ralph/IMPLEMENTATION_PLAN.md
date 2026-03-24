@@ -14,7 +14,7 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 
 ### Phase 2: Parallel Dispatch
 - [x] US-002: Replace has_active_task() with count_active_tasks(). Add dispatch_ready() for multi-task dispatch.
-- [ ] US-003: Wire dispatch_ready() into coordinator tick. Execute via asyncio.gather().
+- [x] US-003: Wire dispatch_ready() into coordinator tick. Execute via asyncio.gather().
 
 ### Phase 3: Intelligent Decomposition
 - [ ] US-004: Add _detect_complexity() to planner. Set max_concurrent on DecompositionResult.
