@@ -731,38 +731,63 @@ class MissionDispatcher:
 
         # Include input context (upstream outputs, retry feedback, etc.)
         if isinstance(task.input_context, dict):
-            upstream_outputs = task.input_context.get("upstream_outputs")
-            if upstream_outputs:
-                parts.append("\n## Previous Task Outputs")
-                for output in upstream_outputs:
+            # Check if this is a revision retry (has previous output)
+            previous_output = task.input_context.get("previous_output")
+            verification_feedback = task.input_context.get("verification_feedback")
+
+            if previous_output and verification_feedback:
+                # REVISION MODE: Give the LLM its own output back with
+                # targeted feedback. Much cheaper than a full rewrite.
+                failures = verification_feedback.get("failures", [])
+                reasoning = verification_feedback.get("reasoning", "Unknown")
+                attempt = verification_feedback.get("attempt", "?")
+
+                parts = [
+                    f"# Revision Request: {task.title}",
+                    f"\nYour previous output (attempt {attempt}) needs revision. "
+                    f"Do NOT rewrite from scratch — revise the content below to address the feedback.",
+                    f"\n## Issues to Fix\n{reasoning}",
+                ]
+                if failures:
                     parts.append(
-                        f"\n### {output.get('title', 'Previous Task')}\n"
-                        f"{output.get('output', '')}"
+                        "Failed checks: " + ", ".join(failures)
+                    )
+                parts.append(
+                    f"\n## Your Previous Output (revise this)\n\n{previous_output}"
+                )
+                # Still include upstream outputs for reference if needed
+                upstream_outputs = task.input_context.get("upstream_outputs")
+                if upstream_outputs:
+                    parts.append("\n## Reference: Upstream Task Outputs")
+                    for output in upstream_outputs:
+                        parts.append(
+                            f"\n### {output.get('title', 'Previous Task')}\n"
+                            f"{output.get('output', '')}"
+                        )
+            else:
+                # FIRST ATTEMPT: Standard prompt construction
+                upstream_outputs = task.input_context.get("upstream_outputs")
+                if upstream_outputs:
+                    parts.append("\n## Previous Task Outputs")
+                    for output in upstream_outputs:
+                        parts.append(
+                            f"\n### {output.get('title', 'Previous Task')}\n"
+                            f"{output.get('output', '')}"
+                        )
+
+                retry_feedback = task.input_context.get("retry_feedback")
+                if retry_feedback:
+                    parts.append(
+                        f"\n## Feedback from Previous Attempt\n"
+                        f"Your previous output was rejected. Here is the feedback:\n"
+                        f"{retry_feedback}"
                     )
 
-            retry_feedback = task.input_context.get("retry_feedback")
-            if retry_feedback:
-                parts.append(
-                    f"\n## Feedback from Previous Attempt\n"
-                    f"Your previous output was rejected. Here is the feedback:\n"
-                    f"{retry_feedback}"
-                )
-
-            verification_criteria = task.input_context.get("verification_criteria_hint")
-            if verification_criteria:
-                parts.append(
-                    f"\n## Quality Requirements\n{verification_criteria}"
-                )
-
-            # Surface verification feedback from failed attempts
-            verification_feedback = task.input_context.get("verification_feedback")
-            if verification_feedback:
-                parts.append(
-                    f"\n## Feedback from Previous Attempt\n"
-                    f"Your previous output was rejected. Here is the feedback:\n"
-                    f"Reason: {verification_feedback.get('reasoning', 'Unknown')}\n"
-                    f"Failed checks: {', '.join(verification_feedback.get('failures', []))}"
-                )
+                verification_criteria = task.input_context.get("verification_criteria_hint")
+                if verification_criteria:
+                    parts.append(
+                        f"\n## Quality Requirements\n{verification_criteria}"
+                    )
 
         # Inject required output format from verification_criteria
         vc = task.verification_criteria if hasattr(task, 'verification_criteria') else None

@@ -506,14 +506,28 @@ class VerificationService:
                 verdict = self._compute_verdict(scores, confidence)
 
                 # If deterministic checks had non-must_pass failures, factor in
+                # BUT only downgrade if failures are structural (min_length,
+                # format_regex, etc) — not required_sections which is just
+                # heading-name guessing that burns tokens on retries
                 if not deterministic_result.passed and verdict == VERDICT_PASS:
-                    # Downgrade to partial if deterministic checks failed
-                    # but weren't must_pass
-                    verdict = VERDICT_PARTIAL
-                    reasoning = (
-                        f"Deterministic check failures: {'; '.join(deterministic_failures)}. "
-                        f"LLM judge assessment: {reasoning}"
-                    )
+                    structural_failures = [
+                        f for f in deterministic_result.failures
+                        if f.check_type != "required_sections"
+                    ]
+                    if structural_failures:
+                        verdict = VERDICT_PARTIAL
+                        reasoning = (
+                            f"Deterministic check failures: "
+                            f"{'; '.join(f.description for f in structural_failures)}. "
+                            f"LLM judge assessment: {reasoning}"
+                        )
+                    else:
+                        # Only required_sections failed — trust the LLM judge
+                        logger.info(
+                            "Skipping PARTIAL downgrade for task '%s' — "
+                            "only required_sections failed, LLM judge says PASS",
+                            task_title,
+                        )
 
                 logger.info(
                     "Verification %s for task '%s' (model: %s, scores: %s, confidence: %.2f)",

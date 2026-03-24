@@ -624,22 +624,14 @@ class CoordinatorService:
         upstream_outputs: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """
-        Generate verification criteria for synthesis tasks:
-        - required_sections derived from upstream task titles
-        - min_length = 50% of combined upstream output length
+        Generate verification criteria for synthesis tasks.
+
+        NOTE: We intentionally skip required_sections for synthesis —
+        the LLM planner can't predict exact headings the agent will use,
+        and exact-match checks cause PARTIAL downgrades that burn tokens
+        on retries. The LLM judge already evaluates content quality.
         """
         criteria: List[Dict[str, Any]] = []
-
-        # Required sections from upstream titles
-        section_titles = [
-            u.get("title", f"Section {i}")
-            for i, u in enumerate(upstream_outputs, 1)
-        ]
-        if section_titles:
-            criteria.append({
-                "type": "required_sections",
-                "value": section_titles,
-            })
 
         # Minimum length — 50% of combined upstream
         combined_length = sum(len(u.get("output", "")) for u in upstream_outputs)
@@ -732,9 +724,44 @@ class CoordinatorService:
 
         # Build the prompt — synthesis tasks use a specialised prompt
         is_synthesis = task.task_type == TaskType.SYNTHESIS.value
+
+        # Check if this is a revision retry (has previous output + feedback)
+        ctx = task.input_context or {}
+        previous_output = ctx.get("previous_output")
+        verification_feedback = ctx.get("verification_feedback")
+        is_revision = bool(previous_output and verification_feedback)
+
         if is_synthesis:
             synthesis_upstream = self._collect_upstream_outputs(db, task)
-            prompt = self._build_synthesis_prompt(task, synthesis_upstream)
+
+            if is_revision:
+                # REVISION MODE: Don't rebuild the full synthesis prompt.
+                # Give the LLM its own output + targeted feedback instead.
+                failures = verification_feedback.get("failures", [])
+                reasoning = verification_feedback.get("reasoning", "Unknown")
+                attempt = verification_feedback.get("attempt", "?")
+
+                prompt_parts = [
+                    f"# Revision Request: {task.title}",
+                    f"\nYour previous synthesis (attempt {attempt}) needs revision. "
+                    f"Do NOT rewrite from scratch — revise the content below to "
+                    f"address the feedback while preserving everything that was good.",
+                    f"\n## Issues to Fix\n{reasoning}",
+                ]
+                if failures:
+                    prompt_parts.append(
+                        "Failed checks: " + ", ".join(failures)
+                    )
+                prompt_parts.append(
+                    f"\n## Your Previous Output (revise this)\n\n{previous_output}"
+                )
+                prompt = "\n".join(prompt_parts)
+                logger.info(
+                    "Built revision prompt for synthesis task %s (attempt %s)",
+                    task.id, attempt,
+                )
+            else:
+                prompt = self._build_synthesis_prompt(task, synthesis_upstream)
 
             # Auto-set verification criteria if not already defined
             if not task.verification_criteria:

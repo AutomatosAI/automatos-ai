@@ -235,9 +235,9 @@ class TestTokenEstimate:
         ]
         estimate = _estimate_token_budget(tasks)
         flat_estimate = 2000 * len(tasks)
-        # simple(1000) + complex(8000) + moderate(4000) = 13000
+        # simple(5000) + complex(35000) + moderate(15000) = 55000
         assert estimate != flat_estimate
-        assert estimate == 1000 + 8000 + 4000
+        assert estimate == 5000 + 35000 + 15000
 
 
 # ---------------------------------------------------------------------------

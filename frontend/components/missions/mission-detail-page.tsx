@@ -43,7 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Activity, ListChecks, Clock, Coins, Brain, Zap } from 'lucide-react'
+import { Activity, ListChecks, Clock, Coins, Brain, Zap, DollarSign } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface MissionDetailPageProps {
@@ -407,6 +407,12 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 icon: Coins,
                 iconColor: 'text-[hsl(var(--warning))]',
               },
+              {
+                label: 'Est. Cost',
+                value: `~$${((stats.tokensUsed / 1_000_000) * 4).toFixed(2)}`,
+                icon: DollarSign,
+                iconColor: 'text-emerald-400',
+              },
               ...(mission.max_concurrent > 1
                 ? [{
                     label: 'Parallel',
@@ -424,6 +430,12 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
           <MissionBudgetBar
             tokensUsed={mission.tokens_used}
             tokenBudgetEstimate={mission.token_budget_estimate}
+            missionState={mission.state}
+            onResume={() => resumeMutation.mutate(missionId, {
+              onSuccess: () => toast.success('Mission resumed'),
+              onError: (err) => toast.error(err.message),
+            })}
+            isResuming={resumeMutation.isLoading}
           />
         )}
       </div>
@@ -594,8 +606,8 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 className="h-full"
               />
             ) : isTerminal ? (
-              <div className="h-full flex flex-col">
-                <div className="p-3 border-b border-border flex items-center gap-1">
+              <div className="h-full flex flex-col overflow-hidden">
+                <div className="p-3 border-b border-border flex items-center gap-1 shrink-0">
                   <button
                     onClick={() => setRightTab('activity')}
                     className={cn(
@@ -621,17 +633,17 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                   </button>
                 </div>
                 {rightTab === 'field' ? (
-                  <MissionFieldPanel missionId={missionId} className="flex-1" />
+                  <MissionFieldPanel missionId={missionId} className="flex-1 min-h-0 overflow-y-auto" />
                 ) : (
                   <MissionResultsPanel
                     mission={mission}
-                    className="flex-1"
+                    className="flex-1 min-h-0 overflow-y-auto"
                   />
                 )}
               </div>
             ) : (
-              <div className="h-full flex flex-col">
-                <div className="p-3 border-b border-border flex items-center gap-1">
+              <div className="h-full flex flex-col overflow-hidden">
+                <div className="p-3 border-b border-border flex items-center gap-1 shrink-0">
                   <button
                     onClick={() => setRightTab('activity')}
                     className={cn(
@@ -657,11 +669,11 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                   </button>
                 </div>
                 {rightTab === 'field' ? (
-                  <MissionFieldPanel missionId={missionId} className="flex-1" />
+                  <MissionFieldPanel missionId={missionId} className="flex-1 min-h-0 overflow-y-auto" />
                 ) : (
                   <MissionActivityFeed
                     events={mission.recent_events}
-                    className="flex-1"
+                    className="flex-1 min-h-0 overflow-y-auto"
                   />
                 )}
               </div>

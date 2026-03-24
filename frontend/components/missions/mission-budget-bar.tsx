@@ -2,11 +2,15 @@
 
 import { useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import { AlertTriangle, Coins } from 'lucide-react'
+import { AlertTriangle, Coins, Play } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface MissionBudgetBarProps {
   tokensUsed: number
   tokenBudgetEstimate: number
+  missionState?: string
+  onResume?: () => void
+  isResuming?: boolean
   className?: string
 }
 
@@ -45,6 +49,9 @@ const STATUS_STYLES: Record<BudgetStatus, { bar: string; text: string; bg: strin
 export function MissionBudgetBar({
   tokensUsed,
   tokenBudgetEstimate,
+  missionState,
+  onResume,
+  isResuming,
   className,
 }: MissionBudgetBarProps) {
   const { percentage, status, styles } = useMemo(() => {
@@ -54,6 +61,8 @@ export function MissionBudgetBar({
     const s = getBudgetStatus(pct)
     return { percentage: pct, status: s, styles: STATUS_STYLES[s] }
   }, [tokensUsed, tokenBudgetEstimate])
+
+  const isPaused = missionState === 'paused'
 
   return (
     <div className={cn('space-y-1.5', styles.bg && `rounded-lg border p-3 ${styles.bg}`, className)}>
@@ -65,6 +74,9 @@ export function MissionBudgetBar({
         </div>
         <span className={cn('font-mono font-medium', styles.text)}>
           {tokensUsed.toLocaleString()} / {tokenBudgetEstimate.toLocaleString()} ({percentage}%)
+          <span className="ml-2 text-muted-foreground">
+            ~${((tokensUsed / 1_000_000) * 4).toFixed(2)}
+          </span>
         </span>
       </div>
 
@@ -76,17 +88,33 @@ export function MissionBudgetBar({
         />
       </div>
 
-      {/* Warning banner */}
+      {/* Warning banner + resume button */}
       {(status === 'warning' || status === 'critical' || status === 'exceeded') && (
-        <div className={cn('flex items-center gap-1.5 text-[11px]', styles.text)}>
-          <AlertTriangle className="w-3 h-3 shrink-0" />
-          <span>
-            {status === 'exceeded'
-              ? 'Budget exceeded — mission may be paused'
-              : status === 'critical'
-                ? 'Budget critical — only synthesis and review tasks will dispatch'
-                : 'Budget usage above 50%'}
-          </span>
+        <div className="flex items-center justify-between gap-2">
+          <div className={cn('flex items-center gap-1.5 text-[11px]', styles.text)}>
+            <AlertTriangle className="w-3 h-3 shrink-0" />
+            <span>
+              {isPaused
+                ? 'Mission paused — budget exceeded'
+                : status === 'exceeded'
+                  ? 'Budget exceeded — mission may be paused'
+                  : status === 'critical'
+                    ? 'Budget critical — only synthesis and review tasks will dispatch'
+                    : 'Budget usage above 50%'}
+            </span>
+          </div>
+          {isPaused && onResume && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onResume}
+              disabled={isResuming}
+              className="h-6 px-2.5 text-[11px] gap-1 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+            >
+              <Play className="w-3 h-3" />
+              {isResuming ? 'Resuming...' : 'Resume'}
+            </Button>
+          )}
         </div>
       )}
     </div>
