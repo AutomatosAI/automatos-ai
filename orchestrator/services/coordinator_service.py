@@ -616,6 +616,18 @@ class CoordinatorService:
                 "you can from the task description alone.*"
             )
 
+        # PRD-108: Tell synthesis agent about the shared field
+        field_id = (task.input_context or {}).get("field_id")
+        if field_id:
+            parts.append(
+                "\n## Shared Mission Field\n"
+                "You have access to the shared mission field. Use "
+                "**platform_field_query** to search for additional findings, "
+                "analysis, or context from other agents that may not appear in "
+                "the upstream outputs above. Query the field for key topics "
+                "before synthesising to ensure nothing is missed."
+            )
+
         return "\n".join(parts)
 
     @staticmethod

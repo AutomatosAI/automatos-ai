@@ -789,6 +789,22 @@ class MissionDispatcher:
                         f"\n## Quality Requirements\n{verification_criteria}"
                     )
 
+            # PRD-108: Tell agents about the shared field
+            field_id = task.input_context.get("field_id") if isinstance(task.input_context, dict) else None
+            if field_id:
+                parts.append(
+                    "\n## Shared Mission Field\n"
+                    "You have access to a shared semantic field where all mission agents "
+                    "store and retrieve knowledge. Use these tools:\n"
+                    "- **platform_field_query**: Search for what other agents have found "
+                    "(e.g. research findings, analysis results). Query BEFORE starting work "
+                    "to see what's already known.\n"
+                    "- **platform_field_inject**: Share your key findings, conclusions, or "
+                    "intermediate results so other agents can discover them.\n"
+                    "The field ranks results by relevance — important, frequently-accessed "
+                    "findings surface first. Stale information fades naturally."
+                )
+
         # Inject required output format from verification_criteria
         vc = task.verification_criteria if hasattr(task, 'verification_criteria') else None
         if isinstance(vc, list):
