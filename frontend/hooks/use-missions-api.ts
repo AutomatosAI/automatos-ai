@@ -241,6 +241,22 @@ export function useCancelMission() {
   })
 }
 
+// ── Delete Mission ───────────────────────────────────────────
+
+export function useDeleteMission() {
+  const queryClient = useQueryClient()
+
+  return useMutation<void, Error, string>({
+    mutationFn: (id) =>
+      apiClient.request<void>(`/api/missions/${id}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.all })
+    },
+  })
+}
+
 // ── Replan Failed Mission (PRD-82B US-005) ───────────────────
 
 export function useReplanMission() {
