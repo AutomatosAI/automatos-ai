@@ -14,6 +14,7 @@ The planner:
 Source: PRD-82A Section 12 (US-011), PRD-82B US-001/US-002
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -32,6 +33,182 @@ from services.orchestration_deps import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Attachment helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_office_text(raw: bytes, filename_lower: str) -> str:
+    """Extract text from Office documents (.docx, .xlsx)."""
+    import io
+    if filename_lower.endswith(".docx"):
+        from docx import Document as DocxDocument
+        doc = DocxDocument(io.BytesIO(raw))
+        return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    elif filename_lower.endswith(".xlsx") or filename_lower.endswith(".xls"):
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        lines = []
+        for ws in wb.worksheets:
+            lines.append(f"## Sheet: {ws.title}")
+            for row in ws.iter_rows(values_only=True):
+                cells = [str(c) if c is not None else "" for c in row]
+                if any(cells):
+                    lines.append(" | ".join(cells))
+        wb.close()
+        return "\n".join(lines)
+    else:
+        return f"[Office file: unsupported format]"
+
+
+async def _fetch_attachment_contents(
+    attachments: List[Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    """Fetch text content from S3 attachment keys.
+
+    Returns a list of {filename, content} dicts. Binary files are skipped
+    with a placeholder note.
+    """
+    if not attachments:
+        return []
+
+    try:
+        import boto3
+        from botocore.config import Config as BotoConfig
+        from core.config import Config
+
+        boto_cfg = BotoConfig(region_name=Config.AWS_REGION)
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=Config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=Config.AWS_SECRET_ACCESS_KEY,
+            config=boto_cfg,
+        )
+    except Exception:
+        logger.warning("Cannot initialize S3 client for attachments — skipping")
+        return []
+
+    loop = asyncio.get_running_loop()
+    results: List[Dict[str, str]] = []
+
+    for att in attachments:
+        # New format: document_id (from DocumentManager pipeline)
+        doc_id = att.get("document_id")
+        if doc_id:
+            try:
+                from core.database.database import SessionLocal
+                from core.models.core import Document
+                db = SessionLocal()
+                try:
+                    doc = db.query(Document).filter(Document.id == doc_id).first()
+                    if doc and doc.file_path:
+                        s3_path = doc.file_path
+                        if s3_path.startswith("s3://"):
+                            parts = s3_path[5:].split("/", 1)
+                            bucket, key = parts[0], parts[1] if len(parts) > 1 else ""
+                        else:
+                            bucket, key = Config.S3_DOCUMENTS_BUCKET, s3_path
+                        response = await loop.run_in_executor(
+                            None,
+                            lambda b=bucket, k=key: s3.get_object(Bucket=b, Key=k),
+                        )
+                        raw = response["Body"].read()
+                        fname = doc.filename or att.get("filename", f"doc_{doc_id}")
+                        if fname.lower().endswith(".pdf"):
+                            try:
+                                import fitz
+                                pdf_doc = fitz.open(stream=raw, filetype="pdf")
+                                content = "\n\n".join(p.get_text() for p in pdf_doc)
+                                pdf_doc.close()
+                            except ImportError:
+                                content = raw.decode("utf-8", errors="replace")
+                        else:
+                            content = raw.decode("utf-8", errors="replace")
+                        results.append({"filename": fname, "content": content})
+                        logger.info("Fetched attachment doc_id=%s: %s (%d chars)", doc_id, fname, len(content))
+                    else:
+                        logger.warning("Attachment doc_id=%s not found or no file_path", doc_id)
+                finally:
+                    db.close()
+            except Exception as exc:
+                logger.warning("Failed to fetch attachment doc_id=%s: %s", doc_id, exc)
+            continue
+
+        # Legacy format: S3 key directly
+        s3_key = att.get("key", "")
+        filename = att.get("filename", "unknown")
+        content_type = att.get("content_type", "")
+
+        # Validate S3 key — must be under workspaces/ prefix
+        if s3_key and not s3_key.startswith("workspaces/"):
+            logger.warning("Skipping attachment with disallowed S3 key prefix: %s", s3_key[:100])
+            results.append({
+                "filename": filename,
+                "content": f"[Attachment skipped — invalid storage path]",
+            })
+            continue
+
+        # Determine extractable file types
+        text_types = {
+            "text/", "application/json", "application/pdf",
+            "text/csv", "text/markdown", "text/plain",
+        }
+        office_extensions = {".docx", ".xlsx", ".doc", ".xls"}
+        is_text = any(content_type.startswith(t) for t in text_types)
+        fname_lower = filename.lower()
+        is_office = any(fname_lower.endswith(ext) for ext in office_extensions)
+        is_pdf = "pdf" in fname_lower or content_type == "application/pdf"
+
+        if not is_text and not is_pdf and not is_office:
+            results.append({
+                "filename": filename,
+                "content": f"[Binary file: {filename} ({content_type}) — content not extracted]",
+            })
+            continue
+
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda k=s3_key: s3.get_object(
+                    Bucket=Config.S3_DOCUMENTS_BUCKET, Key=k,
+                ),
+            )
+            raw = response["Body"].read()
+
+            # PDF extraction
+            if is_pdf:
+                try:
+                    import fitz  # PyMuPDF
+                    doc = fitz.open(stream=raw, filetype="pdf")
+                    text_parts = [page.get_text() for page in doc]
+                    doc.close()
+                    content = "\n\n".join(text_parts)
+                except ImportError:
+                    content = "[PDF file — PyMuPDF not available for text extraction]"
+            # Office document extraction
+            elif is_office:
+                try:
+                    content = _extract_office_text(raw, fname_lower)
+                except Exception as exc:
+                    logger.warning("Office extraction failed for %s: %s", filename, exc)
+                    content = f"[Office file: {filename} — text extraction failed]"
+            else:
+                content = raw.decode("utf-8", errors="replace")
+
+            results.append({"filename": filename, "content": content})
+            logger.info("Fetched attachment: %s (%d chars)", filename, len(content))
+
+        except Exception as exc:
+            logger.warning("Failed to fetch attachment %s: %s", s3_key, exc)
+            results.append({
+                "filename": filename,
+                "content": f"[Failed to fetch: {exc}]",
+            })
+
+    return results
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -295,6 +472,16 @@ class MissionPlanner:
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 
+        # Fetch attachment contents if present in config
+        attachment_contents: Optional[List[Dict[str, str]]] = None
+        raw_attachments = (config or {}).get("attachments")
+        if raw_attachments and isinstance(raw_attachments, list):
+            attachment_contents = await _fetch_attachment_contents(raw_attachments)
+            logger.info(
+                "MissionPlanner: fetched %d attachment(s) for context",
+                len(attachment_contents),
+            )
+
         for attempt in range(1, MAX_PLAN_RETRIES + 1):
             logger.info(
                 "MissionPlanner.decompose: attempt %d/%d for goal='%s' workspace=%s",
@@ -308,6 +495,7 @@ class MissionPlanner:
                 goal=goal,
                 agent_roster=agent_roster,
                 validation_errors=last_errors if attempt > 1 else None,
+                attachment_contents=attachment_contents,
             )
 
             messages = [
@@ -403,13 +591,38 @@ def _build_decomposition_prompt(
     goal: str,
     agent_roster: str,
     validation_errors: Optional[List[str]] = None,
+    attachment_contents: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """Build the user prompt for goal decomposition."""
     parts = [
         f"## Goal\n<user_goal>\n{goal}\n</user_goal>\n",
-        f"## Available Agents\n{agent_roster}\n",
-        _OUTPUT_SCHEMA_INSTRUCTIONS,
     ]
+
+    # Inject attachment content so the LLM has full context
+    if attachment_contents:
+        parts.append("## Attached Reference Documents\n")
+        total_budget = 90_000  # Global budget for all attachments combined
+        per_file_limit = 30_000
+        accumulated = 0
+        for att in attachment_contents:
+            remaining = total_budget - accumulated
+            if remaining <= 0:
+                parts.append(
+                    "\n[... further attachments skipped — total attachment budget exceeded ...]\n"
+                )
+                break
+            filename = att.get("filename", "unknown")
+            content = att.get("content", "")
+            limit = min(len(content), per_file_limit, remaining)
+            if len(content) > limit:
+                content = content[:limit] + "\n\n[... truncated ...]"
+            accumulated += len(content)
+            parts.append(
+                f"### {filename}\n<attachment>\n{content}\n</attachment>\n"
+            )
+
+    parts.append(f"## Available Agents\n{agent_roster}\n")
+    parts.append(_OUTPUT_SCHEMA_INSTRUCTIONS)
 
     if validation_errors:
         error_text = "\n".join(f"- {e}" for e in validation_errors)

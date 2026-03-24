@@ -379,9 +379,9 @@ async def lifespan(app: FastAPI):
                         logger.info("HeartbeatService started on unified scheduler")
 
                     if config.RECIPE_SCHEDULER_ENABLED:
-                        from services.recipe_scheduler import get_recipe_scheduler
-                        await get_recipe_scheduler().start(scheduler=shared_sched)
-                        logger.info("RecipeSchedulerService started on unified scheduler")
+                        from services.playbook_scheduler import get_playbook_scheduler
+                        await get_playbook_scheduler().start(scheduler=shared_sched)
+                        logger.info("PlaybookSchedulerService started on unified scheduler")
 
                     # PRD-72: Task Reconciliation — stall detection + auto-retry
                     try:

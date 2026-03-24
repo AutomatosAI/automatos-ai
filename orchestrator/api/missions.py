@@ -27,13 +27,15 @@ Agent telemetry:
 Source: PRD-82A Section 12, PRD-82B US-004/US-005/US-008
 """
 
+import asyncio
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
@@ -57,6 +59,9 @@ from core.models.orchestration_enums import (
     TERMINAL_RUN_STATES,
 )
 from modules.coordination.planner import PlanValidationError
+import boto3
+from botocore.config import Config as BotoConfig
+
 from services.coordinator_service import get_coordinator_service
 from services.orchestration_state import (
     ConflictError,
@@ -107,6 +112,11 @@ class MissionReviewRequest(BaseModel):
     task_feedback: Optional[Dict[str, str]] = Field(
         None,
         description="Map of task_id → feedback string. On reject, tasks with feedback get re-queued.",
+    )
+    feedback: Optional[str] = Field(
+        None,
+        max_length=5000,
+        description="General rejection feedback (when rejecting without flagging specific tasks).",
     )
 
     @validator("task_feedback")
@@ -689,6 +699,85 @@ async def get_archived_mission(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# ---------------------------------------------------------------------------
+# File upload
+# ---------------------------------------------------------------------------
+
+_UPLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20 MB
+_UPLOAD_ALLOWED_EXTS = {".pdf", ".md", ".txt", ".doc", ".docx", ".json", ".csv", ".xlsx"}
+
+
+@router.post("/upload")
+async def upload_mission_file(
+    file: UploadFile = File(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Upload a file attachment for use in a mission.
+
+    Max 20 MB. Allowed types: pdf, md, txt, doc, docx, json, csv, xlsx.
+    Runs through DocumentManager pipeline (S3 + chunking + embedding for RAG).
+    Returns document_id and file metadata.
+    """
+    from pathlib import Path
+    from api.documents import get_document_manager
+
+    # --- validate extension ---------------------------------------------------
+    filename = file.filename or "upload"
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    if ext not in _UPLOAD_ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not allowed. Accepted: {sorted(_UPLOAD_ALLOWED_EXTS)}",
+        )
+
+    # --- read & validate size -------------------------------------------------
+    content = await file.read()
+    if len(content) > _UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large ({len(content)} bytes). Max {_UPLOAD_MAX_BYTES} bytes (20 MB).",
+        )
+
+    # --- write to temp file for DocumentManager -------------------------------
+    upload_dir = Path("/tmp/automatos_mission_uploads")
+    upload_dir.mkdir(exist_ok=True)
+    temp_filename = f"{uuid4().hex}{ext}"
+    temp_path = upload_dir / temp_filename
+
+    try:
+        with open(temp_path, "wb") as f:
+            f.write(content)
+
+        doc_manager = get_document_manager(str(ctx.workspace_id))
+        document_id = await doc_manager.upload_document(
+            file_path=str(temp_path),
+            filename=filename,
+            tags=["mission-attachment"],
+            description="Uploaded as mission reference document",
+            created_by=ctx.user.id if ctx.user else "system",
+        )
+
+        return {
+            "document_id": document_id,
+            "filename": filename,
+            "size": len(content),
+            "content_type": file.content_type or "application/octet-stream",
+        }
+    except Exception as exc:
+        logger.error("Mission upload failed for %s: %s", filename, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="File upload failed")
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Mission detail & telemetry
+# ---------------------------------------------------------------------------
+
+
 @router.get("/{mission_id}")
 async def get_mission(
     mission_id: UUID,
@@ -984,6 +1073,7 @@ async def review_mission(
             actor_id=ctx.user.id or "unknown",
             verdict=body.verdict,
             task_feedback=body.task_feedback,
+            feedback=body.feedback,
         )
         db.commit()
         return _run_to_response(run)

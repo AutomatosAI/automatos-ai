@@ -24,6 +24,7 @@ from uuid import UUID
 from sqlalchemy import and_, text
 from sqlalchemy.orm import Session
 
+from config import Config
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import (
@@ -378,25 +379,44 @@ class MissionDispatcher:
                 tokens,
             )
         else:
-            # Agent error
+            # Agent error — retry if attempts remain, else fail permanently
             error_msg = result.get("error", "Unknown error")
-            task.failure_reason_code = FailureReasonCode.AGENT_ERROR.value
-            task.failure_detail = error_msg[:2000]  # Truncate to prevent oversized rows
+            max_retries = task.max_retries or Config.COORDINATOR_MAX_TASK_RETRIES
+            current_attempt = (task.attempt_number or 0) + 1
+            task.attempt_number = current_attempt
 
-            transition_task(
-                db=db,
-                task=task,
-                new_state=TaskState.FAILED,
-                actor_type=ActorType.AGENT,
-                actor_id=str(task.assigned_agent_id),
-                reason=f"Agent error: {error_msg[:200]}",
-            )
-
-            logger.warning(
-                "Task %s failed with agent error: %s",
-                task.id,
-                error_msg[:200],
-            )
+            if current_attempt < max_retries:
+                # Re-queue for retry
+                task.assigned_agent_id = None
+                task.failure_detail = error_msg[:2000]
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.QUEUED,
+                    actor_type=ActorType.AGENT,
+                    actor_id=str(task.assigned_agent_id or "unknown"),
+                    reason=f"Agent error, retrying (attempt {current_attempt}/{max_retries}): {error_msg[:200]}",
+                )
+                logger.warning(
+                    "Task %s agent error → re-queued (attempt %d/%d): %s",
+                    task.id, current_attempt, max_retries, error_msg[:200],
+                )
+            else:
+                # Retries exhausted
+                task.failure_reason_code = FailureReasonCode.AGENT_ERROR.value
+                task.failure_detail = error_msg[:2000]
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.FAILED,
+                    actor_type=ActorType.AGENT,
+                    actor_id=str(task.assigned_agent_id),
+                    reason=f"Agent error after {current_attempt} attempts: {error_msg[:200]}",
+                )
+                logger.warning(
+                    "Task %s failed after %d attempts: %s",
+                    task.id, current_attempt, error_msg[:200],
+                )
 
         sync_board_status(db, task)
 

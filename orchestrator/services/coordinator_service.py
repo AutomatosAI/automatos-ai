@@ -17,6 +17,7 @@ Source: PRD-82A Sections 6, 8, 9, 12 (US-014)
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -188,6 +189,103 @@ class CoordinatorService:
         except Exception as e:
             logger.warning("[PRD-108] Failed to inject task output: %s", e)
 
+    async def _seed_field_with_documents(
+        self,
+        db: Session,
+        field,
+        field_id: str,
+        attachments: List[Dict[str, Any]],
+        workspace_id,
+    ) -> None:
+        """Inject uploaded document references into the shared field at elevated strength."""
+        from core.models.core import Document
+
+        for att in attachments:
+            doc_id = att.get("document_id")
+            if not doc_id:
+                continue
+            try:
+                doc = (
+                    db.query(Document)
+                    .filter(Document.id == doc_id, Document.workspace_id == workspace_id)
+                    .first()
+                )
+                if not doc:
+                    continue
+                await field.inject(
+                    context_id=field_id,
+                    key=f"reference_doc:{doc.filename}",
+                    value=(
+                        f"Reference document '{doc.filename}' uploaded by user as mission context. "
+                        f"Type: {doc.file_type or 'unknown'}, Size: {doc.file_size or 0} bytes. "
+                        f"Tags: {doc.tags or []}. Description: {doc.description or 'N/A'}"
+                    ),
+                    agent_id=0,
+                    strength=1.2,  # Above default so reference material ranks higher
+                )
+                logger.info("[PRD-108] Seeded field %s with doc %s (%s)", field_id, doc_id, doc.filename)
+            except Exception as e:
+                logger.warning("[PRD-108] Failed to seed doc %s into field: %s", doc_id, e)
+
+    async def _save_mission_output_as_document(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+    ) -> Optional[int]:
+        """On mission completion, save assembled task outputs as a document for future intelligence."""
+        from api.documents import get_document_manager
+        from pathlib import Path
+
+        try:
+            tasks = (
+                db.query(OrchestrationTask)
+                .filter(
+                    OrchestrationTask.run_id == run.id,
+                    OrchestrationTask.state == TaskState.VERIFIED.value,
+                )
+                .order_by(OrchestrationTask.sequence_number)
+                .all()
+            )
+            if not tasks:
+                return None
+
+            # Assemble markdown output
+            parts = [f"# Mission: {run.goal}\n"]
+            for t in tasks:
+                parts.append(f"## {t.sequence_number}. {t.title}\n")
+                if t.output:
+                    parts.append(str(t.output))
+                parts.append("")
+            content = "\n".join(parts)
+
+            # Write to temp file
+            output_dir = Path("/tmp/automatos_mission_outputs")
+            output_dir.mkdir(exist_ok=True)
+            slug = re.sub(r"[^a-z0-9]+", "-", run.goal[:60].lower()).strip("-")
+            temp_path = output_dir / f"mission_{run.id}_{slug}.md"
+            temp_path.write_text(content, encoding="utf-8")
+
+            try:
+                doc_manager = get_document_manager(str(run.workspace_id))
+                document_id = await doc_manager.upload_document(
+                    file_path=str(temp_path),
+                    filename=f"mission-output-{slug}.md",
+                    tags=["mission-output", f"mission:{run.id}"],
+                    description=f"Output from completed mission: {run.goal[:200]}",
+                    created_by="coordinator",
+                )
+                # Store reference in run config
+                run.config = {**(run.config or {}), "output_document_id": document_id}
+                db.flush()
+                logger.info("[Mission] Saved output document %s for mission %s", document_id, run.id)
+                return document_id
+            finally:
+                if temp_path.exists():
+                    temp_path.unlink()
+        except Exception as e:
+            logger.warning("[Mission] Failed to save output document for %s: %s", run.id, e, exc_info=True)
+            return None
+
     async def _cleanup_terminal_fields(self, db: Session) -> None:
         """Destroy fields for missions that have ended."""
         terminal_with_fields = (
@@ -209,6 +307,21 @@ class CoordinatorService:
             updated_config.pop("field_id", None)
             run.config = updated_config
             db.flush()
+
+    async def _save_pending_output_documents(self, db: Session) -> None:
+        """Save output documents for completed missions that don't have one yet."""
+        completed_without_output = (
+            db.query(OrchestrationRun)
+            .filter(
+                OrchestrationRun.state == RunState.COMPLETED.value,
+            )
+            .limit(3)
+            .all()
+        )
+        for run in completed_without_output:
+            if (run.config or {}).get("output_document_id"):
+                continue
+            await self._save_mission_output_as_document(db, run)
 
     # ------------------------------------------------------------------
     # Scheduler lifecycle
@@ -309,6 +422,11 @@ class CoordinatorService:
 
                 # --- PRD-108: Clean up fields for terminal runs ---
                 await self._cleanup_terminal_fields(db)
+                db.commit()  # Persist field_id removal to stop destroy loop
+
+                # --- Save output docs for completed missions ---
+                await self._save_pending_output_documents(db)
+                db.commit()
 
                 # --- Archive phase (throttled to once per hour) ---
                 self._maybe_archive(db, summary)
@@ -336,7 +454,16 @@ class CoordinatorService:
 
         # --- PRD-108: Ensure field exists (lazy create for manual-approve path) ---
         if not (run.config or {}).get("field_id"):
-            await self._create_mission_field(db, run)
+            field_id = await self._create_mission_field(db, run)
+            # Seed field with uploaded document references
+            if field_id:
+                attachments = (run.config or {}).get("attachments", [])
+                if attachments:
+                    field = self._get_field()
+                    if field:
+                        await self._seed_field_with_documents(
+                            db, field, field_id, attachments, run.workspace_id,
+                        )
 
         # Load roster agents for this workspace
         agents: List[Agent] = (
@@ -839,6 +966,7 @@ class CoordinatorService:
         actor_id: str,
         verdict: str,
         task_feedback: Optional[Dict[str, str]] = None,
+        feedback: Optional[str] = None,
     ) -> OrchestrationRun:
         """
         Submit human review after all tasks are verified.
@@ -847,6 +975,7 @@ class CoordinatorService:
             verdict: 'accept' or 'reject'
             task_feedback: Optional dict mapping task_id → feedback string.
                           On reject, tasks with feedback get re-queued.
+            feedback: Optional general rejection feedback (no per-task flags needed).
         """
         run = self._get_run(db, run_id)
 
@@ -872,7 +1001,7 @@ class CoordinatorService:
             # Re-queue specific tasks with feedback
             requeued_count = 0
             if task_feedback:
-                for task_id_str, feedback in task_feedback.items():
+                for task_id_str, fb in task_feedback.items():
                     task = (
                         db.query(OrchestrationTask)
                         .filter(
@@ -885,9 +1014,36 @@ class CoordinatorService:
                     )
                     if task:
                         self._requeue_task_with_feedback(
-                            db, task, feedback, actor_id,
+                            db, task, fb, actor_id,
                         )
                         requeued_count += 1
+
+            # Feedback-only rejection: re-queue the last verified task with the feedback
+            if requeued_count == 0 and feedback:
+                last_task = (
+                    db.query(OrchestrationTask)
+                    .filter(
+                        and_(
+                            OrchestrationTask.run_id == run_id,
+                            OrchestrationTask.state == TaskState.VERIFIED.value,
+                        )
+                    )
+                    .order_by(OrchestrationTask.sequence_number.desc())
+                    .first()
+                )
+                if last_task:
+                    self._requeue_task_with_feedback(
+                        db, last_task, feedback, actor_id,
+                    )
+                    requeued_count += 1
+
+            # Build reason string
+            if requeued_count > 0:
+                reason = f"Human rejected — {requeued_count} tasks re-queued"
+            elif feedback:
+                reason = f"Human rejected with feedback: {feedback[:200]}"
+            else:
+                reason = "Human rejected"
 
             # Transition run back to running for re-execution
             transition_run(
@@ -896,8 +1052,15 @@ class CoordinatorService:
                 new_state=RunState.RUNNING,
                 actor_type=ActorType.HUMAN,
                 actor_id=actor_id,
-                reason=f"Human rejected — {requeued_count} tasks re-queued",
+                reason=reason,
             )
+
+            event_payload: Dict[str, object] = {
+                "verdict": "reject",
+                "tasks_requeued": requeued_count,
+            }
+            if feedback:
+                event_payload["feedback"] = feedback
 
             emit_event(
                 db=db,
@@ -905,17 +1068,15 @@ class CoordinatorService:
                 event_type=EventType.RUN_RESUMED,
                 actor_type=ActorType.HUMAN,
                 actor_id=actor_id,
-                payload={
-                    "verdict": "reject",
-                    "tasks_requeued": requeued_count,
-                },
+                payload=event_payload,
             )
 
             logger.info(
-                "Mission %s rejected by %s — %d tasks re-queued",
+                "Mission %s rejected by %s — %d tasks re-queued, general_feedback=%s",
                 run_id,
                 actor_id,
                 requeued_count,
+                bool(feedback),
             )
 
         return run

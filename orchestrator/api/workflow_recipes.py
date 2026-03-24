@@ -32,17 +32,17 @@ from config import config
 
 
 def _sync_cron_schedule(recipe: WorkflowRecipe):
-    """Sync a recipe's cron schedule with the RecipeSchedulerService."""
+    """Sync a playbook's cron schedule with the PlaybookSchedulerService."""
     if not config.RECIPE_SCHEDULER_ENABLED:
         return
     try:
-        from services.recipe_scheduler import get_recipe_scheduler
-        scheduler = get_recipe_scheduler()
+        from services.playbook_scheduler import get_playbook_scheduler
+        scheduler = get_playbook_scheduler()
         sc = recipe.schedule_config or {}
         if sc.get("type") == "cron" and sc.get("cron_expression"):
-            scheduler.schedule_recipe(recipe)
+            scheduler.schedule_playbook(recipe)
         else:
-            scheduler.unschedule_recipe(recipe.id)
+            scheduler.unschedule_playbook(recipe.id)
     except Exception as e:
         logger.warning(f"[_sync_cron_schedule] Failed for recipe {recipe.id}: {e}")
 
@@ -667,8 +667,8 @@ async def delete_workflow_recipe(
         # Unschedule cron job if any
         if config.RECIPE_SCHEDULER_ENABLED:
             try:
-                from services.recipe_scheduler import get_recipe_scheduler
-                get_recipe_scheduler().unschedule_recipe(recipe.id)
+                from services.playbook_scheduler import get_playbook_scheduler
+                get_playbook_scheduler().unschedule_playbook(recipe.id)
             except Exception:
                 pass
 

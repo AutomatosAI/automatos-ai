@@ -1,8 +1,8 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { ArrowLeft, Pause, Play, X, Eye, Target, Check, XCircle, Save } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { ArrowLeft, Pause, Play, X, Eye, Target, Check, XCircle, Save, RefreshCw, RotateCcw } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -32,7 +32,7 @@ import { TaskInspector } from './task-inspector'
 import { HumanReviewPanel } from './human-review-panel'
 import { MissionResultsPanel } from './mission-results-panel'
 import { MissionFieldPanel } from './mission-field-panel'
-import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine } from '@/hooks/use-missions-api'
+import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine, useReplanMission, useRerunMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import { computeMissionStats, TERMINAL_RUN_STATES } from '@/types/missions'
 import { Activity, ListChecks, Clock, Coins, Brain } from 'lucide-react'
@@ -43,6 +43,7 @@ interface MissionDetailPageProps {
 }
 
 export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const showReview = searchParams?.get('tab') === 'review'
 
@@ -56,10 +57,14 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const rejectMutation = useRejectMission()
 
   const saveAsRoutineMutation = useSaveAsRoutine()
+  const replanMutation = useReplanMission()
+  const rerunMutation = useRerunMission()
 
   const [rightTab, setRightTab] = useState<'activity' | 'field'>('activity')
   const [showRejectInput, setShowRejectInput] = useState(false)
   const [rejectFeedback, setRejectFeedback] = useState('')
+  const [showReplan, setShowReplan] = useState(false)
+  const [replanNotes, setReplanNotes] = useState('')
   const [showSaveRoutine, setShowSaveRoutine] = useState(false)
   const [routineName, setRoutineName] = useState('')
   const [routineDescription, setRoutineDescription] = useState('')
@@ -272,6 +277,95 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+            )}
+
+            {/* Replan — failed missions */}
+            {mission.state === 'failed' && (
+              <Dialog open={showReplan} onOpenChange={setShowReplan}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+                    Replan
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Replan Mission</DialogTitle>
+                    <DialogDescription>
+                      Generate new tasks for the failed parts of this mission.
+                      Completed work is preserved.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-2 py-2">
+                    <Label htmlFor="replan-notes">Guidance (optional)</Label>
+                    <Textarea
+                      id="replan-notes"
+                      placeholder="Any notes for the replanner, e.g. 'use a different approach for step 3'..."
+                      value={replanNotes}
+                      onChange={(e) => setReplanNotes(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowReplan(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={replanMutation.isLoading}
+                      onClick={() =>
+                        replanMutation.mutate(
+                          {
+                            id: missionId,
+                            notes: replanNotes.trim() || undefined,
+                          },
+                          {
+                            onSuccess: () => {
+                              toast.success('Mission replanned — new tasks generated')
+                              setShowReplan(false)
+                              setReplanNotes('')
+                            },
+                            onError: (err) => toast.error(err.message),
+                          },
+                        )
+                      }
+                    >
+                      {replanMutation.isLoading ? 'Replanning...' : 'Replan'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            )}
+
+            {/* Re-run — completed or failed missions */}
+            {(mission.state === 'completed' || mission.state === 'failed') && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={rerunMutation.isLoading}
+                onClick={() =>
+                  rerunMutation.mutate(
+                    {
+                      goal: mission.goal,
+                      config: mission.config ?? undefined,
+                    },
+                    {
+                      onSuccess: (newMission) => {
+                        toast.success('New mission created from same goal')
+                        router.push(`/missions/${newMission.id}` as any)
+                      },
+                      onError: (err) => toast.error(err.message),
+                    },
+                  )
+                }
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                {rerunMutation.isLoading ? 'Creating...' : 'Re-run'}
+              </Button>
             )}
           </div>
         </div>

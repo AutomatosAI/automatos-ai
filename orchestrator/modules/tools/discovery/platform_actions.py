@@ -12,7 +12,7 @@ This module re-exports register_all_actions() as the single entry point.
 from .action_registry import ActionRegistry
 
 from .actions_agents import register_agents_actions
-from .actions_recipes import register_recipes_actions
+from .actions_playbooks import register_playbooks_actions
 from .actions_analytics import register_analytics_actions
 from .actions_documents import register_documents_actions
 from .actions_workspace import register_workspace_actions_defs
@@ -25,12 +25,13 @@ from .actions_board_tasks import register_board_task_actions
 from .actions_scheduling import register_scheduling_actions
 from .actions_reports import register_report_actions
 from .actions_field import register_field_actions
+from .actions_blog import register_blog_actions
 
 
 def register_all_actions(registry: ActionRegistry) -> None:
     """Register all platform actions with the registry."""
     register_agents_actions(registry)
-    register_recipes_actions(registry)
+    register_playbooks_actions(registry)
     register_analytics_actions(registry)
     register_documents_actions(registry)
     register_workspace_actions_defs(registry)
@@ -43,6 +44,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_scheduling_actions(registry)
     register_report_actions(registry)
     register_field_actions(registry)
+    register_blog_actions(registry)
 
     # Workspace tools (file I/O, grep, exec, git)
     from .workspace_actions import register_workspace_actions

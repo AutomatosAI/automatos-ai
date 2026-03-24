@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { ChevronDown, CheckCircle2, XCircle, Copy, Check, FileText } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { ChevronDown, CheckCircle2, XCircle, Copy, Check, FileText, Download } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -25,41 +25,96 @@ interface MissionResultsPanelProps {
 const proseClass =
   'prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-p:text-foreground prose-a:text-orange-500 dark:prose-a:text-orange-300 prose-li:text-foreground prose-strong:text-foreground'
 
+type ResultsView = 'combined' | 'per-task'
+
 export function MissionResultsPanel({ mission, className }: MissionResultsPanelProps) {
+  const isTerminal = ['completed', 'failed', 'cancelled'].includes(mission.state)
+  const [view, setView] = useState<ResultsView>(isTerminal ? 'combined' : 'per-task')
+
+  useEffect(() => {
+    if (isTerminal) setView('combined')
+  }, [isTerminal])
+
   const completedTasks = mission.tasks
     .filter((t) => ['verified', 'completed', 'failed'].includes(t.state))
     .sort((a, b) => a.sequence_number - b.sequence_number)
 
   const summary = mission.output_summary as Record<string, unknown> | null
 
-  const handleCopyAll = async () => {
-    const allOutputs = completedTasks
+  const combinedMarkdown = useMemo(() => {
+    return completedTasks
       .filter((t) => t.output)
       .map((t) => `# ${t.title}\n\n${t.output}`)
       .join('\n\n---\n\n')
+  }, [completedTasks])
 
-    await navigator.clipboard.writeText(allOutputs)
+  const handleCopyAll = async () => {
+    await navigator.clipboard.writeText(combinedMarkdown)
     toast.success('All results copied to clipboard')
+  }
+
+  const handleDownload = () => {
+    const blob = new Blob([combinedMarkdown], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `mission-results-${mission.id.slice(0, 8)}.md`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
     <div className={cn('flex flex-col h-full', className)}>
       {/* Header */}
-      <div className="p-4 border-b border-border flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold flex items-center gap-1.5">
-            <FileText className="w-4 h-4" />
-            Mission Results
-          </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {completedTasks.filter((t) => t.state === 'verified').length} of{' '}
-            {mission.tasks.length} tasks verified
-          </p>
+      <div className="p-4 border-b border-border space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold flex items-center gap-1.5">
+              <FileText className="w-4 h-4" />
+              Mission Results
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {completedTasks.filter((t) => t.state === 'verified').length} of{' '}
+              {mission.tasks.length} tasks verified
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleDownload}>
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Download .md
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleCopyAll}>
+              <Copy className="w-3.5 h-3.5 mr-1.5" />
+              Copy All
+            </Button>
+          </div>
         </div>
-        <Button variant="outline" size="sm" onClick={handleCopyAll}>
-          <Copy className="w-3.5 h-3.5 mr-1.5" />
-          Copy All
-        </Button>
+
+        {/* View toggle */}
+        <div className="flex gap-1 bg-secondary/30 rounded-md p-0.5 w-fit">
+          <button
+            onClick={() => setView('combined')}
+            className={cn(
+              'px-3 py-1 text-xs rounded transition-colors cursor-pointer',
+              view === 'combined'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Combined
+          </button>
+          <button
+            onClick={() => setView('per-task')}
+            className={cn(
+              'px-3 py-1 text-xs rounded transition-colors cursor-pointer',
+              view === 'per-task'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Per Task
+          </button>
+        </div>
       </div>
 
       {/* Summary stats */}
@@ -88,16 +143,32 @@ export function MissionResultsPanel({ mission, className }: MissionResultsPanelP
 
       {/* Task outputs */}
       <ScrollArea className="flex-1">
-        <div className="p-3 space-y-2">
-          {completedTasks.map((task) => (
-            <TaskResultItem key={task.id} task={task} />
-          ))}
-          {completedTasks.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-8">
-              No completed tasks yet
-            </p>
-          )}
-        </div>
+        {view === 'combined' ? (
+          <div className="p-4">
+            {combinedMarkdown ? (
+              <div className={cn(proseClass, 'text-xs leading-relaxed')}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} unwrapDisallowed>
+                  {combinedMarkdown}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-8">
+                No completed tasks yet
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="p-3 space-y-2">
+            {completedTasks.map((task) => (
+              <TaskResultItem key={task.id} task={task} />
+            ))}
+            {completedTasks.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-8">
+                No completed tasks yet
+              </p>
+            )}
+          </div>
+        )}
       </ScrollArea>
     </div>
   )
@@ -177,7 +248,7 @@ function TaskResultItem({ task }: { task: TaskResponse }) {
             {/* Markdown output */}
             {task.output ? (
               <div className={cn(proseClass, 'text-xs leading-relaxed')}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} unwrapDisallowed>
                   {task.output}
                 </ReactMarkdown>
               </div>

@@ -22,17 +22,17 @@ from modules.tools.discovery.handlers_agents import (
     update_agent,
     delete_agent,
 )
-from modules.tools.discovery.handlers_recipes import (
-    list_recipes,
-    get_recipe,
-    create_recipe,
-    update_recipe,
-    add_recipe_step,
-    update_recipe_step,
-    delete_recipe_step,
-    execute_recipe,
-    get_recipe_execution,
-    delete_recipe,
+from modules.tools.discovery.handlers_playbooks import (
+    list_playbooks,
+    get_playbook,
+    create_playbook,
+    update_playbook,
+    add_playbook_step,
+    update_playbook_step,
+    delete_playbook_step,
+    execute_playbook,
+    get_playbook_execution,
+    delete_playbook,
 )
 from modules.tools.discovery.handlers_analytics import (
     get_llm_usage,
@@ -111,6 +111,10 @@ from modules.tools.discovery.handlers_field import (
     field_inject,
     field_stability,
 )
+from modules.tools.discovery.handlers_blog import (
+    publish_blog_post,
+    list_blog_posts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,8 +132,8 @@ class PlatformActionExecutor:
             # Read actions
             "platform_list_agents": list_agents,
             "platform_get_agent": get_agent,
-            "platform_list_recipes": list_recipes,
-            "platform_get_recipe": get_recipe,
+            "platform_list_recipes": list_playbooks,
+            "platform_get_recipe": get_playbook,
             "platform_get_llm_usage": get_llm_usage,
             "platform_get_cost_breakdown": get_cost_breakdown,
             "platform_list_documents": list_documents,
@@ -139,11 +143,11 @@ class PlatformActionExecutor:
             # Write actions
             "platform_create_agent": create_agent,
             "platform_update_agent": update_agent,
-            "platform_create_recipe": create_recipe,
-            "platform_update_recipe": update_recipe,
-            "platform_add_recipe_step": add_recipe_step,
-            "platform_update_recipe_step": update_recipe_step,
-            "platform_delete_recipe_step": delete_recipe_step,
+            "platform_create_recipe": create_playbook,
+            "platform_update_recipe": update_playbook,
+            "platform_add_recipe_step": add_playbook_step,
+            "platform_update_recipe_step": update_playbook_step,
+            "platform_delete_recipe_step": delete_playbook_step,
             "platform_store_memory": store_memory,
             "platform_delete_agent": delete_agent,
             # Infrastructure / observability
@@ -162,12 +166,12 @@ class PlatformActionExecutor:
             "platform_list_datasources": list_datasources,
             "platform_workspace_stats": workspace_stats,
             # Self-management
-            "platform_execute_recipe": execute_recipe,
-            "platform_get_recipe_execution": get_recipe_execution,
+            "platform_execute_recipe": execute_playbook,
+            "platform_get_recipe_execution": get_playbook_execution,
             "platform_get_system_health": get_system_health,
             "platform_delete_document": delete_document,
             "platform_reprocess_document": reprocess_document,
-            "platform_delete_recipe": delete_recipe,
+            "platform_delete_recipe": delete_playbook,
             "platform_get_activity_feed": get_activity_feed,
             # Marketplace discovery & workspace inventory (PRD-71)
             "platform_browse_marketplace_plugins": browse_marketplace_plugins,
@@ -206,6 +210,9 @@ class PlatformActionExecutor:
             "platform_field_query": field_query,
             "platform_field_inject": field_inject,
             "platform_field_stability": field_stability,
+            # Blog Widget
+            "platform_publish_blog_post": publish_blog_post,
+            "platform_list_blog_posts": list_blog_posts,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:

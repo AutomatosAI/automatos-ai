@@ -641,10 +641,10 @@ class ActivityService:
         except Exception as e:
             logger.error("Failed to fetch routine schedule: %s", e, exc_info=True)
 
-        # 2) Cron-scheduled recipes (from recipe_scheduler)
+        # 2) Cron-scheduled playbooks (from playbook_scheduler)
         try:
-            from services.recipe_scheduler import get_recipe_scheduler
-            sched = get_recipe_scheduler()
+            from services.playbook_scheduler import get_playbook_scheduler
+            sched = get_playbook_scheduler()
             if sched:
                 sched_status = sched.get_status()
                 recipe_ids_from_jobs = []

@@ -232,7 +232,7 @@ ALLOWED_TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.PENDING: frozenset({TaskState.QUEUED, TaskState.SKIPPED}),
     TaskState.QUEUED: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED}),
     TaskState.ASSIGNED: frozenset({TaskState.RUNNING, TaskState.STALLED, TaskState.SKIPPED}),
-    TaskState.RUNNING: frozenset({TaskState.COMPLETED, TaskState.STALLED, TaskState.FAILED, TaskState.SKIPPED}),
+    TaskState.RUNNING: frozenset({TaskState.COMPLETED, TaskState.STALLED, TaskState.FAILED, TaskState.SKIPPED, TaskState.QUEUED}),
     TaskState.COMPLETED: frozenset({TaskState.VERIFYING, TaskState.SKIPPED}),
     TaskState.VERIFYING: frozenset({TaskState.VERIFIED, TaskState.RETRYING, TaskState.FAILED, TaskState.SKIPPED}),
     TaskState.VERIFIED: frozenset({TaskState.RETRYING}),  # human rejection re-queues for retry
