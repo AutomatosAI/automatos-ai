@@ -599,6 +599,39 @@ class MissionDispatcher:
             if result.dispatched:
                 dispatched_count += 1
 
+        # If every candidate was deferred (budget critical, none dispatched),
+        # pause the run so the user can resume with extended budget.
+        all_deferred = (
+            dispatched_count == 0
+            and len(results) > 0
+            and all(r.skipped_reason == "budget_critical_deferred" for r in results)
+        )
+        if all_deferred:
+            logger.warning(
+                "All %d candidates deferred for run %s — pausing (budget critical stall)",
+                len(results), run_id,
+            )
+            emit_event(
+                db=db,
+                run_id=run_id,
+                event_type=EventType.RUN_BUDGET_EXCEEDED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="dispatcher",
+                payload={
+                    "tokens_used": run.tokens_used or 0,
+                    "token_budget_estimate": run.token_budget_estimate,
+                    "reason": "all_tasks_deferred_budget_critical",
+                },
+            )
+            transition_run(
+                db=db,
+                run=run,
+                new_state=RunState.PAUSED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="dispatcher",
+                reason="Budget critical — all remaining tasks deferred, mission paused",
+            )
+
         logger.info(
             "dispatch_ready(run=%s): %d candidates, %d slots, %d dispatched",
             run_id,
