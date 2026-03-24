@@ -401,6 +401,17 @@ _PLATFORM_KEYWORDS = {
         "field stability", "how converged", "field status",
         "is the field stable", "convergence check",
     ],
+    # Blog Widget
+    "platform_publish_blog_post": [
+        "blog", "publish post", "blog post", "write article",
+        "publish article", "write blog", "create blog post",
+        "publish blog", "write a post",
+    ],
+    "platform_list_blog_posts": [
+        "list blog posts", "show blog posts", "what blog posts",
+        "published articles", "blog articles", "my blog",
+        "check blog", "existing posts",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]

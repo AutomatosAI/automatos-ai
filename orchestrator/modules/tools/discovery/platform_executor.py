@@ -111,6 +111,10 @@ from modules.tools.discovery.handlers_field import (
     field_inject,
     field_stability,
 )
+from modules.tools.discovery.handlers_blog import (
+    publish_blog_post,
+    list_blog_posts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +210,9 @@ class PlatformActionExecutor:
             "platform_field_query": field_query,
             "platform_field_inject": field_inject,
             "platform_field_stability": field_stability,
+            # Blog Widget
+            "platform_publish_blog_post": publish_blog_post,
+            "platform_list_blog_posts": list_blog_posts,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:

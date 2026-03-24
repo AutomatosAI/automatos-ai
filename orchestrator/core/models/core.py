@@ -1556,3 +1556,72 @@ class BoardTask(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+# ---------------------------------------------------------------------------
+# Blog Posts (PRD Blog Widget)
+# ---------------------------------------------------------------------------
+
+class BlogPost(Base):
+    __tablename__ = "blog_posts"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "slug", name="uq_blog_posts_workspace_slug"),
+        CheckConstraint(
+            "status IN ('draft', 'scheduled', 'published', 'archived')",
+            name="ck_blog_posts_status",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    author_agent_id = Column(Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    author_name = Column(String(255), nullable=False)
+
+    title = Column(String(500), nullable=False)
+    slug = Column(String(500), nullable=False)
+    excerpt = Column(String(500), nullable=True)
+    content = Column(Text, nullable=False)
+    cover_image_url = Column(String(1000), nullable=True)
+
+    tags = Column(PG_ARRAY(Text), default=list)
+    category = Column(String(100), nullable=True)
+    status = Column(String(20), nullable=False, default="draft")
+
+    published_at = Column(DateTime, nullable=True)
+    scheduled_for = Column(DateTime, nullable=True)
+
+    seo_title = Column(String(200), nullable=True)
+    seo_description = Column(String(300), nullable=True)
+
+    reading_time_minutes = Column(Integer, default=1)
+    view_count = Column(Integer, default=0)
+
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def to_dict(self, include_content: bool = False):
+        d = {
+            "id": str(self.id),
+            "workspace_id": str(self.workspace_id),
+            "author_agent_id": self.author_agent_id,
+            "author_name": self.author_name,
+            "title": self.title,
+            "slug": self.slug,
+            "excerpt": self.excerpt,
+            "cover_image_url": self.cover_image_url,
+            "tags": self.tags or [],
+            "category": self.category,
+            "status": self.status,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+            "scheduled_for": self.scheduled_for.isoformat() if self.scheduled_for else None,
+            "seo_title": self.seo_title,
+            "seo_description": self.seo_description,
+            "reading_time_minutes": self.reading_time_minutes,
+            "view_count": self.view_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_content:
+            d["content"] = self.content
+        return d
