@@ -98,7 +98,7 @@ class OrchestrationRun(Base):
 
     # Execution limits
     max_retries = Column(Integer, nullable=False, server_default="3")
-    max_concurrent = Column(Integer, nullable=False, server_default="1")
+    max_concurrent = Column(Integer, nullable=False, server_default="3")
 
     # Replan tracking (PRD-82B US-005)
     replan_count = Column(Integer, nullable=False, server_default="0")
@@ -218,6 +218,11 @@ class OrchestrationTask(Base):
     # Retry tracking (PRD-82A Section 11)
     attempt_number = Column(Integer, nullable=False, server_default="0")
     max_retries = Column(Integer, nullable=False, server_default="3")
+
+    # Complexity and parallel execution (PRD-82C)
+    complexity = Column(String(10), nullable=False, server_default="moderate")
+    parallel_group = Column(String(50), nullable=True)
+    estimated_tokens = Column(Integer, nullable=False, server_default="4000")
 
     # Budget tracking (PRD-82A Section 9)
     tokens_used = Column(Integer, nullable=False, server_default="0")

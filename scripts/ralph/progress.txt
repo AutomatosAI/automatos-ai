@@ -1,3 +1,8 @@
-# PRD-82C Parallel Execution, Budget Governance & Intelligent Decomposition — Ralph Progress
-# Branch: ralph/prd-82c-parallel-budget-decomposition
-# Started: 2026-03-24
+US-001 COMPLETED (2026-03-24)
+- Added ComplexityTier (SIMPLE/MODERATE/COMPLEX) and BudgetStatus (HEALTHY/WARNING/CRITICAL/EXCEEDED) enums to orchestration_enums.py
+- Added complexity, parallel_group, estimated_tokens columns to OrchestrationTask model
+- Changed max_concurrent default from 1 to 3 on OrchestrationRun
+- Added COMPLEXITY_TOKEN_BUDGET dict to config.py (simple=1000, moderate=4000, complex=8000, synthesis=6000)
+- Created Alembic migration prd82c_parallel_schema (depends on prd82b_us009_archive)
+- All imports validated, 5 orchestration tests pass
+- Pre-existing issues: pgvector not installed locally (test_memory_fixes.py), test_recipe_scheduler.py has import error — both unrelated to 82C

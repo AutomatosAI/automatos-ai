@@ -10,7 +10,7 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 ## Tasks
 
 ### Phase 1: Schema & Foundation
-- [ ] US-001: Add complexity, parallel_group, estimated_tokens columns. ComplexityTier + BudgetStatus enums. COMPLEXITY_TOKEN_BUDGET config. Change max_concurrent default to 3.
+- [x] US-001: Add complexity, parallel_group, estimated_tokens columns. ComplexityTier + BudgetStatus enums. COMPLEXITY_TOKEN_BUDGET config. Change max_concurrent default to 3.
 
 ### Phase 2: Parallel Dispatch
 - [ ] US-002: Replace has_active_task() with count_active_tasks(). Add dispatch_ready() for multi-task dispatch.
