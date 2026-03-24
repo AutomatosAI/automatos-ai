@@ -165,3 +165,30 @@ US-011 COMPLETED (2026-03-24)
   - Max concurrent override dropdown (1/2/3) in approval bar
   - Override value sent as max_concurrent_override in approve request
 - TypeScript compilation passes (0 new errors, pre-existing workflow-service.ts errors only)
+
+US-012 COMPLETED (2026-03-24)
+- Created orchestrator/tests/test_82c_wiring.py — dedicated end-to-end wiring test suite (22 tests)
+- Tests prove ALL 82C features are called through real code paths, mocking only LLM and DB:
+  1. Parallel dispatch: 2 independent tasks both dispatch when max_concurrent=2
+  2. Sequential regression: max_concurrent=1 dispatches only 1 task
+  3. Dependency blocking: task with unmet deps excluded by DependencyResolver
+  4. Complexity detection: complex goal → max_concurrent >= 2, simple → 1
+  5. Decompose wiring: MissionPlanner.decompose() sets max_concurrent from complexity
+  6. Parallel group validation: cross-dependent tasks in same group rejected
+  7. Valid parallel group: independent tasks in same group accepted
+  8. Budget gate blocks: >100% budget → blocked + PAUSED + BUDGET_EXCEEDED event
+  9. Budget gate synthesis: 85% budget → synthesis dispatched, heavy deferred
+  10. Synthesis prompt: contains all upstream titles and outputs
+  11. Upstream output collection: traces dependency graph correctly
+  12. Auto verification criteria: required_sections + min_length generated
+  13. Template parallel groups: content_pipeline has research group + synthesis
+  14. All templates: every template has parallel groups and synthesis tasks
+  15. Templates pass validation: all rendered templates pass _parse_plan + _validate_plan
+  16. Token estimate: uses COMPLEXITY_TOKEN_BUDGET not flat 2000 * count
+  17. Synthesis complexity: maps to 6000 from config
+  18. Coordinator tick: dispatch_ready called, both tasks executed, reconcile runs
+  19. Exception handling: one task failure doesn't crash tick or prevent reconcile
+  20. Synthesis auto-insert: inserts when no explicit synthesis after parallel group
+  21. No auto-insert: skips when explicit synthesis already exists
+- 100 tests pass across all 82C test files (8 files), no regressions
+- Pre-existing env issues: pgvector missing (test_memory_fixes.py), unrelated to 82C
