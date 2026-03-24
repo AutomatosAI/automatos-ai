@@ -41,6 +41,7 @@ from core.models.orchestration_enums import (
     FailureReasonCode,
     RunState,
     TaskState,
+    TaskType,
     TERMINAL_RUN_STATES,
     DONE_TASK_STATES,
 )
@@ -525,6 +526,117 @@ class CoordinatorService:
         if RunState(run.state) == RunState.VERIFYING:
             await self._build_and_advance_to_awaiting_human(db, run)
 
+    # ------------------------------------------------------------------
+    # Synthesis support (PRD-82C US-007)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _collect_upstream_outputs(
+        db: Session,
+        task: OrchestrationTask,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch outputs from all dependency tasks of the given task.
+
+        Returns list of dicts with 'title', 'description', and 'output' keys,
+        ordered by sequence_number.
+        """
+        upstream_deps = (
+            db.query(OrchestrationTaskDependency)
+            .filter(OrchestrationTaskDependency.task_id == task.id)
+            .all()
+        )
+        if not upstream_deps:
+            return []
+
+        dep_task_ids = [d.depends_on_task_id for d in upstream_deps]
+        dep_tasks = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.id.in_(dep_task_ids))
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+        return [
+            {
+                "title": dt.title,
+                "description": dt.description or "",
+                "output": dt.output or "",
+            }
+            for dt in dep_tasks
+        ]
+
+    @staticmethod
+    def _build_synthesis_prompt(
+        task: OrchestrationTask,
+        upstream_outputs: List[Dict[str, Any]],
+    ) -> str:
+        """
+        Build a specialised prompt for TaskType.SYNTHESIS tasks that merges
+        parallel upstream outputs into a unified result.
+        """
+        parts = [
+            f"# Synthesis Task: {task.title}",
+            "",
+            "You are synthesising the outputs of multiple upstream tasks into a "
+            "single, unified result. Follow these rules:",
+            "- Include ALL substantive content from every upstream output.",
+            "- Resolve any contradictions by noting the discrepancy and choosing "
+            "the better-supported position.",
+            "- Write in a unified voice — this must read as one cohesive document, "
+            "NOT a concatenation of separate pieces.",
+            "- Preserve important details, data, and citations from each source.",
+        ]
+
+        if task.description:
+            parts.append(f"\n## Task Description\n{task.description}")
+
+        parts.append("\n## Upstream Outputs to Synthesise")
+        for i, upstream in enumerate(upstream_outputs, 1):
+            title = upstream.get("title", f"Task {i}")
+            output = upstream.get("output", "(no output)")
+            parts.append(f"\n### {i}. {title}\n{output}")
+
+        if not upstream_outputs:
+            parts.append(
+                "\n*No upstream outputs available — produce the best result "
+                "you can from the task description alone.*"
+            )
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _auto_synthesis_verification_criteria(
+        task: OrchestrationTask,
+        upstream_outputs: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate verification criteria for synthesis tasks:
+        - required_sections derived from upstream task titles
+        - min_length = 50% of combined upstream output length
+        """
+        criteria: List[Dict[str, Any]] = []
+
+        # Required sections from upstream titles
+        section_titles = [
+            u.get("title", f"Section {i}")
+            for i, u in enumerate(upstream_outputs, 1)
+        ]
+        if section_titles:
+            criteria.append({
+                "type": "required_sections",
+                "value": section_titles,
+            })
+
+        # Minimum length — 50% of combined upstream
+        combined_length = sum(len(u.get("output", "")) for u in upstream_outputs)
+        min_length = max(combined_length // 2, 200)  # floor at 200 chars
+        criteria.append({
+            "type": "min_length",
+            "value": min_length,
+        })
+
+        return criteria
+
     async def _execute_task(
         self,
         db: Session,
@@ -604,8 +716,24 @@ class CoordinatorService:
                 "field_id": field_id,
             }
 
-        # Build the prompt
-        prompt = MissionDispatcher.build_task_prompt(task)
+        # Build the prompt — synthesis tasks use a specialised prompt
+        is_synthesis = task.task_type == TaskType.SYNTHESIS.value
+        if is_synthesis:
+            synthesis_upstream = self._collect_upstream_outputs(db, task)
+            prompt = self._build_synthesis_prompt(task, synthesis_upstream)
+
+            # Auto-set verification criteria if not already defined
+            if not task.verification_criteria:
+                task.verification_criteria = (
+                    self._auto_synthesis_verification_criteria(task, synthesis_upstream)
+                )
+                logger.info(
+                    "Auto-set verification criteria for synthesis task %s: %s",
+                    task.id,
+                    task.verification_criteria,
+                )
+        else:
+            prompt = MissionDispatcher.build_task_prompt(task)
 
         # Execute via AgentFactory
         factory = AgentFactory(db_session=db)

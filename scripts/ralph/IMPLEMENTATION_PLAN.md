@@ -22,7 +22,7 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 - [x] US-006: Rewrite all 4 templates with parallel groups and synthesis tasks.
 
 ### Phase 4: Synthesis & Budget
-- [ ] US-007: Build synthesis executor. _build_synthesis_prompt(). Detect TaskType.SYNTHESIS in _execute_task().
+- [x] US-007: Build synthesis executor. _build_synthesis_prompt(). Detect TaskType.SYNTHESIS in _execute_task().
 - [ ] US-008: Auto-insert synthesis tasks when parallel branches converge without explicit synthesis.
 - [ ] US-009: Wire budget admission gate. Pre-dispatch can_afford() check. Graduated response. Pause on exceeded.
 

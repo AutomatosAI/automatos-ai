@@ -79,3 +79,22 @@ US-006 COMPLETED (2026-03-24)
   - All rendered templates pass _parse_plan and _validate_plan
   - Rendered tasks include complexity and parallel_group fields
 - 13 tests pass in test_parallel_decomposition.py, no regressions
+
+US-007 COMPLETED (2026-03-24)
+- Added _collect_upstream_outputs(db, task) static method to CoordinatorService — fetches all dependency task outputs ordered by sequence_number
+- Added _build_synthesis_prompt(task, upstream_outputs) static method — specialised prompt with merge rules: include ALL content, resolve contradictions, unified voice
+- Added _auto_synthesis_verification_criteria(task, upstream_outputs) static method — generates required_sections from upstream titles + min_length at 50% combined output (floor 200)
+- Wired synthesis detection into _execute_task(): when task.task_type == TaskType.SYNTHESIS.value, uses synthesis prompt + auto-sets verification criteria
+- Non-synthesis tasks continue using standard MissionDispatcher.build_task_prompt()
+- Imported TaskType into coordinator_service.py
+- Created tests/test_synthesis_executor.py with 9 wiring tests:
+  - _collect_upstream_outputs returns upstream task outputs
+  - _collect_upstream_outputs returns empty for no deps
+  - _build_synthesis_prompt contains all upstream outputs + merge rules
+  - _build_synthesis_prompt handles no upstream gracefully
+  - _auto_synthesis_verification_criteria generates required_sections from titles
+  - Min length is 50% of combined upstream output
+  - Min length floors at 200 chars
+  - _execute_task uses synthesis prompt for SYNTHESIS tasks (integration)
+  - _execute_task uses standard prompt for non-SYNTHESIS tasks (regression)
+- 447 tests pass across non-broken test files, no regressions from US-007
