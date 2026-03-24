@@ -30,6 +30,11 @@ from modules.coordination.planner import (
     _parse_plan,
     _validate_plan,
 )
+from modules.coordination.templates import (
+    TEMPLATE_REGISTRY,
+    match_template,
+    render_template,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -346,3 +351,92 @@ class TestDecomposeParallelPlan:
         # Token estimate is complexity-based, not flat
         flat_estimate = 2000 * len(result.tasks)
         assert result.token_estimate != flat_estimate
+
+
+# ---------------------------------------------------------------------------
+# Wiring: Template parallel groups (US-006)
+# ---------------------------------------------------------------------------
+
+class TestTemplateParallelGroups:
+    """WIRING TEST: render_template produces parallel groups and synthesis tasks."""
+
+    def test_content_pipeline_has_parallel_research_group(self):
+        """content_pipeline: parallel_group 'research' has 2 tasks with no deps,
+        synthesis task depends on both."""
+        template = next(t for t in TEMPLATE_REGISTRY if t.id == "content_pipeline")
+        tasks = render_template(template, "Write a blog post about AI")
+
+        research_tasks = [t for t in tasks if t.get("parallel_group") == "research"]
+        assert len(research_tasks) == 2, f"Expected 2 research tasks, got {len(research_tasks)}"
+        for rt in research_tasks:
+            assert rt["dependencies"] == [], f"Parallel task {rt['temp_id']} should have no deps"
+
+        synth_tasks = [t for t in tasks if t.get("task_type") == "synthesis"]
+        assert len(synth_tasks) >= 1, "Expected at least one synthesis task"
+
+        # First synthesis task should depend on both research tasks
+        first_synth = synth_tasks[0]
+        research_ids = [rt["temp_id"] for rt in research_tasks]
+        for rid in research_ids:
+            assert rid in first_synth["dependencies"], (
+                f"Synthesis task should depend on {rid}"
+            )
+
+    def test_match_template_returns_content_pipeline_with_parallel_groups(self):
+        """match_template('Write a blog post about AI') returns content_pipeline."""
+        result = match_template("Write a blog post about AI")
+        assert result is not None
+        assert result.id == "content_pipeline"
+
+        # Rendered tasks should have parallel groups
+        tasks = render_template(result, "Write a blog post about AI")
+        has_parallel = any(t.get("parallel_group") is not None for t in tasks)
+        assert has_parallel, "Template should produce tasks with parallel_group"
+
+    def test_all_templates_have_synthesis_after_parallel(self):
+        """Every template has at least one synthesis task."""
+        for template in TEMPLATE_REGISTRY:
+            tasks = render_template(template, "Test goal for synthesis check")
+            synth_tasks = [t for t in tasks if t.get("task_type") == "synthesis"]
+            assert len(synth_tasks) >= 1, (
+                f"Template '{template.id}' has no synthesis tasks"
+            )
+
+    def test_all_templates_have_parallel_groups(self):
+        """Every template has at least one parallel group with 2+ tasks."""
+        for template in TEMPLATE_REGISTRY:
+            tasks = render_template(template, "Test goal for parallel check")
+            groups: dict = {}
+            for t in tasks:
+                pg = t.get("parallel_group")
+                if pg:
+                    groups[pg] = groups.get(pg, 0) + 1
+            assert any(c >= 2 for c in groups.values()), (
+                f"Template '{template.id}' has no parallel group with 2+ tasks: {groups}"
+            )
+
+    def test_rendered_templates_pass_parse_and_validate(self):
+        """All rendered templates pass _parse_plan and _validate_plan."""
+        agents = [_make_agent("researcher"), _make_agent("writer"),
+                  _make_agent("analyst"), _make_agent("search"),
+                  _make_agent("reviewer")]
+        for template in TEMPLATE_REGISTRY:
+            tasks = render_template(template, "Test goal for validation")
+            errors: list = []
+            parsed_tasks, deps = _parse_plan({"tasks": tasks}, errors)
+            assert not errors, f"Template '{template.id}' parse errors: {errors}"
+
+            val_errors = _validate_plan(parsed_tasks, deps, agents)
+            assert not val_errors, f"Template '{template.id}' validation errors: {val_errors}"
+
+    def test_template_complexity_and_parallel_group_in_output(self):
+        """Rendered tasks include complexity and parallel_group fields."""
+        template = next(t for t in TEMPLATE_REGISTRY if t.id == "research_and_report")
+        tasks = render_template(template, "Evaluate cloud providers")
+
+        for t in tasks:
+            assert "complexity" in t, f"Task {t['temp_id']} missing complexity"
+            assert "parallel_group" in t, f"Task {t['temp_id']} missing parallel_group"
+            assert t["complexity"] in ("simple", "moderate", "complex"), (
+                f"Task {t['temp_id']} invalid complexity: {t['complexity']}"
+            )

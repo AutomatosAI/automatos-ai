@@ -62,3 +62,20 @@ US-005 COMPLETED (2026-03-24)
   - Token estimate uses complexity (not flat 2000 * count)
   - Wiring: complex goal produces parallel groups + synthesis tasks
 - 431 tests pass across non-broken test files, no regressions from US-005
+
+US-006 COMPLETED (2026-03-24)
+- Added complexity (str), parallel_group (Optional[str]), depends_on (Optional[List[str]]), task_type (str) fields to TaskTemplate dataclass
+- Updated render_template(): uses explicit depends_on from TaskTemplate instead of auto-chaining; assigns sequential temp_ids (task_1..N); includes complexity, parallel_group in output dicts; resolves task_type via TaskType enum
+- Rewrote research_and_report: seq 1 parallel research (researcher + search) → seq 2 synthesis → seq 3 analysis → seq 4 draft → seq 5 review (6 tasks)
+- Rewrote content_pipeline: seq 1 parallel research (researcher + search) → seq 2 synthesis outline → seq 3 draft → seq 4 synthesis merge → seq 5 review (6 tasks)
+- Rewrote competitive_analysis: seq 1 parallel competitor research (search + researcher) → seq 2 synthesis → seq 3 analysis → seq 4 report → seq 5 review (6 tasks)
+- Rewrote data_investigation: seq 1 parallel gathering (search + researcher) → seq 2 synthesis → seq 3 analysis → seq 4 report (5 tasks)
+- All templates have at least one parallel group with 2+ tasks and at least one synthesis task
+- Added 6 wiring tests to test_parallel_decomposition.py:
+  - content_pipeline has parallel 'research' group with 2 tasks, synthesis depends on both
+  - match_template returns content_pipeline with parallel groups
+  - All templates have synthesis tasks
+  - All templates have parallel groups with 2+ tasks
+  - All rendered templates pass _parse_plan and _validate_plan
+  - Rendered tasks include complexity and parallel_group fields
+- 13 tests pass in test_parallel_decomposition.py, no regressions

@@ -19,7 +19,7 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 ### Phase 3: Intelligent Decomposition
 - [x] US-004: Add _detect_complexity() to planner. Set max_concurrent on DecompositionResult.
 - [x] US-005: Update planner system prompt for parallel groups + complexity. Parse new fields. Validate parallel_group cross-deps.
-- [ ] US-006: Rewrite all 4 templates with parallel groups and synthesis tasks.
+- [x] US-006: Rewrite all 4 templates with parallel groups and synthesis tasks.
 
 ### Phase 4: Synthesis & Budget
 - [ ] US-007: Build synthesis executor. _build_synthesis_prompt(). Detect TaskType.SYNTHESIS in _execute_task().

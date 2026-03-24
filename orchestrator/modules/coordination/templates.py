@@ -37,6 +37,10 @@ class TaskTemplate:
     required_tools: List[str] = field(default_factory=list)
     expected_output: str = ""
     verification_criteria: List[Dict[str, object]] = field(default_factory=list)
+    complexity: str = "moderate"
+    parallel_group: Optional[str] = None
+    depends_on: Optional[List[str]] = None
+    task_type: str = "llm_generation"
 
 
 @dataclass(frozen=True)
@@ -58,7 +62,9 @@ class DecompositionTemplate:
 # ---------------------------------------------------------------------------
 
 TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
-    # ── research_and_report (5 tasks) ──────────────────────────────────
+    # ── research_and_report (6 tasks) ──────────────────────────────────
+    # seq 1: parallel research tasks → seq 2: synthesis → seq 3: analysis
+    # → seq 4: draft → seq 5: review
     DecompositionTemplate(
         id="research_and_report",
         name="Research & Report",
@@ -67,20 +73,23 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             "research", "compare", "evaluate", "benchmark",
             "framework", "survey", "review",
         ],
-        min_tasks=5,
-        max_tasks=7,
+        min_tasks=6,
+        max_tasks=8,
         output_format="markdown",
         task_templates=[
             TaskTemplate(
                 sequence=1,
                 agent_role="researcher",
-                title_pattern="Define research scope for: {goal}",
+                title_pattern="Research scope and criteria for: {goal}",
                 description_pattern=(
                     "Identify the key dimensions, criteria, and sources "
                     "relevant to: {goal}. Produce a research brief listing "
                     "3-5 evaluation criteria, target sources, and scope boundaries."
                 ),
                 expected_output="Research brief with criteria and source list",
+                complexity="moderate",
+                parallel_group="research",
+                depends_on=[],
                 verification_criteria=[
                     {"type": "min_length", "value": 200, "must_pass": True},
                     {
@@ -91,17 +100,37 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
                 ],
             ),
             TaskTemplate(
-                sequence=2,
+                sequence=1,
                 agent_role="search",
-                title_pattern="Gather data on: {goal}",
+                title_pattern="Gather data and sources for: {goal}",
                 description_pattern=(
-                    "Using the research brief from Task 1, search for and "
-                    "collect relevant data, articles, and benchmarks related to: "
-                    "{goal}. Compile raw findings with source citations."
+                    "Search for and collect relevant data, articles, and "
+                    "benchmarks related to: {goal}. Compile raw findings "
+                    "with source citations."
                 ),
                 expected_output="Raw findings with sources",
+                complexity="moderate",
+                parallel_group="research",
+                depends_on=[],
                 verification_criteria=[
                     {"type": "min_length", "value": 300, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=2,
+                agent_role="writer",
+                title_pattern="Synthesize research findings for: {goal}",
+                description_pattern=(
+                    "Merge the research brief and gathered data into a "
+                    "unified set of findings. Resolve contradictions, "
+                    "deduplicate, and produce a coherent research synthesis."
+                ),
+                expected_output="Unified research synthesis",
+                complexity="moderate",
+                task_type="synthesis",
+                depends_on=["task_1", "task_2"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 400, "must_pass": True},
                 ],
             ),
             TaskTemplate(
@@ -109,11 +138,13 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
                 agent_role="analyst",
                 title_pattern="Analyze findings for: {goal}",
                 description_pattern=(
-                    "Analyze the gathered data from Task 2 against the criteria "
-                    "defined in Task 1. Produce a structured comparison with "
+                    "Analyze the synthesized research against the evaluation "
+                    "criteria. Produce a structured comparison with "
                     "pros/cons and scoring for each candidate."
                 ),
                 expected_output="Comparative analysis with scoring",
+                complexity="moderate",
+                depends_on=["task_3"],
                 verification_criteria=[
                     {"type": "min_length", "value": 400, "must_pass": True},
                     {
@@ -128,11 +159,13 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
                 agent_role="writer",
                 title_pattern="Draft report for: {goal}",
                 description_pattern=(
-                    "Using the analysis from Task 3, write a polished report "
-                    "with executive summary, detailed findings, comparison "
+                    "Using the analysis, write a polished report with "
+                    "executive summary, detailed findings, comparison "
                     "tables, and actionable recommendations for: {goal}."
                 ),
                 expected_output="Complete research report",
+                complexity="complex",
+                depends_on=["task_4"],
                 verification_criteria=[
                     {"type": "min_length", "value": 800, "must_pass": True},
                     {
@@ -151,18 +184,23 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
                 agent_role="reviewer",
                 title_pattern="Review and finalize report on: {goal}",
                 description_pattern=(
-                    "Review the draft report from Task 4 for accuracy, "
-                    "completeness, and quality. Check claims against source "
-                    "data, fix any inconsistencies, and produce the final version."
+                    "Review the draft report for accuracy, completeness, "
+                    "and quality. Check claims against source data, fix "
+                    "any inconsistencies, and produce the final version."
                 ),
                 expected_output="Reviewed and finalized report",
+                complexity="moderate",
+                depends_on=["task_5"],
+                task_type="review",
                 verification_criteria=[
                     {"type": "min_length", "value": 800, "must_pass": True},
                 ],
             ),
         ],
     ),
-    # ── content_pipeline (4 tasks) ────────────────────────────────────
+    # ── content_pipeline (6 tasks) ────────────────────────────────────
+    # seq 1: parallel research + source gathering → seq 2: synthesis outline
+    # → seq 3: parallel section drafts → seq 4: synthesis merge → seq 5: review
     DecompositionTemplate(
         id="content_pipeline",
         name="Content Pipeline",
@@ -171,8 +209,8 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             "write", "blog", "article", "content",
             "draft", "copywrite", "newsletter",
         ],
-        min_tasks=4,
-        max_tasks=6,
+        min_tasks=6,
+        max_tasks=8,
         output_format="markdown",
         task_templates=[
             TaskTemplate(
@@ -185,6 +223,26 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
                     "content, and unique value propositions."
                 ),
                 expected_output="Research notes with key talking points",
+                complexity="moderate",
+                parallel_group="research",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 200, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=1,
+                agent_role="search",
+                title_pattern="Gather source material for: {goal}",
+                description_pattern=(
+                    "Search for reference material, statistics, quotes, "
+                    "and examples relevant to: {goal}. Compile a source "
+                    "document with citations."
+                ),
+                expected_output="Source material with citations",
+                complexity="moderate",
+                parallel_group="research",
+                depends_on=[],
                 verification_criteria=[
                     {"type": "min_length", "value": 200, "must_pass": True},
                 ],
@@ -192,15 +250,18 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             TaskTemplate(
                 sequence=2,
                 agent_role="writer",
-                title_pattern="Create outline for: {goal}",
+                title_pattern="Synthesize research into outline for: {goal}",
                 description_pattern=(
-                    "Using the research from Task 1, create a detailed "
-                    "content outline with sections, key points per section, "
-                    "and target word count for: {goal}."
+                    "Merge the research notes and source material into a "
+                    "detailed content outline with sections, key points per "
+                    "section, and target word count for: {goal}."
                 ),
                 expected_output="Content outline with sections and key points",
+                complexity="moderate",
+                task_type="synthesis",
+                depends_on=["task_1", "task_2"],
                 verification_criteria=[
-                    {"type": "min_length", "value": 150, "must_pass": True},
+                    {"type": "min_length", "value": 200, "must_pass": True},
                 ],
             ),
             TaskTemplate(
@@ -208,32 +269,56 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
                 agent_role="writer",
                 title_pattern="Write full draft for: {goal}",
                 description_pattern=(
-                    "Following the outline from Task 2, write the complete "
-                    "content piece for: {goal}. Maintain consistent tone, "
-                    "include transitions, and ensure all outline points are covered."
+                    "Following the outline, write the complete content piece "
+                    "for: {goal}. Maintain consistent tone, include "
+                    "transitions, and ensure all outline points are covered."
                 ),
                 expected_output="Complete content draft",
+                complexity="complex",
+                depends_on=["task_3"],
                 verification_criteria=[
                     {"type": "min_length", "value": 600, "must_pass": True},
                 ],
             ),
             TaskTemplate(
                 sequence=4,
+                agent_role="writer",
+                title_pattern="Synthesize and merge final content for: {goal}",
+                description_pattern=(
+                    "Review the draft against the outline and source material. "
+                    "Ensure all key points are covered, resolve any gaps, "
+                    "and produce a cohesive final draft."
+                ),
+                expected_output="Merged final draft",
+                complexity="moderate",
+                task_type="synthesis",
+                depends_on=["task_4"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 600, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=5,
                 agent_role="reviewer",
                 title_pattern="Edit and polish: {goal}",
                 description_pattern=(
-                    "Review the draft from Task 3 for grammar, clarity, "
-                    "tone, and factual accuracy. Produce the final polished "
+                    "Review the final draft for grammar, clarity, tone, "
+                    "and factual accuracy. Produce the final polished "
                     "version ready for publication."
                 ),
                 expected_output="Final polished content",
+                complexity="moderate",
+                depends_on=["task_5"],
+                task_type="review",
                 verification_criteria=[
                     {"type": "min_length", "value": 600, "must_pass": True},
                 ],
             ),
         ],
     ),
-    # ── competitive_analysis (4 tasks) ────────────────────────────────
+    # ── competitive_analysis (6 tasks) ────────────────────────────────
+    # seq 1: parallel per-competitor research → seq 2: synthesis
+    # → seq 3: report → seq 4: review
     DecompositionTemplate(
         id="competitive_analysis",
         name="Competitive Analysis",
@@ -242,34 +327,59 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             "competitive", "market analysis", "compare companies",
             "industry", "landscape", "players",
         ],
-        min_tasks=4,
-        max_tasks=6,
+        min_tasks=6,
+        max_tasks=8,
         output_format="markdown",
         task_templates=[
             TaskTemplate(
                 sequence=1,
                 agent_role="search",
-                title_pattern="Identify competitors for: {goal}",
+                title_pattern="Identify and research competitor group A for: {goal}",
                 description_pattern=(
-                    "Search for and identify the key players, competitors, "
-                    "and market participants relevant to: {goal}. List each "
-                    "with a brief description, market position, and key differentiators."
+                    "Search for key players and competitors relevant to: "
+                    "{goal}. Focus on market leaders and established players. "
+                    "List each with description, market position, strengths, "
+                    "weaknesses, pricing, and key differentiators."
                 ),
-                expected_output="Competitor list with descriptions",
+                expected_output="Competitor profiles for group A",
+                complexity="moderate",
+                parallel_group="competitor_research",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 300, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=1,
+                agent_role="researcher",
+                title_pattern="Identify and research competitor group B for: {goal}",
+                description_pattern=(
+                    "Research emerging competitors, startups, and alternative "
+                    "solutions relevant to: {goal}. For each, document "
+                    "features, market share, recent developments, and "
+                    "competitive advantages."
+                ),
+                expected_output="Competitor profiles for group B",
+                complexity="moderate",
+                parallel_group="competitor_research",
+                depends_on=[],
                 verification_criteria=[
                     {"type": "min_length", "value": 300, "must_pass": True},
                 ],
             ),
             TaskTemplate(
                 sequence=2,
-                agent_role="researcher",
-                title_pattern="Deep-dive competitor analysis for: {goal}",
+                agent_role="writer",
+                title_pattern="Synthesize competitor research for: {goal}",
                 description_pattern=(
-                    "For each competitor identified in Task 1, research "
-                    "their strengths, weaknesses, pricing, features, market "
-                    "share, and recent developments related to: {goal}."
+                    "Merge all competitor research into a unified competitor "
+                    "landscape. Deduplicate entries, resolve contradictions, "
+                    "and produce a comprehensive competitor database."
                 ),
-                expected_output="Detailed per-competitor analysis",
+                expected_output="Unified competitor landscape",
+                complexity="moderate",
+                task_type="synthesis",
+                depends_on=["task_1", "task_2"],
                 verification_criteria=[
                     {"type": "min_length", "value": 400, "must_pass": True},
                 ],
@@ -277,13 +387,15 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             TaskTemplate(
                 sequence=3,
                 agent_role="analyst",
-                title_pattern="Synthesize competitive insights for: {goal}",
+                title_pattern="Analyze competitive insights for: {goal}",
                 description_pattern=(
-                    "Synthesize the competitor data from Tasks 1-2 into "
-                    "strategic insights: market gaps, opportunities, threats, "
-                    "and positioning recommendations for: {goal}."
+                    "Analyze the unified competitor data to identify market "
+                    "gaps, opportunities, threats, and positioning "
+                    "recommendations for: {goal}."
                 ),
                 expected_output="Strategic insights and recommendations",
+                complexity="moderate",
+                depends_on=["task_3"],
                 verification_criteria=[
                     {"type": "min_length", "value": 400, "must_pass": True},
                     {
@@ -298,11 +410,13 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
                 agent_role="writer",
                 title_pattern="Write competitive analysis report: {goal}",
                 description_pattern=(
-                    "Compile the analysis from Tasks 1-3 into a professional "
-                    "competitive analysis report with executive summary, "
-                    "competitor comparison matrix, and strategic recommendations."
+                    "Compile the analysis into a professional competitive "
+                    "analysis report with executive summary, competitor "
+                    "comparison matrix, and strategic recommendations."
                 ),
                 expected_output="Complete competitive analysis report",
+                complexity="complex",
+                depends_on=["task_4"],
                 verification_criteria=[
                     {"type": "min_length", "value": 800, "must_pass": True},
                     {
@@ -316,9 +430,27 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
                     },
                 ],
             ),
+            TaskTemplate(
+                sequence=5,
+                agent_role="reviewer",
+                title_pattern="Review competitive analysis: {goal}",
+                description_pattern=(
+                    "Review the competitive analysis report for accuracy, "
+                    "completeness, and strategic soundness. Verify claims "
+                    "against source data and produce the final version."
+                ),
+                expected_output="Reviewed competitive analysis report",
+                complexity="moderate",
+                depends_on=["task_5"],
+                task_type="review",
+                verification_criteria=[
+                    {"type": "min_length", "value": 800, "must_pass": True},
+                ],
+            ),
         ],
     ),
-    # ── data_investigation (3 tasks) ──────────────────────────────────
+    # ── data_investigation (5 tasks) ──────────────────────────────────
+    # seq 1: parallel data gathering → seq 2: analysis → seq 3: report
     DecompositionTemplate(
         id="data_investigation",
         name="Data Investigation",
@@ -327,34 +459,73 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             "investigate", "audit", "diagnose", "track",
             "monitor", "analyze data", "find",
         ],
-        min_tasks=3,
-        max_tasks=5,
+        min_tasks=5,
+        max_tasks=7,
         output_format="markdown",
         task_templates=[
             TaskTemplate(
                 sequence=1,
                 agent_role="search",
-                title_pattern="Gather evidence for: {goal}",
+                title_pattern="Gather external evidence for: {goal}",
                 description_pattern=(
-                    "Search for and collect all relevant data, logs, metrics, "
-                    "and evidence related to: {goal}. Document sources and "
-                    "note any anomalies or patterns observed."
+                    "Search for and collect external data, articles, "
+                    "benchmarks, and reference material related to: {goal}. "
+                    "Document sources and note any relevant patterns."
                 ),
-                expected_output="Evidence collection with sources",
+                expected_output="External evidence collection with sources",
+                complexity="moderate",
+                parallel_group="gathering",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 200, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=1,
+                agent_role="researcher",
+                title_pattern="Gather internal evidence for: {goal}",
+                description_pattern=(
+                    "Collect all relevant internal data, logs, metrics, and "
+                    "evidence related to: {goal}. Document anomalies and "
+                    "patterns observed in the data."
+                ),
+                expected_output="Internal evidence collection",
+                complexity="moderate",
+                parallel_group="gathering",
+                depends_on=[],
                 verification_criteria=[
                     {"type": "min_length", "value": 200, "must_pass": True},
                 ],
             ),
             TaskTemplate(
                 sequence=2,
+                agent_role="writer",
+                title_pattern="Synthesize gathered evidence for: {goal}",
+                description_pattern=(
+                    "Merge external and internal evidence into a unified "
+                    "evidence base. Resolve contradictions, identify gaps, "
+                    "and produce a coherent evidence synthesis."
+                ),
+                expected_output="Unified evidence synthesis",
+                complexity="moderate",
+                task_type="synthesis",
+                depends_on=["task_1", "task_2"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 300, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=3,
                 agent_role="analyst",
                 title_pattern="Analyze and diagnose: {goal}",
                 description_pattern=(
-                    "Analyze the evidence from Task 1 to identify root "
+                    "Analyze the synthesized evidence to identify root "
                     "causes, correlations, and patterns for: {goal}. Provide "
                     "a diagnosis with confidence levels for each finding."
                 ),
                 expected_output="Diagnosis with findings and confidence levels",
+                complexity="moderate",
+                depends_on=["task_3"],
                 verification_criteria=[
                     {"type": "min_length", "value": 300, "must_pass": True},
                     {
@@ -365,15 +536,17 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
                 ],
             ),
             TaskTemplate(
-                sequence=3,
+                sequence=4,
                 agent_role="writer",
                 title_pattern="Write investigation report: {goal}",
                 description_pattern=(
-                    "Compile the investigation results from Tasks 1-2 into "
-                    "a clear report with findings, root cause analysis, and "
-                    "recommended actions for: {goal}."
+                    "Compile the investigation results into a clear report "
+                    "with findings, root cause analysis, and recommended "
+                    "actions for: {goal}."
                 ),
                 expected_output="Investigation report with recommendations",
+                complexity="moderate",
+                depends_on=["task_4"],
                 verification_criteria=[
                     {"type": "min_length", "value": 400, "must_pass": True},
                     {
@@ -454,29 +627,50 @@ def render_template(
 
     Output format matches planner._parse_plan_response() / PlannedTask fields:
       title, description, agent_role, required_tools, depends_on,
-      verification_criteria, temp_id, sequence_number, task_type.
+      verification_criteria, temp_id, sequence_number, task_type,
+      complexity, parallel_group.
+
+    Task numbering: tasks are assigned sequential temp_ids (task_1, task_2, ...)
+    based on their position in the task_templates list. Templates use explicit
+    depends_on references to these temp_ids instead of auto-chaining.
     """
     tasks: List[Dict[str, object]] = []
 
-    for tt in template.task_templates:
+    for idx, tt in enumerate(template.task_templates, start=1):
         title = tt.title_pattern.replace("{goal}", goal)
         description = tt.description_pattern.replace("{goal}", goal)
+        temp_id = f"task_{idx}"
 
-        # Build dependencies: each task depends on the previous one
-        depends_on: List[str] = []
-        if tt.sequence > 1:
-            depends_on = [f"task_{tt.sequence - 1}"]
+        # Use explicit depends_on from template; fall back to auto-chain
+        if tt.depends_on is not None:
+            depends_on = list(tt.depends_on)
+        elif tt.sequence > 1:
+            # Legacy fallback: chain to previous task
+            depends_on = [f"task_{idx - 1}"]
+        else:
+            depends_on = []
+
+        # Resolve task_type from template field
+        task_type = tt.task_type
+        if task_type == "llm_generation":
+            task_type = TaskType.LLM_GENERATION.value
+        elif task_type == "synthesis":
+            task_type = TaskType.SYNTHESIS.value
+        elif task_type == "review":
+            task_type = TaskType.REVIEW.value
 
         tasks.append({
-            "temp_id": f"task_{tt.sequence}",
+            "temp_id": temp_id,
             "title": title,
             "description": description,
             "agent_role": tt.agent_role,
             "sequence_number": tt.sequence,
-            "task_type": TaskType.LLM_GENERATION.value,
+            "task_type": task_type,
             "required_tools": list(tt.required_tools),
             "dependencies": depends_on,
             "verification_criteria": list(tt.verification_criteria),
+            "complexity": tt.complexity,
+            "parallel_group": tt.parallel_group,
         })
 
     return tasks
