@@ -308,6 +308,21 @@ class CoordinatorService:
             run.config = updated_config
             db.flush()
 
+    async def _save_pending_output_documents(self, db: Session) -> None:
+        """Save output documents for completed missions that don't have one yet."""
+        completed_without_output = (
+            db.query(OrchestrationRun)
+            .filter(
+                OrchestrationRun.state == RunState.COMPLETED.value,
+            )
+            .limit(3)
+            .all()
+        )
+        for run in completed_without_output:
+            if (run.config or {}).get("output_document_id"):
+                continue
+            await self._save_mission_output_as_document(db, run)
+
     # ------------------------------------------------------------------
     # Scheduler lifecycle
     # ------------------------------------------------------------------
@@ -408,6 +423,10 @@ class CoordinatorService:
                 # --- PRD-108: Clean up fields for terminal runs ---
                 await self._cleanup_terminal_fields(db)
                 db.commit()  # Persist field_id removal to stop destroy loop
+
+                # --- Save output docs for completed missions ---
+                await self._save_pending_output_documents(db)
+                db.commit()
 
                 # --- Archive phase (throttled to once per hour) ---
                 self._maybe_archive(db, summary)
@@ -976,8 +995,6 @@ class CoordinatorService:
                 actor_id=actor_id,
             )
             VerificationService.clear_cache(run.id)
-            # Save assembled output as a document for future intelligence
-            await self._save_mission_output_as_document(db, run)
             logger.info("Mission %s accepted by %s → completed", run_id, actor_id)
 
         elif verdict == "reject":
