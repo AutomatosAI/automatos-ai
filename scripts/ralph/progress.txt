@@ -69,3 +69,15 @@
     - Downgrade: DELETE WHERE workspace_id IS NULL
   - Validated: dry-run parses all 81 SKILL.md files, correct model IDs, all 10 categories
   - Validated: Python imports OK, no new errors
+
+2026-03-24: US-007 COMPLETED
+  - Added 4 agent catalog API endpoints to orchestrator/api/marketplace.py:
+    - GET /api/marketplace/agents — paginated browse with ?category= and ?search= filters
+    - GET /api/marketplace/agents/categories — category list with counts and icons
+    - GET /api/marketplace/agents/{slug} — single template detail with full persona
+    - POST /api/marketplace/agents/{slug}/deploy — create Agent in workspace from template
+  - Deploy endpoint: creates Agent with persona, model_config, links skills by package_slug/name, assigns Composio tools
+  - 4 Pydantic response models: AgentCatalogTemplateOut, AgentCatalogTemplateDetail, AgentCatalogCategoryOut, AgentCatalogDeployResponse
+  - All endpoints require auth via get_request_context_hybrid
+  - Deploy scoped to user's workspace (ctx.workspace_id)
+  - Validated: all imports OK, 79 tests pass (1 pre-existing failure unrelated)
