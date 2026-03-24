@@ -873,15 +873,47 @@ class AgentFactory:
                             ])
                             response.content = f"Based on the tool results:\n\n{tool_summary}"
 
-                    # Warn if LLM output was truncated (hit max_tokens limit)
-                    if response and getattr(response, "finish_reason", None) == "length":
+                    # Handle truncation: continue generating if output was cut off
+                    max_continuations = 2
+                    continuation = 0
+                    while (
+                        response
+                        and getattr(response, "finish_reason", None) == "length"
+                        and response.content
+                        and continuation < max_continuations
+                    ):
+                        continuation += 1
                         completion_tokens = (response.usage or {}).get("completion_tokens", 0)
-                        self.logger.warning(
-                            "LLM output TRUNCATED (finish_reason=length) for agent %s. "
-                            "completion_tokens=%s, max_tokens=%s. Output may be incomplete.",
-                            agent_id,
-                            completion_tokens,
-                            getattr(agent_runtime.llm_manager.config, "max_tokens", "?"),
+                        self.logger.info(
+                            "Output truncated for agent %s (continuation %d/%d, %d tokens so far). "
+                            "Requesting continuation...",
+                            agent_id, continuation, max_continuations, completion_tokens,
+                        )
+                        # Append partial output and ask to continue
+                        messages.append({"role": "assistant", "content": response.content})
+                        messages.append({
+                            "role": "user",
+                            "content": "Your response was truncated. Continue exactly where you left off — do not repeat any content.",
+                        })
+                        continuation_response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
+                        if continuation_response and continuation_response.content:
+                            response.content += continuation_response.content
+                            if continuation_response.usage:
+                                prev_usage = response.usage or {}
+                                response.usage = {
+                                    "total_tokens": prev_usage.get("total_tokens", 0) + continuation_response.usage.get("total_tokens", 0),
+                                    "completion_tokens": prev_usage.get("completion_tokens", 0) + continuation_response.usage.get("completion_tokens", 0),
+                                    "prompt_tokens": continuation_response.usage.get("prompt_tokens", 0),
+                                }
+                            response.finish_reason = getattr(continuation_response, "finish_reason", None)
+                            execution_time = time.time() - start_time
+                        else:
+                            break
+
+                    if continuation > 0:
+                        self.logger.info(
+                            "Completed %d continuation(s) for agent %s. Total output: %d chars",
+                            continuation, agent_id, len(response.content) if response and response.content else 0,
                         )
 
                     if response and response.content:
