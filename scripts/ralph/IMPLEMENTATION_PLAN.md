@@ -28,7 +28,7 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 
 ### Phase 5: API & Frontend
 - [x] US-010: Enrich plan approval API with budget estimate, max_concurrent override.
-- [ ] US-011: Budget bar component, parallel DAG rendering, approval overrides.
+- [x] US-011: Budget bar component, parallel DAG rendering, approval overrides.
 
 ### Phase 6: Wiring Tests
 - [ ] US-012: Dedicated test suite proving all 82C features are wired end-to-end.

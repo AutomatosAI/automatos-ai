@@ -143,3 +143,25 @@ US-010 COMPLETED (2026-03-24)
 - Updated coordinator_service.py: plan JSONB now includes complexity and parallel_group per task (was missing from serialization)
 - Updated frontend/types/missions.ts: MissionResponse, TaskResponse, MissionApproveRequest aligned with backend
 - 62 tests pass across 82C test files, no regressions
+
+US-011 COMPLETED (2026-03-24)
+- Created MissionBudgetBar component (frontend/components/missions/mission-budget-bar.tsx):
+  - Color-coded progress bar: green (<50%), amber (50-80%), red (80-100%), pulsing red (>100%)
+  - Shows used/estimated tokens with percentage: "23,500 / 48,000 tokens (49%)"
+  - Warning banner appears at WARNING, CRITICAL, and EXCEEDED levels
+- Updated mission-dag-canvas.tsx for parallel rendering:
+  - Tasks with same sequence_number rendered side-by-side (horizontal layout)
+  - Parallel group tasks share a dashed visual container with group label
+  - Synthesis edges rendered with purple dashed stroke
+  - Center-aligned rows for visual balance
+- Updated mission-task-node.tsx:
+  - Synthesis tasks shown with Merge icon and purple border/label
+  - Per-task token usage display (tokens_used / estimated_tokens) with Coins icon
+  - New taskType, tokensUsed, estimatedTokens fields in MissionTaskNodeData
+- Updated mission-detail-page.tsx:
+  - Budget bar visible below stats when token_budget_estimate exists
+  - Parallel "Nx" stat in stats bar when max_concurrent > 1
+  - Plan approval bar shows complexity_tier, token estimate, parallel groups, has_synthesis_tasks
+  - Max concurrent override dropdown (1/2/3) in approval bar
+  - Override value sent as max_concurrent_override in approve request
+- TypeScript compilation passes (0 new errors, pre-existing workflow-service.ts errors only)
