@@ -9,6 +9,7 @@ Proves:
 4. _complexity_to_max_concurrent maps tiers correctly
 5. decompose() sets max_concurrent on DecompositionResult based on complexity
 """
+import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -161,7 +162,6 @@ class TestDecomposeMaxConcurrent:
         ), patch(
             "modules.coordination.planner.create_llm_manager"
         ) as mock_llm_factory:
-            import json
             mock_llm = MagicMock()
             mock_llm.generate_response = AsyncMock(
                 return_value=MagicMock(content=json.dumps(fake_plan))
@@ -208,7 +208,6 @@ class TestDecomposeMaxConcurrent:
         ), patch(
             "modules.coordination.planner.create_llm_manager"
         ) as mock_llm_factory:
-            import json
             mock_llm = MagicMock()
             mock_llm.generate_response = AsyncMock(
                 return_value=MagicMock(content=json.dumps(fake_plan))
@@ -229,10 +228,14 @@ class TestDecomposeMaxConcurrent:
 # Helpers
 # ---------------------------------------------------------------------------
 
+_agent_id_counter = 0
+
 def _make_agent(role: str) -> MagicMock:
     """Create a minimal mock Agent with required attributes."""
+    global _agent_id_counter
+    _agent_id_counter += 1
     agent = MagicMock()
-    agent.id = 1
+    agent.id = _agent_id_counter
     agent.name = role  # name used for fuzzy matching in _validate_plan
     agent.skill = role
     agent.model = "test-model"

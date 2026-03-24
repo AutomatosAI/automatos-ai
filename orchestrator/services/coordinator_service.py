@@ -486,7 +486,8 @@ class CoordinatorService:
         dispatched = [r for r in dispatch_results if r.dispatched]
 
         if dispatched:
-            # Load tasks from DB for each dispatch result
+            # Load tasks and perform all DB state changes SERIALLY on the
+            # shared session before launching concurrent agent I/O.
             tasks_to_execute = []
             for result in dispatched:
                 task = (
@@ -497,26 +498,20 @@ class CoordinatorService:
                 if task:
                     tasks_to_execute.append((task, result.agent_id))
 
-            # Execute concurrently via asyncio.gather — return_exceptions
-            # ensures one task failure doesn't cancel others
-            if tasks_to_execute:
-                outcomes = await asyncio.gather(
-                    *(
-                        self._execute_task(db, run, task, agent_id)
-                        for task, agent_id in tasks_to_execute
-                    ),
-                    return_exceptions=True,
-                )
-                # Log any exceptions without crashing the tick
-                for i, outcome in enumerate(outcomes):
-                    if isinstance(outcome, Exception):
-                        task, agent_id = tasks_to_execute[i]
-                        logger.error(
-                            "Task %s execution failed: %s",
-                            task.id,
-                            outcome,
-                            exc_info=outcome,
-                        )
+            # Execute tasks — each _execute_task performs DB reads/writes
+            # on the shared session so we must run them sequentially.
+            # TODO: When agent I/O dominates latency, refactor to separate
+            # DB prep (serial) from agent calls (parallel via asyncio.gather).
+            for task, agent_id in tasks_to_execute:
+                try:
+                    await self._execute_task(db, run, task, agent_id)
+                except Exception as exc:
+                    logger.error(
+                        "Task %s execution failed: %s",
+                        task.id,
+                        exc,
+                        exc_info=True,
+                    )
 
         # --- Reconcile phase ---
         await MissionReconciler.reconcile(db, run)
@@ -556,14 +551,33 @@ class CoordinatorService:
             .order_by(OrchestrationTask.sequence_number)
             .all()
         )
-        return [
-            {
+
+        # Sanitize and truncate — reuse same logic as _execute_task upstream
+        _PER_OUTPUT_LIMIT = 8000
+        _TOTAL_BUDGET = 30_000
+        _BASE64_RE = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+")
+
+        results: List[Dict[str, Any]] = []
+        accumulated = 0
+        for dt in dep_tasks:
+            raw_output = dt.output or ""
+            # Strip base64 blobs
+            cleaned = _BASE64_RE.sub("[image removed]", raw_output)
+            # Per-output truncation
+            remaining = _TOTAL_BUDGET - accumulated
+            if remaining <= 0:
+                break
+            limit = min(len(cleaned), _PER_OUTPUT_LIMIT, remaining)
+            truncated = cleaned[:limit]
+            if len(cleaned) > limit:
+                truncated += "\n\n... (truncated)"
+            accumulated += len(truncated)
+            results.append({
                 "title": dt.title,
-                "description": dt.description or "",
-                "output": dt.output or "",
-            }
-            for dt in dep_tasks
-        ]
+                "description": (dt.description or "")[:500],
+                "output": truncated,
+            })
+        return results
 
     @staticmethod
     def _build_synthesis_prompt(

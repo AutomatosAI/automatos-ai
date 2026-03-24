@@ -445,7 +445,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
                 {mission.token_budget_estimate != null && mission.token_budget_estimate > 0 && (
                   <span>Est. tokens: <span className="font-medium text-foreground">{mission.token_budget_estimate.toLocaleString()}</span></span>
                 )}
-                {mission.parallel_groups.length > 0 && (
+                {Array.isArray(mission.parallel_groups) && mission.parallel_groups.length > 0 && (
                   <span>Parallel groups: <span className="font-medium text-foreground">{mission.parallel_groups.join(', ')}</span></span>
                 )}
                 {mission.has_synthesis_tasks && (

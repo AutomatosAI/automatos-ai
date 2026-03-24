@@ -463,15 +463,21 @@ class MissionPlanner:
                 continue
 
             token_estimate = _estimate_token_budget(tasks)
+            # Compute max_concurrent same as decompose()
+            max_concurrent = _complexity_to_max_concurrent(
+                _detect_complexity(goal, None)
+            )
             logger.info(
-                "MissionPlanner.replan: generated %d replacement tasks (attempt %d)",
+                "MissionPlanner.replan: generated %d replacement tasks (attempt %d, max_concurrent=%d)",
                 len(tasks),
                 attempt,
+                max_concurrent,
             )
             return DecompositionResult(
                 tasks=tasks,
                 dependencies=deps,
                 token_estimate=token_estimate,
+                max_concurrent=max_concurrent,
             )
 
         raise PlanValidationError(last_errors)

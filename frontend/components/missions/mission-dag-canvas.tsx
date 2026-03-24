@@ -63,9 +63,11 @@ function layoutTasks(tasks: TaskResponse[]): {
     const rowWidth = tasksInRow.length * NODE_WIDTH + (tasksInRow.length - 1) * GAP_X
     const startX = Math.max(50, (500 - rowWidth) / 2) // center the row
 
-    // Check if these tasks share a parallel_group
-    const parallelGroup = tasksInRow.length > 1
-      ? tasksInRow[0].parallel_group
+    // Check if ALL tasks in the row share the same non-null parallel_group
+    const firstGroup = tasksInRow[0].parallel_group
+    const parallelGroup = tasksInRow.length > 1 && firstGroup != null
+      && tasksInRow.every((t) => t.parallel_group === firstGroup)
+      ? firstGroup
       : null
 
     for (let i = 0; i < tasksInRow.length; i++) {

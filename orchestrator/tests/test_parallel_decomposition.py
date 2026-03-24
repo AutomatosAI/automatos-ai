@@ -84,7 +84,7 @@ class TestParsePlanParallelFields:
             ]
         }
         errors = []
-        tasks, deps = _parse_plan(raw, errors)
+        tasks, _deps = _parse_plan(raw, errors)
         assert not errors
         assert len(tasks) == 2
         assert tasks[0].complexity == "complex"

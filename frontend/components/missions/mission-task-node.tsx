@@ -105,7 +105,7 @@ function MissionTaskNodeInner({ data }: NodeProps<MissionTaskNodeData>) {
       )}
 
       {/* Token usage (execution/review mode) */}
-      {!isPlanMode && (data.tokensUsed != null && data.tokensUsed > 0 || data.estimatedTokens != null && data.estimatedTokens > 0) && (
+      {!isPlanMode && ((data.tokensUsed != null && data.tokensUsed > 0) || (data.estimatedTokens != null && data.estimatedTokens > 0)) && (
         <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
           <Coins className="w-3 h-3" />
           <span className="font-mono">

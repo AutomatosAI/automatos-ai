@@ -753,7 +753,7 @@ class TestWiringSynthesisAutoInsertion:
             PlannedDependency("t2", "t3"),
         ]
 
-        new_tasks, new_deps = _ensure_synthesis_tasks(tasks, deps)
+        new_tasks, _ = _ensure_synthesis_tasks(tasks, deps)
 
         assert len(new_tasks) == 4
         synth = [t for t in new_tasks if t.task_type == TaskType.SYNTHESIS.value]
@@ -781,6 +781,6 @@ class TestWiringSynthesisAutoInsertion:
             PlannedDependency("t_synth", "t4"),
         ]
 
-        new_tasks, new_deps = _ensure_synthesis_tasks(tasks, deps)
+        new_tasks, _ = _ensure_synthesis_tasks(tasks, deps)
         assert len(new_tasks) == 4
         assert len(new_deps) == 3
