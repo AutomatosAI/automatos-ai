@@ -473,7 +473,7 @@ function FieldScene({ patterns }: FieldSceneProps) {
       {/* Background */}
       <StarField />
       <GridFloor />
-      <fog attach="fog" args={['#050510', 8, 25]} />
+      <fog attach="fog" args={['#0a0a12', 8, 25]} />
 
       {/* Central Qdrant / Field core */}
       <QdrantCore />
@@ -542,10 +542,10 @@ export function MissionFieldViz({ patterns, className }: MissionFieldVizProps) {
         camera={{ position: [0, 3, 7], fov: 50 }}
         gl={{
           antialias: true,
-          alpha: true,
+          alpha: false,
           powerPreference: 'high-performance',
         }}
-        style={{ background: 'transparent' }}
+        style={{ background: '#0a0a12' }}
         dpr={[1, 2]}
       >
         <FieldScene patterns={patterns} />
