@@ -241,6 +241,41 @@ export function useCancelMission() {
   })
 }
 
+// ── Replan Failed Mission (PRD-82B US-005) ───────────────────
+
+export function useReplanMission() {
+  const queryClient = useQueryClient()
+
+  return useMutation<MissionResponse, Error, { id: string; notes?: string }>({
+    mutationFn: ({ id, notes }) =>
+      apiClient.request<MissionResponse>(`/api/missions/${id}/replan`, {
+        method: 'POST',
+        body: (notes ? { notes } : {}) as unknown as BodyInit,
+      }),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.all })
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.detail(id) })
+    },
+  })
+}
+
+// ── Re-run Mission (clone goal + config into new mission) ────
+
+export function useRerunMission() {
+  const queryClient = useQueryClient()
+
+  return useMutation<MissionResponse, Error, MissionCreateRequest>({
+    mutationFn: (body) =>
+      apiClient.request<MissionResponse>('/api/missions', {
+        method: 'POST',
+        body: body as unknown as BodyInit,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: missionQueryKeys.all })
+    },
+  })
+}
+
 // ── Save as Routine (PRD-82B US-008) ─────────────────────────
 
 export function useSaveAsRoutine() {
