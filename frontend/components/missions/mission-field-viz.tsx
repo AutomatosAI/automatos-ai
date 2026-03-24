@@ -542,10 +542,10 @@ export function MissionFieldViz({ patterns, className }: MissionFieldVizProps) {
         camera={{ position: [0, 3, 7], fov: 50 }}
         gl={{
           antialias: true,
-          alpha: false,
+          alpha: true,
           powerPreference: 'high-performance',
         }}
-        style={{ background: '#050510' }}
+        style={{ background: 'transparent' }}
         dpr={[1, 2]}
       >
         <FieldScene patterns={patterns} />

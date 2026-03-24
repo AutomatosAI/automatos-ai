@@ -1315,8 +1315,23 @@ class CoordinatorService:
         run_id: UUID,
         actor_id: str,
     ) -> OrchestrationRun:
-        """Resume a paused mission."""
+        """Resume a paused mission.
+
+        If the mission was paused due to budget exceeded, auto-extend the
+        budget by 25% so the dispatcher doesn't immediately re-pause.
+        """
         run = self._get_run(db, run_id)
+
+        # Auto-extend budget when tokens_used >= budget (budget-pause loop fix)
+        budget = run.token_budget_estimate or 0
+        used = run.tokens_used or 0
+        if budget > 0 and used >= budget:
+            new_budget = int(used * 1.25)
+            logger.info(
+                "Mission %s: auto-extending budget %d → %d (tokens_used=%d)",
+                run_id, budget, new_budget, used,
+            )
+            run.token_budget_estimate = new_budget
 
         transition_run(
             db=db,
@@ -1332,6 +1347,12 @@ class CoordinatorService:
             event_type=EventType.RUN_RESUMED,
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
+            payload={
+                "budget_extended": budget > 0 and used >= budget,
+                "old_budget": budget,
+                "new_budget": run.token_budget_estimate,
+                "tokens_used": used,
+            },
         )
 
         logger.info("Mission %s resumed by %s", run_id, actor_id)

@@ -24,7 +24,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable'
-import { StatsBar } from '@/components/shared/stats-bar'
+// StatsBar removed — stats visible in budget bar + task nodes
 import { MissionStatusBadge } from './mission-status-badge'
 import { MissionBudgetBar } from './mission-budget-bar'
 import { MissionDAGCanvas } from './mission-dag-canvas'
@@ -43,7 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Activity, ListChecks, Clock, Coins, Brain, Zap, DollarSign } from 'lucide-react'
+import { Brain } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface MissionDetailPageProps {
@@ -136,7 +136,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <h1 className="text-lg font-semibold leading-tight line-clamp-2">
-              {mission.goal}
+              {(mission.config as Record<string, unknown>)?.name as string || mission.goal.split(':')[0]}
             </h1>
             <div className="flex items-center gap-3 mt-2">
               <MissionStatusBadge state={mission.state} />
@@ -288,8 +288,8 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
               </Dialog>
             )}
 
-            {/* Replan — failed missions */}
-            {mission.state === 'failed' && (
+            {/* Replan — failed or cancelled missions */}
+            {(mission.state === 'failed' || mission.state === 'cancelled') && (
               <Dialog open={showReplan} onOpenChange={setShowReplan}>
                 <DialogTrigger asChild>
                   <Button variant="outline" size="sm">
@@ -350,8 +350,8 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
               </Dialog>
             )}
 
-            {/* Re-run — completed or failed missions */}
-            {(mission.state === 'completed' || mission.state === 'failed') && (
+            {/* Re-run — any terminal mission */}
+            {isTerminal && (
               <Button
                 variant="outline"
                 size="sm"
@@ -379,51 +379,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
           </div>
         </div>
 
-        {/* Stats bar */}
-        {stats && (
-          <StatsBar
-            stats={[
-              {
-                label: 'Tasks Done',
-                value: `${stats.tasksDone}/${stats.taskCount}`,
-                icon: ListChecks,
-                iconColor: 'text-[hsl(var(--success))]',
-              },
-              {
-                label: 'Active Now',
-                value: stats.tasksActive,
-                icon: Activity,
-                iconColor: 'text-primary',
-              },
-              {
-                label: 'Elapsed',
-                value: stats.elapsedMs > 0 ? formatElapsed(stats.elapsedMs) : '-',
-                icon: Clock,
-                iconColor: 'text-[hsl(var(--info))]',
-              },
-              {
-                label: 'Tokens Used',
-                value: stats.tokensUsed.toLocaleString(),
-                icon: Coins,
-                iconColor: 'text-[hsl(var(--warning))]',
-              },
-              {
-                label: 'Est. Cost',
-                value: `~$${((stats.tokensUsed / 1_000_000) * 4).toFixed(2)}`,
-                icon: DollarSign,
-                iconColor: 'text-emerald-400',
-              },
-              ...(mission.max_concurrent > 1
-                ? [{
-                    label: 'Parallel',
-                    value: `${mission.max_concurrent}x`,
-                    icon: Zap,
-                    iconColor: 'text-purple-400',
-                  }]
-                : []),
-            ]}
-          />
-        )}
+        {/* Stats are shown inline on the budget bar and task nodes */}
 
         {/* Budget bar */}
         {mission.token_budget_estimate != null && mission.token_budget_estimate > 0 && (

@@ -68,6 +68,7 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
   const [description, setDescription] = useState('')
   const [tags, setTags] = useState('')
   const [files, setFiles] = useState<UploadingFile[]>([])
+  const [budgetPauseEnabled, setBudgetPauseEnabled] = useState(true)
 
   const isSubmitting = createMission.isLoading
   const isUploading = files.some((f) => f.status === 'uploading')
@@ -173,6 +174,7 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
     if (tagList.length > 0) config.tags = tagList
     if (name.trim()) config.name = name.trim()
     if (attachments.length > 0) config.attachments = attachments
+    if (!budgetPauseEnabled) config.budget_pause_disabled = true
 
     createMission.mutate(
       { goal, ...(Object.keys(config).length > 0 ? { config } : {}) },
@@ -196,6 +198,7 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
     setDescription('')
     setTags('')
     setFiles([])
+    setBudgetPauseEnabled(true)
   }
 
   const formatSize = (bytes: number) => {
@@ -309,6 +312,36 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Budget pause toggle */}
+          <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
+            <div className="space-y-0.5">
+              <Label htmlFor="budget-pause" className="text-sm cursor-pointer">
+                Pause on budget exceeded
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                Pause the mission if token usage exceeds the estimated budget
+              </p>
+            </div>
+            <button
+              id="budget-pause"
+              type="button"
+              role="switch"
+              aria-checked={budgetPauseEnabled}
+              onClick={() => setBudgetPauseEnabled((v) => !v)}
+              className={cn(
+                'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
+                budgetPauseEnabled ? 'bg-primary' : 'bg-muted',
+              )}
+            >
+              <span
+                className={cn(
+                  'pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform',
+                  budgetPauseEnabled ? 'translate-x-4' : 'translate-x-0',
+                )}
+              />
+            </button>
           </div>
 
           <div className="space-y-2">
