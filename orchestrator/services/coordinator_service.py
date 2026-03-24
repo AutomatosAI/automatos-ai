@@ -1322,11 +1322,11 @@ class CoordinatorService:
         """
         run = self._get_run(db, run_id)
 
-        # Auto-extend budget when tokens_used >= budget (budget-pause loop fix)
+        # Auto-extend budget when tokens_used >= 80% of budget (prevents re-pause loop)
         budget = run.token_budget_estimate or 0
         used = run.tokens_used or 0
-        if budget > 0 and used >= budget:
-            new_budget = int(used * 1.25)
+        if budget > 0 and used >= budget * 0.8:
+            new_budget = int(used * 1.5)
             logger.info(
                 "Mission %s: auto-extending budget %d → %d (tokens_used=%d)",
                 run_id, budget, new_budget, used,
