@@ -26,7 +26,7 @@ from uuid import UUID
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from config import Config
+from config import COMPLEXITY_TOKEN_BUDGET, Config
 from core.models.core import Agent
 from core.models.orchestration import (
     OrchestrationArchive,
@@ -812,6 +812,11 @@ class CoordinatorService:
                     "required_tools": planned.required_tools,
                 } if planned.required_tools else None,
                 max_retries=run.max_retries,
+                complexity=getattr(planned, "complexity", "moderate"),
+                parallel_group=getattr(planned, "parallel_group", None),
+                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
+                    getattr(planned, "complexity", "moderate"), 4000
+                ),
             )
             db.add(task)
             db.flush()  # Get task.id
@@ -1362,6 +1367,11 @@ class CoordinatorService:
                     else None
                 ),
                 max_retries=run.max_retries,
+                complexity=getattr(planned, "complexity", "moderate"),
+                parallel_group=getattr(planned, "parallel_group", None),
+                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
+                    getattr(planned, "complexity", "moderate"), 4000
+                ),
             )
             db.add(task)
             db.flush()

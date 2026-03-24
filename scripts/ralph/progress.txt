@@ -44,3 +44,21 @@ US-004 COMPLETED (2026-03-24)
   - Wiring test: complex research goal → max_concurrent >= 2
   - Wiring test: simple summarize goal → max_concurrent == 1
 - 424 tests pass across non-broken test files, no regressions from US-004
+
+US-005 COMPLETED (2026-03-24)
+- Updated _SYSTEM_PROMPT: removed "sequential" framing, added parallel group + complexity + synthesis instructions
+- Updated _OUTPUT_SCHEMA_INSTRUCTIONS: added complexity and parallel_group fields with example showing parallel tasks + synthesis
+- Updated _REPLAN_SYSTEM_PROMPT: same parallel/complexity guidance
+- Added complexity (str, default "moderate") and parallel_group (Optional[str]) to PlannedTask dataclass
+- Updated _parse_plan(): extracts complexity (validated against _VALID_COMPLEXITIES set) and parallel_group from LLM output
+- Added parallel_group cross-dependency validation to _validate_plan(): tasks in same group must NOT depend on each other
+- Replaced flat token estimate (2000 * task_count) with _estimate_token_budget() using COMPLEXITY_TOKEN_BUDGET dict
+- Updated coordinator_service.py: both decompose and replan paths now set complexity, parallel_group, estimated_tokens on OrchestrationTask rows
+- Created tests/test_parallel_decomposition.py with 7 tests:
+  - Parse plan extracts complexity and parallel_group
+  - Defaults complexity to "moderate" when missing or invalid
+  - Validates cross-dependent parallel group → error
+  - Accepts valid parallel group → no error
+  - Token estimate uses complexity (not flat 2000 * count)
+  - Wiring: complex goal produces parallel groups + synthesis tasks
+- 431 tests pass across non-broken test files, no regressions from US-005

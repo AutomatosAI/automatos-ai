@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID, uuid4
 
+from config import COMPLEXITY_TOKEN_BUDGET
 from core.llm import create_llm_manager
 from core.models.core import Agent
 from core.models.orchestration_enums import ComplexityTier, TaskType
@@ -174,7 +175,15 @@ async def _fetch_attachment_contents(
 MIN_TASKS = 3
 MAX_TASKS = 20
 MAX_PLAN_RETRIES = 3
-TOKENS_PER_TASK_ESTIMATE = 2000
+TOKENS_PER_TASK_ESTIMATE = 2000  # legacy fallback
+
+
+def _estimate_token_budget(tasks: List["PlannedTask"]) -> int:
+    """Sum token budgets based on each task's complexity tier."""
+    return sum(
+        COMPLEXITY_TOKEN_BUDGET.get(t.complexity, TOKENS_PER_TASK_ESTIMATE)
+        for t in tasks
+    )
 
 # Deliverable keywords for complexity scoring
 _DELIVERABLE_KEYWORDS = frozenset({
@@ -299,6 +308,8 @@ class PlannedTask:
     verification_criteria: List[Dict[str, Any]]
     required_tools: List[str]
     dependencies: List[str]  # temp_ids of upstream tasks
+    complexity: str = "moderate"
+    parallel_group: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -450,7 +461,7 @@ class MissionPlanner:
                 )
                 continue
 
-            token_estimate = len(tasks) * TOKENS_PER_TASK_ESTIMATE
+            token_estimate = _estimate_token_budget(tasks)
             logger.info(
                 "MissionPlanner.replan: generated %d replacement tasks (attempt %d)",
                 len(tasks),
@@ -511,7 +522,7 @@ class MissionPlanner:
             if not parse_errors:
                 validation_errors = _validate_plan(tasks, deps, agents)
                 if not validation_errors:
-                    token_estimate = len(tasks) * TOKENS_PER_TASK_ESTIMATE
+                    token_estimate = _estimate_token_budget(tasks)
                     logger.info(
                         "MissionPlanner: template=%s produced %d tasks",
                         template.id,
@@ -624,7 +635,7 @@ class MissionPlanner:
                 continue
 
             # Success
-            token_estimate = len(tasks) * TOKENS_PER_TASK_ESTIMATE
+            token_estimate = _estimate_token_budget(tasks)
             logger.info(
                 "MissionPlanner: decomposed goal into %d tasks (attempt %d)",
                 len(tasks),
@@ -647,18 +658,28 @@ class MissionPlanner:
 
 _SYSTEM_PROMPT = """\
 You are a mission planner for an AI agent platform. Your job is to decompose \
-a user's goal into a sequential plan of discrete tasks that can be executed \
-by the available agents.
+a user's goal into a task DAG that can be executed by the available agents. \
+Tasks may run in parallel when they are independent.
 
 Rules:
 - Each task must be atomic — completable by ONE agent in ONE execution.
-- Tasks execute sequentially (one at a time). Use dependencies to encode ordering.
+- Each task should produce at most ~4000 words of output.
+- Use dependencies to encode ordering. Tasks with no dependencies on each other \
+can run in parallel.
+- Assign a complexity tier to each task: "simple" (~1000 tokens), "moderate" \
+(~4000 tokens), or "complex" (~8000 tokens).
+- Group independent tasks that can run in parallel under the same parallel_group \
+name (e.g. "research", "analysis"). Tasks in the same parallel_group MUST NOT \
+depend on each other.
+- After parallel groups converge, include a "synthesis" task (task_type="synthesis") \
+that merges and integrates the outputs of the parallel tasks.
 - Every task must specify an agent_role matching one of the available agents.
 - The plan MUST contain between 3 and 20 tasks inclusive.
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
 
 _VALID_TASK_TYPES = frozenset(t.value for t in TaskType)
+_VALID_COMPLEXITIES = frozenset({"simple", "moderate", "complex"})
 
 
 def _build_decomposition_prompt(
@@ -714,6 +735,8 @@ Return ONLY a JSON object with this exact structure:
       "agent_role": "researcher",
       "sequence_number": 1,
       "task_type": "llm_generation",
+      "complexity": "moderate",
+      "parallel_group": "research",
       "verification_criteria": [
         {"type": "min_length", "value": 200, "must_pass": true},
         {"type": "required_sections", "value": ["## Summary", "## Findings"], "must_pass": false}
@@ -723,21 +746,40 @@ Return ONLY a JSON object with this exact structure:
     },
     {
       "temp_id": "task_2",
-      "title": "...",
+      "title": "Research secondary sources",
       "description": "...",
-      "agent_role": "writer",
-      "sequence_number": 2,
+      "agent_role": "researcher",
+      "sequence_number": 1,
       "task_type": "llm_generation",
+      "complexity": "moderate",
+      "parallel_group": "research",
       "verification_criteria": [],
       "required_tools": [],
-      "dependencies": ["task_1"]
+      "dependencies": []
+    },
+    {
+      "temp_id": "task_3",
+      "title": "Synthesize research findings",
+      "description": "Merge and integrate all research outputs into a coherent whole",
+      "agent_role": "writer",
+      "sequence_number": 2,
+      "task_type": "synthesis",
+      "complexity": "moderate",
+      "parallel_group": null,
+      "verification_criteria": [],
+      "required_tools": [],
+      "dependencies": ["task_1", "task_2"]
     }
   ]
 }
 ```
 
 Valid task_type values: llm_generation, tool_execution, analysis, synthesis, review
+Valid complexity values: simple, moderate, complex
 Dependencies reference temp_id values of upstream tasks that must complete first.
+parallel_group: string name grouping independent parallel tasks (null if sequential).
+Tasks in the same parallel_group MUST NOT depend on each other.
+After parallel groups converge, include a synthesis task that merges the outputs.
 """
 
 
@@ -751,7 +793,13 @@ Rules:
 - Do NOT duplicate work already completed by verified tasks.
 - Generate only the tasks needed to replace the failed task and complete the goal.
 - Each task must be atomic — completable by ONE agent in ONE execution.
-- Tasks execute sequentially. Use dependencies to encode ordering.
+- Each task should produce at most ~4000 words of output.
+- Use dependencies to encode ordering. Independent tasks can run in parallel.
+- Assign a complexity tier to each task: "simple", "moderate", or "complex".
+- Group independent parallel tasks under the same parallel_group name. \
+Tasks in the same parallel_group MUST NOT depend on each other.
+- After parallel groups converge, include a "synthesis" task (task_type="synthesis") \
+that merges the parallel outputs.
 - Every task must specify an agent_role matching one of the available agents.
 - The plan MUST contain between 3 and 20 tasks inclusive.
 - Return ONLY a single JSON object (no markdown, no explanation).
@@ -947,6 +995,14 @@ def _parse_plan(
         if not isinstance(task_deps, list):
             task_deps = []
 
+        # PRD-82C: complexity and parallel_group
+        complexity = str(rt.get("complexity", "moderate")).lower()
+        if complexity not in _VALID_COMPLEXITIES:
+            complexity = "moderate"
+
+        raw_pg = rt.get("parallel_group")
+        parallel_group = str(raw_pg).strip() if raw_pg else None
+
         tasks.append(
             PlannedTask(
                 temp_id=temp_id,
@@ -958,6 +1014,8 @@ def _parse_plan(
                 verification_criteria=verification_criteria,
                 required_tools=[str(t) for t in required_tools],
                 dependencies=[str(d) for d in task_deps],
+                complexity=complexity,
+                parallel_group=parallel_group,
             )
         )
 
@@ -1075,7 +1133,23 @@ def _validate_plan(
                 f"which does not match any active agent"
             )
 
-    # 5. Orphan check — every task should be reachable from a root
+    # 5. Parallel group cross-dependency check (PRD-82C)
+    #    Tasks in the same parallel_group must NOT depend on each other.
+    group_members: Dict[str, set] = {}
+    for task in tasks:
+        if task.parallel_group:
+            group_members.setdefault(task.parallel_group, set()).add(task.temp_id)
+
+    dep_set = {(d.from_task_temp_id, d.to_task_temp_id) for d in deps}
+    for group_name, members in group_members.items():
+        for dep_from, dep_to in dep_set:
+            if dep_from in members and dep_to in members:
+                errors.append(
+                    f"Tasks in parallel_group '{group_name}' have a "
+                    f"cross-dependency: {dep_from} → {dep_to}"
+                )
+
+    # 6. Orphan check — every task should be reachable from a root
     #    (a root is a task with no dependencies)
     children_of: Dict[str, List[str]] = {t.temp_id: [] for t in tasks}
     for dep in deps:
