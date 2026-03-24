@@ -22,7 +22,7 @@ Import ~65 professional agent skills from agency-agents, build agent templates m
 
 ### Phase 3: Frontend
 - [x] US-008: Marketplace page with category grid + agent cards + search
-- [ ] US-009: Agent template detail modal + one-click deploy button
+- [x] US-009: Agent template detail modal + one-click deploy button
 
 ### Phase 4: Business Plan Template & Wiring
 - [ ] US-010: Business Plan mission template in TEMPLATE_REGISTRY (4 phases, parallel groups)

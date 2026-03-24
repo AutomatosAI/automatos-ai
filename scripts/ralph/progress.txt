@@ -98,3 +98,21 @@
     - Loading skeletons and empty state
   - Added "Agent Catalog" tab to marketplace-homepage.tsx (between Agents and Recipes)
   - Validated: TypeScript passes (no new errors, all pre-existing)
+
+2026-03-24: US-009 COMPLETED
+  - Created frontend/components/marketplace/agent-template-detail.tsx:
+    - Framer-motion animated modal (backdrop + centered Card) following plugin-detail-modal pattern
+    - Full template details: icon, name, category, tier badge, description
+    - Collapsible persona preview section
+    - Recommended model badge with full model ID
+    - Recommended tools list as badges
+    - Tags display
+    - Optional custom agent name input field
+    - One-click "Add to Workspace" deploy button with loading state
+    - Uses existing useAgentCatalogTemplate() and useDeployAgentCatalogTemplate() hooks
+    - On success: closes modal (toast from mutation hook)
+    - On error: shows error toast (from mutation hook)
+  - Updated agent-catalog-tab.tsx:
+    - Cards now clickable (cursor-pointer + onClick → setSelectedSlug)
+    - AgentTemplateDetail modal rendered at bottom, controlled by selectedSlug state
+  - Validated: TypeScript passes (no new errors)

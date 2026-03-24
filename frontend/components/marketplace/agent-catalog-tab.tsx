@@ -13,6 +13,7 @@ import {
   type AgentCatalogTemplate,
   type AgentCatalogCategory,
 } from '@/hooks/use-marketplace-api'
+import { AgentTemplateDetail } from './agent-template-detail'
 
 // Map category to display-friendly label
 const CATEGORY_LABELS: Record<string, string> = {
@@ -132,7 +133,8 @@ export function AgentCatalogTab({ searchQuery }: AgentCatalogTabProps) {
           {templates.map((template: AgentCatalogTemplate) => (
             <Card
               key={template.slug}
-              className="glass-card card-glow hover:border-primary/20 transition-all duration-300 flex flex-col"
+              className="glass-card card-glow hover:border-primary/20 transition-all duration-300 flex flex-col cursor-pointer"
+              onClick={() => setSelectedSlug(template.slug)}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start gap-3">
@@ -235,6 +237,13 @@ export function AgentCatalogTab({ searchQuery }: AgentCatalogTabProps) {
           ))}
         </div>
       )}
+
+      {/* Template Detail Modal */}
+      <AgentTemplateDetail
+        open={selectedSlug !== null}
+        slug={selectedSlug}
+        onClose={() => setSelectedSlug(null)}
+      />
     </div>
   )
 }
