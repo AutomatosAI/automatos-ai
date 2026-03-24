@@ -6,3 +6,13 @@ US-001 COMPLETED (2026-03-24)
 - Created Alembic migration prd82c_parallel_schema (depends on prd82b_us009_archive)
 - All imports validated, 5 orchestration tests pass
 - Pre-existing issues: pgvector not installed locally (test_memory_fixes.py), test_recipe_scheduler.py has import error — both unrelated to 82C
+
+US-002 COMPLETED (2026-03-24)
+- Added count_active_tasks(db, run_id) -> int to MissionDispatcher
+- Added dispatch_ready(db, run, agents) -> List[DispatchResult] for parallel dispatch up to max_concurrent slots
+- Extracted _dispatch_single() from dispatch_next() to share dispatch logic
+- Deprecated has_active_task() and dispatch_next() with DeprecationWarning
+- dispatch_ready() combines queued/retrying + DependencyResolver.get_ready_tasks() candidates
+- Created tests/test_dispatcher_parallel.py with 9 wiring tests (all pass)
+- 159 tests pass across non-broken test files, no regressions
+- coordinator_service.py:481 still calls dispatch_next() — will be wired to dispatch_ready() in US-003
