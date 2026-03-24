@@ -17,7 +17,7 @@ Import ~65 professional agent skills from agency-agents, build agent templates m
 
 ### Phase 2: Database & API
 - [x] US-005: Add agent_catalog_templates DB table + Alembic migration + SQLAlchemy model
-- [ ] US-006: Seed agent catalog templates from imported SKILL.md files (55+ rows)
+- [x] US-006: Seed agent catalog templates from imported SKILL.md files (55+ rows)
 - [ ] US-007: Marketplace API endpoints (browse, search, categories, deploy)
 
 ### Phase 3: Frontend

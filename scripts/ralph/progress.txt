@@ -53,3 +53,19 @@
     - Indexes: slug (unique), category, workspace_id, partial index on is_active=true
   - Added AgentCatalogTemplate import to core/models/__init__.py
   - Validated: syntax OK on all 3 changed files, no new errors
+
+2026-03-24: US-006 COMPLETED
+  - Created scripts/seed_agent_catalog.py
+    - Stdlib-only YAML frontmatter parser (no PyYAML dependency)
+    - Extracts persona from ## Identity section, prefixed with "You are a {name}."
+    - Maps model slugs to full OpenRouter model IDs (haiku-4.5, sonnet-4.6, opus-4.6)
+    - Category → icon mapping (10 categories, emoji icons)
+    - Standalone CLI: --dry-run, --skills-dir flags
+    - DB upsert via SQLAlchemy SessionLocal (idempotent on slug)
+    - seed_from_alembic(op) entrypoint for Alembic data migration (raw SQL upsert)
+  - Created Alembic data migration: prd120_seed_agent_catalog.py
+    - down_revision: prd120_agent_catalog_templates
+    - Calls seed_from_alembic() to populate rows
+    - Downgrade: DELETE WHERE workspace_id IS NULL
+  - Validated: dry-run parses all 81 SKILL.md files, correct model IDs, all 10 categories
+  - Validated: Python imports OK, no new errors
