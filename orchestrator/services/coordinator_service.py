@@ -1326,7 +1326,7 @@ class CoordinatorService:
         budget = run.token_budget_estimate or 0
         used = run.tokens_used or 0
         if budget > 0 and used >= budget * 0.8:
-            new_budget = int(used * 1.5)
+            new_budget = int(used * 2.0)
             logger.info(
                 "Mission %s: auto-extending budget %d → %d (tokens_used=%d)",
                 run_id, budget, new_budget, used,
