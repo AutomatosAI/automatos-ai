@@ -2067,16 +2067,17 @@ class CoordinatorService:
     ) -> None:
         """
         Build output summary, run cross-task consistency check, and
-        transition run from verifying → awaiting_human.
+        auto-complete the mission. Consistency check is informational only —
+        results are stored in output_summary for the user to review at leisure.
         """
         try:
             summary = self.build_output_summary(db, run)
             run.output_summary = summary
 
             # --- Cross-task consistency verification (PRD-82B US-006) ---
+            # Informational only — does NOT gate completion
             consistency_result = await self._run_consistency_check(db, run)
             if consistency_result is not None:
-                # Attach consistency issues to the summary for human review
                 summary["consistency"] = {
                     "passed": consistency_result.passed,
                     "score": consistency_result.score,
@@ -2096,19 +2097,20 @@ class CoordinatorService:
                 if consistency_result.tokens_used > 0:
                     run.tokens_used = (run.tokens_used or 0) + consistency_result.tokens_used
 
+            # Auto-complete — all tasks passed verification, work is done
             transition_run(
                 db=db,
                 run=run,
-                new_state=RunState.AWAITING_HUMAN,
+                new_state=RunState.COMPLETED,
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
-                reason="All tasks verified — awaiting human review",
+                reason="All tasks verified — mission complete",
             )
 
             emit_event(
                 db=db,
                 run_id=run.id,
-                event_type=EventType.RUN_AWAITING_HUMAN,
+                event_type=EventType.RUN_COMPLETED,
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
                 payload={
@@ -2118,11 +2120,15 @@ class CoordinatorService:
                 },
             )
 
+            # Clean up verification cache
+            VerificationService.clear_cache(run.id)
+
             logger.info(
-                "Mission %s → awaiting_human (summary: %d tasks, %ds)",
+                "Mission %s → completed (summary: %d tasks, %ds, consistency=%s)",
                 run.id,
                 summary["tasks_completed"],
                 summary["total_duration_seconds"],
+                "pass" if (consistency_result and consistency_result.passed) else "issues",
             )
 
         except Exception:
