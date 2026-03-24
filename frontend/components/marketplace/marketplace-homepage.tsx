@@ -12,6 +12,7 @@ import { MarketplaceLlmsTab } from './marketplace-llms-tab'
 import { MarketplacePlaybooksTab } from './marketplace-playbooks-tab'
 import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { MarketplaceSkillsTab } from './marketplace-skills-tab'
+import { AgentCatalogTab } from './agent-catalog-tab'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 
@@ -141,6 +142,7 @@ export function MarketplaceHomepage() {
           <TabsList data-tour="marketplace-tabs">
             <TabsTrigger value="tools">Applications</TabsTrigger>
             <TabsTrigger value="agents">Agents</TabsTrigger>
+            <TabsTrigger value="catalog">Agent Catalog</TabsTrigger>
             <TabsTrigger value="recipes">Recipes</TabsTrigger>
             <TabsTrigger value="llms">LLMs</TabsTrigger>
             <TabsTrigger value="capabilities">Capabilities</TabsTrigger>
@@ -165,6 +167,10 @@ export function MarketplaceHomepage() {
 
         <TabsContent value="agents" className="mt-0">
           <MarketplaceAgentsTab searchQuery={searchQuery} />
+        </TabsContent>
+
+        <TabsContent value="catalog" className="mt-0">
+          <AgentCatalogTab searchQuery={searchQuery} />
         </TabsContent>
 
         <TabsContent value="recipes" className="mt-0">

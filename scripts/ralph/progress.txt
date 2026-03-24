@@ -81,3 +81,20 @@
   - All endpoints require auth via get_request_context_hybrid
   - Deploy scoped to user's workspace (ctx.workspace_id)
   - Validated: all imports OK, 79 tests pass (1 pre-existing failure unrelated)
+
+2026-03-24: US-008 COMPLETED
+  - Added agent catalog React Query hooks to frontend/hooks/use-marketplace-api.ts:
+    - useAgentCatalogTemplates() — browse with category/search filters
+    - useAgentCatalogCategories() — category list with counts
+    - useAgentCatalogTemplate() — single template detail by slug
+    - useDeployAgentCatalogTemplate() — deploy mutation with toast notifications
+    - TypeScript interfaces: AgentCatalogTemplate, AgentCatalogTemplateDetail, AgentCatalogCategory, AgentCatalogDeployResponse
+    - Query key factory: agentCatalogQueryKeys
+  - Created frontend/components/marketplace/agent-catalog-tab.tsx:
+    - Category filter bar with counts (from /api/marketplace/agents/categories)
+    - Responsive agent template card grid (1/2/3/4 cols)
+    - Cards show: icon, name, category, description, model badge, tags, recommended tools
+    - "Add to Workspace" deploy button with loading state
+    - Loading skeletons and empty state
+  - Added "Agent Catalog" tab to marketplace-homepage.tsx (between Agents and Recipes)
+  - Validated: TypeScript passes (no new errors, all pre-existing)

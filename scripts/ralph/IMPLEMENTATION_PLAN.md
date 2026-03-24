@@ -21,7 +21,7 @@ Import ~65 professional agent skills from agency-agents, build agent templates m
 - [x] US-007: Marketplace API endpoints (browse, search, categories, deploy)
 
 ### Phase 3: Frontend
-- [ ] US-008: Marketplace page with category grid + agent cards + search
+- [x] US-008: Marketplace page with category grid + agent cards + search
 - [ ] US-009: Agent template detail modal + one-click deploy button
 
 ### Phase 4: Business Plan Template & Wiring
