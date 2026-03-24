@@ -28,3 +28,13 @@
   - Total new: 41 SKILL.md files across 5 categories
   - Grand total: 70 SKILL.md files
   - Validated: all frontmatter valid, all 5 sections present, no banned platform refs, all recommended_tools valid
+
+2026-03-24: US-004 COMPLETED
+  - Added 22 selective SKIP_AGENTS entries for Tier 2 divisions (testing, paid-media, specialized)
+  - Imported 3 Testing skills: accessibility-auditor, api-tester, performance-benchmarker
+  - Imported 3 Paid Media skills: auditor (paid media), creative-strategist, ppc-strategist
+  - Imported 5 Specialized skills: compliance-auditor, developer-advocate, document-generator, recruitment-specialist, supply-chain-strategist
+  - Total new: 11 SKILL.md files across 3 categories
+  - Grand total: 81 SKILL.md files across 10 categories
+  - Generated automatos-skills/CATALOG.md — table of all 81 skills with slug, category, name, description, model
+  - Validated: all 81 skills pass format check, no banned platform refs, all required sections present

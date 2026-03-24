@@ -13,7 +13,7 @@ Import ~65 professional agent skills from agency-agents, build agent templates m
 - [x] US-001: Create automatos-skills/ directory structure + Python import/conversion script
 - [x] US-002: Clone agency-agents, import Engineering + Design skills (29 skills: 21 eng + 8 design)
 - [x] US-003: Import Marketing, Sales, Product, PM, Support skills (41 skills: 16 mkt + 8 sales + 5 product + 6 pm + 6 support)
-- [ ] US-004: Import Tier 2 selective skills (Testing, Paid Media, Specialized ~11 skills) + CATALOG.md
+- [x] US-004: Import Tier 2 selective skills (Testing, Paid Media, Specialized ~11 skills) + CATALOG.md
 
 ### Phase 2: Database & API
 - [ ] US-005: Add agent_catalog_templates DB table + Alembic migration + SQLAlchemy model
@@ -108,3 +108,6 @@ Note: Pre-existing errors may exist in other files. Only check for NEW errors in
 - Marketing yielded 16 skills (not ~12 as estimated) — more non-China agents than expected. Filtered: baidu, bilibili, douyin, kuaishou, weibo, xiaohongshu, zhihu, china-ecommerce, private-domain, livestream-commerce, wechat-official-account.
 - Product yielded 5 skills (not ~4) — includes behavioral-nudge-engine, a useful product psychology agent.
 - Total skills after US-003: 70 (29 from US-002 + 41 from US-003).
+- US-004: Testing yielded 3 skills (accessibility-auditor, api-tester, performance-benchmarker). Paid Media yielded 3 (auditor, creative-strategist, ppc-strategist). Specialized yielded 5 (compliance-auditor, developer-advocate, document-generator, recruitment-specialist, supply-chain-strategist).
+- Total skills after US-004: 81 (70 + 11). Exceeds the 55+ target by 26.
+- CATALOG.md generated with full table of all 81 skills across 10 categories.

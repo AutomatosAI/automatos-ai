@@ -70,6 +70,41 @@ SKIP_AGENTS: set[str] = {
     "wechat-mini-program-developer",
     # Game-dev specific that might appear in other divisions
     "game-dev-specialist",
+    # Tier 2 Testing — keep only: api-tester, performance-benchmarker, accessibility-auditor
+    "evidence-collector",
+    "reality-checker",
+    "test-results-analyzer",
+    "tool-evaluator",
+    "workflow-optimizer",
+    # Tier 2 Paid Media — keep only: ppc-strategist, creative-strategist, auditor
+    "paid-social-strategist",
+    "programmatic-buyer",
+    "search-query-analyst",
+    "tracking-specialist",
+    # Tier 2 Specialized — keep only: document-generator, compliance-auditor,
+    # recruitment-specialist, supply-chain-strategist, developer-advocate
+    "accounts-payable-agent",
+    "agentic-identity-trust",
+    "agents-orchestrator",
+    "automation-governance-architect",
+    "blockchain-security-auditor",
+    "corporate-training-designer",
+    "data-consolidation-agent",
+    "government-digital-presales-consultant",
+    "healthcare-marketing-compliance",
+    "identity-graph-operator",
+    "lsp-index-engineer",
+    "report-distribution-agent",
+    "sales-data-extraction-agent",
+    "cultural-intelligence-strategist",
+    "french-consulting-market",
+    "korean-business-navigator",
+    "mcp-builder",
+    "model-qa",
+    "salesforce-architect",
+    "workflow-architect",
+    "study-abroad-advisor",
+    "zk-steward",
 }
 
 # Non-Automatos platform references to strip
