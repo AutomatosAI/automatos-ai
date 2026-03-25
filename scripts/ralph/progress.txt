@@ -30,3 +30,13 @@
 - threat-detection-engineer uses platform_query_loki_logs for threat hunting (LogQL queries)
 - autonomous-optimization-architect uses platform_get_cost_breakdown + platform_get_llm_usage for cost analysis
 - Removed workspace_write_file from autonomous-optimization-architect tools (not needed for report-only agent)
+
+## US-005: Marketing — 16 skills rewritten (2026-03-25)
+- Rewrote: growth-hacker, content-creator, seo-specialist, social-media-strategist, linkedin-content-creator, twitter-engager, tiktok-strategist, instagram-curator, podcast-strategist, reddit-community-builder, app-store-optimizer, carousel-growth-engine, short-video-editing-coach, ai-citation-strategist, book-co-author, cross-border-ecommerce
+- All skills: frontmatter with tools:{name,description}, identity paragraph, 5-step workflow with JSON tool calls, output format template, "What NOT To Do" section
+- Line counts: 87-100 lines (within 60-100 target)
+- Social media skills (linkedin, twitter) use composio_execute for platform-specific actions
+- Content skills use platform_publish_blog_post for publishing
+- Growth-hacker uses composio_execute with GOOGLE_ANALYTICS for metrics
+- SEO specialist uses composio_execute with GOOGLE_ANALYTICS + workspace tools for auditing
+- Fixed ai-citation-strategist: removed specific AI model brand names per no-external-platform rule
