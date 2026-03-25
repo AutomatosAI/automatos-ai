@@ -101,3 +101,10 @@
 - developer-advocate uses composio_execute with GITHUB_LIST_ISSUES + platform_publish_blog_post
 - document-generator uses platform_search_memory for brand guidelines retrieval
 - Removed China-specific content from recruitment-specialist and supply-chain-strategist (generic/global now)
+
+## US-011: Validation — all 81 skills pass (2026-03-25)
+- Wrote validate_skills.py (stdlib only) checking: frontmatter fields, tools format, workflow+JSON blocks, output format, anti-patterns, no banned refs, line count
+- 81 rewritten skills validated, 19 pre-existing exempt
+- Fixed 1 issue: ai-engineer had "openai" in a grep pattern (replaced with generic SDK terms)
+- Seed script dry-run: 97 entries would be upserted, correct model assignments (13 opus, 3 haiku, rest sonnet)
+- All acceptance criteria met

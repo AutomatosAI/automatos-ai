@@ -24,7 +24,7 @@ Rewrite all 81 imported skills to Automatos production quality. Each skill must 
 - [x] US-010: Paid Media + Specialized (8): ppc-strategist, creative-strategist, auditor, document-generator, compliance-auditor, recruitment-specialist, supply-chain-strategist, developer-advocate
 
 ### Phase 3: Validation
-- [ ] US-011: Validate all 81 skills, run seed dry-run, commit to skills repo
+- [x] US-011: Validate all 81 skills, run seed dry-run, commit to skills repo
 
 ---
 
