@@ -82,6 +82,11 @@ router = APIRouter(prefix="/api/missions", tags=["missions"])
 class MissionCreateRequest(BaseModel):
     goal: str = Field(..., min_length=1, max_length=5000, description="Natural-language goal")
     config: Optional[Dict[str, Any]] = Field(None, description="Optional mission config overrides")
+    template_id: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Template ID hint — bypass LLM matching and use this template directly",
+    )
 
 
 ALLOWED_MODIFICATION_KEYS = {"task_overrides", "notes", "agent_overrides"}
@@ -404,13 +409,19 @@ async def create_mission(
 ):
     """Create a new mission from a natural-language goal."""
     coordinator = get_coordinator_service()
+
+    # Merge template_id into config so it flows to planner
+    mission_config = dict(body.config) if body.config else {}
+    if body.template_id:
+        mission_config["template_id"] = body.template_id
+
     try:
         run = await coordinator.create_mission(
             db=db,
             workspace_id=ctx.workspace_id,
             goal=body.goal,
             created_by=ctx.user.id or "unknown",
-            config=body.config,
+            config=mission_config or None,
         )
         db.commit()
         return _run_to_response(run)

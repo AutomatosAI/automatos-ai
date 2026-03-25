@@ -1625,3 +1625,61 @@ class BlogPost(Base):
         if include_content:
             d["content"] = self.content
         return d
+
+
+# ---------------------------------------------------------------------------
+# PRD-120: Agent Catalog Templates (Skills Marketplace)
+# ---------------------------------------------------------------------------
+
+class AgentCatalogTemplate(Base):
+    """Pre-built agent template for marketplace one-click deploy."""
+
+    __tablename__ = "agent_catalog_templates"
+
+    id = Column(Integer, primary_key=True)
+    slug = Column(String(150), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    category = Column(String(100), nullable=False, index=True)
+    description = Column(Text, nullable=False)
+    persona = Column(Text, nullable=True)
+    skill_slug = Column(String(150), nullable=True)
+    recommended_model = Column(String(100), nullable=True)
+    recommended_tools = Column(JSON, default=list)
+    tags = Column(JSON, default=list)
+    icon = Column(String(10), nullable=True)
+    tier = Column(String(50), nullable=False, default="free", server_default="free")
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+
+    # Future per-workspace templates (NULL = global)
+    workspace_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace = relationship("Workspace", foreign_keys=[workspace_id])
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "slug": self.slug,
+            "name": self.name,
+            "category": self.category,
+            "description": self.description,
+            "persona": self.persona,
+            "skill_slug": self.skill_slug,
+            "recommended_model": self.recommended_model,
+            "recommended_tools": self.recommended_tools or [],
+            "tags": self.tags or [],
+            "icon": self.icon,
+            "tier": self.tier,
+            "is_active": self.is_active,
+            "workspace_id": str(self.workspace_id) if self.workspace_id else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

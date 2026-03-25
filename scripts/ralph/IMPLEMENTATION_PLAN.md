@@ -1,37 +1,30 @@
-# PRD-82C Parallel Execution, Budget & Decomposition — Implementation Plan
+# PRD-120 Phase 2: Skill Rewrites — Implementation Plan
 
 ## Overview
-Make missions parallel, budget-aware, and intelligently decomposed. Wire all scaffolded-but-unused code from 82A/B. Every story includes wiring tests that prove the code is called, not just defined.
+Rewrite all 81 imported skills to Automatos production quality. Each skill must have: proper persona, real platform/workspace/composio tool mappings with JSON call examples, structured workflows, output formats, and anti-patterns. Quality bar = Sentinel + Scout skills.
 
-## Branch: ralph/prd-82c-parallel-budget-decomposition
+## Branch: ralph/prd-120-skill-rewrites
 
 ---
 
 ## Tasks
 
-### Phase 1: Schema & Foundation
-- [x] US-001: Add complexity, parallel_group, estimated_tokens columns. ComplexityTier + BudgetStatus enums. COMPLEXITY_TOKEN_BUDGET config. Change max_concurrent default to 3.
+### Phase 1: Infrastructure
+- [x] US-001: Create SKILL-GUIDE.md reference + fix seed script frontmatter parsing for tools:{name,description} format
 
-### Phase 2: Parallel Dispatch
-- [x] US-002: Replace has_active_task() with count_active_tasks(). Add dispatch_ready() for multi-task dispatch.
-- [x] US-003: Wire dispatch_ready() into coordinator tick. Execute via asyncio.gather().
+### Phase 2: Skill Rewrites by Category
+- [x] US-002: Engineering batch 1 (8): frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer
+- [x] US-003: Engineering batch 2 (8): code-reviewer, software-architect, technical-writer, mobile-app-builder, senior-developer, git-workflow-master, rapid-prototyper, incident-response-commander
+- [x] US-004: Engineering batch 3 (5): threat-detection-engineer, solidity-smart-contract-engineer, embedded-firmware-engineer, ai-data-remediation-engineer, autonomous-optimization-architect
+- [x] US-005: Marketing (16): growth-hacker, content-creator, seo-specialist, social-media-strategist, linkedin-content-creator, twitter-engager, tiktok-strategist, instagram-curator, podcast-strategist, reddit-community-builder, app-store-optimizer, carousel-growth-engine, short-video-editing-coach, ai-citation-strategist, book-co-author, cross-border-ecommerce
+- [x] US-006: Sales (8): outbound-strategist, discovery-coach, deal-strategist, pipeline-analyst, account-strategist, coach, engineer, proposal-strategist
+- [x] US-007: Design (8): ui-designer, ux-researcher, ux-architect, brand-guardian, visual-storyteller, image-prompt-engineer, inclusive-visuals-specialist, whimsy-injector
+- [x] US-008: Product + PM (11): sprint-prioritizer, trend-researcher, feedback-synthesizer, behavioral-nudge-engine, manager, project-shepherd, studio-producer, experiment-tracker, jira-workflow-steward, project-manager-senior, studio-operations
+- [x] US-009: Support + Testing (9): support-responder, analytics-reporter, finance-tracker, legal-compliance-checker, executive-summary-generator, infrastructure-maintainer, performance-benchmarker, api-tester, accessibility-auditor
+- [x] US-010: Paid Media + Specialized (8): ppc-strategist, creative-strategist, auditor, document-generator, compliance-auditor, recruitment-specialist, supply-chain-strategist, developer-advocate
 
-### Phase 3: Intelligent Decomposition
-- [x] US-004: Add _detect_complexity() to planner. Set max_concurrent on DecompositionResult.
-- [x] US-005: Update planner system prompt for parallel groups + complexity. Parse new fields. Validate parallel_group cross-deps.
-- [x] US-006: Rewrite all 4 templates with parallel groups and synthesis tasks.
-
-### Phase 4: Synthesis & Budget
-- [x] US-007: Build synthesis executor. _build_synthesis_prompt(). Detect TaskType.SYNTHESIS in _execute_task().
-- [x] US-008: Auto-insert synthesis tasks when parallel branches converge without explicit synthesis.
-- [x] US-009: Wire budget admission gate. Pre-dispatch can_afford() check. Graduated response. Pause on exceeded.
-
-### Phase 5: API & Frontend
-- [x] US-010: Enrich plan approval API with budget estimate, max_concurrent override.
-- [x] US-011: Budget bar component, parallel DAG rendering, approval overrides.
-
-### Phase 6: Wiring Tests
-- [x] US-012: Dedicated test suite proving all 82C features are wired end-to-end.
+### Phase 3: Validation
+- [x] US-011: Validate all 81 skills, run seed dry-run, commit to skills repo
 
 ---
 
@@ -39,56 +32,74 @@ Make missions parallel, budget-aware, and intelligently decomposed. Wire all sca
 
 | File | Purpose |
 |------|---------|
-| `orchestrator/modules/coordination/dispatcher.py` | Task dispatch — has_active_task (line ~78), dispatch_next |
-| `orchestrator/modules/coordination/planner.py` | Goal decomposition — _SYSTEM_PROMPT (line ~530), _parse_plan (line ~769), _validate_plan (line ~862) |
-| `orchestrator/modules/coordination/templates.py` | Template library — TaskTemplate (line ~30), TEMPLATE_REGISTRY (line ~60), render_template (line ~448) |
-| `orchestrator/services/coordinator_service.py` | Tick loop — _process_run(), _execute_task(), token tracking (line ~624) |
-| `orchestrator/services/orchestration_deps.py` | DAG resolution — DependencyResolver.get_ready_tasks() |
-| `orchestrator/core/models/orchestration.py` | DB models — OrchestrationRun, OrchestrationTask |
-| `orchestrator/core/models/orchestration_enums.py` | State machine — RunState, TaskState, TaskType, EventType |
-| `orchestrator/core/config.py` | All config constants |
-| `orchestrator/modules/orchestrator/stages/token_budget_manager.py` | Budget (exists but unwired — can_afford() never called) |
-| `orchestrator/modules/coordination/verification.py` | Verification — VerificationService, ConsistencyResult |
-| `frontend/components/missions/mission-detail-page.tsx` | Mission detail UI |
-| `frontend/components/missions/mission-dag-canvas.tsx` | DAG visualization |
-| `frontend/hooks/use-missions-api.ts` | React Query hooks |
-| `frontend/types/missions.ts` | TypeScript interfaces |
-| `docs/PRDS/82C-PARALLEL-EXECUTION-BUDGET-DECOMPOSITION.md` | Full PRD with architecture details |
+| `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/sentinel/SKILL.md` | Gold standard: monitoring skill with tool calls |
+| `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/scout/SKILL.md` | Gold standard: sales/outreach skill with CRM tools |
+| `scripts/seed_agent_catalog.py` | Seed script — parses SKILL.md, populates DB |
+| `orchestrator/modules/tools/discovery/platform_actions.py` | All platform tool registrations |
+| `orchestrator/modules/tools/discovery/workspace_actions.py` | All workspace tool registrations |
+| `orchestrator/modules/context/sections/skills.py` | How skill content gets injected into agent prompts |
+| `orchestrator/core/models/core.py` | Agent + Skill SQLAlchemy models |
 
-## Architecture Rules (CRITICAL)
+## Quality Bar (CRITICAL)
 
-- Python 3.11+ with type hints on all public functions
-- SQLAlchemy ORM with sync Session — follow existing patterns
-- FastAPI endpoints with Pydantic BaseModel
-- ALL config values go in orchestrator/core/config.py — NO os.getenv() anywhere else
-- Dual-write pattern: state change + orchestration_events append in SAME transaction
-- Optimistic locking via version_id column
-- Agent roles in templates: use categories from _ROLE_SYNONYMS in agent_matcher.py
-- NO hardcoded values — use config constants
-- Frozen dataclasses for immutable data
-- BEFORE DELETING ANY CODE: grep EVERY file for callers
-- React Query v4 on frontend (isLoading not isPending)
+Every rewritten skill MUST have:
+
+1. **Frontmatter**: name, description (1 sentence), version, tags, category: agent-role, tools: [{name, description}]
+2. **Identity**: 1-2 sentences — who this agent is in the Automatos context
+3. **Workflow**: Numbered steps with ```json code blocks showing exact tool calls with realistic params
+4. **Output Format**: Structured template (like Sentinel's status report)
+5. **What NOT To Do**: 3-5 anti-patterns specific to the role
+6. **Length**: 60-100 lines, no filler, every line actionable
+
+## Tool Reference
+
+### Platform Tools (agents call these via function calling)
+- `platform_get_system_health` — service health + response times
+- `platform_get_logs` — app logs by severity (params: severity, limit)
+- `platform_get_llm_usage` — token usage + cost metrics
+- `platform_get_cost_breakdown` — detailed cost analysis
+- `platform_workspace_stats` — workspace metrics
+- `platform_submit_report` — submit status/standup/audit report (params: title, report_type, status, content, metrics, summary)
+- `platform_get_latest_report` — read previous report (params: agent_name)
+- `platform_create_task` — create board task (params: title, description, priority, status)
+- `platform_list_tasks` — list board tasks (params: status filter)
+- `platform_board_summary` — board state overview
+- `platform_search_memory` — search workspace knowledge
+- `platform_search_chat_history` — search past conversations
+- `platform_query_loki_logs` — LogQL query
+- `platform_publish_blog_post` — publish content
+- `platform_schedule_task` — schedule recurring work
+
+### Workspace Tools (file/code operations)
+- `workspace_read_file` — read file (params: path)
+- `workspace_write_file` — write file (params: path, content)
+- `workspace_list_dir` — list directory (params: path)
+- `workspace_grep` — regex search (params: pattern, path, include, max_results)
+- `workspace_exec` — run command (params: command, cwd, timeout)
+- `workspace_git` — git operations (params: operation, args)
+
+### Composio (external service actions)
+- `composio_execute` — execute external action (params: action, app_name, ...)
+  - HUBSPOT: LIST_CONTACTS, CREATE_CONTACT, UPDATE_CONTACT, CREATE_DEAL
+  - GMAIL: SEND_EMAIL, LIST_EMAILS
+  - LINKEDIN: SEND_MESSAGE, CREATE_POST
+  - TWITTER: CREATE_TWEET
+  - GOOGLE_SHEETS: READ_RANGE, WRITE_RANGE
+  - GOOGLE_ANALYTICS: GET_REPORT
+  - JIRA: CREATE_ISSUE, LIST_ISSUES, UPDATE_ISSUE
+  - GITHUB: CREATE_ISSUE, LIST_REPOS
+  - SLACK: SEND_MESSAGE
 
 ## Validation
 
-Backend Python imports:
+Seed script dry-run:
 ```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -c "
-from orchestrator.modules.coordination import templates, planner, dispatcher, agent_matcher, verification
-from orchestrator.services.coordinator_service import CoordinatorService
-from orchestrator.core.models.orchestration_enums import TaskType, ComplexityTier, BudgetStatus
-print('All imports OK')
-" 2>&1 | tail -5
+python3 scripts/seed_agent_catalog.py --dry-run 2>&1 | tail -5
 ```
 
-Tests:
+Skill count:
 ```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -m pytest orchestrator/tests/ -x -q --timeout=30 2>&1 | tail -20
-```
-
-Frontend:
-```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/frontend && npx tsc --noEmit 2>&1 | grep -iE "mission-detail|mission-dag|budget-bar" | head -10
+find /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills -name "SKILL.md" | wc -l
 ```
 
 ## Discovered Issues

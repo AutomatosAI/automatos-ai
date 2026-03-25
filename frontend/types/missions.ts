@@ -111,6 +111,7 @@ export interface MissionListResponse {
 export interface MissionCreateRequest {
   goal: string
   config?: Record<string, unknown>
+  template_id?: string
 }
 
 export interface MissionApproveRequest {

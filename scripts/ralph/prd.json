@@ -1,265 +1,190 @@
 {
   "project": "Automatos AI Platform",
-  "branchName": "ralph/prd-82c-parallel-budget-decomposition",
-  "description": "PRD-82C: Parallel Execution, Intelligent Decomposition & Budget Governance — Make missions parallel, budget-aware, and intelligently decomposed. Wire all scaffolded-but-unused code from 82A/B.",
+  "branchName": "ralph/prd-120-skill-rewrites",
+  "description": "PRD-120 Phase 2: Rewrite all 81 imported skills to Automatos quality — proper personas, real platform/workspace/composio tool mappings with JSON call examples, structured workflows, output formats, and anti-patterns. Match Sentinel/Scout quality bar.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Add complexity and parallel_group columns to orchestration_tasks",
-      "description": "As a developer, I need the DB schema to support task complexity tiers and parallel groups before any dispatch or planner changes.",
+      "title": "Create skill rewrite reference guide and fix seed script frontmatter parsing",
+      "description": "As a developer, I need a reference guide for skill authors and an updated seed script that parses the correct tools: frontmatter format.",
       "acceptanceCriteria": [
-        "Create Alembic migration that adds `complexity` VARCHAR(10) DEFAULT 'medium' to orchestration_tasks",
-        "Same migration adds `parallel_group` VARCHAR(50) DEFAULT NULL to orchestration_tasks",
-        "Same migration adds `estimated_tokens` INTEGER DEFAULT 4000 to orchestration_tasks",
-        "Same migration changes `max_concurrent` default from 1 to 3 on orchestration_runs",
-        "Add complexity, parallel_group, estimated_tokens fields to OrchestrationTask SQLAlchemy model in orchestrator/core/models/orchestration.py",
-        "Add ComplexityTier enum to orchestration_enums.py: SIMPLE, MODERATE, COMPLEX",
-        "Add BudgetStatus enum to orchestration_enums.py: HEALTHY, WARNING, CRITICAL, EXCEEDED",
-        "Add COMPLEXITY_TOKEN_BUDGET dict to config.py: light=1000, medium=4000, heavy=8000, synthesis=6000",
-        "Existing tests still pass — no behavioral changes yet, schema only",
+        "Create automatos-skills/SKILL-GUIDE.md documenting the Automatos SKILL.md format with: frontmatter spec (name, description, version, tags, category, tools list with {name, description}), body sections (identity, workflow with tool call JSON, output format, anti-patterns), and 2 annotated examples (Sentinel for monitoring, Scout for sales)",
+        "Update scripts/seed_agent_catalog.py to parse tools: as list of {name, description} dicts (current format) instead of recommended_tools (string list)",
+        "Update seed script to derive recommended_model from a CATEGORY_MODEL_MAP instead of reading recommended_model from frontmatter — engineering/testing: sonnet-4.6, marketing/sales/design/product/pm/support: sonnet-4.6, paid-media/specialized: sonnet-4.6, simple repetitive roles (support-responder, finance-tracker, analytics-reporter): haiku-4.5, complex reasoning (software-architect, security-engineer, deal-strategist, compliance-auditor): opus-4.6",
+        "Add SLUG_MODEL_OVERRIDES dict in seed script for per-skill model overrides that differ from category default",
+        "Update seed script to extract tool names from tools: [{name, description}] for the recommended_tools column",
+        "Seed script dry-run works with current skills repo: python3 scripts/seed_agent_catalog.py --dry-run",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "Migration goes in orchestrator/alembic/versions/. Use revision naming like prd82c_parallel_schema. The OrchestrationTask model is in orchestrator/core/models/orchestration.py. The enums are in orchestrator/core/models/orchestration_enums.py. Config is orchestrator/core/config.py (class Config with class vars). This is schema-only — no logic changes."
+      "notes": "The seed script is at scripts/seed_agent_catalog.py. The skills repo is at /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills. The guide goes IN the skills repo. Read sentinel/SKILL.md and scout/SKILL.md as reference implementations — they define the quality bar. The frontmatter format is: tools: [{name: 'platform_foo', description: 'What it does'}]. The seed script currently reads recommended_tools (list of strings) and recommended_model (string) — both need updating. For model selection: most skills should be sonnet-4.6, only override to haiku for simple/repetitive or opus for complex reasoning."
     },
     {
       "id": "US-002",
-      "title": "Replace sequential dispatch gate with parallel dispatch",
-      "description": "As a coordinator, I want the dispatcher to send up to max_concurrent tasks simultaneously instead of blocking on one active task.",
+      "title": "Rewrite Engineering skills batch 1 (8 skills)",
+      "description": "As a skill author, I want Engineering skills rewritten to Automatos quality with proper tool mappings and workflows.",
       "acceptanceCriteria": [
-        "In orchestrator/modules/coordination/dispatcher.py, add count_active_tasks(db, run_id) -> int method that counts tasks in ASSIGNED or RUNNING state",
-        "Add dispatch_ready(db, run, agents) -> List[DispatchResult] method that dispatches up to (run.max_concurrent - active_count) ready tasks",
-        "dispatch_ready calls DependencyResolver.get_ready_tasks() and iterates results up to available slots",
-        "Each task dispatched via existing _dispatch_single logic (agent matching, optimistic claim, board task creation)",
-        "If no dispatch slots available, return list with single DispatchResult(dispatched=False, skipped_reason='max_concurrent_reached')",
-        "Keep has_active_task() and dispatch_next() as-is for backward compatibility but mark as deprecated",
-        "WIRING TEST: Create run with max_concurrent=2 and 2 independent PENDING tasks — both dispatch on same call",
-        "WIRING TEST: Create run with max_concurrent=1 and 2 independent tasks — only 1 dispatches (regression)",
-        "WIRING TEST: Create run with max_concurrent=3, task_a (no deps) and task_b (depends on task_a) — only task_a dispatches",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 8 skills in /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/: frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer",
+        "Each skill has frontmatter: name, description (1 sentence), version: 1.0.0, tags (3-5 relevant), category: agent-role, tools: list of {name, description} pairs",
+        "Each skill body has: identity paragraph (who this agent is in Automatos context), workflow (numbered steps with tool call JSON examples), output format (structured template), 'What NOT To Do' section",
+        "Tools are selected from the ENGINEERING TOOL KIT (see notes) — each skill uses 3-6 tools most relevant to its domain",
+        "Workflows reference specific tool calls with realistic parameters — not generic 'analyze and implement'",
+        "Each file is 60-100 lines, no filler, every line actionable",
+        "No references to external platforms (Cursor, OpenClaw, etc.)",
+        "All 8 files written to the skills repo directory"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "The dispatcher is at orchestrator/modules/coordination/dispatcher.py. has_active_task() is at line ~78. dispatch_next() is the main method. DependencyResolver.get_ready_tasks() already returns multiple tasks — the current code just takes [0]. For agent matching, each task needs its own agent — prefer different agents for parallel tasks (AgentMatcher already scores availability lower for busy agents). DispatchResult is a frozen dataclass in the same file."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nREFERENCE: Read sentinel/SKILL.md and scout/SKILL.md first — match their quality.\n\nENGINEERING TOOL KIT:\n- workspace_read_file: Read source code, configs, logs\n- workspace_write_file: Write/update code, configs, docs\n- workspace_list_dir: Explore repo structure\n- workspace_grep: Search codebase for patterns, functions, errors\n- workspace_exec: Run tests, linters, builds, scripts (pytest, npm, pip, docker)\n- workspace_git: Git operations (status, diff, commit, push, log, blame)\n- platform_get_logs: Retrieve application logs by severity\n- platform_get_system_health: Check service health and response times\n- platform_query_loki_logs: Query centralized logs via LogQL\n- platform_submit_report: Submit findings/status report\n- platform_get_latest_report: Read previous reports for context\n- platform_create_task: Create board tasks for work items\n\nMODEL GUIDANCE:\n- frontend-developer: sonnet-4.6 (code gen)\n- backend-architect: opus-4.6 (complex design)\n- devops-automator: sonnet-4.6 (infrastructure)\n- security-engineer: opus-4.6 (security analysis)\n- ai-engineer: sonnet-4.6 (ML/AI work)\n- sre: sonnet-4.6 (reliability)\n- data-engineer: sonnet-4.6 (pipelines)\n- database-optimizer: sonnet-4.6 (query optimization)\n\nEXAMPLE WORKFLOW STEP (from Sentinel):\n### Step 1: Scan Codebase\n```json\n{ \"tool\": \"workspace_grep\", \"params\": { \"pattern\": \"TODO|FIXME|HACK\", \"path\": \"src/\" } }\n```\nIdentify technical debt markers and prioritize by severity."
     },
     {
       "id": "US-003",
-      "title": "Wire parallel dispatch into coordinator tick loop",
-      "description": "As a coordinator, I want the tick loop to execute multiple dispatched tasks concurrently via asyncio.gather.",
+      "title": "Rewrite Engineering skills batch 2 (8 skills)",
+      "description": "As a skill author, I want remaining Engineering skills rewritten to Automatos quality.",
       "acceptanceCriteria": [
-        "In orchestrator/services/coordinator_service.py, update _process_run() to call MissionDispatcher.dispatch_ready() instead of dispatch_next()",
-        "Collect all DispatchResult where dispatched=True",
-        "Execute dispatched tasks concurrently: await asyncio.gather(*[self._execute_task(db, run, r.task, r.agent_id) for r in results], return_exceptions=True)",
-        "Handle exceptions from gather: log errors per task, don't crash the tick",
-        "After all executions complete, run reconciler as before",
-        "WIRING TEST: Integration test that dispatches 2 tasks and verifies both _execute_task calls happen (mock _execute_task, verify call_count=2)",
-        "Existing sequential missions (max_concurrent=1) still work unchanged",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 8 skills: code-reviewer, software-architect, technical-writer, mobile-app-builder, senior-developer, git-workflow-master, rapid-prototyper, incident-response-commander",
+        "Same quality criteria as US-002: frontmatter with tools:{name,description}, identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Tools selected from ENGINEERING TOOL KIT (see US-002 notes)",
+        "Each file 60-100 lines",
+        "All 8 files written to the skills repo"
       ],
       "priority": 3,
       "passes": false,
-      "notes": "coordinator_service.py is large. The _process_run() method is the key one — it currently calls dispatch_next() and if dispatched, calls _execute_task() once. Change to: dispatch_ready() → gather multiple _execute_task calls. Be careful with DB session — each _execute_task should handle its own commits/rollbacks. The reconciler tick runs AFTER all executions complete."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md first as reference.\n\nUse same ENGINEERING TOOL KIT from US-002.\n\nMODEL GUIDANCE:\n- code-reviewer: sonnet-4.6\n- software-architect: opus-4.6 (complex design decisions)\n- technical-writer: sonnet-4.6\n- mobile-app-builder: sonnet-4.6\n- senior-developer: sonnet-4.6\n- git-workflow-master: sonnet-4.6\n- rapid-prototyper: sonnet-4.6\n- incident-response-commander: opus-4.6 (crisis reasoning)\n\nNOTE: incident-response-commander should reference platform_get_logs, platform_get_system_health, platform_query_loki_logs heavily — it's the crisis version of Sentinel.\n\nNOTE: code-reviewer workflow should grep for patterns, read files, then write review report."
     },
     {
       "id": "US-004",
-      "title": "Add complexity detection to planner",
-      "description": "As a planner, I want to detect goal complexity and set max_concurrent accordingly before decomposition.",
+      "title": "Rewrite Engineering skills batch 3 (5 remaining)",
+      "description": "As a skill author, I want the last Engineering skills rewritten.",
       "acceptanceCriteria": [
-        "In orchestrator/modules/coordination/planner.py, add _detect_complexity(goal, attachments) -> ComplexityTier function",
-        "Complexity signals: word_count > 100 (+1), deliverable_count > 1 (+1), domain_breadth > 2 (+1), attachment_count > 0 (+1)",
-        "Add _count_deliverables(goal) — count keywords: report, paper, app, application, analysis, presentation, document, dashboard, pipeline, system",
-        "Add _estimate_domains(goal) — count distinct topic clusters mentioned",
-        "Score >= 3 → COMPLEX (max_concurrent=3), score >= 1 → MODERATE (max_concurrent=2), else SIMPLE (max_concurrent=1)",
-        "Add max_concurrent field to DecompositionResult dataclass (default 1)",
-        "Call _detect_complexity() at the start of decompose(), set result.max_concurrent",
-        "In coordinator_service.py where DecompositionResult is consumed, set run.max_concurrent = decomposition.max_concurrent",
-        "WIRING TEST: decompose('Write a 4000 word research paper with 6 sections covering AI coordination, prior art, experiments, and implications') returns max_concurrent >= 2",
-        "WIRING TEST: decompose('Summarize this document') returns max_concurrent == 1",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 5 skills: threat-detection-engineer, solidity-smart-contract-engineer, embedded-firmware-engineer, ai-data-remediation-engineer, autonomous-optimization-architect",
+        "Same quality criteria as US-002",
+        "Tools selected from ENGINEERING TOOL KIT",
+        "Each file 60-100 lines",
+        "All 5 files written to the skills repo"
       ],
       "priority": 4,
       "passes": false,
-      "notes": "The planner is at orchestrator/modules/coordination/planner.py. DecompositionResult is a frozen dataclass in the same file. The decompose() method is async. The coordinator sets run fields from decomposition result around line 769 in coordinator_service.py. Import ComplexityTier from orchestration_enums.py."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md first as reference.\n\nUse same ENGINEERING TOOL KIT from US-002.\n\nMODEL GUIDANCE: All sonnet-4.6 except threat-detection-engineer which should be opus-4.6 (security analysis).\n\nNOTE: These are more niche engineering roles. solidity-smart-contract-engineer focuses on blockchain — workspace tools for code review/writing. embedded-firmware-engineer is hardware-adjacent — workspace tools. ai-data-remediation-engineer works with data quality — workspace_exec for running data scripts. autonomous-optimization-architect is a meta-role for system optimization."
     },
     {
       "id": "US-005",
-      "title": "Update planner system prompt for parallel decomposition",
-      "description": "As a planner, I want the LLM to generate parallel task groups and complexity tiers instead of flat sequential plans.",
+      "title": "Rewrite Marketing skills (16 skills)",
+      "description": "As a skill author, I want all Marketing skills rewritten with proper social media and content tool mappings.",
       "acceptanceCriteria": [
-        "Replace _SYSTEM_PROMPT in planner.py — remove 'Tasks execute sequentially', add instructions for parallel groups, complexity tiers, synthesis tasks, and 4000-word-per-task limit",
-        "Update _OUTPUT_SCHEMA_INSTRUCTIONS to include complexity and parallel_group fields in the JSON schema example",
-        "Update _REPLAN_SYSTEM_PROMPT with same parallel/complexity guidance",
-        "In _parse_plan(), extract complexity (default 'medium') and parallel_group (default None) from each task dict",
-        "Store complexity and parallel_group on PlannedTask objects",
-        "In _validate_plan(), add check: tasks in same parallel_group must NOT have dependencies on each other — append error if violated",
-        "Update token estimate calculation: sum of COMPLEXITY_TOKEN_BUDGET[task.complexity] instead of flat 2000 * task_count",
-        "When creating OrchestrationTask rows from plan, set complexity, parallel_group, estimated_tokens fields",
-        "WIRING TEST: Decompose a complex research paper goal — result contains at least one parallel_group with 2+ tasks",
-        "WIRING TEST: Decompose a complex goal — result contains at least one task with task_type='synthesis'",
-        "WIRING TEST: Validate plan rejects parallel_group tasks with cross-dependencies",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 16 skills: growth-hacker, content-creator, seo-specialist, social-media-strategist, linkedin-content-creator, twitter-engager, tiktok-strategist, instagram-curator, podcast-strategist, reddit-community-builder, app-store-optimizer, carousel-growth-engine, short-video-editing-coach, ai-citation-strategist, book-co-author, cross-border-ecommerce",
+        "Each skill has frontmatter with tools:{name,description} from MARKETING TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Social media skills reference the matching composio automation tool (e.g. linkedin-content-creator uses composio_execute with LINKEDIN actions)",
+        "Content skills reference workspace_write_file for drafting and platform_publish_blog_post where relevant",
+        "Each file 60-100 lines",
+        "All 16 files written to the skills repo"
       ],
       "priority": 5,
       "passes": false,
-      "notes": "The system prompt is at _SYSTEM_PROMPT around line 530. The output schema is at _OUTPUT_SCHEMA_INSTRUCTIONS around line 584. _parse_plan() starts around line 769. _validate_plan() starts around line 862. PlannedTask is a NamedTuple or dataclass in the same file. COMPLEXITY_TOKEN_BUDGET is in config.py (from US-001). The LLM may not always generate parallel groups — that's OK, validation should accept purely sequential plans too."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead scout/SKILL.md first as reference (similar outreach/content pattern).\n\nMARKETING TOOL KIT:\n- workspace_write_file: Draft content, strategies, calendars\n- workspace_read_file: Read briefs, guidelines, past content\n- workspace_list_dir: Browse content library\n- platform_publish_blog_post: Publish to Automatos blog\n- platform_list_blog_posts: Check existing published content\n- platform_submit_report: Submit campaign reports, content calendars\n- platform_get_latest_report: Read previous reports for trends\n- platform_search_memory: Search workspace knowledge for brand voice, past campaigns\n- platform_create_task: Create content tasks on the board\n- composio_execute: Execute social media actions — specify the relevant app per skill:\n  - LINKEDIN actions for linkedin-content-creator\n  - TWITTER actions for twitter-engager\n  - GOOGLE_SHEETS for analytics/tracking\n  - GOOGLE_ANALYTICS for SEO/growth\n  - SLACK for team notifications\n\nMODEL GUIDANCE: All sonnet-4.6 except growth-hacker (opus-4.6 for strategic thinking).\n\nNOTE: 16 skills in one batch is large. Focus on quality over quantity — each skill should have a SPECIFIC workflow, not generic 'create content'. E.g. seo-specialist should grep for meta tags, analyze structure, write optimization report. linkedin-content-creator should draft posts, schedule via composio, track engagement."
     },
     {
       "id": "US-006",
-      "title": "Update templates with parallel groups and synthesis tasks",
-      "description": "As a template author, I want built-in templates to generate parallel task groups with synthesis merge points.",
+      "title": "Rewrite Sales skills (8 skills)",
+      "description": "As a skill author, I want Sales skills rewritten with CRM and outreach tool mappings.",
       "acceptanceCriteria": [
-        "In orchestrator/modules/coordination/templates.py, add complexity: str = 'medium' field to TaskTemplate dataclass",
-        "Add parallel_group: Optional[str] = None field to TaskTemplate dataclass",
-        "Add depends_on: Optional[List[str]] = None field to TaskTemplate dataclass (replaces auto-chaining)",
-        "Update render_template() to use explicit depends_on instead of always chaining to previous task",
-        "Tasks with parallel_group and no depends_on get no dependencies (root parallel tasks)",
-        "Rewrite content_pipeline template: research + source gathering (parallel, seq=1) -> synthesis outline (seq=2) -> section drafts (parallel, seq=3) -> synthesis merge (seq=4) -> review (seq=5)",
-        "Rewrite research_and_report template: topic research tasks (parallel, seq=1) -> analysis (seq=2) -> synthesis (seq=3) -> draft (seq=4) -> review (seq=5)",
-        "Rewrite competitive_analysis template: per-competitor research (parallel, seq=1) -> synthesis (seq=2) -> report (seq=3) -> review (seq=4)",
-        "Rewrite data_investigation template: data gathering (parallel, seq=1) -> analysis (seq=2) -> report (seq=3)",
-        "All templates include at least one task with task_type=synthesis after parallel convergence",
-        "WIRING TEST: render content_pipeline template — verify parallel_group 'research' has 2 tasks with no deps, synthesis task depends on both",
-        "WIRING TEST: match_template('Write a blog post about AI') returns content_pipeline with parallel groups",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 8 skills: outbound-strategist, discovery-coach, deal-strategist, pipeline-analyst, account-strategist, coach, engineer, proposal-strategist",
+        "Each skill has frontmatter with tools:{name,description} from SALES TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "CRM-focused skills reference composio_execute with HUBSPOT actions",
+        "Outreach skills reference composio_execute with GMAIL/LINKEDIN actions",
+        "Each file 60-100 lines",
+        "All 8 files written to the skills repo"
       ],
       "priority": 6,
       "passes": false,
-      "notes": "Templates are in orchestrator/modules/coordination/templates.py. TaskTemplate is a frozen dataclass around line 30. TEMPLATE_REGISTRY holds the 4 templates. render_template() is around line 448. The current auto-chaining logic is: depends_on = [f'task_{tt.sequence - 1}'] for sequence > 1. Replace with explicit depends_on from the TaskTemplate. Agent roles must match _ROLE_SYNONYMS in agent_matcher.py. TaskType.SYNTHESIS.value = 'synthesis'."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead scout/SKILL.md CAREFULLY — it's the gold standard for sales skills.\n\nSALES TOOL KIT:\n- composio_execute: CRM operations (HUBSPOT_LIST_CONTACTS, HUBSPOT_UPDATE_CONTACT, HUBSPOT_CREATE_DEAL, GMAIL_SEND_EMAIL, LINKEDIN_SEND_MESSAGE)\n- platform_submit_report: Submit pipeline reports, call summaries\n- platform_get_latest_report: Read previous pipeline state\n- platform_search_memory: Look up account history, past interactions\n- platform_workspace_stats: Check platform usage for trial users\n- platform_create_task: Create follow-up tasks\n- platform_list_tasks: Check pending tasks\n- workspace_write_file: Draft proposals, email sequences, battle cards\n- workspace_read_file: Read prospect research, pricing docs\n\nMODEL GUIDANCE:\n- deal-strategist: opus-4.6 (complex negotiation reasoning)\n- proposal-strategist: opus-4.6 (persuasive writing)\n- All others: sonnet-4.6\n\nNOTE: 'coach' = Sales Coach, 'engineer' = Sales Engineer — these are sales roles, not dev roles. Sales Engineer demos technical products and answers technical objections. Sales Coach reviews calls and provides feedback."
     },
     {
       "id": "US-007",
-      "title": "Build synthesis task executor",
-      "description": "As a coordinator, I want TaskType.SYNTHESIS tasks to use a special prompt that merges parallel upstream outputs.",
+      "title": "Rewrite Design skills (8 skills)",
+      "description": "As a skill author, I want Design skills rewritten with workspace file and reporting tools.",
       "acceptanceCriteria": [
-        "In orchestrator/services/coordinator_service.py, add _build_synthesis_prompt(task, upstream_outputs) -> str method",
-        "Synthesis prompt includes: all upstream task titles + outputs, task description, rules for merging (include ALL content, resolve contradictions, unified voice, not concatenation)",
-        "In _execute_task(), detect task.task_type == TaskType.SYNTHESIS.value and use synthesis prompt instead of standard build_task_prompt()",
-        "Synthesis tasks get verification criteria auto-set: required_sections from task description + min_length = 50% of combined upstream length",
-        "Add _collect_upstream_outputs(db, task) -> List[Dict] that fetches all dependency task outputs",
-        "WIRING TEST: Create 2 completed parallel tasks + 1 synthesis task depending on both — synthesis prompt contains both upstream outputs",
-        "WIRING TEST: Synthesis task has auto-generated verification_criteria with required_sections",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 8 skills: ui-designer, ux-researcher, ux-architect, brand-guardian, visual-storyteller, image-prompt-engineer, inclusive-visuals-specialist, whimsy-injector",
+        "Each skill has frontmatter with tools:{name,description} from DESIGN TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Design skills focus on workspace file operations (reading specs, writing design docs/guidelines) and reporting",
+        "Each file 60-100 lines",
+        "All 8 files written to the skills repo"
       ],
       "priority": 7,
       "passes": false,
-      "notes": "coordinator_service.py _execute_task() currently builds prompt via MissionDispatcher.build_task_prompt(). For synthesis, bypass that and use the new _build_synthesis_prompt(). Upstream outputs come from OrchestrationTaskDependency joins — query tasks where id in (SELECT depends_on_task_id FROM deps WHERE task_id = synthesis_task.id). The upstream outputs are on OrchestrationTask.output (text column). TaskType is imported from orchestration_enums.py."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference.\n\nDESIGN TOOL KIT:\n- workspace_write_file: Write design specs, guidelines, component docs, prompt libraries\n- workspace_read_file: Read existing designs, brand guidelines, component inventory\n- workspace_list_dir: Browse design assets and component libraries\n- workspace_grep: Search for design tokens, color values, component usage\n- platform_submit_report: Submit design reviews, UX audit reports\n- platform_get_latest_report: Read previous design reports\n- platform_create_task: Create design tasks (component needed, UX issue, brand violation)\n- platform_search_memory: Look up brand guidelines, design decisions\n\nMODEL GUIDANCE: All sonnet-4.6 except ux-architect (opus-4.6 for systems thinking).\n\nNOTE: These are AI agents that assist with design THINKING and documentation, not visual design tools. ui-designer writes component specs and reviews markup. ux-researcher writes research plans and synthesizes findings. brand-guardian audits content for brand consistency. image-prompt-engineer crafts prompts for image generation."
     },
     {
       "id": "US-008",
-      "title": "Add synthesis auto-insertion in planner",
-      "description": "As a planner, I want synthesis tasks to be auto-inserted when parallel branches converge without an explicit synthesis task.",
+      "title": "Rewrite Product + Project Management skills (11 skills)",
+      "description": "As a skill author, I want Product and PM skills rewritten with board task and planning tool mappings.",
       "acceptanceCriteria": [
-        "In orchestrator/modules/coordination/planner.py, add _ensure_synthesis_tasks(tasks, dependencies) method",
-        "Detect convergence points: if 2+ tasks in same parallel_group and a downstream task depends on them but is NOT task_type=synthesis, auto-insert a synthesis task between them",
-        "Auto-inserted synthesis task: agent_role='writer', task_type='synthesis', complexity='synthesis', title='Synthesize {parallel_group} outputs', depends on all parallel group tasks",
-        "Original downstream task's dependency updated to point at the new synthesis task instead",
-        "Call _ensure_synthesis_tasks() after _parse_plan() and before _validate_plan()",
-        "If planner already included explicit synthesis tasks after parallel groups, skip auto-insertion for that group",
-        "WIRING TEST: Plan with parallel group 'research' (2 tasks) and downstream task_3 depending on both but not synthesis — auto-inserts synthesis between",
-        "WIRING TEST: Plan with explicit synthesis task after parallel group — no auto-insertion",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 11 skills: sprint-prioritizer, trend-researcher, feedback-synthesizer, behavioral-nudge-engine, manager (Product Manager), project-shepherd, studio-producer, experiment-tracker, jira-workflow-steward, project-manager-senior, studio-operations",
+        "Each skill has frontmatter with tools:{name,description} from PRODUCT/PM TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "PM skills heavily use board task tools (create, list, summary) and reporting",
+        "Product skills use memory search and reporting for synthesis work",
+        "Each file 60-100 lines",
+        "All 11 files written to the skills repo"
       ],
       "priority": 8,
       "passes": false,
-      "notes": "This runs in the planner pipeline: decompose() → LLM call → _extract_json → _parse_plan → _ensure_synthesis_tasks (NEW) → _validate_plan. The method operates on the parsed task list and dependency list. Auto-inserted tasks need temp_ids that don't collide (use 'synth_{parallel_group}' pattern). Update sequence_numbers to maintain ordering — synthesis gets sequence = max(parallel_group_sequences) + 1, bump downstream sequences."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference.\n\nPRODUCT/PM TOOL KIT:\n- platform_create_task: Create board tasks for work items, milestones\n- platform_list_tasks: Review current backlog and sprint items\n- platform_board_summary: Get overview of board state (counts by status)\n- platform_submit_report: Submit sprint reports, experiment results, trend analysis\n- platform_get_latest_report: Read previous reports for trends\n- platform_search_memory: Search workspace knowledge for user feedback, metrics\n- platform_schedule_task: Schedule recurring reviews\n- workspace_write_file: Write PRDs, experiment plans, roadmaps\n- workspace_read_file: Read existing docs, metrics, feedback\n- composio_execute: JIRA actions for jira-workflow-steward (JIRA_CREATE_ISSUE, JIRA_LIST_ISSUES, JIRA_UPDATE_ISSUE)\n- composio_execute: SLACK for team notifications\n\nMODEL GUIDANCE:\n- manager (Product Manager): opus-4.6 (strategic prioritization)\n- project-manager-senior: opus-4.6 (complex coordination)\n- All others: sonnet-4.6\n\nNOTE: sprint-prioritizer should score and rank tasks. trend-researcher should search memory and write trend reports. feedback-synthesizer should aggregate and analyze. jira-workflow-steward uses JIRA composio actions specifically."
     },
     {
       "id": "US-009",
-      "title": "Wire budget admission gate into dispatcher",
-      "description": "As a dispatcher, I want to check can_afford() before dispatching each task and pause the mission if budget is exceeded.",
+      "title": "Rewrite Support + Testing skills (9 skills)",
+      "description": "As a skill author, I want Support and Testing skills rewritten with monitoring and QA tool mappings.",
       "acceptanceCriteria": [
-        "In orchestrator/modules/coordination/dispatcher.py, add _pre_dispatch_budget_check(db, run, task) -> str method returning 'allow', 'defer', or 'block'",
-        "Calculate estimated tokens from task.estimated_tokens (set from complexity in US-001)",
-        "Compute budget_percentage = (run.tokens_used / run.token_budget_estimate) * 100 if estimate exists",
-        "HEALTHY (<50%): return 'allow'",
-        "WARNING (50-80%): return 'allow' (dispatch continues, but log warning)",
-        "CRITICAL (80-100%): return 'defer' if task_type not in (SYNTHESIS, REVIEW), else 'allow'",
-        "EXCEEDED (>100%): return 'block'",
-        "In dispatch_ready(), call _pre_dispatch_budget_check before each task dispatch",
-        "If 'block': skip task, set run state to PAUSED via transition, emit BUDGET_EXCEEDED event, break dispatch loop",
-        "If 'defer': skip this task but continue checking others (synthesis/review may still dispatch)",
-        "If run.token_budget_estimate is None or 0: always allow (no budget set = unlimited)",
-        "WIRING TEST: Run with token_budget_estimate=1000, tokens_used=950 — heavy task (8000 est) blocked, mission paused",
-        "WIRING TEST: Run with token_budget_estimate=10000, tokens_used=8500 — synthesis task allowed, heavy task deferred",
-        "WIRING TEST: Run with no token_budget_estimate — all tasks dispatch normally",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 9 skills: support-responder, analytics-reporter, finance-tracker, legal-compliance-checker, executive-summary-generator, infrastructure-maintainer, performance-benchmarker, api-tester, accessibility-auditor",
+        "Each skill has frontmatter with tools:{name,description} from SUPPORT/TESTING TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Support skills use chat history search and memory for context",
+        "Testing skills use workspace_exec for running test suites",
+        "Each file 60-100 lines",
+        "All 9 files written to the skills repo"
       ],
       "priority": 9,
       "passes": false,
-      "notes": "The existing TokenBudgetManager in orchestrator/modules/orchestrator/stages/token_budget_manager.py has can_afford() but it's complex and not wired. Simpler approach: do the budget check inline in the dispatcher using run.tokens_used and run.token_budget_estimate directly — no need to involve TokenBudgetManager. The graduated response is the key feature. RunState.PAUSED already exists. Use transition_run() for state changes. EventType should have BUDGET_EXCEEDED or RUN_BUDGET_WARNING (check what exists in enums)."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference (sentinel is a support/monitoring skill).\n\nSUPPORT/TESTING TOOL KIT:\n- platform_search_chat_history: Search past user conversations\n- platform_search_memory: Look up knowledge base, past solutions\n- platform_get_logs: Retrieve application logs\n- platform_get_system_health: Check service status\n- platform_get_llm_usage: Check LLM costs and usage\n- platform_get_cost_breakdown: Detailed cost analysis\n- platform_workspace_stats: Workspace metrics\n- platform_submit_report: Submit support/test/audit reports\n- platform_get_latest_report: Read previous reports\n- platform_create_task: Create bug tickets, action items\n- workspace_exec: Run test suites, linters, benchmarks\n- workspace_read_file: Read test files, configs, source code\n- workspace_grep: Search for patterns, errors, vulnerabilities\n- workspace_write_file: Write test plans, compliance docs\n\nMODEL GUIDANCE:\n- support-responder: haiku-4.5 (simple, high-volume)\n- analytics-reporter: haiku-4.5 (data formatting)\n- finance-tracker: haiku-4.5 (repetitive cost checks)\n- legal-compliance-checker: opus-4.6 (requires careful reasoning)\n- executive-summary-generator: sonnet-4.6\n- infrastructure-maintainer: sonnet-4.6\n- performance-benchmarker: sonnet-4.6\n- api-tester: sonnet-4.6\n- accessibility-auditor: sonnet-4.6"
     },
     {
       "id": "US-010",
-      "title": "Update plan approval API with budget estimate and max_concurrent override",
-      "description": "As a user, I want to see the estimated token cost at plan approval and optionally override max_concurrent.",
+      "title": "Rewrite Paid Media + Specialized skills (8 skills)",
+      "description": "As a skill author, I want Paid Media and Specialized skills rewritten with advertising and domain-specific tool mappings.",
       "acceptanceCriteria": [
-        "In orchestrator/api/missions.py, update the plan response (mission detail when state=awaiting_approval) to include: estimated_tokens, max_concurrent, complexity_tier, parallel_groups list, has_synthesis_tasks boolean",
-        "These fields come from DecompositionResult stored in run.plan JSONB — extract at response time",
-        "Update MissionApproveRequest in types/missions.ts to accept optional max_concurrent and token_budget_override fields",
-        "In the approve endpoint handler, if max_concurrent provided: set run.max_concurrent = request.max_concurrent",
-        "If token_budget_override provided: set run.token_budget_estimate = request.token_budget_override",
-        "Add parallel_groups to MissionDetailResponse type: list of unique parallel_group names from tasks",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 8 skills: ppc-strategist, creative-strategist, auditor (paid media), document-generator, compliance-auditor, recruitment-specialist, supply-chain-strategist, developer-advocate",
+        "Each skill has frontmatter with tools:{name,description} from appropriate tool kit",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Paid media skills reference composio_execute with GOOGLE_ADS and GOOGLE_ANALYTICS",
+        "Specialized skills use domain-appropriate tool combinations",
+        "Each file 60-100 lines",
+        "All 8 files written to the skills repo"
       ],
       "priority": 10,
       "passes": false,
-      "notes": "The missions API is at orchestrator/api/missions.py. The approve endpoint is POST /api/missions/{id}/approve. MissionApproveRequest is defined in the API file or types. The plan is stored as run.plan (JSONB) — it contains the DecompositionResult serialized. Frontend types are in frontend/types/missions.ts. The _run_to_response() helper builds the API response — extend it there."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference.\n\nPAID MEDIA TOOL KIT:\n- composio_execute: GOOGLE_ADS (campaign management), GOOGLE_ANALYTICS (tracking), GOOGLE_SHEETS (reporting)\n- workspace_write_file: Write ad copy, campaign plans\n- workspace_read_file: Read performance data, creative briefs\n- platform_submit_report: Submit campaign performance reports\n- platform_get_latest_report: Read previous campaign reports\n- platform_create_task: Create optimization tasks\n\nSPECIALIZED TOOL KIT (varies per skill):\n- document-generator: workspace_write_file (primary), workspace_read_file, platform_submit_report\n- compliance-auditor: workspace_grep (scan for violations), workspace_read_file, platform_submit_report, platform_create_task\n- recruitment-specialist: composio_execute (GMAIL, LINKEDIN), platform_create_task, workspace_write_file, platform_submit_report\n- supply-chain-strategist: workspace_write_file, platform_submit_report, platform_create_task, composio_execute (GOOGLE_SHEETS)\n- developer-advocate: workspace_write_file, platform_publish_blog_post, composio_execute (GITHUB), platform_submit_report\n\nMODEL GUIDANCE:\n- compliance-auditor: opus-4.6 (careful legal reasoning)\n- All others: sonnet-4.6"
     },
     {
       "id": "US-011",
-      "title": "Add budget bar and parallel DAG rendering to mission detail page",
-      "description": "As a user, I want to see budget usage and parallel task branches on the mission detail page.",
+      "title": "Validate all rewritten skills and commit to skills repo",
+      "description": "As a developer, I want to validate that all 81 skills meet the quality bar and commit them.",
       "acceptanceCriteria": [
-        "Add MissionBudgetBar component in frontend/components/missions/ — shows used/estimated tokens as progress bar",
-        "Color coding: green (<50%), amber (50-80%), red (80-100%), pulsing red (>100%)",
-        "Show percentage and raw numbers: '23,500 / 48,000 tokens (49%)'",
-        "Budget bar visible on mission detail page when token_budget_estimate exists",
-        "Budget warning banner appears when status is WARNING or above",
-        "In mission-dag-canvas.tsx, render tasks with same sequence_number side-by-side (parallel visualization)",
-        "Parallel group tasks share a visual container/bracket",
-        "Synthesis tasks rendered with a merge icon or visual indicator",
-        "Add max_concurrent override dropdown in plan approval dialog (options: 1, 2, 3)",
-        "Per-task token usage visible in task detail panel (tokens_used / estimated_tokens)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Run validation script that checks every SKILL.md in /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/ for: frontmatter has name, description, version, tags, category, tools fields; tools is a list of {name, description} dicts; body contains workflow section with at least one JSON tool call block; body contains output format section; body contains anti-pattern section",
+        "All 81 imported skills pass validation (existing skills like sentinel/scout exempt from this check)",
+        "No skill references external platforms (Cursor, OpenClaw, Qwen, etc.)",
+        "Every tool name referenced in skills exists in the platform (validate against known tool list)",
+        "Run seed script dry-run: python3 scripts/seed_agent_catalog.py --dry-run shows 97+ entries with correct model assignments",
+        "Commit all rewritten skills to the skills repo with descriptive message",
+        "Typecheck passes for seed script changes"
       ],
       "priority": 11,
       "passes": false,
-      "notes": "The mission detail page is at frontend/components/missions/mission-detail-page.tsx. The DAG canvas is at frontend/components/missions/mission-dag-canvas.tsx. Budget data comes from the mission detail API response (run.tokens_used, run.token_budget_estimate). Use existing shadcn/ui components (Progress bar, Badge, Alert). The approval dialog is in the mission detail page — it shows when state is awaiting_approval. React Query hooks are in frontend/hooks/use-missions-api.ts."
-    },
-    {
-      "id": "US-012",
-      "title": "Add wiring verification test suite",
-      "description": "As a developer, I want a dedicated test file that proves all 82C features are wired end-to-end through the coordinator tick.",
-      "acceptanceCriteria": [
-        "Create orchestrator/tests/test_82c_wiring.py with integration tests",
-        "Test: parallel dispatch — 2 independent tasks both get dispatched when max_concurrent=2 (trace through dispatch_ready)",
-        "Test: sequential regression — max_concurrent=1 dispatches only 1 task",
-        "Test: dependency blocking — task with unmet deps stays PENDING even with free slots",
-        "Test: complexity detection — complex goal returns max_concurrent >= 2, simple goal returns 1",
-        "Test: parallel_group validation — plan with cross-dependent parallel tasks is rejected",
-        "Test: budget gate blocks — run at 100%+ budget pauses instead of dispatching",
-        "Test: budget gate allows synthesis at critical — synthesis task dispatches at 85% budget",
-        "Test: synthesis prompt contains all upstream outputs — mock 2 completed tasks, verify prompt text",
-        "Test: template parallel groups — content_pipeline renders with parallel research group",
-        "Test: token estimate uses complexity — estimate is NOT flat 2000 * task_count",
-        "All tests use real DB models (not mocks) where possible, mock only LLM calls",
-        "Typecheck passes",
-        "All tests pass"
-      ],
-      "priority": 12,
-      "passes": false,
-      "notes": "This is the KEY story that prevents the 82A/B problem. Tests go in orchestrator/tests/test_82c_wiring.py. Use pytest fixtures. For DB tests, check if there's an existing test DB setup (conftest.py). Mock LLM calls (AgentFactory.execute_with_prompt, llm_manager.generate_response) but use real dispatcher, planner validation, and coordinator logic. Import from orchestrator/modules/coordination/dispatcher.py, planner.py, templates.py. These tests MUST prove the code is called, not just that it exists."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\nSEED SCRIPT: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/scripts/seed_agent_catalog.py\n\nVALID TOOL NAMES (for validation):\nPlatform: platform_get_system_health, platform_get_logs, platform_get_llm_usage, platform_get_cost_breakdown, platform_workspace_stats, platform_submit_report, platform_get_latest_report, platform_create_task, platform_list_tasks, platform_board_summary, platform_search_memory, platform_search_chat_history, platform_query_loki_logs, platform_query_prometheus, platform_publish_blog_post, platform_list_blog_posts, platform_create_agent, platform_list_agents, platform_schedule_task, platform_field_query, platform_field_inject\nWorkspace: workspace_read_file, workspace_write_file, workspace_list_dir, workspace_grep, workspace_exec, workspace_git\nComposio: composio_execute\n\nWrite a quick Python validation script (can be temporary) that reads all SKILL.md files and checks the criteria. Print pass/fail per skill.\n\nFor the commit to the skills repo, use: cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills && git add -A && git commit -m 'feat: rewrite all 81 imported skills to Automatos quality'"
     }
   ]
 }

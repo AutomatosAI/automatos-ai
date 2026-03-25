@@ -114,3 +114,6 @@ frontend/.env.local
 
 # Nightly test reports (generated JSON)
 tests/api/reports/*.json
+
+# Vendored external repos (cloned for import scripts)
+scripts/vendor/

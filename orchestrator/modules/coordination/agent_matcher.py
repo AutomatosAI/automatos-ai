@@ -71,6 +71,7 @@ _ROLE_SYNONYMS: Dict[str, List[str]] = {
     "summarizer": ["summarizer", "summary", "synthesis", "consolidate", "report"],
     "search": ["search", "web", "browse", "lookup", "find"],
     "document": ["document", "report", "scribe", "draft", "write"],
+    "admin": ["admin", "operations", "ops", "configure", "setup", "workspace"],
 }
 
 

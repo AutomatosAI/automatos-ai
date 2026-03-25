@@ -1,0 +1,265 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/prd-82c-parallel-budget-decomposition",
+  "description": "PRD-82C: Parallel Execution, Intelligent Decomposition & Budget Governance — Make missions parallel, budget-aware, and intelligently decomposed. Wire all scaffolded-but-unused code from 82A/B.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add complexity and parallel_group columns to orchestration_tasks",
+      "description": "As a developer, I need the DB schema to support task complexity tiers and parallel groups before any dispatch or planner changes.",
+      "acceptanceCriteria": [
+        "Create Alembic migration that adds `complexity` VARCHAR(10) DEFAULT 'medium' to orchestration_tasks",
+        "Same migration adds `parallel_group` VARCHAR(50) DEFAULT NULL to orchestration_tasks",
+        "Same migration adds `estimated_tokens` INTEGER DEFAULT 4000 to orchestration_tasks",
+        "Same migration changes `max_concurrent` default from 1 to 3 on orchestration_runs",
+        "Add complexity, parallel_group, estimated_tokens fields to OrchestrationTask SQLAlchemy model in orchestrator/core/models/orchestration.py",
+        "Add ComplexityTier enum to orchestration_enums.py: SIMPLE, MODERATE, COMPLEX",
+        "Add BudgetStatus enum to orchestration_enums.py: HEALTHY, WARNING, CRITICAL, EXCEEDED",
+        "Add COMPLEXITY_TOKEN_BUDGET dict to config.py: light=1000, medium=4000, heavy=8000, synthesis=6000",
+        "Existing tests still pass — no behavioral changes yet, schema only",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Migration goes in orchestrator/alembic/versions/. Use revision naming like prd82c_parallel_schema. The OrchestrationTask model is in orchestrator/core/models/orchestration.py. The enums are in orchestrator/core/models/orchestration_enums.py. Config is orchestrator/core/config.py (class Config with class vars). This is schema-only — no logic changes."
+    },
+    {
+      "id": "US-002",
+      "title": "Replace sequential dispatch gate with parallel dispatch",
+      "description": "As a coordinator, I want the dispatcher to send up to max_concurrent tasks simultaneously instead of blocking on one active task.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/dispatcher.py, add count_active_tasks(db, run_id) -> int method that counts tasks in ASSIGNED or RUNNING state",
+        "Add dispatch_ready(db, run, agents) -> List[DispatchResult] method that dispatches up to (run.max_concurrent - active_count) ready tasks",
+        "dispatch_ready calls DependencyResolver.get_ready_tasks() and iterates results up to available slots",
+        "Each task dispatched via existing _dispatch_single logic (agent matching, optimistic claim, board task creation)",
+        "If no dispatch slots available, return list with single DispatchResult(dispatched=False, skipped_reason='max_concurrent_reached')",
+        "Keep has_active_task() and dispatch_next() as-is for backward compatibility but mark as deprecated",
+        "WIRING TEST: Create run with max_concurrent=2 and 2 independent PENDING tasks — both dispatch on same call",
+        "WIRING TEST: Create run with max_concurrent=1 and 2 independent tasks — only 1 dispatches (regression)",
+        "WIRING TEST: Create run with max_concurrent=3, task_a (no deps) and task_b (depends on task_a) — only task_a dispatches",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "The dispatcher is at orchestrator/modules/coordination/dispatcher.py. has_active_task() is at line ~78. dispatch_next() is the main method. DependencyResolver.get_ready_tasks() already returns multiple tasks — the current code just takes [0]. For agent matching, each task needs its own agent — prefer different agents for parallel tasks (AgentMatcher already scores availability lower for busy agents). DispatchResult is a frozen dataclass in the same file."
+    },
+    {
+      "id": "US-003",
+      "title": "Wire parallel dispatch into coordinator tick loop",
+      "description": "As a coordinator, I want the tick loop to execute multiple dispatched tasks concurrently via asyncio.gather.",
+      "acceptanceCriteria": [
+        "In orchestrator/services/coordinator_service.py, update _process_run() to call MissionDispatcher.dispatch_ready() instead of dispatch_next()",
+        "Collect all DispatchResult where dispatched=True",
+        "Execute dispatched tasks concurrently: await asyncio.gather(*[self._execute_task(db, run, r.task, r.agent_id) for r in results], return_exceptions=True)",
+        "Handle exceptions from gather: log errors per task, don't crash the tick",
+        "After all executions complete, run reconciler as before",
+        "WIRING TEST: Integration test that dispatches 2 tasks and verifies both _execute_task calls happen (mock _execute_task, verify call_count=2)",
+        "Existing sequential missions (max_concurrent=1) still work unchanged",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "coordinator_service.py is large. The _process_run() method is the key one — it currently calls dispatch_next() and if dispatched, calls _execute_task() once. Change to: dispatch_ready() → gather multiple _execute_task calls. Be careful with DB session — each _execute_task should handle its own commits/rollbacks. The reconciler tick runs AFTER all executions complete."
+    },
+    {
+      "id": "US-004",
+      "title": "Add complexity detection to planner",
+      "description": "As a planner, I want to detect goal complexity and set max_concurrent accordingly before decomposition.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/planner.py, add _detect_complexity(goal, attachments) -> ComplexityTier function",
+        "Complexity signals: word_count > 100 (+1), deliverable_count > 1 (+1), domain_breadth > 2 (+1), attachment_count > 0 (+1)",
+        "Add _count_deliverables(goal) — count keywords: report, paper, app, application, analysis, presentation, document, dashboard, pipeline, system",
+        "Add _estimate_domains(goal) — count distinct topic clusters mentioned",
+        "Score >= 3 → COMPLEX (max_concurrent=3), score >= 1 → MODERATE (max_concurrent=2), else SIMPLE (max_concurrent=1)",
+        "Add max_concurrent field to DecompositionResult dataclass (default 1)",
+        "Call _detect_complexity() at the start of decompose(), set result.max_concurrent",
+        "In coordinator_service.py where DecompositionResult is consumed, set run.max_concurrent = decomposition.max_concurrent",
+        "WIRING TEST: decompose('Write a 4000 word research paper with 6 sections covering AI coordination, prior art, experiments, and implications') returns max_concurrent >= 2",
+        "WIRING TEST: decompose('Summarize this document') returns max_concurrent == 1",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "The planner is at orchestrator/modules/coordination/planner.py. DecompositionResult is a frozen dataclass in the same file. The decompose() method is async. The coordinator sets run fields from decomposition result around line 769 in coordinator_service.py. Import ComplexityTier from orchestration_enums.py."
+    },
+    {
+      "id": "US-005",
+      "title": "Update planner system prompt for parallel decomposition",
+      "description": "As a planner, I want the LLM to generate parallel task groups and complexity tiers instead of flat sequential plans.",
+      "acceptanceCriteria": [
+        "Replace _SYSTEM_PROMPT in planner.py — remove 'Tasks execute sequentially', add instructions for parallel groups, complexity tiers, synthesis tasks, and 4000-word-per-task limit",
+        "Update _OUTPUT_SCHEMA_INSTRUCTIONS to include complexity and parallel_group fields in the JSON schema example",
+        "Update _REPLAN_SYSTEM_PROMPT with same parallel/complexity guidance",
+        "In _parse_plan(), extract complexity (default 'medium') and parallel_group (default None) from each task dict",
+        "Store complexity and parallel_group on PlannedTask objects",
+        "In _validate_plan(), add check: tasks in same parallel_group must NOT have dependencies on each other — append error if violated",
+        "Update token estimate calculation: sum of COMPLEXITY_TOKEN_BUDGET[task.complexity] instead of flat 2000 * task_count",
+        "When creating OrchestrationTask rows from plan, set complexity, parallel_group, estimated_tokens fields",
+        "WIRING TEST: Decompose a complex research paper goal — result contains at least one parallel_group with 2+ tasks",
+        "WIRING TEST: Decompose a complex goal — result contains at least one task with task_type='synthesis'",
+        "WIRING TEST: Validate plan rejects parallel_group tasks with cross-dependencies",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "The system prompt is at _SYSTEM_PROMPT around line 530. The output schema is at _OUTPUT_SCHEMA_INSTRUCTIONS around line 584. _parse_plan() starts around line 769. _validate_plan() starts around line 862. PlannedTask is a NamedTuple or dataclass in the same file. COMPLEXITY_TOKEN_BUDGET is in config.py (from US-001). The LLM may not always generate parallel groups — that's OK, validation should accept purely sequential plans too."
+    },
+    {
+      "id": "US-006",
+      "title": "Update templates with parallel groups and synthesis tasks",
+      "description": "As a template author, I want built-in templates to generate parallel task groups with synthesis merge points.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/templates.py, add complexity: str = 'medium' field to TaskTemplate dataclass",
+        "Add parallel_group: Optional[str] = None field to TaskTemplate dataclass",
+        "Add depends_on: Optional[List[str]] = None field to TaskTemplate dataclass (replaces auto-chaining)",
+        "Update render_template() to use explicit depends_on instead of always chaining to previous task",
+        "Tasks with parallel_group and no depends_on get no dependencies (root parallel tasks)",
+        "Rewrite content_pipeline template: research + source gathering (parallel, seq=1) -> synthesis outline (seq=2) -> section drafts (parallel, seq=3) -> synthesis merge (seq=4) -> review (seq=5)",
+        "Rewrite research_and_report template: topic research tasks (parallel, seq=1) -> analysis (seq=2) -> synthesis (seq=3) -> draft (seq=4) -> review (seq=5)",
+        "Rewrite competitive_analysis template: per-competitor research (parallel, seq=1) -> synthesis (seq=2) -> report (seq=3) -> review (seq=4)",
+        "Rewrite data_investigation template: data gathering (parallel, seq=1) -> analysis (seq=2) -> report (seq=3)",
+        "All templates include at least one task with task_type=synthesis after parallel convergence",
+        "WIRING TEST: render content_pipeline template — verify parallel_group 'research' has 2 tasks with no deps, synthesis task depends on both",
+        "WIRING TEST: match_template('Write a blog post about AI') returns content_pipeline with parallel groups",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Templates are in orchestrator/modules/coordination/templates.py. TaskTemplate is a frozen dataclass around line 30. TEMPLATE_REGISTRY holds the 4 templates. render_template() is around line 448. The current auto-chaining logic is: depends_on = [f'task_{tt.sequence - 1}'] for sequence > 1. Replace with explicit depends_on from the TaskTemplate. Agent roles must match _ROLE_SYNONYMS in agent_matcher.py. TaskType.SYNTHESIS.value = 'synthesis'."
+    },
+    {
+      "id": "US-007",
+      "title": "Build synthesis task executor",
+      "description": "As a coordinator, I want TaskType.SYNTHESIS tasks to use a special prompt that merges parallel upstream outputs.",
+      "acceptanceCriteria": [
+        "In orchestrator/services/coordinator_service.py, add _build_synthesis_prompt(task, upstream_outputs) -> str method",
+        "Synthesis prompt includes: all upstream task titles + outputs, task description, rules for merging (include ALL content, resolve contradictions, unified voice, not concatenation)",
+        "In _execute_task(), detect task.task_type == TaskType.SYNTHESIS.value and use synthesis prompt instead of standard build_task_prompt()",
+        "Synthesis tasks get verification criteria auto-set: required_sections from task description + min_length = 50% of combined upstream length",
+        "Add _collect_upstream_outputs(db, task) -> List[Dict] that fetches all dependency task outputs",
+        "WIRING TEST: Create 2 completed parallel tasks + 1 synthesis task depending on both — synthesis prompt contains both upstream outputs",
+        "WIRING TEST: Synthesis task has auto-generated verification_criteria with required_sections",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "coordinator_service.py _execute_task() currently builds prompt via MissionDispatcher.build_task_prompt(). For synthesis, bypass that and use the new _build_synthesis_prompt(). Upstream outputs come from OrchestrationTaskDependency joins — query tasks where id in (SELECT depends_on_task_id FROM deps WHERE task_id = synthesis_task.id). The upstream outputs are on OrchestrationTask.output (text column). TaskType is imported from orchestration_enums.py."
+    },
+    {
+      "id": "US-008",
+      "title": "Add synthesis auto-insertion in planner",
+      "description": "As a planner, I want synthesis tasks to be auto-inserted when parallel branches converge without an explicit synthesis task.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/planner.py, add _ensure_synthesis_tasks(tasks, dependencies) method",
+        "Detect convergence points: if 2+ tasks in same parallel_group and a downstream task depends on them but is NOT task_type=synthesis, auto-insert a synthesis task between them",
+        "Auto-inserted synthesis task: agent_role='writer', task_type='synthesis', complexity='synthesis', title='Synthesize {parallel_group} outputs', depends on all parallel group tasks",
+        "Original downstream task's dependency updated to point at the new synthesis task instead",
+        "Call _ensure_synthesis_tasks() after _parse_plan() and before _validate_plan()",
+        "If planner already included explicit synthesis tasks after parallel groups, skip auto-insertion for that group",
+        "WIRING TEST: Plan with parallel group 'research' (2 tasks) and downstream task_3 depending on both but not synthesis — auto-inserts synthesis between",
+        "WIRING TEST: Plan with explicit synthesis task after parallel group — no auto-insertion",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "This runs in the planner pipeline: decompose() → LLM call → _extract_json → _parse_plan → _ensure_synthesis_tasks (NEW) → _validate_plan. The method operates on the parsed task list and dependency list. Auto-inserted tasks need temp_ids that don't collide (use 'synth_{parallel_group}' pattern). Update sequence_numbers to maintain ordering — synthesis gets sequence = max(parallel_group_sequences) + 1, bump downstream sequences."
+    },
+    {
+      "id": "US-009",
+      "title": "Wire budget admission gate into dispatcher",
+      "description": "As a dispatcher, I want to check can_afford() before dispatching each task and pause the mission if budget is exceeded.",
+      "acceptanceCriteria": [
+        "In orchestrator/modules/coordination/dispatcher.py, add _pre_dispatch_budget_check(db, run, task) -> str method returning 'allow', 'defer', or 'block'",
+        "Calculate estimated tokens from task.estimated_tokens (set from complexity in US-001)",
+        "Compute budget_percentage = (run.tokens_used / run.token_budget_estimate) * 100 if estimate exists",
+        "HEALTHY (<50%): return 'allow'",
+        "WARNING (50-80%): return 'allow' (dispatch continues, but log warning)",
+        "CRITICAL (80-100%): return 'defer' if task_type not in (SYNTHESIS, REVIEW), else 'allow'",
+        "EXCEEDED (>100%): return 'block'",
+        "In dispatch_ready(), call _pre_dispatch_budget_check before each task dispatch",
+        "If 'block': skip task, set run state to PAUSED via transition, emit BUDGET_EXCEEDED event, break dispatch loop",
+        "If 'defer': skip this task but continue checking others (synthesis/review may still dispatch)",
+        "If run.token_budget_estimate is None or 0: always allow (no budget set = unlimited)",
+        "WIRING TEST: Run with token_budget_estimate=1000, tokens_used=950 — heavy task (8000 est) blocked, mission paused",
+        "WIRING TEST: Run with token_budget_estimate=10000, tokens_used=8500 — synthesis task allowed, heavy task deferred",
+        "WIRING TEST: Run with no token_budget_estimate — all tasks dispatch normally",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "The existing TokenBudgetManager in orchestrator/modules/orchestrator/stages/token_budget_manager.py has can_afford() but it's complex and not wired. Simpler approach: do the budget check inline in the dispatcher using run.tokens_used and run.token_budget_estimate directly — no need to involve TokenBudgetManager. The graduated response is the key feature. RunState.PAUSED already exists. Use transition_run() for state changes. EventType should have BUDGET_EXCEEDED or RUN_BUDGET_WARNING (check what exists in enums)."
+    },
+    {
+      "id": "US-010",
+      "title": "Update plan approval API with budget estimate and max_concurrent override",
+      "description": "As a user, I want to see the estimated token cost at plan approval and optionally override max_concurrent.",
+      "acceptanceCriteria": [
+        "In orchestrator/api/missions.py, update the plan response (mission detail when state=awaiting_approval) to include: estimated_tokens, max_concurrent, complexity_tier, parallel_groups list, has_synthesis_tasks boolean",
+        "These fields come from DecompositionResult stored in run.plan JSONB — extract at response time",
+        "Update MissionApproveRequest in types/missions.ts to accept optional max_concurrent and token_budget_override fields",
+        "In the approve endpoint handler, if max_concurrent provided: set run.max_concurrent = request.max_concurrent",
+        "If token_budget_override provided: set run.token_budget_estimate = request.token_budget_override",
+        "Add parallel_groups to MissionDetailResponse type: list of unique parallel_group names from tasks",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "The missions API is at orchestrator/api/missions.py. The approve endpoint is POST /api/missions/{id}/approve. MissionApproveRequest is defined in the API file or types. The plan is stored as run.plan (JSONB) — it contains the DecompositionResult serialized. Frontend types are in frontend/types/missions.ts. The _run_to_response() helper builds the API response — extend it there."
+    },
+    {
+      "id": "US-011",
+      "title": "Add budget bar and parallel DAG rendering to mission detail page",
+      "description": "As a user, I want to see budget usage and parallel task branches on the mission detail page.",
+      "acceptanceCriteria": [
+        "Add MissionBudgetBar component in frontend/components/missions/ — shows used/estimated tokens as progress bar",
+        "Color coding: green (<50%), amber (50-80%), red (80-100%), pulsing red (>100%)",
+        "Show percentage and raw numbers: '23,500 / 48,000 tokens (49%)'",
+        "Budget bar visible on mission detail page when token_budget_estimate exists",
+        "Budget warning banner appears when status is WARNING or above",
+        "In mission-dag-canvas.tsx, render tasks with same sequence_number side-by-side (parallel visualization)",
+        "Parallel group tasks share a visual container/bracket",
+        "Synthesis tasks rendered with a merge icon or visual indicator",
+        "Add max_concurrent override dropdown in plan approval dialog (options: 1, 2, 3)",
+        "Per-task token usage visible in task detail panel (tokens_used / estimated_tokens)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "The mission detail page is at frontend/components/missions/mission-detail-page.tsx. The DAG canvas is at frontend/components/missions/mission-dag-canvas.tsx. Budget data comes from the mission detail API response (run.tokens_used, run.token_budget_estimate). Use existing shadcn/ui components (Progress bar, Badge, Alert). The approval dialog is in the mission detail page — it shows when state is awaiting_approval. React Query hooks are in frontend/hooks/use-missions-api.ts."
+    },
+    {
+      "id": "US-012",
+      "title": "Add wiring verification test suite",
+      "description": "As a developer, I want a dedicated test file that proves all 82C features are wired end-to-end through the coordinator tick.",
+      "acceptanceCriteria": [
+        "Create orchestrator/tests/test_82c_wiring.py with integration tests",
+        "Test: parallel dispatch — 2 independent tasks both get dispatched when max_concurrent=2 (trace through dispatch_ready)",
+        "Test: sequential regression — max_concurrent=1 dispatches only 1 task",
+        "Test: dependency blocking — task with unmet deps stays PENDING even with free slots",
+        "Test: complexity detection — complex goal returns max_concurrent >= 2, simple goal returns 1",
+        "Test: parallel_group validation — plan with cross-dependent parallel tasks is rejected",
+        "Test: budget gate blocks — run at 100%+ budget pauses instead of dispatching",
+        "Test: budget gate allows synthesis at critical — synthesis task dispatches at 85% budget",
+        "Test: synthesis prompt contains all upstream outputs — mock 2 completed tasks, verify prompt text",
+        "Test: template parallel groups — content_pipeline renders with parallel research group",
+        "Test: token estimate uses complexity — estimate is NOT flat 2000 * task_count",
+        "All tests use real DB models (not mocks) where possible, mock only LLM calls",
+        "Typecheck passes",
+        "All tests pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "This is the KEY story that prevents the 82A/B problem. Tests go in orchestrator/tests/test_82c_wiring.py. Use pytest fixtures. For DB tests, check if there's an existing test DB setup (conftest.py). Mock LLM calls (AgentFactory.execute_with_prompt, llm_manager.generate_response) but use real dispatcher, planner validation, and coordinator logic. Import from orchestrator/modules/coordination/dispatcher.py, planner.py, templates.py. These tests MUST prove the code is called, not just that it exists."
+    }
+  ]
+}
