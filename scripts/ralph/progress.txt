@@ -134,3 +134,24 @@
   - Validated: match_template correctly matches "business plan", "start a company", "startup business idea"
   - Validated: render_template produces 12 tasks with parallel groups in Phase 1 and 3, platform tools in Phase 3
   - Validated: no false positives on unrelated queries
+
+2026-03-25: US-011 COMPLETED
+  - Backend: added template_id field to MissionCreateRequest in missions.py
+    - Optional[str], max_length=100
+    - Merged into config dict before passing to coordinator (template_id key)
+  - Planner: updated MissionPlanner.decompose() in planner.py
+    - Checks config["template_id"] before keyword matching
+    - Looks up template directly from TEMPLATE_REGISTRY by id
+    - Falls back to match_template() if hint not found or not provided
+  - Frontend types: added template_id?: string to MissionCreateRequest in types/missions.ts
+  - Frontend create-mission-modal.tsx:
+    - Added 6 template options: Custom Goal, Business Plan, Research Report, Content Pipeline, Competitive Analysis, Data Investigation
+    - Template selector grid (2 cols) with icons, descriptions, estimated costs
+    - selectedTemplate state controls which template is active
+    - Business Plan template shows extra fields: business_name*, business_type*, industry*, target_market, goals
+    - Business plan fields assembled into structured goal string
+    - Business plan config fields passed to backend for downstream agents
+    - template_id sent in create request when template selected
+    - resetForm clears template and business plan fields
+    - Submit button disabled state updated for business plan required fields
+  - Validated: Python imports OK, frontend typecheck OK (no new errors), test failure pre-existing

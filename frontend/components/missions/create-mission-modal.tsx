@@ -3,7 +3,10 @@
 import { useState, useCallback } from 'react'
 import { useAuth } from '@clerk/nextjs'
 import { useDropzone } from 'react-dropzone'
-import { Target, Loader2, Upload, X, FileText, Paperclip } from 'lucide-react'
+import {
+  Target, Loader2, Upload, X, FileText, Paperclip,
+  Pen, Search, BarChart3, Database, Briefcase, Sparkles,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -53,6 +56,59 @@ const ACCEPT_MAP = Object.fromEntries(
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
 
+interface MissionTemplateOption {
+  id: string | null // null = custom goal (no template)
+  name: string
+  description: string
+  icon: typeof Target
+  estimatedCost: string
+}
+
+const MISSION_TEMPLATES: MissionTemplateOption[] = [
+  {
+    id: null,
+    name: 'Custom Goal',
+    description: 'Freeform — describe anything',
+    icon: Sparkles,
+    estimatedCost: 'varies',
+  },
+  {
+    id: 'business_plan',
+    name: 'Business Plan',
+    description: 'Research, financials, and full plan',
+    icon: Briefcase,
+    estimatedCost: '~500K tokens',
+  },
+  {
+    id: 'research_and_report',
+    name: 'Research Report',
+    description: 'Research a topic and produce a report',
+    icon: Search,
+    estimatedCost: '~200K tokens',
+  },
+  {
+    id: 'content_pipeline',
+    name: 'Content Pipeline',
+    description: 'Write, edit, and publish content',
+    icon: Pen,
+    estimatedCost: '~150K tokens',
+  },
+  {
+    id: 'competitive_analysis',
+    name: 'Competitive Analysis',
+    description: 'Analyze competitors and market position',
+    icon: BarChart3,
+    estimatedCost: '~200K tokens',
+  },
+  {
+    id: 'data_investigation',
+    name: 'Data Investigation',
+    description: 'Investigate, diagnose, and report on data',
+    icon: Database,
+    estimatedCost: '~150K tokens',
+  },
+]
+
 interface CreateMissionModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -64,11 +120,21 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
   const createMission = useCreateMission()
   const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
 
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [tags, setTags] = useState('')
   const [files, setFiles] = useState<UploadingFile[]>([])
   const [budgetPauseEnabled, setBudgetPauseEnabled] = useState(true)
+
+  // Business Plan template extra fields
+  const [businessName, setBusinessName] = useState('')
+  const [businessType, setBusinessType] = useState('')
+  const [industry, setIndustry] = useState('')
+  const [targetMarket, setTargetMarket] = useState('')
+  const [businessGoals, setBusinessGoals] = useState('')
+
+  const isBusinessPlan = selectedTemplate === 'business_plan'
 
   const isSubmitting = createMission.isLoading
   const isUploading = files.some((f) => f.status === 'uploading')
@@ -155,11 +221,28 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
   })
 
   const handleSubmit = () => {
-    const goalParts: string[] = []
-    if (name.trim()) goalParts.push(name.trim())
-    if (description.trim()) goalParts.push(description.trim())
+    // For business plan template, build goal from structured fields
+    let goal: string
+    if (isBusinessPlan) {
+      if (!businessName.trim() || !businessType.trim() || !industry.trim()) {
+        toast.error('Business name, type, and industry are required')
+        return
+      }
+      const parts = [
+        `Write a business plan for ${businessName.trim()}`,
+        `a ${businessType.trim()} business in the ${industry.trim()} industry`,
+      ]
+      if (targetMarket.trim()) parts.push(`targeting ${targetMarket.trim()}`)
+      if (businessGoals.trim()) parts.push(`with goals: ${businessGoals.trim()}`)
+      if (description.trim()) parts.push(description.trim())
+      goal = parts.join('. ')
+    } else {
+      const goalParts: string[] = []
+      if (name.trim()) goalParts.push(name.trim())
+      if (description.trim()) goalParts.push(description.trim())
+      goal = goalParts.join(': ')
+    }
 
-    const goal = goalParts.join(': ')
     if (!goal) {
       toast.error('Please enter a mission name or description')
       return
@@ -176,8 +259,21 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
     if (attachments.length > 0) config.attachments = attachments
     if (!budgetPauseEnabled) config.budget_pause_disabled = true
 
+    // Add business plan fields to config for downstream agents
+    if (isBusinessPlan) {
+      config.business_name = businessName.trim()
+      config.business_type = businessType.trim()
+      config.industry = industry.trim()
+      if (targetMarket.trim()) config.target_market = targetMarket.trim()
+      if (businessGoals.trim()) config.goals = businessGoals.trim()
+    }
+
     createMission.mutate(
-      { goal, ...(Object.keys(config).length > 0 ? { config } : {}) },
+      {
+        goal,
+        ...(Object.keys(config).length > 0 ? { config } : {}),
+        ...(selectedTemplate ? { template_id: selectedTemplate } : {}),
+      },
       {
         onSuccess: (mission) => {
           setActivePlanningMissionId(mission.id)
@@ -194,11 +290,17 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
   }
 
   const resetForm = () => {
+    setSelectedTemplate(null)
     setName('')
     setDescription('')
     setTags('')
     setFiles([])
     setBudgetPauseEnabled(true)
+    setBusinessName('')
+    setBusinessType('')
+    setIndustry('')
+    setTargetMarket('')
+    setBusinessGoals('')
   }
 
   const formatSize = (bytes: number) => {
@@ -222,25 +324,124 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {/* Template selector */}
           <div className="space-y-2">
-            <Label htmlFor="mission-name">Mission Name</Label>
-            <Input
-              id="mission-name"
-              placeholder="e.g. Research top AI agent frameworks"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-            />
+            <Label>Mission Type</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {MISSION_TEMPLATES.map((tmpl) => {
+                const Icon = tmpl.icon
+                const isSelected = selectedTemplate === tmpl.id
+                return (
+                  <button
+                    key={tmpl.id ?? 'custom'}
+                    type="button"
+                    onClick={() => setSelectedTemplate(tmpl.id)}
+                    className={cn(
+                      'flex items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors',
+                      isSelected
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                        : 'border-border hover:border-muted-foreground/40',
+                    )}
+                  >
+                    <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', isSelected ? 'text-primary' : 'text-muted-foreground')} />
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium truncate">{tmpl.name}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{tmpl.description}</div>
+                      <div className="text-[9px] text-muted-foreground/60 mt-0.5">{tmpl.estimatedCost}</div>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
+          {/* Business Plan extra fields */}
+          {isBusinessPlan && (
+            <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <Label className="text-xs font-medium text-primary">Business Plan Details</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="bp-name" className="text-[11px]">Business Name *</Label>
+                  <Input
+                    id="bp-name"
+                    placeholder="e.g. BrewCraft"
+                    value={businessName}
+                    onChange={(e) => setBusinessName(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="bp-type" className="text-[11px]">Business Type *</Label>
+                  <Input
+                    id="bp-type"
+                    placeholder="e.g. SaaS, retail, service"
+                    value={businessType}
+                    onChange={(e) => setBusinessType(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="bp-industry" className="text-[11px]">Industry *</Label>
+                <Input
+                  id="bp-industry"
+                  placeholder="e.g. Coffee & Beverages"
+                  value={industry}
+                  onChange={(e) => setIndustry(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="bp-market" className="text-[11px]">Target Market</Label>
+                  <Input
+                    id="bp-market"
+                    placeholder="e.g. Urban millennials"
+                    value={targetMarket}
+                    onChange={(e) => setTargetMarket(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="bp-goals" className="text-[11px]">Goals</Label>
+                  <Input
+                    id="bp-goals"
+                    placeholder="e.g. Launch in 6 months"
+                    value={businessGoals}
+                    onChange={(e) => setBusinessGoals(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Name + Description (shown for non-business-plan or as additional context) */}
+          {!isBusinessPlan && (
+            <div className="space-y-2">
+              <Label htmlFor="mission-name">Mission Name</Label>
+              <Input
+                id="mission-name"
+                placeholder="e.g. Research top AI agent frameworks"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoFocus
+              />
+            </div>
+          )}
+
           <div className="space-y-2">
-            <Label htmlFor="mission-description">Description</Label>
+            <Label htmlFor="mission-description">
+              {isBusinessPlan ? 'Additional Context' : 'Description'}
+            </Label>
             <Textarea
               id="mission-description"
-              placeholder="Describe what you want to accomplish, any constraints, output format..."
+              placeholder={isBusinessPlan
+                ? 'Any additional context, constraints, or specific requirements...'
+                : 'Describe what you want to accomplish, any constraints, output format...'}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows={4}
+              rows={isBusinessPlan ? 2 : 4}
             />
           </div>
 
@@ -362,7 +563,11 @@ export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalPro
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || isUploading || (!name.trim() && !description.trim())}
+            disabled={isSubmitting || isUploading || (
+              isBusinessPlan
+                ? !businessName.trim() || !businessType.trim() || !industry.trim()
+                : !name.trim() && !description.trim()
+            )}
           >
             {isSubmitting ? (
               <>

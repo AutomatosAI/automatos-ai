@@ -516,7 +516,25 @@ class MissionPlanner:
         )
 
         # --- Template matching (82B US-002) — try before LLM ---
-        template = match_template(goal)
+        # If config provides a template_id hint, use it directly (PRD-120 US-011)
+        template_id_hint = (config or {}).get("template_id")
+        template = None
+        if template_id_hint:
+            from modules.coordination.templates import TEMPLATE_REGISTRY
+            matching = [t for t in TEMPLATE_REGISTRY if t.id == template_id_hint]
+            if matching:
+                template = matching[0]
+                logger.info(
+                    "MissionPlanner: template_id hint '%s' resolved directly",
+                    template_id_hint,
+                )
+            else:
+                logger.warning(
+                    "MissionPlanner: template_id hint '%s' not found in registry — falling back to keyword match",
+                    template_id_hint,
+                )
+        if template is None:
+            template = match_template(goal)
         if template is not None:
             logger.info(
                 "MissionPlanner: template=%s matched for goal='%s'",
