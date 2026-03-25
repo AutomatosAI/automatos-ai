@@ -15,3 +15,10 @@
 - Line counts: 91-98 lines (within 60-100 target)
 - Each skill uses 6 tools from the Engineering Tool Kit
 - Seed script dry-run: 97 entries, no errors
+
+## US-003: Engineering batch 2 — 8 skills rewritten (2026-03-25)
+- Rewrote: code-reviewer, software-architect, technical-writer, mobile-app-builder, senior-developer, git-workflow-master, rapid-prototyper, incident-response-commander
+- All skills: frontmatter with tools:{name,description}, identity paragraph, 6-step workflow with JSON tool calls, output format template, "What NOT To Do" section
+- Line counts: 92-100 lines (within 60-100 target)
+- Each skill uses 6-7 tools from the Engineering Tool Kit
+- incident-response-commander uses platform_get_system_health, platform_get_logs, platform_query_loki_logs (crisis monitoring tools as specified)
