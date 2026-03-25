@@ -74,3 +74,17 @@
 - feedback-synthesizer mines platform_search_chat_history for user feedback signals
 - behavioral-nudge-engine searches chat history for drop-off/confusion patterns
 - project-shepherd and studio-operations use platform_schedule_task for recurring reviews
+
+## US-009: Support + Testing — 9 skills rewritten (2026-03-25)
+- Rewrote: support-responder, analytics-reporter, finance-tracker, legal-compliance-checker, executive-summary-generator, infrastructure-maintainer, performance-benchmarker, api-tester, accessibility-auditor
+- All skills: frontmatter with tools:{name,description}, identity paragraph, 4-7 step workflow with JSON tool calls, output format template, "What NOT To Do" section
+- Line counts: 74-101 lines (within target range)
+- support-responder: uses platform_search_chat_history + platform_search_memory for issue resolution
+- analytics-reporter: pulls platform_workspace_stats + platform_get_cost_breakdown for trend reports
+- finance-tracker: budget anomaly detection with WARNING/CRITICAL thresholds on LLM spend
+- legal-compliance-checker: workspace_grep for PII/secrets scanning, creates remediation tasks
+- executive-summary-generator: reads reports from all other agents, synthesizes into 300-word brief
+- infrastructure-maintainer: platform_get_system_health + platform_query_loki_logs + workspace_exec for infra checks
+- performance-benchmarker: workspace_exec for benchmark suite, compares p50/p95/p99 against baselines
+- api-tester: workspace_grep for endpoint discovery, workspace_exec for pytest suite, contract validation
+- accessibility-auditor: workspace_grep for missing ARIA/alt/labels, workspace_exec for eslint a11y rules
