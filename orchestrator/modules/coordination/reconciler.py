@@ -264,6 +264,17 @@ class MissionReconciler:
             # Parse verification criteria from task spec
             criteria = task.verification_criteria if task.verification_criteria else None
 
+            # Strip required_sections from synthesis tasks — exact heading
+            # matching causes PARTIAL downgrades that burn tokens on retries.
+            # The LLM judge already evaluates content quality.
+            if criteria and task.task_type == "synthesis":
+                criteria = [
+                    c for c in criteria
+                    if c.get("type") != "required_sections"
+                ]
+                if not criteria:
+                    criteria = None
+
             # Run verification
             try:
                 result: VerificationResult = await verification_service.verify_task(
@@ -338,8 +349,9 @@ class MissionReconciler:
                     tasks_verification_failed += 1
 
             elif result.verdict == VERDICT_PARTIAL:
-                MissionReconciler._apply_verdict_partial(db, run_id, task, result)
-                tasks_verification_failed += 1
+                failed = MissionReconciler._apply_verdict_partial(db, run_id, task, result)
+                if failed:
+                    tasks_verification_failed += 1
 
             db.flush()
 
@@ -396,9 +408,14 @@ class MissionReconciler:
             task.failure_reason_code = FailureReasonCode.VERIFICATION_FAIL.value
             task.attempt_number = attempt + 1
 
+            # Stash previous output so the retry can revise instead of
+            # rewriting from scratch — saves ~80% of tokens per retry
+            previous_output = task.output or ""
+
             # Inject verification feedback — immutable replace for JSONB detection
             task.input_context = {
                 **(task.input_context or {}),
+                "previous_output": previous_output,
                 "verification_feedback": {
                     "attempt": attempt + 1,
                     "reasoning": result.reasoning,
@@ -457,50 +474,101 @@ class MissionReconciler:
         run_id: UUID,
         task: OrchestrationTask,
         result: VerificationResult,
-    ) -> None:
+    ) -> bool:
         """
-        Handle PARTIAL verdict: fail with escalation event for human review.
+        Handle PARTIAL verdict: retry with feedback if retries remain,
+        otherwise fail with escalation for human review.
 
-        PARTIAL means low confidence — escalate rather than retry blindly.
+        PARTIAL means low confidence — give the agent another shot with
+        the verifier's feedback before escalating.
+
+        Returns True if permanently failed, False if retrying.
         """
-        task.failure_reason_code = FailureReasonCode.VERIFICATION_FAIL.value
-        task.failure_detail = (
-            f"Verification partial (low confidence {result.confidence:.2f}): "
-            f"{result.reasoning}"
+        max_retries = task.max_retries or Config.COORDINATOR_MAX_TASK_RETRIES
+        attempt = task.attempt_number or 0
+
+        # Emit escalation event regardless (for visibility in UI)
+        emit_event(
+            db=db,
+            run_id=run_id,
+            event_type=EventType.TASK_VERIFICATION_FAILED,
+            actor_type=ActorType.COORDINATOR,
+            actor_id="reconciler",
+            task_id=task.id,
+            payload={
+                "verdict": VERDICT_PARTIAL,
+                "confidence": result.confidence,
+                "reasoning": result.reasoning,
+                "scores": result.scores,
+                "escalation": attempt >= max_retries,
+            },
         )
-        try:
-            transition_task(
-                db=db,
-                task=task,
-                new_state=TaskState.FAILED,
-                actor_type=ActorType.COORDINATOR,
-                actor_id="reconciler",
-                reason=f"Verification partial — escalating: {result.reasoning}",
-            )
-            sync_board_status(db, task)
 
-            # Emit escalation event for potential human intervention
-            emit_event(
-                db=db,
-                run_id=run_id,
-                event_type=EventType.TASK_VERIFICATION_FAILED,
-                actor_type=ActorType.COORDINATOR,
-                actor_id="reconciler",
-                task_id=task.id,
-                payload={
-                    "verdict": VERDICT_PARTIAL,
+        if attempt < max_retries:
+            # Retry with verifier feedback (same pattern as _apply_verdict_fail)
+            task.failure_reason_code = FailureReasonCode.VERIFICATION_FAIL.value
+            task.attempt_number = attempt + 1
+
+            # Stash previous output for revision-based retry
+            previous_output = task.output or ""
+
+            task.input_context = {
+                **(task.input_context or {}),
+                "previous_output": previous_output,
+                "verification_feedback": {
+                    "attempt": attempt + 1,
+                    "verdict": "partial",
                     "confidence": result.confidence,
                     "reasoning": result.reasoning,
                     "scores": result.scores,
-                    "escalation": True,
                 },
+            }
+            try:
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.RETRYING,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="reconciler",
+                    reason=(
+                        f"Verification partial (confidence={result.confidence:.2f}), "
+                        f"retrying (attempt {attempt + 1}/{max_retries}): {result.reasoning}"
+                    ),
+                )
+                sync_board_status(db, task)
+                logger.info(
+                    "Task %s verification partial (confidence=%.2f) → retrying (attempt %d/%d)",
+                    task.id, result.confidence, attempt + 1, max_retries,
+                )
+                return False
+            except ConflictError:
+                logger.warning("Conflict transitioning task %s to retrying (partial)", task.id)
+                return False
+        else:
+            # Retries exhausted — fail permanently with escalation
+            task.failure_reason_code = FailureReasonCode.MAX_RETRIES_EXHAUSTED.value
+            task.failure_detail = (
+                f"Verification partial (low confidence {result.confidence:.2f}) "
+                f"after {attempt} attempts: {result.reasoning}"
             )
-            logger.info(
-                "Task %s verification partial (confidence=%.2f) → failed with escalation",
-                task.id, result.confidence,
-            )
-        except ConflictError:
-            logger.warning("Conflict transitioning task %s to failed (partial)", task.id)
+            try:
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.FAILED,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="reconciler",
+                    reason=f"Verification partial, retries exhausted — escalating: {result.reasoning}",
+                )
+                sync_board_status(db, task)
+                logger.info(
+                    "Task %s verification partial (confidence=%.2f) → failed with escalation (retries exhausted)",
+                    task.id, result.confidence,
+                )
+                return True
+            except ConflictError:
+                logger.warning("Conflict transitioning task %s to failed (partial)", task.id)
+                return True
 
     # -----------------------------------------------------------------------
     # Stall detection and recovery

@@ -612,8 +612,8 @@ class TestWiringTokenEstimate:
         estimate = _estimate_token_budget(tasks)
         flat = 2000 * 3
         assert estimate != flat
-        # simple(1000) + complex(8000) + moderate(4000) = 13000
-        assert estimate == 13000
+        # simple(5000) + complex(35000) + moderate(15000) = 55000
+        assert estimate == 55000
 
     def test_synthesis_complexity_uses_config(self):
         """E2E: 'synthesis' complexity tier maps to its own budget."""
@@ -622,7 +622,7 @@ class TestWiringTokenEstimate:
                           task_type="synthesis"),
         ]
         estimate = _estimate_token_budget(tasks)
-        assert estimate == 6000  # COMPLEXITY_TOKEN_BUDGET["synthesis"]
+        assert estimate == 20000  # COMPLEXITY_TOKEN_BUDGET["synthesis"]
 
 
 # ===========================================================================

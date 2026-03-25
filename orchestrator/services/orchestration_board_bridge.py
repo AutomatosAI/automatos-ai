@@ -252,8 +252,8 @@ def sync_board_status(
     if new_status == "done" and board_task.completed_at is None:
         board_task.completed_at = task.completed_at
 
-    # Store task output as result when task completes
-    if task_state == TaskState.VERIFIED and task.output:
+    # Store task output as result when task completes or is verified
+    if task_state in (TaskState.COMPLETED, TaskState.VERIFIED) and task.output:
         board_task.result = task.output
 
     # Store failure info

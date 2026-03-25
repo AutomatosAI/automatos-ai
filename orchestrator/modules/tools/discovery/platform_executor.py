@@ -271,6 +271,29 @@ class PlatformActionExecutor:
             except Exception:
                 pass  # Fail open
 
+        # PRD-108: Auto-inject field_id for field tools from active mission
+        if action_name.startswith("platform_field_") and "field_id" not in params:
+            try:
+                from core.models.orchestration import OrchestrationRun
+                active_run = (
+                    self.db.query(OrchestrationRun)
+                    .filter(
+                        OrchestrationRun.workspace_id == self.workspace_id,
+                        OrchestrationRun.state == "running",
+                    )
+                    .first()
+                )
+                if active_run:
+                    field_id = (active_run.config or {}).get("field_id")
+                    if field_id:
+                        params = {**params, "field_id": field_id}
+                        logger.info(
+                            "[PRD-108] Auto-injected field_id %s for %s",
+                            field_id, action_name,
+                        )
+            except Exception as e:
+                logger.warning("[PRD-108] Failed to resolve field_id: %s", e)
+
         try:
             return await handler(self.db, self.workspace_id, params)
         except Exception as e:

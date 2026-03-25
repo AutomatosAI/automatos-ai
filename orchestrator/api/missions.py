@@ -20,6 +20,7 @@ terminology; DB/backend uses "orchestration" (PRD-82A Section 10).
   POST   /api/missions/{id}/pause    — pause mission
   POST   /api/missions/{id}/resume   — resume mission
   POST   /api/missions/{id}/cancel   — cancel mission
+  DELETE /api/missions/{id}           — delete terminal mission
 
 Agent telemetry:
   GET    /api/agents/{agent_id}/mission-history  — agent mission perf (PRD-82B US-004)
@@ -44,7 +45,7 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
-from core.models.core import Agent, WorkflowTemplate
+from core.models.core import Agent, BoardTask, WorkflowTemplate
 from core.models.orchestration import (
     OrchestrationArchive,
     OrchestrationEvent,
@@ -1527,6 +1528,49 @@ async def cancel_mission(
     except Exception as exc:
         db.rollback()
         logger.error("Failed to cancel mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.delete("/{mission_id}", status_code=204)
+async def delete_mission(
+    mission_id: UUID,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Delete a mission. Only allowed for terminal-state missions."""
+    try:
+        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+
+        if RunState(run.state) not in TERMINAL_RUN_STATES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete mission in state '{run.state}'. Cancel it first.",
+            )
+
+        # Clean up linked board tasks
+        db.query(BoardTask).filter(
+            BoardTask.orchestration_run_id == run.id,
+        ).delete(synchronize_session="fetch")
+        db.query(BoardTask).filter(
+            BoardTask.orchestration_task_id.in_(
+                db.query(OrchestrationTask.id).filter(
+                    OrchestrationTask.run_id == run.id
+                )
+            ),
+        ).delete(synchronize_session="fetch")
+
+        # Delete run (cascades to tasks, events, dependencies, archives)
+        db.delete(run)
+        db.commit()
+
+        logger.info("Deleted mission %s by user %s", mission_id, ctx.user.id)
+        return None
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to delete mission %s: %s", mission_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

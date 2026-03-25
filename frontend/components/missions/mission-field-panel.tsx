@@ -227,7 +227,7 @@ export function MissionFieldPanel({ missionId, className }: MissionFieldPanelPro
       </div>
 
       {/* Neural field visualization */}
-      <div className="flex-1 min-h-0 relative">
+      <div className="flex-1 min-h-[480px] relative">
         {patterns.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Brain className="w-8 h-8 mb-2 opacity-30 animate-pulse" />

@@ -416,6 +416,11 @@ class MissionDispatcher:
         if not budget or budget <= 0:
             return "allow"
 
+        # User can disable budget pausing via mission config
+        config = run.config or {}
+        if config.get("budget_pause_disabled"):
+            return "allow"
+
         status = MissionDispatcher._get_budget_status(run)
         task_type = getattr(task, "task_type", None) or ""
 
@@ -594,6 +599,39 @@ class MissionDispatcher:
             if result.dispatched:
                 dispatched_count += 1
 
+        # If every candidate was deferred (budget critical, none dispatched),
+        # pause the run so the user can resume with extended budget.
+        all_deferred = (
+            dispatched_count == 0
+            and len(results) > 0
+            and all(r.skipped_reason == "budget_critical_deferred" for r in results)
+        )
+        if all_deferred:
+            logger.warning(
+                "All %d candidates deferred for run %s — pausing (budget critical stall)",
+                len(results), run_id,
+            )
+            emit_event(
+                db=db,
+                run_id=run_id,
+                event_type=EventType.RUN_BUDGET_EXCEEDED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="dispatcher",
+                payload={
+                    "tokens_used": run.tokens_used or 0,
+                    "token_budget_estimate": run.token_budget_estimate,
+                    "reason": "all_tasks_deferred_budget_critical",
+                },
+            )
+            transition_run(
+                db=db,
+                run=run,
+                new_state=RunState.PAUSED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="dispatcher",
+                reason="Budget critical — all remaining tasks deferred, mission paused",
+            )
+
         logger.info(
             "dispatch_ready(run=%s): %d candidates, %d slots, %d dispatched",
             run_id,
@@ -731,37 +769,78 @@ class MissionDispatcher:
 
         # Include input context (upstream outputs, retry feedback, etc.)
         if isinstance(task.input_context, dict):
-            upstream_outputs = task.input_context.get("upstream_outputs")
-            if upstream_outputs:
-                parts.append("\n## Previous Task Outputs")
-                for output in upstream_outputs:
+            # Check if this is a revision retry (has previous output)
+            previous_output = task.input_context.get("previous_output")
+            verification_feedback = task.input_context.get("verification_feedback")
+
+            if previous_output and verification_feedback:
+                # REVISION MODE: Give the LLM its own output back with
+                # targeted feedback. Much cheaper than a full rewrite.
+                failures = verification_feedback.get("failures", [])
+                reasoning = verification_feedback.get("reasoning", "Unknown")
+                attempt = verification_feedback.get("attempt", "?")
+
+                parts = [
+                    f"# Revision Request: {task.title}",
+                    f"\nYour previous output (attempt {attempt}) needs revision. "
+                    f"Do NOT rewrite from scratch — revise the content below to address the feedback.",
+                    f"\n## Issues to Fix\n{reasoning}",
+                ]
+                if failures:
                     parts.append(
-                        f"\n### {output.get('title', 'Previous Task')}\n"
-                        f"{output.get('output', '')}"
+                        "Failed checks: " + ", ".join(failures)
+                    )
+                parts.append(
+                    f"\n## Your Previous Output (revise this)\n\n{previous_output}"
+                )
+                # Still include upstream outputs for reference if needed
+                upstream_outputs = task.input_context.get("upstream_outputs")
+                if upstream_outputs:
+                    parts.append("\n## Reference: Upstream Task Outputs")
+                    for output in upstream_outputs:
+                        parts.append(
+                            f"\n### {output.get('title', 'Previous Task')}\n"
+                            f"{output.get('output', '')}"
+                        )
+            else:
+                # FIRST ATTEMPT: Standard prompt construction
+                upstream_outputs = task.input_context.get("upstream_outputs")
+                if upstream_outputs:
+                    parts.append("\n## Previous Task Outputs")
+                    for output in upstream_outputs:
+                        parts.append(
+                            f"\n### {output.get('title', 'Previous Task')}\n"
+                            f"{output.get('output', '')}"
+                        )
+
+                retry_feedback = task.input_context.get("retry_feedback")
+                if retry_feedback:
+                    parts.append(
+                        f"\n## Feedback from Previous Attempt\n"
+                        f"Your previous output was rejected. Here is the feedback:\n"
+                        f"{retry_feedback}"
                     )
 
-            retry_feedback = task.input_context.get("retry_feedback")
-            if retry_feedback:
-                parts.append(
-                    f"\n## Feedback from Previous Attempt\n"
-                    f"Your previous output was rejected. Here is the feedback:\n"
-                    f"{retry_feedback}"
-                )
+                verification_criteria = task.input_context.get("verification_criteria_hint")
+                if verification_criteria:
+                    parts.append(
+                        f"\n## Quality Requirements\n{verification_criteria}"
+                    )
 
-            verification_criteria = task.input_context.get("verification_criteria_hint")
-            if verification_criteria:
+            # PRD-108: Tell agents about the shared field
+            field_id = task.input_context.get("field_id") if isinstance(task.input_context, dict) else None
+            if field_id:
                 parts.append(
-                    f"\n## Quality Requirements\n{verification_criteria}"
-                )
-
-            # Surface verification feedback from failed attempts
-            verification_feedback = task.input_context.get("verification_feedback")
-            if verification_feedback:
-                parts.append(
-                    f"\n## Feedback from Previous Attempt\n"
-                    f"Your previous output was rejected. Here is the feedback:\n"
-                    f"Reason: {verification_feedback.get('reasoning', 'Unknown')}\n"
-                    f"Failed checks: {', '.join(verification_feedback.get('failures', []))}"
+                    "\n## Shared Mission Field\n"
+                    "You have access to a shared semantic field where all mission agents "
+                    "store and retrieve knowledge. Use these tools:\n"
+                    "- **platform_field_query**: Search for what other agents have found "
+                    "(e.g. research findings, analysis results). Query BEFORE starting work "
+                    "to see what's already known.\n"
+                    "- **platform_field_inject**: Share your key findings, conclusions, or "
+                    "intermediate results so other agents can discover them.\n"
+                    "The field ranks results by relevance — important, frequently-accessed "
+                    "findings surface first. Stale information fades naturally."
                 )
 
         # Inject required output format from verification_criteria

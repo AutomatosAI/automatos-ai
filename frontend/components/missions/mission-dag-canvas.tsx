@@ -174,7 +174,7 @@ export function MissionDAGCanvas({
   onTaskSelect,
   className,
 }: MissionDAGCanvasProps) {
-  const { nodes: layoutedNodes, edges: layoutedEdges, groupRects } = useMemo(
+  const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(
     () => layoutTasks(tasks),
     [tasks],
   )
@@ -227,34 +227,7 @@ export function MissionDAGCanvas({
         maxZoom={1.5}
         proOptions={{ hideAttribution: true }}
       >
-        {/* Parallel group visual containers rendered as SVG overlays */}
-        <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-          {groupRects.map((rect) => (
-            <g key={rect.label}>
-              <rect
-                x={rect.x}
-                y={rect.y}
-                width={rect.width}
-                height={rect.height}
-                rx={8}
-                ry={8}
-                fill="hsla(16, 100%, 60%, 0.03)"
-                stroke="hsla(16, 100%, 60%, 0.15)"
-                strokeWidth={1}
-                strokeDasharray="6 3"
-              />
-              <text
-                x={rect.x + 8}
-                y={rect.y + 12}
-                fill="hsla(16, 100%, 60%, 0.5)"
-                fontSize={10}
-                fontFamily="monospace"
-              >
-                {rect.label}
-              </text>
-            </g>
-          ))}
-        </svg>
+        {/* Parallel group info is shown on individual task nodes */}
 
         <Background gap={20} size={1} color="hsl(0, 0%, 15%)" />
         <Controls

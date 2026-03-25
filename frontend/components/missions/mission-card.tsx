@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { Target, Clock, Coins, MoreHorizontal, Pause, Play, X } from 'lucide-react'
+import { Target, Clock, Coins, MoreHorizontal, Pause, Play, X, Trash2 } from 'lucide-react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import {
@@ -14,7 +14,7 @@ import { MissionStatusBadge } from './mission-status-badge'
 import { cn } from '@/lib/utils'
 import type { MissionResponse, RunState } from '@/types/missions'
 import { DONE_TASK_STATES, TERMINAL_RUN_STATES } from '@/types/missions'
-import { usePauseMission, useResumeMission, useCancelMission } from '@/hooks/use-missions-api'
+import { usePauseMission, useResumeMission, useCancelMission, useDeleteMission } from '@/hooks/use-missions-api'
 import { formatDistanceToNow } from 'date-fns'
 
 interface MissionCardProps {
@@ -28,6 +28,7 @@ export function MissionCard({ mission, index }: MissionCardProps) {
   const pauseMutation = usePauseMission()
   const resumeMutation = useResumeMission()
   const cancelMutation = useCancelMission()
+  const deleteMutation = useDeleteMission()
 
   // Parse plan for task stats (plan is JSONB with tasks array)
   const planTasks = (mission.plan as { tasks?: Array<Record<string, unknown>> })?.tasks ?? []
@@ -90,6 +91,18 @@ export function MissionCard({ mission, index }: MissionCardProps) {
                 <X className="w-4 h-4 mr-2" /> Cancel
               </DropdownMenuItem>
             )}
+            {isTerminal && (
+              <DropdownMenuItem
+                className="text-destructive"
+                onClick={() => {
+                  if (window.confirm('Delete this mission? This cannot be undone.')) {
+                    deleteMutation.mutate(mission.id)
+                  }
+                }}
+              >
+                <Trash2 className="w-4 h-4 mr-2" /> Delete
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -97,7 +110,7 @@ export function MissionCard({ mission, index }: MissionCardProps) {
       {/* Title + description */}
       <div>
         <h3 className="text-sm font-semibold line-clamp-2 leading-snug">
-          {mission.goal.length > 80 ? `${mission.goal.slice(0, 80)}...` : mission.goal}
+          {String((mission.config as Record<string, unknown>)?.name || '') || mission.goal.split(':')[0].slice(0, 80)}
         </h3>
       </div>
 
