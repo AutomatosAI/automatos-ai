@@ -40,3 +40,13 @@
 - Growth-hacker uses composio_execute with GOOGLE_ANALYTICS for metrics
 - SEO specialist uses composio_execute with GOOGLE_ANALYTICS + workspace tools for auditing
 - Fixed ai-citation-strategist: removed specific AI model brand names per no-external-platform rule
+
+## US-006: Sales — 8 skills rewritten (2026-03-25)
+- Rewrote: outbound-strategist, discovery-coach, deal-strategist, pipeline-analyst, account-strategist, coach (Sales Coach), engineer (Sales Engineer), proposal-strategist
+- All skills: frontmatter with tools:{name,description}, identity paragraph, 5-6 step workflow with JSON tool calls, output format template, "What NOT To Do" section
+- Line counts: 86-97 lines (within 60-100 target)
+- CRM skills (outbound-strategist, deal-strategist, pipeline-analyst, account-strategist) use composio_execute with HUBSPOT actions
+- Outreach skill (outbound-strategist) uses composio_execute with GMAIL_SEND_EMAIL
+- account-strategist uses platform_workspace_stats for usage health cross-referencing
+- coach and discovery-coach focus on workspace_read_file for transcript/performance analysis
+- proposal-strategist uses workspace_grep for searching proposal content library by win theme
