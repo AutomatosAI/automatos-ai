@@ -10,7 +10,7 @@ Rewrite all 81 imported skills to Automatos production quality. Each skill must 
 ## Tasks
 
 ### Phase 1: Infrastructure
-- [ ] US-001: Create SKILL-GUIDE.md reference + fix seed script frontmatter parsing for tools:{name,description} format
+- [x] US-001: Create SKILL-GUIDE.md reference + fix seed script frontmatter parsing for tools:{name,description} format
 
 ### Phase 2: Skill Rewrites by Category
 - [ ] US-002: Engineering batch 1 (8): frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer

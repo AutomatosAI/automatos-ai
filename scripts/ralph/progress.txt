@@ -1,1 +1,10 @@
 # PRD-120 Phase 2: Skill Rewrites — Progress Log
+
+## US-001: SKILL-GUIDE.md + seed script updates (2026-03-25)
+- Created automatos-skills/SKILL-GUIDE.md with full format spec, tool reference, examples
+- Updated seed script frontmatter parser to handle tools: [{name, description}] dicts
+- Added CATEGORY_MODEL_MAP (category → default model slug)
+- Added SLUG_MODEL_OVERRIDES (13 opus, 3 haiku overrides)
+- Removed reliance on recommended_model/recommended_tools frontmatter fields
+- Fixed identity extraction to handle both ## Identity and # Title paragraph formats
+- Dry run: 97 entries, correct model assignments

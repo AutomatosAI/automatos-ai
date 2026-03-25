@@ -46,6 +46,45 @@ MODEL_ID_MAP: dict[str, str] = {
     "opus-4.6": "anthropic/claude-opus-4-6",
 }
 
+# Category → default model slug (most skills use sonnet-4.6)
+CATEGORY_MODEL_MAP: dict[str, str] = {
+    "engineering": "sonnet-4.6",
+    "design": "sonnet-4.6",
+    "marketing": "sonnet-4.6",
+    "sales": "sonnet-4.6",
+    "product": "sonnet-4.6",
+    "project-management": "sonnet-4.6",
+    "support": "sonnet-4.6",
+    "testing": "sonnet-4.6",
+    "paid-media": "sonnet-4.6",
+    "specialized": "sonnet-4.6",
+    "agent-role": "sonnet-4.6",
+    "productivity": "sonnet-4.6",
+    "social-media": "sonnet-4.6",
+}
+
+# Per-skill model overrides (slug → model slug)
+SLUG_MODEL_OVERRIDES: dict[str, str] = {
+    # Complex reasoning → opus
+    "backend-architect": "opus-4.6",
+    "security-engineer": "opus-4.6",
+    "software-architect": "opus-4.6",
+    "incident-response-commander": "opus-4.6",
+    "threat-detection-engineer": "opus-4.6",
+    "deal-strategist": "opus-4.6",
+    "proposal-strategist": "opus-4.6",
+    "ux-architect": "opus-4.6",
+    "manager": "opus-4.6",
+    "project-manager-senior": "opus-4.6",
+    "legal-compliance-checker": "opus-4.6",
+    "compliance-auditor": "opus-4.6",
+    "growth-hacker": "opus-4.6",
+    # Simple/repetitive → haiku
+    "support-responder": "haiku-4.5",
+    "analytics-reporter": "haiku-4.5",
+    "finance-tracker": "haiku-4.5",
+}
+
 # ---------------------------------------------------------------------------
 # YAML frontmatter parser (stdlib only — no PyYAML dependency)
 # ---------------------------------------------------------------------------
@@ -55,8 +94,8 @@ def _parse_frontmatter(text: str) -> dict:
     """Parse YAML frontmatter between --- delimiters.
 
     Handles scalar values, flow-style lists ([a, b, c]), multi-line >- scalars,
-    and nested keys at one level.  NOT a full YAML parser — tailored for the
-    SKILL.md format produced by import_agency_skills.py.
+    block lists of strings, and block lists of {name, description} dicts (the
+    tools: format used by SKILL.md v2).
     """
     m = re.match(r"^---\n(.*?)\n---", text, re.DOTALL)
     if not m:
@@ -66,12 +105,16 @@ def _parse_frontmatter(text: str) -> dict:
     result: dict = {}
     current_key: Optional[str] = None
     multiline_buf: list[str] = []
-    list_buf: list[str] = []
+    list_buf: list = []
+    current_dict: Optional[dict] = None
 
     def _flush() -> None:
-        nonlocal current_key, multiline_buf, list_buf
+        nonlocal current_key, multiline_buf, list_buf, current_dict
         if current_key is None:
             return
+        if current_dict:
+            list_buf.append(current_dict)
+            current_dict = None
         if list_buf:
             result[current_key] = list_buf
             list_buf = []
@@ -81,11 +124,28 @@ def _parse_frontmatter(text: str) -> dict:
         current_key = None
 
     for line in lines:
-        # Block-list item:  "  - value"
+        # Block-list item starting with "  - "
         if re.match(r"^\s+-\s+", line) and current_key:
+            # Flush any previous dict in the list
+            if current_dict:
+                list_buf.append(current_dict)
+                current_dict = None
+
             val = re.sub(r"^\s+-\s+", "", line).strip()
-            list_buf.append(val)
+            # Check if it's a key: value (start of a dict item)
+            kv = re.match(r"^(\w[\w-]*):\s*(.*)", val)
+            if kv:
+                current_dict = {kv.group(1): kv.group(2).strip().strip("'\"") if kv.group(2).strip() else ""}
+            else:
+                list_buf.append(val)
             continue
+
+        # Nested dict key continuation: "    key: value"
+        if current_dict and re.match(r"^\s{4,}\w", line):
+            kv = re.match(r"^\s+(\w[\w-]*):\s*(.*)", line)
+            if kv:
+                current_dict[kv.group(1)] = kv.group(2).strip().strip("'\"") if kv.group(2).strip() else ""
+                continue
 
         # Multi-line continuation (indented, no key)
         if line.startswith("  ") and current_key and not re.match(r"^\s+\w+:", line):
@@ -100,7 +160,6 @@ def _parse_frontmatter(text: str) -> dict:
             val = km.group(2).strip()
 
             if val == ">-" or val == ">":
-                # multi-line scalar follows
                 multiline_buf = []
                 continue
 
@@ -112,27 +171,40 @@ def _parse_frontmatter(text: str) -> dict:
                 current_key = None
                 continue
 
-            # Simple scalar
-            result[current_key] = val.strip("'\"") if val else ""
-            current_key = None
+            # Simple scalar (but empty value may precede a list — keep key active)
+            if val:
+                result[current_key] = val.strip("'\"")
+                current_key = None
+            # else: keep current_key — a list or block may follow
 
     _flush()
     return result
 
 
 def _extract_identity(text: str) -> str:
-    """Extract content under ## Identity section and build a persona string."""
-    # Find the Identity section
+    """Extract persona text from the skill body.
+
+    Tries in order:
+    1. Text under ## Identity section (legacy format)
+    2. First paragraph after the top-level # heading (new format, e.g. Sentinel)
+    """
+    # Try ## Identity section first
     m = re.search(r"^## Identity\s*\n(.*?)(?=\n## |\Z)", text, re.MULTILINE | re.DOTALL)
-    if not m:
-        return ""
-    content = m.group(1).strip()
-    # Remove markdown references/instructions lines
-    lines = [
-        ln for ln in content.split("\n")
-        if ln.strip() and not ln.strip().startswith("**Instructions Reference**")
-    ]
-    return "\n".join(lines)
+    if m:
+        content = m.group(1).strip()
+        lines = [
+            ln for ln in content.split("\n")
+            if ln.strip() and not ln.strip().startswith("**Instructions Reference**")
+        ]
+        return "\n".join(lines)
+
+    # Try first paragraph after top-level heading (after frontmatter)
+    body = re.sub(r"^---\n.*?\n---\s*", "", text, flags=re.DOTALL)
+    m = re.search(r"^#\s+.+\n\n(.+?)(?=\n\n|\n##|\Z)", body)
+    if m:
+        return m.group(1).strip()
+
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -167,12 +239,19 @@ def parse_skill_file(skill_path: Path) -> Optional[CatalogEntry]:
     identity_text = _extract_identity(text)
     persona = f"You are a {fm['name']}. {identity_text}".strip() if identity_text else f"You are a {fm['name']}."
 
-    raw_model = fm.get("recommended_model", "sonnet-4.6")
+    # Model: slug override > category default > sonnet-4.6
+    raw_model = SLUG_MODEL_OVERRIDES.get(slug, CATEGORY_MODEL_MAP.get(category, "sonnet-4.6"))
     model_id = MODEL_ID_MAP.get(raw_model, raw_model)
 
-    tools = fm.get("recommended_tools", [])
-    if isinstance(tools, str):
-        tools = [tools]
+    # Extract tool names from tools: [{name, description}] or fall back to
+    # legacy recommended_tools: [string] format
+    raw_tools = fm.get("tools", [])
+    if raw_tools and isinstance(raw_tools[0], dict):
+        tools = [t["name"] for t in raw_tools if isinstance(t, dict) and "name" in t]
+    else:
+        tools = fm.get("recommended_tools", raw_tools)
+        if isinstance(tools, str):
+            tools = [tools]
 
     tags = fm.get("tags", [])
     if isinstance(tags, str):
