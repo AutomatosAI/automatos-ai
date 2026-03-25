@@ -62,3 +62,15 @@
 - image-prompt-engineer: maintains prompt library with subject/style/lighting/mood structure
 - inclusive-visuals-specialist: separate tracks for accessibility vs representation
 - Fixed batch 2 skills: changed "input" to "params" in JSON tool call blocks (matching Sentinel format)
+
+## US-008: Product + PM — 11 skills rewritten (2026-03-25)
+- Rewrote: sprint-prioritizer, trend-researcher, feedback-synthesizer, behavioral-nudge-engine, manager, project-shepherd, studio-producer, experiment-tracker, jira-workflow-steward, project-manager-senior, studio-operations
+- All skills: frontmatter with tools:{name,description}, identity paragraph, 6-step workflow with JSON tool calls, output format template, "What NOT To Do" section
+- Line counts: 95-101 lines (within target range)
+- PM skills heavily use platform_create_task, platform_list_tasks, platform_board_summary for board management
+- jira-workflow-steward uses composio_execute with JIRA_LIST_ISSUES and JIRA_UPDATE_ISSUE
+- manager uses ICE scoring framework (Impact x Confidence x Ease)
+- sprint-prioritizer uses priority formula: (Impact x 2 + Urgency) / Effort
+- feedback-synthesizer mines platform_search_chat_history for user feedback signals
+- behavioral-nudge-engine searches chat history for drop-off/confusion patterns
+- project-shepherd and studio-operations use platform_schedule_task for recurring reviews
