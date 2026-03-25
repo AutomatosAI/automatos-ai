@@ -1,33 +1,30 @@
-# PRD-120 Skills Marketplace & Agent Catalog — Implementation Plan
+# PRD-120 Phase 2: Skill Rewrites — Implementation Plan
 
 ## Overview
-Import ~65 professional agent skills from agency-agents, build agent templates marketplace with one-click deploy, and create the Business Plan Mission Template that configures entire workspaces.
+Rewrite all 81 imported skills to Automatos production quality. Each skill must have: proper persona, real platform/workspace/composio tool mappings with JSON call examples, structured workflows, output formats, and anti-patterns. Quality bar = Sentinel + Scout skills.
 
-## Branch: ralph/prd-120-skills-marketplace-agent-catalog
+## Branch: ralph/prd-120-skill-rewrites
 
 ---
 
 ## Tasks
 
-### Phase 1: Skill Import Infrastructure
-- [x] US-001: Create automatos-skills/ directory structure + Python import/conversion script
-- [x] US-002: Clone agency-agents, import Engineering + Design skills (29 skills: 21 eng + 8 design)
-- [x] US-003: Import Marketing, Sales, Product, PM, Support skills (41 skills: 16 mkt + 8 sales + 5 product + 6 pm + 6 support)
-- [x] US-004: Import Tier 2 selective skills (Testing, Paid Media, Specialized ~11 skills) + CATALOG.md
+### Phase 1: Infrastructure
+- [ ] US-001: Create SKILL-GUIDE.md reference + fix seed script frontmatter parsing for tools:{name,description} format
 
-### Phase 2: Database & API
-- [x] US-005: Add agent_catalog_templates DB table + Alembic migration + SQLAlchemy model
-- [x] US-006: Seed agent catalog templates from imported SKILL.md files (55+ rows)
-- [x] US-007: Marketplace API endpoints (browse, search, categories, deploy)
+### Phase 2: Skill Rewrites by Category
+- [ ] US-002: Engineering batch 1 (8): frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer
+- [ ] US-003: Engineering batch 2 (8): code-reviewer, software-architect, technical-writer, mobile-app-builder, senior-developer, git-workflow-master, rapid-prototyper, incident-response-commander
+- [ ] US-004: Engineering batch 3 (5): threat-detection-engineer, solidity-smart-contract-engineer, embedded-firmware-engineer, ai-data-remediation-engineer, autonomous-optimization-architect
+- [ ] US-005: Marketing (16): growth-hacker, content-creator, seo-specialist, social-media-strategist, linkedin-content-creator, twitter-engager, tiktok-strategist, instagram-curator, podcast-strategist, reddit-community-builder, app-store-optimizer, carousel-growth-engine, short-video-editing-coach, ai-citation-strategist, book-co-author, cross-border-ecommerce
+- [ ] US-006: Sales (8): outbound-strategist, discovery-coach, deal-strategist, pipeline-analyst, account-strategist, coach, engineer, proposal-strategist
+- [ ] US-007: Design (8): ui-designer, ux-researcher, ux-architect, brand-guardian, visual-storyteller, image-prompt-engineer, inclusive-visuals-specialist, whimsy-injector
+- [ ] US-008: Product + PM (11): sprint-prioritizer, trend-researcher, feedback-synthesizer, behavioral-nudge-engine, manager, project-shepherd, studio-producer, experiment-tracker, jira-workflow-steward, project-manager-senior, studio-operations
+- [ ] US-009: Support + Testing (9): support-responder, analytics-reporter, finance-tracker, legal-compliance-checker, executive-summary-generator, infrastructure-maintainer, performance-benchmarker, api-tester, accessibility-auditor
+- [ ] US-010: Paid Media + Specialized (8): ppc-strategist, creative-strategist, auditor, document-generator, compliance-auditor, recruitment-specialist, supply-chain-strategist, developer-advocate
 
-### Phase 3: Frontend
-- [x] US-008: Marketplace page with category grid + agent cards + search
-- [x] US-009: Agent template detail modal + one-click deploy button
-
-### Phase 4: Business Plan Template & Wiring
-- [x] US-010: Business Plan mission template in TEMPLATE_REGISTRY (4 phases, parallel groups)
-- [x] US-011: Mission template selector in create-mission-modal + backend template_id hint
-- [x] US-012: Integration tests + catalog validation
+### Phase 3: Validation
+- [ ] US-011: Validate all 81 skills, run seed dry-run, commit to skills repo
 
 ---
 
@@ -35,81 +32,76 @@ Import ~65 professional agent skills from agency-agents, build agent templates m
 
 | File | Purpose |
 |------|---------|
-| `orchestrator/api/marketplace.py` | Existing marketplace router at /api/marketplace |
-| `orchestrator/api/marketplace_plugins.py` | Plugin marketplace (separate from agent catalog) |
-| `orchestrator/api/skills.py` | Skill management API (PRD-22) |
-| `orchestrator/api/agents.py` | Agent CRUD endpoints |
-| `orchestrator/api/missions.py` | Mission create/approve/list endpoints |
-| `orchestrator/core/models/core.py` | SQLAlchemy models — Agent, AgentTemplate (Pydantic, line ~863), BoardTask |
-| `orchestrator/modules/coordination/templates.py` | Mission templates — TEMPLATE_REGISTRY, TaskTemplate, render_template |
-| `orchestrator/modules/coordination/agent_matcher.py` | _ROLE_SYNONYMS for agent role matching |
-| `orchestrator/modules/tools/discovery/platform_actions.py` | Platform tool registration (ActionDefinitions) |
-| `orchestrator/modules/tools/discovery/platform_executor.py` | Platform tool handlers |
-| `orchestrator/modules/tools/discovery/actions_playbooks.py` | platform_create_playbook (ALREADY EXISTS) |
-| `orchestrator/modules/tools/discovery/actions_board_tasks.py` | platform_board_summary (board task tools) |
-| `orchestrator/core/config.py` | ALL config constants |
-| `frontend/components/missions/create-mission-modal.tsx` | Mission creation UI |
-| `frontend/hooks/use-missions-api.ts` | Mission React Query hooks |
-| `frontend/types/missions.ts` | Mission TypeScript interfaces |
-| `docs/PRDS/120-SKILLS-MARKETPLACE-AGENT-CATALOG.md` | Full PRD |
+| `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/sentinel/SKILL.md` | Gold standard: monitoring skill with tool calls |
+| `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/scout/SKILL.md` | Gold standard: sales/outreach skill with CRM tools |
+| `scripts/seed_agent_catalog.py` | Seed script — parses SKILL.md, populates DB |
+| `orchestrator/modules/tools/discovery/platform_actions.py` | All platform tool registrations |
+| `orchestrator/modules/tools/discovery/workspace_actions.py` | All workspace tool registrations |
+| `orchestrator/modules/context/sections/skills.py` | How skill content gets injected into agent prompts |
+| `orchestrator/core/models/core.py` | Agent + Skill SQLAlchemy models |
 
-## Architecture Rules (CRITICAL)
+## Quality Bar (CRITICAL)
 
-- Python 3.11+ with type hints on all public functions
-- SQLAlchemy ORM with sync Session — follow existing patterns
-- FastAPI endpoints with Pydantic BaseModel
-- ALL config values go in orchestrator/core/config.py — NO os.getenv() anywhere else
-- Agent roles in templates: use categories from _ROLE_SYNONYMS in agent_matcher.py
-- NO hardcoded values — use config constants
-- Frozen dataclasses for immutable data
-- BEFORE DELETING ANY CODE: grep EVERY file for callers
-- React Query v4 on frontend (isLoading not isPending)
-- Skills go in automatos-skills/skills/{category}/{slug}/SKILL.md
-- Agent catalog templates keyed by slug matching skill directory name
+Every rewritten skill MUST have:
+
+1. **Frontmatter**: name, description (1 sentence), version, tags, category: agent-role, tools: [{name, description}]
+2. **Identity**: 1-2 sentences — who this agent is in the Automatos context
+3. **Workflow**: Numbered steps with ```json code blocks showing exact tool calls with realistic params
+4. **Output Format**: Structured template (like Sentinel's status report)
+5. **What NOT To Do**: 3-5 anti-patterns specific to the role
+6. **Length**: 60-100 lines, no filler, every line actionable
+
+## Tool Reference
+
+### Platform Tools (agents call these via function calling)
+- `platform_get_system_health` — service health + response times
+- `platform_get_logs` — app logs by severity (params: severity, limit)
+- `platform_get_llm_usage` — token usage + cost metrics
+- `platform_get_cost_breakdown` — detailed cost analysis
+- `platform_workspace_stats` — workspace metrics
+- `platform_submit_report` — submit status/standup/audit report (params: title, report_type, status, content, metrics, summary)
+- `platform_get_latest_report` — read previous report (params: agent_name)
+- `platform_create_task` — create board task (params: title, description, priority, status)
+- `platform_list_tasks` — list board tasks (params: status filter)
+- `platform_board_summary` — board state overview
+- `platform_search_memory` — search workspace knowledge
+- `platform_search_chat_history` — search past conversations
+- `platform_query_loki_logs` — LogQL query
+- `platform_publish_blog_post` — publish content
+- `platform_schedule_task` — schedule recurring work
+
+### Workspace Tools (file/code operations)
+- `workspace_read_file` — read file (params: path)
+- `workspace_write_file` — write file (params: path, content)
+- `workspace_list_dir` — list directory (params: path)
+- `workspace_grep` — regex search (params: pattern, path, include, max_results)
+- `workspace_exec` — run command (params: command, cwd, timeout)
+- `workspace_git` — git operations (params: operation, args)
+
+### Composio (external service actions)
+- `composio_execute` — execute external action (params: action, app_name, ...)
+  - HUBSPOT: LIST_CONTACTS, CREATE_CONTACT, UPDATE_CONTACT, CREATE_DEAL
+  - GMAIL: SEND_EMAIL, LIST_EMAILS
+  - LINKEDIN: SEND_MESSAGE, CREATE_POST
+  - TWITTER: CREATE_TWEET
+  - GOOGLE_SHEETS: READ_RANGE, WRITE_RANGE
+  - GOOGLE_ANALYTICS: GET_REPORT
+  - JIRA: CREATE_ISSUE, LIST_ISSUES, UPDATE_ISSUE
+  - GITHUB: CREATE_ISSUE, LIST_REPOS
+  - SLACK: SEND_MESSAGE
 
 ## Validation
 
-Backend Python imports:
+Seed script dry-run:
 ```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -c "
-from orchestrator.modules.coordination import templates, planner, dispatcher, agent_matcher
-from orchestrator.api import marketplace
-print('All imports OK')
-" 2>&1 | tail -5
+python3 scripts/seed_agent_catalog.py --dry-run 2>&1 | tail -5
 ```
 
-Tests:
+Skill count:
 ```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai && python -m pytest orchestrator/tests/ -x -q --timeout=30 2>&1 | tail -20
+find /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills -name "SKILL.md" | wc -l
 ```
-
-Frontend:
-```bash
-cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/frontend && npx tsc --noEmit 2>&1 | grep -iE "marketplace|agent-template|create-mission" | head -10
-```
-
-Skill count check:
-```bash
-find automatos-skills/skills -name "SKILL.md" | wc -l
-```
-
-Note: Pre-existing errors may exist in other files. Only check for NEW errors introduced by your changes.
 
 ## Discovered Issues
 
-- agency-agents filenames include division prefix (e.g., `engineering-backend-architect.md`). Import script strips this to produce clean slugs.
-- agency-agents has `strategy` and `academic` divisions not listed in PRD — skipped (not in DIVISION_TO_CATEGORY).
-- Total unfiltered count across all divisions: 121 agents. US-002/003/004 filtering will narrow to ~65.
-- Python import validation requires venv with sqlalchemy etc. — pre-existing, not caused by this change.
-- Many source agent files lack Workflow/Deliverables sections. Import script updated with fallback content generation for missing sections.
-- Engineering yielded 21 skills (not ~15 as estimated) — no game-dev agents in engineering division to filter. All are professional software skills.
-- Design yielded 8 skills (not ~6 as estimated) — includes whimsy-injector and inclusive-visuals-specialist which are niche but useful.
-- SKIP_AGENTS needed post-strip slug variants — original slugs had division prefix, but skip check runs after stripping. Added 9 additional China-specific slugs.
-- Marketing yielded 16 skills (not ~12 as estimated) — more non-China agents than expected. Filtered: baidu, bilibili, douyin, kuaishou, weibo, xiaohongshu, zhihu, china-ecommerce, private-domain, livestream-commerce, wechat-official-account.
-- Product yielded 5 skills (not ~4) — includes behavioral-nudge-engine, a useful product psychology agent.
-- Total skills after US-003: 70 (29 from US-002 + 41 from US-003).
-- US-004: Testing yielded 3 skills (accessibility-auditor, api-tester, performance-benchmarker). Paid Media yielded 3 (auditor, creative-strategist, ppc-strategist). Specialized yielded 5 (compliance-auditor, developer-advocate, document-generator, recruitment-specialist, supply-chain-strategist).
-- Total skills after US-004: 81 (70 + 11). Exceeds the 55+ target by 26.
-- CATALOG.md generated with full table of all 81 skills across 10 categories.
-- US-012: business_plan template had min_tasks=14 but only 12 task_templates — fixed to min_tasks=12, max_tasks=14.
-- US-012: Pre-existing test_parallel_decomposition failure for business_plan — mock agents lack "admin" role. Not introduced by US-012.
+(Ralph will log issues here during implementation)

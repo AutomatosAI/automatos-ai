@@ -1,248 +1,190 @@
 {
   "project": "Automatos AI Platform",
-  "branchName": "ralph/prd-120-skills-marketplace-agent-catalog",
-  "description": "PRD-120: Skills Marketplace & Agent Catalog — Import ~65 professional agent skills from agency-agents, build agent templates marketplace with one-click deploy, and create the Business Plan Mission Template that configures entire workspaces.",
+  "branchName": "ralph/prd-120-skill-rewrites",
+  "description": "PRD-120 Phase 2: Rewrite all 81 imported skills to Automatos quality — proper personas, real platform/workspace/composio tool mappings with JSON call examples, structured workflows, output formats, and anti-patterns. Match Sentinel/Scout quality bar.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create skill directory structure and import conversion script",
-      "description": "As a developer, I need a directory structure for skills and a Python script that converts agency-agents markdown files to Automatos SKILL.md format.",
+      "title": "Create skill rewrite reference guide and fix seed script frontmatter parsing",
+      "description": "As a developer, I need a reference guide for skill authors and an updated seed script that parses the correct tools: frontmatter format.",
       "acceptanceCriteria": [
-        "Create automatos-skills/skills/ directory with subdirectories: engineering, design, marketing, sales, product, project-management, testing, support, paid-media, specialized",
-        "Create automatos-skills/README.md with skill format specification (frontmatter: name, version, category, tags, description, recommended_tools, recommended_model + sections: Identity, Core Mission, Workflow, Deliverables, Rules)",
-        "Create scripts/import_agency_skills.py that: reads a source markdown file with YAML frontmatter, extracts name/description/tools/services, maps tools to Automatos equivalents (workspace_read_file, workspace_write_file, workspace_exec, composio tools), assigns recommended_model based on complexity, strips platform-specific references, outputs Automatos SKILL.md format",
-        "Script accepts --source-dir (agency-agents clone path) and --output-dir (automatos-skills/skills/) arguments",
-        "Script has --category flag to process one category at a time",
-        "Script has --dry-run flag that prints conversion plan without writing files",
-        "Script maps agency-agents divisions to Automatos categories (engineering->engineering, design->design, marketing->marketing, etc.)",
-        "Script trims output to 200-400 lines per skill, removing filler and emoji section markers",
-        "Run script with --dry-run on at least one sample file to verify output format",
+        "Create automatos-skills/SKILL-GUIDE.md documenting the Automatos SKILL.md format with: frontmatter spec (name, description, version, tags, category, tools list with {name, description}), body sections (identity, workflow with tool call JSON, output format, anti-patterns), and 2 annotated examples (Sentinel for monitoring, Scout for sales)",
+        "Update scripts/seed_agent_catalog.py to parse tools: as list of {name, description} dicts (current format) instead of recommended_tools (string list)",
+        "Update seed script to derive recommended_model from a CATEGORY_MODEL_MAP instead of reading recommended_model from frontmatter — engineering/testing: sonnet-4.6, marketing/sales/design/product/pm/support: sonnet-4.6, paid-media/specialized: sonnet-4.6, simple repetitive roles (support-responder, finance-tracker, analytics-reporter): haiku-4.5, complex reasoning (software-architect, security-engineer, deal-strategist, compliance-auditor): opus-4.6",
+        "Add SLUG_MODEL_OVERRIDES dict in seed script for per-skill model overrides that differ from category default",
+        "Update seed script to extract tool names from tools: [{name, description}] for the recommended_tools column",
+        "Seed script dry-run works with current skills repo: python3 scripts/seed_agent_catalog.py --dry-run",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "The script should use standard library only (no extra deps). Tool mapping: agency-agents uses generic tool names like 'WebFetch', 'Read', 'Write', 'Edit', 'Bash' — map these to workspace_read_file, workspace_write_file, workspace_exec. Services like 'GitHub' map to GITHUB composio tool. Model mapping: simple/repetitive tasks -> haiku-4.5, standard work -> sonnet-4.6, complex reasoning -> opus-4.6. The script parses YAML frontmatter between --- delimiters."
+      "notes": "The seed script is at scripts/seed_agent_catalog.py. The skills repo is at /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills. The guide goes IN the skills repo. Read sentinel/SKILL.md and scout/SKILL.md as reference implementations — they define the quality bar. The frontmatter format is: tools: [{name: 'platform_foo', description: 'What it does'}]. The seed script currently reads recommended_tools (list of strings) and recommended_model (string) — both need updating. For model selection: most skills should be sonnet-4.6, only override to haiku for simple/repetitive or opus for complex reasoning."
     },
     {
       "id": "US-002",
-      "title": "Clone agency-agents and import Tier 1 Engineering + Design skills",
-      "description": "As a developer, I want to import the first batch of high-priority skills from the agency-agents repository.",
+      "title": "Rewrite Engineering skills batch 1 (8 skills)",
+      "description": "As a skill author, I want Engineering skills rewritten to Automatos quality with proper tool mappings and workflows.",
       "acceptanceCriteria": [
-        "Clone github.com/msitarzewski/agency-agents to a temp directory (or scripts/vendor/agency-agents)",
-        "Run import script for Engineering division — expect ~15 skills after filtering (skip game-dev specific ones)",
-        "Run import script for Design division — expect ~6 skills",
-        "Each output SKILL.md has valid frontmatter with name, version (1.0.0), category, tags, description, recommended_tools, recommended_model",
-        "Each output SKILL.md has Identity, Core Mission, Workflow, Deliverables, and Rules sections",
-        "No output file references OpenClaw, Cursor, Qwen, or other non-Automatos platforms",
-        "All recommended_tools reference valid Automatos tool names (workspace_*, composio tools like GITHUB, SLACK, GOOGLE_SHEETS)",
-        "At least 18 SKILL.md files created in automatos-skills/skills/engineering/ and automatos-skills/skills/design/",
-        "Typecheck passes"
+        "Rewrite these 8 skills in /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/: frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer",
+        "Each skill has frontmatter: name, description (1 sentence), version: 1.0.0, tags (3-5 relevant), category: agent-role, tools: list of {name, description} pairs",
+        "Each skill body has: identity paragraph (who this agent is in Automatos context), workflow (numbered steps with tool call JSON examples), output format (structured template), 'What NOT To Do' section",
+        "Tools are selected from the ENGINEERING TOOL KIT (see notes) — each skill uses 3-6 tools most relevant to its domain",
+        "Workflows reference specific tool calls with realistic parameters — not generic 'analyze and implement'",
+        "Each file is 60-100 lines, no filler, every line actionable",
+        "No references to external platforms (Cursor, OpenClaw, etc.)",
+        "All 8 files written to the skills repo directory"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "Clone to scripts/vendor/agency-agents (gitignored). The agency-agents repo structure has divisions as top-level directories with agent markdown files inside. Engineering includes: frontend-developer, backend-architect, devops, security-engineer, ai-engineer, SRE, database, API, mobile, etc. Design includes: ui-designer, ux-researcher, brand-guardian, design-system, etc. Skip any agents that are too niche (game-dev, spatial-computing). If the import script needs tweaks for edge cases in the source files, fix the script."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nREFERENCE: Read sentinel/SKILL.md and scout/SKILL.md first — match their quality.\n\nENGINEERING TOOL KIT:\n- workspace_read_file: Read source code, configs, logs\n- workspace_write_file: Write/update code, configs, docs\n- workspace_list_dir: Explore repo structure\n- workspace_grep: Search codebase for patterns, functions, errors\n- workspace_exec: Run tests, linters, builds, scripts (pytest, npm, pip, docker)\n- workspace_git: Git operations (status, diff, commit, push, log, blame)\n- platform_get_logs: Retrieve application logs by severity\n- platform_get_system_health: Check service health and response times\n- platform_query_loki_logs: Query centralized logs via LogQL\n- platform_submit_report: Submit findings/status report\n- platform_get_latest_report: Read previous reports for context\n- platform_create_task: Create board tasks for work items\n\nMODEL GUIDANCE:\n- frontend-developer: sonnet-4.6 (code gen)\n- backend-architect: opus-4.6 (complex design)\n- devops-automator: sonnet-4.6 (infrastructure)\n- security-engineer: opus-4.6 (security analysis)\n- ai-engineer: sonnet-4.6 (ML/AI work)\n- sre: sonnet-4.6 (reliability)\n- data-engineer: sonnet-4.6 (pipelines)\n- database-optimizer: sonnet-4.6 (query optimization)\n\nEXAMPLE WORKFLOW STEP (from Sentinel):\n### Step 1: Scan Codebase\n```json\n{ \"tool\": \"workspace_grep\", \"params\": { \"pattern\": \"TODO|FIXME|HACK\", \"path\": \"src/\" } }\n```\nIdentify technical debt markers and prioritize by severity."
     },
     {
       "id": "US-003",
-      "title": "Import Tier 1 Marketing, Sales, Product, PM, and Support skills",
-      "description": "As a developer, I want to import the remaining high-priority skill divisions.",
+      "title": "Rewrite Engineering skills batch 2 (8 skills)",
+      "description": "As a skill author, I want remaining Engineering skills rewritten to Automatos quality.",
       "acceptanceCriteria": [
-        "Run import script for Marketing division — expect ~12 skills (skip China-specific: Xiaohongshu, WeChat, Baidu, Bilibili, Douyin, Kuaishou, Weibo)",
-        "Run import script for Sales division — expect ~8 skills",
-        "Run import script for Product division — expect ~4 skills",
-        "Run import script for Project Management division — expect ~6 skills",
-        "Run import script for Support division — expect ~6 skills",
-        "Each output SKILL.md follows the same format validation as US-002",
-        "No China-specific marketing skills imported (filter by name or manual skip list)",
-        "At least 30 new SKILL.md files created across the 5 category directories",
-        "Typecheck passes"
+        "Rewrite these 8 skills: code-reviewer, software-architect, technical-writer, mobile-app-builder, senior-developer, git-workflow-master, rapid-prototyper, incident-response-commander",
+        "Same quality criteria as US-002: frontmatter with tools:{name,description}, identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Tools selected from ENGINEERING TOOL KIT (see US-002 notes)",
+        "Each file 60-100 lines",
+        "All 8 files written to the skills repo"
       ],
       "priority": 3,
       "passes": false,
-      "notes": "Marketing has the most agents (~25) but we skip China-specific ones (~7), leaving ~18. Some may not map well — use judgment. Sales includes: outbound-strategist, discovery-coach, deal-strategist, pipeline-manager, etc. Product includes: sprint-prioritizer, trend-researcher, feedback-synthesizer, product-strategist. PM includes: project-shepherd, studio-producer, experiment-tracker, etc. Support includes: support-responder, analytics-reporter, finance-tracker, legal-compliance."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md first as reference.\n\nUse same ENGINEERING TOOL KIT from US-002.\n\nMODEL GUIDANCE:\n- code-reviewer: sonnet-4.6\n- software-architect: opus-4.6 (complex design decisions)\n- technical-writer: sonnet-4.6\n- mobile-app-builder: sonnet-4.6\n- senior-developer: sonnet-4.6\n- git-workflow-master: sonnet-4.6\n- rapid-prototyper: sonnet-4.6\n- incident-response-commander: opus-4.6 (crisis reasoning)\n\nNOTE: incident-response-commander should reference platform_get_logs, platform_get_system_health, platform_query_loki_logs heavily — it's the crisis version of Sentinel.\n\nNOTE: code-reviewer workflow should grep for patterns, read files, then write review report."
     },
     {
       "id": "US-004",
-      "title": "Import Tier 2 selective skills (Testing, Paid Media, Specialized)",
-      "description": "As a developer, I want to import selectively from lower-priority divisions.",
+      "title": "Rewrite Engineering skills batch 3 (5 remaining)",
+      "description": "As a skill author, I want the last Engineering skills rewritten.",
       "acceptanceCriteria": [
-        "Run import for Testing: QA Engineer, Performance Benchmarker, API Tester (3 skills)",
-        "Run import for Paid Media: PPC Strategist, Ad Creative Strategist, Analytics (3 skills)",
-        "Run import for Specialized: Document Generator, Compliance Auditor, Recruitment Specialist, Supply Chain Manager, Developer Advocate (5 skills)",
-        "Skip all Game Development and Spatial Computing agents",
-        "Each output SKILL.md follows format validation",
-        "At least 10 new SKILL.md files created across testing/, paid-media/, specialized/ directories",
-        "Create automatos-skills/CATALOG.md — a table listing ALL imported skills with: slug, category, description, recommended_model (for easy browsing)",
-        "Total skill count across all categories is 55+",
-        "Typecheck passes"
+        "Rewrite these 5 skills: threat-detection-engineer, solidity-smart-contract-engineer, embedded-firmware-engineer, ai-data-remediation-engineer, autonomous-optimization-architect",
+        "Same quality criteria as US-002",
+        "Tools selected from ENGINEERING TOOL KIT",
+        "Each file 60-100 lines",
+        "All 5 files written to the skills repo"
       ],
       "priority": 4,
       "passes": false,
-      "notes": "Tier 2 is selective — only import the most broadly useful agents from each division. The CATALOG.md is for developer reference and marketplace seeding. Count all .md files in automatos-skills/skills/**/ to verify total. Testing division agents may have names like qa-engineer, performance-tester, api-tester, accessibility-auditor — pick the 3 most general."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md first as reference.\n\nUse same ENGINEERING TOOL KIT from US-002.\n\nMODEL GUIDANCE: All sonnet-4.6 except threat-detection-engineer which should be opus-4.6 (security analysis).\n\nNOTE: These are more niche engineering roles. solidity-smart-contract-engineer focuses on blockchain — workspace tools for code review/writing. embedded-firmware-engineer is hardware-adjacent — workspace tools. ai-data-remediation-engineer works with data quality — workspace_exec for running data scripts. autonomous-optimization-architect is a meta-role for system optimization."
     },
     {
       "id": "US-005",
-      "title": "Add agent_catalog_templates DB table and migration",
-      "description": "As a developer, I need a database table to store agent templates for the marketplace one-click deploy feature.",
+      "title": "Rewrite Marketing skills (16 skills)",
+      "description": "As a skill author, I want all Marketing skills rewritten with proper social media and content tool mappings.",
       "acceptanceCriteria": [
-        "Create Alembic migration that adds agent_catalog_templates table with columns: id (PK), slug (VARCHAR unique), name (VARCHAR), category (VARCHAR), description (TEXT), persona (TEXT), skill_slug (VARCHAR — references skill directory slug), recommended_model (VARCHAR), recommended_tools (JSON array), tags (JSON array), icon (VARCHAR(10)), tier (VARCHAR default 'free'), is_active (BOOLEAN default true), created_at (TIMESTAMP), updated_at (TIMESTAMP)",
-        "Add workspace_id (INTEGER, nullable, FK to workspaces.id) for future per-workspace templates, default NULL = global",
-        "Add AgentCatalogTemplate SQLAlchemy model in orchestrator/core/models/core.py",
-        "Add relationship to Workspace model if workspace_id FK is present",
-        "Migration runs successfully (alembic upgrade head)",
-        "Existing tests still pass — no behavioral changes yet, schema only",
-        "Typecheck passes"
+        "Rewrite these 16 skills: growth-hacker, content-creator, seo-specialist, social-media-strategist, linkedin-content-creator, twitter-engager, tiktok-strategist, instagram-curator, podcast-strategist, reddit-community-builder, app-store-optimizer, carousel-growth-engine, short-video-editing-coach, ai-citation-strategist, book-co-author, cross-border-ecommerce",
+        "Each skill has frontmatter with tools:{name,description} from MARKETING TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Social media skills reference the matching composio automation tool (e.g. linkedin-content-creator uses composio_execute with LINKEDIN actions)",
+        "Content skills reference workspace_write_file for drafting and platform_publish_blog_post where relevant",
+        "Each file 60-100 lines",
+        "All 16 files written to the skills repo"
       ],
       "priority": 5,
       "passes": false,
-      "notes": "Migration goes in orchestrator/alembic/versions/. Use revision naming like prd120_agent_catalog_templates. The existing AgentTemplate in core.py (line ~863) is a Pydantic BaseModel used for the creation wizard — do NOT modify it. Create a new SQLAlchemy model AgentCatalogTemplate. Follow existing migration patterns (see alembic/versions/ for examples). The slug should match the skill directory name (e.g. 'growth-hacker' matches automatos-skills/skills/marketing/growth-hacker/)."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead scout/SKILL.md first as reference (similar outreach/content pattern).\n\nMARKETING TOOL KIT:\n- workspace_write_file: Draft content, strategies, calendars\n- workspace_read_file: Read briefs, guidelines, past content\n- workspace_list_dir: Browse content library\n- platform_publish_blog_post: Publish to Automatos blog\n- platform_list_blog_posts: Check existing published content\n- platform_submit_report: Submit campaign reports, content calendars\n- platform_get_latest_report: Read previous reports for trends\n- platform_search_memory: Search workspace knowledge for brand voice, past campaigns\n- platform_create_task: Create content tasks on the board\n- composio_execute: Execute social media actions — specify the relevant app per skill:\n  - LINKEDIN actions for linkedin-content-creator\n  - TWITTER actions for twitter-engager\n  - GOOGLE_SHEETS for analytics/tracking\n  - GOOGLE_ANALYTICS for SEO/growth\n  - SLACK for team notifications\n\nMODEL GUIDANCE: All sonnet-4.6 except growth-hacker (opus-4.6 for strategic thinking).\n\nNOTE: 16 skills in one batch is large. Focus on quality over quantity — each skill should have a SPECIFIC workflow, not generic 'create content'. E.g. seo-specialist should grep for meta tags, analyze structure, write optimization report. linkedin-content-creator should draft posts, schedule via composio, track engagement."
     },
     {
       "id": "US-006",
-      "title": "Seed agent catalog templates from imported skills",
-      "description": "As a developer, I want to populate the agent_catalog_templates table with entries for all imported skills.",
+      "title": "Rewrite Sales skills (8 skills)",
+      "description": "As a skill author, I want Sales skills rewritten with CRM and outreach tool mappings.",
       "acceptanceCriteria": [
-        "Create scripts/seed_agent_catalog.py that reads all SKILL.md files from automatos-skills/skills/",
-        "Script parses frontmatter (name, category, tags, description, recommended_tools, recommended_model) from each SKILL.md",
-        "Script generates a persona field from the Identity section of each SKILL.md",
-        "Script assigns icon based on category (engineering=gear, design=palette, marketing=chart, sales=money, product=target, pm=clipboard, support=building, testing=magnifier, paid-media=megaphone, specialized=star)",
-        "Script creates INSERT statements or uses SQLAlchemy to upsert into agent_catalog_templates",
-        "Script is idempotent — running twice doesn't create duplicates (upsert on slug)",
-        "Also create an Alembic data migration that calls the seed logic so it runs on deploy",
-        "After running seed, agent_catalog_templates has 55+ rows",
-        "Typecheck passes"
+        "Rewrite these 8 skills: outbound-strategist, discovery-coach, deal-strategist, pipeline-analyst, account-strategist, coach, engineer, proposal-strategist",
+        "Each skill has frontmatter with tools:{name,description} from SALES TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "CRM-focused skills reference composio_execute with HUBSPOT actions",
+        "Outreach skills reference composio_execute with GMAIL/LINKEDIN actions",
+        "Each file 60-100 lines",
+        "All 8 files written to the skills repo"
       ],
       "priority": 6,
       "passes": false,
-      "notes": "The seed script should be runnable standalone (python scripts/seed_agent_catalog.py) AND as an Alembic migration. Use the frontmatter parser from the import script (or a simple YAML parser). For persona generation, extract the Identity section content and prefix with 'You are a...'. The recommended_model should map to actual model IDs: haiku-4.5 -> anthropic/claude-haiku-4-5-20251001, sonnet-4.6 -> anthropic/claude-sonnet-4-6, opus-4.6 -> anthropic/claude-opus-4-6. Use config.py for model IDs if they exist there."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead scout/SKILL.md CAREFULLY — it's the gold standard for sales skills.\n\nSALES TOOL KIT:\n- composio_execute: CRM operations (HUBSPOT_LIST_CONTACTS, HUBSPOT_UPDATE_CONTACT, HUBSPOT_CREATE_DEAL, GMAIL_SEND_EMAIL, LINKEDIN_SEND_MESSAGE)\n- platform_submit_report: Submit pipeline reports, call summaries\n- platform_get_latest_report: Read previous pipeline state\n- platform_search_memory: Look up account history, past interactions\n- platform_workspace_stats: Check platform usage for trial users\n- platform_create_task: Create follow-up tasks\n- platform_list_tasks: Check pending tasks\n- workspace_write_file: Draft proposals, email sequences, battle cards\n- workspace_read_file: Read prospect research, pricing docs\n\nMODEL GUIDANCE:\n- deal-strategist: opus-4.6 (complex negotiation reasoning)\n- proposal-strategist: opus-4.6 (persuasive writing)\n- All others: sonnet-4.6\n\nNOTE: 'coach' = Sales Coach, 'engineer' = Sales Engineer — these are sales roles, not dev roles. Sales Engineer demos technical products and answers technical objections. Sales Coach reviews calls and provides feedback."
     },
     {
       "id": "US-007",
-      "title": "Add marketplace agent catalog API endpoints",
-      "description": "As a frontend developer, I need API endpoints to browse, search, and deploy agent templates from the catalog.",
+      "title": "Rewrite Design skills (8 skills)",
+      "description": "As a skill author, I want Design skills rewritten with workspace file and reporting tools.",
       "acceptanceCriteria": [
-        "Add GET /api/marketplace/agents endpoint — returns paginated list of AgentCatalogTemplate, supports ?category= and ?search= query params",
-        "Add GET /api/marketplace/agents/categories endpoint — returns list of categories with counts (e.g. [{category: 'marketing', count: 12, icon: 'chart'}])",
-        "Add GET /api/marketplace/agents/{slug} endpoint — returns single template detail including full persona text",
-        "Add POST /api/marketplace/agents/{slug}/deploy endpoint — creates a new Agent in user's workspace with: name from template, skill installed from skill_slug, model set to recommended_model, Composio tools assigned from recommended_tools, persona set",
-        "Deploy endpoint uses existing platform tool logic: creates agent (Agent model), assigns skill, assigns tools",
-        "Deploy endpoint returns the created agent ID and name",
-        "All endpoints require authentication via get_request_context_hybrid",
-        "Deploy endpoint scoped to user's workspace (ctx.workspace_id)",
-        "Add these routes to the existing marketplace.py router (prefix /api/marketplace)",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 8 skills: ui-designer, ux-researcher, ux-architect, brand-guardian, visual-storyteller, image-prompt-engineer, inclusive-visuals-specialist, whimsy-injector",
+        "Each skill has frontmatter with tools:{name,description} from DESIGN TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Design skills focus on workspace file operations (reading specs, writing design docs/guidelines) and reporting",
+        "Each file 60-100 lines",
+        "All 8 files written to the skills repo"
       ],
       "priority": 7,
       "passes": false,
-      "notes": "Extend the existing orchestrator/api/marketplace.py which already has the router at /api/marketplace. The deploy endpoint should follow the same pattern as platform_create_agent in platform_executor.py — create Agent row, then use existing skill/tool assignment logic. Check orchestrator/api/agents.py for agent creation patterns. The Composio tool assignment may use agent_composio_tools table (check core/models/core.py for the relationship). Pagination: use limit/offset with defaults (limit=50, offset=0)."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference.\n\nDESIGN TOOL KIT:\n- workspace_write_file: Write design specs, guidelines, component docs, prompt libraries\n- workspace_read_file: Read existing designs, brand guidelines, component inventory\n- workspace_list_dir: Browse design assets and component libraries\n- workspace_grep: Search for design tokens, color values, component usage\n- platform_submit_report: Submit design reviews, UX audit reports\n- platform_get_latest_report: Read previous design reports\n- platform_create_task: Create design tasks (component needed, UX issue, brand violation)\n- platform_search_memory: Look up brand guidelines, design decisions\n\nMODEL GUIDANCE: All sonnet-4.6 except ux-architect (opus-4.6 for systems thinking).\n\nNOTE: These are AI agents that assist with design THINKING and documentation, not visual design tools. ui-designer writes component specs and reviews markup. ux-researcher writes research plans and synthesizes findings. brand-guardian audits content for brand consistency. image-prompt-engineer crafts prompts for image generation."
     },
     {
       "id": "US-008",
-      "title": "Frontend marketplace page with category grid and agent cards",
-      "description": "As a user, I want to browse the agent marketplace organized by category and see agent cards I can deploy.",
+      "title": "Rewrite Product + Project Management skills (11 skills)",
+      "description": "As a skill author, I want Product and PM skills rewritten with board task and planning tool mappings.",
       "acceptanceCriteria": [
-        "Create frontend/components/marketplace/agent-marketplace.tsx — main marketplace page component",
-        "Create frontend/hooks/use-marketplace-api.ts — React Query hooks for GET /api/marketplace/agents, /agents/categories, /agents/:slug",
-        "Category grid at top: clickable category cards showing icon + name + agent count, from /categories endpoint",
-        "Clicking a category filters the agent list below",
-        "Search bar that filters agents by name/description (debounced, calls API with ?search=)",
-        "Agent cards in a responsive grid (3 cols desktop, 2 tablet, 1 mobile) showing: icon, name, category badge, description (truncated to 2 lines), recommended_model badge, 'Add to Workspace' button",
-        "Empty state when no agents match filter/search",
-        "Loading skeleton while fetching",
-        "Add marketplace page to the app router/navigation (sidebar or top nav)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Rewrite these 11 skills: sprint-prioritizer, trend-researcher, feedback-synthesizer, behavioral-nudge-engine, manager (Product Manager), project-shepherd, studio-producer, experiment-tracker, jira-workflow-steward, project-manager-senior, studio-operations",
+        "Each skill has frontmatter with tools:{name,description} from PRODUCT/PM TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "PM skills heavily use board task tools (create, list, summary) and reporting",
+        "Product skills use memory search and reporting for synthesis work",
+        "Each file 60-100 lines",
+        "All 11 files written to the skills repo"
       ],
       "priority": 8,
       "passes": false,
-      "notes": "Use existing shadcn/ui components (Card, Badge, Button, Input, Skeleton). Follow existing page patterns — check frontend/components/ for layout conventions. React Query v4 (use isLoading not isPending). The marketplace should be accessible from the main sidebar navigation — check frontend/components/layout/ or app/ for where nav items are defined. Category icons should match the ones seeded in US-006. Use frontend/types/ for TypeScript interfaces."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference.\n\nPRODUCT/PM TOOL KIT:\n- platform_create_task: Create board tasks for work items, milestones\n- platform_list_tasks: Review current backlog and sprint items\n- platform_board_summary: Get overview of board state (counts by status)\n- platform_submit_report: Submit sprint reports, experiment results, trend analysis\n- platform_get_latest_report: Read previous reports for trends\n- platform_search_memory: Search workspace knowledge for user feedback, metrics\n- platform_schedule_task: Schedule recurring reviews\n- workspace_write_file: Write PRDs, experiment plans, roadmaps\n- workspace_read_file: Read existing docs, metrics, feedback\n- composio_execute: JIRA actions for jira-workflow-steward (JIRA_CREATE_ISSUE, JIRA_LIST_ISSUES, JIRA_UPDATE_ISSUE)\n- composio_execute: SLACK for team notifications\n\nMODEL GUIDANCE:\n- manager (Product Manager): opus-4.6 (strategic prioritization)\n- project-manager-senior: opus-4.6 (complex coordination)\n- All others: sonnet-4.6\n\nNOTE: sprint-prioritizer should score and rank tasks. trend-researcher should search memory and write trend reports. feedback-synthesizer should aggregate and analyze. jira-workflow-steward uses JIRA composio actions specifically."
     },
     {
       "id": "US-009",
-      "title": "Frontend agent template detail modal and one-click deploy",
-      "description": "As a user, I want to preview an agent template and deploy it to my workspace with one click.",
+      "title": "Rewrite Support + Testing skills (9 skills)",
+      "description": "As a skill author, I want Support and Testing skills rewritten with monitoring and QA tool mappings.",
       "acceptanceCriteria": [
-        "Create frontend/components/marketplace/agent-template-detail.tsx — slide-over or modal showing full template details",
-        "Detail view shows: icon, name, full description, persona preview (collapsible), recommended model, recommended tools list, tags",
-        "Recommended tools shown as badges with Composio tool names",
-        "'Add to Workspace' button triggers POST /api/marketplace/agents/{slug}/deploy",
-        "Add useDeploy mutation hook to use-marketplace-api.ts",
-        "On success: show toast notification with agent name, invalidate agents query cache, close modal",
-        "On error: show error toast with message from API",
-        "Loading state on deploy button while request is in flight",
-        "Optional: allow user to customize agent name before deploy (input field, defaults to template name)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Rewrite these 9 skills: support-responder, analytics-reporter, finance-tracker, legal-compliance-checker, executive-summary-generator, infrastructure-maintainer, performance-benchmarker, api-tester, accessibility-auditor",
+        "Each skill has frontmatter with tools:{name,description} from SUPPORT/TESTING TOOL KIT",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Support skills use chat history search and memory for context",
+        "Testing skills use workspace_exec for running test suites",
+        "Each file 60-100 lines",
+        "All 9 files written to the skills repo"
       ],
       "priority": 9,
       "passes": false,
-      "notes": "Follow existing modal/slide-over patterns — check mission-detail-page.tsx or report-viewer.tsx for slide-over examples. Use shadcn/ui Sheet or Dialog component. The deploy mutation should use useMutation from React Query v4. Toast notifications — check if there's an existing toast system (sonner, react-hot-toast, or shadcn toast). Invalidate the agents roster query after deploy so the new agent shows up in the user's agent list."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference (sentinel is a support/monitoring skill).\n\nSUPPORT/TESTING TOOL KIT:\n- platform_search_chat_history: Search past user conversations\n- platform_search_memory: Look up knowledge base, past solutions\n- platform_get_logs: Retrieve application logs\n- platform_get_system_health: Check service status\n- platform_get_llm_usage: Check LLM costs and usage\n- platform_get_cost_breakdown: Detailed cost analysis\n- platform_workspace_stats: Workspace metrics\n- platform_submit_report: Submit support/test/audit reports\n- platform_get_latest_report: Read previous reports\n- platform_create_task: Create bug tickets, action items\n- workspace_exec: Run test suites, linters, benchmarks\n- workspace_read_file: Read test files, configs, source code\n- workspace_grep: Search for patterns, errors, vulnerabilities\n- workspace_write_file: Write test plans, compliance docs\n\nMODEL GUIDANCE:\n- support-responder: haiku-4.5 (simple, high-volume)\n- analytics-reporter: haiku-4.5 (data formatting)\n- finance-tracker: haiku-4.5 (repetitive cost checks)\n- legal-compliance-checker: opus-4.6 (requires careful reasoning)\n- executive-summary-generator: sonnet-4.6\n- infrastructure-maintainer: sonnet-4.6\n- performance-benchmarker: sonnet-4.6\n- api-tester: sonnet-4.6\n- accessibility-auditor: sonnet-4.6"
     },
     {
       "id": "US-010",
-      "title": "Business Plan mission template configuration",
-      "description": "As a platform developer, I want a Business Plan mission template that decomposes into research, document generation, and workspace configuration phases.",
+      "title": "Rewrite Paid Media + Specialized skills (8 skills)",
+      "description": "As a skill author, I want Paid Media and Specialized skills rewritten with advertising and domain-specific tool mappings.",
       "acceptanceCriteria": [
-        "Add 'business_plan' template to orchestrator/modules/coordination/templates.py TEMPLATE_REGISTRY",
-        "Template has 4 phases with parallel groups: Phase 1 (research — 3 parallel tasks: market research, competitive analysis, financial modeling), Phase 2 (document generation — sequential: exec summary, market analysis, financial projections, synthesis into full doc), Phase 3 (workspace config — 3 parallel tasks: create agents from catalog, create playbooks, create board tasks), Phase 4 (verification — summary report)",
-        "Template match keywords: 'business plan', 'startup', 'business idea', 'launch a business', 'start a company'",
-        "Template has required_input fields: business_name, business_type, industry (required) + target_market, budget_range, goals (optional)",
-        "Template tasks use agent roles from _ROLE_SYNONYMS: researcher, analyst, writer, admin/operations",
-        "Phase 3 workspace config tasks reference platform tools: platform_create_agent, platform_install_skill, platform_create_playbook, platform_configure_heartbeat, platform_create_board_task",
-        "Template includes synthesis tasks after parallel convergences (Phase 1 -> synthesis -> Phase 2)",
-        "Estimated token budget: 500000 (from PRD)",
-        "Template renders correctly via render_template() — returns valid task list with dependencies",
-        "WIRING TEST: match_template('Write a business plan for my coffee brand') returns business_plan template",
-        "WIRING TEST: render_template for business_plan has parallel groups in Phase 1 and Phase 3",
-        "Typecheck passes",
-        "All tests pass"
+        "Rewrite these 8 skills: ppc-strategist, creative-strategist, auditor (paid media), document-generator, compliance-auditor, recruitment-specialist, supply-chain-strategist, developer-advocate",
+        "Each skill has frontmatter with tools:{name,description} from appropriate tool kit",
+        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
+        "Paid media skills reference composio_execute with GOOGLE_ADS and GOOGLE_ANALYTICS",
+        "Specialized skills use domain-appropriate tool combinations",
+        "Each file 60-100 lines",
+        "All 8 files written to the skills repo"
       ],
       "priority": 10,
       "passes": false,
-      "notes": "Follow the exact same pattern as existing templates (research_and_report, content_pipeline, etc.) in templates.py. TaskTemplate dataclass has: title, agent_role, task_type, description, sequence, complexity, parallel_group, depends_on. Use the parallel group patterns from PRD-82C (already implemented). Phase 3 tasks are unique — they use platform tools to configure the workspace. The admin/operations role needs to be in _ROLE_SYNONYMS in agent_matcher.py — check and add if missing. Template rendering was updated in US-006 of PRD-82C to support explicit depends_on."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference.\n\nPAID MEDIA TOOL KIT:\n- composio_execute: GOOGLE_ADS (campaign management), GOOGLE_ANALYTICS (tracking), GOOGLE_SHEETS (reporting)\n- workspace_write_file: Write ad copy, campaign plans\n- workspace_read_file: Read performance data, creative briefs\n- platform_submit_report: Submit campaign performance reports\n- platform_get_latest_report: Read previous campaign reports\n- platform_create_task: Create optimization tasks\n\nSPECIALIZED TOOL KIT (varies per skill):\n- document-generator: workspace_write_file (primary), workspace_read_file, platform_submit_report\n- compliance-auditor: workspace_grep (scan for violations), workspace_read_file, platform_submit_report, platform_create_task\n- recruitment-specialist: composio_execute (GMAIL, LINKEDIN), platform_create_task, workspace_write_file, platform_submit_report\n- supply-chain-strategist: workspace_write_file, platform_submit_report, platform_create_task, composio_execute (GOOGLE_SHEETS)\n- developer-advocate: workspace_write_file, platform_publish_blog_post, composio_execute (GITHUB), platform_submit_report\n\nMODEL GUIDANCE:\n- compliance-auditor: opus-4.6 (careful legal reasoning)\n- All others: sonnet-4.6"
     },
     {
       "id": "US-011",
-      "title": "Add mission template selector to create-mission-modal",
-      "description": "As a user, I want to choose a mission template when creating a new mission, with the Business Plan template featured prominently.",
+      "title": "Validate all rewritten skills and commit to skills repo",
+      "description": "As a developer, I want to validate that all 81 skills meet the quality bar and commit them.",
       "acceptanceCriteria": [
-        "Update frontend/components/missions/create-mission-modal.tsx to show template selector before the goal input",
-        "Template options: 'Custom Goal' (freeform, current behavior), 'Business Plan', 'Research Report', 'Content Pipeline', 'Competitive Analysis', 'Data Investigation'",
-        "Each template option shows: icon, name, short description, estimated cost badge",
-        "Selecting 'Business Plan' shows additional input fields: business_name, business_type, industry, target_market (optional), goals (optional)",
-        "Selecting 'Custom Goal' shows the current freeform textarea",
-        "Selected template name sent to backend in create mission request (add template_id field to CreateMissionRequest)",
-        "Update orchestrator/api/missions.py create endpoint to accept optional template_id — if provided, pass to coordinator as template hint",
-        "Update coordinator_service.py to use template_id in decompose() if provided (bypass LLM template matching)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Run validation script that checks every SKILL.md in /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/ for: frontmatter has name, description, version, tags, category, tools fields; tools is a list of {name, description} dicts; body contains workflow section with at least one JSON tool call block; body contains output format section; body contains anti-pattern section",
+        "All 81 imported skills pass validation (existing skills like sentinel/scout exempt from this check)",
+        "No skill references external platforms (Cursor, OpenClaw, Qwen, etc.)",
+        "Every tool name referenced in skills exists in the platform (validate against known tool list)",
+        "Run seed script dry-run: python3 scripts/seed_agent_catalog.py --dry-run shows 97+ entries with correct model assignments",
+        "Commit all rewritten skills to the skills repo with descriptive message",
+        "Typecheck passes for seed script changes"
       ],
       "priority": 11,
       "passes": false,
-      "notes": "The create-mission-modal.tsx already exists — read it first. The CreateMissionRequest is defined in missions.py or types/missions.ts. The coordinator_service.py decompose flow currently calls MissionPlanner.decompose() which calls match_template() internally. Adding a template_id hint means: if template_id matches a TEMPLATE_REGISTRY key, use that template directly instead of LLM matching. The mission API create endpoint is POST /api/missions/. Frontend types in frontend/types/missions.ts."
-    },
-    {
-      "id": "US-012",
-      "title": "Integration tests and catalog validation",
-      "description": "As a developer, I want integration tests proving the marketplace deploy flow and business plan template work end-to-end.",
-      "acceptanceCriteria": [
-        "Create orchestrator/tests/test_120_marketplace.py with integration tests",
-        "Test: GET /api/marketplace/agents returns 55+ templates with valid structure",
-        "Test: GET /api/marketplace/agents?category=marketing returns only marketing agents",
-        "Test: GET /api/marketplace/agents?search=growth returns results containing 'growth'",
-        "Test: GET /api/marketplace/agents/categories returns 10 categories with counts",
-        "Test: POST /api/marketplace/agents/{slug}/deploy creates agent in workspace with correct skill, model, tools",
-        "Test: business_plan template in TEMPLATE_REGISTRY matches 'business plan' keywords",
-        "Test: business_plan template renders with 4 phases, parallel groups, synthesis tasks",
-        "Test: business_plan Phase 3 tasks reference platform_create_agent and platform_create_playbook tools",
-        "Test: catalog SKILL.md count matches agent_catalog_templates row count",
-        "All tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 12,
-      "passes": false,
-      "notes": "Use pytest fixtures. For API tests, check if there's an existing test client setup (conftest.py with TestClient). Mock the database for deploy tests — verify the correct Agent creation args. For template tests, import directly from templates.py and test render_template(). The SKILL.md count check: glob automatos-skills/skills/**/*.md and compare against DB count. Some tests may need the seed data loaded — either run the seed script in a fixture or create test-specific fixtures."
+      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\nSEED SCRIPT: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/scripts/seed_agent_catalog.py\n\nVALID TOOL NAMES (for validation):\nPlatform: platform_get_system_health, platform_get_logs, platform_get_llm_usage, platform_get_cost_breakdown, platform_workspace_stats, platform_submit_report, platform_get_latest_report, platform_create_task, platform_list_tasks, platform_board_summary, platform_search_memory, platform_search_chat_history, platform_query_loki_logs, platform_query_prometheus, platform_publish_blog_post, platform_list_blog_posts, platform_create_agent, platform_list_agents, platform_schedule_task, platform_field_query, platform_field_inject\nWorkspace: workspace_read_file, workspace_write_file, workspace_list_dir, workspace_grep, workspace_exec, workspace_git\nComposio: composio_execute\n\nWrite a quick Python validation script (can be temporary) that reads all SKILL.md files and checks the criteria. Print pass/fail per skill.\n\nFor the commit to the skills repo, use: cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills && git add -A && git commit -m 'feat: rewrite all 81 imported skills to Automatos quality'"
     }
   ]
 }
