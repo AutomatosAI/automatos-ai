@@ -292,7 +292,8 @@ def seed_from_alembic(op) -> None:
         column("is_active", sa.Boolean),
     )
 
-    skills_dir = Path(__file__).parent.parent / "automatos-skills" / "skills"
+    # Skills live in sibling repo: automatos-skills (not inside automatos-ai)
+    skills_dir = Path(__file__).parent.parent.parent / "automatos-skills"
     entries = collect_entries(skills_dir)
 
     bind = op.get_bind()
@@ -358,8 +359,8 @@ def main() -> None:
     parser.add_argument(
         "--skills-dir",
         type=Path,
-        default=Path(__file__).parent.parent / "automatos-skills" / "skills",
-        help="Root directory containing category/slug/SKILL.md files",
+        default=Path(__file__).parent.parent.parent / "automatos-skills",
+        help="Root directory of automatos-skills repo (sibling to automatos-ai)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print entries without writing to DB")
     args = parser.parse_args()

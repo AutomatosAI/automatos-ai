@@ -35,7 +35,8 @@ from modules.coordination.templates import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-SKILLS_ROOT = Path(__file__).resolve().parent.parent.parent / "automatos-skills" / "skills"
+# Skills live in sibling repo: automatos-skills (not inside automatos-ai)
+SKILLS_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "automatos-skills"
 
 EXPECTED_CATEGORIES = {
     "engineering", "design", "marketing", "sales", "product",
