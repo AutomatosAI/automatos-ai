@@ -1,67 +1,48 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Loader2, Download, Bot, Check, Trash2, Zap, MoreVertical
+  Loader2, Download, Bot, Zap, Wrench
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { PremiumIcon } from '@/components/shared'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { ToolLogo } from '@/components/ui/tool-logo'
-import { useMarketplaceItems, useInstallMarketplaceItem } from '@/hooks/use-marketplace-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
-import { AGENT_CATEGORIES as UNIFIED_CATEGORIES, LEGACY_CATEGORY_MAP } from '@/lib/agent-constants'
-import { MarketplaceItemModal } from './marketplace-item-modal'
-import { useUser } from '@clerk/nextjs'
-import { toast } from 'sonner'
-import { apiClient } from '@/lib/api-client'
+import { AGENT_CATEGORIES as UNIFIED_CATEGORIES } from '@/lib/agent-constants'
+import {
+  useAgentCatalogTemplates,
+  useAgentCatalogCategories,
+  useDeployAgentCatalogTemplate,
+  type AgentCatalogTemplate,
+  type AgentCatalogCategory,
+} from '@/hooks/use-marketplace-api'
+import { AgentTemplateDetail } from './agent-template-detail'
 
-// Unified agent categories from shared constants + "All" filter
-const MARKETPLACE_CATEGORIES = [
-  { id: 'all', name: 'All Categories' },
-  ...UNIFIED_CATEGORIES.map(c => ({ id: c.id, name: c.name })),
-]
-
-/**
- * Normalize a marketplace agent's category to the unified system.
- * Handles legacy Title Case categories and unknown values.
- */
-const normalizeCategory = (category: string | null | undefined): string => {
-  if (!category) return 'custom'
-  // Already a unified ID?
-  if (UNIFIED_CATEGORIES.some(c => c.id === category)) return category
-  // Legacy mapping?
-  return LEGACY_CATEGORY_MAP[category] || 'custom'
+// Map catalog categories → unified category IDs for icon lookup
+const CATALOG_TO_UNIFIED: Record<string, string> = {
+  engineering: 'development',
+  design: 'design',
+  marketing: 'marketing',
+  sales: 'sales',
+  product: 'business',
+  'project-management': 'productivity',
+  testing: 'development',
+  support: 'support',
+  'paid-media': 'marketing',
+  specialized: 'custom',
 }
 
-interface MarketplaceAgent {
-  id: number
-  name: string
-  description: string
-  creator_name: string
-  category: string
-  install_count: number
-  is_approved?: boolean
-  is_featured?: boolean
-  icon?: string
-  metadata: {
-    agent_type?: string
-    model_id?: string
-    skills?: string[]
-    tools?: number[]
-    tool_names?: string[]
-    tool_icons?: string[]
-  }
+function modelShortName(model?: string): string {
+  if (!model) return ''
+  if (model.includes('opus')) return 'Opus'
+  if (model.includes('sonnet')) return 'Sonnet'
+  if (model.includes('haiku')) return 'Haiku'
+  return model.split('/').pop()?.substring(0, 20) || model
 }
 
 interface MarketplaceAgentsTabProps {
@@ -69,111 +50,83 @@ interface MarketplaceAgentsTabProps {
 }
 
 export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps) {
-  const { user } = useUser()
   const [viewMode, setViewMode] = useViewMode('mp-agents')
   const [selectedCategory, setSelectedCategory] = useState('all')
-  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
-  const [approvingId, setApprovingId] = useState<number | null>(null)
-  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
+  const [deployingSlug, setDeployingSlug] = useState<string | null>(null)
 
-  // Check if user is admin (you can adjust this check based on your admin logic)
-  const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
-
-  // Fetch all marketplace agents (filter client-side by unified category)
-  const { data: rawAgents = [], isLoading, refetch } = useMarketplaceItems({
-    type: 'agent',
-    search: searchQuery || undefined,
-    limit: 100
-  })
-
-  // Client-side category filtering using normalized categories
-  const agents = selectedCategory === 'all'
-    ? rawAgents
-    : (rawAgents as MarketplaceAgent[]).filter((a: MarketplaceAgent) =>
-        normalizeCategory(a.category) === selectedCategory
-      )
-
-  // Get system icons
   const { data: iconMappings = {} } = useSystemIcons()
 
-  // Install agent mutation using our marketplace hook
-  const installMutation = useInstallMarketplaceItem()
+  // Fetch categories with counts from API
+  const { data: categories = [] } = useAgentCatalogCategories()
 
-  const handleAgentClick = (agent: MarketplaceAgent) => {
-    setSelectedAgentId(agent.id)
-  }
+  // Fetch templates (category filter via API)
+  const { data: rawTemplates = [], isLoading } = useAgentCatalogTemplates({
+    category: selectedCategory !== 'all' ? selectedCategory : undefined,
+    search: searchQuery || undefined,
+    limit: 200,
+  })
 
-  const handleApprove = async (e: React.MouseEvent, agentId: number) => {
+  const deployMutation = useDeployAgentCatalogTemplate()
+
+  // Reset to "all" when search changes
+  useEffect(() => {
+    setSelectedCategory('all')
+  }, [searchQuery])
+
+  // Client-side search filter (API also filters, but this gives instant feedback)
+  const templates = useMemo(() => {
+    if (!searchQuery.trim()) return rawTemplates
+    const q = searchQuery.toLowerCase()
+    return (rawTemplates as AgentCatalogTemplate[]).filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) ||
+        t.description?.toLowerCase().includes(q) ||
+        t.tags?.some((tag) => tag.toLowerCase().includes(q))
+    )
+  }, [rawTemplates, searchQuery])
+
+  const totalCount = useMemo(
+    () => categories.reduce((sum: number, c: AgentCatalogCategory) => sum + c.count, 0),
+    [categories]
+  )
+
+  const handleDeploy = async (e: React.MouseEvent, slug: string) => {
     e.stopPropagation()
-    setApprovingId(agentId)
+    setDeployingSlug(slug)
     try {
-      await apiClient.post(`/api/marketplace/items/${agentId}/approve`)
-      toast.success('Agent approved and published to marketplace!')
-      refetch()
-    } catch (error: any) {
-      toast.error('Failed to approve agent', {
-        description: error?.message || 'An error occurred'
-      })
+      await deployMutation.mutateAsync(slug)
     } finally {
-      setApprovingId(null)
+      setDeployingSlug(null)
     }
   }
 
-  const handleDelete = async (e: React.MouseEvent, agentId: number) => {
-    e.stopPropagation()
-    if (!confirm('Are you sure you want to delete this marketplace agent?')) {
-      return
+  // Icon helpers — match unified system icons, fall back to UNIFIED_CATEGORIES lucide icons
+  const getIcon = (category: string, size: number) => {
+    const unifiedId = CATALOG_TO_UNIFIED[category] || category
+    const premiumName = iconMappings[unifiedId] || iconMappings[category]
+    if (premiumName) return <PremiumIcon name={premiumName} size={size} className="shrink-0" />
+    const catDef = UNIFIED_CATEGORIES.find((c) => c.id === unifiedId)
+    if (catDef) {
+      const Icon = catDef.icon
+      return <Icon className="shrink-0 text-primary" style={{ width: size, height: size }} />
     }
-    setDeletingId(agentId)
-    try {
-      await apiClient.delete(`/api/marketplace/items/${agentId}`)
-      toast.success('Agent removed from marketplace')
-      refetch()
-    } catch (error: any) {
-      toast.error('Failed to delete agent', {
-        description: error?.message || 'An error occurred'
-      })
-    } finally {
-      setDeletingId(null)
-    }
+    return <Bot className="shrink-0 text-primary" style={{ width: size, height: size }} />
   }
 
-  const formatInstallCount = (count: number) => {
-    if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`
-    if (count >= 1000) return `${(count / 1000).toFixed(1)}k`
-    return count.toString()
+  const getCategoryName = (category: string) => {
+    const unifiedId = CATALOG_TO_UNIFIED[category] || category
+    return (
+      UNIFIED_CATEGORIES.find((c) => c.id === unifiedId)?.name ||
+      category.charAt(0).toUpperCase() + category.slice(1).replace(/-/g, ' ')
+    )
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Category Filter Buttons */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent flex-1">
-          {MARKETPLACE_CATEGORIES.map((category) => {
-            const premiumName = iconMappings[category.id]
-            return (
-              <Button
-                key={category.id}
-                variant={selectedCategory === category.id ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setSelectedCategory(category.id)}
-                className={`whitespace-nowrap flex-shrink-0 gap-1.5 ${selectedCategory === category.id
-                  ? 'bg-secondary border-primary/50 text-foreground font-semibold'
-                  : 'border-secondary text-muted-foreground hover:bg-secondary'
-                  }`}
-              >
-                {premiumName && <PremiumIcon name={premiumName} size={14} />}
-                {category.name}
-              </Button>
-            )
-          })}
-        </div>
-        <ViewToggle value={viewMode} onChange={setViewMode} />
-      </div>
-
-      {/* Agents Grid - 4 columns like Agent Management page */}
-      {isLoading ? (
-        viewMode === 'list' ? (
+  // Loading skeleton
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        {viewMode === 'list' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {[...Array(6)].map((_, i) => (
               <div key={i} className="h-16 glass-card animate-pulse rounded-xl" />
@@ -182,201 +135,255 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {[...Array(8)].map((_, i) => (
-              <div key={i} className="h-64 glass-card animate-pulse" />
-            ))}
-          </div>
-        )
-      ) : (agents as MarketplaceAgent[]).length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
-          <p>No agents found. Try adjusting your search or filters.</p>
-        </div>
-      ) : viewMode === 'list' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {(agents as MarketplaceAgent[]).map((agent: MarketplaceAgent) => {
-            const normalized = normalizeCategory(agent.category)
-            const premiumIconName = iconMappings[normalized] || iconMappings[agent.category] || null
-            const catDef = UNIFIED_CATEGORIES.find(c => c.id === normalized)
-            return (
-              <Card
-                key={agent.id}
-                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
-                onClick={() => handleAgentClick(agent)}
-              >
-                <CardContent className="p-3">
+              <Card key={i} className="glass-card animate-pulse">
+                <CardHeader className="pb-2">
                   <div className="flex items-center gap-3">
-                    {premiumIconName ? (
-                      <PremiumIcon name={premiumIconName} size={36} className="shrink-0" />
-                    ) : (
-                      <Bot className="w-9 h-9 text-primary shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm truncate">{agent.name}</span>
-                        {isAdmin && !agent.is_approved && (
-                          <Badge variant="outline" className="text-[10px] border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))] shrink-0">
-                            Pending
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                        <span>{catDef?.name || agent.category}</span>
-                        <span>&middot;</span>
-                        <span>{formatInstallCount(agent.install_count)} installs</span>
-                      </div>
+                    <div className="w-10 h-10 bg-secondary/50 rounded-lg" />
+                    <div className="space-y-2">
+                      <div className="h-4 w-24 bg-secondary/50 rounded" />
+                      <div className="h-3 w-32 bg-secondary/50 rounded" />
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 shrink-0"
-                      onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}
-                    >
-                      <Download className="w-4 h-4" />
-                    </Button>
                   </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-8 w-full bg-secondary/50 rounded mt-2" />
+                  <div className="h-6 w-20 bg-secondary/50 rounded mt-3" />
                 </CardContent>
               </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header Stats */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-semibold">Agent Templates</h3>
+          <p className="text-sm text-muted-foreground">
+            Pre-built agents ready to deploy to your workspace
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Badge variant="outline" className="text-[hsl(var(--info))] border-[hsl(var(--info))]/30">
+            {totalCount} Available
+          </Badge>
+          <ViewToggle value={viewMode} onChange={setViewMode} />
+        </div>
+      </div>
+
+      {/* Category Filters — Horizontal Scroll */}
+      <div className="relative">
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent">
+          <Button
+            variant={selectedCategory === 'all' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedCategory('all')}
+            className={`whitespace-nowrap flex-shrink-0 ${
+              selectedCategory === 'all'
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
+                : 'border-secondary text-muted-foreground hover:bg-secondary'
+            }`}
+          >
+            All Agents
+            {totalCount > 0 && (
+              <Badge variant="secondary" className="ml-2 bg-secondary/50 text-xs">
+                {totalCount}
+              </Badge>
+            )}
+          </Button>
+          {categories.map((cat: AgentCatalogCategory) => {
+            const unifiedId = CATALOG_TO_UNIFIED[cat.category] || cat.category
+            const premiumName = iconMappings[unifiedId] || iconMappings[cat.category]
+            return (
+              <Button
+                key={cat.category}
+                variant={selectedCategory === cat.category ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSelectedCategory(cat.category)}
+                className={`whitespace-nowrap flex-shrink-0 ${
+                  selectedCategory === cat.category
+                    ? 'bg-secondary border-primary/50 text-foreground font-semibold'
+                    : 'border-secondary text-muted-foreground hover:bg-secondary'
+                }`}
+              >
+                {premiumName && <PremiumIcon name={premiumName} size={14} />}
+                {getCategoryName(cat.category)}
+                {cat.count > 0 && (
+                  <Badge variant="secondary" className="ml-2 bg-secondary/50 text-xs">
+                    {cat.count}
+                  </Badge>
+                )}
+              </Button>
             )
           })}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {agents.map((agent: MarketplaceAgent) => (
+      </div>
+
+      {/* Empty State */}
+      {templates.length === 0 ? (
+        <div className="text-center py-12">
+          <div className="w-16 h-16 rounded-lg bg-secondary/30 flex items-center justify-center mx-auto mb-4">
+            <Bot className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <h3 className="text-lg font-semibold mb-2">No agents found</h3>
+          <p className="text-muted-foreground mb-4">
+            {searchQuery
+              ? `No agents match "${searchQuery}"`
+              : 'No agents available in this category'}
+          </p>
+          <Button variant="outline" onClick={() => setSelectedCategory('all')}>
+            Clear Filters
+          </Button>
+        </div>
+      ) : viewMode === 'list' ? (
+        /* List View */
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {templates.map((template: AgentCatalogTemplate) => (
             <Card
-              key={agent.id}
-              className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
-              onClick={() => handleAgentClick(agent)}
+              key={template.slug}
+              className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+              onClick={() => setSelectedSlug(template.slug)}
             >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    {(() => {
-                      const normalized = normalizeCategory(agent.category)
-                      const premiumIconName = iconMappings[normalized] || iconMappings[agent.category] || null
-                      return premiumIconName ? (
-                        <PremiumIcon name={premiumIconName} size={40} className="shrink-0" />
-                      ) : (
-                        <Bot className="w-10 h-10 text-primary shrink-0" />
-                      )
-                    })()}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-foreground line-clamp-1">
-                          {agent.name}
-                        </h3>
-                        {isAdmin && !agent.is_approved && (
-                          <Badge variant="outline" className="text-xs border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))]">
-                            Pending
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        by {agent.creator_name}
-                      </p>
+              <CardContent className="p-3">
+                <div className="flex items-center gap-3">
+                  {getIcon(template.category, 36)}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm truncate">{template.name}</span>
+                      <Badge variant="outline" className="text-[10px] h-5 shrink-0">
+                        {getCategoryName(template.category)}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                      {template.recommended_model && (
+                        <span>{modelShortName(template.recommended_model)}</span>
+                      )}
+                      {template.recommended_tools.length > 0 && (
+                        <>
+                          <span>&middot;</span>
+                          <span>{template.recommended_tools.length} tools</span>
+                        </>
+                      )}
                     </div>
                   </div>
-                  {isAdmin && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {!agent.is_approved && (
-                          <DropdownMenuItem
-                            onClick={(e) => { e.stopPropagation(); handleApprove(e as any, agent.id) }}
-                            disabled={approvingId === agent.id}
-                            title="Approve"
-                          >
-                            <Check className="w-4 h-4 mr-2" />
-                            {approvingId === agent.id ? 'Approving...' : 'Approve'}
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem
-                          className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10 focus:text-[hsl(var(--destructive))] focus:bg-[hsl(var(--destructive))]/10"
-                          onClick={(e) => { e.stopPropagation(); handleDelete(e as any, agent.id) }}
-                          disabled={deletingId === agent.id}
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          {deletingId === agent.id ? 'Deleting...' : 'Delete'}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </div>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground line-clamp-2">
-                  {agent.description}
-                </p>
-
-                {/* Category badge */}
-                <div className="flex flex-col gap-2">
-                  <Badge variant="outline" className="text-xs border-border text-muted-foreground w-fit">
-                    {UNIFIED_CATEGORIES.find(c => c.id === normalizeCategory(agent.category))?.name || agent.category}
-                  </Badge>
-                  {agent.metadata.model_id && (
-                    <Badge className="text-xs bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))] border-[hsl(var(--agent))]/30 w-fit">
-                      <Zap className="w-3 h-3 mr-1" />
-                      {agent.metadata.model_id.split('/').pop()?.substring(0, 15)}
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Tools Preview - matching agent roster */}
-                {agent.metadata.tool_names && agent.metadata.tool_names.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-3 border-t border-border/30">
-                    {agent.metadata.tool_names.slice(0, 5).map((toolName, idx) => (
-                      <div key={idx} title={toolName}>
-                        <ToolLogo
-                          name={toolName}
-                          logo={agent.metadata.tool_icons?.[idx]}
-                          size={24}
-                          showBackground={true}
-                          className="bg-secondary/30 border border-border/30"
-                        />
-                      </div>
-                    ))}
-                    {agent.metadata.tool_names.length > 5 && (
-                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-border/30 text-[10px] text-muted-foreground">
-                        +{agent.metadata.tool_names.length - 5}
-                      </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 shrink-0"
+                    disabled={deployingSlug === template.slug}
+                    onClick={(e) => handleDeploy(e, template.slug)}
+                  >
+                    {deployingSlug === template.slug ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4" />
                     )}
-                  </div>
-                )}
-
-                {/* Install count */}
-                <div className="text-xs text-muted-foreground pb-2">
-                  {formatInstallCount(agent.install_count)} installs
+                  </Button>
                 </div>
-
               </CardContent>
-              <Separator />
-              <div className="flex items-center justify-between px-6 py-3">
-                <Button variant="ghost" size="sm"
-                  onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}
-                  className="text-muted-foreground hover:text-foreground p-0 h-auto">
-                  Details
-                </Button>
-                <Button size="sm" variant="outline"
-                  onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}>
-                  Add to Workspace
-                </Button>
-              </div>
             </Card>
           ))}
+        </div>
+      ) : (
+        /* Grid View */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <AnimatePresence>
+            {templates.map((template: AgentCatalogTemplate, index: number) => (
+              <motion.div
+                key={template.slug}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                transition={{ delay: Math.min(index * 0.05, 0.5) }}
+              >
+                <Card
+                  className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
+                  onClick={() => setSelectedSlug(template.slug)}
+                >
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center space-x-3">
+                        {getIcon(template.category, 40)}
+                        <div>
+                          <h3 className="font-semibold line-clamp-1">{template.name}</h3>
+                          <p className="text-xs text-muted-foreground">
+                            {getCategoryName(template.category)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </CardHeader>
+
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground line-clamp-2 min-h-[40px]">
+                      {template.description}
+                    </p>
+
+                    {/* Tags */}
+                    <div className="flex items-center justify-between text-xs">
+                      <div />
+                      <div className="flex gap-1">
+                        {template.tags?.slice(0, 2).map((tag) => (
+                          <Badge key={tag} variant="outline" className="text-[10px] h-5">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Model + Tools Count */}
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      {template.recommended_model && (
+                        <div className="flex items-center gap-1">
+                          <Zap className="w-3 h-3" />
+                          <span>{modelShortName(template.recommended_model)}</span>
+                        </div>
+                      )}
+                      {template.recommended_tools.length > 0 && (
+                        <div className="flex items-center gap-1">
+                          <Wrench className="w-3 h-3" />
+                          <span>{template.recommended_tools.length} Tools</span>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+
+                  <Separator />
+                  <div className="flex items-center justify-between px-6 py-3">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => { e.stopPropagation(); setSelectedSlug(template.slug) }}
+                      className="text-muted-foreground hover:text-foreground p-0 h-auto"
+                    >
+                      Details
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={deployingSlug === template.slug}
+                      onClick={(e) => handleDeploy(e, template.slug)}
+                    >
+                      {deployingSlug === template.slug ? 'Adding...' : 'Add to Workspace'}
+                    </Button>
+                  </div>
+                </Card>
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
       )}
 
       {/* Detail Modal */}
-      {selectedAgentId && (
-        <MarketplaceItemModal
-          itemId={selectedAgentId}
-          onClose={() => setSelectedAgentId(null)}
-        />
-      )}
+      <AgentTemplateDetail
+        open={selectedSlug !== null}
+        slug={selectedSlug}
+        onClose={() => setSelectedSlug(null)}
+      />
     </div>
   )
 }
