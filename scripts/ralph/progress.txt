@@ -8,3 +8,10 @@
 - Removed reliance on recommended_model/recommended_tools frontmatter fields
 - Fixed identity extraction to handle both ## Identity and # Title paragraph formats
 - Dry run: 97 entries, correct model assignments
+
+## US-002: Engineering batch 1 — 8 skills rewritten (2026-03-25)
+- Rewrote: frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer
+- All skills: frontmatter with tools:{name,description}, identity paragraph, 6-step workflow with JSON tool calls, output format template, "What NOT To Do" section
+- Line counts: 91-98 lines (within 60-100 target)
+- Each skill uses 6 tools from the Engineering Tool Kit
+- Seed script dry-run: 97 entries, no errors

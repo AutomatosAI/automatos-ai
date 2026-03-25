@@ -13,7 +13,7 @@ Rewrite all 81 imported skills to Automatos production quality. Each skill must 
 - [x] US-001: Create SKILL-GUIDE.md reference + fix seed script frontmatter parsing for tools:{name,description} format
 
 ### Phase 2: Skill Rewrites by Category
-- [ ] US-002: Engineering batch 1 (8): frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer
+- [x] US-002: Engineering batch 1 (8): frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer
 - [ ] US-003: Engineering batch 2 (8): code-reviewer, software-architect, technical-writer, mobile-app-builder, senior-developer, git-workflow-master, rapid-prototyper, incident-response-commander
 - [ ] US-004: Engineering batch 3 (5): threat-detection-engineer, solidity-smart-contract-engineer, embedded-firmware-engineer, ai-data-remediation-engineer, autonomous-optimization-architect
 - [ ] US-005: Marketing (16): growth-hacker, content-creator, seo-specialist, social-media-strategist, linkedin-content-creator, twitter-engager, tiktok-strategist, instagram-curator, podcast-strategist, reddit-community-builder, app-store-optimizer, carousel-growth-engine, short-video-editing-coach, ai-citation-strategist, book-co-author, cross-border-ecommerce
