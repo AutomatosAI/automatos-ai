@@ -22,3 +22,11 @@
 - Line counts: 92-100 lines (within 60-100 target)
 - Each skill uses 6-7 tools from the Engineering Tool Kit
 - incident-response-commander uses platform_get_system_health, platform_get_logs, platform_query_loki_logs (crisis monitoring tools as specified)
+
+## US-004: Engineering batch 3 — 5 skills rewritten (2026-03-25)
+- Rewrote: threat-detection-engineer, solidity-smart-contract-engineer, embedded-firmware-engineer, ai-data-remediation-engineer, autonomous-optimization-architect
+- All skills: frontmatter with tools:{name,description}, identity paragraph, 6-8 step workflow with JSON tool calls, output format template, "What NOT To Do" section
+- Line counts: 94-103 lines (within target range)
+- threat-detection-engineer uses platform_query_loki_logs for threat hunting (LogQL queries)
+- autonomous-optimization-architect uses platform_get_cost_breakdown + platform_get_llm_usage for cost analysis
+- Removed workspace_write_file from autonomous-optimization-architect tools (not needed for report-only agent)
