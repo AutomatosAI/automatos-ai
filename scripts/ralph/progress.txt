@@ -88,3 +88,16 @@
 - performance-benchmarker: workspace_exec for benchmark suite, compares p50/p95/p99 against baselines
 - api-tester: workspace_grep for endpoint discovery, workspace_exec for pytest suite, contract validation
 - accessibility-auditor: workspace_grep for missing ARIA/alt/labels, workspace_exec for eslint a11y rules
+
+## US-010: Paid Media + Specialized — 8 skills rewritten (2026-03-25)
+- Rewrote: ppc-strategist, creative-strategist, auditor, document-generator, compliance-auditor, recruitment-specialist, supply-chain-strategist, developer-advocate
+- All skills: frontmatter with tools:{name,description}, identity paragraph, 5-7 step workflow with JSON tool calls, output format template, "What NOT To Do" section
+- Line counts: 83-100 lines (within 60-100 target)
+- Paid media skills (ppc-strategist, auditor) use composio_execute with GOOGLE_ADS and GOOGLE_ANALYTICS
+- creative-strategist uses workspace_grep for creative library audit, workspace_write_file for ad copy batches
+- compliance-auditor uses workspace_grep for secret scanning, workspace_exec for license checks
+- recruitment-specialist uses composio_execute with LINKEDIN_SEND_MESSAGE for candidate outreach
+- supply-chain-strategist uses composio_execute with GOOGLE_SHEETS for inventory tracking
+- developer-advocate uses composio_execute with GITHUB_LIST_ISSUES + platform_publish_blog_post
+- document-generator uses platform_search_memory for brand guidelines retrieval
+- Removed China-specific content from recruitment-specialist and supply-chain-strategist (generic/global now)
