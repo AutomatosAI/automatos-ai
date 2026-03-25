@@ -48,7 +48,6 @@ from .orchestration_enums import (  # noqa: F401
 # PRD-72: Board Tasks — explicit import so `from core.models import BoardTask` works
 from .core import BoardTask  # noqa: F811
 from .core import BlogPost  # noqa: F811
-from .core import AgentCatalogTemplate  # noqa: F811  # PRD-120: Skills Marketplace
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
 try:
