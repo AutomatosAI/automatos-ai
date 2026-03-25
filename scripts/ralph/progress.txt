@@ -50,3 +50,15 @@
 - account-strategist uses platform_workspace_stats for usage health cross-referencing
 - coach and discovery-coach focus on workspace_read_file for transcript/performance analysis
 - proposal-strategist uses workspace_grep for searching proposal content library by win theme
+
+## US-007: Design — 8 skills rewritten (2026-03-25)
+- Rewrote: ui-designer, ux-researcher, ux-architect, brand-guardian, visual-storyteller, image-prompt-engineer, inclusive-visuals-specialist, whimsy-injector
+- All skills: frontmatter with tools:{name,description}, identity paragraph, 4-7 step workflow with JSON tool calls, output format template, "What NOT To Do" section
+- Line counts: 94-100 lines (within 60-100 target)
+- ui-designer: grep-based audit for hardcoded colors/inline styles, writes component specs
+- ux-architect: maps routes via list_dir + grep, documents IA and user flows
+- brand-guardian: retrieves brand standards from memory, scans terminology + color violations
+- whimsy-injector: audits empty states/loading/error copy, writes delight library
+- image-prompt-engineer: maintains prompt library with subject/style/lighting/mood structure
+- inclusive-visuals-specialist: separate tracks for accessibility vs representation
+- Fixed batch 2 skills: changed "input" to "params" in JSON tool call blocks (matching Sentinel format)
