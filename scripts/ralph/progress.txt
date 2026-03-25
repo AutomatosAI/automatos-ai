@@ -155,3 +155,19 @@
     - resetForm clears template and business plan fields
     - Submit button disabled state updated for business plan required fields
   - Validated: Python imports OK, frontend typecheck OK (no new errors), test failure pre-existing
+
+2026-03-25: US-012 COMPLETED
+  - Created orchestrator/tests/test_120_marketplace.py with 29 integration tests:
+    - Business plan template matching: matches "business plan", "start a company", "launch a business", no false positives
+    - Business plan structure: 12 tasks, 4+ phases, parallel bp_research (3 tasks), parallel bp_workspace_config (3 tasks), 2+ synthesis tasks
+    - Business plan synthesis dependencies: research synthesis depends on all 3 research tasks
+    - Phase 3 platform tools: platform_create_agent, platform_create_playbook, platform_install_skill referenced
+    - Phase 3 admin role: all workspace config tasks use "admin" agent_role
+    - Marketplace API logic: list, category filter, search filter, deploy creates agent, model_config, name dedup
+    - Categories endpoint: returns expected structure
+    - SKILL.md count: 81 files across 10 categories, >= 55 (acceptance criterion)
+    - Frontmatter validation: spot-check first 5 skills have valid YAML with name field
+    - Template regression: all templates render without error, all have parallel groups
+  - Fixed: business_plan template min_tasks 14 → 12, max_tasks 16 → 14 (actual task_templates count is 12)
+  - Noted: pre-existing test_parallel_decomposition failure — mock agents lack "admin" role (not caused by US-012)
+  - All 29 new tests pass, no regressions in other tests

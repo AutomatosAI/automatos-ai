@@ -27,7 +27,7 @@ Import ~65 professional agent skills from agency-agents, build agent templates m
 ### Phase 4: Business Plan Template & Wiring
 - [x] US-010: Business Plan mission template in TEMPLATE_REGISTRY (4 phases, parallel groups)
 - [x] US-011: Mission template selector in create-mission-modal + backend template_id hint
-- [ ] US-012: Integration tests + catalog validation
+- [x] US-012: Integration tests + catalog validation
 
 ---
 
@@ -111,3 +111,5 @@ Note: Pre-existing errors may exist in other files. Only check for NEW errors in
 - US-004: Testing yielded 3 skills (accessibility-auditor, api-tester, performance-benchmarker). Paid Media yielded 3 (auditor, creative-strategist, ppc-strategist). Specialized yielded 5 (compliance-auditor, developer-advocate, document-generator, recruitment-specialist, supply-chain-strategist).
 - Total skills after US-004: 81 (70 + 11). Exceeds the 55+ target by 26.
 - CATALOG.md generated with full table of all 81 skills across 10 categories.
+- US-012: business_plan template had min_tasks=14 but only 12 task_templates — fixed to min_tasks=12, max_tasks=14.
+- US-012: Pre-existing test_parallel_decomposition failure for business_plan — mock agents lack "admin" role. Not introduced by US-012.

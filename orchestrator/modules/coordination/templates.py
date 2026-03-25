@@ -578,8 +578,8 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             "business", "plan", "startup", "venture",
             "company", "launch",
         ],
-        min_tasks=14,
-        max_tasks=16,
+        min_tasks=12,
+        max_tasks=14,
         output_format="markdown",
         task_templates=[
             # ── Phase 1: Research (3 parallel + 1 synthesis) ──────────
