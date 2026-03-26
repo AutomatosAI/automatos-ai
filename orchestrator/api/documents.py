@@ -289,11 +289,20 @@ async def download_document_by_id(
             raise ValueError("No AWS credentials")
 
         bucket = app_config.S3_DOCUMENTS_BUCKET
-        # file_path may be an S3 key or local path
-        s3_key = doc.file_path
-        if s3_key and s3_key.startswith("/"):
-            # Local path — try constructing S3 key from workspace
-            s3_key = f"workspaces/{doc.workspace_id}/documents/{doc.filename}"
+        # file_path formats:
+        #   s3://bucket-name/workspaces/ws-id/documents/123_file.md  (normal upload)
+        #   /local/path/file.md  (legacy local)
+        #   workspaces/ws-id/documents/file.md  (bare key)
+        raw_path = doc.file_path or ""
+        if raw_path.startswith("s3://"):
+            # Strip "s3://bucket-name/" to get bare S3 key
+            without_scheme = raw_path[5:]  # remove "s3://"
+            s3_key = without_scheme.split("/", 1)[1] if "/" in without_scheme else without_scheme
+        elif raw_path.startswith("/"):
+            # Local path — construct S3 key (upload uses {id}_{filename})
+            s3_key = f"workspaces/{doc.workspace_id}/documents/{doc.id}_{doc.filename}"
+        else:
+            s3_key = raw_path
 
         boto_cfg = BotoConfig(
             region_name=app_config.AWS_REGION or "us-east-1",
