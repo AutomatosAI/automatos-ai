@@ -517,6 +517,7 @@ export function DocumentManagement() {
   const handleDownload = async (documentId: number, filename: string) => {
     try {
       // Get pre-signed URL from backend (mode=url returns JSON, avoids CORS redirect issues)
+      const { default: apiClient } = await import('@/lib/api-client')
       const headers = await apiClient.getAuthHeaders()
       const baseUrl = apiClient.getBaseUrl()
       const response = await fetch(`${baseUrl}/api/documents/${documentId}/download?mode=url`, {
