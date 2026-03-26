@@ -2,6 +2,7 @@
 'use client'
 
 import React, { useState, useRef, useMemo, useEffect } from 'react'
+import toast from 'react-hot-toast'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import {
@@ -515,13 +516,19 @@ export function DocumentManagement() {
 
   const handleDownload = async (documentId: number, filename: string) => {
     try {
-      // Use apiClient for authenticated download with proper headers
-      const response = await apiClient.get(`/api/documents/${documentId}/download`, {
-        responseType: 'blob'
+      // Build the download URL with auth headers
+      const headers = await apiClient.getAuthHeaders()
+      const baseUrl = apiClient.getBaseUrl()
+      const response = await fetch(`${baseUrl}/api/documents/${documentId}/download`, {
+        headers,
+        redirect: 'follow',
       })
 
-      // Create blob URL and trigger download
-      const blob = new Blob([response])
+      if (!response.ok) {
+        throw new Error(`Download failed (${response.status})`)
+      }
+
+      const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -532,7 +539,7 @@ export function DocumentManagement() {
       window.URL.revokeObjectURL(url)
     } catch (error) {
       console.error('Error downloading document:', error)
-      alert('Error downloading document')
+      toast.error('Failed to download document')
     }
   }
 
