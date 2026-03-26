@@ -107,6 +107,24 @@ class WorkspaceClient:
         except (httpx.ConnectError, httpx.TimeoutException) as err:
             return _connection_error("list_dir", err)
 
+    async def download_file(self, path: str) -> Dict[str, Any]:
+        """Download a raw binary file from the workspace. Returns bytes content."""
+        client = _get_client()
+        url = _worker_url(self.workspace_id, "/files/download")
+        try:
+            resp = await client.get(url, params={"path": path})
+            if resp.status_code != 200:
+                return {"success": False, "error": _parse_error(resp), "status_code": resp.status_code}
+            return {
+                "success": True,
+                "content": resp.content,
+                "filename": path.split("/")[-1],
+                "size": len(resp.content),
+                "content_type": resp.headers.get("content-type", "application/octet-stream"),
+            }
+        except (httpx.ConnectError, httpx.TimeoutException) as err:
+            return _connection_error("download_file", err)
+
     # ── Search ─────────────────────────────────────────────────────
 
     async def grep(

@@ -798,12 +798,49 @@ class WorkspaceWorker:
             result = await executor.execute_command(command, timeout=120, cwd=cwd)
             return web.json_response(result)
 
+        async def download_file_handler(request):
+            """GET /workspaces/{workspace_id}/files/download — raw binary download."""
+            from pathlib import Path as P
+
+            workspace_id = request.match_info["workspace_id"]
+            ws_dir = P(volume_path) / workspace_id
+            if not ws_dir.is_dir():
+                return web.json_response({"error": "Workspace not found"}, status=404)
+
+            rel_path = request.query.get("path", "").strip()
+            if not rel_path:
+                return web.json_response({"error": "path parameter required"}, status=400)
+
+            target = (ws_dir / rel_path).resolve()
+            if not str(target).startswith(str(ws_dir.resolve())):
+                return web.json_response({"error": "Path traversal denied"}, status=403)
+            if not target.is_file():
+                return web.json_response({"error": "File not found"}, status=404)
+
+            max_download_size = 100 * 1024 * 1024  # 100 MB
+            file_size = target.stat().st_size
+            if file_size > max_download_size:
+                return web.json_response(
+                    {"error": f"File too large ({file_size} bytes, max {max_download_size})"},
+                    status=413,
+                )
+
+            mime_type, _ = mimetypes.guess_type(target.name)
+            return web.FileResponse(
+                target,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{target.name}"',
+                    "Content-Type": mime_type or "application/octet-stream",
+                },
+            )
+
         app.router.add_get("/health", health_handler)
         app.router.add_get("/workspaces/{workspace_id}/files", list_files_handler)
         app.router.add_get("/workspaces/{workspace_id}/files/content", file_content_handler)
         app.router.add_post("/workspaces/{workspace_id}/exec", exec_handler)
         app.router.add_post("/workspaces/{workspace_id}/files/write", write_file_handler)
         app.router.add_get("/workspaces/{workspace_id}/files/grep", grep_handler)
+        app.router.add_get("/workspaces/{workspace_id}/files/download", download_file_handler)
         app.router.add_post("/workspaces/{workspace_id}/git", git_handler)
 
         runner = web.AppRunner(app)

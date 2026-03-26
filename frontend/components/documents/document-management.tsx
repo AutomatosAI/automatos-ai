@@ -516,27 +516,35 @@ export function DocumentManagement() {
 
   const handleDownload = async (documentId: number, filename: string) => {
     try {
-      // Build the download URL with auth headers
+      // Get pre-signed URL from backend (mode=url returns JSON, avoids CORS redirect issues)
       const headers = await apiClient.getAuthHeaders()
       const baseUrl = apiClient.getBaseUrl()
-      const response = await fetch(`${baseUrl}/api/documents/${documentId}/download`, {
+      const response = await fetch(`${baseUrl}/api/documents/${documentId}/download?mode=url`, {
         headers,
-        redirect: 'follow',
       })
 
       if (!response.ok) {
         throw new Error(`Download failed (${response.status})`)
       }
 
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
+      const contentType = response.headers.get('content-type') || ''
+
+      if (contentType.includes('application/json')) {
+        // S3 path: got pre-signed URL — open directly (browser handles download)
+        const data = await response.json()
+        window.open(data.url, '_blank')
+      } else {
+        // Local file fallback: response IS the file bytes
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = filename
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(url)
+      }
     } catch (error) {
       console.error('Error downloading document:', error)
       toast.error('Failed to download document')

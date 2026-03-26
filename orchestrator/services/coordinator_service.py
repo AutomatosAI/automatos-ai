@@ -234,7 +234,11 @@ class CoordinatorService:
         db: Session,
         run: OrchestrationRun,
     ) -> Optional[int]:
-        """On mission completion, save assembled task outputs as a document for future intelligence."""
+        """On mission completion, save assembled task outputs as a document for future intelligence.
+
+        For app_builder missions, also downloads the zip bundle from the workspace
+        and saves it as a separate downloadable document.
+        """
         from api.documents import get_document_manager
         from pathlib import Path
 
@@ -267,8 +271,10 @@ class CoordinatorService:
             temp_path = output_dir / f"mission_{run.id}_{slug}.md"
             temp_path.write_text(content, encoding="utf-8")
 
+            doc_manager = get_document_manager(str(run.workspace_id))
+            document_id = None
+
             try:
-                doc_manager = get_document_manager(str(run.workspace_id))
                 document_id = await doc_manager.upload_document(
                     file_path=str(temp_path),
                     filename=f"mission-output-{slug}.md",
@@ -276,16 +282,79 @@ class CoordinatorService:
                     description=f"Output from completed mission: {run.goal[:200]}",
                     created_by="coordinator",
                 )
-                # Store reference in run config
                 run.config = {**(run.config or {}), "output_document_id": document_id}
                 db.flush()
                 logger.info("[Mission] Saved output document %s for mission %s", document_id, run.id)
-                return document_id
             finally:
                 if temp_path.exists():
                     temp_path.unlink()
+
+            # --- App builder: also save the zip bundle ---
+            template_used = (run.config or {}).get("template_used")
+            if template_used == "app_builder":
+                zip_doc_id = await self._save_app_bundle_zip(db, run, slug, doc_manager)
+                if zip_doc_id:
+                    run.config = {**(run.config or {}), "app_bundle_document_id": zip_doc_id}
+                    db.flush()
+
+            return document_id
         except Exception as e:
             logger.warning("[Mission] Failed to save output document for %s: %s", run.id, e, exc_info=True)
+            return None
+
+    async def _save_app_bundle_zip(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        slug: str,
+        doc_manager,
+    ) -> Optional[int]:
+        """Download the app zip bundle from workspace and save as a document."""
+        from core.workspace_client import WorkspaceClient
+        from pathlib import Path
+
+        try:
+            ws_client = WorkspaceClient(str(run.workspace_id))
+            result = await ws_client.download_file("artifacts/app-bundle.zip")
+
+            if not result.get("success"):
+                logger.warning(
+                    "[Mission] App bundle zip not found for mission %s: %s",
+                    run.id,
+                    result.get("error", "unknown"),
+                )
+                return None
+
+            # Write zip bytes to temp file
+            output_dir = Path("/tmp/automatos_mission_outputs")
+            output_dir.mkdir(exist_ok=True)
+            zip_path = output_dir / f"app-{slug}.zip"
+            zip_path.write_bytes(result["content"])
+
+            try:
+                zip_doc_id = await doc_manager.upload_document(
+                    file_path=str(zip_path),
+                    filename=f"app-{slug}.zip",
+                    tags=["mission-output", "app-bundle", f"mission:{run.id}"],
+                    description=f"App bundle from mission: {run.goal[:200]}",
+                    created_by="coordinator",
+                )
+                logger.info(
+                    "[Mission] Saved app bundle zip %s for mission %s",
+                    zip_doc_id,
+                    run.id,
+                )
+                return zip_doc_id
+            finally:
+                if zip_path.exists():
+                    zip_path.unlink()
+        except Exception as e:
+            logger.warning(
+                "[Mission] Failed to save app bundle zip for %s: %s",
+                run.id,
+                e,
+                exc_info=True,
+            )
             return None
 
     async def _cleanup_terminal_fields(self, db: Session) -> None:
@@ -977,6 +1046,13 @@ class CoordinatorService:
         }
         run.token_budget_estimate = decomposition.token_estimate
         run.max_concurrent = decomposition.max_concurrent
+
+        # Persist template metadata for completion handler (e.g. app_builder → zip output)
+        if decomposition.template_used:
+            run.config = {
+                **(run.config or {}),
+                "template_used": decomposition.template_used,
+            }
 
         # Create OrchestrationTask rows
         temp_id_to_task: Dict[str, OrchestrationTask] = {}
@@ -1769,7 +1845,8 @@ class CoordinatorService:
                 "tokens_used": task.tokens_used or 0,
             })
 
-        return {
+        config = run.config or {}
+        summary: Dict[str, Any] = {
             "goal": run.goal,
             "tasks_completed": verified_count,
             "tasks_failed": failed_count,
@@ -1777,6 +1854,16 @@ class CoordinatorService:
             "task_summaries": task_summaries,
             "generated_at": now.isoformat(),
         }
+
+        # Include template and artifact metadata for frontend rendering
+        template_used = config.get("template_used")
+        if template_used:
+            summary["template_used"] = template_used
+        app_bundle_doc_id = config.get("app_bundle_document_id")
+        if app_bundle_doc_id:
+            summary["app_bundle_document_id"] = app_bundle_doc_id
+
+        return summary
 
     # ------------------------------------------------------------------
     # Internal helpers

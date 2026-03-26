@@ -876,6 +876,238 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             ),
         ],
     ),
+    # ── app_builder (8 tasks) ─────────────────────────────────────────
+    # Phase 1: research + design (2 parallel) → synthesis
+    # Phase 2: scaffold → build pages → build components (sequential)
+    # Phase 3: verify build → package zip
+    DecompositionTemplate(
+        id="app_builder",
+        name="App Builder",
+        description=(
+            "Build a web application (Next.js / React) with multiple pages "
+            "and features, verify it compiles, and package it for download."
+        ),
+        keywords=[
+            "build an app", "build a website", "build a dashboard",
+            "create an app", "create a website", "next.js", "nextjs",
+            "react app", "web app", "webapp", "landing page",
+            "build", "app", "website", "dashboard", "frontend",
+            "scaffold", "prototype",
+        ],
+        min_tasks=7,
+        max_tasks=9,
+        output_format="zip",
+        task_templates=[
+            # ── Phase 1: Research & Design (parallel) ──────────────────
+            TaskTemplate(
+                sequence=1,
+                agent_role="researcher",
+                title_pattern="Research requirements and UI patterns for: {goal}",
+                description_pattern=(
+                    "Research best practices, UI patterns, and similar apps "
+                    "for: {goal}. Identify the key pages needed, essential "
+                    "features, recommended libraries (e.g. shadcn/ui, "
+                    "recharts, lucide-react), and data model. Produce a "
+                    "research brief with concrete recommendations."
+                ),
+                expected_output="Research brief with pages, features, and library recommendations",
+                complexity="moderate",
+                parallel_group="app_research",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 300, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": ["Pages", "Features", "Libraries"],
+                        "must_pass": False,
+                    },
+                ],
+            ),
+            TaskTemplate(
+                sequence=1,
+                agent_role="designer",
+                title_pattern="Design component architecture for: {goal}",
+                description_pattern=(
+                    "Design the component architecture and page layout for: "
+                    "{goal}. Define the file structure (app router pages, "
+                    "shared components, lib utilities), component hierarchy, "
+                    "props interfaces, and data flow. Output a technical "
+                    "design document with the full file tree."
+                ),
+                expected_output="Technical design with file tree and component specs",
+                complexity="moderate",
+                parallel_group="app_research",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 300, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": ["File Structure", "Components"],
+                        "must_pass": False,
+                    },
+                ],
+            ),
+            # ── Phase 1b: Synthesis ────────────────────────────────────
+            TaskTemplate(
+                sequence=2,
+                agent_role="writer",
+                title_pattern="Synthesize app specification for: {goal}",
+                description_pattern=(
+                    "Merge the research brief and technical design into a "
+                    "single app specification for: {goal}. Produce a clear "
+                    "build plan listing every file to create, its purpose, "
+                    "key imports, and implementation notes. This is the "
+                    "blueprint the coder will follow."
+                ),
+                expected_output="Unified app specification and build plan",
+                complexity="moderate",
+                task_type="synthesis",
+                depends_on=["task_1", "task_2"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 400, "must_pass": True},
+                ],
+            ),
+            # ── Phase 2: Build (sequential) ────────────────────────────
+            TaskTemplate(
+                sequence=3,
+                agent_role="coder",
+                title_pattern="Scaffold Next.js project for: {goal}",
+                description_pattern=(
+                    "Create the Next.js project in the workspace for: {goal}.\n\n"
+                    "Steps:\n"
+                    "1. Run: workspace_exec with command "
+                    "'npx create-next-app@latest app --ts --tailwind --eslint "
+                    "--app --src-dir --use-npm --no-import-alias' \n"
+                    "2. Install additional dependencies: "
+                    "'cd app && npm install lucide-react recharts'\n"
+                    "3. Verify the scaffold compiled: 'cd app && npm run build'\n"
+                    "4. List the file tree: 'find app/src -type f'\n\n"
+                    "Report the full file tree and any build warnings. "
+                    "If create-next-app prompts fail, write package.json and "
+                    "config files manually via workspace_write_file."
+                ),
+                required_tools=["workspace_exec", "workspace_write_file"],
+                expected_output="Scaffolded project file tree and build confirmation",
+                complexity="moderate",
+                depends_on=["task_3"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 100, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=4,
+                agent_role="coder",
+                title_pattern="Build pages and layouts for: {goal}",
+                description_pattern=(
+                    "Following the app specification, create all page files "
+                    "and layouts for: {goal}.\n\n"
+                    "Use workspace_write_file to create each file under "
+                    "app/src/app/. Include:\n"
+                    "- Root layout with navigation sidebar or header\n"
+                    "- Each page defined in the spec (dashboard, list, "
+                    "detail, settings, etc.)\n"
+                    "- Loading states and error boundaries where appropriate\n\n"
+                    "Use Tailwind CSS for styling. Import from shadcn/ui "
+                    "components where specified in the design. Each page "
+                    "should have realistic mock data hardcoded as constants "
+                    "(not API calls) so the app works standalone."
+                ),
+                required_tools=["workspace_write_file", "workspace_read_file"],
+                expected_output="List of all page files created with descriptions",
+                complexity="complex",
+                depends_on=["task_4"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 200, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=5,
+                agent_role="coder",
+                title_pattern="Build shared components for: {goal}",
+                description_pattern=(
+                    "Create all shared/reusable components for: {goal}.\n\n"
+                    "Use workspace_write_file to create files under "
+                    "app/src/components/. Include:\n"
+                    "- Navigation component (sidebar or top nav)\n"
+                    "- Data display components (cards, tables, charts)\n"
+                    "- Form components if needed\n"
+                    "- Any utility components from the spec\n\n"
+                    "Each component should be self-contained with TypeScript "
+                    "interfaces for props. Use Tailwind for styling and "
+                    "lucide-react for icons."
+                ),
+                required_tools=["workspace_write_file", "workspace_read_file"],
+                expected_output="List of all component files created with descriptions",
+                complexity="complex",
+                depends_on=["task_5"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 200, "must_pass": True},
+                ],
+            ),
+            # ── Phase 3: Verify & Package ──────────────────────────────
+            TaskTemplate(
+                sequence=6,
+                agent_role="coder",
+                title_pattern="Verify build compiles for: {goal}",
+                description_pattern=(
+                    "Verify the complete app builds successfully.\n\n"
+                    "Steps:\n"
+                    "1. Run: workspace_exec 'cd app && npm run build'\n"
+                    "2. If build fails, read the error output carefully\n"
+                    "3. Fix each error using workspace_write_file\n"
+                    "4. Re-run build until it passes\n"
+                    "5. Report final build output (success or remaining warnings)\n\n"
+                    "Common fixes: missing imports, type errors, undefined "
+                    "components. Do NOT skip errors — fix every one."
+                ),
+                required_tools=[
+                    "workspace_exec",
+                    "workspace_write_file",
+                    "workspace_read_file",
+                ],
+                expected_output="Clean build output confirming compilation success",
+                complexity="moderate",
+                depends_on=["task_6"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 50, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=7,
+                agent_role="coder",
+                title_pattern="Package app for download: {goal}",
+                description_pattern=(
+                    "Package the completed app for user download.\n\n"
+                    "Steps:\n"
+                    "1. Remove node_modules to reduce size: "
+                    "workspace_exec 'rm -rf app/node_modules'\n"
+                    "2. Create a README.md at app/README.md with:\n"
+                    "   - Project description\n"
+                    "   - Setup instructions (npm install && npm run dev)\n"
+                    "   - Feature list\n"
+                    "   - File structure overview\n"
+                    "3. Create zip: workspace_exec "
+                    "'cd /workspaces/$WORKSPACE_ID && zip -r "
+                    "artifacts/app-bundle.zip app/ "
+                    "-x \"app/.next/*\" \"app/node_modules/*\"'\n"
+                    "4. Verify zip: workspace_exec "
+                    "'ls -lh artifacts/app-bundle.zip'\n\n"
+                    "Report the zip file size and contents summary."
+                ),
+                required_tools=[
+                    "workspace_exec",
+                    "workspace_write_file",
+                    "workspace_list_dir",
+                ],
+                expected_output="Zip file path, size, and contents summary",
+                complexity="moderate",
+                depends_on=["task_7"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 50, "must_pass": True},
+                ],
+            ),
+        ],
+    ),
 ]
 
 

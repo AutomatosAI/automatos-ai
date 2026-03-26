@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
-import { ChevronDown, CheckCircle2, XCircle, Copy, Check, FileText, Download } from 'lucide-react'
+import { ChevronDown, CheckCircle2, XCircle, Copy, Check, FileText, Download, Package, Terminal } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -40,6 +40,37 @@ export function MissionResultsPanel({ mission, className }: MissionResultsPanelP
     .sort((a, b) => a.sequence_number - b.sequence_number)
 
   const summary = mission.output_summary as Record<string, unknown> | null
+  const isAppBuilder = (summary?.template_used as string) === 'app_builder'
+  const appBundleDocId = summary?.app_bundle_document_id as number | undefined
+
+  const handleDownloadBundle = async () => {
+    if (!appBundleDocId) return
+    try {
+      const { default: apiClient } = await import('@/lib/api-client')
+      const baseUrl = apiClient.getBaseUrl()
+      const headers = await apiClient.getAuthHeaders()
+      const response = await fetch(`${baseUrl}/api/documents/${appBundleDocId}/download?mode=url`, {
+        headers,
+      })
+      if (!response.ok) throw new Error('Download failed')
+      const contentType = response.headers.get('content-type') || ''
+      if (contentType.includes('application/json')) {
+        const data = await response.json()
+        window.open(data.url, '_blank')
+      } else {
+        const blob = await response.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `app-${mission.id.slice(0, 8)}.zip`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+      toast.success('App bundle downloaded')
+    } catch {
+      toast.error('Failed to download app bundle')
+    }
+  }
 
   const combinedMarkdown = useMemo(() => {
     return completedTasks
@@ -136,6 +167,43 @@ export function MissionResultsPanel({ mission, className }: MissionResultsPanelP
                   : '-'}
               </p>
               <p className="text-[10px] text-muted-foreground">Duration</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* App bundle download banner */}
+      {isAppBuilder && isTerminal && (
+        <div className="mx-4 my-3 rounded-lg border border-orange-500/20 bg-orange-500/5 p-4">
+          <div className="flex items-start gap-3">
+            <Package className="w-5 h-5 text-orange-500 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <h4 className="text-sm font-semibold text-foreground">App Bundle Ready</h4>
+              <p className="text-xs text-muted-foreground mt-1">
+                Your app has been built and packaged. Download the zip, then run:
+              </p>
+              <div className="mt-2 flex items-center gap-2 bg-background/80 rounded-md px-3 py-2 border border-border/50">
+                <Terminal className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <code className="text-xs text-foreground font-mono">
+                  unzip app-*.zip && cd app && npm install && npm run dev
+                </code>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                {appBundleDocId ? (
+                  <Button size="sm" onClick={handleDownloadBundle} className="bg-orange-500 hover:bg-orange-600 text-white">
+                    <Download className="w-3.5 h-3.5 mr-1.5" />
+                    Download .zip
+                  </Button>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">
+                    Zip bundle is being processed...
+                  </p>
+                )}
+                <Button variant="outline" size="sm" onClick={handleDownload}>
+                  <FileText className="w-3.5 h-3.5 mr-1.5" />
+                  Build Log (.md)
+                </Button>
+              </div>
             </div>
           </div>
         </div>

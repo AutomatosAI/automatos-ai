@@ -263,11 +263,14 @@ async def handle_request(
 @router.get("/{document_id}/download")
 async def download_document_by_id(
     document_id: int,
+    mode: str = Query("url", description="'url' returns JSON with pre-signed URL, 'redirect' does 302"),
     db: Session = Depends(get_db),
 ):
     """
-    Download a document by ID. Generates a pre-signed S3 URL and redirects.
-    Falls back to local file if not on S3.
+    Download a document by ID. Generates a pre-signed S3 URL.
+
+    mode=url (default): returns JSON {"url": "...", "filename": "..."} — safe for fetch().
+    mode=redirect: returns 302 redirect — for direct browser navigation / <a> tags.
     """
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
@@ -314,7 +317,12 @@ async def download_document_by_id(
             },
             ExpiresIn=3600,
         )
-        return RedirectResponse(url=presigned_url, status_code=302)
+
+        if mode == "redirect":
+            return RedirectResponse(url=presigned_url, status_code=302)
+
+        # Default: return URL as JSON (avoids CORS issues with S3 redirects)
+        return {"url": presigned_url, "filename": filename}
 
     except Exception as e:
         logger.warning(f"S3 download failed for doc {document_id}: {e}")
