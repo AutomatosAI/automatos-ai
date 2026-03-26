@@ -181,11 +181,11 @@ async def list_items(
             # Convert agents to response format
             for agent in agents:
                 # Get creator name
-                creator_name = "Unknown"
+                creator_name = agent.created_by or "Unknown"
                 if agent.original_creator_id:
                     creator = db.query(UserModel).filter(UserModel.id == agent.original_creator_id).first()
                     if creator:
-                        creator_name = creator.email or f"User {creator.id}"
+                        creator_name = creator.name or creator.email or f"User {creator.id}"
 
                 # Get tool names and icons for the card
                 tool_names = []
@@ -355,11 +355,11 @@ async def get_item(
 def _build_agent_detail(agent: Agent, db: Session) -> MarketplaceItemDetail:
     """Build a MarketplaceItemDetail from an Agent model."""
     # Get creator name
-    creator_name = "Unknown"
+    creator_name = agent.created_by or "Unknown"
     if agent.original_creator_id:
         creator = db.query(UserModel).filter(UserModel.id == agent.original_creator_id).first()
         if creator:
-            creator_name = creator.email or f"User {creator.id}"
+            creator_name = creator.name or creator.email or f"User {creator.id}"
 
     # Build dependencies info
     dependencies: Dict[str, Any] = {}
