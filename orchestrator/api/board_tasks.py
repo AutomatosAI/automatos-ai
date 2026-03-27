@@ -99,7 +99,7 @@ async def create_task(
         review_mode=review_mode,
         assigned_agent_id=assigned_agent_id,
         created_by_type="user",
-        created_by_id=ctx.user.clerk_user_id or ctx.user.user_id,
+        created_by_id=ctx.user.clerk_user_id or ctx.user.id,
         parent_task_id=body.get("parent_task_id"),
         tags=body.get("tags", []),
         planning_data=body.get("planning_data"),
