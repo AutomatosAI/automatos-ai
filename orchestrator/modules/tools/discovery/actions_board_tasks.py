@@ -43,6 +43,15 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
                     "type": "integer",
                     "description": "Parent task ID if this is a sub-task",
                 },
+                "approval_action": {
+                    "type": "object",
+                    "description": "If set, task goes to Review status with an approval gate. On user approve, the action executes. Example: {\"type\": \"publish_blog\", \"post_id\": \"uuid\"}",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["inbox", "assigned", "review"],
+                    "description": "Initial task status. Auto-set to 'review' if approval_action is provided.",
+                },
             },
             "required": ["title", "description"],
         },

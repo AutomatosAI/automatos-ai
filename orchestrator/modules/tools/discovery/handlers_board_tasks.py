@@ -32,17 +32,28 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         if agent:
             assigned_agent_id = agent.id
 
+    # Build planning_data if approval_action or other planning fields provided
+    planning_data = params.get("planning_data")
+    if not planning_data and params.get("approval_action"):
+        planning_data = {"approval_action": params["approval_action"]}
+
+    # Determine initial status — tasks with approval_action go to review
+    initial_status = params.get("status", "assigned" if assigned_agent_id else "inbox")
+    if planning_data and planning_data.get("approval_action"):
+        initial_status = "review"
+
     task = BoardTask(
         workspace_id=workspace_id,
         title=title,
         description=description,
         priority=params.get("priority", "medium"),
         assigned_agent_id=assigned_agent_id,
-        status="assigned" if assigned_agent_id else "inbox",
+        status=initial_status,
         created_by_type="agent",
         created_by_id=str(params.get("_agent_id", "")),
         parent_task_id=params.get("parent_task_id"),
         tags=params.get("tags", []),
+        planning_data=planning_data,
     )
     db.add(task)
     db.commit()

@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/types/board'
-import { useUpdateTaskStatus } from '@/hooks/use-board-tasks'
+import { useUpdateTaskStatus, useApproveTask, useRejectTask } from '@/hooks/use-board-tasks'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
@@ -197,7 +197,8 @@ function InProgressContent({ task }: { task: BoardTask }) {
   )
 }
 
-function ReviewContent({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
+function ReviewContent({ task, onStatusChange, onApprove, onReject }: { task: BoardTask; onStatusChange: (status: string) => void; onApprove: () => void; onReject: (feedback?: string) => void }) {
+  const hasApprovalAction = !!task.planning_data?.approval_action
   return (
     <div className="space-y-6">
       {/* Review banner */}
@@ -260,22 +261,35 @@ function ReviewContent({ task, onStatusChange }: { task: BoardTask; onStatusChan
         )}
       </div>
 
+      {/* Approval action info */}
+      {hasApprovalAction && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20">
+          <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Approval action:</span>{' '}
+            {task.planning_data?.approval_action?.type === 'publish_blog'
+              ? 'Publish blog post to live site'
+              : task.planning_data?.approval_action?.type ?? 'Execute action'}
+          </p>
+        </div>
+      )}
+
       {/* Review actions */}
       <div className="flex gap-3 pt-2 border-t border-border/30">
         <Button
           variant="outline"
           className="flex-1"
-          onClick={() => onStatusChange('inbox')}
+          onClick={() => onReject()}
         >
           <AlertCircle className="w-4 h-4 mr-2" />
           Reject
         </Button>
         <Button
           className="flex-1"
-          onClick={() => onStatusChange('done')}
+          onClick={onApprove}
         >
           <CheckCircle2 className="w-4 h-4 mr-2" />
-          Approve
+          {hasApprovalAction ? 'Approve & Publish' : 'Approve'}
         </Button>
       </div>
     </div>
@@ -409,6 +423,8 @@ function ExecutionKitchenLink({ task, onClose }: { task: BoardTask; onClose: () 
 export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTaskViewerProps) {
   const task = useLiveTask(propTask)
   const updateStatus = useUpdateTaskStatus()
+  const approveTask = useApproveTask()
+  const rejectTask = useRejectTask()
 
   if (!task) return null
 
@@ -420,6 +436,16 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
     if (newStatus === 'done') {
       onOpenChange(false)
     }
+  }
+
+  const handleApprove = () => {
+    approveTask.mutate({ taskId: task.id }, {
+      onSuccess: () => onOpenChange(false),
+    })
+  }
+
+  const handleReject = (feedback?: string) => {
+    rejectTask.mutate({ taskId: task.id, feedback })
   }
 
   return (
@@ -480,7 +506,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
           {task.status === 'in_progress' && <InProgressContent task={task} />}
-          {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} />}
+          {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} onApprove={handleApprove} onReject={handleReject} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
 
           {/* Deep link to Execution Kitchen for recipe tasks */}

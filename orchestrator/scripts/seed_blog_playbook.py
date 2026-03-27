@@ -208,10 +208,15 @@ BLOG_PLAYBOOK = {
             "agent_name": "QUILL",
             "prompt_template": (
                 "The blog post draft has been written, reviewed, and designed. "
-                "Create a board task for human review using platform_create_task with: "
-                "title='Review & Publish: [post title]', "
-                "description='Blog post ready for final review and publishing. "
-                "Review the draft at /blog and click Publish when ready.'"
+                "First, use platform_list_blog_posts(status=draft) to find the latest draft post. "
+                "Then create a board task for human approval using platform_create_task with:\n"
+                "- title: 'Review & Publish: [the actual post title]'\n"
+                "- description: 'Blog post ready for final review. Approve to publish live.'\n"
+                "- approval_action: {\"type\": \"publish_blog\", \"post_id\": \"[the actual post UUID]\"}\n"
+                "- priority: 'high'\n"
+                "- tags: ['blog', 'approval']\n\n"
+                "The approval_action field is CRITICAL — it enables the one-click publish "
+                "button on the board. Use the actual post_id from the draft you found."
             ),
             "max_iterations": 5,
             "error_handling": "skip",

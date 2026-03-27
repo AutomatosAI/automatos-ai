@@ -118,6 +118,44 @@ export function useUpdateTaskStatus() {
   })
 }
 
+/**
+ * Approve a task in review status — executes approval_action (e.g., publish blog).
+ */
+export function useApproveTask() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ taskId }: { taskId: string }) => {
+      return apiClient.request(`/api/v1/tasks/${taskId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.all })
+    },
+  })
+}
+
+/**
+ * Reject a task in review status with optional feedback.
+ */
+export function useRejectTask() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ taskId, feedback }: { taskId: string; feedback?: string }) => {
+      return apiClient.request(`/api/v1/tasks/${taskId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ feedback }),
+      })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.all })
+    },
+  })
+}
+
 // ============= HELPERS =============
 
 /**
@@ -153,6 +191,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
       playbook_id: item.planning_data.playbook_id ?? item.planning_data.recipe_id,
       execution_id: item.planning_data.execution_id,
       step_progress: item.planning_data.step_progress,
+      approval_action: item.planning_data.approval_action,
     } : undefined,
     result: item.result,
   }

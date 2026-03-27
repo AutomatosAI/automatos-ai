@@ -33,7 +33,7 @@ export interface BoardTask {
   report_id?: string
   source_id: string
   project_id?: number
-  planning_data?: { playbook_id?: number; execution_id?: string; step_progress?: { current: number; total: number } }
+  planning_data?: { playbook_id?: number; execution_id?: string; step_progress?: { current: number; total: number }; approval_action?: { type: string; post_id?: string; [key: string]: any } }
   result?: any
 }
 

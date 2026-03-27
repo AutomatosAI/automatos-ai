@@ -11,6 +11,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
@@ -299,6 +300,123 @@ async def delete_task(
 
 
 # ── Status shortcut (drag-and-drop) ─────────────────────────────────
+
+@router.post("/{task_id}/approve")
+async def approve_task(
+    task_id: int,
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Approve a board task in review status.
+
+    If the task has an approval_action in planning_data, execute it
+    (e.g., publish a blog post). Then move the task to done.
+    """
+    task = db.query(BoardTask).filter(
+        BoardTask.id == task_id,
+        BoardTask.workspace_id == ctx.workspace_id,
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status != "review":
+        raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
+
+    body = await request.json()
+    action_result = None
+
+    # Execute approval_action if present
+    approval_action = (task.planning_data or {}).get("approval_action")
+    if approval_action:
+        action_type = approval_action.get("type")
+        try:
+            if action_type == "publish_blog":
+                from core.services.blog_service import BlogService
+                post_id = approval_action.get("post_id")
+                if not post_id:
+                    raise HTTPException(status_code=422, detail="approval_action missing post_id")
+                svc = BlogService(db, ctx.workspace_id)
+                post = svc.publish_post(UUID(post_id))
+                if not post:
+                    raise HTTPException(status_code=404, detail=f"Blog post {post_id} not found")
+                action_result = {
+                    "type": "publish_blog",
+                    "post_id": str(post.id),
+                    "title": post.title,
+                    "slug": post.slug,
+                    "status": post.status,
+                    "url": f"/api/widgets/blog/posts/{post.slug}?workspace_id={ctx.workspace_id}",
+                }
+                logger.info("[BoardTasks] Approved: published blog post %s (%s)", post.id, post.title)
+            else:
+                logger.warning("[BoardTasks] Unknown approval_action type: %s", action_type)
+                action_result = {"type": action_type, "warning": "Unknown action type, task approved without side-effect"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("[BoardTasks] Approval action failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Approval action failed: {e}")
+
+    # Move to done
+    task.status = "done"
+    task.completed_at = datetime.now(timezone.utc)
+    if action_result:
+        task.result = json.dumps(action_result) if not task.result else task.result
+    db.commit()
+    db.refresh(task)
+
+    logger.info("[BoardTasks] Task %d approved and moved to done", task.id)
+    return {
+        "success": True,
+        "task_id": task.id,
+        "status": task.status,
+        "action_result": action_result,
+    }
+
+
+@router.post("/{task_id}/reject")
+async def reject_task(
+    task_id: int,
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Reject a board task in review status with optional feedback.
+    Moves task back to inbox with feedback stored in error_message.
+    """
+    task = db.query(BoardTask).filter(
+        BoardTask.id == task_id,
+        BoardTask.workspace_id == ctx.workspace_id,
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status != "review":
+        raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
+
+    body = await request.json()
+    feedback = (body.get("feedback") or "").strip()
+
+    task.status = "inbox"
+    task.started_at = None
+    task.completed_at = None
+    if feedback:
+        task.error_message = f"Rejected: {feedback}"
+
+    db.commit()
+    db.refresh(task)
+
+    logger.info("[BoardTasks] Task %d rejected%s", task.id, f" with feedback: {feedback}" if feedback else "")
+    return {
+        "success": True,
+        "task_id": task.id,
+        "status": task.status,
+        "feedback": feedback or None,
+    }
+
 
 @router.patch("/{task_id}/status")
 async def update_task_status(
