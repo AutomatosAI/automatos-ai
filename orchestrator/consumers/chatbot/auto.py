@@ -422,6 +422,22 @@ _PLATFORM_KEYWORDS = {
         "improve draft", "edit article", "update post",
         "change blog post", "set cover image",
     ],
+    # PRD-82A: Missions
+    "platform_create_mission": [
+        "launch a mission", "start a mission", "create a mission",
+        "run a mission", "new mission", "kick off a mission",
+        "deep research", "multi-agent research", "research mission",
+        "launch mission to", "start mission to",
+    ],
+    "platform_list_missions": [
+        "list missions", "show missions", "what missions",
+        "running missions", "mission status", "my missions",
+        "any missions", "active missions", "completed missions",
+    ],
+    "platform_get_mission": [
+        "show mission", "get mission", "mission details",
+        "mission info", "how is mission", "check mission",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]

@@ -442,6 +442,52 @@ async def general_workspace_webhook(
         workspace_id=workspace.id,
     )
 
+    # 3b. Platform tool interception — if the message matches a platform keyword,
+    # route to Auto (CTO agent) which has all platform tools, instead of going
+    # through UniversalRouter. This lets Telegram/Slack users trigger missions,
+    # create tasks, check stats, etc. just like they can from the chat UI.
+    try:
+        from consumers.chatbot.auto import AutoBrain
+        platform_tool = AutoBrain._match_platform_query(envelope.content.lower())
+        if platform_tool:
+            logger.info(
+                "[webhook/ws] Platform tool detected: %s — routing to Auto",
+                platform_tool,
+            )
+            # Find the CTO/Auto agent
+            from core.models.core import Agent as AgentModel
+            auto_agent = db.query(AgentModel).filter(
+                AgentModel.slug == "auto-cto",
+                AgentModel.is_system_agent.is_(True),
+                AgentModel.status == "active",
+            ).first()
+            if auto_agent:
+                result = await _execute_agent_sync(
+                    agent_id=auto_agent.id,
+                    content=envelope.content,
+                    metadata=envelope.metadata,
+                    workspace_id=workspace.id,
+                )
+                if platform and integrations:
+                    reply_text = _extract_response_text(result)
+                    task = asyncio.create_task(
+                        _deliver_reply(reply_text, reply_ctx, integrations)
+                    )
+                    _background_tasks.add(task)
+                    task.add_done_callback(_background_tasks.discard)
+
+                return {
+                    "status": "completed",
+                    "routed": True,
+                    "route_type": "platform_tool",
+                    "tool": platform_tool,
+                    "platform": platform,
+                    "reply_delivered": platform is not None and bool(integrations),
+                    "result": result,
+                }
+    except Exception:
+        logger.debug("[webhook/ws] Platform tool interception failed, continuing to router", exc_info=True)
+
     # 4. Route through UniversalRouter
     universal_router = UniversalRouter(db, cache=get_routing_cache())
     try:

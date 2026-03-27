@@ -1,8 +1,9 @@
 """
-Seed the Daily Blog Pipeline: QUILL, EDITOR, CANVAS agents + playbook.
+Seed the Blog Pipeline v2: Mission-powered research + playbook orchestration.
 
-Creates three content agents in the marketplace and a 4-step daily playbook
-that researches, writes, reviews, designs cover art, and queues for publish.
+The playbook scouts a topic, launches a multi-agent mission for deep research
+and writing, generates cover art, then creates an approval task with a publish
+gate. Runs Tue/Fri at 09:00 UTC.
 
 Usage:
     python scripts/seed_blog_playbook.py
@@ -27,66 +28,34 @@ CONTENT_AGENTS = [
         "name": "QUILL",
         "agent_type": "custom",
         "description": (
-            "Blog writer agent. Researches trending topics, checks workspace memory "
-            "for previously covered subjects, and drafts engaging long-form blog posts "
-            "in markdown. Creates posts as drafts for editorial review before publishing. "
-            "Uses web search when available to ground articles in current data."
+            "Blog topic scout. Checks workspace memory and existing posts to find "
+            "fresh, trending topics. Launches a research mission via platform_create_mission "
+            "for deep, multi-agent content creation. Lightweight — the mission does the "
+            "heavy lifting (research, writing, editing, fact-checking)."
         ),
         "category": "Content Creation",
-        "tags": ["blog", "writing", "content", "research", "seo", "draft"],
+        "tags": ["blog", "content", "topic-scout", "mission-launcher"],
         "tools": [],
-        "model_id": "anthropic/claude-3.5-sonnet",
-        "skills": ["pattern_recognition", "Data Analysis"],
-        "system_prompt": (
-            "You are QUILL, an expert blog writer for Automatos AI. Your job is to "
-            "research and write high-quality, engaging blog posts in markdown format.\n\n"
-            "## Workflow\n"
-            "1. Use platform_search_memory to check what topics have been covered before\n"
-            "2. Use platform_list_blog_posts to see existing published content\n"
-            "3. Research a trending topic relevant to the given category\n"
-            "4. Write a comprehensive blog post (800-1500 words) in clean markdown\n"
-            "5. Create the draft with platform_publish_blog_post(publish_immediately=false)\n\n"
-            "## Writing Guidelines\n"
-            "- Strong, SEO-friendly headline\n"
-            "- Compelling opening paragraph that hooks the reader\n"
-            "- Clear section structure with ## headings\n"
-            "- Include data points, examples, or comparisons where possible\n"
-            "- End with a conclusion and call-to-action\n"
-            "- Write a concise excerpt (under 300 chars) for the preview card\n"
-            "- Add relevant tags and a category\n"
-            "- ALWAYS create as draft (publish_immediately=false) — never publish directly"
-        ),
-    },
-    {
-        "name": "EDITOR",
-        "agent_type": "custom",
-        "description": (
-            "Blog editor agent. Reviews draft blog posts for clarity, engagement, "
-            "grammar, SEO quality, and factual accuracy. Improves content without "
-            "changing the author's voice. Never publishes — only improves drafts."
-        ),
-        "category": "Content Creation",
-        "tags": ["blog", "editing", "review", "seo", "quality", "draft"],
-        "tools": [],
-        "model_id": "anthropic/claude-3.5-sonnet",
+        "model_id": "mistralai/mistral-small-3.1-24b-instruct",
         "skills": ["pattern_recognition"],
         "system_prompt": (
-            "You are EDITOR, an expert blog editor for Automatos AI. Your job is to "
-            "review and improve draft blog posts without changing the writer's voice.\n\n"
+            "You are QUILL, the blog topic scout for Automatos AI. Your job is to find "
+            "a compelling topic and launch a mission that will research and write it.\n\n"
             "## Workflow\n"
-            "1. Use platform_list_blog_posts(status=draft) to find the latest draft\n"
-            "2. Use platform_get_blog_post to read the full content\n"
-            "3. Review for: clarity, flow, grammar, engagement, SEO, factual accuracy\n"
-            "4. Improve the post with platform_update_blog_post\n\n"
-            "## Editorial Guidelines\n"
-            "- Fix grammar and awkward phrasing\n"
-            "- Strengthen weak openings and conclusions\n"
-            "- Improve headline for SEO and click-through\n"
-            "- Ensure section headings are clear and descriptive\n"
-            "- Add transition sentences between sections if flow is choppy\n"
-            "- Tighten verbose paragraphs — cut fluff\n"
-            "- Verify the excerpt is compelling and under 300 chars\n"
-            "- NEVER publish — only improve the draft"
+            "1. Use platform_search_memory to check what topics have been covered\n"
+            "2. Use platform_list_blog_posts to see existing published content\n"
+            "3. Pick a fresh, trending topic in the given category that hasn't been covered\n"
+            "4. Launch a mission with platform_create_mission — the goal should be specific:\n"
+            "   - What to research (3-5 specific angles/questions)\n"
+            "   - Target audience and tone (technical professionals, accessible)\n"
+            "   - Required output: a blog post draft created via platform_publish_blog_post\n"
+            "   - Quality bar: cite real data/tools/examples, 1000-2000 words\n"
+            "   - Must call platform_publish_blog_post(publish_immediately=false) at the end\n\n"
+            "## Topic Selection Guidelines\n"
+            "- Avoid topics already covered (check memory + existing posts)\n"
+            "- Prefer timely topics with recent developments\n"
+            "- Focus on practical, actionable content over theory\n"
+            "- Tie topics back to AI automation, agents, or orchestration when possible"
         ),
     },
     {
@@ -95,13 +64,12 @@ CONTENT_AGENTS = [
         "description": (
             "Cover art designer agent. Generates cover images for blog posts using "
             "AI image generation (DALL-E via Composio when available). Reads the post "
-            "title and excerpt to create a relevant, visually appealing cover image. "
-            "Falls back to tagging posts that need manual cover art."
+            "title and excerpt to create a relevant, visually appealing cover image."
         ),
         "category": "Content Creation",
         "tags": ["blog", "design", "cover-image", "dall-e", "image-generation"],
         "tools": [],
-        "model_id": "anthropic/claude-3.5-sonnet",
+        "model_id": "mistralai/mistral-small-3.1-24b-instruct",
         "skills": [],
         "system_prompt": (
             "You are CANVAS, a cover art designer for Automatos AI blog posts. Your job "
@@ -126,70 +94,65 @@ CONTENT_AGENTS = [
 
 
 # ---------------------------------------------------------------------------
-# Playbook definition
+# Playbook definition (v2 — mission-powered)
 # ---------------------------------------------------------------------------
 
 BLOG_PLAYBOOK = {
-    "name": "Daily Blog Pipeline",
+    "name": "Blog Pipeline",
     "template_id": "daily-blog-pipeline",
     "description": (
-        "Autonomous daily blog pipeline. QUILL researches and writes a draft, "
-        "EDITOR reviews and improves it, CANVAS generates a cover image, and a "
-        "review task is created for human approval. Runs daily at 09:00 UTC."
+        "Mission-powered blog pipeline. QUILL scouts a trending topic and launches "
+        "a research mission that handles deep research, writing, and editing via "
+        "multiple agents. CANVAS generates cover art. Finally, a review task is "
+        "created with a one-click publish approval gate. Runs Tue/Fri at 09:00 UTC."
     ),
     "category": "Content Creation",
-    "tags": ["blog", "content", "daily", "autonomous", "writing", "scheduled"],
+    "tags": ["blog", "content", "mission", "autonomous", "writing", "scheduled"],
     "recipe_type": "workflow",
     "inputs": {
         "category": {
             "type": "string",
             "required": True,
             "default": "AI & Automation",
-            "description": "Blog topic category (e.g. AI, Engineering, Business)",
+            "description": "Blog topic category (e.g. AI Agents, Developer Tools, Cloud Infrastructure)",
         },
     },
     "execution_config": {
         "mode": "sequential",
         "max_retries": 1,
-        "timeout_per_step": 300,
-        "total_timeout": 900,
+        "timeout_per_step": 600,
+        "total_timeout": 1800,
     },
     "schedule_config": {
         "type": "cron",
-        "cron_expression": "0 9 * * *",
+        "cron_expression": "0 9 * * 2,5",
     },
     "steps": [
         {
-            "step_id": "quill_write",
+            "step_id": "quill_scout_and_launch",
             "order": 1,
             "agent_name": "QUILL",
             "prompt_template": (
-                "Research a trending topic in the '{input.category}' category and write "
-                "an engaging blog post. First check platform_search_memory and "
-                "platform_list_blog_posts to avoid repeating topics we've already covered. "
-                "Create the post as a draft using platform_publish_blog_post with "
-                "publish_immediately=false. Include relevant tags and a compelling excerpt."
+                "Find a fresh, trending topic in the '{input.category}' category for our blog.\n\n"
+                "1. Check platform_search_memory and platform_list_blog_posts to see what "
+                "we've already covered — avoid duplicates.\n"
+                "2. Pick a specific, compelling topic with a clear angle.\n"
+                "3. Launch a research mission using platform_create_mission with a detailed goal:\n\n"
+                "   Goal template:\n"
+                "   'Research and write a high-quality blog post about [TOPIC]. "
+                "   Investigate [2-3 specific angles]. Include real-world examples, "
+                "   data points, and expert perspectives. The post should be 1000-2000 words, "
+                "   written for technical professionals. Use platform_publish_blog_post to "
+                "   create the draft with publish_immediately=false. Include category: "
+                "{input.category}, relevant tags, and a compelling excerpt under 300 chars.'\n\n"
+                "The mission will handle research, writing, and editing automatically."
             ),
             "max_iterations": 15,
             "error_handling": "stop",
         },
         {
-            "step_id": "editor_review",
-            "order": 2,
-            "agent_name": "EDITOR",
-            "prompt_template": (
-                "Review and improve the latest draft blog post. Use "
-                "platform_list_blog_posts(status=draft) to find it, then "
-                "platform_get_blog_post to read the full content. Improve clarity, "
-                "engagement, grammar, and SEO using platform_update_blog_post. "
-                "Do NOT publish — only improve the draft."
-            ),
-            "max_iterations": 15,
-            "error_handling": "skip",
-        },
-        {
             "step_id": "canvas_design",
-            "order": 3,
+            "order": 2,
             "agent_name": "CANVAS",
             "prompt_template": (
                 "Find the latest draft blog post and generate a cover image for it. "
@@ -204,11 +167,11 @@ BLOG_PLAYBOOK = {
         },
         {
             "step_id": "create_review_task",
-            "order": 4,
+            "order": 3,
             "agent_name": "QUILL",
             "prompt_template": (
-                "The blog post draft has been written, reviewed, and designed. "
-                "First, use platform_list_blog_posts(status=draft) to find the latest draft post. "
+                "The blog post has been researched, written, and designed. "
+                "Use platform_list_blog_posts(status=draft) to find the latest draft post. "
                 "Then create a board task for human approval using platform_create_task with:\n"
                 "- title: 'Review & Publish: [the actual post title]'\n"
                 "- description: 'Blog post ready for final review. Approve to publish live.'\n"
@@ -224,19 +187,19 @@ BLOG_PLAYBOOK = {
     ],
     "metadata": {
         "required_tools": [],
-        "required_skills": ["pattern_recognition", "Data Analysis"],
-        "suggested_agents": ["QUILL", "EDITOR", "CANVAS"],
+        "required_skills": ["pattern_recognition"],
+        "suggested_agents": ["QUILL", "CANVAS"],
         "trigger_type": "cron",
-        "schedule": "0 9 * * *",
-        "estimated_time": "10-15 minutes",
-        "cost_tier": "premium",
+        "schedule": "0 9 * * 2,5",
+        "estimated_time": "15-30 minutes",
+        "cost_tier": "standard",
     },
 }
 
 
 def seed_blog_playbook():
-    """Seed content agents + daily blog playbook into the marketplace."""
-    print("Seeding Daily Blog Pipeline...")
+    """Seed content agents + blog playbook into the marketplace."""
+    print("Seeding Blog Pipeline v2 (mission-powered)...")
 
     engine = create_engine(get_database_url())
 
@@ -281,11 +244,18 @@ def seed_blog_playbook():
                 agent_id = result.scalar()
                 print(f"  Agent: {agent['name']} (ID: {agent_id})")
 
+            # Also remove EDITOR from marketplace (no longer needed — mission handles editing)
+            db.execute(text(
+                "DELETE FROM marketplace_items WHERE type = 'agent' "
+                "AND creator_name = 'Automatos Team' AND name = 'EDITOR'"
+            ))
+            print("  Removed: EDITOR (mission handles editing now)")
+
             # --- Seed playbook into marketplace ---
             db.execute(text(
                 "DELETE FROM marketplace_items WHERE type = 'recipe' "
-                "AND creator_name = 'Automatos Team' AND name = :name"
-            ), {"name": BLOG_PLAYBOOK["name"]})
+                "AND creator_name = 'Automatos Team' AND name IN (:n1, :n2)"
+            ), {"n1": BLOG_PLAYBOOK["name"], "n2": "Daily Blog Pipeline"})
 
             playbook_metadata = BLOG_PLAYBOOK["metadata"].copy()
             playbook_metadata["steps"] = [
@@ -300,7 +270,7 @@ def seed_blog_playbook():
                     created_at, updated_at
                 ) VALUES (
                     'recipe', :name, :description, 'Automatos Team', :category, :tags,
-                    0, true, true, '1.0.0', :metadata,
+                    0, true, true, '2.0.0', :metadata,
                     NOW(), NOW()
                 )
                 RETURNING id
@@ -314,10 +284,10 @@ def seed_blog_playbook():
             playbook_id = result.scalar()
             print(f"  Playbook: {BLOG_PLAYBOOK['name']} (ID: {playbook_id})")
 
-            # --- If WORKSPACE_ID is set, also create the actual playbook in workflow_recipes ---
+            # --- If WORKSPACE_ID is set, also update the live playbook ---
             workspace_id = os.environ.get("WORKSPACE_ID")
             if workspace_id:
-                print(f"\n  Creating playbook in workspace {workspace_id}...")
+                print(f"\n  Updating live playbook in workspace {workspace_id}...")
 
                 # Look up agent IDs by name in this workspace
                 agent_map = {}
@@ -331,7 +301,7 @@ def seed_blog_playbook():
                     else:
                         print(f"    Agent not found: {agent['name']} — install from marketplace first")
 
-                if len(agent_map) >= 2:  # At least QUILL and EDITOR
+                if "QUILL" in agent_map:
                     # Build steps with actual agent IDs
                     steps = []
                     for step in BLOG_PLAYBOOK["steps"]:
@@ -346,40 +316,79 @@ def seed_blog_playbook():
                                 "error_handling": step.get("error_handling", "stop"),
                             })
 
-                    # Delete existing playbook by template_id
-                    db.execute(text(
-                        "DELETE FROM workflow_recipes WHERE workspace_id = :ws "
-                        "AND template_id = :tid"
-                    ), {"ws": workspace_id, "tid": BLOG_PLAYBOOK["template_id"]})
+                    # Update existing playbook or create new one
+                    existing = db.execute(text(
+                        "SELECT id FROM workflow_recipes WHERE workspace_id = :ws "
+                        "AND template_id = :tid LIMIT 1"
+                    ), {"ws": workspace_id, "tid": BLOG_PLAYBOOK["template_id"]}).fetchone()
 
-                    db.execute(text("""
-                        INSERT INTO workflow_recipes (
-                            workspace_id, owner_type, template_id, name, description,
-                            steps, inputs, execution_config, schedule_config,
-                            tags, category, is_public, is_featured,
-                            created_at, updated_at
-                        ) VALUES (
-                            :ws, 'workspace', :tid, :name, :description,
-                            :steps, :inputs, :exec_config, :sched_config,
-                            :tags, :category, true, false,
-                            NOW(), NOW()
-                        )
-                        RETURNING id
-                    """), {
-                        "ws": workspace_id,
-                        "tid": BLOG_PLAYBOOK["template_id"],
-                        "name": BLOG_PLAYBOOK["name"],
-                        "description": BLOG_PLAYBOOK["description"],
-                        "steps": json.dumps(steps),
-                        "inputs": json.dumps(BLOG_PLAYBOOK["inputs"]),
-                        "exec_config": json.dumps(BLOG_PLAYBOOK["execution_config"]),
-                        "sched_config": json.dumps(BLOG_PLAYBOOK["schedule_config"]),
-                        "tags": json.dumps(BLOG_PLAYBOOK["tags"]),
-                        "category": BLOG_PLAYBOOK["category"],
-                    })
-                    print(f"    Playbook created in workspace!")
+                    if existing:
+                        db.execute(text("""
+                            UPDATE workflow_recipes SET
+                                name = :name,
+                                description = :description,
+                                steps = :steps,
+                                inputs = :inputs,
+                                execution_config = :exec_config,
+                                schedule_config = :sched_config,
+                                tags = :tags,
+                                category = :category,
+                                updated_at = NOW()
+                            WHERE id = :id
+                        """), {
+                            "id": existing[0],
+                            "name": BLOG_PLAYBOOK["name"],
+                            "description": BLOG_PLAYBOOK["description"],
+                            "steps": json.dumps(steps),
+                            "inputs": json.dumps(BLOG_PLAYBOOK["inputs"]),
+                            "exec_config": json.dumps(BLOG_PLAYBOOK["execution_config"]),
+                            "sched_config": json.dumps(BLOG_PLAYBOOK["schedule_config"]),
+                            "tags": json.dumps(BLOG_PLAYBOOK["tags"]),
+                            "category": BLOG_PLAYBOOK["category"],
+                        })
+                        print(f"    Updated existing playbook (ID: {existing[0]})")
+                    else:
+                        db.execute(text("""
+                            INSERT INTO workflow_recipes (
+                                workspace_id, owner_type, template_id, name, description,
+                                steps, inputs, execution_config, schedule_config,
+                                tags, category, is_public, is_featured,
+                                created_at, updated_at
+                            ) VALUES (
+                                :ws, 'workspace', :tid, :name, :description,
+                                :steps, :inputs, :exec_config, :sched_config,
+                                :tags, :category, true, false,
+                                NOW(), NOW()
+                            )
+                            RETURNING id
+                        """), {
+                            "ws": workspace_id,
+                            "tid": BLOG_PLAYBOOK["template_id"],
+                            "name": BLOG_PLAYBOOK["name"],
+                            "description": BLOG_PLAYBOOK["description"],
+                            "steps": json.dumps(steps),
+                            "inputs": json.dumps(BLOG_PLAYBOOK["inputs"]),
+                            "exec_config": json.dumps(BLOG_PLAYBOOK["execution_config"]),
+                            "sched_config": json.dumps(BLOG_PLAYBOOK["schedule_config"]),
+                            "tags": json.dumps(BLOG_PLAYBOOK["tags"]),
+                            "category": BLOG_PLAYBOOK["category"],
+                        })
+                        print("    Created new playbook in workspace")
+
+                    # Update agent models to use cheap models (topic scouting is lightweight)
+                    for name, model in [
+                        ("QUILL", "mistralai/mistral-small-3.1-24b-instruct"),
+                        ("CANVAS", "mistralai/mistral-small-3.1-24b-instruct"),
+                    ]:
+                        if name in agent_map:
+                            db.execute(text(
+                                "UPDATE agents SET model_id = :model, updated_at = NOW() "
+                                "WHERE id = :id"
+                            ), {"id": agent_map[name], "model": model})
+                            print(f"    Updated {name} model → {model}")
+
                 else:
-                    print("    Skipping workspace playbook — install agents first")
+                    print("    Skipping workspace playbook — QUILL agent required")
 
             trans.commit()
             print("\nDone!")

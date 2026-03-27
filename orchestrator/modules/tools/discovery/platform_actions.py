@@ -26,6 +26,7 @@ from .actions_scheduling import register_scheduling_actions
 from .actions_reports import register_report_actions
 from .actions_field import register_field_actions
 from .actions_blog import register_blog_actions
+from .actions_missions import register_mission_actions
 
 
 def register_all_actions(registry: ActionRegistry) -> None:
@@ -45,6 +46,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_report_actions(registry)
     register_field_actions(registry)
     register_blog_actions(registry)
+    register_mission_actions(registry)
 
     # Workspace tools (file I/O, grep, exec, git)
     from .workspace_actions import register_workspace_actions

@@ -117,6 +117,11 @@ from modules.tools.discovery.handlers_blog import (
     get_blog_post,
     update_blog_post,
 )
+from modules.tools.discovery.handlers_missions import (
+    create_mission,
+    list_missions,
+    get_mission,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +222,10 @@ class PlatformActionExecutor:
             "platform_list_blog_posts": list_blog_posts,
             "platform_get_blog_post": get_blog_post,
             "platform_update_blog_post": update_blog_post,
+            # PRD-82A: Missions
+            "platform_create_mission": create_mission,
+            "platform_list_missions": list_missions,
+            "platform_get_mission": get_mission,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
