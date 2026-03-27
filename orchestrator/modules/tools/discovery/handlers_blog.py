@@ -18,7 +18,7 @@ async def publish_blog_post(db: Session, workspace_id: UUID, params: Dict[str, A
     if not title or not content:
         return {"success": False, "error": "title and content are required"}
 
-    publish_immediately = params.get("publish_immediately", True)
+    publish_immediately = params.get("publish_immediately", False)
     status = "published" if publish_immediately else "draft"
 
     agent_name = params.get("_agent_name", "AI Agent")

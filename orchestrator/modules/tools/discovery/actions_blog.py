@@ -45,7 +45,7 @@ def register_blog_actions(registry: ActionRegistry) -> None:
                 },
                 "publish_immediately": {
                     "type": "boolean",
-                    "description": "If true (default), post is published immediately. If false, saved as draft.",
+                    "description": "If true, post is published immediately. If false (default), saved as draft.",
                 },
             },
             "required": ["title", "content"],
