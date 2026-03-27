@@ -736,7 +736,7 @@ async def record_recipe_usage(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        recipe.use_count += 1
+        recipe.use_count = (recipe.use_count or 0) + 1
         recipe.last_used_at = datetime.now()
         db.commit()
 
@@ -893,7 +893,7 @@ async def execute_recipe(
         db.add(recipe_execution)
 
         # Update recipe usage stats
-        recipe.use_count += 1
+        recipe.use_count = (recipe.use_count or 0) + 1
         recipe.last_used_at = datetime.now()
 
         db.commit()
