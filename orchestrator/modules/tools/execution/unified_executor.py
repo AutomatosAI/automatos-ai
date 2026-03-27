@@ -340,6 +340,9 @@ class UnifiedToolExecutor:
             if tool_name == "platform_execute":
                 action_name = (parameters.get("action") or "").strip()
                 action_params = parameters.get("params") or {}
+                # LLMs often put params at top level instead of nested under "params"
+                if not action_params:
+                    action_params = {k: v for k, v in parameters.items() if k not in ("action", "params")}
                 if not action_name:
                     return {"success": False, "error": "Missing required field: action", "tool": tool_name}
 
