@@ -45,6 +45,43 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
+        name="platform_browse_marketplace_agents",
+        description=(
+            "Browse or search the marketplace for pre-built agent templates. Returns agent name, "
+            "description, category, model, tools, skills, install count, and whether it's already "
+            "installed in this workspace. Use when designing teams or hiring new agents."
+        ),
+        category="marketplace",
+        parameters={
+            "type": "object",
+            "properties": {
+                "search": {
+                    "type": "string",
+                    "description": "Search term to filter agents by name or description.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Category to filter by (e.g., 'sales', 'marketing', 'devops', 'finance').",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return. Defaults to 20.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["marketplace", "agents", "browse", "search", "hire"],
+        examples=[
+            "browse marketplace agents",
+            "search agents for marketing",
+            "what agents are available to hire?",
+            "find an agent for sales",
+            "show me available team members",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
         name="platform_browse_marketplace_skills",
         description=(
             "Browse or search the global skills catalog (marketplace skills). Returns "

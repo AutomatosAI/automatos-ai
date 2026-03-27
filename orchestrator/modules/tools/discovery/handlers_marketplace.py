@@ -79,6 +79,81 @@ async def browse_marketplace_plugins(db: Session, workspace_id: UUID, params: Di
     }
 
 
+async def browse_marketplace_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Browse/search marketplace agent templates (owner_type='marketplace')."""
+    from core.models.core import Agent, agent_skills, Skill
+
+    query = db.query(Agent).filter(
+        Agent.owner_type == "marketplace",
+        Agent.status == "active",
+    )
+
+    search = (params.get("search") or "").strip()
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            Agent.name.ilike(like)
+            | Agent.description.ilike(like)
+            | Agent.marketplace_category.ilike(like)
+        )
+
+    category = params.get("category")
+    if category:
+        query = query.filter(Agent.marketplace_category.ilike(f"%{category}%"))
+
+    limit = min(params.get("limit", 20), 50)
+    agents = query.order_by(Agent.install_count.desc()).limit(limit).all()
+
+    # Check which marketplace agents are already cloned into this workspace
+    cloned_from_ids = set()
+    try:
+        rows = (
+            db.query(Agent.cloned_from_id)
+            .filter(
+                Agent.workspace_id == workspace_id,
+                Agent.cloned_from_id.isnot(None),
+            )
+            .all()
+        )
+        cloned_from_ids = {r.cloned_from_id for r in rows}
+    except Exception:
+        pass
+
+    results = []
+    for a in agents:
+        # Get skill names
+        skill_names = []
+        try:
+            if a.skills:
+                skill_names = [s.name for s in a.skills if s.name]
+        except Exception:
+            pass
+
+        # Extract model info
+        model_id = None
+        if a.model_config and isinstance(a.model_config, dict):
+            model_id = a.model_config.get("model_id")
+
+        results.append({
+            "id": a.id,
+            "name": a.name,
+            "description": (a.description or "")[:300],
+            "category": a.marketplace_category,
+            "model": model_id,
+            "skills": skill_names,
+            "tags": a.tags or [],
+            "install_count": a.install_count or 0,
+            "is_featured": a.is_featured,
+            "is_installed": a.id in cloned_from_ids,
+        })
+
+    return {
+        "success": True,
+        "agents": results,
+        "count": len(results),
+    }
+
+
 async def browse_marketplace_skills(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Browse/search global marketplace skills (workspace_id IS NULL)."""
     from core.models.core import Skill

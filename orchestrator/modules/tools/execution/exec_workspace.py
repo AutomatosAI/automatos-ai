@@ -56,7 +56,12 @@ async def execute_workspace_action(
             "workspace_read_file", "workspace_write_file",
             "workspace_grep", "workspace_list_dir",
         )
-        if (needs_repo or needs_path_prefix) and not parameters.get("cwd") and not parameters.get("path", "").startswith("repos/"):
+        # Paths starting with these prefixes are workspace-root relative, not repo-relative
+        _WORKSPACE_ROOT_PREFIXES = ("repos/", "artifacts/", "content/", "reports/", "logs/")
+        param_path = parameters.get("path", "")
+        param_cwd = parameters.get("cwd", "")
+        path_is_workspace_root = any(param_path.startswith(p) for p in _WORKSPACE_ROOT_PREFIXES)
+        if (needs_repo or needs_path_prefix) and not param_cwd and not path_is_workspace_root:
             repo_dir = await resolve_repo_dir(client)
 
         if tool_name == "workspace_read_file":

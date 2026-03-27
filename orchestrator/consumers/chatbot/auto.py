@@ -231,6 +231,11 @@ _PLATFORM_KEYWORDS = {
         "any issues", "infrastructure issues",
     ],
     # Marketplace discovery & workspace inventory (PRD-71)
+    "platform_browse_marketplace_agents": [
+        "marketplace agents", "browse agents", "search agents",
+        "available agents", "find an agent", "hire agent",
+        "show me agents", "agent catalog", "team members",
+    ],
     "platform_browse_marketplace_plugins": [
         "marketplace plugins", "browse plugins", "search plugins",
         "available plugins", "find a plugin",

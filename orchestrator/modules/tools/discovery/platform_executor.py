@@ -71,6 +71,7 @@ from modules.tools.discovery.handlers_tools_llms import (
     list_datasources,
 )
 from modules.tools.discovery.handlers_marketplace import (
+    browse_marketplace_agents,
     browse_marketplace_plugins,
     browse_marketplace_skills,
     list_workspace_plugins,
@@ -181,6 +182,7 @@ class PlatformActionExecutor:
             "platform_delete_recipe": delete_playbook,
             "platform_get_activity_feed": get_activity_feed,
             # Marketplace discovery & workspace inventory (PRD-71)
+            "platform_browse_marketplace_agents": browse_marketplace_agents,
             "platform_browse_marketplace_plugins": browse_marketplace_plugins,
             "platform_browse_marketplace_skills": browse_marketplace_skills,
             "platform_list_workspace_plugins": list_workspace_plugins,

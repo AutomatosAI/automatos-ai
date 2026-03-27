@@ -369,6 +369,11 @@ class UnifiedToolExecutor:
                     }
 
                 logger.info(f"[tool-trace {trace}] platform_execute -> {action_name}")
+                # Workspace actions registered in ActionRegistry need workspace routing
+                if action_name.startswith("workspace_"):
+                    return await self._execute_workspace_action(
+                        action_name, action_params, workspace_id=workspace_id, trace_id=trace
+                    )
                 return await self._execute_platform_action(
                     action_name, action_params, workspace_id=workspace_id, trace_id=trace
                 )

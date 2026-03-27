@@ -290,6 +290,9 @@ class Config:
     LOKI_URL: str = os.getenv("LOKI_URL", "http://loki.railway.internal:3100")
     PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://prometheus.railway.internal:9090")
     ALERTMANAGER_URL: str = os.getenv("ALERTMANAGER_URL", "http://alertmanager.railway.internal:9093")
+    GRAFANA_URL: str = os.getenv("GRAFANA_URL", "")
+    GRAFANA_SERVICE_ACCOUNT_TOKEN: str = os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", "")
+    GRAFANA_LOKI_DATASOURCE_UID: str = os.getenv("GRAFANA_LOKI_DATASOURCE_UID", "loki")
 
     # =============================================================================
     # FEATURE FLAGS

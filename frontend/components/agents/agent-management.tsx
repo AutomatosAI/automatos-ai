@@ -13,7 +13,8 @@ import {
   Users,
   Zap,
   ChefHat,
-  RefreshCw
+  RefreshCw,
+  Network,
 } from 'lucide-react'
 
 // Shared components
@@ -32,6 +33,7 @@ import { AgentCoordination } from './agent-coordination'
 import { PlaybooksTab } from '@/components/workflows/playbooks-tab'
 import { CreateAgentModal } from './create-agent-modal'
 import { AgentDetailsModal } from './agent-details-modal'
+import { OrgChartTab } from './org-chart-tab'
 
 // API hooks for real data
 import { useAgents, useAgentStats, useAgentTypes } from '@/hooks/use-agent-api'
@@ -132,6 +134,7 @@ export function AgentManagement() {
 
   const tabDefs = [
     { value: 'roster', label: 'Agent Roster', icon: Users },
+    { value: 'org-chart', label: 'Org Chart', icon: Network },
     { value: 'configuration', label: 'Configuration', icon: Settings },
     { value: 'coordination', label: 'Coordination', icon: Users },
     { value: 'recipes', label: 'Recipes', icon: ChefHat },
@@ -255,6 +258,10 @@ export function AgentManagement() {
                 viewMode={viewMode}
               />
             </div>
+          </TabsContent>
+
+          <TabsContent value="org-chart" className="space-y-6">
+            <OrgChartTab />
           </TabsContent>
 
           <TabsContent value="configuration" className="space-y-6">

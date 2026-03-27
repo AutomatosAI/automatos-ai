@@ -257,7 +257,7 @@ ALLOWED_TASK_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.COMPLETED: frozenset({TaskState.VERIFYING, TaskState.SKIPPED}),
     TaskState.VERIFYING: frozenset({TaskState.VERIFIED, TaskState.RETRYING, TaskState.FAILED, TaskState.SKIPPED}),
     TaskState.VERIFIED: frozenset({TaskState.RETRYING}),  # human rejection re-queues for retry
-    TaskState.FAILED: frozenset(),    # terminal
+    TaskState.FAILED: frozenset({TaskState.SKIPPED}),  # allow skip during replan
     TaskState.SKIPPED: frozenset(),   # terminal
     TaskState.STALLED: frozenset({TaskState.QUEUED, TaskState.ASSIGNED, TaskState.SKIPPED}),
     TaskState.RETRYING: frozenset({TaskState.ASSIGNED, TaskState.SKIPPED}),

@@ -1108,6 +1108,228 @@ TEMPLATE_REGISTRY: List[DecompositionTemplate] = [
             ),
         ],
     ),
+    # ── org_design / Mission Zero (7 tasks) ───────────────────────────
+    # Phase 1: audit + browse marketplace (parallel)
+    # Phase 2: synthesize findings → design org structure
+    # Phase 3: hire agents + create playbooks (parallel)
+    # Phase 4: review & document
+    DecompositionTemplate(
+        id="org_design",
+        name="Mission Zero — Org Design",
+        description=(
+            "Design the AI company structure: audit current agents, browse "
+            "marketplace for talent, design teams and reporting lines, hire "
+            "agents, and create operational playbooks."
+        ),
+        keywords=[
+            "mission zero", "design the company", "org chart", "organization",
+            "build a team", "hire agents", "design team", "company structure",
+            "restructure", "org design", "team structure", "staffing plan",
+            "workforce", "department", "roster review",
+        ],
+        min_tasks=6,
+        max_tasks=9,
+        output_format="markdown",
+        task_templates=[
+            # ── Phase 1: Audit & Discovery (parallel) ─────────────────
+            TaskTemplate(
+                sequence=1,
+                agent_role="admin",
+                title_pattern="Audit current agent roster for: {goal}",
+                description_pattern=(
+                    "Audit the current workspace agent roster for: {goal}.\n\n"
+                    "Steps:\n"
+                    "1. Use platform_list_agents to get all current agents\n"
+                    "2. For each agent, document: name, model, skills, tools, tags, status\n"
+                    "3. Identify gaps: which roles are missing? which agents overlap?\n"
+                    "4. Identify underperformers: agents with unclear purpose or wrong model\n"
+                    "5. List agents to keep, retire, or upgrade\n\n"
+                    "Output a structured roster report with recommendations."
+                ),
+                required_tools=["platform_list_agents"],
+                expected_output="Roster audit with keep/retire/upgrade recommendations",
+                complexity="moderate",
+                parallel_group="discovery",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 500, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=1,
+                agent_role="search",
+                title_pattern="Browse marketplace for available agents, skills, and tools for: {goal}",
+                description_pattern=(
+                    "Discover available talent and capabilities in the marketplace for: {goal}.\n\n"
+                    "Steps:\n"
+                    "1. Use platform_browse_marketplace_agents to see all available agent templates\n"
+                    "2. Use platform_browse_marketplace_skills to see all available skills\n"
+                    "3. Use platform_browse_marketplace_plugins to see all available plugins\n"
+                    "4. Use platform_list_llms to see available models by tier (budget, mid, premium)\n"
+                    "5. Categorize findings by department: Engineering, Marketing, Sales, "
+                    "Finance, Operations, Content, Support, HR, Research\n\n"
+                    "Output a marketplace catalog organized by department with recommendations "
+                    "for which agents/skills/models best fit each role."
+                ),
+                required_tools=[
+                    "platform_browse_marketplace_agents",
+                    "platform_browse_marketplace_skills",
+                    "platform_browse_marketplace_plugins",
+                    "platform_list_llms",
+                ],
+                expected_output="Marketplace catalog organized by department",
+                complexity="moderate",
+                parallel_group="discovery",
+                depends_on=[],
+                verification_criteria=[
+                    {"type": "min_length", "value": 500, "must_pass": True},
+                ],
+            ),
+            # ── Phase 2: Synthesis → Org Design ───────────────────────
+            TaskTemplate(
+                sequence=2,
+                agent_role="admin",
+                title_pattern="Synthesize audit and marketplace findings for: {goal}",
+                description_pattern=(
+                    "Merge the roster audit and marketplace catalog into a unified "
+                    "view for: {goal}. Cross-reference existing agents against "
+                    "marketplace options. Identify the best path for each role: "
+                    "keep existing, upgrade existing, or hire from marketplace.\n\n"
+                    "Output a gap analysis with specific recommendations per role."
+                ),
+                expected_output="Gap analysis with hire/keep/upgrade per role",
+                complexity="moderate",
+                task_type="synthesis",
+                depends_on=["task_1", "task_2"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 400, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=3,
+                agent_role="admin",
+                title_pattern="Design organizational structure for: {goal}",
+                description_pattern=(
+                    "Design the complete AI company org chart for: {goal}.\n\n"
+                    "Define:\n"
+                    "1. **Departments/Teams**: Engineering, Marketing, Content, Sales, "
+                    "Finance, Operations, Support, Research (adapt to the goal)\n"
+                    "2. **Hierarchy**: CTO at top, team leads per department, "
+                    "individual contributor agents\n"
+                    "3. **For each agent position**: job_title, team, model recommendation "
+                    "(budget/mid/premium tier), required skills, required tools, reporting line\n"
+                    "4. **Staffing plan**: which marketplace agents to install, which "
+                    "existing agents to reassign, which to create custom\n\n"
+                    "Output the org chart as a structured document with a table of all "
+                    "positions and a clear hierarchy."
+                ),
+                expected_output="Org chart document with positions, hierarchy, and staffing plan",
+                complexity="complex",
+                depends_on=["task_3"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 800, "must_pass": True},
+                    {
+                        "type": "required_sections",
+                        "value": ["Departments", "Hierarchy", "Staffing"],
+                        "must_pass": False,
+                    },
+                ],
+            ),
+            # ── Phase 3: Execute Hires & Playbooks (parallel) ─────────
+            TaskTemplate(
+                sequence=4,
+                agent_role="admin",
+                title_pattern="Execute hiring plan — create and configure agents for: {goal}",
+                description_pattern=(
+                    "Execute the staffing plan from the org design for: {goal}.\n\n"
+                    "For each agent to hire:\n"
+                    "1. If from marketplace: use platform_install_skill for required skills, "
+                    "then platform_create_agent with the right model, description, and tags\n"
+                    "2. If upgrading existing: use platform_update_agent to change model, "
+                    "description, tags, team, and job_title\n"
+                    "3. For ALL agents (new and existing): set team and job_title fields\n"
+                    "4. Use platform_assign_skill_to_agent and platform_assign_tool_to_agent "
+                    "to wire up capabilities\n"
+                    "5. Use platform_configure_agent_heartbeat for agents that need "
+                    "autonomous operation\n\n"
+                    "Report each action taken with agent IDs and confirmation."
+                ),
+                required_tools=[
+                    "platform_create_agent",
+                    "platform_update_agent",
+                    "platform_assign_skill_to_agent",
+                    "platform_assign_tool_to_agent",
+                    "platform_install_skill",
+                    "platform_configure_agent_heartbeat",
+                ],
+                expected_output="Execution log with all agents created/updated and their IDs",
+                complexity="complex",
+                parallel_group="execute",
+                depends_on=["task_4"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 300, "must_pass": True},
+                ],
+            ),
+            TaskTemplate(
+                sequence=4,
+                agent_role="admin",
+                title_pattern="Create operational playbooks for: {goal}",
+                description_pattern=(
+                    "Create playbooks (workflow recipes) that define how teams operate "
+                    "for: {goal}.\n\n"
+                    "Create at least 2-3 playbooks covering:\n"
+                    "1. **Content Pipeline**: research → write → review → publish\n"
+                    "2. **Customer Lifecycle**: lead gen → nurture → support → success\n"
+                    "3. **Engineering Ops**: bug triage → fix → review → deploy\n"
+                    "(Adapt to the actual teams in the org design)\n\n"
+                    "For each playbook, use platform_create_playbook with:\n"
+                    "- Clear name and description\n"
+                    "- Sequential steps referencing the agents by ID\n"
+                    "- Appropriate execution config (sequential/parallel, timeouts)\n\n"
+                    "Report each playbook created with its ID and step summary."
+                ),
+                required_tools=[
+                    "platform_create_playbook",
+                    "platform_add_playbook_step",
+                ],
+                expected_output="List of playbooks created with IDs and step summaries",
+                complexity="complex",
+                parallel_group="execute",
+                depends_on=["task_4"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 300, "must_pass": True},
+                ],
+            ),
+            # ── Phase 4: Review & Document ────────────────────────────
+            TaskTemplate(
+                sequence=5,
+                agent_role="reviewer",
+                title_pattern="Review and document final org structure for: {goal}",
+                description_pattern=(
+                    "Review the complete org design execution for: {goal}.\n\n"
+                    "1. Use platform_list_agents to verify all agents are created and configured\n"
+                    "2. Verify each agent has: team, job_title, correct model, skills, tools\n"
+                    "3. Use platform_list_playbooks to verify playbooks are created\n"
+                    "4. Produce a final org chart document in markdown with:\n"
+                    "   - Visual hierarchy (indented tree)\n"
+                    "   - Agent table: ID, Name, Job Title, Team, Model, Skills, Tools\n"
+                    "   - Playbook summary table: ID, Name, Steps, Schedule\n"
+                    "   - Recommendations for future hires or improvements\n\n"
+                    "This document will be shown in the Org Chart tab."
+                ),
+                required_tools=[
+                    "platform_list_agents",
+                    "platform_list_playbooks",
+                ],
+                expected_output="Final org chart document with hierarchy, agent table, and playbook summary",
+                complexity="moderate",
+                depends_on=["task_5", "task_6"],
+                verification_criteria=[
+                    {"type": "min_length", "value": 500, "must_pass": True},
+                ],
+            ),
+        ],
+    ),
 ]
 
 

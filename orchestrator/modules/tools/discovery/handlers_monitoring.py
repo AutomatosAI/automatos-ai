@@ -85,11 +85,10 @@ async def list_services(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
 
 async def query_loki_logs(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Query application logs from Loki."""
+    """Query application logs from Loki (via Grafana datasource proxy, fallback to direct Loki)."""
     import httpx
     from config import config
 
-    loki_url = getattr(config, "LOKI_URL", None) or "http://loki.railway.internal:3100"
     minutes = min(params.get("minutes", 60), 10080)
     limit = min(params.get("limit", 100), 500)
     service = params.get("service")
@@ -104,7 +103,6 @@ async def query_loki_logs(db: Session, workspace_id: UUID, params: Dict[str, Any
         label_parts.append(f'level="{level}"')
     label_selector = "{" + ", ".join(label_parts) + "}" if label_parts else '{}'
 
-    # Add line filter for search
     line_filter = ""
     if search:
         line_filter = f' |= `{search}`'
@@ -113,56 +111,88 @@ async def query_loki_logs(db: Session, workspace_id: UUID, params: Dict[str, Any
 
     import time as _time
     end_ns = int(_time.time() * 1e9)
-    start_ns = int(((_time.time()) - minutes * 60) * 1e9)
+    start_ns = int((_time.time() - minutes * 60) * 1e9)
 
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"{loki_url}/loki/api/v1/query_range",
-                params={
-                    "query": logql,
-                    "start": str(start_ns),
-                    "end": str(end_ns),
-                    "limit": str(limit),
-                    "direction": "backward",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
+    query_params = {
+        "query": logql,
+        "start": str(start_ns),
+        "end": str(end_ns),
+        "limit": str(limit),
+        "direction": "backward",
+    }
 
-        results = data.get("data", {}).get("result", [])
-        log_lines = []
-        for stream in results:
-            labels = stream.get("stream", {})
-            svc = labels.get("service", "unknown")
-            lvl = labels.get("level", "")
-            for ts_ns, msg in stream.get("values", []):
-                ts_sec = int(ts_ns) / 1e9
-                ts_str = datetime.fromtimestamp(ts_sec, tz=timezone.utc).strftime("%H:%M:%S")
-                log_lines.append(f"[{ts_str}] [{svc}] [{lvl.upper()}] {msg}")
+    data = None
+    source = "unknown"
 
-        formatted = "\n".join(log_lines[:limit])
-        if len(formatted) > 8000:
-            formatted = formatted[:8000] + "\n... (truncated)"
+    # Try Grafana datasource proxy first (works from outside Railway network)
+    grafana_url = getattr(config, "GRAFANA_URL", "") or ""
+    grafana_token = getattr(config, "GRAFANA_SERVICE_ACCOUNT_TOKEN", "") or ""
+    loki_ds_uid = getattr(config, "GRAFANA_LOKI_DATASOURCE_UID", "loki") or "loki"
 
-        return {
-            "success": True,
-            "query": logql,
-            "total_entries": len(log_lines),
-            "time_range_minutes": minutes,
-            "formatted_logs": formatted,
-        }
-    except httpx.ConnectError:
-        return {
-            "success": False,
-            "error": (
-                f"Cannot reach Loki at {loki_url}. "
-                "Loki is only accessible within the Railway internal network."
-            ),
-        }
-    except Exception as exc:
-        logger.error("[PlatformExecutor] Loki query failed: %s", exc, exc_info=True)
-        return {"success": False, "error": f"Loki query failed: {exc}"}
+    if grafana_url and grafana_token:
+        try:
+            proxy_url = f"{grafana_url.rstrip('/')}/api/datasources/proxy/uid/{loki_ds_uid}/loki/api/v1/query_range"
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(
+                    proxy_url,
+                    params=query_params,
+                    headers={"Authorization": f"Bearer {grafana_token}"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                source = "grafana"
+        except Exception as exc:
+            logger.warning("[PlatformExecutor] Grafana Loki proxy failed, falling back to direct: %s", exc)
+
+    # Fallback: direct Loki (internal network only)
+    if data is None:
+        loki_url = getattr(config, "LOKI_URL", None) or "http://loki.railway.internal:3100"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{loki_url}/loki/api/v1/query_range",
+                    params=query_params,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                source = "loki-direct"
+        except httpx.ConnectError:
+            return {
+                "success": False,
+                "error": (
+                    f"Cannot reach Loki at {loki_url}. "
+                    "Loki is only accessible within the Railway internal network. "
+                    "Set GRAFANA_URL and GRAFANA_SERVICE_ACCOUNT_TOKEN for external access."
+                ),
+            }
+        except Exception as exc:
+            logger.error("[PlatformExecutor] Loki query failed: %s", exc, exc_info=True)
+            return {"success": False, "error": f"Loki query failed: {exc}"}
+
+    # Parse results
+    results = data.get("data", {}).get("result", [])
+    log_lines = []
+    for stream in results:
+        labels = stream.get("stream", {})
+        svc = labels.get("service", "unknown")
+        lvl = labels.get("level", "")
+        for ts_ns, msg in stream.get("values", []):
+            ts_sec = int(ts_ns) / 1e9
+            ts_str = datetime.fromtimestamp(ts_sec, tz=timezone.utc).strftime("%H:%M:%S")
+            log_lines.append(f"[{ts_str}] [{svc}] [{lvl.upper()}] {msg}")
+
+    formatted = "\n".join(log_lines[:limit])
+    if len(formatted) > 8000:
+        formatted = formatted[:8000] + "\n... (truncated)"
+
+    return {
+        "success": True,
+        "source": source,
+        "query": logql,
+        "total_entries": len(log_lines),
+        "time_range_minutes": minutes,
+        "formatted_logs": formatted,
+    }
 
 
 async def query_prometheus(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

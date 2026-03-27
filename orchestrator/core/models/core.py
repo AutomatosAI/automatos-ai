@@ -219,6 +219,11 @@ class Agent(Base):
     required_role = Column(String(50), nullable=True)  # If set, only visible to users with this system_role
     slug = Column(String(100), nullable=True, unique=True)  # Stable ID for system agents (idempotent seeding)
 
+    # Mission Zero: Org structure
+    team = Column(String(100), nullable=True)       # Department/team name (e.g., "Engineering", "Marketing")
+    job_title = Column(String(200), nullable=True)  # Human-readable role (e.g., "Lead Developer", "SEO Analyst")
+    reports_to_id = Column(Integer, ForeignKey('agents.id', ondelete='SET NULL'), nullable=True)
+
     # PRD-64: Semantic routing embedding
     semantic_embedding = Column(JSONB, nullable=True)       # 2048-float vector for cosine similarity
     semantic_text_hash = Column(String(64), nullable=True)  # SHA-256 for staleness detection
@@ -260,6 +265,9 @@ class Agent(Base):
     workflows = relationship("Workflow", secondary=workflow_agents, back_populates="agents")
     executions = relationship("WorkflowExecution", back_populates="agent")
     # Tool/app assignments are managed via `AgentAppAssignment` (Composio cache model).
+
+    # Mission Zero: Org hierarchy
+    reports_to = relationship("Agent", remote_side=[id], foreign_keys=[reports_to_id], backref="direct_reports")
 
     # Marketplace relationships
     cloned_from = relationship("Agent", remote_side=[id], foreign_keys=[cloned_from_id], backref="clones")
