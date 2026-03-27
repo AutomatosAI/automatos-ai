@@ -52,6 +52,10 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
                     "enum": ["inbox", "assigned", "review"],
                     "description": "Initial task status. Auto-set to 'review' if approval_action is provided.",
                 },
+                "auto_approve": {
+                    "type": "boolean",
+                    "description": "If true AND approval_action is set, immediately execute the action (skip human review). Use for automated pipelines.",
+                },
             },
             "required": ["title", "description"],
         },

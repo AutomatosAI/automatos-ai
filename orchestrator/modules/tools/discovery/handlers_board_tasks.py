@@ -59,6 +59,32 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     db.commit()
     db.refresh(task)
 
+    # Auto-approve: execute the approval action immediately, skip human review
+    auto_approve = params.get("auto_approve", False)
+    if auto_approve and planning_data and planning_data.get("approval_action"):
+        approval_action = planning_data["approval_action"]
+        action_type = approval_action.get("type")
+        try:
+            if action_type == "publish_blog":
+                from core.services.blog_service import BlogService
+                from uuid import UUID as _UUID
+                svc = BlogService(db, workspace_id)
+                svc.publish_post(_UUID(approval_action["post_id"]))
+                logger.info("[BoardTasks] Auto-approved publish_blog for task %s", task.id)
+            task.status = "done"
+            db.commit()
+            return {
+                "success": True,
+                "task_id": task.id,
+                "status": "done",
+                "title": task.title,
+                "auto_approved": True,
+                "action_executed": action_type,
+            }
+        except Exception as approve_err:
+            logger.error("[BoardTasks] Auto-approve failed: %s", approve_err, exc_info=True)
+            # Fall through to normal review flow
+
     # Send notification if task lands in review (approval gate)
     if initial_status == "review":
         try:

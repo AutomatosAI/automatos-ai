@@ -1,12 +1,43 @@
 """Blog handlers for PlatformActionExecutor."""
 
+import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_tags(raw) -> List[str]:
+    """Normalize tags from LLM input — handles strings, JSON strings, and lists."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(t).strip() for t in parsed if t]
+            except (json.JSONDecodeError, ValueError):
+                pass
+        # Comma-separated string fallback
+        return [t.strip() for t in raw.split(",") if t.strip()]
+    if isinstance(raw, list):
+        # Ensure all elements are strings (not nested)
+        result = []
+        for item in raw:
+            if isinstance(item, str) and len(item) > 1:
+                result.append(item.strip())
+            elif isinstance(item, str) and len(item) <= 1:
+                # Single char — likely from a broken string iteration, skip
+                continue
+            else:
+                result.append(str(item).strip())
+        return result if result else []
+    return []
 
 
 async def publish_blog_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,7 +63,7 @@ async def publish_blog_post(db: Session, workspace_id: UUID, params: Dict[str, A
         author_agent_id=agent_id,
         excerpt=params.get("excerpt"),
         cover_image_url=params.get("cover_image_url"),
-        tags=params.get("tags", []),
+        tags=_normalize_tags(params.get("tags")),
         category=params.get("category"),
         status=status,
     )
@@ -132,6 +163,8 @@ async def update_blog_post(db: Session, workspace_id: UUID, params: Dict[str, An
     # Extract only the updatable fields that were provided
     updatable = ("title", "content", "excerpt", "tags", "category", "cover_image_url", "seo_title", "seo_description")
     updates = {k: params[k] for k in updatable if k in params and params[k] is not None}
+    if "tags" in updates:
+        updates["tags"] = _normalize_tags(updates["tags"])
 
     if not updates:
         return {"success": False, "error": "No fields to update"}
