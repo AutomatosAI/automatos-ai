@@ -19,8 +19,7 @@ export function OrgChartTab() {
   const { data, isLoading, error } = useQuery<OrgChartResponse>({
     queryKey: ['org-chart'],
     queryFn: async () => {
-      const res = await apiClient.get('/api/agents/org-chart')
-      return res.data
+      return apiClient.request('/api/agents/org-chart')
     },
   })
 
