@@ -59,6 +59,17 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     db.commit()
     db.refresh(task)
 
+    # Send notification if task lands in review (approval gate)
+    if initial_status == "review":
+        try:
+            from core.services.notification_service import send_workspace_notification
+            action_type = (planning_data or {}).get("approval_action", {}).get("type", "")
+            action_label = "publish blog post" if action_type == "publish_blog" else "review task"
+            msg = f"[Approval Required] {title}\n{description}\nAction: {action_label}\nOpen the Board to approve or reject."
+            await send_workspace_notification(str(workspace_id), msg)
+        except Exception as notify_err:
+            logger.debug("[BoardTasks] Notification skipped: %s", notify_err)
+
     return {
         "success": True,
         "task_id": task.id,
