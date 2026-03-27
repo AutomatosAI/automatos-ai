@@ -87,7 +87,12 @@ async def create_task(
     if review_mode not in VALID_REVIEW_MODES:
         raise HTTPException(status_code=422, detail=f"Invalid review_mode: {review_mode}")
 
-    status = "assigned" if assigned_agent_id else "inbox"
+    planning_data = body.get("planning_data")
+    # Auto-set review status when approval_action is present
+    if planning_data and isinstance(planning_data, dict) and planning_data.get("approval_action"):
+        status = "review"
+    else:
+        status = "assigned" if assigned_agent_id else "inbox"
 
     task = BoardTask(
         workspace_id=ctx.workspace_id,
@@ -102,7 +107,7 @@ async def create_task(
         created_by_id=ctx.user.clerk_user_id or ctx.user.id,
         parent_task_id=body.get("parent_task_id"),
         tags=body.get("tags", []),
-        planning_data=body.get("planning_data"),
+        planning_data=planning_data,
     )
     db.add(task)
     db.commit()
