@@ -3,13 +3,82 @@ Composio tool executors -- direct action, meta-tool, and tool router.
 Extracted from unified_executor.py.
 """
 
+import base64
 import logging
+import os
+import pathlib
 from typing import Any, Dict, Optional
 from uuid import UUID
 
 from modules.tools.registry.tool_registry import ToolSpec
 
 logger = logging.getLogger(__name__)
+
+# Image file extensions to detect in Composio results
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}
+_EXT_TO_MIME = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".png": "image/png", ".webp": "image/webp",
+    ".gif": "image/gif", ".svg": "image/svg+xml",
+}
+
+
+async def _upload_local_images(result: Dict[str, Any], workspace_id: Optional[UUID]) -> None:
+    """Detect local image file paths in Composio results and upload to image store.
+
+    Replaces local paths like /home/automatos/.composio/outputs/.../*.jpg with
+    public URLs served by /api/generated-images/{image_id}.
+    """
+    if not result or not result.get("successful", result.get("success")):
+        return
+
+    data = result.get("data", {})
+    if not isinstance(data, dict):
+        return
+
+    replaced = False
+    for key, value in data.items():
+        if not isinstance(value, str):
+            continue
+        p = pathlib.Path(value)
+        if p.suffix.lower() not in _IMAGE_EXTENSIONS:
+            continue
+        if not p.is_absolute():
+            continue
+        # It's a local image path — try to read and upload
+        if not p.exists():
+            logger.warning("[Composio] Image path does not exist: %s", value)
+            continue
+        try:
+            image_bytes = p.read_bytes()
+            b64 = base64.b64encode(image_bytes).decode("ascii")
+            mime = _EXT_TO_MIME.get(p.suffix.lower(), "image/png")
+            ws_str = str(workspace_id) if workspace_id else "default"
+
+            from core.services.image_store import get_image_store
+            store = get_image_store()
+            image_id = await store.save_image(b64, mime_type=mime, workspace_id=ws_str)
+
+            from config import Config as config
+            backend_url = (config.BACKEND_URL or "").rstrip("/")
+            public_url = f"{backend_url}/api/generated-images/{image_id}"
+
+            data[key] = public_url
+            replaced = True
+            logger.info(
+                "[Composio] Uploaded local image %s -> %s (%d bytes)",
+                value, public_url, len(image_bytes),
+            )
+            # Clean up the local file
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        except Exception as e:
+            logger.warning("[Composio] Failed to upload image %s: %s", value, e)
+
+    if replaced:
+        result["data"] = data
 
 
 async def execute_composio_tool(
@@ -133,6 +202,9 @@ async def execute_composio_execute(
     )
 
     _exec_ms = int((_time.monotonic() - _exec_start) * 1000)
+
+    # Post-process: upload local image files to image store and replace paths with public URLs
+    await _upload_local_images(result, workspace_id)
 
     # Log to tool_execution_logs (triggers auto-increment of AgentAppFeature.usage_count)
     try:
