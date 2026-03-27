@@ -126,7 +126,7 @@ BLOG_PLAYBOOK = {
     },
     "steps": [
         {
-            "step_id": "quill_scout_and_launch",
+            "step_id": "quill_launch_mission",
             "order": 1,
             "agent_name": "QUILL",
             "prompt_template": (
@@ -134,58 +134,36 @@ BLOG_PLAYBOOK = {
                 "1. Check platform_search_memory and platform_list_blog_posts to see what "
                 "we've already covered — avoid duplicates.\n"
                 "2. Pick a specific, compelling topic with a clear angle.\n"
-                "3. Launch a research mission using platform_create_mission with a detailed goal:\n\n"
+                "3. Launch a mission using platform_create_mission with a goal that covers "
+                "the ENTIRE pipeline end-to-end:\n\n"
                 "   Goal template:\n"
                 "   'Research and write a high-quality blog post about [TOPIC]. "
                 "   Investigate [2-3 specific angles]. Include real-world examples, "
                 "   data points, and expert perspectives. The post should be 1000-2000 words, "
-                "   written for technical professionals. Use platform_publish_blog_post to "
-                "   create the draft with publish_immediately=false. Include category: "
-                "{input.category}, relevant tags, and a compelling excerpt under 300 chars.'\n\n"
-                "The mission will handle research, writing, and editing automatically."
+                "   written for technical professionals.\n\n"
+                "   The mission MUST complete ALL of these steps:\n"
+                "   1. Research the topic thoroughly from multiple angles\n"
+                "   2. Write the blog post draft\n"
+                "   3. Edit and SEO-review for accuracy, clarity, and readability\n"
+                "   4. Publish the draft via platform_publish_blog_post(publish_immediately=false) "
+                "with category: {input.category}, relevant tags as an array, and a compelling "
+                "excerpt under 300 chars\n"
+                "   5. Generate a cover image for the post using the GEMINI tool (Nano Banana) "
+                "and update the post via platform_update_blog_post(cover_image_url=...)\n"
+                "   6. Create a board task for human review via platform_create_task with "
+                "title: Review & Publish: [post title], approval_action: "
+                "{type: publish_blog, post_id: [the post UUID]}, priority: high, "
+                "auto_approve: true, tags: [blog, approval]'\n\n"
+                "The mission handles EVERYTHING — research, writing, images, and publishing."
             ),
             "max_iterations": 15,
             "error_handling": "stop",
-        },
-        {
-            "step_id": "canvas_design",
-            "order": 2,
-            "agent_name": "CANVAS",
-            "prompt_template": (
-                "Find the latest draft blog post and generate a cover image for it. "
-                "Use platform_list_blog_posts(status=draft) to find it, then "
-                "platform_get_blog_post to read the title and excerpt. Generate an "
-                "appropriate cover image and update the post with the cover_image_url "
-                "using platform_update_blog_post. If no image generation tool is "
-                "available, add 'needs-cover-image' to the post tags."
-            ),
-            "max_iterations": 10,
-            "error_handling": "skip",
-        },
-        {
-            "step_id": "create_review_task",
-            "order": 3,
-            "agent_name": "QUILL",
-            "prompt_template": (
-                "The blog post has been researched, written, and designed. "
-                "Use platform_list_blog_posts(status=draft) to find the latest draft post. "
-                "Then create a board task for human approval using platform_create_task with:\n"
-                "- title: 'Review & Publish: [the actual post title]'\n"
-                "- description: 'Blog post ready for final review. Approve to publish live.'\n"
-                "- approval_action: {\"type\": \"publish_blog\", \"post_id\": \"[the actual post UUID]\"}\n"
-                "- priority: 'high'\n"
-                "- tags: ['blog', 'approval']\n\n"
-                "The approval_action field is CRITICAL — it enables the one-click publish "
-                "button on the board. Use the actual post_id from the draft you found."
-            ),
-            "max_iterations": 5,
-            "error_handling": "skip",
         },
     ],
     "metadata": {
         "required_tools": [],
         "required_skills": ["pattern_recognition"],
-        "suggested_agents": ["QUILL", "CANVAS"],
+        "suggested_agents": ["QUILL"],
         "trigger_type": "cron",
         "schedule": "0 9 * * 2,5",
         "estimated_time": "15-30 minutes",
