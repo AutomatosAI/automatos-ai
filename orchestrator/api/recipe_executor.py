@@ -724,8 +724,8 @@ async def _execute_recipe_inner(
             return
 
         # --- Initialize scratchpad ---
-        from core.services.recipe_scratchpad import RecipeScratchpad
-        scratchpad = RecipeScratchpad(recipe_execution_id)
+        from core.services.playbook_scratchpad import PlaybookScratchpad
+        scratchpad = PlaybookScratchpad(recipe_execution_id)
         scratchpad.write_inputs(input_data)
         scratchpad.write_meta(recipe_id, total_steps)
 
