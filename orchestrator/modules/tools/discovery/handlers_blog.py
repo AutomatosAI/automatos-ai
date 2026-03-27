@@ -130,7 +130,7 @@ async def update_blog_post(db: Session, workspace_id: UUID, params: Dict[str, An
         return {"success": False, "error": "post_id is required"}
 
     # Extract only the updatable fields that were provided
-    updatable = ("title", "content", "excerpt", "tags", "category", "cover_image_url")
+    updatable = ("title", "content", "excerpt", "tags", "category", "cover_image_url", "seo_title", "seo_description")
     updates = {k: params[k] for k in updatable if k in params and params[k] is not None}
 
     if not updates:

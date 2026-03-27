@@ -171,6 +171,14 @@ def register_blog_actions(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": "URL to a cover image for the post.",
                 },
+                "seo_title": {
+                    "type": "string",
+                    "description": "SEO-optimised title for search engines (max 60 chars).",
+                },
+                "seo_description": {
+                    "type": "string",
+                    "description": "SEO meta description for search results (max 160 chars).",
+                },
             },
             "required": ["post_id"],
         },
