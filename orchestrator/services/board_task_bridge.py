@@ -109,7 +109,9 @@ def complete_recipe_board_task(
     if not task:
         return
 
-    task.status = 'done' if success else 'review'
+    # Always mark done — failed playbooks log the error, individual bug tickets
+    # are the actionable output (not the playbook wrapper task itself).
+    task.status = 'done'
     task.completed_at = datetime.now(timezone.utc)
 
     if result:
