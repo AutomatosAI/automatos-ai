@@ -68,8 +68,9 @@ async def get_published_post(
 
     svc.increment_views(post.id)
 
-    data = post.to_dict(include_content=True)
-    data["content"] = render_markdown_to_html(data["content"])
+    data = post.to_dict(include_content=False)
+    content = await svc.get_content(post) or ""
+    data["content"] = render_markdown_to_html(content)
 
     response = JSONResponse(content=data)
     response.headers["Cache-Control"] = "public, max-age=3600"

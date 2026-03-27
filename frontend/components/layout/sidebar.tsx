@@ -18,6 +18,7 @@ import {
   Store,
   BarChart3,
   LayoutDashboard,
+  HardDrive,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
@@ -37,6 +38,14 @@ const navigationItems = [
     iconColor: 'text-primary',
     navIconKey: 'nav_chat',
     description: 'Your AI workspace'
+  },
+  {
+    name: 'Workspace',
+    href: '/workspace',
+    icon: HardDrive,
+    iconColor: 'text-[hsl(var(--chart-3))]',
+    navIconKey: 'nav_workspace',
+    description: 'Files, code & agent output'
   },
   {
     name: 'Activity',

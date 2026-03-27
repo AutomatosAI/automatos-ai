@@ -25,7 +25,7 @@ async def publish_blog_post(db: Session, workspace_id: UUID, params: Dict[str, A
     agent_id = params.get("_agent_id")
 
     svc = BlogService(db, workspace_id)
-    post = svc.create_post(
+    post = await svc.create_post(
         title=title,
         content=content,
         author_name=agent_name,
@@ -43,6 +43,7 @@ async def publish_blog_post(db: Session, workspace_id: UUID, params: Dict[str, A
         "title": post.title,
         "slug": post.slug,
         "status": post.status,
+        "file_path": post.file_path,
         "url": f"/api/widgets/blog/posts/{post.slug}?workspace_id={workspace_id}",
     }
 
@@ -81,4 +82,69 @@ async def list_blog_posts(db: Session, workspace_id: UUID, params: Dict[str, Any
         "success": True,
         "posts": posts,
         "total": result["total"],
+    }
+
+
+async def get_blog_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get full blog post content by ID or slug."""
+    from core.services.blog_service import BlogService
+
+    post_id = params.get("post_id")
+    slug = params.get("slug")
+    if not post_id and not slug:
+        return {"success": False, "error": "post_id or slug is required"}
+
+    svc = BlogService(db, workspace_id)
+    if post_id:
+        post = svc.get_post(UUID(post_id))
+    else:
+        post = svc.get_post_by_slug(slug)
+
+    if not post:
+        return {"success": False, "error": "Post not found"}
+
+    content = await svc.get_content(post)
+
+    return {
+        "success": True,
+        "post_id": str(post.id),
+        "title": post.title,
+        "slug": post.slug,
+        "status": post.status,
+        "content": content,
+        "excerpt": post.excerpt,
+        "cover_image_url": post.cover_image_url,
+        "tags": post.tags or [],
+        "category": post.category,
+        "published_at": post.published_at.isoformat() if post.published_at else None,
+        "reading_time_minutes": post.reading_time_minutes,
+    }
+
+
+async def update_blog_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Update fields on an existing blog post."""
+    from core.services.blog_service import BlogService
+
+    post_id = params.get("post_id")
+    if not post_id:
+        return {"success": False, "error": "post_id is required"}
+
+    # Extract only the updatable fields that were provided
+    updatable = ("title", "content", "excerpt", "tags", "category", "cover_image_url")
+    updates = {k: params[k] for k in updatable if k in params and params[k] is not None}
+
+    if not updates:
+        return {"success": False, "error": "No fields to update"}
+
+    svc = BlogService(db, workspace_id)
+    post = await svc.update_post(UUID(post_id), **updates)
+    if not post:
+        return {"success": False, "error": "Post not found"}
+
+    return {
+        "success": True,
+        "post_id": str(post.id),
+        "title": post.title,
+        "slug": post.slug,
+        "status": post.status,
     }

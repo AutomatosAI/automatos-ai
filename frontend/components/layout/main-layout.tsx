@@ -36,6 +36,7 @@ export function MainLayout({ children }: MainLayoutProps) {
     if (pathname.startsWith('/analytics')) return 'analytics'
     if (pathname.startsWith('/context')) return 'context'
     if (pathname.startsWith('/playbooks')) return 'playbooks'
+    if (pathname.startsWith('/workspace')) return 'workspace'
     if (pathname.startsWith('/chat')) return 'chat'
     return 'dashboard'
   }

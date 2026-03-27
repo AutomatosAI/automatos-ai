@@ -1,4 +1,4 @@
-"""Blog ActionDefinitions (publish post, list posts)."""
+"""Blog ActionDefinitions (publish, list, get, update posts)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
 
@@ -95,5 +95,93 @@ def register_blog_actions(registry: ActionRegistry) -> None:
             "what blog posts have been published?",
             "show me draft blog posts",
             "check what articles exist",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_get_blog_post",
+        description=(
+            "Read the full content of a blog post by ID or slug. Returns the "
+            "complete markdown content, metadata, and status. Use this to review "
+            "a draft before editing or to read existing published content."
+        ),
+        category="blog",
+        parameters={
+            "type": "object",
+            "properties": {
+                "post_id": {
+                    "type": "string",
+                    "description": "UUID of the blog post.",
+                },
+                "slug": {
+                    "type": "string",
+                    "description": "URL slug of the blog post.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["blog", "read", "content"],
+        examples=[
+            "read blog post",
+            "get blog post content",
+            "show blog draft",
+            "fetch article",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_update_blog_post",
+        description=(
+            "Update an existing blog post. Only updates the fields you provide — "
+            "omitted fields are left unchanged. Use this to improve drafts, fix "
+            "content, update tags/category, or set a cover image URL. "
+            "Content should be in markdown format."
+        ),
+        category="blog",
+        parameters={
+            "type": "object",
+            "properties": {
+                "post_id": {
+                    "type": "string",
+                    "description": "UUID of the blog post to update.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "New title for the post.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Updated blog post content in markdown format.",
+                },
+                "excerpt": {
+                    "type": "string",
+                    "description": "Updated excerpt/summary (max 300 chars).",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Updated tags.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Updated category.",
+                },
+                "cover_image_url": {
+                    "type": "string",
+                    "description": "URL to a cover image for the post.",
+                },
+            },
+            "required": ["post_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["blog", "write", "update", "edit", "content"],
+        examples=[
+            "update blog post",
+            "edit blog post",
+            "revise article",
+            "improve draft",
+            "set cover image on blog post",
         ],
     ))

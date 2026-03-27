@@ -1581,7 +1581,8 @@ class BlogPost(Base):
     title = Column(String(500), nullable=False)
     slug = Column(String(500), nullable=False)
     excerpt = Column(String(500), nullable=True)
-    content = Column(Text, nullable=False)
+    content = Column(Text, nullable=True)
+    file_path = Column(String(500), nullable=True)
     cover_image_url = Column(String(1000), nullable=True)
 
     tags = Column(PG_ARRAY(Text), default=list)
@@ -1609,6 +1610,7 @@ class BlogPost(Base):
             "title": self.title,
             "slug": self.slug,
             "excerpt": self.excerpt,
+            "file_path": self.file_path,
             "cover_image_url": self.cover_image_url,
             "tags": self.tags or [],
             "category": self.category,

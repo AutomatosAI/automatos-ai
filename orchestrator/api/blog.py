@@ -66,7 +66,7 @@ async def create_post(
     """Create a new blog post (draft by default)."""
     svc = BlogService(db, ctx.workspace_id)
     author_name = ctx.user.display_name if ctx.user and ctx.user.display_name else "Workspace Author"
-    post = svc.create_post(
+    post = await svc.create_post(
         title=body.title,
         content=body.content,
         author_name=author_name,
@@ -120,7 +120,9 @@ async def get_post(
     post = svc.get_post(post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    return post.to_dict(include_content=True)
+    data = post.to_dict(include_content=False)
+    data["content"] = await svc.get_content(post)
+    return data
 
 
 @router.put("/posts/{post_id}")
@@ -133,7 +135,7 @@ async def update_post(
     """Update post fields."""
     svc = BlogService(db, ctx.workspace_id)
     updates = body.dict(exclude_unset=True)
-    post = svc.update_post(post_id, **updates)
+    post = await svc.update_post(post_id, **updates)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     return post.to_dict(include_content=True)

@@ -114,6 +114,8 @@ from modules.tools.discovery.handlers_field import (
 from modules.tools.discovery.handlers_blog import (
     publish_blog_post,
     list_blog_posts,
+    get_blog_post,
+    update_blog_post,
 )
 
 logger = logging.getLogger(__name__)
@@ -213,6 +215,8 @@ class PlatformActionExecutor:
             # Blog Widget
             "platform_publish_blog_post": publish_blog_post,
             "platform_list_blog_posts": list_blog_posts,
+            "platform_get_blog_post": get_blog_post,
+            "platform_update_blog_post": update_blog_post,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:

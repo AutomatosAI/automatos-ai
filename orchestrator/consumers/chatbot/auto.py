@@ -412,6 +412,16 @@ _PLATFORM_KEYWORDS = {
         "published articles", "blog articles", "my blog",
         "check blog", "existing posts",
     ],
+    "platform_get_blog_post": [
+        "read blog post", "get blog post", "show blog draft",
+        "fetch article", "read article", "blog content",
+        "show post content", "get draft",
+    ],
+    "platform_update_blog_post": [
+        "update blog post", "edit blog post", "revise article",
+        "improve draft", "edit article", "update post",
+        "change blog post", "set cover image",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]

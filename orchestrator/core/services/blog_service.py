@@ -2,12 +2,16 @@
 Blog Service
 =============
 
-CRUD operations for blog posts. Handles slug generation, reading time
-calculation, and workspace-scoped queries.
+CRUD operations for blog posts. Content stored as .md files in
+workspace storage (same pattern as ReportService). Metadata stays
+in the blog_posts table; the file_path column points to the .md file.
+
+Falls back to the legacy content column for pre-migration posts.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from datetime import datetime, timezone
@@ -18,6 +22,9 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from core.models.core import BlogPost
+from core.workspace_client import WorkspaceClient
+
+logger = logging.getLogger(__name__)
 
 
 def _slugify(text: str) -> str:
@@ -52,17 +59,56 @@ def _unique_slug(db: Session, workspace_id: UUID, base_slug: str, exclude_id: UU
         slug = f"{base_slug}-{suffix}"
 
 
+def _content_file_path(slug: str) -> str:
+    """Workspace-relative path for blog content files."""
+    return f"content/blog/{slug}.md"
+
+
 class BlogService:
-    """Workspace-scoped blog post CRUD."""
+    """Workspace-scoped blog post CRUD with workspace file storage."""
 
     def __init__(self, db: Session, workspace_id: UUID):
         self.db = db
         self.workspace_id = workspace_id
 
+    def _ws_client(self) -> WorkspaceClient:
+        return WorkspaceClient(str(self.workspace_id))
+
+    # ------------------------------------------------------------------
+    # Content I/O (workspace files)
+    # ------------------------------------------------------------------
+    async def _write_content(self, file_path: str, content: str) -> bool:
+        """Write markdown content to workspace file. Returns True on success."""
+        result = await self._ws_client().write_file(file_path, content)
+        if not result.get("success", False):
+            logger.error(
+                "[BlogService] Failed to write %s: %s",
+                file_path, result.get("error", "unknown"),
+            )
+            return False
+        return True
+
+    async def get_content(self, post: BlogPost) -> str | None:
+        """Read full markdown content for a post.
+
+        Reads from workspace file if file_path is set, falls back to
+        the legacy content column for pre-migration posts.
+        """
+        if post.file_path:
+            result = await self._ws_client().read_file(post.file_path)
+            if result.get("success"):
+                return result.get("content", "")
+            logger.warning(
+                "[BlogService] Failed to read %s, falling back to DB: %s",
+                post.file_path, result.get("error", "unknown"),
+            )
+        # Fallback: legacy content column
+        return post.content
+
     # ------------------------------------------------------------------
     # Create
     # ------------------------------------------------------------------
-    def create_post(
+    async def create_post(
         self,
         title: str,
         content: str,
@@ -80,7 +126,11 @@ class BlogService:
         if not excerpt:
             excerpt = content[:300].strip()
 
+        file_path = _content_file_path(slug)
         now = datetime.now(timezone.utc) if status == "published" else None
+
+        # Write .md to workspace
+        wrote = await self._write_content(file_path, content)
 
         post = BlogPost(
             workspace_id=self.workspace_id,
@@ -89,7 +139,8 @@ class BlogService:
             title=title,
             slug=slug,
             excerpt=excerpt,
-            content=content,
+            content=content[:500] if wrote else content,  # truncated fallback if wrote to file
+            file_path=file_path if wrote else None,
             cover_image_url=cover_image_url,
             tags=tags or [],
             category=category,
@@ -156,22 +207,38 @@ class BlogService:
     # ------------------------------------------------------------------
     # Update
     # ------------------------------------------------------------------
-    def update_post(self, post_id: UUID, **kwargs: Any) -> BlogPost | None:
+    async def update_post(self, post_id: UUID, **kwargs: Any) -> BlogPost | None:
         post = self.get_post(post_id)
         if not post:
             return None
+
+        # If content is being updated, write to workspace file
+        if "content" in kwargs:
+            new_content = kwargs["content"]
+            file_path = post.file_path or _content_file_path(post.slug)
+            wrote = await self._write_content(file_path, new_content)
+            if wrote:
+                post.file_path = file_path
+                kwargs["content"] = new_content[:500]  # truncated fallback in DB
+            post.reading_time_minutes = _reading_time(new_content)
 
         for key, value in kwargs.items():
             if hasattr(post, key):
                 setattr(post, key, value)
 
-        if "content" in kwargs:
-            post.reading_time_minutes = _reading_time(post.content)
-
         if "title" in kwargs and post.status == "draft":
-            post.slug = _unique_slug(
+            new_slug = _unique_slug(
                 self.db, self.workspace_id, _slugify(post.title), exclude_id=post.id
             )
+            # If slug changed, write content to new file path
+            if new_slug != post.slug:
+                new_file_path = _content_file_path(new_slug)
+                content = await self.get_content(post)
+                if content:
+                    wrote = await self._write_content(new_file_path, content)
+                    if wrote:
+                        post.file_path = new_file_path
+                post.slug = new_slug
 
         self.db.commit()
         self.db.refresh(post)
