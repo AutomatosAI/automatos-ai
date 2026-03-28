@@ -134,6 +134,7 @@ except ImportError:
 from api.orchestrator import router as orchestrator_router
 from api.analytics_api import router as analytics_api_router
 from api.analytics_real import router as analytics_real_router
+from api.kpi_api import router as kpi_router  # KPI Command Centre Widgets
 from api.insights import router as insights_router
 from api.knowledge import router as knowledge_router
 from api.knowledge_multimodal import router as knowledge_multimodal_router
@@ -809,6 +810,7 @@ app.include_router(context_summarization_router)  # Context Engineering 2.0: Sel
 app.include_router(orchestrator_router)
 app.include_router(analytics_api_router)
 app.include_router(analytics_real_router)
+app.include_router(kpi_router)  # KPI Command Centre Widgets
 app.include_router(insights_router)
 app.include_router(knowledge_router)
 app.include_router(knowledge_multimodal_router)

@@ -1,8 +1,14 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { Settings2, RotateCcw, GripVertical } from 'lucide-react'
+import { useState, useCallback, useEffect, useMemo, type ReactNode } from 'react'
+import {
+  Settings2, RotateCcw, GripVertical, Eye, EyeOff,
+  Play, PieChart as PieChartIcon, Calendar, BarChart3,
+  Activity, Layers, FileText, Users,
+  DollarSign, TrendingUp, BookOpen, ShieldCheck,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ActiveNowWidget } from './active-now-widget'
 import { ScheduleWidget } from './schedule-widget'
 import { AgentReportsWidget } from './agent-reports-widget'
@@ -11,31 +17,68 @@ import { StatusOverviewWidget } from './status-overview-widget'
 import { PriorityBreakdownWidget } from './priority-breakdown-widget'
 import { TypesOfWorkWidget } from './types-of-work-widget'
 import { TeamWorkloadWidget } from './team-workload-widget'
+import { CostTrackerWidget } from './cost-tracker-widget'
+import { AgentPerformanceWidget } from './agent-performance-widget'
+import { PlaybookMetricsWidget } from './playbook-metrics-widget'
+import { ApprovalGatesWidget } from './approval-gates-widget'
 import { cn } from '@/lib/utils'
 
-// ── Widget Order Storage ────────────────────────────────────
+// ── Widget Registry ─────────────────────────────────────────
 
-const ORDER_STORAGE_KEY = 'automatos:command-centre-order-v2'
-const DEFAULT_ORDER = [
-  'active-now', 'status-overview',
-  'schedule', 'priority-breakdown',
-  'recent-activity', 'types-of-work',
-  'agent-reports', 'team-workload',
+interface WidgetDef {
+  id: string
+  label: string
+  icon: ReactNode
+  defaultVisible: boolean
+  span: string
+  height: string
+}
+
+const WIDGET_REGISTRY: WidgetDef[] = [
+  { id: 'active-now',          label: 'Active Now',          icon: <Play className="w-3.5 h-3.5" />,          defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[320px]' },
+  { id: 'status-overview',     label: 'Status Overview',     icon: <PieChartIcon className="w-3.5 h-3.5" />,  defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[320px]' },
+  { id: 'schedule',            label: 'Schedule',            icon: <Calendar className="w-3.5 h-3.5" />,      defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[320px]' },
+  { id: 'priority-breakdown',  label: 'Priority Breakdown',  icon: <BarChart3 className="w-3.5 h-3.5" />,     defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[320px]' },
+  { id: 'recent-activity',     label: 'Recent Activity',     icon: <Activity className="w-3.5 h-3.5" />,      defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[280px]' },
+  { id: 'types-of-work',       label: 'Types of Work',       icon: <Layers className="w-3.5 h-3.5" />,        defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[280px]' },
+  { id: 'agent-reports',       label: 'Agent Reports',       icon: <FileText className="w-3.5 h-3.5" />,      defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[280px]' },
+  { id: 'team-workload',       label: 'Team Workload',       icon: <Users className="w-3.5 h-3.5" />,         defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[280px]' },
+  // KPI Widgets
+  { id: 'cost-tracker',        label: 'Cost Tracker',        icon: <DollarSign className="w-3.5 h-3.5" />,    defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[320px]' },
+  { id: 'agent-performance',   label: 'Agent Performance',   icon: <TrendingUp className="w-3.5 h-3.5" />,    defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[320px]' },
+  { id: 'playbook-metrics',    label: 'Playbook Metrics',    icon: <BookOpen className="w-3.5 h-3.5" />,      defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[280px]' },
+  { id: 'approval-gates',      label: 'Approval Gates',      icon: <ShieldCheck className="w-3.5 h-3.5" />,   defaultVisible: true,  span: 'lg:col-span-6', height: 'min-h-[280px]' },
 ]
 
-function loadSavedOrder(): string[] | null {
+const ALL_IDS = WIDGET_REGISTRY.map((w) => w.id)
+const DEFAULT_ORDER = ALL_IDS
+const DEFAULT_HIDDEN: string[] = []
+
+// ── Persistence ─────────────────────────────────────────────
+
+const STORAGE_KEY = 'automatos:command-centre-v3'
+
+interface DashboardState {
+  order: string[]
+  hidden: string[]
+}
+
+function loadState(): DashboardState | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = localStorage.getItem(ORDER_STORAGE_KEY)
-    return raw ? JSON.parse(raw) : null
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as DashboardState
+    if (!Array.isArray(parsed.order) || !Array.isArray(parsed.hidden)) return null
+    return parsed
   } catch {
     return null
   }
 }
 
-function saveOrder(order: string[]) {
+function saveState(state: DashboardState) {
   if (typeof window === 'undefined') return
-  localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(order))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
 }
 
 // ── Dashboard Component ─────────────────────────────────────
@@ -48,26 +91,52 @@ interface CommandCentreDashboardProps {
 
 export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalendar }: CommandCentreDashboardProps) {
   const [widgetOrder, setWidgetOrder] = useState<string[]>(DEFAULT_ORDER)
+  const [hiddenWidgets, setHiddenWidgets] = useState<string[]>(DEFAULT_HIDDEN)
   const [isCustomizing, setIsCustomizing] = useState(false)
   const [draggedWidget, setDraggedWidget] = useState<string | null>(null)
 
+  // Load saved state, merging in any new widgets that didn't exist before
   useEffect(() => {
-    const saved = loadSavedOrder()
-    if (saved && saved.length === DEFAULT_ORDER.length) {
-      setWidgetOrder(saved)
+    const saved = loadState()
+    if (saved) {
+      // Merge: keep saved order, append any new registry widgets at the end
+      const knownIds = new Set(saved.order)
+      const newIds = ALL_IDS.filter((id) => !knownIds.has(id))
+      const mergedOrder = [...saved.order.filter((id) => ALL_IDS.includes(id)), ...newIds]
+      setWidgetOrder(mergedOrder)
+      setHiddenWidgets(saved.hidden.filter((id) => ALL_IDS.includes(id)))
     }
+  }, [])
+
+  const persist = useCallback((order: string[], hidden: string[]) => {
+    saveState({ order, hidden })
   }, [])
 
   const handleReset = useCallback(() => {
     setWidgetOrder(DEFAULT_ORDER)
-    saveOrder(DEFAULT_ORDER)
-  }, [])
+    setHiddenWidgets(DEFAULT_HIDDEN)
+    persist(DEFAULT_ORDER, DEFAULT_HIDDEN)
+  }, [persist])
 
   const toggleCustomize = useCallback(() => {
     setIsCustomizing((prev) => !prev)
   }, [])
 
-  // Simple drag-and-drop reorder
+  const toggleWidget = useCallback((widgetId: string) => {
+    setHiddenWidgets((prev) => {
+      const next = prev.includes(widgetId)
+        ? prev.filter((id) => id !== widgetId)
+        : [...prev, widgetId]
+      // Persist with current order
+      setWidgetOrder((currentOrder) => {
+        persist(currentOrder, next)
+        return currentOrder
+      })
+      return next
+    })
+  }, [persist])
+
+  // Drag and drop
   const handleDragStart = useCallback((widgetId: string) => {
     setDraggedWidget(widgetId)
   }, [])
@@ -90,10 +159,23 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
   const handleDragEnd = useCallback(() => {
     setDraggedWidget(null)
     setWidgetOrder((current) => {
-      saveOrder(current)
+      persist(current, hiddenWidgets)
       return current
     })
+  }, [hiddenWidgets, persist])
+
+  // Registry lookup
+  const registryMap = useMemo(() => {
+    const map = new Map<string, WidgetDef>()
+    for (const w of WIDGET_REGISTRY) map.set(w.id, w)
+    return map
   }, [])
+
+  // Visible widgets in order
+  const visibleWidgets = useMemo(
+    () => widgetOrder.filter((id) => !hiddenWidgets.includes(id)),
+    [widgetOrder, hiddenWidgets],
+  )
 
   // Render widget by ID
   const renderWidget = (widgetId: string) => {
@@ -114,33 +196,17 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
         return <AgentReportsWidget />
       case 'team-workload':
         return <TeamWorkloadWidget period={period} />
+      case 'cost-tracker':
+        return <CostTrackerWidget period={period} />
+      case 'agent-performance':
+        return <AgentPerformanceWidget period={period} />
+      case 'playbook-metrics':
+        return <PlaybookMetricsWidget period={period} />
+      case 'approval-gates':
+        return <ApprovalGatesWidget period={period} />
       default:
         return null
     }
-  }
-
-  // Grid span config for each widget
-  const gridSpan: Record<string, string> = {
-    'active-now': 'lg:col-span-6',
-    'status-overview': 'lg:col-span-6',
-    'schedule': 'lg:col-span-6',
-    'priority-breakdown': 'lg:col-span-6',
-    'recent-activity': 'lg:col-span-6',
-    'types-of-work': 'lg:col-span-6',
-    'agent-reports': 'lg:col-span-6',
-    'team-workload': 'lg:col-span-6',
-  }
-
-  // Height config
-  const gridHeight: Record<string, string> = {
-    'active-now': 'min-h-[320px]',
-    'status-overview': 'min-h-[320px]',
-    'schedule': 'min-h-[320px]',
-    'priority-breakdown': 'min-h-[320px]',
-    'recent-activity': 'min-h-[280px]',
-    'types-of-work': 'min-h-[280px]',
-    'agent-reports': 'min-h-[280px]',
-    'team-workload': 'min-h-[280px]',
   }
 
   return (
@@ -148,15 +214,62 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
       {/* Customize Controls */}
       <div className="flex items-center justify-end gap-2">
         {isCustomizing && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleReset}
-            className="text-xs h-7"
-          >
-            <RotateCcw className="w-3 h-3 mr-1" />
-            Reset Layout
-          </Button>
+          <>
+            {/* Widget Picker */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-xs h-7">
+                  <Eye className="w-3 h-3 mr-1" />
+                  Widgets ({visibleWidgets.length}/{WIDGET_REGISTRY.length})
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 p-2">
+                <p className="text-xs font-medium text-muted-foreground px-2 py-1">
+                  Show / Hide Widgets
+                </p>
+                <div className="space-y-0.5 mt-1 max-h-[320px] overflow-y-auto">
+                  {WIDGET_REGISTRY.map((w) => {
+                    const isHidden = hiddenWidgets.includes(w.id)
+                    return (
+                      <button
+                        key={w.id}
+                        type="button"
+                        onClick={() => toggleWidget(w.id)}
+                        className={cn(
+                          'flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors',
+                          isHidden
+                            ? 'text-muted-foreground hover:bg-secondary/50'
+                            : 'text-foreground hover:bg-secondary/50',
+                        )}
+                      >
+                        <span className={cn('shrink-0', isHidden && 'opacity-40')}>
+                          {w.icon}
+                        </span>
+                        <span className={cn('flex-1 text-left', isHidden && 'line-through opacity-50')}>
+                          {w.label}
+                        </span>
+                        {isHidden ? (
+                          <EyeOff className="w-3 h-3 text-muted-foreground" />
+                        ) : (
+                          <Eye className="w-3 h-3 text-emerald-400" />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleReset}
+              className="text-xs h-7"
+            >
+              <RotateCcw className="w-3 h-3 mr-1" />
+              Reset
+            </Button>
+          </>
         )}
         <Button
           variant={isCustomizing ? 'secondary' : 'ghost'}
@@ -171,29 +284,34 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
 
       {/* Widget Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {widgetOrder.map((widgetId) => (
-          <div
-            key={widgetId}
-            draggable={isCustomizing}
-            onDragStart={() => handleDragStart(widgetId)}
-            onDragOver={(e) => handleDragOver(e, widgetId)}
-            onDragEnd={handleDragEnd}
-            className={cn(
-              'glass-card overflow-hidden rounded-xl border col-span-1 relative',
-              gridSpan[widgetId],
-              gridHeight[widgetId],
-              isCustomizing && 'ring-1 ring-dashed ring-primary/30',
-              isCustomizing && draggedWidget === widgetId && 'opacity-50',
-            )}
-          >
-            {isCustomizing && (
-              <div className="absolute top-2 left-2 z-10 cursor-grab active:cursor-grabbing p-1 rounded bg-background/80 backdrop-blur-sm border border-border/50">
-                <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
-              </div>
-            )}
-            {renderWidget(widgetId)}
-          </div>
-        ))}
+        {visibleWidgets.map((widgetId) => {
+          const def = registryMap.get(widgetId)
+          if (!def) return null
+
+          return (
+            <div
+              key={widgetId}
+              draggable={isCustomizing}
+              onDragStart={() => handleDragStart(widgetId)}
+              onDragOver={(e) => handleDragOver(e, widgetId)}
+              onDragEnd={handleDragEnd}
+              className={cn(
+                'glass-card overflow-hidden rounded-xl border col-span-1 relative',
+                def.span,
+                def.height,
+                isCustomizing && 'ring-1 ring-dashed ring-primary/30',
+                isCustomizing && draggedWidget === widgetId && 'opacity-50',
+              )}
+            >
+              {isCustomizing && (
+                <div className="absolute top-2 left-2 z-10 cursor-grab active:cursor-grabbing p-1 rounded bg-background/80 backdrop-blur-sm border border-border/50">
+                  <GripVertical className="w-3.5 h-3.5 text-muted-foreground" />
+                </div>
+              )}
+              {renderWidget(widgetId)}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
