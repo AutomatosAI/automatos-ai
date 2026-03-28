@@ -123,6 +123,19 @@ from modules.tools.discovery.handlers_missions import (
     list_missions,
     get_mission,
 )
+from modules.tools.discovery.handlers_analytics_enhanced import (
+    get_success_rate,
+    get_completion_time,
+    get_error_rates,
+    get_queue_depth,
+    get_efficiency_score,
+    get_cost_per_execution,
+    get_peak_hours,
+    get_bottlenecks,
+    get_predictive_alerts,
+    get_agent_ranking,
+    get_sla_compliance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +241,18 @@ class PlatformActionExecutor:
             "platform_create_mission": create_mission,
             "platform_list_missions": list_missions,
             "platform_get_mission": get_mission,
+            # Enhanced Analytics (dashboard + performance)
+            "platform_get_success_rate": get_success_rate,
+            "platform_get_completion_time": get_completion_time,
+            "platform_get_error_rates": get_error_rates,
+            "platform_get_queue_depth": get_queue_depth,
+            "platform_get_efficiency_score": get_efficiency_score,
+            "platform_get_cost_per_execution": get_cost_per_execution,
+            "platform_get_peak_hours": get_peak_hours,
+            "platform_get_bottlenecks": get_bottlenecks,
+            "platform_get_predictive_alerts": get_predictive_alerts,
+            "platform_get_agent_ranking": get_agent_ranking,
+            "platform_get_sla_compliance": get_sla_compliance,
         }
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
