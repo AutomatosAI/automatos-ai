@@ -803,6 +803,20 @@ class CoordinatorService:
                 "field_id": field_id,
             }
 
+        # Fetch mission attachments (cached per run to avoid repeated S3 calls)
+        attachment_contents = None
+        raw_attachments = (run.config or {}).get("attachments")
+        if raw_attachments and isinstance(raw_attachments, list):
+            # Cache on run object to avoid re-fetching per task
+            if not hasattr(run, "_cached_attachments"):
+                from modules.coordination.planner import _fetch_attachment_contents
+                run._cached_attachments = await _fetch_attachment_contents(raw_attachments)
+                logger.info(
+                    "Fetched %d mission attachment(s) for task context",
+                    len(run._cached_attachments),
+                )
+            attachment_contents = run._cached_attachments
+
         # Build the prompt — synthesis tasks use a specialised prompt
         is_synthesis = task.task_type == TaskType.SYNTHESIS.value
 
@@ -855,7 +869,7 @@ class CoordinatorService:
                     task.verification_criteria,
                 )
         else:
-            prompt = MissionDispatcher.build_task_prompt(task)
+            prompt = MissionDispatcher.build_task_prompt(task, attachment_contents)
 
         # Execute via AgentFactory
         factory = AgentFactory(db_session=db)
