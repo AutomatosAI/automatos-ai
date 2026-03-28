@@ -11,6 +11,7 @@ export function useChat({
   selectedModelId = 'gpt-4',
   selectedAgentId,
   missionMode = false,
+  planMode = false,
   onData,
   onChatIdUpdate,
   onRoutingDecision,
@@ -20,6 +21,7 @@ export function useChat({
   selectedModelId?: string
   selectedAgentId?: number | null
   missionMode?: boolean
+  planMode?: boolean
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
   onRoutingDecision?: (info: RoutingInfo) => void
@@ -115,6 +117,8 @@ export function useChat({
             selectedVisibilityType: 'private',
             // PRD-82A: Mission mode — conversational mission planning
             ...(missionMode ? { missionMode: true } : {}),
+            // Plan mode — research and strategy, no execution
+            ...(planMode ? { planMode: true } : {}),
           }),
           signal: abortControllerRef.current.signal,
         })

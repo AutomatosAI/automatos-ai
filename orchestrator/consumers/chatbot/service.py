@@ -605,6 +605,7 @@ class StreamingChatService:
         is_cto_agent: bool,
         cto_check_result: Any,
         mission_mode: bool = False,
+        plan_mode: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Optional[List[Dict[str, Any]]], Any]:
         """
         Prepare LLM messages with orchestration, persona, CTO override, and context guard.
@@ -666,6 +667,29 @@ class StreamingChatService:
                 ),
             },
         )
+
+        # Plan mode: inject research-focused system prompt, disable tools
+        if plan_mode:
+            llm_messages.insert(
+                1,
+                {
+                    "role": "system",
+                    "content": (
+                        "You are in PLAN MODE. Your role is to research, analyze, and produce a structured plan. "
+                        "Do NOT execute actions, call tools, or make changes. Focus entirely on strategy and planning.\n\n"
+                        "Output format:\n"
+                        "1. **Goal Summary** — 2-3 sentence overview of what will be accomplished\n"
+                        "2. **Steps** — Numbered list of concrete steps with agent assignments and tool recommendations\n"
+                        "3. **Dependencies** — What needs to happen before each step\n"
+                        "4. **Risks & Mitigations** — Potential failure points and how to handle them\n"
+                        "5. **Success Criteria** — How to verify the plan worked\n\n"
+                        "The user will iterate on this plan conversationally. When they are satisfied, "
+                        "they can launch it as a Mission. Keep plans actionable and specific — "
+                        "name the agents, tools, and data sources that should be used."
+                    ),
+                },
+            )
+            use_tools = None  # Disable tool execution in plan mode
 
         # Context Window Guard
         from core.context_guard import ContextGuard
@@ -1614,6 +1638,7 @@ class StreamingChatService:
         skip_composio: bool = False,
         complexity_assessment: Optional[Any] = None,
         mission_mode: bool = False,
+        plan_mode: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
@@ -1699,6 +1724,7 @@ class StreamingChatService:
                 messages, agent_runtime, agent_ctx, all_tools,
                 chat_id, complexity_assessment, _is_cto_agent, _cto_check_result,
                 mission_mode=mission_mode,
+                plan_mode=plan_mode,
             )
 
             if orchestrated:

@@ -224,6 +224,8 @@ class ChatRequest(BaseModel):
     agentId: Optional[int] = None  # Selected agent ID (default: system agent id=1)
     # PRD-82A: Mission mode — conversational mission planning
     missionMode: Optional[bool] = False
+    # Plan mode — research and strategy output, no execution
+    planMode: Optional[bool] = False
 
 
 class UpdateTitleRequest(BaseModel):
@@ -579,6 +581,7 @@ async def stream_chat(
                     skip_composio=_skip_composio,
                     complexity_assessment=complexity_assessment,
                     mission_mode=bool(request.missionMode),
+                    plan_mode=bool(request.planMode),
                 ):
                     yield chunk
 

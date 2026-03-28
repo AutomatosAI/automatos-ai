@@ -1,6 +1,6 @@
 'use client'
 
-import { Code2, Target } from 'lucide-react'
+import { Code2, FileText, Target } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { pillBase, inactiveStyle } from './chat-mode-styles'
 
@@ -13,8 +13,10 @@ interface PinnedAgent {
 
 interface ChatModeBarProps {
   isCodeActive: boolean
+  isPlanActive: boolean
   isMissionActive: boolean
   onCodeClick: () => void
+  onPlanClick: () => void
   onMissionClick: () => void
   pinnedAgentIds?: number[]
   agents?: PinnedAgent[]
@@ -31,8 +33,10 @@ const labelClass = 'hidden md:inline'
 
 export function ChatModeBar({
   isCodeActive,
+  isPlanActive,
   isMissionActive,
   onCodeClick,
+  onPlanClick,
   onMissionClick,
   pinnedAgentIds = [],
   agents = [],
@@ -55,6 +59,17 @@ export function ChatModeBar({
       >
         <Code2 className={iconClass} />
         <span className={labelClass}>Code</span>
+      </button>
+
+      {/* Plan mode */}
+      <button
+        type="button"
+        onClick={onPlanClick}
+        title="Plan"
+        className={cn(pillBase, isPlanActive ? activeStyle : inactiveStyle)}
+      >
+        <FileText className={iconClass} />
+        <span className={labelClass}>Plan</span>
       </button>
 
       {/* Mission mode */}

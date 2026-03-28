@@ -112,17 +112,19 @@ const MISSION_TEMPLATES: MissionTemplateOption[] = [
 interface CreateMissionModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialGoal?: string
+  initialDescription?: string
 }
 
-export function CreateMissionModal({ open, onOpenChange }: CreateMissionModalProps) {
+export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDescription }: CreateMissionModalProps) {
   const router = useRouter()
   const { getToken } = useAuth()
   const createMission = useCreateMission()
   const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
 
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
+  const [name, setName] = useState(initialGoal ?? '')
+  const [description, setDescription] = useState(initialDescription ?? '')
   const [tags, setTags] = useState('')
   const [files, setFiles] = useState<UploadingFile[]>([])
   const [budgetPauseEnabled, setBudgetPauseEnabled] = useState(true)

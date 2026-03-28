@@ -9,6 +9,8 @@ import { create } from 'zustand'
 
 interface MissionStore {
   // ── Chat integration ──
+  isPlanMode: boolean
+  setPlanMode: (on: boolean) => void
   isMissionMode: boolean
   setMissionMode: (on: boolean) => void
   activePlanningMissionId: string | null
@@ -42,8 +44,17 @@ const EMPTY_MODIFICATIONS: PlanModifications = {
 
 export const useMissionStore = create<MissionStore>((set) => ({
   // ── Chat integration ──
+  isPlanMode: false,
+  setPlanMode: (on) => set((state) => ({
+    isPlanMode: on,
+    // Plan and Mission modes are mutually exclusive
+    ...(on && state.isMissionMode ? { isMissionMode: false } : {}),
+  })),
   isMissionMode: false,
-  setMissionMode: (on) => set({ isMissionMode: on }),
+  setMissionMode: (on) => set((state) => ({
+    isMissionMode: on,
+    ...(on && state.isPlanMode ? { isPlanMode: false } : {}),
+  })),
   activePlanningMissionId: null,
   setActivePlanningMissionId: (id) => set({ activePlanningMissionId: id }),
 

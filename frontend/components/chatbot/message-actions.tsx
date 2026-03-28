@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Copy, ThumbsUp, ThumbsDown, RotateCw, Check } from 'lucide-react'
+import { Copy, ThumbsUp, ThumbsDown, RotateCw, Check, Rocket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { voteMessage } from '@/lib/chat/api'
 import { copyToClipboard } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useMissionStore } from '@/stores/mission-store'
 
 interface MessageActionsProps {
   chatId: string
@@ -15,6 +16,7 @@ interface MessageActionsProps {
   isReadonly: boolean
   regenerate: () => void
   createdAt?: string
+  onLaunchAsMission?: (content: string) => void
 }
 
 function relativeTime(dateStr?: string): string {
@@ -38,7 +40,9 @@ export function MessageActions({
   isReadonly,
   regenerate,
   createdAt,
+  onLaunchAsMission,
 }: MessageActionsProps) {
+  const isPlanMode = useMissionStore((s) => s.isPlanMode)
   const [isUpvoted, setIsUpvoted] = useState<boolean | undefined>()
   const [copied, setCopied] = useState(false)
   const [timeLabel, setTimeLabel] = useState(() => relativeTime(createdAt))
@@ -108,6 +112,17 @@ export function MessageActions({
           >
             <RotateCw className="w-3 h-3" />
           </Button>
+          {isPlanMode && onLaunchAsMission && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onLaunchAsMission(content)}
+              className="text-orange-400 hover:text-orange-300 hover:bg-orange-500/10 px-2 h-auto gap-1"
+            >
+              <Rocket className="w-3 h-3" />
+              <span className="text-[11px] font-medium">Launch as Mission</span>
+            </Button>
+          )}
         </>
       )}
 

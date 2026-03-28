@@ -40,6 +40,7 @@ import { PinAgentPicker } from '@/components/chatbot/pin-agent-picker'
 import { usePinnedAgents } from '@/hooks/use-pinned-agents'
 import { useAgents } from '@/hooks/use-agent-api'
 import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
+import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 
 export interface ChatProps {
   id: string
@@ -75,9 +76,11 @@ export function Chat({
   const dispatchMemoryStored = useWorkspaceStore((s) => s.dispatchMemoryStored)
   const dispatchWorkflowUpdate = useWorkspaceStore((s) => s.dispatchWorkflowUpdate)
 
-  // PRD-82A: Mission mode
+  // PRD-82A: Mission mode + Plan mode
   const isMissionMode = useMissionStore((s) => s.isMissionMode)
   const setMissionMode = useMissionStore((s) => s.setMissionMode)
+  const isPlanMode = useMissionStore((s) => s.isPlanMode)
+  const setPlanMode = useMissionStore((s) => s.setPlanMode)
   const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
   const activePlanningMissionId = useMissionStore((s) => s.activePlanningMissionId)
   const createMission = useCreateMission()
@@ -128,6 +131,18 @@ export function Chat({
     setSelectedArtifact(null)
   }, [clearWidgets])
 
+  // Plan → Mission launch state
+  const [planMissionModalOpen, setPlanMissionModalOpen] = useState(false)
+  const [planMissionContent, setPlanMissionContent] = useState<{ goal: string; description: string } | null>(null)
+
+  const handleLaunchPlanAsMission = useCallback((content: string) => {
+    // Extract first 2-3 sentences as goal, full content as description
+    const sentences = content.split(/(?<=[.!?])\s+/).filter(Boolean)
+    const goal = sentences.slice(0, 3).join(' ').slice(0, 200)
+    setPlanMissionContent({ goal, description: content })
+    setPlanMissionModalOpen(true)
+  }, [])
+
   const [canvasWidth, setCanvasWidth] = useState(800)
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [visibilityType, setVisibilityType] = useState<VisibilityType>(initialVisibilityType)
@@ -167,6 +182,7 @@ export function Chat({
     selectedModelId: currentModelId,
     selectedAgentId,
     missionMode: isMissionMode,
+    planMode: isPlanMode,
     onData: (dataPart) => {
       if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
@@ -811,6 +827,7 @@ export function Chat({
                           regenerate={regenerate}
                           isReadonly={isReadonly}
                           onArtifactSelect={handleArtifactSelect}
+                          onLaunchAsMission={handleLaunchPlanAsMission}
                           onCodeSelect={handleCodeSelect}
                           onDocumentSelect={handleDocumentSelect}
                           onDatabaseSelect={handleDatabaseSelect}
@@ -926,6 +943,7 @@ export function Chat({
                             regenerate={regenerate}
                             isReadonly={isReadonly}
                             onArtifactSelect={handleArtifactSelect}
+                          onLaunchAsMission={handleLaunchPlanAsMission}
                             onCodeSelect={handleCodeSelect}
                             onDocumentSelect={handleDocumentSelect}
                             onDatabaseSelect={handleDatabaseSelect}
@@ -1072,8 +1090,10 @@ export function Chat({
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2 pt-1">
                   <ChatModeBar
                     isCodeActive={hasWidgets}
+                    isPlanActive={isPlanMode}
                     isMissionActive={isMissionMode}
                     onCodeClick={handleOpenCodeCanvas}
+                    onPlanClick={() => setPlanMode(!isPlanMode)}
                     onMissionClick={() => router.push('/activity?tab=missions')}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
@@ -1215,8 +1235,10 @@ export function Chat({
                 <div className="flex flex-wrap justify-center gap-3 md:gap-2">
                   <ChatModeBar
                     isCodeActive={hasWidgets}
+                    isPlanActive={isPlanMode}
                     isMissionActive={isMissionMode}
                     onCodeClick={handleOpenCodeCanvas}
+                    onPlanClick={() => setPlanMode(!isPlanMode)}
                     onMissionClick={() => router.push('/activity?tab=missions')}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
@@ -1235,6 +1257,13 @@ export function Chat({
           )}
         </div>
       )}
+      {/* Plan → Mission modal */}
+      <CreateMissionModal
+        open={planMissionModalOpen}
+        onOpenChange={setPlanMissionModalOpen}
+        initialGoal={planMissionContent?.goal}
+        initialDescription={planMissionContent?.description}
+      />
     </>
   )
 }

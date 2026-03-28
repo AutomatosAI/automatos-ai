@@ -23,6 +23,7 @@ export interface MessageProps {
   onCodeSelect?: (code: CodeSnippet) => void
   onDocumentSelect?: (doc: DocumentReference) => void
   onDatabaseSelect?: (db: DatabaseResult) => void
+  onLaunchAsMission?: (content: string) => void
 }
 
 // Extract images from markdown content
@@ -48,6 +49,7 @@ export function Message({
   onCodeSelect,
   onDocumentSelect,
   onDatabaseSelect,
+  onLaunchAsMission,
 }: MessageProps) {
   const isUser = message.role === 'user'
 
@@ -555,6 +557,7 @@ export function Message({
             isReadonly={isReadonly}
             regenerate={regenerate}
             createdAt={message.createdAt}
+            onLaunchAsMission={onLaunchAsMission}
           />
         </div>
       </div>
