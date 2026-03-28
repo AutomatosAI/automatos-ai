@@ -1,9 +1,9 @@
 'use client'
 
-import { useRef, useMemo } from 'react'
+import { useRef, useMemo, Suspense } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Float, Text, Billboard, OrbitControls } from '@react-three/drei'
-import { EffectComposer, Bloom, ChromaticAberration } from '@react-three/postprocessing'
+import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import { cn } from '@/lib/utils'
 import type { FieldPattern } from '@/hooks/use-missions-api'
@@ -204,6 +204,7 @@ function ParticleStream({ from, to, color, count, speed, reverse }: ParticleStre
         <bufferAttribute
           attach="attributes-position"
           args={[positions, 3]}
+          count={count}
         />
       </bufferGeometry>
       <pointsMaterial
@@ -402,6 +403,7 @@ function StarField() {
         <bufferAttribute
           attach="attributes-position"
           args={[positions, 3]}
+          count={count}
         />
       </bufferGeometry>
       <pointsMaterial
@@ -524,11 +526,6 @@ function FieldScene({ patterns }: FieldSceneProps) {
           intensity={1.5}
           mipmapBlur
         />
-        <ChromaticAberration
-          offset={new THREE.Vector2(0.0005, 0.0005)}
-          radialModulation={false}
-          modulationOffset={0}
-        />
       </EffectComposer>
     </>
   )
@@ -537,7 +534,7 @@ function FieldScene({ patterns }: FieldSceneProps) {
 // ── Main Export ───────────────────────────────────────────────
 export function MissionFieldViz({ patterns, className }: MissionFieldVizProps) {
   return (
-    <div className={cn('w-full h-full', className)}>
+    <div className={cn('w-full h-full min-h-[400px]', className)} style={{ background: '#0a0a12' }}>
       <Canvas
         camera={{ position: [0, 3, 7], fov: 50 }}
         gl={{
@@ -545,10 +542,13 @@ export function MissionFieldViz({ patterns, className }: MissionFieldVizProps) {
           alpha: false,
           powerPreference: 'high-performance',
         }}
-        style={{ background: '#0a0a12' }}
         dpr={[1, 2]}
+        resize={{ debounce: 0 }}
+        fallback={<div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">Loading 3D...</div>}
       >
-        <FieldScene patterns={patterns} />
+        <Suspense fallback={null}>
+          <FieldScene patterns={patterns} />
+        </Suspense>
       </Canvas>
     </div>
   )
