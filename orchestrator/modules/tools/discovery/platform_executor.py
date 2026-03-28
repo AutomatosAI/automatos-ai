@@ -123,6 +123,14 @@ from modules.tools.discovery.handlers_missions import (
     list_missions,
     get_mission,
 )
+from modules.tools.discovery.handlers_governance import (
+    list_blueprints,
+    get_blueprint,
+    create_blueprint,
+    update_blueprint,
+    validate_agent_handler,
+    check_budget_handler,
+)
 from modules.tools.discovery.handlers_analytics_enhanced import (
     get_success_rate,
     get_completion_time,
@@ -241,6 +249,13 @@ class PlatformActionExecutor:
             "platform_create_mission": create_mission,
             "platform_list_missions": list_missions,
             "platform_get_mission": get_mission,
+            # Governance & Blueprints
+            "platform_list_blueprints": list_blueprints,
+            "platform_get_blueprint": get_blueprint,
+            "platform_create_blueprint": create_blueprint,
+            "platform_update_blueprint": update_blueprint,
+            "platform_validate_agent": validate_agent_handler,
+            "platform_check_budget": check_budget_handler,
             # Enhanced Analytics (dashboard + performance)
             "platform_get_success_rate": get_success_rate,
             "platform_get_completion_time": get_completion_time,

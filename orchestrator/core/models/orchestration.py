@@ -103,6 +103,10 @@ class OrchestrationRun(Base):
     # Replan tracking (PRD-82B US-005)
     replan_count = Column(Integer, nullable=False, server_default="0")
 
+    # Governance: mission budget tracking
+    budget_config = Column(JSONB, nullable=True)   # {max_cost, max_tokens, alert_at_pct}
+    budget_spent = Column(JSONB, nullable=True, server_default=text("'{}'"))  # {cost, tokens, api_calls}
+
     # Timestamps
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)

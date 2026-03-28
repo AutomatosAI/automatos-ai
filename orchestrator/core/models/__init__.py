@@ -20,6 +20,7 @@ from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
 from .personas import *  # PRD-42: Agent Personas
 from .system_prompts import *  # PRD-58: System Prompt Management
 from .voice_profiles import *  # PRD-74: Voice Profiles
+from .blueprints import *  # Governance: Agent Blueprints
 
 # PRD-82A: Orchestration (Sequential Mission Coordinator)
 from .orchestration import (  # noqa: F401

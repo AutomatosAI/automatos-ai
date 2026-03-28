@@ -28,6 +28,7 @@ from .actions_field import register_field_actions
 from .actions_blog import register_blog_actions
 from .actions_missions import register_mission_actions
 from .actions_analytics_enhanced import register_analytics_enhanced_actions
+from .actions_governance import register_governance_actions
 
 
 def register_all_actions(registry: ActionRegistry) -> None:
@@ -49,6 +50,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_blog_actions(registry)
     register_mission_actions(registry)
     register_analytics_enhanced_actions(registry)
+    register_governance_actions(registry)
 
     # Workspace tools (file I/O, grep, exec, git)
     from .workspace_actions import register_workspace_actions
