@@ -232,6 +232,13 @@ class PlatformActionExecutor:
 
     async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a platform action by name with permission checking."""
+        # LLMs sometimes send params as a JSON string instead of a dict
+        if isinstance(params, str):
+            try:
+                import json
+                params = json.loads(params)
+            except (json.JSONDecodeError, TypeError):
+                return {"success": False, "error": f"Invalid params format: expected dict, got string"}
         handler = self._handlers.get(action_name)
         if not handler:
             return {"success": False, "error": f"Unknown platform action: {action_name}"}

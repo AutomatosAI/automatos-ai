@@ -270,7 +270,7 @@ ALLOWED_RUN_TRANSITIONS: dict[RunState, frozenset[RunState]] = {
     RunState.RUNNING: frozenset({RunState.PAUSED, RunState.REPLANNING, RunState.VERIFYING, RunState.FAILED, RunState.CANCELLED}),
     RunState.PAUSED: frozenset({RunState.RUNNING, RunState.CANCELLED}),
     RunState.REPLANNING: frozenset({RunState.RUNNING, RunState.FAILED}),
-    RunState.VERIFYING: frozenset({RunState.AWAITING_HUMAN, RunState.FAILED, RunState.CANCELLED}),
+    RunState.VERIFYING: frozenset({RunState.COMPLETED, RunState.AWAITING_HUMAN, RunState.FAILED, RunState.CANCELLED}),
     RunState.AWAITING_HUMAN: frozenset({RunState.COMPLETED, RunState.RUNNING, RunState.CANCELLED}),
     RunState.COMPLETED: frozenset(),   # terminal
     RunState.FAILED: frozenset({RunState.REPLANNING}),  # replannable (PRD-82B US-005)
