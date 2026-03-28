@@ -77,8 +77,9 @@ export function BoardFiltersBar({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Types</SelectItem>
-            <SelectItem value="routine">Routine</SelectItem>
-            <SelectItem value="recipe">Task</SelectItem>
+            <SelectItem value="mission">Mission</SelectItem>
+            <SelectItem value="playbook">Playbook</SelectItem>
+            <SelectItem value="task">Task</SelectItem>
           </SelectContent>
         </Select>
 

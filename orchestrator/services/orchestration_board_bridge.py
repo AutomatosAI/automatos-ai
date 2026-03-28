@@ -182,7 +182,7 @@ def create_task_board_task(
         parent_task_id=parent_id,
         source_type="orchestration_task",
         orchestration_task_id=task.id,
-        tags=["orchestration_task"],
+        tags=["mission", f"mission:{(run.goal or 'Mission')[:60]}"],
         planning_data={
             "sequence_number": task.sequence_number,
             "agent_role": task.agent_role,

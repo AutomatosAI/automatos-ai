@@ -1,7 +1,7 @@
 'use client'
 
 import { Draggable } from '@hello-pangea/dnd'
-import { Bot, AlertCircle, Workflow, ClipboardList, Trash2, FolderKanban } from 'lucide-react'
+import { Bot, AlertCircle, Workflow, ClipboardList, Trash2, FolderKanban, Target } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow } from 'date-fns'
 import type { BoardTask } from '@/types/board'
@@ -47,10 +47,20 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
         >
           {/* Type badge + delete button */}
           <div className="flex items-center justify-between mb-1">
-            {task.type === 'playbook' ? (
+            {task.type === 'mission' ? (
+              <div className="flex items-center gap-1 min-w-0">
+                <Target className="w-3 h-3 text-primary shrink-0" />
+                <span className="text-[10px] font-medium text-primary uppercase tracking-wider shrink-0">Mission</span>
+                {task.mission_name && (
+                  <span className="text-[10px] text-primary/60 truncate" title={task.mission_name}>
+                    · {task.mission_name}
+                  </span>
+                )}
+              </div>
+            ) : task.type === 'playbook' ? (
               <div className="flex items-center gap-1">
-                <Workflow className="w-3 h-3 text-primary" />
-                <span className="text-[10px] font-medium text-primary uppercase tracking-wider">Playbook</span>
+                <Workflow className="w-3 h-3 text-[hsl(var(--warning))]" />
+                <span className="text-[10px] font-medium text-[hsl(var(--warning))] uppercase tracking-wider">Playbook</span>
               </div>
             ) : task.type === 'project' ? (
               <div className="flex items-center gap-1">

@@ -56,9 +56,13 @@ export function useBoardTasks(filters?: BoardFilters) {
     staleTime: 30000,
   })
 
-  // Group into columns
+  // Group into columns (with client-side type filter)
+  const typeFilter = filters?.type ?? null
   const columns: BoardColumn[] = BOARD_COLUMNS.map((col) => {
     const tasks = (query.data?.tasks ?? []).filter((t) => {
+      // Type filter (client-side — mission, playbook, task)
+      if (typeFilter && t.type !== typeFilter) return false
+
       if (col.status === 'done') {
         return t.status === 'done' || t.status === ('completed' as any) || t.status === ('failed' as any)
       }
@@ -162,14 +166,25 @@ export function useRejectTask() {
  * Map a /api/v1/tasks response item into a BoardTask.
  */
 function mapTaskToBoardTask(item: any): BoardTask {
+  const tags: string[] = item.tags ?? []
+  const missionTag = tags.find((t: string) => t.startsWith('mission:'))
+  const missionName = missionTag ? missionTag.slice(8) : undefined
+
+  const type = (item.source_type === 'recipe' || item.source_type === 'playbook')
+    ? 'playbook' as const
+    : (item.source_type === 'orchestration' || item.source_type === 'orchestration_task')
+      ? 'mission' as const
+      : (item.type ?? 'task') as 'task'
+
   return {
     id: String(item.id),
-    type: (item.source_type === 'recipe' || item.source_type === 'playbook') ? 'playbook' : (item.type ?? 'task'),
+    type,
     name: item.title ?? 'Untitled',
     description: item.description ?? undefined,
     status: (item.status as BoardStatus) ?? 'inbox',
     priority: item.priority ?? 'medium',
-    tags: item.tags ?? [],
+    tags: tags.filter((t: string) => !t.startsWith('mission:')),
+    mission_name: missionName,
     assignee: item.agent
       ? {
           agent_id: item.agent.id,
