@@ -78,7 +78,7 @@ async def _fetch_attachment_contents(
     try:
         import boto3
         from botocore.config import Config as BotoConfig
-        from core.config import Config
+        from config import Config
 
         boto_cfg = BotoConfig(region_name=Config.AWS_REGION)
         s3 = boto3.client(
@@ -88,7 +88,7 @@ async def _fetch_attachment_contents(
             config=boto_cfg,
         )
     except Exception:
-        logger.warning("Cannot initialize S3 client for attachments — skipping")
+        logger.warning("Cannot initialize S3 client for attachments — skipping", exc_info=True)
         return []
 
     loop = asyncio.get_running_loop()
