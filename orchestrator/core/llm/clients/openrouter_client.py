@@ -95,6 +95,13 @@ class OpenRouterProvider(BaseLLMProvider):
                         kwargs.pop("tools", None)
                         kwargs.pop("tool_choice", None)
                         return self.client.chat.completions.create(**kwargs)
+                    if tools and "Tool choice must be auto" in err_str and kwargs.get("tool_choice") != "auto":
+                        logger.warning(
+                            "Model %s provider requires tool_choice=auto — retrying",
+                            self.config.model,
+                        )
+                        kwargs["tool_choice"] = "auto"
+                        return self.client.chat.completions.create(**kwargs)
                     raise
 
             response = await loop.run_in_executor(None, _call)
