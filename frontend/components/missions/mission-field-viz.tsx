@@ -3,7 +3,9 @@
 import { useRef, useMemo, Suspense } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Float, Text, Billboard, OrbitControls } from '@react-three/drei'
-import { EffectComposer, Bloom } from '@react-three/postprocessing'
+// Removed EffectComposer/Bloom — v3 uses SelectiveBloomEffect which requires
+// a <Selection> context. Without it, the render pipeline outputs black.
+// Emissive materials provide sufficient glow without postprocessing.
 import * as THREE from 'three'
 import { cn } from '@/lib/utils'
 import type { FieldPattern } from '@/hooks/use-missions-api'
@@ -518,15 +520,7 @@ function FieldScene({ patterns }: FieldSceneProps) {
         )
       })}
 
-      {/* Postprocessing */}
-      <EffectComposer>
-        <Bloom
-          luminanceThreshold={0.2}
-          luminanceSmoothing={0.9}
-          intensity={1.5}
-          mipmapBlur
-        />
-      </EffectComposer>
+      {/* Postprocessing removed — v3 Bloom requires Selection context, causes black screen without it */}
     </>
   )
 }
