@@ -80,7 +80,8 @@ class VectorFieldSharedContext(SharedContextPort):
             ),
         )
 
-        # Payload indexes for filtered queries
+        # Payload indexes for filtered queries — wait=True to avoid race
+        # between collection creation and index creation on Qdrant.
         for field_name, schema in [
             ("content_hash", PayloadSchemaType.KEYWORD),
             ("agent_id", PayloadSchemaType.INTEGER),
@@ -90,6 +91,7 @@ class VectorFieldSharedContext(SharedContextPort):
                 collection_name=collection,
                 field_name=field_name,
                 field_schema=schema,
+                wait=True,
             )
 
         # Seed with initial data (e.g. mission brief)
