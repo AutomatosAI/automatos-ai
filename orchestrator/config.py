@@ -336,10 +336,10 @@ class Config:
     COORDINATOR_CONSISTENCY_CHECK: bool = os.getenv("COORDINATOR_CONSISTENCY_CHECK", "true").lower() in ("true", "1", "yes")
     # Parallel execution & budget governance (PRD-82C)
     # Token budgets per complexity tier — used for task estimation and budget gate
-    COMPLEXITY_TOKEN_BUDGET_SIMPLE: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_SIMPLE", "5000"))
-    COMPLEXITY_TOKEN_BUDGET_MODERATE: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_MODERATE", "15000"))
-    COMPLEXITY_TOKEN_BUDGET_COMPLEX: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_COMPLEX", "35000"))
-    COMPLEXITY_TOKEN_BUDGET_SYNTHESIS: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_SYNTHESIS", "20000"))
+    COMPLEXITY_TOKEN_BUDGET_SIMPLE: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_SIMPLE", "15000"))
+    COMPLEXITY_TOKEN_BUDGET_MODERATE: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_MODERATE", "40000"))
+    COMPLEXITY_TOKEN_BUDGET_COMPLEX: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_COMPLEX", "80000"))
+    COMPLEXITY_TOKEN_BUDGET_SYNTHESIS: int = int(os.getenv("COMPLEXITY_TOKEN_BUDGET_SYNTHESIS", "50000"))
 
     # Archival: move terminal runs to archive after N days (PRD-82B US-009)
     COORDINATOR_ARCHIVE_AFTER_DAYS: int = int(os.getenv("COORDINATOR_ARCHIVE_AFTER_DAYS", "30"))

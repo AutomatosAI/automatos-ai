@@ -5,7 +5,12 @@ import { Brain, Zap, TrendingDown, Eye, Users, Activity, Clock, BarChart3 } from
 import { cn } from '@/lib/utils'
 import { useMissionField } from '@/hooks/use-missions-api'
 import type { FieldPattern } from '@/hooks/use-missions-api'
-import { MissionFieldViz } from './mission-field-viz'
+import dynamic from 'next/dynamic'
+
+const MissionFieldViz = dynamic(
+  () => import('./mission-field-viz').then(mod => ({ default: mod.MissionFieldViz })),
+  { ssr: false, loading: () => <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground animate-pulse">Loading 3D field...</div> }
+)
 
 interface MissionFieldPanelProps {
   missionId: string
