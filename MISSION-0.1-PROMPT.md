@@ -2,132 +2,231 @@
 
 ## Who We Are
 
-Automatos AI is an AI-agent managed company. We build and operate a platform where AI agents work as employees — each with a role, tools, skills, and accountability. The CEO (human) sets direction. Auto (CTO agent) manages day-to-day operations. Every other agent is a team member with a job title, department, tools, and deliverables.
+Automatos AI is an AI-agent managed company. The CEO (human) sets direction. Auto (CTO) runs operations. Every other agent is a team member with a job title, department, tools, skills, and deliverables.
 
-We have the platform. We have 98 tools, a mission system, a board, heartbeats, playbooks, reports, analytics, governance blueprints, a marketplace with agent templates/skills/plugins, and 400+ Composio integrations. What we DON'T have is a properly staffed, configured, operational team.
+The platform is built: 98 tools, mission system, 6-column kanban board, heartbeats, playbooks, reports, analytics, governance blueprints, marketplace with agent templates/skills/plugins, 400+ Composio integrations, and 1000+ LLM models. What we DON'T have is a properly staffed, equipped, operational team.
 
-**Your job is to fix that.**
+**Your job: research the marketplace, hire the team, equip every agent, wire up governance and playbooks, and make them operational. No reviews. No assessments. Build it.**
 
-## Mission Objective
+---
 
-Design and implement a complete company team structure. Research what's available, hire the right agents, equip them properly, configure their operations, and make them productive.
+## The Approved Roster — 14 Agents
 
-## Phase 1: Research (Use Plan Mode)
+The org chart is decided. You are hiring and configuring these roles:
 
-Before hiring anyone, you MUST research what's available:
+### Executive & Core Control
+| # | Name | Title | Dept | Reports To | Model | Purpose |
+|---|------|-------|------|------------|-------|---------|
+| 1 | **AUTO** | CTO / Chief of Operations | Executive | CEO (human) | `opus` | Day-to-day ops, agent oversight, mission coordination, final escalation |
+| 2 | **ATLAS** | Business Intelligence Lead | Executive / Strategy | Auto | `anthropic/claude-sonnet-4-6` | KPI analysis, weekly reviews, trends, rankings, departmental scorecards |
+| 3 | **ORACLE** | Knowledge Operations Lead | Platform Operations | Auto | `openai/gpt-4.1` | KB quality, document freshness, taxonomy, SOP integrity, memory hygiene |
 
-### 1A. Audit the Marketplace
-- Run `platform_browse_marketplace_agents` with EVERY category (Marketing & Growth, Sales & Revenue, Engineering & DevOps, Design & Brand, Product & Strategy, Project Management, Operations & Support, Finance & Legal, Content & Media, Quality & Testing)
-- Run `platform_browse_marketplace_skills` — browse ALL categories, note every skill name, description, and estimated token cost
-- Run `platform_browse_marketplace_plugins` — browse ALL categories, note every plugin and what it provides
-- Run `platform_list_tools` with category "composio" — see every available integration (Slack, Gmail, Jira, GitHub, Google Analytics, Stripe, HubSpot, LinkedIn, Twitter, etc.)
-- Run `platform_list_llms` — see all available models, their capabilities, and costs
+### Growth & Marketing
+| # | Name | Title | Dept | Reports To | Model | Purpose |
+|---|------|-------|------|------------|-------|---------|
+| 4 | **SCOUT** | Growth Marketing Specialist | Growth & Marketing | Auto | `deepseek/deepseek-chat` | SEO, growth experiments, channel performance, acquisition insights |
+| 5 | **PULSE** | Lifecycle & Email Marketing Manager | Growth & Marketing | SCOUT | `haiku-4.5` | Email sequences, nurture campaigns, list segmentation, send optimization |
 
-### 1B. Audit Current State
-- Run `platform_list_agents` — who do we have now? What's their status, tools, skills?
-- For each existing agent, run `platform_get_agent` — full config review
-- Run `platform_list_connected_apps` — what integrations are already connected?
-- Run `platform_workspace_stats` — current resource usage
-- Run `platform_get_cost_breakdown` — current spending by model/agent
+### Sales & Revenue
+| # | Name | Title | Dept | Reports To | Model | Purpose |
+|---|------|-------|------|------------|-------|---------|
+| 6 | **CLOSER** | Revenue Ops & Pipeline Manager | Sales & Revenue | Auto | `openai/gpt-4.1` | CRM hygiene, deal stages, pipeline reporting, revenue workflows |
+| 7 | **PROSPECT** | Lead Research & Outreach Specialist | Sales & Revenue | CLOSER | `deepseek/deepseek-chat` | Target lists, lead enrichment, outreach drafts, prospect prioritization |
 
-### 1C. Read the Operating Model
-- Read `PLATFORM-CAPABILITIES-DEFINITIVE.md` — understand every system capability
-- Read `MISSION-ZERO-RESULTS.md` — understand the operating model blueprint (authority levels, communication matrix, review cadences)
+### Finance & Operations
+| # | Name | Title | Dept | Reports To | Model | Purpose |
+|---|------|-------|------|------------|-------|---------|
+| 8 | **LEDGER** | Finance & Cost Control Manager | Finance & Operations | Auto | `anthropic/claude-sonnet-4-6` | Spend tracking, model costs, budgets, invoice review, anomaly detection |
 
-## Phase 2: Design the Org Chart
+### Engineering & DevOps
+| # | Name | Title | Dept | Reports To | Model | Purpose |
+|---|------|-------|------|------------|-------|---------|
+| 9 | **SENTINEL** | Engineering Reliability & Security Lead | Engineering & DevOps | Auto | `anthropic/claude-sonnet-4-6` | Monitoring, security posture, CI/CD, incident triage, technical escalation |
+| 10 | **PATCH** | QA & Bug Triage Engineer | Engineering & DevOps | SENTINEL | `deepseek/deepseek-chat` | Bug sorting, issue reproduction, fix validation, test discipline |
 
-Based on your research, design the company structure. For EACH department, define:
+### Content & Media
+| # | Name | Title | Dept | Reports To | Model | Purpose |
+|---|------|-------|------|------------|-------|---------|
+| 11 | **COMMS** | Content Editor & Brand Voice Lead | Content & Media | Auto | `openai/gpt-4.1` | Editorial quality, newsletters, blog, tone consistency, social content |
 
-### Departments Required
-1. **Growth & Marketing** — SEO, content marketing, social media, email campaigns, analytics
-2. **Sales & Revenue** — Lead gen, outreach, pipeline management, CRM
-3. **Finance & Operations** — Cost tracking, invoicing, budgeting, expense management
-4. **Engineering & DevOps** — Code review, CI/CD, monitoring, security, bug triage
-5. **Content & Media** — Blog posts, newsletters, social content, design, copywriting
-6. **Customer Success** — Support, onboarding, feedback collection, retention
-7. **Research & Intelligence** — Market research, competitive analysis, trend spotting
-8. **Platform Operations** — System health, performance monitoring, knowledge management
+### Customer Success
+| # | Name | Title | Dept | Reports To | Model | Purpose |
+|---|------|-------|------|------------|-------|---------|
+| 12 | **GUIDE** | Customer Success & Onboarding Manager | Customer Success | Auto | `openai/gpt-4.1` | Onboarding, adoption, retention, support triage, feedback analysis |
 
-### For Each Agent, Specify:
-- **Name** — Clear, memorable (e.g., "SCOUT" not "Agent 47")
-- **Job Title** — Human-readable role (e.g., "Growth Marketing Specialist")
-- **Department/Team** — Which team they belong to
-- **Reports To** — Who they report to in the hierarchy (most report to Auto)
-- **Model** — Choose wisely based on task complexity and cost:
-  - `haiku-4.5` for high-frequency, simple tasks (cheapest)
-  - `deepseek/deepseek-chat` for mid-tier work (great value)
-  - `anthropic/claude-sonnet-4-6` for complex reasoning
-  - `openai/gpt-4.1` for general purpose
-  - Reserve `opus` for Auto only
-- **System Prompt / Persona** — Who is this agent? What's their personality, expertise, communication style?
-- **Skills** — Which marketplace skills to assign (install if needed)
-- **Tools** — Which Composio apps they need (GMAIL, SLACK, GITHUB, GOOGLE_ANALYTICS, JIRA, STRIPE, HUBSPOT, LINKEDIN, TWITTER, etc.)
-- **Plugins** — Which marketplace plugins to install and assign
-- **Tags** — Capability tags for routing and matching
-- **Heartbeat Config**:
-  - Interval (how often they check in)
-  - Proactive level (0-100, how autonomous)
-  - Active hours (when they work)
-  - What they do each heartbeat cycle
-- **Playbooks** — What recurring workflows should they run? (cron schedule, steps, quality thresholds)
-- **Blueprint Rules** — What governance rules apply? (min tools, required tags, model restrictions)
+### Research & Intelligence
+| # | Name | Title | Dept | Reports To | Model | Purpose |
+|---|------|-------|------|------------|-------|---------|
+| 13 | **RADAR** | Market Research & Competitive Intel | Research & Intelligence | Auto | `anthropic/claude-sonnet-4-6` | Competitors, market shifts, pricing, positioning, strategic opportunities |
 
-## Phase 3: Execute — Hire & Configure
+### Platform Operations
+| # | Name | Title | Dept | Reports To | Model | Purpose |
+|---|------|-------|------|------------|-------|---------|
+| 14 | **NEXUS** | Platform Ops & Workflow Orchestrator | Platform Operations | Auto | `deepseek/deepseek-chat` | Board hygiene, task routing, playbook visibility, heartbeat exceptions |
 
-For each agent in your plan:
+---
 
-1. **Create or update the agent** — `platform_create_agent` or `platform_update_agent`
-2. **Install required skills** — `platform_install_skill` then `platform_assign_skill_to_agent`
-3. **Install required plugins** — `platform_install_plugin` then `platform_assign_plugin_to_agent`
-4. **Assign tools** — `platform_assign_tool_to_agent` for each Composio app
-5. **Configure heartbeat** — `platform_configure_agent_heartbeat` with interval, proactive level, active hours
-6. **Set org hierarchy** — Use `team`, `job_title`, `reports_to_id` fields
+## Phase 1: Research the Marketplace
 
-## Phase 4: Governance & Operations
+Before equipping anyone, audit what's available. This is NOT optional — you must know the full catalog.
 
-1. **Create agent blueprints** — `platform_create_blueprint`:
-   - Default workspace blueprint (min 2 tools, require system prompt)
-   - Strict blueprint for sensitive roles (Finance, Security)
-   - Cost-tier blueprint (restrict expensive models to senior agents)
+### 1A. Marketplace Deep Dive
+Run ALL of these. Browse every category. Read every result:
+- `platform_browse_marketplace_agents` — search each category: "Marketing", "Sales", "Engineering", "DevOps", "Finance", "Content", "Support", "Research", "Operations", "Design", "Product", "Quality"
+- `platform_browse_marketplace_skills` — browse ALL skill categories. Note name, description, token cost, skill_type for each. These are what give agents their expertise.
+- `platform_browse_marketplace_plugins` — browse ALL plugin categories. Note what capabilities each plugin bundles.
+- `platform_list_tools` with `category="composio"` — the full integration catalog. This determines what each agent can connect to.
+- `platform_list_llms` — all available models with capability flags (tools, vision, reasoning, json_mode) and cost tiers (free, budget, mid, premium)
 
-2. **Deploy recurring playbooks** — `platform_create_playbook` with cron schedules:
-   - **Daily CEO Briefing** (0 8 * * *) — Auto summarizes yesterday's activity, costs, blockers
-   - **Weekly Business Review** (0 9 * * 1) — ATLAS pulls 7-day KPIs, trends, rankings
-   - **Monthly KB Audit** (0 10 1 * *) — ORACLE audits documents for staleness
-   - **Daily Social Post** — Content team publishes to social channels
-   - **Weekly Newsletter** — Content team compiles and sends
-   - Any other recurring workflows your team design requires
+### 1B. Current State Audit
+- `platform_list_agents` — every existing agent
+- `platform_get_agent` for each one — full config, tools, skills, activity
+- `platform_list_connected_apps` — which OAuth connections are live (ONLY assign tools where connections exist)
+- `platform_workspace_stats` — resource usage
+- `platform_get_cost_breakdown` — spending by model and agent
 
-3. **Publish standard documents** — `workspace_write_file`:
-   - `docs/communication-matrix.md` — Which channel for which message type
-   - `docs/authority-boundaries.md` — What each authority level can do
-   - `docs/report-template.md` — Required sections for all reports
-   - `docs/metric-baselines.md` — Current KPI values as baseline snapshot
+### 1C. Read Operating Docs
+- Read `PLATFORM-CAPABILITIES-DEFINITIVE.md` in the workspace root — all 98 tools documented
+- Read `MISSION-ZERO-RESULTS.md` — the operating model blueprint (authority levels, comms matrix, review cadences)
 
-4. **Store metric baselines** — `platform_store_memory` with current values from analytics
+**Output from Phase 1:** A complete catalog of available skills, plugins, tools, and models. A current-state map of what exists. Decisions on which existing agents to keep, reconfigure, or retire.
 
-5. **Configure Auto's own heartbeat** — 15-min interval, high proactive level, active hours 07:00-22:00, full CTO analysis loop
+---
 
-## Constraints
+## Phase 2: Build Per-Agent Spec Sheets
 
-- **Budget-conscious**: Use cheaper models (haiku, deepseek) for routine work. Reserve expensive models for complex tasks.
-- **Don't over-hire**: Better to have 12 excellent agents than 25 mediocre ones. Each agent must have a clear, distinct purpose.
-- **Composio apps must be connected**: Only assign tools where the OAuth connection exists. Check `platform_list_connected_apps` first.
-- **Existing agents**: Keep agents that are working well (SENTINEL, COMMS). Retire or reconfigure agents that are dead weight (0 tasks completed, no heartbeat).
-- **Everything through the board**: All work flows through the Kanban board. Every playbook creates board tasks. Every agent reports via `platform_submit_report`.
+For EACH of the 14 agents, produce a complete implementation spec:
+
+1. **Persona / System Prompt** — Write a full persona. Who is this agent? What's their expertise? Communication style? What do they prioritize? What do they refuse to do? Make it specific and actionable, not generic fluff.
+
+2. **Skills** — Pick from marketplace skills discovered in Phase 1. Match skills to role. Install with `platform_install_skill`, assign with `platform_assign_skill_to_agent`.
+
+3. **Tools (Composio Apps)** — Pick from connected apps ONLY. Match to role:
+   - COMMS needs: SLACK, GMAIL, maybe WORDPRESS
+   - SENTINEL needs: GITHUB, JIRA, SLACK
+   - CLOSER needs: HUBSPOT or SALESFORCE, GMAIL, SLACK
+   - SCOUT needs: GOOGLE_ANALYTICS, GOOGLE_SHEETS, SLACK
+   - LEDGER needs: STRIPE, GOOGLE_SHEETS, SLACK
+   - etc. — you decide based on what's actually connected
+
+4. **Plugins** — Pick from marketplace plugins. Install with `platform_install_plugin`, assign with `platform_assign_plugin_to_agent`.
+
+5. **Tags** — Capability tags for task routing and matching. Be specific: `["growth", "seo", "analytics", "acquisition"]` not just `["marketing"]`.
+
+6. **Heartbeat Config:**
+   - **AUTO**: 15 min, proactive level 90, active hours 07:00-22:00
+   - **Department leads** (ATLAS, SENTINEL, COMMS, CLOSER, LEDGER, GUIDE, RADAR): 60 min, proactive level 60, active hours 08:00-20:00
+   - **Specialists** (SCOUT, PULSE, PROSPECT, PATCH, NEXUS, ORACLE): 120 min, proactive level 40, active hours 09:00-18:00
+   - Each heartbeat prompt should describe what the agent checks, analyzes, and reports on every cycle
+
+7. **Blueprint Class:**
+   - `default` — standard agents (min 2 tools, require system prompt, require tags)
+   - `strict` — LEDGER, SENTINEL (min 3 tools, restricted models, require system prompt, required_tags must include department)
+   - `cost-tier` — PULSE, PATCH, NEXUS, PROSPECT (model restricted to haiku/deepseek only)
+
+---
+
+## Phase 3: Execute the Build
+
+Execute in this order. Each step uses specific platform tools.
+
+### Step 1: Clean House
+- Review existing agents from Phase 1B audit
+- Keep: SENTINEL, COMMS, ATLAS, ORACLE (if they exist and are healthy)
+- Reconfigure: update model, persona, team, job_title, reports_to_id, tags
+- Retire: delete or deactivate dead-weight agents (0 tasks, no heartbeat, no purpose)
+- Tools: `platform_update_agent`, `platform_delete_agent`
+
+### Step 2: Create New Agents
+For each role that doesn't exist yet, create it:
+- `platform_create_agent` with: name, agent_type, description, model, system_prompt, tags, team, job_title
+- Set `reports_to_id` to the lead agent's ID
+- Tools: `platform_create_agent`
+
+### Step 3: Install & Assign Skills
+- `platform_install_skill` for each required skill (workspace-level)
+- `platform_assign_skill_to_agent` for each agent-skill pairing
+- Verify assignment stuck with `platform_get_agent`
+
+### Step 4: Assign Tools
+- `platform_assign_tool_to_agent` for each Composio app per agent
+- ONLY assign apps that showed up in `platform_list_connected_apps`
+- If an app isn't connected, note it as "awaiting OAuth" and skip
+
+### Step 5: Install & Assign Plugins
+- `platform_install_plugin` for each required plugin (workspace-level)
+- `platform_assign_plugin_to_agent` for each agent-plugin pairing
+
+### Step 6: Configure Heartbeats
+- `platform_configure_agent_heartbeat` for ALL 14 agents
+- Use the intervals and proactive levels from the spec sheets
+- Write a meaningful heartbeat prompt for each — not "check things" but specific checks, tools to call, and what to report on
+
+### Step 7: Create Governance Blueprints
+- `platform_create_blueprint` — create 3 blueprints:
+  1. **"Standard Agent"** — `enforce_mode: "advisory"`, rules: `min_tools: 2, require_system_prompt: true`
+  2. **"Sensitive Role"** — `enforce_mode: "strict"`, rules: `min_tools: 3, require_system_prompt: true, required_tags: ["department-tag"], allowed_models: ["anthropic/claude-sonnet-4-6", "openai/gpt-4.1"]`
+  3. **"Cost-Controlled"** — `enforce_mode: "strict"`, rules: `require_system_prompt: true, allowed_models: ["anthropic/claude-haiku-4-5-20251001", "deepseek/deepseek-chat"]`
+- Set "Standard Agent" as workspace default
+
+### Step 8: Deploy Recurring Playbooks
+Create with `platform_create_playbook` + `platform_add_playbook_step` + schedule config:
+
+| Playbook | Cron | Owner | Steps |
+|----------|------|-------|-------|
+| **Daily CEO Briefing** | `0 8 * * *` | ATLAS | 1. Query 24h activity + costs 2. Summarize blockers + wins 3. Submit report 4. Post to Slack |
+| **Weekly Business Review** | `0 9 * * 1` | ATLAS | 1. Pull 7-day KPIs 2. Agent rankings 3. Cost analysis 4. Create board task for CEO review |
+| **Monthly KB Audit** | `0 10 1 * *` | ORACLE | 1. Scan docs for staleness 2. Check retrieval quality 3. Create cleanup tasks on board |
+| **Daily Content Pipeline** | `0 10 * * 1-5` | COMMS | 1. Check content calendar 2. Draft social posts 3. Queue for review |
+| **Weekly Cost Review** | `0 14 * * 5` | LEDGER | 1. Pull cost breakdown 2. Compare to baselines 3. Flag anomalies 4. Submit report |
+| **Daily Engineering Sweep** | `0 7 * * *` | SENTINEL | 1. Check alerts + logs 2. Review open incidents 3. Triage new issues 4. Submit report |
+| **Weekly Pipeline Review** | `0 10 * * 2` | CLOSER | 1. Pull CRM metrics 2. Stage analysis 3. Forecast update 4. Create board task |
+
+### Step 9: Publish Operating Documents
+Use `workspace_write_file` for each:
+- `docs/communication-matrix.md` — Channel routing rules (Slack for routine, Telegram for urgent, Email for formal, Board for tracking)
+- `docs/authority-boundaries.md` — L1 (all agents: read, create tasks, submit reports), L2 (Auto: assign tasks, adjust agents, trigger playbooks), L3 (human: budget, hiring, strategic changes)
+- `docs/report-template.md` — Required sections: Summary, Metrics, Actions Taken, Blockers, Next Steps
+- `docs/metric-baselines.md` — Snapshot current KPI values from analytics
+
+### Step 10: Store Baselines & Configure Auto
+- `platform_store_memory` — store current metric baselines (cost/week, requests/week, tokens/week, agent count, SLA %)
+- `platform_configure_agent_heartbeat` for Auto — 15 min, proactive 90, active 07:00-22:00
+- Auto's heartbeat prompt should: check board health, review costs, detect anomalies, assign unassigned high-priority tasks, submit CTO standup report
+
+### Step 11: Validate Everything
+For each agent:
+- `platform_get_agent` — verify config is complete
+- `platform_validate_agent` — verify blueprint passes (green badge)
+- Confirm heartbeat is configured
+- Confirm at least 1 skill and 2 tools assigned
+
+Report any failures as a punch list with specific fixes needed.
+
+---
+
+## Hard Rules
+
+1. **NO reviews or assessments as deliverables.** Every task produces a platform tool call, not a document about what should be done.
+2. **Only assign Composio tools with active OAuth connections.** Check `platform_list_connected_apps` first. No exceptions.
+3. **Budget-conscious model selection is non-negotiable.** haiku/deepseek for routine, sonnet for reasoning, opus for Auto only.
+4. **Every playbook must create board tasks.** Work that doesn't hit the board doesn't exist.
+5. **Every agent must submit reports via `platform_submit_report`.** Reports use `required_sections: ["Summary", "Metrics", "Actions Taken", "Next Steps"]`.
+6. **Retire dead agents.** Any existing agent with 0 tasks, no heartbeat, and no clear role gets deactivated. No charity hires.
+
+---
 
 ## Success Criteria
 
-When this mission is complete:
-- [ ] Org chart with 10-20 agents across all departments, each with clear role
-- [ ] Every agent has: skills, tools, persona, heartbeat, and blueprint validation passing
-- [ ] At least 3 governance blueprints created (default, strict, cost-tier)
-- [ ] At least 5 recurring playbooks deployed with cron schedules
-- [ ] Standard docs published to workspace
+- [ ] 14 agents live with distinct roles across 8 departments
+- [ ] Every agent has: persona, skills, tools (connected only), heartbeat, tags
+- [ ] Org hierarchy set: `team`, `job_title`, `reports_to_id` populated for all
+- [ ] 3 governance blueprints created and default set
+- [ ] 7+ recurring playbooks deployed with cron schedules
+- [ ] 4 operating docs published to workspace
+- [ ] Metric baselines stored in memory
 - [ ] Auto's 15-min heartbeat configured and running
-- [ ] Metric baselines stored
-- [ ] All agents show green readiness badge (blueprint validation passing)
+- [ ] All agents pass `platform_validate_agent` (green readiness badge)
+- [ ] Dead-weight agents from old roster deactivated
 
-## Important
-
-You are not writing a REVIEW or an ASSESSMENT. You are BUILDING. Every finding becomes an action. Every gap becomes a tool call. Research first, plan second, execute third. No circular reviews. Ship it.
+**This is a build mission. Ship it.**
