@@ -56,10 +56,26 @@ export function useBoardTasks(filters?: BoardFilters) {
     staleTime: 30000,
   })
 
+  // Build child count map and filter to top-level tasks
+  const allTasks = query.data?.tasks ?? []
+  const childCountMap = new Map<string, number>()
+  for (const t of allTasks) {
+    if (t.parent_task_id) {
+      childCountMap.set(t.parent_task_id, (childCountMap.get(t.parent_task_id) ?? 0) + 1)
+    }
+  }
+  // Annotate parent tasks with child_count
+  const annotatedTasks = allTasks.map((t) => ({
+    ...t,
+    child_count: childCountMap.get(t.id) ?? 0,
+  }))
+  // Top-level = tasks without a parent (children nest under their parent card)
+  const topLevelTasks = annotatedTasks.filter((t) => !t.parent_task_id)
+
   // Group into columns (with client-side type filter)
   const typeFilter = filters?.type ?? null
   const columns: BoardColumn[] = BOARD_COLUMNS.map((col) => {
-    const tasks = (query.data?.tasks ?? []).filter((t) => {
+    const tasks = topLevelTasks.filter((t) => {
       // Type filter (client-side — mission, playbook, task)
       if (typeFilter && t.type !== typeFilter) return false
 
@@ -208,6 +224,10 @@ function mapTaskToBoardTask(item: any): BoardTask {
       step_progress: item.planning_data.step_progress,
       approval_action: item.planning_data.approval_action,
     } : undefined,
+    parent_task_id: item.parent_task_id ? String(item.parent_task_id) : undefined,
+    sla_deadline: item.sla_deadline ?? undefined,
+    blocked_at: item.blocked_at ?? undefined,
+    blocked_reason: item.blocked_reason ?? undefined,
     result: item.result,
   }
 }

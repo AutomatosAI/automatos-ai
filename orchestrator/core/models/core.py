@@ -1532,6 +1532,9 @@ class BoardTask(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     planning_data = Column(JSONB, nullable=True)
+    sla_deadline = Column(DateTime(timezone=True), nullable=True)
+    blocked_at = Column(DateTime(timezone=True), nullable=True)
+    blocked_reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -1561,6 +1564,9 @@ class BoardTask(Base):
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "planning_data": self.planning_data,
+            "sla_deadline": self.sla_deadline.isoformat() if self.sla_deadline else None,
+            "blocked_at": self.blocked_at.isoformat() if self.blocked_at else None,
+            "blocked_reason": self.blocked_reason,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

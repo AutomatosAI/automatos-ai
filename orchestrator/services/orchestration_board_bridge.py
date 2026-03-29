@@ -16,6 +16,7 @@ Source: PRD-82A Section 4.3, PRD-101 Section 7.2
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -23,6 +24,14 @@ from sqlalchemy.orm import Session
 from core.models.core import BoardTask
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import BOARD_STATUS_MAP, TaskState
+
+# Priority → SLA deadline hours
+_PRIORITY_SLA_HOURS: dict[str, int] = {
+    "urgent": 4,
+    "high": 12,
+    "medium": 24,
+    "low": 72,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +47,7 @@ _ORCHESTRATION_TO_BOARD_STATUS: dict[str, str] = {
     "in_progress": "in_progress",
     "in_review": "review",
     "done": "done",
-    "blocked": "review",
+    "blocked": "blocked",
     "cancelled": "done",
 }
 
@@ -101,6 +110,7 @@ def create_mission_board_task(
         source_type="orchestration",
         orchestration_run_id=run.id,
         tags=["mission", "orchestration"],
+        sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get("medium", 24)),
     )
     db.add(board_task)
     db.flush()  # Get the ID without committing
@@ -187,6 +197,7 @@ def create_task_board_task(
             "sequence_number": task.sequence_number,
             "agent_role": task.agent_role,
         },
+        sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get("medium", 24)),
     )
     db.add(board_task)
     db.flush()
@@ -256,9 +267,17 @@ def sync_board_status(
     if task_state in (TaskState.COMPLETED, TaskState.VERIFIED) and task.output:
         board_task.result = task.output
 
-    # Store failure info
+    # Store failure info and blocked metadata
     if task_state in (TaskState.FAILED, TaskState.STALLED):
         board_task.error_message = task.failure_detail or task.failure_reason_code
+        if new_status == "blocked" and board_task.blocked_at is None:
+            board_task.blocked_at = datetime.now(timezone.utc)
+            board_task.blocked_reason = task.failure_detail or task.failure_reason_code
+
+    # Clear blocked fields when unblocked
+    if new_status != "blocked" and old_status == "blocked":
+        board_task.blocked_at = None
+        board_task.blocked_reason = None
 
     db.flush()
 

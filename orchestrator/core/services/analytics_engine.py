@@ -18,6 +18,7 @@ from core.models import (
     Agent, Workflow, WorkflowExecution,
     SystemMetrics
 )
+from core.models.orchestration import OrchestrationRun, OrchestrationTask
 
 logger = logging.getLogger(__name__)
 
@@ -139,16 +140,37 @@ class AnalyticsEngine:
             # Recent activity (last hour)
             since = datetime.now() - timedelta(hours=1)
             recent_workflows = self.db.query(Workflow).filter(Workflow.created_at >= since).count()
-            
+
+            # Include orchestration missions (PRD-82A) — missions bypass WorkflowExecution
+            total_missions = self.db.query(OrchestrationRun).count()
+            completed_missions = self.db.query(OrchestrationRun).filter(
+                OrchestrationRun.state == "completed"
+            ).count()
+            total_mission_tasks = self.db.query(OrchestrationTask).count()
+            verified_mission_tasks = self.db.query(OrchestrationTask).filter(
+                OrchestrationTask.state == "verified"
+            ).count()
+
+            # Combined efficiency across legacy workflows + orchestration missions
+            combined_total = total_executions + total_mission_tasks
+            combined_success = successful_executions + verified_mission_tasks
+
             return {
-                "totalWorkflows": total_workflows,
-                "completedWorkflows": completed_workflows,
+                "totalWorkflows": total_workflows + total_missions,
+                "completedWorkflows": completed_workflows + completed_missions,
                 "pendingWorkflows": pending_workflows,
-                "completionRate": round((completed_workflows / total_workflows * 100) if total_workflows > 0 else 0, 2),
-                "totalExecutions": total_executions,
-                "successfulExecutions": successful_executions,
-                "successRate": round((successful_executions / total_executions * 100) if total_executions > 0 else 0, 2),
-                "recentWorkflows": recent_workflows
+                "completionRate": round((
+                    (completed_workflows + completed_missions) /
+                    (total_workflows + total_missions) * 100
+                ) if (total_workflows + total_missions) > 0 else 0, 2),
+                "totalExecutions": combined_total,
+                "successfulExecutions": combined_success,
+                "successRate": round((combined_success / combined_total * 100) if combined_total > 0 else 0, 2),
+                "recentWorkflows": recent_workflows,
+                "totalMissions": total_missions,
+                "completedMissions": completed_missions,
+                "totalMissionTasks": total_mission_tasks,
+                "verifiedMissionTasks": verified_mission_tasks,
             }
             
         except Exception as e:

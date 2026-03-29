@@ -3,13 +3,13 @@ Board Tasks API
 ===============
 
 CRUD + planning endpoints for the lightweight task board (PRD-72).
-Tasks follow a Kanban lifecycle: inbox -> assigned -> in_progress -> review -> done.
+Tasks follow a Kanban lifecycle: inbox -> assigned -> in_progress -> review -> blocked -> done.
 """
 
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -25,9 +25,17 @@ from core.models import Agent
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 
-VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "done"}
+VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done"}
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
+
+# Priority → SLA deadline hours
+_PRIORITY_SLA_HOURS: dict[str, int] = {
+    "urgent": 4,
+    "high": 12,
+    "medium": 24,
+    "low": 72,
+}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -108,6 +116,7 @@ async def create_task(
         parent_task_id=body.get("parent_task_id"),
         tags=body.get("tags", []),
         planning_data=planning_data,
+        sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get(priority, 24)),
     )
     db.add(task)
     db.commit()
@@ -216,11 +225,18 @@ async def update_task(
         new_status = body["status"]
         if new_status not in VALID_STATUSES:
             raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
+        old_status = task.status
         task.status = new_status
         if new_status == "in_progress" and not task.started_at:
             task.started_at = datetime.now(timezone.utc)
         if new_status in ("done", "review"):
             task.completed_at = datetime.now(timezone.utc)
+        if new_status == "blocked" and task.blocked_at is None:
+            task.blocked_at = datetime.now(timezone.utc)
+            task.blocked_reason = body.get("blocked_reason")
+        if new_status != "blocked" and old_status == "blocked":
+            task.blocked_at = None
+            task.blocked_reason = None
 
     if "priority" in body:
         if body["priority"] not in VALID_PRIORITIES:
@@ -443,6 +459,7 @@ async def update_task_status(
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
 
+    old_status = task.status
     task.status = new_status
     if new_status == "in_progress":
         task.started_at = datetime.now(timezone.utc)
@@ -451,6 +468,11 @@ async def update_task_status(
         task.result = None
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
+    if new_status == "blocked" and task.blocked_at is None:
+        task.blocked_at = datetime.now(timezone.utc)
+    if new_status != "blocked" and old_status == "blocked":
+        task.blocked_at = None
+        task.blocked_reason = None
 
     db.commit()
     db.refresh(task)

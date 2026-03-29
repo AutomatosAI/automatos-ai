@@ -7,6 +7,7 @@ import {
   Users,
   Brain,
   Settings,
+  Activity,
   Bot,
   MessageCircle,
   Wrench,
@@ -14,6 +15,7 @@ import {
   Store,
   BarChart3,
   LayoutDashboard,
+  HardDrive,
   X
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -33,6 +35,22 @@ const navigationItems = [
     iconColor: 'text-primary',
     navIconKey: 'nav_chat',
     description: 'Your AI workspace'
+  },
+  {
+    name: 'Workspace',
+    href: '/workspace',
+    icon: HardDrive,
+    iconColor: 'text-[hsl(var(--chart-3))]',
+    navIconKey: 'nav_workspace',
+    description: 'Files, code & agent output'
+  },
+  {
+    name: 'Activity',
+    href: '/activity',
+    icon: Activity,
+    iconColor: 'text-[hsl(var(--info))]',
+    navIconKey: 'nav_activity',
+    description: 'Your AI workforce at a glance'
   },
   {
     name: 'Agents',

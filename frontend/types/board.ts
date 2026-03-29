@@ -3,7 +3,7 @@
  * "Task" in UI = "Recipe" in backend. No backend rename.
  */
 
-export type BoardStatus = 'inbox' | 'assigned' | 'in_progress' | 'review' | 'done'
+export type BoardStatus = 'inbox' | 'assigned' | 'in_progress' | 'review' | 'blocked' | 'done'
 
 export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low'
 
@@ -34,6 +34,11 @@ export interface BoardTask {
   source_id: string
   project_id?: number
   mission_name?: string
+  parent_task_id?: string
+  child_count?: number
+  sla_deadline?: string
+  blocked_at?: string
+  blocked_reason?: string
   planning_data?: { playbook_id?: number; execution_id?: string; step_progress?: { current: number; total: number }; approval_action?: { type: string; post_id?: string; [key: string]: any } }
   result?: any
 }
@@ -59,6 +64,7 @@ export const BOARD_COLUMNS: { status: BoardStatus; label: string }[] = [
   { status: 'assigned', label: 'Assigned' },
   { status: 'in_progress', label: 'In Progress' },
   { status: 'review', label: 'Review' },
+  { status: 'blocked', label: 'Blocked' },
   { status: 'done', label: 'Done' },
 ]
 
@@ -74,5 +80,6 @@ export const STATUS_CONFIG: Record<BoardStatus, { label: string; dotColor: strin
   assigned: { label: 'Assigned', dotColor: 'bg-[hsl(var(--agent))]', cssVar: '--agent' },
   in_progress: { label: 'In Progress', dotColor: 'bg-[hsl(var(--info))]', cssVar: '--info' },
   review: { label: 'Review', dotColor: 'bg-[hsl(var(--warning))]', cssVar: '--warning' },
+  blocked: { label: 'Blocked', dotColor: 'bg-[hsl(var(--destructive))]', cssVar: '--destructive' },
   done: { label: 'Done', dotColor: 'bg-[hsl(var(--success))]', cssVar: '--success' },
 }

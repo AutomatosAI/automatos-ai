@@ -1,7 +1,7 @@
 'use client'
 
 import { Draggable } from '@hello-pangea/dnd'
-import { Bot, AlertCircle, Workflow, ClipboardList, Trash2, FolderKanban, Target } from 'lucide-react'
+import { Bot, AlertCircle, Workflow, ClipboardList, Trash2, FolderKanban, Target, Clock, ShieldAlert, Layers } from 'lucide-react'
 import { PremiumIcon } from '@/components/shared'
 import { formatDistanceToNow } from 'date-fns'
 import type { BoardTask } from '@/types/board'
@@ -15,6 +15,42 @@ interface BoardCardProps {
   onDelete?: (taskId: string) => void
 }
 
+function SlaIndicator({ deadline }: { deadline: string }) {
+  const now = Date.now()
+  const sla = new Date(deadline).getTime()
+  const remaining = sla - now
+  const hoursLeft = remaining / (1000 * 60 * 60)
+
+  if (remaining <= 0) {
+    return (
+      <span className="flex items-center gap-0.5 text-[10px] text-destructive font-medium">
+        <Clock className="w-2.5 h-2.5" />
+        Overdue
+      </span>
+    )
+  }
+
+  if (hoursLeft <= 2) {
+    return (
+      <span className="flex items-center gap-0.5 text-[10px] text-destructive">
+        <Clock className="w-2.5 h-2.5" />
+        {hoursLeft < 1 ? `${Math.round(hoursLeft * 60)}m` : `${Math.round(hoursLeft)}h`}
+      </span>
+    )
+  }
+
+  if (hoursLeft <= 8) {
+    return (
+      <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--warning))]">
+        <Clock className="w-2.5 h-2.5" />
+        {Math.round(hoursLeft)}h
+      </span>
+    )
+  }
+
+  return null
+}
+
 export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
   const priorityConf = PRIORITY_CONFIG[task.priority]
   const timeAgo = task.started_at
@@ -24,6 +60,7 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
       : null
 
   const isFailed = task.error_message != null && task.status === 'done'
+  const isBlocked = task.status === 'blocked'
 
   return (
     <Draggable draggableId={task.id} index={index}>
@@ -36,12 +73,13 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
             'group glass-card rounded-lg p-3 mb-2 cursor-grab active:cursor-grabbing transition-shadow',
             'border-l-2',
             snapshot.isDragging && 'shadow-lg shadow-primary/10 ring-1 ring-primary/20',
-            isFailed && 'border-l-destructive',
-            !isFailed && `border-l-[${priorityConf.color}]`,
+            isBlocked && 'border-l-destructive bg-destructive/5',
+            isFailed && !isBlocked && 'border-l-destructive',
+            !isFailed && !isBlocked && `border-l-[${priorityConf.color}]`,
           )}
           style={{
             ...provided.draggableProps.style,
-            borderLeftColor: isFailed ? undefined : priorityConf.color,
+            borderLeftColor: isBlocked ? undefined : isFailed ? undefined : priorityConf.color,
           }}
           onClick={() => onOpen(task)}
         >
@@ -62,7 +100,7 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
                 <Workflow className="w-3 h-3 text-[hsl(var(--warning))]" />
                 <span className="text-[10px] font-medium text-[hsl(var(--warning))] uppercase tracking-wider">Playbook</span>
               </div>
-            ) : task.type === 'project' ? (
+            ) : (task.type as string) === 'project' ? (
               <div className="flex items-center gap-1">
                 <FolderKanban className="w-3 h-3 text-[hsl(var(--info))]" />
                 <span className="text-[10px] font-medium text-[hsl(var(--info))] uppercase tracking-wider">
@@ -76,18 +114,28 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
               </div>
             )}
 
-            {onDelete && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onDelete(task.id)
-                }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/10"
-                title="Delete task"
-              >
-                <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive" />
-              </button>
-            )}
+            <div className="flex items-center gap-1">
+              {/* Child count badge */}
+              {(task.child_count ?? 0) > 0 && (
+                <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                  <Layers className="w-2.5 h-2.5" />
+                  {task.child_count}
+                </span>
+              )}
+
+              {onDelete && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDelete(task.id)
+                  }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/10"
+                  title="Delete task"
+                >
+                  <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Title */}
@@ -98,6 +146,14 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
             <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
               {task.description}
             </p>
+          )}
+
+          {/* Blocked reason */}
+          {isBlocked && task.blocked_reason && (
+            <div className="flex items-center gap-1 mb-2">
+              <ShieldAlert className="w-3 h-3 text-destructive shrink-0" />
+              <p className="text-[10px] text-destructive line-clamp-1">{task.blocked_reason}</p>
+            </div>
           )}
 
           {/* Progress bar for in-progress tasks */}
@@ -141,7 +197,7 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
             </div>
           )}
 
-          {/* Footer: agent + time + open button */}
+          {/* Footer: agent + SLA + time */}
           <div className="flex items-center justify-between mt-1">
             <div className="flex items-center gap-1.5 min-w-0">
               {task.assignee ? (
@@ -160,9 +216,14 @@ export function BoardCard({ task, index, onOpen, onDelete }: BoardCardProps) {
               )}
             </div>
 
-            {timeAgo && (
-              <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
-            )}
+            <div className="flex items-center gap-2">
+              {task.sla_deadline && task.status !== 'done' && (
+                <SlaIndicator deadline={task.sla_deadline} />
+              )}
+              {timeAgo && (
+                <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
+              )}
+            </div>
           </div>
         </div>
       )}
