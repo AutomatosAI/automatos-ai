@@ -56,6 +56,11 @@ def register_report_actions(registry: ActionRegistry) -> None:
                     },
                     "description": "Additional files produced alongside this report (images, data files, etc.).",
                 },
+                "required_sections": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of section headings the report must contain (e.g. ['Summary', 'Metrics', 'Next Steps']). Submission fails if any are missing from the markdown content.",
+                },
             },
             "required": ["title", "content", "report_type", "status"],
         },

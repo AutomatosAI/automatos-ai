@@ -1,7 +1,8 @@
 """Report handlers for PlatformActionExecutor (PRD-76)."""
 
 import logging
-from typing import Any, Dict
+import re
+from typing import Any, Dict, List
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -28,6 +29,17 @@ async def submit_report(db: Session, workspace_id: UUID, params: Dict[str, Any])
     valid_statuses = {"ok", "warning", "critical", "info"}
     if status not in valid_statuses:
         return {"success": False, "error": f"status must be one of: {', '.join(sorted(valid_statuses))}"}
+
+    # Optional: validate required sections in content
+    required_sections: List[str] = params.get("required_sections", [])
+    if required_sections:
+        missing = _check_required_sections(content, required_sections)
+        if missing:
+            return {
+                "success": False,
+                "error": f"Report missing required sections: {', '.join(missing)}",
+                "missing_sections": missing,
+            }
 
     # Resolve agent context -- the calling agent's ID is passed via execution context
     agent_id = params.get("_agent_id")
@@ -80,3 +92,18 @@ async def get_latest_report(db: Session, workspace_id: UUID, params: Dict[str, A
         agent_id=agent_id,
         report_type=report_type,
     )
+
+
+def _check_required_sections(content: str, required_sections: List[str]) -> List[str]:
+    """Check that content contains markdown headers matching each required section.
+
+    Matches ## or ### headers case-insensitively. Returns list of missing section names.
+    """
+    content_lower = content.lower()
+    missing = []
+    for section in required_sections:
+        # Match markdown headers: ## Section Name or ### Section Name
+        pattern = rf"^#{2,3}\s+{re.escape(section.lower())}"
+        if not re.search(pattern, content_lower, re.MULTILINE):
+            missing.append(section)
+    return missing
