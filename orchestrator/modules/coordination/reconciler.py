@@ -123,6 +123,31 @@ class MissionReconciler:
             stalls_detected = stall_counts[0]
             stalls_recovered = stall_counts[1]
 
+            # --- Escalate repeated stalls ---
+            if stalls_detected > 0:
+                try:
+                    from services.escalation_service import escalate_stalled_task
+
+                    stalled_tasks = (
+                        db.query(OrchestrationTask)
+                        .filter(
+                            OrchestrationTask.run_id == run_id,
+                            OrchestrationTask.state == TaskState.STALLED.value,
+                        )
+                        .all()
+                    )
+                    for st in stalled_tasks:
+                        escalate_stalled_task(
+                            db=db,
+                            workspace_id=run.workspace_id,
+                            task_id=st.id,
+                            task_title=st.title or "Untitled",
+                            stall_count=st.attempt_number or 1,
+                            agent_name=str(st.assigned_agent_id or "Unknown"),
+                        )
+                except Exception as e:
+                    logger.warning("Escalation service error (non-fatal): %s", e)
+
             # --- Check task terminal states ---
             all_tasks = (
                 db.query(OrchestrationTask)

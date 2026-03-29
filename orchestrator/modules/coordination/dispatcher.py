@@ -325,6 +325,44 @@ class MissionDispatcher:
                 error=f"no_agent_available for role '{task.agent_role}'",
             )
 
+        # --- Authority check (blueprint enforcement) ---
+        try:
+            from services.blueprint_validator import check_authority
+
+            allowed, violations = check_authority(db, run.workspace_id, match_result.agent_id)
+            if not allowed:
+                task.failure_reason_code = "authority_denied"
+                task.failure_detail = f"Blueprint violation: {'; '.join(violations)}"
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.FAILED,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="dispatcher",
+                    reason="Authority denied by blueprint",
+                )
+                sync_board_status(db, task)
+                logger.warning(
+                    "Task %s failed authority check for agent %s: %s",
+                    task.id,
+                    match_result.agent_id,
+                    violations,
+                )
+                return DispatchResult(
+                    dispatched=False,
+                    error=f"authority_denied: {'; '.join(violations)}",
+                )
+            if violations:
+                logger.info(
+                    "Task %s advisory warnings for agent %s: %s",
+                    task.id,
+                    match_result.agent_id,
+                    violations,
+                )
+        except Exception as e:
+            # Non-fatal: authority check failure shouldn't block dispatch
+            logger.warning("Authority check failed (non-fatal): %s", e)
+
         # --- Optimistic claim (queued → assigned) ---
         claimed = MissionDispatcher.claim_task(db, task, match_result.agent_id)
         if not claimed:

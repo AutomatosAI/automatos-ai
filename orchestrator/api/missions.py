@@ -36,7 +36,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
@@ -1472,10 +1472,11 @@ async def pause_mission(
 @router.post("/{mission_id}/resume")
 async def resume_mission(
     mission_id: UUID,
+    request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Resume a paused mission."""
+    """Resume a paused mission, optionally increasing its budget."""
     try:
         run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
 
@@ -1483,6 +1484,30 @@ async def resume_mission(
             raise HTTPException(
                 status_code=400,
                 detail=f"Mission is in '{run.state}' state, expected 'paused'",
+            )
+
+        # Optional: increase budget on resume
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        additional_tokens = body.get("additional_tokens")
+        additional_cost = body.get("additional_cost")
+
+        if additional_tokens or additional_cost:
+            config = run.budget_config or {}
+            if additional_tokens:
+                config["max_tokens"] = config.get("max_tokens", 0) + int(additional_tokens)
+            if additional_cost:
+                config["max_cost"] = config.get("max_cost", 0) + float(additional_cost)
+            run.budget_config = config
+            db.flush()
+            logger.info(
+                "Increased budget for mission %s: +%s tokens, +$%s",
+                mission_id,
+                additional_tokens,
+                additional_cost,
             )
 
         coordinator = get_coordinator_service()

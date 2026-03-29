@@ -118,13 +118,37 @@ def validate_agent(
 
     passed = len(failures) == 0
 
+    # enforce_mode: "strict" blocks dispatch, "advisory" (default) only warns
+    enforce_mode = rules.get("enforce_mode", "advisory")
+
     return {
         "pass": passed,
         "failures": failures,
         "warnings": warnings,
         "agent_name": agent.name,
         "blueprint_name": blueprint.name,
+        "enforce_mode": enforce_mode,
     }
+
+
+def check_authority(
+    db: Session,
+    workspace_id: UUID,
+    agent_id: int,
+    blueprint_id: Optional[UUID] = None,
+) -> tuple[bool, List[str]]:
+    """
+    Pre-dispatch authority check. Returns (allowed, violations).
+
+    If the blueprint's enforce_mode is "strict", failures block dispatch.
+    If "advisory" (default), always allowed (failures logged as warnings).
+    """
+    result = validate_agent(db, workspace_id, agent_id, blueprint_id)
+
+    if result.get("enforce_mode") == "strict" and not result["pass"]:
+        return False, result["failures"]
+
+    return True, result.get("warnings", [])
 
 
 def check_mission_budget(
