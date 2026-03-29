@@ -176,6 +176,14 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     if tags:
         agent.tags = tags
 
+    # Org fields
+    if params.get("team"):
+        agent.team = params["team"]
+    if params.get("job_title"):
+        agent.job_title = params["job_title"]
+    if params.get("reports_to_id") is not None:
+        agent.reports_to_id = int(params["reports_to_id"])
+
     db.add(agent)
     db.flush()  # Get the ID without committing (caller commits)
 
@@ -258,6 +266,20 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         agent.custom_persona_prompt = system_prompt
         agent.use_custom_persona = True
         changes.append("system prompt updated")
+
+    # Org fields
+    team = params.get("team")
+    if team is not None:
+        agent.team = team
+        changes.append(f"team -> '{team}'")
+    job_title = params.get("job_title")
+    if job_title is not None:
+        agent.job_title = job_title
+        changes.append(f"job_title -> '{job_title}'")
+    reports_to_id = params.get("reports_to_id")
+    if reports_to_id is not None:
+        agent.reports_to_id = int(reports_to_id) if reports_to_id else None
+        changes.append(f"reports_to_id -> {reports_to_id}")
 
     # Tags
     tags = params.get("tags")

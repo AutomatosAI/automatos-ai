@@ -72,7 +72,8 @@ def register_agents_actions(registry: ActionRegistry) -> None:
         name="platform_create_agent",
         description=(
             "Create a new agent in the workspace. Requires a name and agent type. "
-            "Optionally accepts a description, model, system prompt, temperature, and tags. "
+            "Optionally accepts description, model, system prompt, temperature, tags, "
+            "team, job_title, and reports_to_id. "
             "Use when the user asks to create, add, or set up a new agent."
         ),
         category="agents",
@@ -120,6 +121,18 @@ def register_agents_actions(registry: ActionRegistry) -> None:
                     "items": {"type": "string"},
                     "description": "Optional tags for categorisation (e.g. ['support', 'customer-facing']).",
                 },
+                "team": {
+                    "type": "string",
+                    "description": "Department/team name (e.g. 'Engineering & DevOps', 'Growth & Marketing').",
+                },
+                "job_title": {
+                    "type": "string",
+                    "description": "Human-readable role title (e.g. 'Engineering Reliability & Security Lead').",
+                },
+                "reports_to_id": {
+                    "type": "integer",
+                    "description": "Agent ID of the manager this agent reports to (org hierarchy).",
+                },
             },
             "required": ["name"],
         },
@@ -137,7 +150,7 @@ def register_agents_actions(registry: ActionRegistry) -> None:
         name="platform_update_agent",
         description=(
             "Update an existing agent's configuration. Can change name, description, "
-            "status, model, system prompt, temperature, or tags. "
+            "status, model, system prompt, temperature, tags, team, job_title, or reports_to_id. "
             "Use when the user asks to modify, update, or reconfigure an agent."
         ),
         category="agents",
@@ -185,6 +198,18 @@ def register_agents_actions(registry: ActionRegistry) -> None:
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Replace the agent's tags with this list.",
+                },
+                "team": {
+                    "type": "string",
+                    "description": "Department/team name (e.g. 'Engineering & DevOps', 'Growth & Marketing').",
+                },
+                "job_title": {
+                    "type": "string",
+                    "description": "Human-readable role title (e.g. 'Engineering Reliability & Security Lead').",
+                },
+                "reports_to_id": {
+                    "type": "integer",
+                    "description": "Agent ID of the manager this agent reports to (org hierarchy).",
                 },
             },
             "required": [],
