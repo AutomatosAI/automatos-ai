@@ -250,6 +250,72 @@ def get_tools_for_agent(
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
 
+        # PRD-108: First-class field tools for mission agents.
+        # These are registered in ActionRegistry but the dispatcher pattern
+        # requires the LLM to wrap calls in platform_execute(action=..., params=...).
+        # Adding dedicated schemas lets agents call them directly — the execution
+        # path at unified_executor.py:382 routes platform_* calls correctly,
+        # and field_id is auto-injected from the active mission.
+        _FIELD_TOOL_SCHEMAS = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "platform_field_query",
+                    "description": (
+                        "Search the shared mission field for findings from other agents. "
+                        "Returns results ranked by semantic relevance — important, frequently-accessed "
+                        "findings surface first. Always query before starting work to see what's known."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "What to search for, e.g. 'research findings about EU AI Act'",
+                            },
+                            "top_k": {
+                                "type": "integer",
+                                "description": "Max results to return (default 10)",
+                                "default": 10,
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "platform_field_inject",
+                    "description": (
+                        "Share a finding or conclusion with other mission agents by storing it "
+                        "in the shared field. Other agents will discover it when they query."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "key": {
+                                "type": "string",
+                                "description": "Short label, e.g. 'finding_1', 'competitor_analysis'",
+                            },
+                            "value": {
+                                "type": "string",
+                                "description": "The content — research finding, analysis, conclusion",
+                            },
+                            "strength": {
+                                "type": "number",
+                                "description": "Importance 0.0-1.0 (default 1.0). Lower for uncertain findings.",
+                                "default": 1.0,
+                            },
+                        },
+                        "required": ["key", "value"],
+                    },
+                },
+            },
+        ]
+        openai_tools.extend(_FIELD_TOOL_SCHEMAS)
+        logger.info(f"[tool-trace {trace_id}] Added {len(_FIELD_TOOL_SCHEMAS)} first-class field tool schemas")
+
         elapsed_ms = int((time.time() - start_time) * 1000)
         logger.info(
             f"[tool-trace {trace_id}] Loaded {len(openai_tools)} tools "
