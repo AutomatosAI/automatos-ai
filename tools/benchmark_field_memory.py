@@ -582,7 +582,9 @@ def run_trial(
 
     # Create and run mission
     print("Creating mission (auto_approve=true)...")
-    mission = client.create_mission(goal, token_budget=50000)
+    # Parallel mode needs more tokens (4+ concurrent agents)
+    budget = 200000 if mode == "parallel" else 50000
+    mission = client.create_mission(goal, token_budget=budget)
     mission_id = mission["id"]
     print(f"  Mission: {mission_id}")
 

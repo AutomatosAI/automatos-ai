@@ -1,0 +1,82 @@
+{
+  "label": "vector_field",
+  "mode": "parallel",
+  "timestamp": "2026-03-30T15:23:55.586498+00:00",
+  "config": {
+    "trials": 5,
+    "facts_count": 25,
+    "domains": 6,
+    "api_url": "https://api.automatos.app",
+    "scoring_method": "llm_judge"
+  },
+  "summary": {
+    "total_trials": 5,
+    "successful_trials": 0,
+    "avg_coverage": 0,
+    "min_coverage": 0,
+    "max_coverage": 0,
+    "per_difficulty": {
+      "easy": {
+        "avg_coverage": 0.0
+      },
+      "medium": {
+        "avg_coverage": 0.0
+      },
+      "hard": {
+        "avg_coverage": 0.0
+      }
+    },
+    "per_domain": {
+      "AI Governance": {
+        "avg_coverage": 0.0
+      },
+      "Cybersecurity": {
+        "avg_coverage": 0.0
+      },
+      "EU AI Act": {
+        "avg_coverage": 0.0
+      },
+      "Incident Response": {
+        "avg_coverage": 0.0
+      },
+      "Market Research": {
+        "avg_coverage": 0.0
+      },
+      "Operational Efficiency": {
+        "avg_coverage": 0.0
+      }
+    }
+  },
+  "trials": [
+    {
+      "trial": 1,
+      "status": "error",
+      "coverage": 0,
+      "error": "('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+    },
+    {
+      "trial": 2,
+      "status": "error",
+      "coverage": 0,
+      "error": "HTTPSConnectionPool(host='api.automatos.app', port=443): Max retries exceeded with url: /api/missions (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x10a434f20>, 'Connection to api.automatos.app timed out. (connect timeout=120)'))"
+    },
+    {
+      "trial": 3,
+      "status": "error",
+      "coverage": 0,
+      "error": "HTTPSConnectionPool(host='api.automatos.app', port=443): Max retries exceeded with url: /api/missions (Caused by NameResolutionError(\"<urllib3.connection.HTTPSConnection object at 0x10a434590>: Failed to resolve 'api.automatos.app' ([Errno 8] nodename nor servname provided, or not known)\"))"
+    },
+    {
+      "trial": 4,
+      "status": "error",
+      "coverage": 0,
+      "error": "HTTPSConnectionPool(host='api.automatos.app', port=443): Max retries exceeded with url: /api/missions (Caused by NameResolutionError(\"<urllib3.connection.HTTPSConnection object at 0x10a434fe0>: Failed to resolve 'api.automatos.app' ([Errno 8] nodename nor servname provided, or not known)\"))"
+    },
+    {
+      "trial": 5,
+      "status": "error",
+      "coverage": 0,
+      "error": "HTTPSConnectionPool(host='api.automatos.app', port=443): Max retries exceeded with url: /api/missions (Caused by NameResolutionError(\"<urllib3.connection.HTTPSConnection object at 0x10a435130>: Failed to resolve 'api.automatos.app' ([Errno 8] nodename nor servname provided, or not known)\"))"
+    }
+  ]
+}

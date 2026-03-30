@@ -1,0 +1,124 @@
+{
+  "label": "vector_field",
+  "timestamp": "2026-03-30T13:31:26.022576+00:00",
+  "config": {
+    "trials": 3,
+    "facts_count": 12,
+    "api_url": "https://api.automatos.app",
+    "scoring_method": "llm_judge"
+  },
+  "summary": {
+    "total_trials": 3,
+    "successful_trials": 1,
+    "avg_coverage": 1.0,
+    "min_coverage": 1.0,
+    "max_coverage": 1.0,
+    "per_difficulty": {
+      "easy": {
+        "avg_coverage": 1.0
+      },
+      "medium": {
+        "avg_coverage": 1.0
+      },
+      "hard": {
+        "avg_coverage": 1.0
+      }
+    }
+  },
+  "trials": [
+    {
+      "trial": 1,
+      "mission_id": "eb692922-5825-4337-a014-72951e9d383e",
+      "status": "completed",
+      "coverage": 1.0,
+      "total_found": 12,
+      "total_facts": 12,
+      "scoring_method": "llm_judge",
+      "tokens_used": 116804,
+      "task_count": 7,
+      "verified_count": 7,
+      "final_output_length": 8106,
+      "field": {
+        "backend": null,
+        "pattern_count": 0,
+        "stability": 0.0
+      },
+      "per_fact": {
+        "eu1": {
+          "found": true,
+          "evidence": "The EU AI Act establishes a risk-based regulatory framework, classifying AI systems into four distinct tiers: Unacceptable Risk, High Risk, Limited Risk, Minimal Risk"
+        },
+        "eu2": {
+          "found": true,
+          "evidence": "High Risk: Systems subject to stringent obligations, including: Detailed technical documentation. Mandatory conformity assessments prior to EU market deployment."
+        },
+        "eu3": {
+          "found": true,
+          "evidence": "Real-time remote biometric identification in public spaces is broadly prohibited, with only three narrowly defined law enforcement exceptions: 1. Locating missing children or crime victims. 2. Preventing imminent terrorist threats or risks to life."
+        },
+        "cyber1": {
+          "found": true,
+          "evidence": "Zero-Trust Architecture: Requires continuous verification of all users and devices, eliminating implicit trust based on network location"
+        },
+        "cyber2": {
+          "found": true,
+          "evidence": "MITRE ATT&CK Framework: Catalogs 14 tactical categories of adversary behavior, spanning the full attack lifecycle from initial access, execution, and privilege escalation to exfiltration and impact."
+        },
+        "cyber3": {
+          "found": true,
+          "evidence": "Supply Chain Attacks: Incidents have surged by 742% between 2019 and 2022. Case in Point: The SolarWinds Orion compromise affected over 18,000 organizations worldwide, including US federal agencies"
+        },
+        "mkt1": {
+          "found": true,
+          "evidence": "Projected to reach $1.8 trillion by 2030, with a compound annual growth rate (CAGR) of approximately 37% from 2023."
+        },
+        "mkt2": {
+          "found": true,
+          "evidence": "Financial services lead multi-agent AI adoption, accounting for 34% of deployments, followed by healthcare and manufacturing."
+        },
+        "mkt3": {
+          "found": true,
+          "evidence": "Companies deploying AI agents report a median 23% reduction in operational costs. However, these savings are offset by a 40% increase in infrastructure spending during the first 18 months of adoption"
+        },
+        "ir1": {
+          "found": true,
+          "evidence": "NIST Incident Response Lifecycle: Structures breach management into four phases: 1. Preparation 2. Detection and Analysis 3. Containment, Eradication, and Recovery 4. Post-Incident Activity"
+        },
+        "ir2": {
+          "found": true,
+          "evidence": "Breach Metrics (IBM, 2023): Mean time to identify a breach: 204 days. Mean time to contain a breach: 73 days."
+        },
+        "ir3": {
+          "found": true,
+          "evidence": "Organizations with incident response (IR) teams and regularly tested IR plans saved an average of $2.66 million per breach."
+        }
+      },
+      "per_difficulty": {
+        "easy": {
+          "found": 4,
+          "total": 4
+        },
+        "medium": {
+          "found": 4,
+          "total": 4
+        },
+        "hard": {
+          "found": 4,
+          "total": 4
+        }
+      }
+    },
+    {
+      "trial": 2,
+      "mission_id": "3d3481f7-0ad0-4ff1-9995-44aa4e3d0b3f",
+      "status": "failed",
+      "coverage": 0
+    },
+    {
+      "trial": 3,
+      "mission_id": "9a056d3d-3742-4abb-a3d3-130676105c40",
+      "status": "failed",
+      "coverage": 0
+    }
+  ]
+}

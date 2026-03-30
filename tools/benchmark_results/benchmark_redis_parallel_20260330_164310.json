@@ -1,0 +1,87 @@
+{
+  "label": "redis",
+  "mode": "parallel",
+  "timestamp": "2026-03-30T16:43:10.682280+00:00",
+  "config": {
+    "trials": 5,
+    "facts_count": 25,
+    "domains": 6,
+    "api_url": "https://api.automatos.app",
+    "scoring_method": "llm_judge"
+  },
+  "summary": {
+    "total_trials": 5,
+    "successful_trials": 0,
+    "avg_coverage": 0,
+    "min_coverage": 0,
+    "max_coverage": 0,
+    "per_difficulty": {
+      "easy": {
+        "avg_coverage": 0.0
+      },
+      "medium": {
+        "avg_coverage": 0.0
+      },
+      "hard": {
+        "avg_coverage": 0.0
+      }
+    },
+    "per_domain": {
+      "AI Governance": {
+        "avg_coverage": 0.0
+      },
+      "Cybersecurity": {
+        "avg_coverage": 0.0
+      },
+      "EU AI Act": {
+        "avg_coverage": 0.0
+      },
+      "Incident Response": {
+        "avg_coverage": 0.0
+      },
+      "Market Research": {
+        "avg_coverage": 0.0
+      },
+      "Operational Efficiency": {
+        "avg_coverage": 0.0
+      }
+    }
+  },
+  "trials": [
+    {
+      "trial": 1,
+      "mission_id": "753b2e29-8965-4dcb-bf68-7ebf1ebb08ed",
+      "mode": "parallel",
+      "status": "failed",
+      "coverage": 0
+    },
+    {
+      "trial": 2,
+      "mission_id": "99992b24-11b2-4249-a93a-3779fc9637bb",
+      "mode": "parallel",
+      "status": "failed",
+      "coverage": 0
+    },
+    {
+      "trial": 3,
+      "mission_id": "04321eb2-5767-4d2d-876e-b80d8c71b4fc",
+      "mode": "parallel",
+      "status": "failed",
+      "coverage": 0
+    },
+    {
+      "trial": 4,
+      "mission_id": "b4d2b04d-3034-4e00-b87e-2641ee93b403",
+      "mode": "parallel",
+      "status": "failed",
+      "coverage": 0
+    },
+    {
+      "trial": 5,
+      "mission_id": "fcd2dbc8-933d-4e77-84de-e5593e251b51",
+      "mode": "parallel",
+      "status": "timeout",
+      "coverage": 0
+    }
+  ]
+}
