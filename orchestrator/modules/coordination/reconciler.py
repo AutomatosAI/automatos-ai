@@ -268,6 +268,15 @@ class MissionReconciler:
 
         if skip_verification:
             for task in completed_tasks:
+                # Must go COMPLETED → VERIFYING → VERIFIED (state machine requires it)
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.VERIFYING,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="reconciler",
+                    reason="Verification skipped — transitioning through VERIFYING",
+                )
                 MissionReconciler._apply_verdict_pass(db, task)
                 emit_event(
                     db=db,
