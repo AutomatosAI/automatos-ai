@@ -121,7 +121,12 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
             return embedding
 
         except Exception as e:
-            logger.error(f"OpenRouter embedding error ({self.config.model}): {e}")
+            # Use repr(e) — some HTTP errors (e.g. 402 credits exhausted) have empty str()
+            status_code = getattr(e, "status_code", "N/A")
+            logger.error(
+                "OpenRouter embedding error (%s, status=%s): %r",
+                self.config.model, status_code, e,
+            )
             raise
 
     async def generate_embeddings_batch(

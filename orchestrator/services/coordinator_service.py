@@ -150,7 +150,15 @@ class CoordinatorService:
             logger.info("[PRD-108] Created field %s for mission %s", field_id, run.id)
             return field_id
         except Exception as e:
-            logger.warning("[PRD-108] Failed to create field for mission %s: %s", run.id, e, exc_info=True)
+            # Use repr(e) — str(e) can be empty for some HTTP errors (e.g. OpenRouter 402)
+            status_code = getattr(e, "status_code", None)
+            detail = f"{type(e).__name__}: {e!r}"
+            if status_code:
+                detail = f"HTTP {status_code} — {detail}"
+            logger.warning(
+                "[PRD-108] Failed to create field for mission %s: %s",
+                run.id, detail, exc_info=True,
+            )
             return None
 
     async def _destroy_mission_field(self, run: OrchestrationRun) -> None:
@@ -163,7 +171,7 @@ class CoordinatorService:
             await field.destroy_context(field_id)
             logger.info("[PRD-108] Destroyed field %s for mission %s", field_id, run.id)
         except Exception as e:
-            logger.warning("[PRD-108] Failed to destroy field %s: %s", field_id, e)
+            logger.warning("[PRD-108] Failed to destroy field %s: %r", field_id, e, exc_info=True)
 
     async def _inject_task_output_into_field(
         self,
@@ -189,7 +197,7 @@ class CoordinatorService:
                 task.id, field_id,
             )
         except Exception as e:
-            logger.warning("[PRD-108] Failed to inject task output: %s", e)
+            logger.warning("[PRD-108] Failed to inject task output: %r", e, exc_info=True)
 
     async def _seed_field_with_documents(
         self,
@@ -227,7 +235,7 @@ class CoordinatorService:
                 )
                 logger.info("[PRD-108] Seeded field %s with doc %s (%s)", field_id, doc_id, doc.filename)
             except Exception as e:
-                logger.warning("[PRD-108] Failed to seed doc %s into field: %s", doc_id, e)
+                logger.warning("[PRD-108] Failed to seed doc %s into field: %r", doc_id, e, exc_info=True)
 
     async def _save_mission_output_as_document(
         self,
