@@ -1,0 +1,897 @@
+{
+  "label": "vector_field",
+  "mode": "parallel",
+  "timestamp": "2026-03-30T18:20:00.928235+00:00",
+  "config": {
+    "trials": 5,
+    "facts_count": 25,
+    "domains": 6,
+    "api_url": "https://api.automatos.app",
+    "scoring_method": "llm_judge"
+  },
+  "summary": {
+    "total_trials": 5,
+    "successful_trials": 5,
+    "avg_coverage": 0.8800000000000001,
+    "min_coverage": 0.72,
+    "max_coverage": 1.0,
+    "per_difficulty": {
+      "easy": {
+        "avg_coverage": 0.9428571428571428
+      },
+      "medium": {
+        "avg_coverage": 0.925
+      },
+      "hard": {
+        "avg_coverage": 0.82
+      }
+    },
+    "per_domain": {
+      "AI Governance": {
+        "avg_coverage": 1.0
+      },
+      "Cybersecurity": {
+        "avg_coverage": 0.9199999999999999
+      },
+      "EU AI Act": {
+        "avg_coverage": 0.76
+      },
+      "Incident Response": {
+        "avg_coverage": 0.8800000000000001
+      },
+      "Market Research": {
+        "avg_coverage": 0.9199999999999999
+      },
+      "Operational Efficiency": {
+        "avg_coverage": 0.9
+      }
+    }
+  },
+  "trials": [
+    {
+      "trial": 1,
+      "mission_id": "db2e5fc5-cfc1-4899-a679-461d44b6ea77",
+      "mode": "parallel",
+      "status": "completed",
+      "coverage": 1.0,
+      "total_found": 25,
+      "total_facts": 25,
+      "scoring_method": "llm_judge",
+      "tokens_used": 63191,
+      "task_count": 5,
+      "verified_count": 5,
+      "final_output_length": 8743,
+      "field": {
+        "backend": null,
+        "pattern_count": 0,
+        "stability": 0.0
+      },
+      "telemetry": {
+        "field_queries": 0,
+        "field_injects": 0,
+        "field_stability_checks": 0,
+        "total_tool_calls": 0,
+        "agents_using_field": [],
+        "query_details": []
+      },
+      "per_fact": {
+        "eu1": {
+          "found": true,
+          "evidence": "The EU AI Act establishes the world's most comprehensive AI classification regime, sorting systems into four risk tiers: **unacceptable, high, limited, and minimal risk**"
+        },
+        "eu2": {
+          "found": true,
+          "evidence": "High-risk AI systems must maintain detailed technical documentation and undergo **conformity assessments** before EU market deployment"
+        },
+        "eu3": {
+          "found": true,
+          "evidence": "Real-time biometric identification in public spaces is **prohibited**, with only three narrow law enforcement exceptions: **(1)** locating missing children, **(2)** preventing imminent terrorist threats, and **(3)** prosecuting serious crimes"
+        },
+        "eu4": {
+          "found": true,
+          "evidence": "Violations of prohibited practices carry fines of up to **\u20ac35 million or 7% of global annual turnover**, whichever is higher"
+        },
+        "eu5": {
+          "found": true,
+          "evidence": "Transparency obligations require AI-generated deepfakes to be clearly labeled as artificially generated content, with technical standards defined by **ENISA** (European Union Agency for Cybersecurity)"
+        },
+        "cyber1": {
+          "found": true,
+          "evidence": "**Zero-trust architecture** \u2014 requiring strict identity verification for every access attempt regardless of network location \u2014 has become the baseline security model"
+        },
+        "cyber2": {
+          "found": true,
+          "evidence": "The **MITRE ATT&CK** framework catalogs **14 tactical categories** of adversary behavior from initial access through exfiltration and impact"
+        },
+        "cyber3": {
+          "found": true,
+          "evidence": "**Supply chain attacks surged 742% between 2019 and 2022**, exemplified by the **SolarWinds Orion** compromise that affected over **18,000 organizations**, including US federal agencies"
+        },
+        "cyber4": {
+          "found": true,
+          "evidence": "The **NIST Cybersecurity Framework 2.0** added a sixth function, **Govern**, alongside the original five: Identify, Protect, Detect, Respond, and Recover"
+        },
+        "cyber5": {
+          "found": true,
+          "evidence": "**Ransomware payments reached $1.1 billion globally in 2023**, with average enterprise demands exceeding **$5.3 million** (Chainalysis)"
+        },
+        "mkt1": {
+          "found": true,
+          "evidence": "The global AI market is projected to reach **$1.8 trillion by 2030**, growing at a **37% CAGR from 2023**"
+        },
+        "mkt2": {
+          "found": true,
+          "evidence": "Enterprise adoption of multi-agent AI systems is concentrated in **financial services (34%)**, healthcare, and manufacturing"
+        },
+        "mkt3": {
+          "found": true,
+          "evidence": "Companies deploying AI agents already report a **median 23% reduction in operational costs**, though this comes with a **40% increase in infrastructure spending** during the first **18 months**"
+        },
+        "mkt4": {
+          "found": true,
+          "evidence": "McKinsey estimates generative AI alone could unlock **$2.6 to $4.4 trillion annually** across **63 enterprise use cases**, with banking and retail capturing the largest share"
+        },
+        "mkt5": {
+          "found": true,
+          "evidence": "Yet only **11% of enterprises** have moved beyond the pilot stage. The two dominant barriers \u2014 **integration complexity (67%)** and **governance concerns (54%)**"
+        },
+        "ir1": {
+          "found": true,
+          "evidence": "The **NIST Incident Response Lifecycle** \u2014 comprising Preparation, Detection and Analysis, Containment/Eradication/Recovery, and Post-Incident Activity"
+        },
+        "ir2": {
+          "found": true,
+          "evidence": "the mean time to identify a breach was **204 days**, with an additional **73 days** to contain it"
+        },
+        "ir3": {
+          "found": true,
+          "evidence": "Organizations with a dedicated IR team and regularly tested plans saved **$2.66 million per breach**"
+        },
+        "ir4": {
+          "found": true,
+          "evidence": "The **average total cost of a data breach in 2023 was $4.45 million globally**, with **healthcare breaches averaging $10.93 million** \u2014 the highest of any industry"
+        },
+        "ir5": {
+          "found": true,
+          "evidence": "AI and automation in incident response reduced breach costs by **$1.76 million** and shortened the breach lifecycle by **108 days**"
+        },
+        "gov1": {
+          "found": true,
+          "evidence": "The **OECD AI Principles**, adopted by **46+ countries**, establish five core values: inclusive growth, human-centered values, transparency, robustness, and accountability"
+        },
+        "gov2": {
+          "found": true,
+          "evidence": "**ISO/IEC 42001** is the first international standard for AI management systems, providing a structured framework for responsible AI development in enterprise settings"
+        },
+        "gov3": {
+          "found": true,
+          "evidence": "The **Singapore Model AI Governance Framework** goes further operationally, recommending tiered testing where high-impact AI decisions require **human-in-the-loop validation** with documented escalation paths"
+        },
+        "ops1": {
+          "found": true,
+          "evidence": "**Gartner predicts that by 2028, 33% of enterprise software will include agentic AI**, up from **less than 1% in 2024**"
+        },
+        "ops2": {
+          "found": true,
+          "evidence": "**Infosys** reports that AI-driven process automation achieves **35\u201345% faster cycle times in procurement**, with the highest gains in vendor onboarding and invoice reconciliation"
+        }
+      },
+      "per_difficulty": {
+        "easy": {
+          "found": 7,
+          "total": 7
+        },
+        "medium": {
+          "found": 8,
+          "total": 8
+        },
+        "hard": {
+          "found": 10,
+          "total": 10
+        }
+      },
+      "per_domain": {
+        "AI Governance": {
+          "found": 3,
+          "total": 3
+        },
+        "Cybersecurity": {
+          "found": 5,
+          "total": 5
+        },
+        "EU AI Act": {
+          "found": 5,
+          "total": 5
+        },
+        "Incident Response": {
+          "found": 5,
+          "total": 5
+        },
+        "Market Research": {
+          "found": 5,
+          "total": 5
+        },
+        "Operational Efficiency": {
+          "found": 2,
+          "total": 2
+        }
+      }
+    },
+    {
+      "trial": 2,
+      "mission_id": "8bd5c41a-f80a-49c0-8537-4da7c81226c5",
+      "mode": "parallel",
+      "status": "completed",
+      "coverage": 1.0,
+      "total_found": 25,
+      "total_facts": 25,
+      "scoring_method": "llm_judge",
+      "tokens_used": 71896,
+      "task_count": 5,
+      "verified_count": 5,
+      "final_output_length": 6615,
+      "field": {
+        "backend": "vector_field",
+        "pattern_count": 11,
+        "stability": 2.7278
+      },
+      "telemetry": {
+        "field_queries": 0,
+        "field_injects": 0,
+        "field_stability_checks": 0,
+        "total_tool_calls": 0,
+        "agents_using_field": [],
+        "query_details": []
+      },
+      "per_fact": {
+        "eu1": {
+          "found": true,
+          "evidence": "The EU AI Act establishes a four-tier risk classification: 1. Unacceptable risk (prohibited) 2. High risk 3. Limited risk 4. Minimal risk"
+        },
+        "eu2": {
+          "found": true,
+          "evidence": "High-risk AI systems must maintain detailed technical documentation and complete conformity assessments before EU market entry"
+        },
+        "eu3": {
+          "found": true,
+          "evidence": "Real-time biometric identification in public spaces is banned, except for three narrowly defined law enforcement exceptions: (a) searching for missing children, (b) preventing imminent terrorist threats, and (c) identifying suspects of serious crimes after judicial authorization"
+        },
+        "eu4": {
+          "found": true,
+          "evidence": "Non-compliance can result in fines up to 35 million euros or 7% of global annual turnover"
+        },
+        "eu5": {
+          "found": true,
+          "evidence": "All AI-generated deepfakes must be clearly labeled as artificial, with technical standards defined by ENISA (European Union Agency for Cybersecurity)"
+        },
+        "cyber1": {
+          "found": true,
+          "evidence": "Zero-Trust Architecture: Continuous verification of users/devices, eliminating implicit trust"
+        },
+        "cyber2": {
+          "found": true,
+          "evidence": "MITRE ATT&CK: 14 tactical categories from Initial Access to Impact"
+        },
+        "cyber3": {
+          "found": true,
+          "evidence": "Supply chain attacks increased 742% (2019\u20132022), exemplified by SolarWinds, which affected 18,000+ organizations"
+        },
+        "cyber4": {
+          "found": true,
+          "evidence": "NIST Cybersecurity Framework (CSF) 2.0: Added a sixth function, 'Govern', to the original five: Identify, Protect, Detect, Respond, Recover"
+        },
+        "cyber5": {
+          "found": true,
+          "evidence": "Ransomware: $1.1B in global payments (2023), with average enterprise ransom demands exceeding $5.3M"
+        },
+        "mkt1": {
+          "found": true,
+          "evidence": "The global AI market is projected to reach $1.8 trillion by 2030, expanding at a ~37% CAGR (2023\u20132030)"
+        },
+        "mkt2": {
+          "found": true,
+          "evidence": "Enterprise adoption of multi-agent AI is concentrated in financial services (34% adoption, the highest), healthcare, and manufacturing"
+        },
+        "mkt3": {
+          "found": true,
+          "evidence": "While AI agent deployment produces a 23% median reduction in operational costs, it also drives a 40% increase in infrastructure spending during the first 18 months"
+        },
+        "mkt4": {
+          "found": true,
+          "evidence": "McKinsey estimates generative AI could deliver $2.6\u2013$4.4 trillion in annual value across 63 enterprise use cases, with banking and retail capturing the largest share"
+        },
+        "mkt5": {
+          "found": true,
+          "evidence": "Only 11% of enterprises have moved beyond the pilot stage with multi-agent AI, with 67% citing integration complexity and 54% citing governance concerns as principal barriers to scaling"
+        },
+        "ir1": {
+          "found": true,
+          "evidence": "NIST Incident Response Lifecycle: Four phases\u2014Preparation, Detection & Analysis, Containment Eradication & Recovery, Post-Incident Activity"
+        },
+        "ir2": {
+          "found": true,
+          "evidence": "In 2023, the mean time to identify a breach was 204 days, with 73 days to contain it"
+        },
+        "ir3": {
+          "found": true,
+          "evidence": "Organizations with an IR team and tested plans saved $2.66 million per breach"
+        },
+        "ir4": {
+          "found": true,
+          "evidence": "Cost of breaches: Global average was $4.45 million, with healthcare breaches at $10.93 million"
+        },
+        "ir5": {
+          "found": true,
+          "evidence": "AI and automation reduced breach costs by $1.76 million and shortened breach lifecycle by 108 days"
+        },
+        "gov1": {
+          "found": true,
+          "evidence": "OECD AI Principles (adopted by 46+ countries): Inclusive Growth, Human-Centered Values, Transparency, Robustness, Accountability"
+        },
+        "gov2": {
+          "found": true,
+          "evidence": "ISO/IEC 42001: First international standard for AI management systems"
+        },
+        "gov3": {
+          "found": true,
+          "evidence": "Singapore Model AI Governance Framework: Advocates tiered testing and human-in-the-loop for high-impact AI decisions, with documented escalation paths"
+        },
+        "ops1": {
+          "found": true,
+          "evidence": "By 2028, 33% of enterprise software will include agentic AI (up from <1% in 2024, per Gartner)"
+        },
+        "ops2": {
+          "found": true,
+          "evidence": "AI-driven automation delivers 35\u201345% faster procurement cycles (Infosys), especially in vendor onboarding and invoice reconciliation"
+        }
+      },
+      "per_difficulty": {
+        "easy": {
+          "found": 7,
+          "total": 7
+        },
+        "medium": {
+          "found": 8,
+          "total": 8
+        },
+        "hard": {
+          "found": 10,
+          "total": 10
+        }
+      },
+      "per_domain": {
+        "AI Governance": {
+          "found": 3,
+          "total": 3
+        },
+        "Cybersecurity": {
+          "found": 5,
+          "total": 5
+        },
+        "EU AI Act": {
+          "found": 5,
+          "total": 5
+        },
+        "Incident Response": {
+          "found": 5,
+          "total": 5
+        },
+        "Market Research": {
+          "found": 5,
+          "total": 5
+        },
+        "Operational Efficiency": {
+          "found": 2,
+          "total": 2
+        }
+      }
+    },
+    {
+      "trial": 3,
+      "mission_id": "e5ad843a-d9b6-4a11-a4a7-dbd2c2747ac5",
+      "mode": "parallel",
+      "status": "completed",
+      "coverage": 0.72,
+      "total_found": 18,
+      "total_facts": 25,
+      "scoring_method": "keyword",
+      "tokens_used": 74616,
+      "task_count": 5,
+      "verified_count": 5,
+      "final_output_length": 3493,
+      "field": {
+        "backend": null,
+        "pattern_count": 0,
+        "stability": 0.0
+      },
+      "telemetry": {
+        "field_queries": 0,
+        "field_injects": 0,
+        "field_stability_checks": 0,
+        "total_tool_calls": 0,
+        "agents_using_field": [],
+        "query_details": []
+      },
+      "per_fact": {
+        "eu1": {
+          "found": false,
+          "evidence": "not found"
+        },
+        "eu2": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "eu3": {
+          "found": false,
+          "evidence": "not found"
+        },
+        "eu4": {
+          "found": false,
+          "evidence": "not found"
+        },
+        "eu5": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "cyber1": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "cyber2": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "cyber3": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "cyber4": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "cyber5": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "mkt1": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "mkt2": {
+          "found": false,
+          "evidence": "not found"
+        },
+        "mkt3": {
+          "found": false,
+          "evidence": "not found"
+        },
+        "mkt4": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "mkt5": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "ir1": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "ir2": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "ir3": {
+          "found": false,
+          "evidence": "not found"
+        },
+        "ir4": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "ir5": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "gov1": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "gov2": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "gov3": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "ops1": {
+          "found": true,
+          "evidence": "keyword match"
+        },
+        "ops2": {
+          "found": false,
+          "evidence": "not found"
+        }
+      },
+      "per_difficulty": {
+        "easy": {
+          "found": 6,
+          "total": 7
+        },
+        "medium": {
+          "found": 6,
+          "total": 8
+        },
+        "hard": {
+          "found": 6,
+          "total": 10
+        }
+      },
+      "per_domain": {
+        "AI Governance": {
+          "found": 3,
+          "total": 3
+        },
+        "Cybersecurity": {
+          "found": 5,
+          "total": 5
+        },
+        "EU AI Act": {
+          "found": 2,
+          "total": 5
+        },
+        "Incident Response": {
+          "found": 4,
+          "total": 5
+        },
+        "Market Research": {
+          "found": 3,
+          "total": 5
+        },
+        "Operational Efficiency": {
+          "found": 1,
+          "total": 2
+        }
+      }
+    },
+    {
+      "trial": 4,
+      "mission_id": "a7c3d45d-b50c-4f0a-9ed9-ed1078b760cd",
+      "mode": "parallel",
+      "status": "completed",
+      "coverage": 0.96,
+      "total_found": 24,
+      "total_facts": 25,
+      "scoring_method": "llm_judge",
+      "tokens_used": 62823,
+      "task_count": 5,
+      "verified_count": 5,
+      "final_output_length": 6795,
+      "field": {
+        "backend": null,
+        "pattern_count": 0,
+        "stability": 0.0
+      },
+      "telemetry": {
+        "field_queries": 0,
+        "field_injects": 0,
+        "field_stability_checks": 0,
+        "total_tool_calls": 0,
+        "agents_using_field": [],
+        "query_details": []
+      },
+      "per_fact": {
+        "eu1": {
+          "found": true,
+          "evidence": "The EU AI Act introduces a four-tiered risk classification for AI systems: **unacceptable, high, limited, and minimal risk**."
+        },
+        "eu2": {
+          "found": true,
+          "evidence": "High-risk systems are subject to rigorous requirements, including **detailed technical documentation** and **conformity assessments** prior to deployment in the EU."
+        },
+        "eu3": {
+          "found": false,
+          "evidence": "The output mentions 'three law enforcement exceptions' but does not specifically mention 'missing children and imminent terrorist threats' as required."
+        },
+        "eu4": {
+          "found": true,
+          "evidence": "Non-compliance can result in fines of up to **35 million euros or 7% of global annual turnover**."
+        },
+        "eu5": {
+          "found": true,
+          "evidence": "Transparency obligations require all AI-generated deepfakes to be clearly labeled. Compliance is benchmarked against **ENISA technical standards**."
+        },
+        "cyber1": {
+          "found": true,
+          "evidence": "The **Zero-Trust Architecture** principle now dominates, mandating continuous verification for every user and device and eliminating implicit trust based on network location."
+        },
+        "cyber2": {
+          "found": true,
+          "evidence": "The **MITRE ATT&CK Framework** catalogs **14 tactical categories** of adversary behavior, guiding defense strategies from initial access to exfiltration."
+        },
+        "cyber3": {
+          "found": true,
+          "evidence": "**supply chain attacks increasing by 742% between 2019 and 2022**. The SolarWinds Orion compromise alone impacted over **18,000 organizations**, including major US federal agencies."
+        },
+        "cyber4": {
+          "found": true,
+          "evidence": "The updated **NIST Cybersecurity Framework 2.0** introduces a sixth function, **Govern**, supplementing Identify, Protect, Detect, Respond, and Recover."
+        },
+        "cyber5": {
+          "found": true,
+          "evidence": "**ransomware payments reached $1.1 billion globally in 2023**, with average enterprise ransom demands exceeding **$5.3 million** (Chainalysis)."
+        },
+        "mkt1": {
+          "found": true,
+          "evidence": "The global AI market is projected to reach **$1.8 trillion by 2030** at a **~37% CAGR from 2023**."
+        },
+        "mkt2": {
+          "found": true,
+          "evidence": "Adoption is concentrated in **financial services (34% adoption), healthcare, and manufacturing**."
+        },
+        "mkt3": {
+          "found": true,
+          "evidence": "Companies deploying AI agents report a **median 23% reduction in operational costs** but experience a **40% increase in infrastructure spending** during the first 18 months."
+        },
+        "mkt4": {
+          "found": true,
+          "evidence": "**Generative AI** is estimated by McKinsey to deliver **$2.6 to $4.4 trillion annually** across **63 enterprise use cases**, with banking and retail capturing the largest share."
+        },
+        "mkt5": {
+          "found": true,
+          "evidence": "only **11% of enterprises** have moved beyond pilot stage, with **67% citing integration complexity** and **54% citing governance concerns** as primary barriers."
+        },
+        "ir1": {
+          "found": true,
+          "evidence": "The **NIST Incident Response Lifecycle**\u2014Preparation, Detection & Analysis, Containment/Eradication/Recovery, and Post-Incident Activity\u2014remains foundational."
+        },
+        "ir2": {
+          "found": true,
+          "evidence": "In 2023, the mean time to identify a breach was **204 days**, with containment requiring an additional **73 days**."
+        },
+        "ir3": {
+          "found": true,
+          "evidence": "Organizations with dedicated IR teams and tested plans saved an average of **$2.66 million per breach**."
+        },
+        "ir4": {
+          "found": true,
+          "evidence": "The **average global breach cost** was **$4.45 million**, peaking at **$10.93 million** in healthcare."
+        },
+        "ir5": {
+          "found": true,
+          "evidence": "the adoption of AI and automation in incident response reduced breach costs by **$1.76 million** and shortened the breach lifecycle by **108 days**."
+        },
+        "gov1": {
+          "found": true,
+          "evidence": "The **OECD AI Principles**, adopted by over **46 countries**, emphasize inclusive growth, human-centered values, transparency, robustness/safety, and accountability."
+        },
+        "gov2": {
+          "found": true,
+          "evidence": "The **ISO/IEC 42001** standard provides a global framework for AI management systems."
+        },
+        "gov3": {
+          "found": true,
+          "evidence": "The **Singapore Model AI Governance Framework** recommends tiered testing, human-in-the-loop validation, and documented escalation paths."
+        },
+        "ops1": {
+          "found": true,
+          "evidence": "**Gartner forecasts** that by 2028, **33% of enterprise software** will include agentic AI, a dramatic increase from **less than 1% in 2024**."
+        },
+        "ops2": {
+          "found": true,
+          "evidence": "According to **Infosys**, enterprises using AI-driven process automation achieve **35\u201345% faster procurement cycle times**, especially in vendor onboarding and invoice reconciliation."
+        }
+      },
+      "per_difficulty": {
+        "easy": {
+          "found": 7,
+          "total": 7
+        },
+        "medium": {
+          "found": 8,
+          "total": 8
+        },
+        "hard": {
+          "found": 9,
+          "total": 10
+        }
+      },
+      "per_domain": {
+        "AI Governance": {
+          "found": 3,
+          "total": 3
+        },
+        "Cybersecurity": {
+          "found": 5,
+          "total": 5
+        },
+        "EU AI Act": {
+          "found": 4,
+          "total": 5
+        },
+        "Incident Response": {
+          "found": 5,
+          "total": 5
+        },
+        "Market Research": {
+          "found": 5,
+          "total": 5
+        },
+        "Operational Efficiency": {
+          "found": 2,
+          "total": 2
+        }
+      }
+    },
+    {
+      "trial": 5,
+      "mission_id": "efb560cd-a4d5-4ae6-ac2f-b8cac01dc2e6",
+      "mode": "parallel",
+      "status": "completed",
+      "coverage": 0.72,
+      "total_found": 18,
+      "total_facts": 25,
+      "scoring_method": "llm_judge",
+      "tokens_used": 67027,
+      "task_count": 5,
+      "verified_count": 5,
+      "final_output_length": 4657,
+      "field": {
+        "backend": null,
+        "pattern_count": 0,
+        "stability": 0.0
+      },
+      "telemetry": {
+        "field_queries": 0,
+        "field_injects": 0,
+        "field_stability_checks": 0,
+        "total_tool_calls": 0,
+        "agents_using_field": [],
+        "query_details": []
+      },
+      "per_fact": {
+        "eu1": {
+          "found": true,
+          "evidence": "The Act establishes four risk tiers\u2014unacceptable, high, limited, and minimal risk."
+        },
+        "eu2": {
+          "found": true,
+          "evidence": "High-risk systems require detailed technical documentation and conformity assessments before EU market deployment."
+        },
+        "eu3": {
+          "found": false,
+          "evidence": "No mention of real-time biometric identification prohibitions or law enforcement exceptions"
+        },
+        "eu4": {
+          "found": true,
+          "evidence": "Violations involving prohibited practices can result in fines up to 35 million euros or 7% of global annual turnover"
+        },
+        "eu5": {
+          "found": false,
+          "evidence": "No mention of deepfake labeling requirements or ENISA technical standards"
+        },
+        "cyber1": {
+          "found": true,
+          "evidence": "Zero-trust architecture requires continuous verification, eliminating implicit trust based on network location."
+        },
+        "cyber2": {
+          "found": true,
+          "evidence": "The MITRE ATT&CK framework catalogs 14 tactical categories of adversary behavior."
+        },
+        "cyber3": {
+          "found": false,
+          "evidence": "No mention of supply chain attack statistics or SolarWinds compromise"
+        },
+        "cyber4": {
+          "found": true,
+          "evidence": "NIST Cybersecurity Framework 2.0 added 'Govern' as a sixth function alongside Identify, Protect, Detect, Respond, and Recover."
+        },
+        "cyber5": {
+          "found": false,
+          "evidence": "No mention of ransomware payment statistics or Chainalysis data"
+        },
+        "mkt1": {
+          "found": true,
+          "evidence": "The global AI market is projected to reach $1.8 trillion by 2030, growing at 37% CAGR from 2023."
+        },
+        "mkt2": {
+          "found": true,
+          "evidence": "Financial services leads adoption at 34%, reflecting sector maturity in data infrastructure"
+        },
+        "mkt3": {
+          "found": true,
+          "evidence": "companies deploying AI agents report a median 23% reduction in operational costs offset by a 40% increase in infrastructure spending during the first 18 months"
+        },
+        "mkt4": {
+          "found": true,
+          "evidence": "McKinsey estimates generative AI could add $2.6-4.4 trillion annually across 63 enterprise use cases, with banking and retail capturing the largest share."
+        },
+        "mkt5": {
+          "found": true,
+          "evidence": "Only 11% of enterprises have moved beyond pilot stage with multi-agent AI deployments. Among enterprises struggling to scale, 67% cite integration complexity... A further 54% cite governance concerns"
+        },
+        "ir1": {
+          "found": false,
+          "evidence": "No mention of the four phases of NIST incident response lifecycle"
+        },
+        "ir2": {
+          "found": false,
+          "evidence": "No mention of mean time to identify (204 days) or contain (73 days) data breaches"
+        },
+        "ir3": {
+          "found": true,
+          "evidence": "Organizations with incident response teams and tested plans save $2.66 million per breach"
+        },
+        "ir4": {
+          "found": true,
+          "evidence": "Organizations face a global average data breach cost of $4.45 million, with healthcare breaches averaging $10.93 million\u2014the highest of any industry."
+        },
+        "ir5": {
+          "found": true,
+          "evidence": "AI/automation reduces breach costs by $1.76 million and shortens lifecycle by 108 days"
+        },
+        "gov1": {
+          "found": true,
+          "evidence": "OECD AI Principles, adopted by 46+ countries, emphasize five core values: inclusive growth, human-centered values, transparency, robustness, and accountability."
+        },
+        "gov2": {
+          "found": true,
+          "evidence": "ISO/IEC 42001 provides the first international standard for AI management systems."
+        },
+        "gov3": {
+          "found": true,
+          "evidence": "Singapore's Model Framework recommends tiered testing and human-in-the-loop validation for high-impact decisions."
+        },
+        "ops1": {
+          "found": true,
+          "evidence": "Gartner predicts 33% of enterprise software will include agentic AI by 2028 (up from <1% in 2024)."
+        },
+        "ops2": {
+          "found": true,
+          "evidence": "Infosys reports 35-45% faster procurement cycles through AI-driven automation, with highest gains in vendor onboarding and invoice reconciliation."
+        }
+      },
+      "per_difficulty": {
+        "easy": {
+          "found": 6,
+          "total": 7
+        },
+        "medium": {
+          "found": 7,
+          "total": 8
+        },
+        "hard": {
+          "found": 6,
+          "total": 10
+        }
+      },
+      "per_domain": {
+        "AI Governance": {
+          "found": 3,
+          "total": 3
+        },
+        "Cybersecurity": {
+          "found": 3,
+          "total": 5
+        },
+        "EU AI Act": {
+          "found": 3,
+          "total": 5
+        },
+        "Incident Response": {
+          "found": 3,
+          "total": 5
+        },
+        "Market Research": {
+          "found": 5,
+          "total": 5
+        },
+        "Operational Efficiency": {
+          "found": 2,
+          "total": 2
+        }
+      }
+    }
+  ]
+}
