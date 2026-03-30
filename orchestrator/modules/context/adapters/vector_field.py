@@ -53,6 +53,7 @@ class VectorFieldSharedContext(SharedContextPort):
         self._client = AsyncQdrantClient(
             url=config.QDRANT_URL,
             api_key=config.QDRANT_API_KEY or None,
+            timeout=30,  # Default 5s too short for index creation with wait=True
         )
         self._embedder = EmbeddingManager()
         self._decay_rate = config.FIELD_DECAY_RATE
