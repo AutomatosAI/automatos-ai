@@ -307,6 +307,7 @@ class PlatformClient:
                     "config": {
                         "auto_approve": True,
                         "token_budget": token_budget,
+                        "skip_verification": True,
                     },
                 },
                 timeout=120,

@@ -100,6 +100,9 @@ class MissionApproveRequest(BaseModel):
     token_budget_override: Optional[int] = Field(
         None, ge=1000, description="Override token budget estimate for this mission"
     )
+    skip_verification: Optional[bool] = Field(
+        None, description="Skip task verification (for benchmarks/testing)",
+    )
 
     @validator("modifications")
     def validate_modifications(cls, v):
@@ -1048,6 +1051,8 @@ async def approve_plan(
             run.max_concurrent = body.max_concurrent_override
         if body.token_budget_override is not None:
             run.token_budget_estimate = body.token_budget_override
+        if body.skip_verification is not None:
+            run.config = {**(run.config or {}), "skip_verification": body.skip_verification}
 
         coordinator = get_coordinator_service()
         run = coordinator.approve_plan(

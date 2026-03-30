@@ -263,6 +263,36 @@ class MissionReconciler:
         if not completed_tasks:
             return (0, 0)
 
+        # Check if verification should be skipped (benchmark/testing mode)
+        skip_verification = (run.config or {}).get("skip_verification", False)
+
+        if skip_verification:
+            for task in completed_tasks:
+                MissionReconciler._apply_verdict_pass(db, task)
+                emit_event(
+                    db=db,
+                    run_id=run_id,
+                    event_type=EventType.TASK_VERIFICATION_COMPLETED,
+                    actor_type=ActorType.COORDINATOR,
+                    actor_id="reconciler",
+                    task_id=task.id,
+                    payload={
+                        "verdict": VERDICT_PASS,
+                        "scores": {},
+                        "reasoning": "Verification skipped (skip_verification=True)",
+                        "confidence": 1.0,
+                        "deterministic_passed": True,
+                        "tokens_used": 0,
+                    },
+                )
+                db.flush()
+            logger.info(
+                "Skipped verification for %d tasks in run %s (skip_verification=True)",
+                len(completed_tasks),
+                run_id,
+            )
+            return (len(completed_tasks), 0)
+
         verification_service = VerificationService()
 
         for task in completed_tasks:
