@@ -80,7 +80,7 @@ router = APIRouter(prefix="/api/missions", tags=["missions"])
 
 
 class MissionCreateRequest(BaseModel):
-    goal: str = Field(..., min_length=1, max_length=5000, description="Natural-language goal")
+    goal: str = Field(..., min_length=1, max_length=10000, description="Natural-language goal")
     config: Optional[Dict[str, Any]] = Field(None, description="Optional mission config overrides")
     template_id: Optional[str] = Field(
         None,
