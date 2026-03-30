@@ -124,9 +124,11 @@ class ActionRegistry:
                 "name": "platform_execute",
                 "description": (
                     "Execute an internal Automatos platform action. "
-                    "Pass the action name and its parameters. "
+                    "You MUST pass both 'action' and 'params'. "
+                    "Example: platform_execute(action='platform_configure_agent_heartbeat', "
+                    "params={'agent_id': 147, 'enabled': true, 'interval_minutes': 15}). "
                     "See the 'Available Platform Actions' section in your system prompt "
-                    "for the list of actions and their required parameters."
+                    "for the full list of actions and their required parameters."
                 ),
                 "parameters": {
                     "type": "object",
@@ -137,10 +139,14 @@ class ActionRegistry:
                         },
                         "params": {
                             "type": "object",
-                            "description": "Parameters for the action as a JSON object",
+                            "description": (
+                                "Parameters for the action as a JSON object. "
+                                "Always include required params from the action's definition. "
+                                "Example: {'agent_id': 147, 'enabled': true, 'interval_minutes': 60}"
+                            ),
                         },
                     },
-                    "required": ["action"],
+                    "required": ["action", "params"],
                 },
             },
         }

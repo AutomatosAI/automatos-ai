@@ -362,9 +362,19 @@ class UnifiedToolExecutor:
                 required = action_def.parameters.get("required", [])
                 missing = [p for p in required if p not in action_params]
                 if missing:
+                    # Include param descriptions so the LLM can self-correct
+                    props = action_def.parameters.get("properties", {})
+                    hints = [
+                        f"  {p}: {props[p].get('description', props[p].get('type', '?'))}"
+                        for p in missing if p in props
+                    ]
+                    hint_str = "\n".join(hints)
                     return {
                         "success": False,
-                        "error": f"Missing required params for '{action_name}': {missing}",
+                        "error": (
+                            f"Missing required params for '{action_name}': {missing}. "
+                            f"Pass them inside params={{...}}.\n{hint_str}"
+                        ),
                         "tool": tool_name,
                     }
 
