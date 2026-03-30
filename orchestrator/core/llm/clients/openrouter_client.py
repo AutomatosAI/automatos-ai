@@ -46,6 +46,7 @@ class OpenRouterProvider(BaseLLMProvider):
                     "HTTP-Referer": config.OPENROUTER_SITE_URL,
                     "X-Title": "Automatos AI",
                 },
+                timeout=180.0,  # 3 min hard timeout — prevents indefinite hangs
             )
             logger.info(f"Initialized OpenRouter client with model: {self.config.model}")
 

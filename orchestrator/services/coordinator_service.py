@@ -895,12 +895,26 @@ class CoordinatorService:
             )
 
         try:
-            result = await factory.execute_with_prompt(
-                agent=agent_id,
-                prompt=prompt,
-                max_retries=0,  # Coordinator manages retries, not AgentFactory
-                max_tool_iterations=10,
+            result = await asyncio.wait_for(
+                factory.execute_with_prompt(
+                    agent=agent_id,
+                    prompt=prompt,
+                    max_retries=0,  # Coordinator manages retries, not AgentFactory
+                    max_tool_iterations=10,
+                ),
+                timeout=Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
             )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Task %s execution timed out after %ds (agent=%d)",
+                task.id,
+                Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                agent_id,
+            )
+            result = {
+                "status": "error",
+                "error": f"Execution timed out after {Config.COORDINATOR_TASK_EXECUTION_TIMEOUT}s",
+            }
         except Exception as exc:
             logger.error(
                 "execute_with_prompt failed for task %s: %s",

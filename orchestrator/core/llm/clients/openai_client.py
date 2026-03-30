@@ -76,12 +76,12 @@ class OpenAIProvider(BaseLLMProvider):
             )
             self.client = None  # Will fail gracefully on first use
         else:
-            client_kwargs = {"api_key": api_key}
+            client_kwargs = {"api_key": api_key, "timeout": 180.0}
             if self.config.base_url:
                 client_kwargs["base_url"] = self.config.base_url
             if self.config.organization_id:
                 client_kwargs["organization"] = self.config.organization_id
-            
+
             self.client = OpenAI(**client_kwargs)
             logger.info(f"Initialized OpenAI client with model: {self.config.model}")
     

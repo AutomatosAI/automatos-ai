@@ -42,7 +42,8 @@ class GrokProvider(BaseLLMProvider):
         else:
             self.client = OpenAI(
                 api_key=api_key,
-                base_url=self.API_BASE_URL
+                base_url=self.API_BASE_URL,
+                timeout=180.0,
             )
             logger.info(f"Initialized Grok client with model: {self.config.model}")
     

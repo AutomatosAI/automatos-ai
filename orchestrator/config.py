@@ -332,6 +332,8 @@ class Config:
     COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))
     # Max tokens for mission task LLM calls (agents default to 2000, missions need more)
     COORDINATOR_TASK_MAX_TOKENS: int = int(os.getenv("COORDINATOR_TASK_MAX_TOKENS", "16384"))
+    # Maximum seconds a single task execution can take before being timed out
+    COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
     # Cross-task consistency verification (PRD-82B US-006)
     COORDINATOR_CONSISTENCY_CHECK: bool = os.getenv("COORDINATOR_CONSISTENCY_CHECK", "true").lower() in ("true", "1", "yes")
     # Parallel execution & budget governance (PRD-82C)
