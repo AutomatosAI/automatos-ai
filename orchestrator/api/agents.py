@@ -561,10 +561,11 @@ async def get_org_chart(
     try:
         from core.models.composio_cache import AgentAppAssignment
 
-        # Fetch all workspace agents
+        # Fetch active workspace agents (inactive agents don't belong on the org chart)
         agents = (
             db.query(Agent)
             .filter(Agent.workspace_id == ctx.workspace_id)
+            .filter(Agent.status == "active")
             .all()
         )
 
