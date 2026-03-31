@@ -1,0 +1,664 @@
+[
+  {
+    "run": 1,
+    "label": "GPT-5.4 (premium)",
+    "model": "openai/gpt-5.4",
+    "category": "AI & Automation",
+    "exec_id": "exec-df3d70ff27d2",
+    "status": "completed",
+    "wall_time_s": 106,
+    "total_duration_ms": 100697,
+    "total_tokens": 36032,
+    "completed_steps": 4,
+    "failed_steps": 0,
+    "tool_calls": 15,
+    "successful_tools": 15,
+    "quality_score": 50,
+    "est_cost_usd": 0.0721,
+    "draft": {
+      "post_id": "1d1862a6-6f59-482e-963d-a222a1818321",
+      "title": "Human-in-the-Loop AI Automation: The Layer Teams Need",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": false,
+      "has_seo_title": true,
+      "has_seo_description": true,
+      "tag_count": 7,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 43902,
+        "tokens": 9064,
+        "tool_calls": 5,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "completed",
+        "duration_ms": 38344,
+        "tokens": 10835,
+        "tool_calls": 5,
+        "error": null
+      },
+      {
+        "step": "canvas_design",
+        "agent": "CANVAS",
+        "status": "completed",
+        "duration_ms": 9009,
+        "tokens": 7818,
+        "tool_calls": 3,
+        "error": null
+      },
+      {
+        "step": "create_review_task",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 9442,
+        "tokens": 8315,
+        "tool_calls": 2,
+        "error": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "run": 2,
+    "label": "DeepSeek Chat",
+    "model": "deepseek/deepseek-chat",
+    "category": "Developer Tools",
+    "exec_id": "exec-8d1efbe32a00",
+    "status": "completed",
+    "wall_time_s": 182,
+    "total_duration_ms": 176101,
+    "total_tokens": 72928,
+    "completed_steps": 4,
+    "failed_steps": 0,
+    "tool_calls": 12,
+    "successful_tools": 12,
+    "quality_score": 60,
+    "est_cost_usd": 0.0102,
+    "draft": {
+      "post_id": "866dd79e-72cd-485f-a540-5b287b73faa3",
+      "title": "Task-Agnostic AI Orchestration: The Next Frontier in Automation",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": true,
+      "has_seo_title": true,
+      "has_seo_description": true,
+      "tag_count": 5,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 47941,
+        "tokens": 9769,
+        "tool_calls": 3,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "completed",
+        "duration_ms": 58584,
+        "tokens": 10514,
+        "tool_calls": 3,
+        "error": null
+      },
+      {
+        "step": "canvas_design",
+        "agent": "CANVAS",
+        "status": "completed",
+        "duration_ms": 52297,
+        "tokens": 27151,
+        "tool_calls": 4,
+        "error": null
+      },
+      {
+        "step": "create_review_task",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 17279,
+        "tokens": 25494,
+        "tool_calls": 2,
+        "error": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "run": 3,
+    "label": "Gemini 2.5 Flash",
+    "model": "google/gemini-2.5-flash",
+    "category": "Future of Work",
+    "exec_id": "exec-a2f8b16cfc3a",
+    "status": "completed",
+    "wall_time_s": 61,
+    "total_duration_ms": 57029,
+    "total_tokens": 32967,
+    "completed_steps": 4,
+    "failed_steps": 0,
+    "tool_calls": 13,
+    "successful_tools": 13,
+    "quality_score": 60,
+    "est_cost_usd": 0.0049,
+    "draft": {
+      "post_id": "46459dfa-f15a-458f-9220-8d1a32ab52b3",
+      "title": "AI's Role in Hyper-Personalization: Elevating Customer Experience",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": true,
+      "has_seo_title": true,
+      "has_seo_description": true,
+      "tag_count": 5,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 9041,
+        "tokens": 7245,
+        "tool_calls": 2,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "completed",
+        "duration_ms": 15706,
+        "tokens": 9619,
+        "tool_calls": 4,
+        "error": null
+      },
+      {
+        "step": "canvas_design",
+        "agent": "CANVAS",
+        "status": "completed",
+        "duration_ms": 27437,
+        "tokens": 7631,
+        "tool_calls": 4,
+        "error": null
+      },
+      {
+        "step": "create_review_task",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 4845,
+        "tokens": 8472,
+        "tool_calls": 3,
+        "error": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "run": 4,
+    "label": "Gemini 2.5 Pro",
+    "model": "google/gemini-2.5-pro",
+    "category": "Cloud Infrastructure",
+    "exec_id": "exec-66414af60900",
+    "status": "completed",
+    "wall_time_s": 288,
+    "total_duration_ms": 275054,
+    "total_tokens": 35917,
+    "completed_steps": 4,
+    "failed_steps": 0,
+    "tool_calls": 13,
+    "successful_tools": 13,
+    "quality_score": 60,
+    "est_cost_usd": 0.0449,
+    "draft": {
+      "post_id": "f0b49dcd-6faf-4803-b0d3-b807a753d825",
+      "title": "Top AI Agent Frameworks in 2025",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": true,
+      "has_seo_title": true,
+      "has_seo_description": true,
+      "tag_count": 6,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 53139,
+        "tokens": 7776,
+        "tool_calls": 4,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "completed",
+        "duration_ms": 88939,
+        "tokens": 10948,
+        "tool_calls": 4,
+        "error": null
+      },
+      {
+        "step": "canvas_design",
+        "agent": "CANVAS",
+        "status": "completed",
+        "duration_ms": 92117,
+        "tokens": 8466,
+        "tool_calls": 4,
+        "error": null
+      },
+      {
+        "step": "create_review_task",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 40859,
+        "tokens": 8727,
+        "tool_calls": 1,
+        "error": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "run": 5,
+    "label": "Llama 4 Scout",
+    "model": "meta-llama/llama-4-scout",
+    "category": "AI Agents",
+    "exec_id": "exec-623878e8a676",
+    "status": "completed",
+    "wall_time_s": 30,
+    "total_duration_ms": 18629,
+    "total_tokens": 15451,
+    "completed_steps": 2,
+    "failed_steps": 2,
+    "tool_calls": 0,
+    "successful_tools": 0,
+    "quality_score": 50,
+    "est_cost_usd": 0.0012,
+    "draft": {
+      "post_id": "f0b49dcd-6faf-4803-b0d3-b807a753d825",
+      "title": "Top AI Agent Frameworks in 2025",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": true,
+      "has_seo_title": true,
+      "has_seo_description": true,
+      "tag_count": 6,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 6517,
+        "tokens": 8355,
+        "tool_calls": 0,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "failed",
+        "duration_ms": 5428,
+        "tokens": 0,
+        "tool_calls": 0,
+        "error": "OpenRouter returned empty choices (model=meta-llama/llama-4-scout). This usually means the provider rejected the request."
+      },
+      {
+        "step": "canvas_design",
+        "agent": "CANVAS",
+        "status": "completed",
+        "duration_ms": 1648,
+        "tokens": 7096,
+        "tool_calls": 0,
+        "error": null
+      },
+      {
+        "step": "create_review_task",
+        "agent": "QUILL",
+        "status": "failed",
+        "duration_ms": 5036,
+        "tokens": 0,
+        "tool_calls": 0,
+        "error": "OpenRouter returned empty choices (model=meta-llama/llama-4-scout). This usually means the provider rejected the request."
+      }
+    ],
+    "error": null
+  },
+  {
+    "run": 6,
+    "label": "Mistral Small 3.1",
+    "model": "mistralai/mistral-small-3.1-24b-instruct",
+    "category": "Machine Learning",
+    "exec_id": "exec-5ef8bbda96b1",
+    "status": "completed",
+    "wall_time_s": 30,
+    "total_duration_ms": 28586,
+    "total_tokens": 15486,
+    "completed_steps": 4,
+    "failed_steps": 0,
+    "tool_calls": 0,
+    "successful_tools": 0,
+    "quality_score": 60,
+    "est_cost_usd": 0.0005,
+    "draft": {
+      "post_id": "f0b49dcd-6faf-4803-b0d3-b807a753d825",
+      "title": "Top AI Agent Frameworks in 2025",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": true,
+      "has_seo_title": true,
+      "has_seo_description": true,
+      "tag_count": 6,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 7323,
+        "tokens": 3761,
+        "tool_calls": 0,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "completed",
+        "duration_ms": 11073,
+        "tokens": 4311,
+        "tool_calls": 0,
+        "error": null
+      },
+      {
+        "step": "canvas_design",
+        "agent": "CANVAS",
+        "status": "completed",
+        "duration_ms": 5708,
+        "tokens": 2961,
+        "tool_calls": 0,
+        "error": null
+      },
+      {
+        "step": "create_review_task",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 4482,
+        "tokens": 4453,
+        "tool_calls": 0,
+        "error": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "run": 7,
+    "label": "Qwen3 235B MoE",
+    "model": "qwen/qwen3-235b-a22b-2507",
+    "category": "Open Source",
+    "exec_id": "exec-eb640b2e557c",
+    "status": "failed",
+    "wall_time_s": 333,
+    "total_duration_ms": 142655,
+    "total_tokens": 26709,
+    "completed_steps": 2,
+    "failed_steps": 0,
+    "tool_calls": 29,
+    "successful_tools": 27,
+    "quality_score": 40,
+    "est_cost_usd": 0.0019,
+    "draft": {
+      "post_id": "fe467542-cb0d-41e1-ad2a-ae0a77537a23",
+      "title": "How PATCHER Automates Bug Fixes: A Deep Dive into AI-Driven Development Workflows",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": false,
+      "has_seo_title": true,
+      "has_seo_description": true,
+      "tag_count": 8,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 110256,
+        "tokens": 16125,
+        "tool_calls": 26,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "completed",
+        "duration_ms": 32399,
+        "tokens": 10584,
+        "tool_calls": 3,
+        "error": null
+      }
+    ],
+    "error": "Stalled: no progress for 300s (status was 'running')"
+  },
+  {
+    "run": 8,
+    "label": "Qwen3.5 Flash",
+    "model": "qwen/qwen3.5-flash-02-23",
+    "category": "Startup Engineering",
+    "exec_id": "exec-ddeeb20ec2d0",
+    "status": "completed",
+    "wall_time_s": 106,
+    "total_duration_ms": 102138,
+    "total_tokens": 21623,
+    "completed_steps": 2,
+    "failed_steps": 2,
+    "tool_calls": 9,
+    "successful_tools": 9,
+    "quality_score": 50,
+    "est_cost_usd": 0.0015,
+    "draft": {
+      "post_id": "fe467542-cb0d-41e1-ad2a-ae0a77537a23",
+      "title": "How PATCHER Automates Bug Fixes: A Deep Dive into AI-Driven Development Workflows",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": true,
+      "has_seo_title": true,
+      "has_seo_description": true,
+      "tag_count": 8,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 53174,
+        "tokens": 11021,
+        "tool_calls": 5,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "failed",
+        "duration_ms": 3214,
+        "tokens": 0,
+        "tool_calls": 0,
+        "error": "Model 'qwen/qwen3.5-flash-02-23' is unavailable or has been removed. Please select a different model in Settings."
+      },
+      {
+        "step": "canvas_design",
+        "agent": "CANVAS",
+        "status": "completed",
+        "duration_ms": 43869,
+        "tokens": 10602,
+        "tool_calls": 4,
+        "error": null
+      },
+      {
+        "step": "create_review_task",
+        "agent": "QUILL",
+        "status": "failed",
+        "duration_ms": 1881,
+        "tokens": 0,
+        "tool_calls": 0,
+        "error": "Model 'qwen/qwen3.5-flash-02-23' is unavailable or has been removed. Please select a different model in Settings."
+      }
+    ],
+    "error": null
+  },
+  {
+    "run": 9,
+    "label": "GPT-4.1 Mini",
+    "model": "openai/gpt-4.1-mini",
+    "category": "AI Safety",
+    "exec_id": "exec-018d49cc1ec8",
+    "status": "completed",
+    "wall_time_s": 45,
+    "total_duration_ms": 42607,
+    "total_tokens": 29113,
+    "completed_steps": 4,
+    "failed_steps": 0,
+    "tool_calls": 10,
+    "successful_tools": 10,
+    "quality_score": 60,
+    "est_cost_usd": 0.0116,
+    "draft": {
+      "post_id": "fe467542-cb0d-41e1-ad2a-ae0a77537a23",
+      "title": "How PATCHER Automates Bug Fixes: AI-Driven Development Workflows Explained",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": true,
+      "has_seo_title": true,
+      "has_seo_description": true,
+      "tag_count": 8,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 8395,
+        "tokens": 7672,
+        "tool_calls": 3,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "completed",
+        "duration_ms": 21634,
+        "tokens": 8114,
+        "tool_calls": 3,
+        "error": null
+      },
+      {
+        "step": "canvas_design",
+        "agent": "CANVAS",
+        "status": "completed",
+        "duration_ms": 6938,
+        "tokens": 6062,
+        "tool_calls": 2,
+        "error": null
+      },
+      {
+        "step": "create_review_task",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 5640,
+        "tokens": 7265,
+        "tool_calls": 2,
+        "error": null
+      }
+    ],
+    "error": null
+  },
+  {
+    "run": 10,
+    "label": "Gemini 2.0 Flash Lite",
+    "model": "google/gemini-2.0-flash-lite-001",
+    "category": "Edge Computing",
+    "exec_id": "exec-ee58b76e729d",
+    "status": "completed",
+    "wall_time_s": 75,
+    "total_duration_ms": 61999,
+    "total_tokens": 24983,
+    "completed_steps": 4,
+    "failed_steps": 0,
+    "tool_calls": 11,
+    "successful_tools": 11,
+    "quality_score": 40,
+    "est_cost_usd": 0.0017,
+    "draft": {
+      "post_id": "2ade3c1c-157e-4c73-a95a-327dc2c8dcc5",
+      "title": "Automatos: The Future of AI Automation - Task-Agnostic Orchestration",
+      "status": "draft",
+      "has_excerpt": true,
+      "content_length": 500,
+      "has_cover_image": true,
+      "has_seo_title": false,
+      "has_seo_description": false,
+      "tag_count": 4,
+      "category": "AI & Automation"
+    },
+    "step_details": [
+      {
+        "step": "quill_write",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 8736,
+        "tokens": 0,
+        "tool_calls": 3,
+        "error": null
+      },
+      {
+        "step": "editor_review",
+        "agent": "EDITOR",
+        "status": "completed",
+        "duration_ms": 15180,
+        "tokens": 9836,
+        "tool_calls": 3,
+        "error": null
+      },
+      {
+        "step": "canvas_design",
+        "agent": "CANVAS",
+        "status": "completed",
+        "duration_ms": 35648,
+        "tokens": 7298,
+        "tool_calls": 4,
+        "error": null
+      },
+      {
+        "step": "create_review_task",
+        "agent": "QUILL",
+        "status": "completed",
+        "duration_ms": 2435,
+        "tokens": 7849,
+        "tool_calls": 1,
+        "error": null
+      }
+    ],
+    "error": null
+  }
+]
