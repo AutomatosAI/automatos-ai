@@ -319,7 +319,31 @@ async def stream_chat(
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""
     logger.info(f"[chat] RequestContext workspace_id={ctx.workspace_id}")
     chat_service = ChatService(db)
-    streaming_service = StreamingChatService(db, workspace_id=ctx.workspace_id)
+    # Build caller_context for admin gate in PlatformActionExecutor (PRD-122)
+    _caller_context = {
+        "user_id": getattr(ctx.user, "id", None) if ctx.user else None,
+        "system_role": getattr(ctx.user, "system_role", "user") if ctx.user else "user",
+    }
+    # Resolve workspace_role from workspace_members table
+    try:
+        from core.workspaces.models import WorkspaceMember
+        _member = (
+            db.query(WorkspaceMember)
+            .filter(
+                WorkspaceMember.workspace_id == ctx.workspace_id,
+                WorkspaceMember.user_id == _caller_context["user_id"],
+                WorkspaceMember.is_active.is_(True),
+            )
+            .first()
+        )
+        if _member:
+            _caller_context["workspace_role"] = _member.role
+    except Exception:
+        pass  # fail-open for role lookup — admin gate will use workspace_role if present
+
+    streaming_service = StreamingChatService(
+        db, workspace_id=ctx.workspace_id, caller_context=_caller_context,
+    )
     user_id = get_user_id(db)
 
     def get_parts(msg: ChatMessageRequest) -> List[MessagePart]:

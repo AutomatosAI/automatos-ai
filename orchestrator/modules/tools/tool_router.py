@@ -261,6 +261,7 @@ def get_tools_for_agent(
                 logger.debug(f"[tool-trace {trace_id}] Could not resolve workspace admin status: {exc}")
 
         # PRD-64: Single dispatcher for platform actions (reduces 58 schemas → 1)
+        action_registry = None
         try:
             from modules.tools.discovery import get_action_registry
             action_registry = get_action_registry()
@@ -269,8 +270,9 @@ def get_tools_for_agent(
                 exclude_promoted=True,  # promoted actions have first-class schemas below
             )
             openai_tools.append(dispatcher_schema)
-            action_count = len(action_registry.get_all())
-            logger.info(f"[tool-trace {trace_id}] Added platform_execute dispatcher ({action_count} actions behind it)")
+            all_actions = action_registry.get_all()
+            dispatcher_count = len([a for a in all_actions if not a.promoted])
+            logger.info(f"[tool-trace {trace_id}] Added platform_execute dispatcher ({dispatcher_count} actions behind it)")
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
 
@@ -280,6 +282,8 @@ def get_tools_for_agent(
         # them directly. The execution path at unified_executor.py routes
         # platform_* calls correctly regardless of how the schema was defined.
         try:
+            if not action_registry:
+                raise RuntimeError("action_registry not initialized")
             promoted_schemas = action_registry.to_first_class_schemas(exclude_admin=not is_admin)
             openai_tools.extend(promoted_schemas)
             logger.info(f"[tool-trace {trace_id}] Added {len(promoted_schemas)} promoted action schemas")
@@ -315,6 +319,7 @@ async def execute_tool(
     agent_id: int = 1,
     workspace_id: Optional[UUID] = None,
     trace_id: Optional[str] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Execute a tool via modules.tools.UnifiedToolExecutor.
@@ -350,7 +355,8 @@ async def execute_tool(
             tool_args,
             agent_id,
             workspace_id=workspace_id,
-            trace_id=trace
+            trace_id=trace,
+            caller_context=caller_context,
         )
         db_session.commit()
         logger.info(
@@ -387,6 +393,7 @@ class ToolRouter:
         agent_id: int = 1,
         workspace_id: Optional[UUID] = None,
         original_intent: Optional[str] = None,
+        caller_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Execute a tool and return formatted results.
@@ -440,6 +447,7 @@ class ToolRouter:
                     agent_id,
                     workspace_id=workspace_id,
                     trace_id=trace_id,
+                    caller_context=caller_context,
                 )
 
             # Check success (support multiple executor result shapes)

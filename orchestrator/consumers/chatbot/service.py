@@ -420,7 +420,13 @@ class StreamingChatService:
     Thin orchestrator consuming modules.
     """
 
-    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False):
+    def __init__(
+        self,
+        db: Session,
+        workspace_id: Optional[str] = None,
+        widget_mode: bool = False,
+        caller_context: Optional[Dict[str, Any]] = None,
+    ):
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
@@ -428,6 +434,7 @@ class StreamingChatService:
         self.streaming_handler = get_streaming_handler()
         self.workspace_id = workspace_id
         self.widget_mode = widget_mode
+        self.caller_context = caller_context
 
         from modules.agents.factory.agent_factory import AgentFactory
         self.agent_factory = AgentFactory(db_session=db)
@@ -1134,6 +1141,7 @@ class StreamingChatService:
                             agent_id=agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else 1,
                             workspace_id=self.workspace_id,
                             original_intent=user_text,
+                            caller_context=self.caller_context,
                         )
 
                         # Track empty search results for spiral detection
@@ -1909,6 +1917,7 @@ class StreamingChatService:
                         result = await self.tool_router.execute_and_format(
                             tool_name, tool_args,
                             agent_id=1, workspace_id=self.workspace_id,
+                            caller_context=self.caller_context,
                             original_intent=latest_text,
                         )
                         if result['success']:
@@ -1977,6 +1986,7 @@ class StreamingChatService:
                 tool_name, {"query": query},
                 agent_id=agent_id, workspace_id=self.workspace_id,
                 original_intent=query,
+                caller_context=self.caller_context,
             )
 
             if result['success']:

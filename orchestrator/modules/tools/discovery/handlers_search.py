@@ -93,7 +93,10 @@ async def search_memory(db: Session, workspace_id: UUID, params: Dict[str, Any])
         return {"success": False, "error": "query parameter is required"}
 
     agent_id = params.get("agent_id")
-    limit = min(params.get("limit", 10), 50)
+    try:
+        limit = min(int(params.get("limit", 10)), 50)
+    except (TypeError, ValueError):
+        limit = 10
     result_char_limit = 150
 
     try:
