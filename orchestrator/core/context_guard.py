@@ -142,6 +142,14 @@ COMPACT_THRESHOLD = 0.80   # Compact when >80% of context used
 KEEP_RECENT_TURNS = 6      # Always keep the last N user+assistant messages
 SUMMARY_MAX_TOKENS = 500   # Max tokens for the compaction summary
 
+# PRD-123 Pattern #7: Proactive compaction thresholds
+PROACTIVE_COMPACT_AFTER_TURNS = int(
+    __import__("os").getenv("PROACTIVE_COMPACT_AFTER_TURNS", "8")
+)
+PROACTIVE_COMPACT_KEEP_RECENT = int(
+    __import__("os").getenv("PROACTIVE_COMPACT_KEEP_RECENT", "4")
+)
+
 
 class ContextGuard:
     """
@@ -344,3 +352,85 @@ class ContextGuard:
             logger.info("[ContextGuard] Flushed key facts to Mem0")
         except Exception as exc:
             logger.warning("[ContextGuard] Memory flush failed (non-fatal): %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# PRD-123 Pattern #7: Proactive Transcript Compaction
+# ---------------------------------------------------------------------------
+
+
+async def maybe_compact_session(
+    messages: List[Dict[str, Any]],
+    turn_count: int,
+    llm_manager: Any,
+    workspace_id: Optional[str] = None,
+    agent_id: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """
+    Proactively compact conversation every N turns to prevent context bloat.
+
+    Unlike ContextGuard (reactive, triggers at 80% capacity), this function
+    compacts based on turn count — ensuring long conversations stay lean
+    even when individual messages are small.
+
+    Args:
+        messages: Full message list (system + conversation).
+        turn_count: Number of user turns in this session so far.
+        llm_manager: LLMManager for summarization.
+        workspace_id: For memory flush.
+        agent_id: For memory flush.
+
+    Returns:
+        (messages, was_compacted) — compacted messages if threshold met.
+    """
+    if turn_count < PROACTIVE_COMPACT_AFTER_TURNS:
+        return messages, False
+
+    # Only compact on exact multiples to avoid compacting every turn
+    if turn_count % PROACTIVE_COMPACT_AFTER_TURNS != 0:
+        return messages, False
+
+    # Separate system messages from conversation
+    system_msgs = []
+    conversation = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            system_msgs.append(msg)
+        else:
+            conversation.append(msg)
+
+    keep = PROACTIVE_COMPACT_KEEP_RECENT * 2  # user + assistant pairs
+    if len(conversation) <= keep:
+        return messages, False
+
+    old_turns = conversation[:-keep]
+    recent_turns = conversation[-keep:]
+
+    # Build text and summarize
+    guard = ContextGuard()
+    old_text = guard._turns_to_text(old_turns)
+    summary = await guard._summarize(old_text, llm_manager)
+
+    # Flush to memory
+    if workspace_id:
+        await guard._flush_to_memory(old_text, workspace_id, agent_id)
+
+    summary_msg = {
+        "role": "system",
+        "content": (
+            "## Earlier Conversation Summary\n"
+            "The following is a summary of the earlier part of this conversation. "
+            "Use it for context but prioritize the recent messages below.\n\n"
+            f"{summary}"
+        ),
+    }
+
+    compacted = system_msgs + [summary_msg] + recent_turns
+    old_tokens = count_message_tokens(messages)
+    new_tokens = count_message_tokens(compacted)
+    logger.info(
+        "[ProactiveCompact] Turn %d: compacted %d → %d tokens (saved %d)",
+        turn_count, old_tokens, new_tokens, old_tokens - new_tokens,
+    )
+
+    return compacted, True

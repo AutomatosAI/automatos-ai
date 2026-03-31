@@ -21,7 +21,13 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
-from core.models.orchestration import OrchestrationEvent, OrchestrationRun, OrchestrationTask
+from core.models.orchestration import (
+    OrchestrationEvent,
+    OrchestrationRun,
+    OrchestrationTask,
+    RunTransition,
+    TaskTransition,
+)
 from core.models.orchestration_enums import (
     ALLOWED_RUN_TRANSITIONS,
     ALLOWED_TASK_TRANSITIONS,
@@ -82,13 +88,13 @@ def transition_task(
     actor_type: ActorType,
     actor_id: Optional[str] = None,
     reason: Optional[str] = None,
-) -> OrchestrationEvent:
+) -> TaskTransition:
     """
     Transition an orchestration task to a new state with dual-write event.
 
     Validates the transition against ALLOWED_TASK_TRANSITIONS, updates
-    state/state_type/timestamps, and creates an OrchestrationEvent in the
-    same transaction.
+    state/state_type/timestamps, creates an OrchestrationEvent in the
+    same transaction, and returns a frozen TaskTransition record.
 
     Args:
         db: SQLAlchemy session (caller manages transaction).
@@ -99,7 +105,7 @@ def transition_task(
         reason: Optional human-readable reason for the transition.
 
     Returns:
-        The created OrchestrationEvent.
+        Frozen TaskTransition record (PRD-123 Pattern #1).
 
     Raises:
         InvalidTransitionError: If the transition is not allowed.
@@ -158,6 +164,15 @@ def transition_task(
     except StaleDataError:
         raise ConflictError(entity_type="task", entity_id=task.id)
 
+    # PRD-123 Pattern #1: Produce frozen transition record
+    transition = TaskTransition(
+        task_id=task.id,
+        from_state=old_state_value,
+        to_state=new_state.value,
+        triggered_by=actor_type.value,
+        reason=reason,
+    )
+
     logger.info(
         "Task %s transitioned: %s → %s (actor=%s/%s)",
         task.id,
@@ -167,7 +182,7 @@ def transition_task(
         actor_id,
     )
 
-    return event
+    return transition
 
 
 # ---------------------------------------------------------------------------
@@ -184,11 +199,12 @@ def transition_run(
     reason: Optional[str] = None,
     stop_reason: Optional[str] = None,
     stop_detail: Optional[str] = None,
-) -> OrchestrationEvent:
+) -> RunTransition:
     """
     Transition an orchestration run to a new state with dual-write event.
 
-    Same pattern as transition_task but for runs.
+    Same pattern as transition_task but for runs. Returns a frozen
+    RunTransition record (PRD-123 Pattern #1).
 
     Args:
         db: SQLAlchemy session (caller manages transaction).
@@ -201,7 +217,7 @@ def transition_run(
         stop_detail: Human-readable detail about why the mission stopped.
 
     Returns:
-        The created OrchestrationEvent.
+        Frozen RunTransition record (PRD-123 Pattern #1).
 
     Raises:
         InvalidTransitionError: If the transition is not allowed.
@@ -267,6 +283,15 @@ def transition_run(
     except StaleDataError:
         raise ConflictError(entity_type="run", entity_id=run.id)
 
+    # PRD-123 Pattern #1: Produce frozen transition record
+    transition = RunTransition(
+        run_id=run.id,
+        from_state=old_state_value,
+        to_state=new_state.value,
+        triggered_by=actor_type.value,
+        stop_reason=stop_reason,
+    )
+
     logger.info(
         "Run %s transitioned: %s → %s (actor=%s/%s)",
         run.id,
@@ -276,7 +301,7 @@ def transition_run(
         actor_id,
     )
 
-    return event
+    return transition
 
 
 # ---------------------------------------------------------------------------
