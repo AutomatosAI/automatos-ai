@@ -240,214 +240,342 @@ api_call_stats = defaultdict(lambda: {
     "status_codes": defaultdict(int)
 })
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan events"""
-    # Startup
-    logger.info("Starting Automotas AI API Server...")
-    try:
-        # NOTE: Most tables are created by docker-compose on first install.
-        # PRD-58: Ensure system_prompts tables exist + seed on every startup (idempotent).
-        try:
-            import core.models.system_prompts  # register models with Base.metadata
-            from core.database.database import create_tables, get_db_session
-            create_tables()
-            # PRD-58 Phase 1B: Add futureagi_eval_enabled column if missing
-            try:
-                from sqlalchemy import text
-                from core.database.database import engine
-                with engine.connect() as conn:
-                    conn.execute(text(
-                        "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
-                        "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
-                    ))
-                    conn.commit()
-            except Exception as col_err:
-                logger.debug(f"Column migration check: {col_err}")
-            from core.seeds.seed_system_prompts import seed_system_prompts
-            with get_db_session() as db:
-                seed_system_prompts(db)
-        except Exception as e:
-            logger.warning(f"PRD-58 table/seed init: {e}")
+async def _boot_phase_1_core():
+    """
+    Phase 1: Core infrastructure — database, migrations, seeds.
 
-        # PRD-63: Ensure document_templates table exists + seed starter templates
+    PRD-123 Pattern #2: Nothing third-party executes before trust_gate passes.
+    """
+    # PRD-58: Ensure system_prompts tables exist + seed on every startup (idempotent).
+    try:
+        import core.models.system_prompts  # register models with Base.metadata
+        from core.database.database import create_tables, get_db_session
+        create_tables()
+        # PRD-58 Phase 1B: Add futureagi_eval_enabled column if missing
         try:
-            import core.models.core  # noqa: F811 — registers DocumentTemplate with Base
-            from core.database.database import create_tables as _ct, get_db_session as _gdb
-            _ct()  # idempotent — creates any missing tables
-            from modules.documents.seed_templates import seed_starter_templates
-            from core.models.workspaces import Workspace
-            with _gdb() as db:
-                workspace_ids = [w.id for w in db.query(Workspace.id).all()]
-                for ws_id in workspace_ids:
-                    seed_starter_templates(db, ws_id)
-            logger.info(f"PRD-63: Document templates seeded for {len(workspace_ids)} workspace(s)")
-        except Exception as e:
-            logger.warning(f"PRD-63 template seed init: {e}")
-        # PRD-64: Ensure semantic routing columns exist on agents table
-        try:
-            from sqlalchemy import text as _t64
-            from core.database.database import engine as _engine64
-            with _engine64.connect() as conn:
-                conn.execute(_t64(
-                    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
-                    "semantic_embedding JSONB"
-                ))
-                conn.execute(_t64(
-                    "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
-                    "semantic_text_hash VARCHAR(64)"
+            from sqlalchemy import text
+            from core.database.database import engine
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
+                    "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
                 ))
                 conn.commit()
         except Exception as col_err:
-            logger.debug(f"PRD-64 column migration check: {col_err}")
+            logger.debug(f"Column migration check: {col_err}")
+        from core.seeds.seed_system_prompts import seed_system_prompts
+        with get_db_session() as db:
+            seed_system_prompts(db)
+    except Exception as e:
+        logger.warning(f"PRD-58 table/seed init: {e}")
 
-        # PRD-64: Seed semantic embeddings for agents (non-blocking fire-and-forget)
+    # PRD-63: Ensure document_templates table exists + seed starter templates
+    try:
+        import core.models.core  # noqa: F811 — registers DocumentTemplate with Base
+        from core.database.database import create_tables as _ct, get_db_session as _gdb
+        _ct()  # idempotent — creates any missing tables
+        from modules.documents.seed_templates import seed_starter_templates
+        from core.models.workspaces import Workspace
+        with _gdb() as db:
+            workspace_ids = [w.id for w in db.query(Workspace.id).all()]
+            for ws_id in workspace_ids:
+                seed_starter_templates(db, ws_id)
+        logger.info(f"PRD-63: Document templates seeded for {len(workspace_ids)} workspace(s)")
+    except Exception as e:
+        logger.warning(f"PRD-63 template seed init: {e}")
+
+
+async def _schema_migration():
+    """Phase 1 continued: DDL migrations that must complete before seeds."""
+    # PRD-64: Ensure semantic routing columns exist on agents table
+    try:
+        from sqlalchemy import text as _t64
+        from core.database.database import engine as _engine64
+        with _engine64.connect() as conn:
+            conn.execute(_t64(
+                "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
+                "semantic_embedding JSONB"
+            ))
+            conn.execute(_t64(
+                "ALTER TABLE agents ADD COLUMN IF NOT EXISTS "
+                "semantic_text_hash VARCHAR(64)"
+            ))
+            conn.commit()
+    except Exception as col_err:
+        logger.debug(f"PRD-64 column migration check: {col_err}")
+
+
+async def _seed_semantic_embeddings():
+    """Phase 1 continued: Background embedding seed (non-blocking)."""
+    import asyncio as _asyncio
+    from core.routing.semantic_indexer import embed_workspace_agents as _embed_ws
+    from core.models.workspaces import Workspace as _Workspace
+
+    async def _embed_all_agents_on_startup():
+        """Background task: embed agents in all workspaces."""
         try:
-            import asyncio as _asyncio
-            from core.routing.semantic_indexer import embed_workspace_agents as _embed_ws
-            from core.models.workspaces import Workspace as _Workspace
+            from core.database.database import SessionLocal as _SL
+            from core.llm.embedding_manager import get_embedding_manager
+            from core.models.core import Agent as _Agent
 
-            async def _embed_all_agents_on_startup():
-                """Background task: embed agents in all workspaces."""
-                try:
-                    from core.database.database import SessionLocal as _SL
-                    from core.llm.embedding_manager import get_embedding_manager
-                    from core.models.core import Agent as _Agent
+            _db = _SL()
+            try:
+                emgr = get_embedding_manager()
+                emgr._ensure_provider()
+                logger.info(f"PRD-64: Embedding provider: {emgr.get_provider_info()}")
 
-                    _db = _SL()
+                ws_ids = [w.id for w in _db.query(_Workspace.id).all()]
+                total = 0
+                for ws_id in ws_ids:
                     try:
-                        # Log provider info for debugging
-                        emgr = get_embedding_manager()
-                        emgr._ensure_provider()
-                        logger.info(f"PRD-64: Embedding provider: {emgr.get_provider_info()}")
+                        total += await _embed_ws(ws_id, _db)
+                    except Exception:
+                        logger.warning("PRD-64: Failed to embed workspace %s", ws_id, exc_info=True)
 
-                        ws_ids = [w.id for w in _db.query(_Workspace.id).all()]
-                        total = 0
-                        for ws_id in ws_ids:
-                            try:
-                                total += await _embed_ws(ws_id, _db)
-                            except Exception:
-                                logger.warning("PRD-64: Failed to embed workspace %s", ws_id, exc_info=True)
-
-                        # Report embedding coverage
-                        all_agents = _db.query(_Agent).filter(_Agent.status == "active").count()
-                        with_embeddings = _db.query(_Agent).filter(
-                            _Agent.status == "active",
-                            _Agent.semantic_embedding.isnot(None),
-                        ).count()
-                        logger.info(
-                            f"PRD-64: Semantic embeddings seeded — "
-                            f"{total} new, {with_embeddings}/{all_agents} agents have embeddings"
-                        )
-                    finally:
-                        _db.close()
-                except Exception as e:
-                    logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}", exc_info=True)
-
-            _asyncio.create_task(_embed_all_agents_on_startup())
+                all_agents = _db.query(_Agent).filter(_Agent.status == "active").count()
+                with_embeddings = _db.query(_Agent).filter(
+                    _Agent.status == "active",
+                    _Agent.semantic_embedding.isnot(None),
+                ).count()
+                logger.info(
+                    f"PRD-64: Semantic embeddings seeded — "
+                    f"{total} new, {with_embeddings}/{all_agents} agents have embeddings"
+                )
+            finally:
+                _db.close()
         except Exception as e:
-            logger.warning(f"PRD-64: Could not schedule startup embedding (non-fatal): {e}")
+            logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}", exc_info=True)
 
-        logger.info("Database ready")
+    _asyncio.create_task(_embed_all_agents_on_startup())
+
+
+class TrustGateError(RuntimeError):
+    """Raised when the trust gate check fails — platform runs in degraded mode."""
+
+
+def _trust_gate() -> None:
+    """
+    PRD-123 Pattern #2: Trust gate between Phase 1 and Phase 2.
+
+    Verifies core infrastructure is ready before loading extensions.
+    Raises TrustGateError if any check fails (captured by run_stage as 'failed').
+    """
+    failures: list[str] = []
+
+    # Check 1: Database reachable
+    try:
+        from sqlalchemy import text as _tg_text
+        db = SessionLocal()
+        try:
+            db.execute(_tg_text("SELECT 1"))
+        finally:
+            db.close()
+    except Exception as e:
+        failures.append(f"database unreachable: {e}")
+
+    # Check 2: Critical config present
+    if not config.DATABASE_URL:
+        failures.append("DATABASE_URL not configured")
+
+    if failures:
+        msg = "; ".join(failures)
+        logger.warning("Trust gate FAILED — running in degraded mode: %s", msg)
+        raise TrustGateError(msg)
+
+    logger.info("Trust gate PASSED — proceeding to Phase 2 extensions")
+
+
+async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResult":
+    """
+    Phase 2: Extensions — dashboard, scheduler, channels.
+
+    PRD-123 Pattern #2: Each extension is independently faulted.
+    A single extension failure does not crash startup.
+    """
+    from core.models.bootstrap import DeferredInitResult
+
+    result = DeferredInitResult()
+
+    # Initialize Dashboard Services (PRD-06)
+    try:
+        await startup_dashboard(app_instance)
+        result.dashboard_initialized = True
+        logger.info("Dashboard services initialized successfully")
+    except Exception as e:
+        logger.warning(f"Dashboard init failed (non-fatal): {e}")
+
+    # Unified Scheduler: single fcntl lock guards heartbeat + recipe + coordinator
+    # Only one uvicorn worker acquires the lock — prevents 4x duplicate executions
+    if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED or config.COORDINATOR_ENABLED:
+        try:
+            import fcntl
+            lock_path = "/tmp/automatos_scheduler.lock"
+            lock_file = open(lock_path, "w")
+            try:
+                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # We got the lock — this worker owns ALL scheduled services
+                from services.scheduler import get_unified_scheduler
+                unified = get_unified_scheduler()
+                unified.start()
+                shared_sched = unified.apscheduler
+                app_instance.state.scheduler_lock = lock_file  # keep file open to hold lock
+
+                if config.HEARTBEAT_ENABLED:
+                    from services.heartbeat_service import get_heartbeat_service
+                    await get_heartbeat_service().start(scheduler=shared_sched)
+                    logger.info("HeartbeatService started on unified scheduler")
+
+                if config.RECIPE_SCHEDULER_ENABLED:
+                    from services.playbook_scheduler import get_playbook_scheduler
+                    await get_playbook_scheduler().start(scheduler=shared_sched)
+                    logger.info("PlaybookSchedulerService started on unified scheduler")
+
+                # PRD-72: Task Reconciliation — stall detection + auto-retry
+                try:
+                    from services.task_reconciler import get_task_reconciler
+                    await get_task_reconciler().start(scheduler=shared_sched)
+                    logger.info("TaskReconciler started on unified scheduler")
+                except Exception as _tr_err:
+                    logger.warning("Could not start TaskReconciler: %s", _tr_err)
+
+                # PRD-79: Memory background jobs (consolidation, decay, promotion)
+                if config.MEMORY_JOBS_ENABLED:
+                    try:
+                        from services.memory_jobs import get_memory_job_scheduler
+                        await get_memory_job_scheduler().start(scheduler=shared_sched)
+                        logger.info("MemoryJobScheduler started on unified scheduler")
+                    except Exception as _mj_err:
+                        logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
+
+                # PRD-77: Load agent-scheduled tasks into APScheduler
+                try:
+                    from services.scheduled_task_service import ScheduledTaskService
+                    from core.database.database import SessionLocal
+                    _sched_db = SessionLocal()
+                    try:
+                        _sched_svc = ScheduledTaskService(_sched_db, workspace_id=None)
+                        await _sched_svc.load_active_tasks_to_scheduler()
+                    finally:
+                        _sched_db.close()
+                except Exception as _st_err:
+                    logger.warning("Could not load scheduled tasks: %s", _st_err)
+
+                # PRD-82A: Coordinator tick — sequential mission orchestration
+                if config.COORDINATOR_ENABLED:
+                    try:
+                        from services.coordinator_service import get_coordinator_service
+                        await get_coordinator_service().start(scheduler=shared_sched)
+                        logger.info("CoordinatorService started on unified scheduler")
+                    except Exception as _cs_err:
+                        logger.warning("Could not start CoordinatorService: %s", _cs_err)
+
+                # PRD-121: HARNESS Self-Optimizing Organization Loop
+                if config.HARNESS_ENABLED:
+                    try:
+                        from services.harness_service import get_harness_service
+                        await get_harness_service().start(scheduler=shared_sched)
+                        logger.info("HarnessService started on unified scheduler")
+                    except Exception as _hs_err:
+                        logger.warning("Could not start HarnessService: %s", _hs_err)
+
+                result.scheduler_started = True
+                logger.info("Unified scheduler started (this worker owns it)")
+            except BlockingIOError:
+                lock_file.close()
+                result.scheduler_started = True  # another worker owns it — that's OK
+                logger.info("Unified scheduler: another worker owns it, skipping")
+        except Exception as e:
+            logger.warning(f"Unified scheduler failed to start (non-fatal): {e}")
+    else:
+        result.scheduler_started = True  # disabled by config — not a failure
+
+    # PRD-55: Start ChannelManager
+    if config.CHANNELS_ENABLED:
+        try:
+            from channels.manager import get_channel_manager
+            channel_mgr = get_channel_manager()
+            await channel_mgr.start_all()
+            result.channels_connected = True
+            logger.info("ChannelManager started successfully")
+        except Exception as e:
+            logger.warning(f"ChannelManager failed to start (non-fatal): {e}")
+    else:
+        result.channels_connected = True  # disabled by config — not a failure
+
+    # Mark remaining flags that don't have dedicated init yet
+    result.skills_loaded = True
+    result.tools_synced = True
+
+    return result
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan — PRD-123 Pattern #2 (Trust-Gated Init)
+    and Pattern #10 (Named Bootstrap Stages).
+
+    Phase 1: Core (DB, migrations, seeds) — must succeed.
+    Trust Gate: Verify DB reachable + config valid.
+    Phase 2: Extensions (dashboard, scheduler, channels) — independently faulted.
+    """
+    from core.models.bootstrap import BootstrapReport, BootstrapStage, DeferredInitResult, run_stage
+
+    report = BootstrapReport()
+    report.started_at = datetime.utcnow()
+
+    logger.info("Starting Automotas AI API Server...")
+
+    try:
+        # ── Phase 1: Core Infrastructure ──
+        await run_stage(report, BootstrapStage.DATABASE_INIT, _boot_phase_1_core)
+        await run_stage(report, BootstrapStage.SCHEMA_MIGRATION, _schema_migration)
+
+        # Seed embeddings (fire-and-forget background task)
+        await run_stage(report, BootstrapStage.SEMANTIC_EMBEDDINGS, _seed_semantic_embeddings)
+
+        logger.info("Phase 1 complete: core ready")
 
         # NOTE: Redis client uses lazy initialization via get_redis_client()
-        # Services will auto-initialize on first use from environment variables
         logger.info("Redis client will lazy-initialize on first use")
-        
-        # Initialize Dashboard Services (PRD-06)
-        await startup_dashboard(app)
-        logger.info("Dashboard services initialized successfully")
 
-        # Unified Scheduler: single fcntl lock guards heartbeat + recipe + coordinator
-        # Only one uvicorn worker acquires the lock — prevents 4x duplicate executions
-        if config.HEARTBEAT_ENABLED or config.RECIPE_SCHEDULER_ENABLED or config.COORDINATOR_ENABLED:
-            try:
-                import fcntl
-                lock_path = "/tmp/automatos_scheduler.lock"
-                lock_file = open(lock_path, "w")
-                try:
-                    fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    # We got the lock — this worker owns ALL scheduled services
-                    from services.scheduler import get_unified_scheduler
-                    unified = get_unified_scheduler()
-                    unified.start()
-                    shared_sched = unified.apscheduler
-                    app.state.scheduler_lock = lock_file  # keep file open to hold lock
+        # ── Trust Gate ──
+        trust_result = await run_stage(report, BootstrapStage.TRUST_GATE, _trust_gate)
+        trust_passed = trust_result.status == "success"
+        app.state.trust_passed = trust_passed
 
-                    if config.HEARTBEAT_ENABLED:
-                        from services.heartbeat_service import get_heartbeat_service
-                        await get_heartbeat_service().start(scheduler=shared_sched)
-                        logger.info("HeartbeatService started on unified scheduler")
+        # ── Phase 2: Extensions (only if trust gate passed) ──
+        if trust_passed:
+            logger.info("Phase 2: loading extensions...")
 
-                    if config.RECIPE_SCHEDULER_ENABLED:
-                        from services.playbook_scheduler import get_playbook_scheduler
-                        await get_playbook_scheduler().start(scheduler=shared_sched)
-                        logger.info("PlaybookSchedulerService started on unified scheduler")
+            async def _run_phase_2():
+                app.state.deferred_init = await _boot_phase_2_extensions(app)
 
-                    # PRD-72: Task Reconciliation — stall detection + auto-retry
-                    try:
-                        from services.task_reconciler import get_task_reconciler
-                        await get_task_reconciler().start(scheduler=shared_sched)
-                        logger.info("TaskReconciler started on unified scheduler")
-                    except Exception as _tr_err:
-                        logger.warning("Could not start TaskReconciler: %s", _tr_err)
+            await run_stage(report, BootstrapStage.SCHEDULER_INIT, _run_phase_2)
+        else:
+            logger.warning("Phase 2 SKIPPED — trust gate failed, running in degraded mode")
+            app.state.deferred_init = DeferredInitResult()
+            await run_stage(
+                report, BootstrapStage.SCHEDULER_INIT, lambda: None, skip_condition=True
+            )
 
-                    # PRD-79: Memory background jobs (consolidation, decay, promotion)
-                    if config.MEMORY_JOBS_ENABLED:
-                        try:
-                            from services.memory_jobs import get_memory_job_scheduler
-                            await get_memory_job_scheduler().start(scheduler=shared_sched)
-                            logger.info("MemoryJobScheduler started on unified scheduler")
-                        except Exception as _mj_err:
-                            logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
+        # ── Ready ──
+        report.ready_at = datetime.utcnow()
+        await run_stage(report, BootstrapStage.READY, lambda: None)
+        app.state.bootstrap_report = report
 
-                    # PRD-77: Load agent-scheduled tasks into APScheduler
-                    try:
-                        from services.scheduled_task_service import ScheduledTaskService
-                        from core.database.database import SessionLocal
-                        _sched_db = SessionLocal()
-                        try:
-                            _sched_svc = ScheduledTaskService(_sched_db, workspace_id=None)
-                            await _sched_svc.load_active_tasks_to_scheduler()
-                        finally:
-                            _sched_db.close()
-                    except Exception as _st_err:
-                        logger.warning("Could not load scheduled tasks: %s", _st_err)
-
-                    # PRD-82A: Coordinator tick — sequential mission orchestration
-                    if config.COORDINATOR_ENABLED:
-                        try:
-                            from services.coordinator_service import get_coordinator_service
-                            await get_coordinator_service().start(scheduler=shared_sched)
-                            logger.info("CoordinatorService started on unified scheduler")
-                        except Exception as _cs_err:
-                            logger.warning("Could not start CoordinatorService: %s", _cs_err)
-
-                    # PRD-121: HARNESS Self-Optimizing Organization Loop
-                    if config.HARNESS_ENABLED:
-                        try:
-                            from services.harness_service import get_harness_service
-                            await get_harness_service().start(scheduler=shared_sched)
-                            logger.info("HarnessService started on unified scheduler")
-                        except Exception as _hs_err:
-                            logger.warning("Could not start HarnessService: %s", _hs_err)
-
-                    logger.info("Unified scheduler started (this worker owns it)")
-                except BlockingIOError:
-                    lock_file.close()
-                    logger.info("Unified scheduler: another worker owns it, skipping")
-            except Exception as e:
-                logger.warning(f"Unified scheduler failed to start (non-fatal): {e}")
-
-        # PRD-55: Start ChannelManager
-        if config.CHANNELS_ENABLED:
-            try:
-                from channels.manager import get_channel_manager
-                channel_mgr = get_channel_manager()
-                await channel_mgr.start_all()
-                logger.info("ChannelManager started successfully")
-            except Exception as e:
-                logger.warning(f"ChannelManager failed to start (non-fatal): {e}")
+        failed = report.failed_stages
+        if failed:
+            logger.warning(
+                "Bootstrap completed with %d failed stage(s): %s",
+                len(failed),
+                [s.stage.value for s in failed],
+            )
+        else:
+            logger.info(
+                "Bootstrap completed in %dms — all stages passed",
+                report.total_duration_ms,
+            )
 
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
@@ -1039,6 +1167,22 @@ async def health_check():
     else:
         overall_status = "healthy"
 
+    # PRD-123 Pattern #2: Include trust gate and extension health
+    trust_passed = getattr(app.state, "trust_passed", None)
+    deferred_init = getattr(app.state, "deferred_init", None)
+
+    if trust_passed is not None:
+        components["trust_gate"] = "healthy" if trust_passed else "degraded"
+    if deferred_init is not None:
+        components["extensions"] = "healthy" if deferred_init.all_healthy else "degraded"
+
+    # Re-derive overall status with new components
+    statuses = list(components.values())
+    if "unhealthy" in statuses:
+        overall_status = "unhealthy"
+    elif "degraded" in statuses:
+        overall_status = "degraded"
+
     return {
         "status": overall_status,
         "service": "automatos-ai-api",
@@ -1046,7 +1190,21 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(),
         "components": components,
         "metrics": metrics,
+        "extensions": deferred_init.as_dict() if deferred_init else None,
     }
+
+
+@app.get("/health/bootstrap",
+         summary="Bootstrap Report",
+         description="Detailed bootstrap stage timing and status report (PRD-123 Pattern #10)",
+         tags=["System Health"])
+async def bootstrap_health():
+    """Return the bootstrap report with per-stage timing and status."""
+    report = getattr(app.state, "bootstrap_report", None)
+    if report is None:
+        return {"status": "not_available", "message": "Bootstrap report not yet generated"}
+    return report.as_dict()
+
 
 @app.get("/api/health/endpoints",
          summary="📡 API Endpoint Health",
