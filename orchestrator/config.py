@@ -301,6 +301,7 @@ class Config:
     HEARTBEAT_ENABLED: bool = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
+    HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
 
     # =============================================================================
     # COORDINATOR — PRD-82A Sequential Mission Coordinator

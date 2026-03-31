@@ -444,6 +444,22 @@ _PLATFORM_KEYWORDS = {
         "show mission", "get mission", "mission details",
         "mission info", "how is mission", "check mission",
     ],
+    # PRD-121: HARNESS Self-Optimizing Loop
+    "platform_harness_status": [
+        "harness status", "optimization status", "org health",
+        "how is the team performing", "team performance",
+        "harness state", "optimization loop",
+    ],
+    "platform_harness_trigger": [
+        "run harness", "trigger harness", "optimize now",
+        "run optimization", "trigger optimization",
+        "optimize the team", "tune the team",
+    ],
+    "platform_harness_history": [
+        "harness history", "optimization history", "past optimizations",
+        "harness runs", "optimization runs", "what has harness done",
+        "harness changelog",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]
