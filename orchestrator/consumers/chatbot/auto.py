@@ -282,9 +282,10 @@ _PLATFORM_KEYWORDS = {
         "give agent a plugin", "attach plugin to agent",
     ],
     "platform_configure_agent_heartbeat": [
-        "configure heartbeat", "set heartbeat", "agent heartbeat",
-        "heartbeat schedule", "enable heartbeat", "disable heartbeat",
-        "heartbeat interval", "set active hours",
+        "configure heartbeat", "configure heartbeats", "set heartbeat",
+        "agent heartbeat", "heartbeat schedule", "enable heartbeat",
+        "disable heartbeat", "heartbeat interval", "set active hours",
+        "heartbeat config",
     ],
     "platform_create_agent": [
         "create agent", "create an agent", "build agent", "build an agent",
@@ -697,12 +698,13 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
         except Exception:
             logger.exception("[AutoBrain] Tier 3 LLM classification failed, falling back to ATOM")
 
-        # Fallback: treat as ATOM / RESPOND (chat naturally, don't waste tools)
-        # Rationale: a wrong ATOM is a slightly impersonal greeting;
-        # a wrong MOLECULE is a wasted tool call + latency + cost.
+        # Fallback: treat as MOLECULE / RESPOND so tools remain available.
+        # Rationale: a wrong MOLECULE only adds tool schemas to the context
+        # (model still decides via tool_choice=auto). A wrong ATOM strips
+        # tools entirely, making the agent unable to fulfil action requests.
         return ComplexityAssessment(
-            complexity=Complexity.ATOM, action=Action.RESPOND,
-            reasoning="LLM classification failed — defaulting to conversational",
+            complexity=Complexity.MOLECULE, action=Action.RESPOND,
+            reasoning="LLM classification failed — defaulting to MOLECULE (tools available)",
             confidence=0.50, needs_memory=False, tool_hints=[],
             needs_multi_agent=False,
         )
@@ -783,6 +785,13 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
                 # Word-boundary match to avoid false triggers on substrings
                 if re.search(r'\b' + re.escape(phrase) + r'\b', msg_lower):
                     return tool_name
+
+        # Catch-all: if the message explicitly mentions a platform_* action name
+        # (e.g. "use platform_configure_agent_heartbeat"), treat as platform query.
+        platform_match = re.search(r'\bplatform_[a-z_]+\b', msg_lower)
+        if platform_match:
+            return platform_match.group(0)
+
         return None
 
     @staticmethod

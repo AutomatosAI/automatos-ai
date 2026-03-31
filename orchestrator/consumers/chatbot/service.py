@@ -1718,6 +1718,16 @@ class StreamingChatService:
             if _complexity != Complexity.ATOM:
                 agent_ctx = await self._load_agent_context(agent_runtime)
                 all_tools = self._get_tools(agent_id, agent_ctx.get("skill_tools"))
+            else:
+                # ATOM path skips full tool loading, but always include
+                # platform_execute so the agent can respond to platform
+                # queries even when the classifier under-estimates complexity.
+                try:
+                    from modules.tools.discovery.action_registry import get_action_registry
+                    _dispatcher = get_action_registry().to_dispatcher_schema()
+                    all_tools = [_dispatcher]
+                except Exception:
+                    logger.debug("[chat] Could not load platform_execute for ATOM path")
 
             # Prepare messages (orchestration, persona, CTO override, context guard)
             llm_messages, use_tools, orchestrated = await self._prepare_messages(

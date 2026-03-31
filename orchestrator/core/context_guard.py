@@ -89,69 +89,26 @@ def count_tool_tokens(tools: Optional[List[Dict[str, Any]]]) -> int:
 # Model context window lookup
 # ---------------------------------------------------------------------------
 
-# Hardcoded fallbacks for common models. The model_registry DB is the
-# authoritative source, but this table serves as a fast offline fallback.
-_CONTEXT_WINDOWS: Dict[str, int] = {
-    # OpenAI
-    "gpt-4": 8192,
-    "gpt-4-32k": 32768,
-    "gpt-4-turbo": 128000,
-    "gpt-4-turbo-preview": 128000,
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-    "gpt-4.1": 128000,
-    "gpt-4.1-mini": 128000,
-    "gpt-4.1-nano": 128000,
-    "gpt-5.2": 128000,
-    "o1": 200000,
-    "o1-mini": 128000,
-    "o1-preview": 128000,
-    "o3": 200000,
-    "o3-mini": 200000,
-    "o4-mini": 200000,
-    "gpt-3.5-turbo": 16384,
-    # Anthropic
-    "claude-3-opus": 200000,
-    "claude-3-sonnet": 200000,
-    "claude-3-haiku": 200000,
-    "claude-3-5-sonnet": 200000,
-    "claude-3-5-haiku": 200000,
-    "claude-4-opus": 200000,
-    "claude-4-sonnet": 200000,
-    "claude-opus-4": 200000,
-    "claude-sonnet-4": 200000,
-    # Google
-    "gemini-pro": 32768,
-    "gemini-1.5-pro": 1048576,
-    "gemini-2.0-flash": 1048576,
-    "gemini-2.5-pro": 1048576,
-    "gemini-2.5-flash": 1048576,
-    # DeepSeek
-    "deepseek-chat": 65536,
-    "deepseek-r1": 65536,
-    "deepseek-v3": 65536,
-    # Qwen
-    "qwen3-coder": 131072,
-    # Meta
-    "llama-3.3-70b": 131072,
-}
-
-_DEFAULT_CONTEXT_WINDOW = 8192  # Conservative fallback
+# Default for models not in the DB registry. Modern models are 128K+;
+# using a low fallback (e.g. 8K) causes the guard to aggressively strip
+# tools and compact messages when it shouldn't.
+_DEFAULT_CONTEXT_WINDOW = 128_000
 
 
 def get_context_window(model_name: str, db_session=None) -> int:
     """
-    Look up the context window for a model.
+    Look up the context window for a model from the model registry DB.
 
-    Tries model_registry DB first, falls back to hardcoded table.
+    Falls back to a safe 128K default if the model isn't registered.
     """
     if not model_name:
         return _DEFAULT_CONTEXT_WINDOW
 
-    # Try DB first (most accurate, includes workspace-installed models)
     if db_session:
         try:
             from core.models import LLMModel
+
+            # Try exact match first (covers both "openai/gpt-5.4" and "gpt-4o")
             row = (
                 db_session.query(LLMModel.context_window)
                 .filter(LLMModel.model_id == model_name)
@@ -159,18 +116,19 @@ def get_context_window(model_name: str, db_session=None) -> int:
             )
             if row and row[0]:
                 return int(row[0])
+
+            # Try without provider prefix: "openai/gpt-5.4" → "gpt-5.4"
+            if "/" in model_name:
+                bare = model_name.split("/", 1)[1]
+                row = (
+                    db_session.query(LLMModel.context_window)
+                    .filter(LLMModel.model_id == bare)
+                    .first()
+                )
+                if row and row[0]:
+                    return int(row[0])
         except Exception:
             pass
-
-    # Hardcoded lookup (prefix matching for versioned models)
-    m = model_name.lower().strip()
-    if m in _CONTEXT_WINDOWS:
-        return _CONTEXT_WINDOWS[m]
-
-    # Prefix match: "claude-3-5-sonnet-20241022" → "claude-3-5-sonnet"
-    for prefix, window in _CONTEXT_WINDOWS.items():
-        if m.startswith(prefix):
-            return window
 
     return _DEFAULT_CONTEXT_WINDOW
 

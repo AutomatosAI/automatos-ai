@@ -97,6 +97,13 @@ class SmartIntentClassifier:
         r"\brecipes?\b.*\b(do i have|exist|available|set up|configured|running)\b",
         r"\bmemory\b.*\b(stats?|stored|count|how many)\b",
         r"\bhow much\b.*\b(spend|cost|spent|spending)\b",
+        # Platform operations: configure, assign, install, browse, create
+        r"\bconfigure\b.*\b(agent|heartbeat|blueprint|tool|skill)\b",
+        r"\bassign\b.*\b(tool|skill|plugin|agent)\b",
+        r"\binstall\b.*\b(tool|skill|plugin|model)\b",
+        r"\bbrowse\b.*\b(marketplace|skills|plugins|agents)\b",
+        r"\bcreate\b.*\b(blueprint|playbook)\b",
+        r"\bplatform_\w+\b",  # Direct platform tool name reference
     ]
 
     # Search patterns - need knowledge base tools

@@ -18,44 +18,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-def _get_model_context_limit(model: str) -> int:
-    """
-    Best-effort context window sizes for common OpenAI models used in this repo.
-    If unknown, default conservatively to 8192 (avoids 400s).
-    """
-    m = (model or "").lower()
-    # GPT-4 Turbo preview is 128k
-    if "gpt-4-turbo" in m or "gpt-4.1" in m:
-        return 128000
-    # Legacy GPT-4 is typically 8k (unless explicitly 32k)
-    if "gpt-4-32k" in m:
-        return 32768
-    if m.startswith("gpt-4"):
-        return 8192
-    # GPT-3.5 Turbo often 16k, but keep conservative unless explicitly 16k
-    if "gpt-3.5-turbo-16k" in m:
-        return 16384
-    if "gpt-3.5" in m:
-        return 8192
-    return 8192
-
-
-def _safe_max_tokens(model: str, requested_max_tokens: int, prompt_tokens: Optional[int]) -> int:
-    """
-    Compute a safe max_tokens given an estimated/known prompt token count.
-    Leaves a small safety margin to avoid context_length_exceeded.
-    """
-    limit = _get_model_context_limit(model)
-    safety = 256
-    if not prompt_tokens:
-        # No estimate: cap aggressively for 8k-class models.
-        return min(int(requested_max_tokens or 0), 1500) if limit <= 8192 else int(requested_max_tokens or 0)
-    available = max(0, limit - int(prompt_tokens) - safety)
-    if available <= 0:
-        return 256
-    return min(int(requested_max_tokens or 0), available)
-
-
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI GPT provider implementation"""
     
@@ -97,13 +59,11 @@ class OpenAIProvider(BaseLLMProvider):
         loop = asyncio.get_running_loop()
         try:
             def _call():
-                # NOTE: We don't have a tokenizer here, so we do a conservative cap.
-                # Also: if OpenAI returns a context_length_exceeded error, we retry once below.
                 kwargs = {
                     "model": self.config.model,
                     "messages": messages,
                     "temperature": self.config.temperature,
-                    "max_tokens": _safe_max_tokens(self.config.model, self.config.max_tokens, prompt_tokens=None),
+                    "max_tokens": self.config.max_tokens,
                 }
                 # PRD-17: Add tools if provided
                 if tools:
