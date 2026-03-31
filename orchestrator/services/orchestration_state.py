@@ -283,6 +283,15 @@ def transition_run(
     except StaleDataError:
         raise ConflictError(entity_type="run", entity_id=run.id)
 
+    # Sync mission board card status (non-fatal)
+    try:
+        from services.orchestration_board_bridge import sync_mission_board_status
+        sync_mission_board_status(db, run)
+    except Exception:
+        logger.warning(
+            "Failed to sync mission board status for run %s", run.id, exc_info=True,
+        )
+
     # PRD-123 Pattern #1: Produce frozen transition record
     transition = RunTransition(
         run_id=run.id,
