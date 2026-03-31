@@ -63,3 +63,14 @@
   - Default True ensures promoted actions will be excluded from dispatcher enum by default
 - All params have defaults — existing callers unaffected
 - Syntax validation passed (py_compile OK)
+
+## 2026-03-31 — US-008: Mark ~13 high-value actions as promoted=True
+- Added promoted=True to 13 actions across 5 files:
+  - actions_agents.py (4): platform_list_agents, platform_get_agent, platform_create_agent, platform_update_agent
+  - actions_marketplace.py (5): platform_browse_marketplace_agents, platform_browse_marketplace_skills, platform_browse_marketplace_plugins, platform_install_skill, platform_install_plugin
+  - actions_workspace.py (2): platform_store_memory, platform_get_system_health (also admin_only=True)
+  - actions_analytics.py (1): platform_get_activity_feed
+  - actions_search.py (1): platform_search_memory
+- Note: platform_store_memory and platform_get_system_health are in actions_workspace.py, not actions_search.py/actions_monitoring.py as PRD assumed
+- Validated: 97 total actions, 13 promoted, 6 admin-only. platform_get_system_health is both promoted + admin_only
+- Syntax validation passed (py_compile OK for all 5 files)

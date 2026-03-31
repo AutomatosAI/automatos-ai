@@ -71,6 +71,7 @@ def register_search_actions(registry: ActionRegistry) -> None:
             "required": ["query"],
         },
         permission_level="read",
+        promoted=True,
         tags=["memory", "search", "recall", "context"],
         examples=[
             "what do you remember about me?",

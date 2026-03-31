@@ -28,6 +28,7 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        promoted=True,
         tags=["agents", "list", "overview"],
         examples=[
             "what agents do I have?",
@@ -59,6 +60,7 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        promoted=True,
         tags=["agents", "details", "config"],
         examples=[
             "tell me about the DevOps agent",
@@ -137,6 +139,7 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "required": ["name"],
         },
         permission_level="write",
+        promoted=True,
         requires_confirmation=False,
         tags=["agents", "create", "write"],
         examples=[
@@ -215,6 +218,7 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="write",
+        promoted=True,
         requires_confirmation=False,
         tags=["agents", "update", "write"],
         examples=[
