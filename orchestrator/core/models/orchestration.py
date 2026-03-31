@@ -108,6 +108,9 @@ class OrchestrationRun(Base):
     stop_reason = Column(String(50), nullable=True)
     stop_detail = Column(Text, nullable=True)
 
+    # PRD-123 Pattern #8: Session checkpointing
+    checkpoint_count = Column(Integer, nullable=False, server_default="0")
+
     # Governance: mission budget tracking
     budget_config = Column(JSONB, nullable=True)   # {max_cost, max_tokens, alert_at_pct}
     budget_spent = Column(JSONB, nullable=True, server_default=text("'{}'"))  # {cost, tokens, api_calls}
@@ -520,3 +523,16 @@ class RunTransition:
     stop_reason: str | None = None
     timestamp: _dt = field(default_factory=_dt.utcnow)
     metadata: dict | None = None
+
+
+@dataclass(frozen=True)
+class SessionCheckpoint:
+    """Immutable session checkpoint for mission crash recovery (PRD-123 Pattern #8)."""
+
+    run_id: _UUID
+    task_id: _UUID | None
+    messages: tuple[dict, ...]
+    memory_snapshot: dict
+    tokens_used: int
+    checkpoint_number: int
+    created_at: _dt = field(default_factory=_dt.utcnow)
