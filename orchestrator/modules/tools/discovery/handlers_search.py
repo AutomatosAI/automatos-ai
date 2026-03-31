@@ -19,8 +19,14 @@ async def search_chat_history(db: Session, workspace_id: UUID, params: Dict[str,
     if not query:
         return {"success": False, "error": "query parameter is required"}
 
-    days = min(params.get("days", 30), 365)
-    limit = min(params.get("limit", 20), 100)
+    try:
+        days = min(int(params.get("days", 30)), 365)
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        limit = min(int(params.get("limit", 20)), 100)
+    except (TypeError, ValueError):
+        limit = 20
     search_term = f"%{query}%"
 
     try:

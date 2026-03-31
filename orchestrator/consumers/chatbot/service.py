@@ -1724,7 +1724,7 @@ class StreamingChatService:
                 # queries even when the classifier under-estimates complexity.
                 try:
                     from modules.tools.discovery.action_registry import get_action_registry
-                    _dispatcher = get_action_registry().to_dispatcher_schema()
+                    _dispatcher = get_action_registry().to_dispatcher_schema(exclude_admin=True)
                     all_tools = [_dispatcher]
                 except Exception:
                     logger.debug("[chat] Could not load platform_execute for ATOM path")

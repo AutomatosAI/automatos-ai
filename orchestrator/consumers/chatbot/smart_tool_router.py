@@ -252,8 +252,9 @@ class SmartToolRouter:
                         hint_matched.append(tool)
                         break
             if hint_matched:
-                # Always include core tools alongside hint-matched tools
-                core = [t for t in available_tools if t.get("function", {}).get("name") in self.CORE_TOOLS]
+                # Always include core + ALWAYS_INCLUDE tools alongside hint-matched tools
+                must_have = self.CORE_TOOLS | self.ALWAYS_INCLUDE
+                core = [t for t in available_tools if t.get("function", {}).get("name") in must_have]
                 combined = hint_matched + [c for c in core if c not in hint_matched]
                 logger.info(f"[ToolRouter] PRD-68 hint match: {len(hint_matched)} tools for hints={tool_hints}")
                 return ToolRoutingResult(
@@ -291,6 +292,12 @@ class SmartToolRouter:
                 filtered = await self._rank_tools_by_similarity(
                     query, available_tools, intent_result
                 )
+                # Ensure ALWAYS_INCLUDE tools are present even after semantic ranking
+                filtered_names = {t.get("function", {}).get("name") for t in filtered}
+                for tool in available_tools:
+                    name = tool.get("function", {}).get("name", "")
+                    if name in self.ALWAYS_INCLUDE and name not in filtered_names:
+                        filtered.append(tool)
                 tool_choice = self._determine_tool_choice(intent_result, filtered)
                 priority = intent_result.suggested_tools or []
 

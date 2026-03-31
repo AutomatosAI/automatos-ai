@@ -8,8 +8,9 @@ Each handler is a standalone async function in modules/tools/discovery/handlers_
 All queries are workspace-scoped for multi-tenant isolation.
 """
 
+import json
 import logging
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -270,11 +271,45 @@ class PlatformActionExecutor:
             "platform_get_sla_compliance": get_sla_compliance,
         }
 
+    def _workspace_has_admin_owner(self) -> bool:
+        """Check if the workspace owner has an admin/owner role.
+
+        Used when no caller_context is available (heartbeat, agent factory).
+        Agents inherit admin privileges from their workspace owner.
+        Fail-closed: returns False on any error.
+        """
+        try:
+            from core.workspaces.models import WorkspaceMember
+
+            member = (
+                self.db.query(WorkspaceMember)
+                .filter(
+                    WorkspaceMember.workspace_id == self.workspace_id,
+                    WorkspaceMember.role.in_(("owner", "admin")),
+                    WorkspaceMember.is_active.is_(True),
+                )
+                .first()
+            )
+            if member:
+                logger.debug(
+                    "[PlatformExecutor] Workspace %s has admin/owner member — "
+                    "granting admin_only access to agent",
+                    self.workspace_id,
+                )
+                return True
+            return False
+        except Exception:
+            logger.exception(
+                "[PlatformExecutor] Failed to resolve workspace owner role for %s",
+                self.workspace_id,
+            )
+            return False
+
     async def execute(
         self,
         action_name: str,
         params: Dict[str, Any],
-        caller_context: Dict[str, Any] | None = None,
+        caller_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute a platform action by name with permission checking.
 
@@ -288,7 +323,6 @@ class PlatformActionExecutor:
         # LLMs sometimes send params as a JSON string instead of a dict
         if isinstance(params, str):
             try:
-                import json
                 params = json.loads(params)
             except (json.JSONDecodeError, TypeError):
                 return {"success": False, "error": f"Invalid params format: expected dict, got string"}
@@ -309,6 +343,11 @@ class PlatformActionExecutor:
                         caller_context.get("workspace_role") in ("owner", "admin")
                         or caller_context.get("system_role") == "admin"
                     )
+                else:
+                    # No caller_context (heartbeat, agent factory, etc.) —
+                    # resolve from workspace owner's role.  Agents inherit
+                    # admin privileges from their workspace owner.
+                    is_admin = self._workspace_has_admin_owner()
                 if not is_admin:
                     logger.warning(
                         "[PlatformExecutor] Admin-only action '%s' denied — "
@@ -368,8 +407,8 @@ class PlatformActionExecutor:
                         "error": "Rate limit exceeded: max 10 write actions per minute. Try again shortly.",
                     }
                 raise
-            except Exception:
-                pass  # Fail open
+            except Exception as exc:
+                logger.warning("[PlatformExecutor] Rate limiter unavailable, failing open: %s", exc)
 
         # US-003: Destructive safety check — destructive actions must require confirmation
         if (

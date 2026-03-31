@@ -240,11 +240,34 @@ def get_tools_for_agent(
                 "function": schema
             })
 
+        # PRD-122 fix: Auto-resolve admin status from workspace owner role
+        # when no explicit is_admin was passed (heartbeat, agent factory paths).
+        if not is_admin and workspace_id and session_used:
+            try:
+                from core.workspaces.models import WorkspaceMember
+                has_admin = (
+                    session_used.query(WorkspaceMember)
+                    .filter(
+                        WorkspaceMember.workspace_id == workspace_id,
+                        WorkspaceMember.role.in_(("owner", "admin")),
+                        WorkspaceMember.is_active.is_(True),
+                    )
+                    .first()
+                )
+                if has_admin:
+                    is_admin = True
+                    logger.info(f"[tool-trace {trace_id}] Workspace {workspace_id} has admin/owner — including admin tools")
+            except Exception as exc:
+                logger.debug(f"[tool-trace {trace_id}] Could not resolve workspace admin status: {exc}")
+
         # PRD-64: Single dispatcher for platform actions (reduces 58 schemas → 1)
         try:
             from modules.tools.discovery import get_action_registry
             action_registry = get_action_registry()
-            dispatcher_schema = action_registry.to_dispatcher_schema(exclude_admin=not is_admin)
+            dispatcher_schema = action_registry.to_dispatcher_schema(
+                exclude_admin=not is_admin,
+                exclude_promoted=True,  # promoted actions have first-class schemas below
+            )
             openai_tools.append(dispatcher_schema)
             action_count = len(action_registry.get_all())
             logger.info(f"[tool-trace {trace_id}] Added platform_execute dispatcher ({action_count} actions behind it)")
