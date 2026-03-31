@@ -1223,7 +1223,34 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
         
         if not tool.is_active:
             return False, f"Tool '{tool_name}' is not active"
-        
+
+        # -----------------------------------------------------------------
+        # PRD-123 Pattern #4: Tool Tier Policy Enforcement
+        # system  → always available (skip all further checks)
+        # platform → available by default (skip assignment checks)
+        # marketplace/custom → require explicit assignment (existing logic)
+        # -----------------------------------------------------------------
+        tool_tier = getattr(tool, "tier", None) or "marketplace"
+        # Resolve from DB model if the registry tool doesn't carry tier
+        if tool_tier == "marketplace" and db:
+            try:
+                from core.models.tools import Tool as ToolModel
+                db_tool = db.query(ToolModel).filter(ToolModel.name == tool_name).first()
+                if db_tool and db_tool.tier:
+                    tool_tier = db_tool.tier
+            except Exception:
+                pass  # fall through to default marketplace behavior
+
+        if tool_tier == "system":
+            return True, None  # system tools always pass
+
+        if tool_tier == "platform":
+            # Platform tools available by default — only blocked if workspace explicitly disables
+            # (workspace-level disable not yet implemented — allow for now)
+            return True, None
+
+        # marketplace and custom tiers continue to existing assignment checks below
+
         # ---------------------------------------------------------------------
         # Hard gating for Composio execution:
         # Only expose Composio tools when the agent has EXTERNAL app assignments

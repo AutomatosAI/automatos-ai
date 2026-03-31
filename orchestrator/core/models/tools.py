@@ -7,11 +7,22 @@ Comprehensive data models for tools, credentials, configurations, and permission
 for the platform tool registry and marketplace UI.
 """
 
+from enum import Enum
+
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
 from .core import Base
+
+
+class ToolTier(str, Enum):
+    """PRD-123 Pattern #4: Tool trust tiers for access policy enforcement."""
+
+    SYSTEM = "system"          # Always available (platform internals like RAG, MEMORY)
+    PLATFORM = "platform"      # Available by default, can be disabled per workspace
+    MARKETPLACE = "marketplace" # Requires explicit agent_tool_assignments
+    CUSTOM = "custom"          # User-created tools, requires explicit assignment
 
 # ====================================
 # Tools Models
@@ -42,6 +53,7 @@ class Tool(Base):
     
     # Status and availability
     status = Column(String(50), default='available', index=True)  # available, deprecated, maintenance, beta
+    tier = Column(String(20), default='marketplace', index=True)  # PRD-123 Pattern #4: system|platform|marketplace|custom
     is_installed = Column(Boolean, default=False, index=True)
     is_configured = Column(Boolean, default=False, index=True)
     
