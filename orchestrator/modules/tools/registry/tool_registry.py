@@ -1115,9 +1115,10 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             name="generate_document",
             category=ToolCategory.FILE_OPERATIONS,
             description=(
-                "Generate a polished PDF, DOCX, or XLSX document from data. "
-                "Use when the user asks for a report, invoice, export, summary document, "
-                "or any formatted document. Returns a download URL for the generated file."
+                "Generate a polished PDF, DOCX, or XLSX document. "
+                "IMPORTANT: You MUST provide the 'data' parameter with actual written content — "
+                "the document will be blank without it. For PDFs, include 'sections' with full paragraphs. "
+                "Returns a download URL for the generated file."
             ),
             executor_class="AgentPlatformTools",
             executor_method="execute_tool",
@@ -1139,10 +1140,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                     name="data",
                     type="object",
                     description=(
-                        "Data to populate the document. "
-                        "For reports: {\"sections\": [{\"title\": \"Section Name\", \"content\": \"Full paragraph text...\"}], "
+                        "REQUIRED — the actual document content. Without this the document will be blank. "
+                        "For PDF/DOCX reports: {\"sections\": [{\"title\": \"Section Name\", \"content\": \"Write full "
+                        "paragraphs of text here — this is the body of the document.\"}], "
                         "\"author\": \"...\", \"date\": \"...\"}. "
-                        "Each section MUST have 'title' and 'content' keys with substantial text in content. "
+                        "You MUST write out the full text content for each section — do not leave sections empty. "
                         "For tables/xlsx: {\"columns\": [\"col1\", \"col2\"], \"rows\": [[\"val1\", \"val2\"]]}."
                     ),
                     required=True
