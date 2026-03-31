@@ -46,3 +46,10 @@
 - workspace_id parameter was already available in the handler function signature
 - Syntax validation passed
 
+## 2026-03-31 — US-006: Add promoted field + schema generation methods
+- Added `promoted: bool = False` to ActionDefinition dataclass (after admin_only)
+- Added `get_promoted()` method to ActionRegistry — returns list of promoted ActionDefinitions
+- Added `to_first_class_schemas(exclude_admin=False)` method — returns OpenAI function schemas for promoted actions
+  - When exclude_admin=True, admin_only promoted actions are excluded (non-admin callers don't see them)
+- All new fields/params have defaults — existing callers unaffected
+- Validated with isolated import: promoted field works, get_promoted filters correctly, to_first_class_schemas respects exclude_admin

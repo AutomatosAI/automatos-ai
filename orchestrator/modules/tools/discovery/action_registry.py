@@ -36,6 +36,7 @@ class ActionDefinition:
     requires_confirmation: bool = False
     workspace_scoped: bool = True
     admin_only: bool = False
+    promoted: bool = False
     tags: List[str] = field(default_factory=list)
     examples: List[str] = field(default_factory=list)
 
@@ -109,6 +110,28 @@ class ActionRegistry:
         if permission_filter:
             actions = [a for a in actions if a.permission_level == permission_filter]
         return [a.to_openai_schema() for a in actions]
+
+    def get_promoted(self) -> List[ActionDefinition]:
+        """Get all actions marked as promoted."""
+        self._ensure_initialized()
+        return [a for a in self._actions.values() if a.promoted]
+
+    def to_first_class_schemas(self, exclude_admin: bool = False) -> List[Dict[str, Any]]:
+        """
+        Return OpenAI function schemas for promoted actions.
+
+        Promoted actions get their own first-class tool schemas instead of
+        going through the platform_execute dispatcher.
+
+        Args:
+            exclude_admin: If True, admin_only promoted actions are excluded
+                (non-admin callers won't get schemas for admin tools).
+        """
+        self._ensure_initialized()
+        promoted = [a for a in self._actions.values() if a.promoted]
+        if exclude_admin:
+            promoted = [a for a in promoted if not a.admin_only]
+        return [a.to_openai_schema() for a in promoted]
 
     def to_dispatcher_schema(self, exclude_admin: bool = False) -> Dict[str, Any]:
         """
