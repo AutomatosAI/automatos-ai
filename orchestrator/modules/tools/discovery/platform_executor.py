@@ -270,8 +270,21 @@ class PlatformActionExecutor:
             "platform_get_sla_compliance": get_sla_compliance,
         }
 
-    async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a platform action by name with permission checking."""
+    async def execute(
+        self,
+        action_name: str,
+        params: Dict[str, Any],
+        caller_context: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Execute a platform action by name with permission checking.
+
+        Args:
+            action_name: Registered platform action name.
+            params: Action parameters.
+            caller_context: Optional dict with keys user_id, system_role,
+                workspace_role.  Used by admin_only gate (US-003).
+                If None, admin_only actions are denied (fail-closed).
+        """
         # LLMs sometimes send params as a JSON string instead of a dict
         if isinstance(params, str):
             try:

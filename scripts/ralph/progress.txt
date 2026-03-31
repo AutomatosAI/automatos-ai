@@ -8,3 +8,13 @@
 - to_openai_schema() unaffected (admin_only is metadata only)
 - Syntax validation passed
 
+## 2026-03-31 — US-002: Thread caller_context through executor chain
+- Added `caller_context: Optional[Dict[str, Any]] = None` to `execute_tool()` in unified_executor.py
+- Passed caller_context through both platform_execute dispatcher path and direct platform_* routing
+- Updated delegate `_execute_platform_action()` to accept and forward caller_context
+- Updated `exec_platform.execute_platform_action()` to accept and pass caller_context to PlatformActionExecutor
+- Updated `PlatformActionExecutor.execute()` to accept `caller_context: Dict[str, Any] | None = None`
+- All parameters have defaults (None) — existing callers unaffected
+- Syntax validation passed for all 3 files
+- NOTE: unified_executor.py is at `modules/tools/execution/` not `modules/tools/` as PRD assumed
+

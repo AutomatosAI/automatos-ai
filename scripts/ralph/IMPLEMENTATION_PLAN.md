@@ -39,7 +39,7 @@ Execution: unified_executor.py routes platform_* → PlatformActionExecutor (no 
 ### Phase 0: Permission Enforcement (P0)
 
 - [x] **US-001**: Add `admin_only: bool = False` to ActionDefinition + mark 6 infra tools (5 in actions_monitoring.py, 1 in actions_workspace.py)
-- [ ] **US-002**: Thread caller_context (user_id, system_role, workspace_role) through unified_executor → platform_executor
+- [x] **US-002**: Thread caller_context (user_id, system_role, workspace_role) through unified_executor → platform_executor
 - [ ] **US-003**: Add admin gate (before requires_confirmation) + destructive safety check (after rate limit) in platform_executor.py
 - [ ] **US-004**: Add is_admin param to get_tools_for_agent() + exclude_admin to to_dispatcher_schema/build_prompt_summary
 - [ ] **US-005**: Fix search_chat_history WHERE clause to scope by workspace_id
