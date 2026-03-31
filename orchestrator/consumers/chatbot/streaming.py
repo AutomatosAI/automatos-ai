@@ -225,6 +225,78 @@ class StreamingHandler:
             payload["progress"] = progress
         return self.format_aisdk_data("workflow-update", payload)
 
+    # ==========================================================================
+    # PRD-123 Pattern #11: Typed StreamEvent emission
+    # ==========================================================================
+
+    def format_stream_event(self, event: "StreamEvent") -> str:
+        """Format a typed StreamEvent as AI SDK Data Stream line."""
+        return event.to_sse()
+
+    def format_agent_assigned(
+        self,
+        agent_id: int,
+        agent_name: str,
+        route_method: str = "semantic",
+    ) -> str:
+        """Format agent-assigned event."""
+        return self.format_aisdk_data(
+            "agent-assigned",
+            {
+                "agentId": agent_id,
+                "agentName": agent_name,
+                "routeMethod": route_method,
+            },
+        )
+
+    def format_tool_permission_denied(
+        self,
+        tool_name: str,
+        agent_id: int,
+        reason: str,
+    ) -> str:
+        """Format tool-permission-denied event."""
+        return self.format_aisdk_data(
+            "tool-permission-denied",
+            {
+                "toolName": tool_name,
+                "agentId": agent_id,
+                "reason": reason,
+            },
+        )
+
+    def format_budget_warning(
+        self,
+        tokens_used: int,
+        token_budget: int,
+        percent_used: float,
+    ) -> str:
+        """Format budget-warning event."""
+        return self.format_aisdk_data(
+            "budget-warning",
+            {
+                "tokensUsed": tokens_used,
+                "tokenBudget": token_budget,
+                "percentUsed": round(percent_used, 1),
+            },
+        )
+
+    def format_done_with_metadata(
+        self,
+        stop_reason: Optional[str] = None,
+        tokens_used: Optional[int] = None,
+        cost: Optional[float] = None,
+    ) -> str:
+        """Format done event with metadata (PRD-123 enriched finish)."""
+        payload: Dict[str, Any] = {"finishReason": "stop"}
+        if stop_reason:
+            payload["stopReason"] = stop_reason
+        if tokens_used is not None:
+            payload["tokensUsed"] = tokens_used
+        if cost is not None:
+            payload["cost"] = cost
+        return f'd:{json.dumps({**{"type": "finish"}, **payload})}\n'
+
     async def stream_text_aisdk(
         self,
         text: str,
