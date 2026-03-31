@@ -18,3 +18,15 @@
 - Syntax validation passed for all 3 files
 - NOTE: unified_executor.py is at `modules/tools/execution/` not `modules/tools/` as PRD assumed
 
+## 2026-03-31 — US-003: Admin gate + destructive safety check in platform_executor.py
+- Added admin_only gate BEFORE requires_confirmation check:
+  - Looks up action_def from registry, checks admin_only flag
+  - If admin_only: caller must have workspace_role in (owner, admin) OR system_role == admin
+  - If caller_context is None (no identity), admin_only actions are denied (fail-closed)
+  - Returns {success: False, permission_denied: True, error: ...}
+  - Logs denial at WARNING with action name, workspace_id, and sanitized caller_context (no user_id)
+- Added destructive safety check AFTER rate limit block:
+  - If permission_level == "destructive" and requires_confirmation is False, reject with internal error
+  - Logs at ERROR level (misconfigured action)
+- Syntax validation passed
+

@@ -300,6 +300,31 @@ class PlatformActionExecutor:
         try:
             from modules.tools.discovery import get_action_registry
             action_def = get_action_registry().get(action_name)
+
+            # US-003: Admin gate — deny admin_only actions for non-admin callers
+            if action_def and action_def.admin_only:
+                is_admin = False
+                if caller_context:
+                    is_admin = (
+                        caller_context.get("workspace_role") in ("owner", "admin")
+                        or caller_context.get("system_role") == "admin"
+                    )
+                if not is_admin:
+                    logger.warning(
+                        "[PlatformExecutor] Admin-only action '%s' denied — "
+                        "workspace_id=%s, caller_context=%s",
+                        action_name,
+                        self.workspace_id,
+                        {k: v for k, v in (caller_context or {}).items() if k != "user_id"},
+                    )
+                    return {
+                        "success": False,
+                        "permission_denied": True,
+                        "error": (
+                            f"Action '{action_name}' requires workspace admin or owner role."
+                        ),
+                    }
+
             if action_def and action_def.requires_confirmation:
                 return {
                     "success": False,
@@ -345,6 +370,25 @@ class PlatformActionExecutor:
                 raise
             except Exception:
                 pass  # Fail open
+
+        # US-003: Destructive safety check — destructive actions must require confirmation
+        if (
+            action_def
+            and action_def.permission_level == "destructive"
+            and not action_def.requires_confirmation
+        ):
+            logger.error(
+                "[PlatformExecutor] Destructive action '%s' missing requires_confirmation flag — "
+                "rejecting as safety precaution",
+                action_name,
+            )
+            return {
+                "success": False,
+                "error": (
+                    f"Internal error: destructive action '{action_name}' is misconfigured "
+                    "(missing confirmation requirement). Contact platform admin."
+                ),
+            }
 
         # PRD-108: Auto-inject field_id for field tools from active mission
         if action_name.startswith("platform_field_") and "field_id" not in params:
