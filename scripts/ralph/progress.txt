@@ -106,3 +106,10 @@
   - MEMORY_RECALL: now includes "memory" (was empty)
 - Applied ALWAYS_INCLUDE in _filter_tools_by_categories alongside CORE_TOOLS
 - Syntax validation passed (py_compile OK)
+
+## 2026-03-31 — US-011: Update PlatformActionsSection to exclude promoted actions
+- Updated PlatformActionsSection._build() to pass exclude_promoted=True to registry.build_prompt_summary()
+- Parameter was already the default (True from US-007), but now explicit per acceptance criteria
+- Promoted actions no longer appear in the markdown catalog injected into the system prompt
+- Non-promoted actions still appear as before
+- Syntax validation passed (py_compile OK)
