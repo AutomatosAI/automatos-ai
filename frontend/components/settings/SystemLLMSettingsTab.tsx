@@ -7,7 +7,7 @@
  * 1. LLM Configuration (existing, enhanced with thinking level)
  * 2. Soul & Personality (NEW)
  * 3. Heartbeat (NEW)
- * 4. What Automatos Knows (NEW, read-only)
+ * 4. HARNESS — Self-Optimizing Organization Loop (PRD-121)
  */
 
 import React, { useState, useMemo, useEffect } from 'react'
@@ -23,7 +23,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import {
   Save, RotateCcw, Brain, Zap, Settings, Heart, Sparkles,
   ChevronDown, Clock, MessageSquare, AlertCircle, Loader2,
-  Database, Eye, Play
+  Play, Shield, Calendar
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { InlineHelp } from '@/components/ui/help-tooltip'
@@ -43,21 +43,6 @@ interface SystemLLMSettingsTabProps {
   onReset?: () => void
 }
 
-interface MemoryStats {
-  total_memories: number
-  by_type: Record<string, number>
-  by_level: Record<string, number>
-  agents_with_memories: number
-  recent_24h: number
-  recent: Array<{
-    id: string
-    type: string
-    level: string
-    preview: string
-    created_at: string | null
-  }>
-}
-
 interface OrchestratorConfig {
   personality_mode: string
   custom_soul: string
@@ -73,6 +58,11 @@ interface OrchestratorConfig {
     checklist: string
     notification_channel: string
     channel_id?: string
+  }
+  harness: {
+    enabled: boolean
+    schedule: string
+    mode: string
   }
 }
 
@@ -127,15 +117,12 @@ export default function SystemLLMSettingsTab({
   const [orchLoading, setOrchLoading] = useState(true)
   const [orchSaving, setOrchSaving] = useState(false)
 
-  // Memory stats (from workspace API)
-  const [memoryStats, setMemoryStats] = useState<MemoryStats | null>(null)
-  const [memoryLoading, setMemoryLoading] = useState(true)
 
   // Collapsible section states
   const [llmOpen, setLlmOpen] = useState(true)
   const [soulOpen, setSoulOpen] = useState(true)
   const [heartbeatOpen, setHeartbeatOpen] = useState(false)
-  const [memoryOpen, setMemoryOpen] = useState(false)
+  const [harnessOpen, setHarnessOpen] = useState(false)
 
   // Heartbeat: connected channels, run now, last result
   const [connectedChannels, setConnectedChannels] = useState<Array<{ key: string; platform: string }>>([])
@@ -222,22 +209,6 @@ export default function SystemLLMSettingsTab({
     loadOrchConfig()
   }, [])
 
-  // Load memory stats
-  useEffect(() => {
-    const loadMemoryStats = async () => {
-      try {
-        setMemoryLoading(true)
-        const data = await apiClient.request<MemoryStats>('/api/workspaces/current/memory-stats')
-        setMemoryStats(data)
-      } catch (err) {
-        console.error('Failed to load memory stats:', err)
-        setMemoryStats(null)
-      } finally {
-        setMemoryLoading(false)
-      }
-    }
-    loadMemoryStats()
-  }, [])
 
   // Load connected channels for notification dropdown + last heartbeat result
   useEffect(() => {
@@ -291,6 +262,14 @@ export default function SystemLLMSettingsTab({
     setOrchConfig({
       ...orchConfig,
       heartbeat: { ...orchConfig.heartbeat, [key]: value },
+    })
+  }
+
+  const handleHarnessChange = (key: string, value: string | boolean) => {
+    if (!orchConfig) return
+    setOrchConfig({
+      ...orchConfig,
+      harness: { ...orchConfig.harness, [key]: value },
     })
   }
 
@@ -958,127 +937,116 @@ export default function SystemLLMSettingsTab({
         </Card>
       </Collapsible>
 
-      {/* Section 4: What Automatos Knows */}
-      <Collapsible open={memoryOpen} onOpenChange={setMemoryOpen}>
+      {/* Section 4: HARNESS — Self-Optimizing Organization Loop */}
+      <Collapsible open={harnessOpen} onOpenChange={setHarnessOpen}>
         <Card>
           <CollapsibleTrigger asChild>
             <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Database className="h-5 w-5" />
+                  <Shield className="h-5 w-5" />
                   <div>
-                    <CardTitle>What Automatos Knows</CardTitle>
+                    <CardTitle>HARNESS</CardTitle>
                     <CardDescription>
-                      Memory stats and knowledge stored across your workspace
+                      Self-optimizing loop that tunes agent configurations based on performance data
                     </CardDescription>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {memoryStats && memoryStats.total_memories > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      {memoryStats.total_memories} memories
-                    </Badge>
+                  {orchConfig?.harness?.enabled && (
+                    <Badge variant="default" className="text-xs">Active</Badge>
                   )}
-                  <ChevronDown className={`h-5 w-5 transition-transform ${memoryOpen ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`h-5 w-5 transition-transform ${harnessOpen ? 'rotate-180' : ''}`} />
                 </div>
               </div>
             </CardHeader>
           </CollapsibleTrigger>
           <CollapsibleContent>
             <CardContent className="space-y-6">
-              {memoryLoading ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading memory stats...
-                </div>
-              ) : memoryStats ? (
+              {orchConfig ? (
                 <>
-                  {/* Stats Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="rounded-lg border p-3 text-center">
-                      <div className="text-2xl font-bold">{memoryStats.total_memories}</div>
-                      <div className="text-xs text-muted-foreground">Total Memories</div>
-                    </div>
-                    <div className="rounded-lg border p-3 text-center">
-                      <div className="text-2xl font-bold">{memoryStats.agents_with_memories}</div>
-                      <div className="text-xs text-muted-foreground">Agents with Memory</div>
-                    </div>
-                    <div className="rounded-lg border p-3 text-center">
-                      <div className="text-2xl font-bold">{memoryStats.recent_24h}</div>
-                      <div className="text-xs text-muted-foreground">Last 24 Hours</div>
-                    </div>
-                    <div className="rounded-lg border p-3 text-center">
-                      <div className="text-2xl font-bold">{Object.keys(memoryStats.by_type).length}</div>
-                      <div className="text-xs text-muted-foreground">Memory Types</div>
-                    </div>
+                  {/* Description */}
+                  <div className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground">
+                    <p className="mb-2">
+                      <strong className="text-foreground">HARNESS</strong> (Holistic Agent Review, Normalization, Evaluation &amp; Self-Shaping)
+                      periodically collects org-wide metrics, diagnoses regressions, and prescribes configuration
+                      changes to keep your agent fleet running optimally.
+                    </p>
+                    <p>
+                      Safe changes (low risk) can be applied automatically, or you can require manual approval
+                      for every change. Risky changes are always queued as board tasks for your review.
+                    </p>
                   </div>
 
-                  {/* By Type Breakdown */}
-                  {Object.keys(memoryStats.by_type).length > 0 && (
-                    <div className="space-y-2">
-                      <Label className="flex items-center gap-1">
-                        <Eye className="h-3 w-3" />
-                        By Type
-                      </Label>
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(memoryStats.by_type).map(([type, count]) => (
-                          <Badge key={type} variant="outline">
-                            {type}: {count}
-                          </Badge>
-                        ))}
-                      </div>
+                  {/* Enable Toggle */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Enable HARNESS</Label>
+                      <p className="text-xs text-muted-foreground">
+                        When disabled, no automatic optimization runs will occur
+                      </p>
                     </div>
-                  )}
+                    <Switch
+                      checked={orchConfig.harness?.enabled ?? false}
+                      onCheckedChange={(checked) => handleHarnessChange('enabled', checked)}
+                    />
+                  </div>
 
-                  {/* By Level Breakdown */}
-                  {Object.keys(memoryStats.by_level).length > 0 && (
-                    <div className="space-y-2">
-                      <Label>By Level</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(memoryStats.by_level).map(([level, count]) => (
-                          <Badge key={level} variant="outline">
-                            {level}: {count}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {orchConfig.harness?.enabled && (
+                    <>
+                      {/* Schedule & Mode */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            Run Schedule
+                          </Label>
+                          <Select
+                            value={orchConfig.harness.schedule || 'weekly'}
+                            onValueChange={(v) => handleHarnessChange('schedule', v)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="weekly">Weekly (Sunday 2 AM UTC)</SelectItem>
+                              <SelectItem value="biweekly">Biweekly</SelectItem>
+                              <SelectItem value="monthly">Monthly</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            How often HARNESS analyzes your organization and proposes changes
+                          </p>
+                        </div>
 
-                  {/* Recent Memories */}
-                  {memoryStats.recent.length > 0 && (
-                    <div className="space-y-2">
-                      <Label>Recent Memories</Label>
-                      <div className="space-y-2">
-                        {memoryStats.recent.map((mem) => (
-                          <div key={mem.id} className="rounded border p-2 text-sm">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Badge variant="secondary" className="text-xs">{mem.type}</Badge>
-                              <Badge variant="outline" className="text-xs">{mem.level}</Badge>
-                              {mem.created_at && (
-                                <span className="text-xs text-muted-foreground ml-auto">
-                                  {new Date(mem.created_at).toLocaleDateString()}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-xs text-muted-foreground truncate">{mem.preview}</p>
-                          </div>
-                        ))}
+                        <div className="space-y-2">
+                          <Label className="flex items-center gap-1">
+                            <Shield className="h-3 w-3" />
+                            Approval Mode
+                          </Label>
+                          <Select
+                            value={orchConfig.harness.mode || 'full_auto'}
+                            onValueChange={(v) => handleHarnessChange('mode', v)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="full_auto">Full Auto — low-risk changes applied automatically</SelectItem>
+                              <SelectItem value="manual">Manual — all changes require your approval</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            {orchConfig.harness.mode === 'manual'
+                              ? 'Every proposed change will be queued as a board task for your review'
+                              : 'Changes with risk score 1-2 are applied automatically; risk 3+ queued for review'}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  )}
-
-                  {memoryStats.total_memories === 0 && (
-                    <div className="text-center py-6 text-muted-foreground">
-                      <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No memories stored yet. Start chatting to build knowledge!</p>
-                    </div>
+                    </>
                   )}
                 </>
-              ) : (
-                <div className="text-center py-4 text-muted-foreground text-sm">
-                  Memory stats unavailable
-                </div>
-              )}
+              ) : null}
             </CardContent>
           </CollapsibleContent>
         </Card>
