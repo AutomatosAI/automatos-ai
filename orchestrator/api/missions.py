@@ -1803,7 +1803,13 @@ async def resume_mission(
         )
 
     # Read checkpoint
-    cp_number = None if from_checkpoint == "latest" else int(from_checkpoint)
+    try:
+        cp_number = None if from_checkpoint == "latest" else int(from_checkpoint)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid checkpoint number: {from_checkpoint!r} — must be an integer or 'latest'",
+        )
     checkpoint = await read_checkpoint(run.id, cp_number)
     if not checkpoint:
         raise HTTPException(status_code=404, detail="No checkpoint found for this mission")
@@ -1811,15 +1817,23 @@ async def resume_mission(
     # Transition back to running
     from services.orchestration_state import transition_run
     from core.models.orchestration_enums import ActorType
-    transition_run(
-        db=db,
-        run=run,
-        new_state=RunState.RUNNING,
-        actor_type=ActorType.USER,
-        actor_id=str(ctx.user_id) if ctx.user_id else None,
-        reason=f"Resumed from checkpoint {checkpoint.get('checkpoint_number')}",
-    )
-    db.commit()
+    try:
+        transition_run(
+            db=db,
+            run=run,
+            new_state=RunState.RUNNING,
+            actor_type=ActorType.USER,
+            actor_id=str(ctx.user_id) if ctx.user_id else None,
+            reason=f"Resumed from checkpoint {checkpoint.get('checkpoint_number')}",
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        # InvalidTransitionError, ConflictError (stale version), or DB errors
+        raise HTTPException(
+            status_code=409,
+            detail=f"Failed to resume mission: {exc}",
+        )
 
     return {
         "mission_id": str(run.id),

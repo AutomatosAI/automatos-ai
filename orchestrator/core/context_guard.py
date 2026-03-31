@@ -356,6 +356,8 @@ class ContextGuard:
 
 # ---------------------------------------------------------------------------
 # PRD-123 Pattern #7: Proactive Transcript Compaction
+# TODO: Wire into SmartChatOrchestrator.prepare_request() or post-response hook
+#       to call every N turns. Needs turn_count tracking in ConversationState.
 # ---------------------------------------------------------------------------
 
 

@@ -99,21 +99,30 @@ async def read_checkpoint(
             response = _s3_client().get_object(Bucket=_BUCKET, Key=key)
             return json.loads(response["Body"].read())
 
-        # Find latest checkpoint
+        # Find latest checkpoint — paginate to handle >1000
         prefix = _checkpoint_prefix(run_id)
-        response = _s3_client().list_objects_v2(Bucket=_BUCKET, Prefix=prefix)
+        client = _s3_client()
+        all_keys: list[str] = []
+        continuation_token = None
 
-        contents = response.get("Contents", [])
-        if not contents:
+        while True:
+            kwargs = {"Bucket": _BUCKET, "Prefix": prefix}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+            response = client.list_objects_v2(**kwargs)
+            all_keys.extend(obj["Key"] for obj in response.get("Contents", []))
+            if not response.get("IsTruncated"):
+                break
+            continuation_token = response.get("NextContinuationToken")
+
+        if not all_keys:
             return None
 
-        # Sort by key (checkpoint number is in filename) and get latest
-        latest = sorted(contents, key=lambda x: x["Key"])[-1]
-        obj = _s3_client().get_object(Bucket=_BUCKET, Key=latest["Key"])
+        latest_key = sorted(all_keys)[-1]
+        obj = client.get_object(Bucket=_BUCKET, Key=latest_key)
         return json.loads(obj["Body"].read())
 
-    except _s3_client().__class__.__bases__[0].__subclasses__()[0] if False else Exception as exc:
-        # Catch boto3 NoSuchKey or general errors
+    except Exception as exc:
         logger.warning("Checkpoint read failed for run=%s: %s", run_id, exc)
         return None
 
@@ -122,27 +131,45 @@ async def list_checkpoints(run_id: UUID) -> list[dict]:
     """
     List all available checkpoints for a run.
 
+    Extracts checkpoint numbers from S3 keys to avoid N+1 GET calls.
+    Paginates to handle >1000 checkpoints.
+
     Returns:
-        List of {checkpoint_number, task_id, created_at} dicts.
+        List of {checkpoint_number, s3_key, last_modified, size} dicts.
     """
     try:
         prefix = _checkpoint_prefix(run_id)
-        response = _s3_client().list_objects_v2(Bucket=_BUCKET, Prefix=prefix)
-
+        client = _s3_client()
         results = []
-        for obj in response.get("Contents", []):
-            try:
-                data = json.loads(
-                    _s3_client().get_object(Bucket=_BUCKET, Key=obj["Key"])["Body"].read()
-                )
+        continuation_token = None
+
+        while True:
+            kwargs = {"Bucket": _BUCKET, "Prefix": prefix}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+
+            response = client.list_objects_v2(**kwargs)
+
+            for obj in response.get("Contents", []):
+                key = obj["Key"]
+                # Extract checkpoint number from key: checkpoints/{run_id}/{number}.json
+                filename = key.rsplit("/", 1)[-1]
+                try:
+                    cp_number = int(filename.replace(".json", ""))
+                except (ValueError, AttributeError):
+                    continue
                 results.append({
-                    "checkpoint_number": data.get("checkpoint_number"),
-                    "task_id": data.get("task_id"),
-                    "created_at": data.get("created_at"),
-                    "tokens_used": data.get("tokens_used"),
+                    "checkpoint_number": cp_number,
+                    "s3_key": key,
+                    "last_modified": obj.get("LastModified", "").isoformat()
+                    if hasattr(obj.get("LastModified", ""), "isoformat")
+                    else str(obj.get("LastModified", "")),
+                    "size": obj.get("Size", 0),
                 })
-            except Exception:
-                continue
+
+            if not response.get("IsTruncated"):
+                break
+            continuation_token = response.get("NextContinuationToken")
 
         return sorted(results, key=lambda x: x.get("checkpoint_number", 0))
 

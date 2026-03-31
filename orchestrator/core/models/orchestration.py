@@ -508,7 +508,7 @@ class TaskTransition:
     triggered_by: str  # 'coordinator', 'agent', 'user', 'system'
     reason: str | None = None
     stop_reason: str | None = None
-    timestamp: _dt = field(default_factory=_dt.utcnow)
+    timestamp: _dt = field(default_factory=lambda: _dt.now(__import__("datetime").timezone.utc))
     metadata: dict | None = None
 
 
@@ -521,7 +521,7 @@ class RunTransition:
     to_state: str
     triggered_by: str  # 'coordinator', 'agent', 'user', 'system'
     stop_reason: str | None = None
-    timestamp: _dt = field(default_factory=_dt.utcnow)
+    timestamp: _dt = field(default_factory=lambda: _dt.now(__import__("datetime").timezone.utc))
     metadata: dict | None = None
 
 
@@ -535,4 +535,4 @@ class SessionCheckpoint:
     memory_snapshot: dict
     tokens_used: int
     checkpoint_number: int
-    created_at: _dt = field(default_factory=_dt.utcnow)
+    created_at: _dt = field(default_factory=lambda: _dt.now(__import__("datetime").timezone.utc))

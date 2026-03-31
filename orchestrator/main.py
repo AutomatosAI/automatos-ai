@@ -18,7 +18,7 @@ from core.auth.hybrid import get_request_context_hybrid
 import uvicorn
 import uuid
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict, deque
 
 # Load .env file BEFORE anything else
@@ -522,7 +522,7 @@ async def lifespan(app: FastAPI):
     from core.models.bootstrap import BootstrapReport, BootstrapStage, DeferredInitResult, run_stage
 
     report = BootstrapReport()
-    report.started_at = datetime.utcnow()
+    report.started_at = datetime.now(timezone.utc)
 
     logger.info("Starting Automotas AI API Server...")
 
@@ -560,7 +560,7 @@ async def lifespan(app: FastAPI):
             )
 
         # ── Ready ──
-        report.ready_at = datetime.utcnow()
+        report.ready_at = datetime.now(timezone.utc)
         await run_stage(report, BootstrapStage.READY, lambda: None)
         app.state.bootstrap_report = report
 
