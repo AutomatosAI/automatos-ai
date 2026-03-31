@@ -113,3 +113,12 @@
 - Promoted actions no longer appear in the markdown catalog injected into the system prompt
 - Non-promoted actions still appear as before
 - Syntax validation passed (py_compile OK)
+
+## 2026-03-31 — US-012: Add enum to dispatcher schema for remaining actions
+- Added enum of valid action names to the `action` parameter in `to_dispatcher_schema()`
+- Enum is built dynamically from registered actions, respecting both exclude_promoted and exclude_admin filters
+- Sorted alphabetically for consistent output
+- When no actions match (empty registry), enum key is omitted entirely
+- Token impact: ~78 non-promoted action names x ~10 tokens = ~780 tokens — acceptable
+- Syntax validation passed (py_compile OK)
+- Tested: 5 scenarios (exclude both, exclude promoted only, exclude nothing, sorted order, empty registry)

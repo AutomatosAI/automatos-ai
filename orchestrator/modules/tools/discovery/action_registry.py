@@ -148,6 +148,21 @@ class ActionRegistry:
                 from the dispatcher since they have first-class schemas.
         """
         self._ensure_initialized()
+
+        # Build enum of valid action names for the dispatcher
+        valid_actions = sorted(
+            a.name for a in self._actions.values()
+            if (not exclude_promoted or not a.promoted)
+            and (not exclude_admin or not a.admin_only)
+        )
+
+        action_property: Dict[str, Any] = {
+            "type": "string",
+            "description": "The exact platform action name (e.g. 'platform_configure_agent_heartbeat')",
+        }
+        if valid_actions:
+            action_property["enum"] = valid_actions
+
         return {
             "type": "function",
             "function": {
@@ -163,10 +178,7 @@ class ActionRegistry:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "action": {
-                            "type": "string",
-                            "description": "The exact platform action name (e.g. 'platform_list_agents')",
-                        },
+                        "action": action_property,
                         "params": {
                             "type": "object",
                             "description": (

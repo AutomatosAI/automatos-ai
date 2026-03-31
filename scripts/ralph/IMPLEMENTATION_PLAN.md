@@ -55,7 +55,7 @@ Execution: unified_executor.py routes platform_* → PlatformActionExecutor (no 
 
 ### Phase 2: Dispatcher Enum (P2)
 
-- [ ] **US-012**: Add enum of non-promoted action names to to_dispatcher_schema()
+- [x] **US-012**: Add enum of non-promoted action names to to_dispatcher_schema()
 
 ## Constraints
 
