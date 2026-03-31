@@ -176,6 +176,7 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        admin_only=True,
         tags=["health", "status", "infrastructure", "monitoring"],
         examples=[
             "is the system healthy?",

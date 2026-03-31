@@ -35,6 +35,7 @@ class ActionDefinition:
     permission_level: str = "read"      # "read" | "write" | "destructive"
     requires_confirmation: bool = False
     workspace_scoped: bool = True
+    admin_only: bool = False
     tags: List[str] = field(default_factory=list)
     examples: List[str] = field(default_factory=list)
 
