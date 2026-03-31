@@ -110,13 +110,17 @@ class ActionRegistry:
             actions = [a for a in actions if a.permission_level == permission_filter]
         return [a.to_openai_schema() for a in actions]
 
-    def to_dispatcher_schema(self) -> Dict[str, Any]:
+    def to_dispatcher_schema(self, exclude_admin: bool = False) -> Dict[str, Any]:
         """
         Return a SINGLE OpenAI tool schema (platform_execute) that wraps
         all platform actions behind one dispatcher.
 
         The LLM learns available actions from the system prompt (markdown),
         not from the schema.  This keeps the tool payload small.
+
+        Args:
+            exclude_admin: If True, admin_only actions are excluded from the
+                dispatcher (non-admin callers won't see them).
         """
         self._ensure_initialized()
         return {
@@ -152,14 +156,20 @@ class ActionRegistry:
             },
         }
 
-    def build_prompt_summary(self) -> str:
+    def build_prompt_summary(self, exclude_admin: bool = False) -> str:
         """
         Build a markdown summary of all platform actions for injection
         into the agent's system prompt.  Grouped by category.
+
+        Args:
+            exclude_admin: If True, admin_only actions are skipped from the
+                summary (non-admin callers won't see them).
         """
         self._ensure_initialized()
         by_category: Dict[str, List[ActionDefinition]] = {}
         for action in self._actions.values():
+            if exclude_admin and action.admin_only:
+                continue
             by_category.setdefault(action.category, []).append(action)
 
         lines = ["\n## Available Platform Actions\n"]

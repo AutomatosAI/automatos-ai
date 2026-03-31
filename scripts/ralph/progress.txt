@@ -30,3 +30,12 @@
   - Logs at ERROR level (misconfigured action)
 - Syntax validation passed
 
+## 2026-03-31 — US-004: Filter admin_only tools from non-admin callers
+- Added `is_admin: bool = False` param to `get_tools_for_agent()` in tool_router.py
+- Added `exclude_admin: bool = False` param to `to_dispatcher_schema()` in action_registry.py
+- Added `exclude_admin: bool = False` param to `build_prompt_summary()` in action_registry.py
+- build_prompt_summary skips admin_only actions when exclude_admin=True
+- get_tools_for_agent passes `exclude_admin=not is_admin` to dispatcher schema
+- All params default to False — existing callers unaffected
+- Validated: admin actions correctly filtered from summary, dispatcher schema accepts param, is_admin in function signature
+

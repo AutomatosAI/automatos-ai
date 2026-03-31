@@ -130,6 +130,7 @@ def get_tools_for_agent(
     agent_id: Optional[int] = None,
     db_session=None,
     workspace_id: Optional[Any] = None,
+    is_admin: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Get tools from modules.tools.ToolRegistry in OpenAI function format.
@@ -243,7 +244,7 @@ def get_tools_for_agent(
         try:
             from modules.tools.discovery import get_action_registry
             action_registry = get_action_registry()
-            dispatcher_schema = action_registry.to_dispatcher_schema()
+            dispatcher_schema = action_registry.to_dispatcher_schema(exclude_admin=not is_admin)
             openai_tools.append(dispatcher_schema)
             action_count = len(action_registry.get_all())
             logger.info(f"[tool-trace {trace_id}] Added platform_execute dispatcher ({action_count} actions behind it)")
