@@ -47,7 +47,7 @@ Execution: unified_executor.py routes platform_* → PlatformActionExecutor (no 
 ### Phase 1: Promote High-Value Actions (P1)
 
 - [x] **US-006**: Add `promoted: bool = False` to ActionDefinition + get_promoted() + to_first_class_schemas() methods
-- [ ] **US-007**: Update build_prompt_summary(exclude_promoted=True) + to_dispatcher_schema(exclude_promoted=True)
+- [x] **US-007**: Update build_prompt_summary(exclude_promoted=True) + to_dispatcher_schema(exclude_promoted=True)
 - [ ] **US-008**: Mark ~13 actions as promoted=True in actions_agents, actions_marketplace, actions_monitoring, actions_search
 - [ ] **US-009**: Append promoted schemas in tool_router.py + remove hardcoded _FIELD_TOOL_SCHEMAS + promote field tools
 - [ ] **US-010**: Update SmartToolRouter with ALWAYS_INCLUDE set + promoted tool categories

@@ -53,3 +53,13 @@
   - When exclude_admin=True, admin_only promoted actions are excluded (non-admin callers don't see them)
 - All new fields/params have defaults — existing callers unaffected
 - Validated with isolated import: promoted field works, get_promoted filters correctly, to_first_class_schemas respects exclude_admin
+
+## 2026-03-31 — US-007: Exclude promoted actions from prompt summary + dispatcher
+- Added `exclude_promoted: bool = True` param to `build_prompt_summary()` in action_registry.py
+  - When True (default), actions with promoted=True are skipped from the markdown catalog
+  - Filter applied alongside existing exclude_admin filter
+- Added `exclude_promoted: bool = True` param to `to_dispatcher_schema()` in action_registry.py
+  - Parameter accepted for forward compatibility — actual enum filtering will be added in US-012
+  - Default True ensures promoted actions will be excluded from dispatcher enum by default
+- All params have defaults — existing callers unaffected
+- Syntax validation passed (py_compile OK)

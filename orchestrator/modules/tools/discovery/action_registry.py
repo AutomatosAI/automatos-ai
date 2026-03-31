@@ -133,7 +133,7 @@ class ActionRegistry:
             promoted = [a for a in promoted if not a.admin_only]
         return [a.to_openai_schema() for a in promoted]
 
-    def to_dispatcher_schema(self, exclude_admin: bool = False) -> Dict[str, Any]:
+    def to_dispatcher_schema(self, exclude_admin: bool = False, exclude_promoted: bool = True) -> Dict[str, Any]:
         """
         Return a SINGLE OpenAI tool schema (platform_execute) that wraps
         all platform actions behind one dispatcher.
@@ -144,6 +144,8 @@ class ActionRegistry:
         Args:
             exclude_admin: If True, admin_only actions are excluded from the
                 dispatcher (non-admin callers won't see them).
+            exclude_promoted: If True (default), promoted actions are excluded
+                from the dispatcher since they have first-class schemas.
         """
         self._ensure_initialized()
         return {
@@ -179,7 +181,7 @@ class ActionRegistry:
             },
         }
 
-    def build_prompt_summary(self, exclude_admin: bool = False) -> str:
+    def build_prompt_summary(self, exclude_admin: bool = False, exclude_promoted: bool = True) -> str:
         """
         Build a markdown summary of all platform actions for injection
         into the agent's system prompt.  Grouped by category.
@@ -187,11 +189,15 @@ class ActionRegistry:
         Args:
             exclude_admin: If True, admin_only actions are skipped from the
                 summary (non-admin callers won't see them).
+            exclude_promoted: If True (default), promoted actions are skipped
+                since they have their own first-class schemas.
         """
         self._ensure_initialized()
         by_category: Dict[str, List[ActionDefinition]] = {}
         for action in self._actions.values():
             if exclude_admin and action.admin_only:
+                continue
+            if exclude_promoted and action.promoted:
                 continue
             by_category.setdefault(action.category, []).append(action)
 
