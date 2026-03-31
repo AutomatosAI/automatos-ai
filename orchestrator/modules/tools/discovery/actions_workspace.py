@@ -60,8 +60,10 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_store_memory",
         description=(
-            "Store a piece of information in the workspace memory system. "
-            "Use when the user explicitly asks Auto to remember something."
+            "Store a curated fact in workspace memory for future conversations. "
+            "Use for: user facts, confirmed decisions, workspace patterns, and user corrections. "
+            "Do NOT use for: task artifacts, raw tool outputs, volatile data, or speculative context. "
+            "Format: lead with the fact, then context. Keep under 200 characters."
         ),
         category="memory",
         parameters={
