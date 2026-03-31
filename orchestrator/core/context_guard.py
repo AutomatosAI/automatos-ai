@@ -270,8 +270,9 @@ class ContextGuard:
         if workspace_id:
             await self._flush_to_memory(old_text, workspace_id, agent_id)
 
-        # Construct compacted message list
-        summary_msg = {
+        # Construct compacted message list with tombstone boundary
+        # Tombstone preserves the compacted range for audit/replay
+        tombstone = {
             "role": "system",
             "content": (
                 "## Earlier Conversation Summary\n"
@@ -279,9 +280,15 @@ class ContextGuard:
                 "Use it for context but prioritize the recent messages below.\n\n"
                 f"{summary}"
             ),
+            "_compact_tombstone": {
+                "compacted_count": len(old_turns),
+                "compacted_roles": [m.get("role") for m in old_turns],
+                "summary_token_est": self.count_tokens(summary),
+                "original_token_est": sum(self.count_message_tokens(m) for m in old_turns),
+            },
         }
 
-        return system_msgs + [summary_msg] + recent_turns
+        return system_msgs + [tombstone] + recent_turns
 
     def _turns_to_text(self, turns: List[Dict[str, Any]]) -> str:
         """Convert message turns into readable text for summarization."""
