@@ -99,6 +99,11 @@ from modules.tools.discovery.handlers_reports import (
     submit_report,
     get_latest_report,
 )
+from modules.tools.discovery.handlers_harness import (
+    harness_status,
+    harness_trigger,
+    harness_history,
+)
 from modules.tools.discovery.handlers_assignments import (
     assign_tool_to_agent,
     assign_skill_to_agent,
@@ -269,6 +274,10 @@ class PlatformActionExecutor:
             "platform_get_predictive_alerts": get_predictive_alerts,
             "platform_get_agent_ranking": get_agent_ranking,
             "platform_get_sla_compliance": get_sla_compliance,
+            # PRD-121: HARNESS Self-Optimizing Loop
+            "platform_harness_status": harness_status,
+            "platform_harness_trigger": harness_trigger,
+            "platform_harness_history": harness_history,
         }
 
     def _workspace_has_admin_owner(self) -> bool:

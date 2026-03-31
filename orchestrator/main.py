@@ -423,6 +423,15 @@ async def lifespan(app: FastAPI):
                         except Exception as _cs_err:
                             logger.warning("Could not start CoordinatorService: %s", _cs_err)
 
+                    # PRD-121: HARNESS Self-Optimizing Organization Loop
+                    if config.HARNESS_ENABLED:
+                        try:
+                            from services.harness_service import get_harness_service
+                            await get_harness_service().start(scheduler=shared_sched)
+                            logger.info("HarnessService started on unified scheduler")
+                        except Exception as _hs_err:
+                            logger.warning("Could not start HarnessService: %s", _hs_err)
+
                     logger.info("Unified scheduler started (this worker owns it)")
                 except BlockingIOError:
                     lock_file.close()
