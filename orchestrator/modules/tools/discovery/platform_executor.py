@@ -338,7 +338,10 @@ class PlatformActionExecutor:
             # US-003: Admin gate — deny admin_only actions for non-admin callers
             if action_def and action_def.admin_only:
                 is_admin = False
-                if caller_context:
+                if caller_context and (
+                    caller_context.get("workspace_role")
+                    or caller_context.get("system_role")
+                ):
                     is_admin = (
                         caller_context.get("workspace_role") in ("owner", "admin")
                         or caller_context.get("system_role") == "admin"
