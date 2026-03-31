@@ -39,7 +39,9 @@ async def execute_platform_action(
     Args:
         caller_context: Optional dict with keys user_id, system_role, workspace_role.
             Used for admin_only permission gating (US-002/US-003).
-            If None, admin_only actions will be denied (fail-closed).
+            If None, falls back to workspace-scoped check via
+            _workspace_has_admin_owner() — admin workspace grants access,
+            non-admin workspace denies.
     """
     if not workspace_id:
         return {

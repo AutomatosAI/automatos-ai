@@ -51,7 +51,7 @@ class SmartToolRouter:
     """
 
     # Core tools that are almost always useful
-    CORE_TOOLS = {
+    CORE_TOOLS = frozenset({
         "search_knowledge",
         "semantic_search",
         "search_codebase",
@@ -59,18 +59,18 @@ class SmartToolRouter:
         "query_database",
         "composio_execute",
         "generate_document",
-    }
+    })
 
     # Promoted platform tools that bypass intent filtering —
     # always included regardless of detected intent (PRD-122 US-010)
-    ALWAYS_INCLUDE = {
+    ALWAYS_INCLUDE = frozenset({
         "platform_list_agents",
         "platform_get_agent",
         "platform_search_memory",
         "platform_store_memory",
         "platform_field_query",
         "platform_field_inject",
-    }
+    })
 
     # Tool categories
     TOOL_CATEGORIES = {
