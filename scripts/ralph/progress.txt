@@ -39,3 +39,10 @@
 - All params default to False — existing callers unaffected
 - Validated: admin actions correctly filtered from summary, dispatcher schema accepts param, is_admin in function signature
 
+## 2026-03-31 — US-005: Fix search_chat_history multi-tenancy bug
+- Replaced `WHERE c.user_id = (SELECT id FROM users LIMIT 1)` with workspace-scoped JOIN
+- Chats table has no workspace_id column — joined through workspace_members: `JOIN workspace_members wm ON wm.user_id = c.user_id WHERE wm.workspace_id = :workspace_id AND wm.is_active = true`
+- Also fixed INTERVAL bug: `INTERVAL ':days days'` doesn't parameterize (days is inside string literal) — replaced with `make_interval(days => :days)`
+- workspace_id parameter was already available in the handler function signature
+- Syntax validation passed
+

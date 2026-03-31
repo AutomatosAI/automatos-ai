@@ -42,7 +42,7 @@ Execution: unified_executor.py routes platform_* → PlatformActionExecutor (no 
 - [x] **US-002**: Thread caller_context (user_id, system_role, workspace_role) through unified_executor → platform_executor
 - [x] **US-003**: Add admin gate (before requires_confirmation) + destructive safety check (after rate limit) in platform_executor.py
 - [x] **US-004**: Add is_admin param to get_tools_for_agent() + exclude_admin to to_dispatcher_schema/build_prompt_summary
-- [ ] **US-005**: Fix search_chat_history WHERE clause to scope by workspace_id
+- [x] **US-005**: Fix search_chat_history WHERE clause to scope by workspace_id
 
 ### Phase 1: Promote High-Value Actions (P1)
 

@@ -30,8 +30,10 @@ async def search_chat_history(db: Session, workspace_id: UUID, params: Dict[str,
                        c.title AS chat_title
                 FROM messages m
                 JOIN chats c ON c.id = m.chat_id
-                WHERE c.user_id = (SELECT id FROM users LIMIT 1)
-                  AND m.created_at >= NOW() - INTERVAL ':days days'
+                JOIN workspace_members wm ON wm.user_id = c.user_id
+                WHERE wm.workspace_id = :workspace_id
+                  AND wm.is_active = true
+                  AND m.created_at >= NOW() - make_interval(days => :days)
                   AND EXISTS (
                       SELECT 1 FROM jsonb_array_elements(m.parts) AS p
                       WHERE p->>'text' ILIKE :search
@@ -39,7 +41,7 @@ async def search_chat_history(db: Session, workspace_id: UUID, params: Dict[str,
                 ORDER BY m.created_at DESC
                 LIMIT :lim
             """),
-            {"days": days, "search": search_term, "lim": limit},
+            {"workspace_id": str(workspace_id), "days": days, "search": search_term, "lim": limit},
         ).fetchall()
 
         results = []
