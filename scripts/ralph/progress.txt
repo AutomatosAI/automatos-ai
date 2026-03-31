@@ -74,3 +74,16 @@
 - Note: platform_store_memory and platform_get_system_health are in actions_workspace.py, not actions_search.py/actions_monitoring.py as PRD assumed
 - Validated: 97 total actions, 13 promoted, 6 admin-only. platform_get_system_health is both promoted + admin_only
 - Syntax validation passed (py_compile OK for all 5 files)
+
+## 2026-03-31 — US-009: Append promoted schemas in tool_router + consolidate field tools
+- Replaced hardcoded _FIELD_TOOL_SCHEMAS block (60 lines) in tool_router.py with `action_registry.to_first_class_schemas(exclude_admin=not is_admin)`
+  - All promoted actions now get first-class schemas dynamically from ActionRegistry
+  - Admin-only promoted actions excluded for non-admin callers
+  - Log line: "Added {n} promoted action schemas"
+- Marked platform_field_query and platform_field_inject as promoted=True in actions_field.py
+  - platform_field_stability left as non-promoted (not a high-value direct-call tool)
+- Field tool schemas now come from ActionDefinition.to_openai_schema() instead of hardcoded dicts
+  - Schema structure matches: same type/function/name/description/parameters pattern
+  - Descriptions are richer in ActionDefinition (more context for LLM) — improvement, not regression
+- Total promoted count: 15 (13 from US-008 + 2 field tools)
+- Syntax validation passed (py_compile OK for actions_field.py + tool_router.py)
