@@ -145,6 +145,7 @@ class SkillMaterializer:
             existing.skill_version = version
             existing.is_active = True
             self.db.flush()
+            self._invalidate_skill_cache(name)
             logger.info("Updated existing skill '%s' (id=%d) from plugin %s", name, existing.id, plugin.slug)
             return existing.id
 
@@ -164,5 +165,17 @@ class SkillMaterializer:
         )
         self.db.add(skill)
         self.db.flush()  # Get the ID
+        self._invalidate_skill_cache(name)
         logger.info("Created new skill '%s' (id=%d) from plugin %s", name, skill.id, plugin.slug)
         return skill.id
+
+    def _invalidate_skill_cache(self, skill_name: str) -> None:
+        """Clear SkillLoader caches so updated content is served immediately."""
+        try:
+            from modules.agents.services.skill_loader import get_skill_loader
+            loader = get_skill_loader(self.db)
+            loader.metadata_cache.pop(skill_name, None)
+            loader.core_content_cache.pop(skill_name, None)
+            logger.debug("Invalidated cache for skill '%s'", skill_name)
+        except Exception:
+            pass  # SkillLoader not initialized yet — no cache to clear

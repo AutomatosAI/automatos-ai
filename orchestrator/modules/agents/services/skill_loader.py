@@ -338,7 +338,10 @@ class SkillLoader:
             
             # 6. Index repository
             index_result = self._index_repository(db, skill_source.id, local_path)
-            
+
+            # 6b. Clear caches so new/updated skills are served immediately
+            self.clear_caches()
+
             # 7. Update source with results
             skill_source.skills_discovered = len(index_result["skills"])
             skill_source.status = "active"

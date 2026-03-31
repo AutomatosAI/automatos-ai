@@ -79,25 +79,39 @@ class HarnessService:
         logger.info("[HARNESS] Service started (cron: Sunday 02:00 UTC)")
 
     async def _register_workspace_jobs(self) -> None:
-        """Query active workspaces and register a cron job for each."""
+        """Register a single cron job that iterates all active workspaces.
+
+        Single-job design avoids thundering herd (N workspaces all firing at
+        02:00 UTC) and automatically picks up new workspaces without restart.
+        """
+        self._scheduler.add_job(
+            self._harness_sweep,
+            "cron",
+            id="harness_sweep",
+            replace_existing=True,
+            max_instances=1,
+            **_CRON_EXPRESSION,
+        )
+        logger.info("[HARNESS] Registered sweep job (Sunday 02:00 UTC)")
+
+    async def _harness_sweep(self) -> None:
+        """Iterate all active, opted-in workspaces sequentially."""
         from core.database.database import SessionLocal
         from core.models.workspaces import Workspace
 
         db = SessionLocal()
         try:
-            workspaces = db.query(Workspace.id).filter(Workspace.is_active.is_(True)).all()
-            for (ws_id,) in workspaces:
-                job_id = f"harness_{ws_id}"
-                self._scheduler.add_job(
-                    self._harness_tick,
-                    "cron",
-                    id=job_id,
-                    replace_existing=True,
-                    max_instances=1,
-                    kwargs={"workspace_id": ws_id},
-                    **_CRON_EXPRESSION,
-                )
-            logger.info("[HARNESS] Registered jobs for %d workspaces", len(workspaces))
+            workspaces = db.query(Workspace).filter(Workspace.is_active.is_(True)).all()
+            eligible = [
+                ws for ws in workspaces
+                if self._workspace_opted_in(ws)
+            ]
+            logger.info(
+                "[HARNESS] Sweep starting — %d/%d workspaces opted in",
+                len(eligible), len(workspaces),
+            )
+            for ws in eligible:
+                await self._harness_tick(workspace_id=ws.id)
         finally:
             db.close()
 
@@ -150,11 +164,17 @@ class HarnessService:
                 logger.info("[HARNESS] Dormant for %s — insufficient data", ws_key)
                 return
 
+            # ----- Read workspace harness config -----
+            from core.models.workspaces import Workspace as WsModel
+            ws = db.query(WsModel).get(workspace_id)
+            ws_settings = ws.settings if ws else None
+            allow_auto = self._workspace_allows_auto_apply(ws_settings)
+
             # ----- 5-phase pipeline -----
             metrics = await self._phase_collect(workspace_id, db)
             diagnosis = await self._phase_diagnose(workspace_id, metrics, db)
             prescriptions = await self._phase_prescribe(workspace_id, diagnosis, metrics, db)
-            changelog = await self._phase_apply(workspace_id, prescriptions, db)
+            changelog = await self._phase_apply(workspace_id, prescriptions, db, allow_auto_apply=allow_auto)
             await self._phase_baseline(workspace_id, metrics, diagnosis, prescriptions, changelog, db)
 
             elapsed = time.monotonic() - t0
@@ -170,6 +190,40 @@ class HarnessService:
         finally:
             db.close()
             self._running[ws_key] = False
+
+    # ------------------------------------------------------------------
+    # Workspace opt-in / settings
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _workspace_opted_in(workspace: "Workspace") -> bool:
+        """Check workspace.settings.orchestrator.harness.enabled.
+
+        Stored in workspace.settings JSONB under orchestrator.harness:
+          enabled:  bool (default False) — user must opt in
+          schedule: "weekly" | "biweekly" | "monthly"
+          mode:     "full_auto" | "manual"
+        """
+        settings = workspace.settings or {}
+        harness = settings.get("orchestrator", {}).get("harness", {})
+        return harness.get("enabled", False)
+
+    @staticmethod
+    def _get_harness_config(workspace_settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Return harness config from workspace settings."""
+        if not workspace_settings:
+            return {"enabled": False, "schedule": "weekly", "mode": "full_auto"}
+        return workspace_settings.get("orchestrator", {}).get("harness", {
+            "enabled": False, "schedule": "weekly", "mode": "full_auto",
+        })
+
+    @staticmethod
+    def _workspace_allows_auto_apply(workspace_settings: Optional[Dict[str, Any]]) -> bool:
+        """Return False if the user wants all changes queued for review (mode=manual)."""
+        if not workspace_settings:
+            return True
+        harness = workspace_settings.get("orchestrator", {}).get("harness", {})
+        return harness.get("mode", "full_auto") == "full_auto"
 
     # ------------------------------------------------------------------
     # Dormancy check
@@ -494,9 +548,17 @@ class HarnessService:
         workspace_id: UUID,
         prescriptions: List[Dict[str, Any]],
         db: "Session",
+        allow_auto_apply: bool = True,
     ) -> Dict[str, Any]:
-        """Execute safe changes (risk ≤ 2), queue risky ones as board tasks."""
-        logger.info("[HARNESS] Phase 4 APPLY — workspace %s", workspace_id)
+        """Execute safe changes (risk ≤ 2), queue risky ones as board tasks.
+
+        When allow_auto_apply is False (manual mode), ALL prescriptions are
+        queued as board tasks regardless of risk score.
+        """
+        logger.info(
+            "[HARNESS] Phase 4 APPLY — workspace %s (auto_apply=%s)",
+            workspace_id, allow_auto_apply,
+        )
 
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
 
@@ -518,7 +580,7 @@ class HarnessService:
             target_name = rx.get("target_name", "unknown")
             change_type = rx.get("change_type", "unknown")
 
-            if risk <= _AUTO_APPLY_MAX_RISK:
+            if allow_auto_apply and risk <= _AUTO_APPLY_MAX_RISK:
                 # Auto-apply
                 result = await self._auto_apply_prescription(executor, rx)
                 if result.get("success"):

@@ -237,7 +237,15 @@ _ORCHESTRATOR_DEFAULTS = {
         "checklist": "- Check agent health status\n- Review pending webhook failures\n- Summarize today's activity",
         "notification_channel": "in_app",
     },
+    "harness": {
+        "enabled": False,
+        "schedule": "weekly",
+        "mode": "full_auto",
+    },
 }
+
+_VALID_HARNESS_SCHEDULES = ["weekly", "biweekly", "monthly"]
+_VALID_HARNESS_MODES = ["full_auto", "manual"]
 
 
 @router.get("/current/orchestrator")
@@ -256,6 +264,7 @@ async def get_orchestrator_settings(
     # Merge with defaults so frontend always gets a complete object
     result = {**_ORCHESTRATOR_DEFAULTS, **orchestrator}
     result["heartbeat"] = {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **orchestrator.get("heartbeat", {})}
+    result["harness"] = {**_ORCHESTRATOR_DEFAULTS["harness"], **orchestrator.get("harness", {})}
 
     return result
 
@@ -319,6 +328,14 @@ async def save_orchestrator_settings(
                 except (ValueError, AssertionError):
                     raise HTTPException(400, f"heartbeat.{field} must be HH:MM format")
 
+    # Validate harness
+    harness = payload.get("harness")
+    if harness and isinstance(harness, dict):
+        if "schedule" in harness and harness["schedule"] not in _VALID_HARNESS_SCHEDULES:
+            raise HTTPException(400, f"harness.schedule must be one of {_VALID_HARNESS_SCHEDULES}")
+        if "mode" in harness and harness["mode"] not in _VALID_HARNESS_MODES:
+            raise HTTPException(400, f"harness.mode must be one of {_VALID_HARNESS_MODES}")
+
     # Merge into workspace settings
     settings = dict(workspace.settings or {})
     existing_orch = dict(settings.get("orchestrator", {}))
@@ -334,6 +351,12 @@ async def save_orchestrator_settings(
         existing_hb.update(hb)
         existing_orch["heartbeat"] = existing_hb
 
+    # Update harness (merge, don't replace)
+    if harness and isinstance(harness, dict):
+        existing_harness = dict(existing_orch.get("harness", {}))
+        existing_harness.update(harness)
+        existing_orch["harness"] = existing_harness
+
     settings["orchestrator"] = existing_orch
     workspace.settings = settings
 
@@ -346,6 +369,7 @@ async def save_orchestrator_settings(
     # Return merged result with defaults
     result = {**_ORCHESTRATOR_DEFAULTS, **existing_orch}
     result["heartbeat"] = {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **existing_orch.get("heartbeat", {})}
+    result["harness"] = {**_ORCHESTRATOR_DEFAULTS["harness"], **existing_orch.get("harness", {})}
     return {"status": "saved", "orchestrator": result}
 
 
