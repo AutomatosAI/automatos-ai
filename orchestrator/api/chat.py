@@ -319,34 +319,11 @@ async def stream_chat(
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""
     logger.info(f"[chat] RequestContext workspace_id={ctx.workspace_id}")
     chat_service = ChatService(db)
-    # Build caller_context for admin gate in PlatformActionExecutor (PRD-122)
-    _clerk_uid = getattr(ctx.user, "clerk_user_id", None) or getattr(ctx.user, "id", None) if ctx.user else None
-    _caller_context = {
-        "user_id": _clerk_uid,
-        "system_role": getattr(ctx.user, "system_role", "user") if ctx.user else "user",
-    }
-    # Resolve workspace_role via JOIN (clerk_user_id → users → workspace_members)
-    if _clerk_uid:
-        try:
-            from sqlalchemy import text as sa_text
-            _role_row = db.execute(
-                sa_text(
-                    "SELECT wm.role FROM workspace_members wm "
-                    "JOIN users u ON wm.user_id = u.id "
-                    "WHERE wm.workspace_id = :ws_id "
-                    "AND u.clerk_user_id = :clerk_uid "
-                    "AND wm.is_active = true LIMIT 1"
-                ),
-                {"ws_id": str(ctx.workspace_id), "clerk_uid": _clerk_uid},
-            ).fetchone()
-            if _role_row:
-                _caller_context["workspace_role"] = _role_row[0]
-        except Exception:
-            db.rollback()  # prevent InFailedSqlTransaction from poisoning session
-
-    streaming_service = StreamingChatService(
-        db, workspace_id=ctx.workspace_id, caller_context=_caller_context,
-    )
+    # PRD-122: Admin gate is workspace-scoped, not user-scoped.
+    # caller_context=None lets PlatformActionExecutor fall through to
+    # _workspace_has_admin_owner() which checks if the workspace has an
+    # admin/owner member.  Admin workspace → all tools; user workspace → restricted.
+    streaming_service = StreamingChatService(db, workspace_id=ctx.workspace_id)
     user_id = get_user_id(db)
 
     def get_parts(msg: ChatMessageRequest) -> List[MessagePart]:
