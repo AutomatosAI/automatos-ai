@@ -130,6 +130,7 @@ def get_tools_for_agent(
     agent_id: Optional[int] = None,
     db_session=None,
     workspace_id: Optional[Any] = None,
+    is_admin: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Get tools from modules.tools.ToolRegistry in OpenAI function format.
@@ -239,82 +240,55 @@ def get_tools_for_agent(
                 "function": schema
             })
 
+        # PRD-122 fix: Auto-resolve admin status from workspace owner role
+        # when no explicit is_admin was passed (heartbeat, agent factory paths).
+        if not is_admin and workspace_id and session_used:
+            try:
+                from core.workspaces.models import WorkspaceMember
+                has_admin = (
+                    session_used.query(WorkspaceMember)
+                    .filter(
+                        WorkspaceMember.workspace_id == workspace_id,
+                        WorkspaceMember.role.in_(("owner", "admin")),
+                        WorkspaceMember.is_active.is_(True),
+                    )
+                    .first()
+                )
+                if has_admin:
+                    is_admin = True
+                    logger.info(f"[tool-trace {trace_id}] Workspace {workspace_id} has admin/owner — including admin tools")
+            except Exception as exc:
+                logger.debug(f"[tool-trace {trace_id}] Could not resolve workspace admin status: {exc}")
+
         # PRD-64: Single dispatcher for platform actions (reduces 58 schemas → 1)
+        action_registry = None
         try:
             from modules.tools.discovery import get_action_registry
             action_registry = get_action_registry()
-            dispatcher_schema = action_registry.to_dispatcher_schema()
+            dispatcher_schema = action_registry.to_dispatcher_schema(
+                exclude_admin=not is_admin,
+                exclude_promoted=True,  # promoted actions have first-class schemas below
+            )
             openai_tools.append(dispatcher_schema)
-            action_count = len(action_registry.get_all())
-            logger.info(f"[tool-trace {trace_id}] Added platform_execute dispatcher ({action_count} actions behind it)")
+            all_actions = action_registry.get_all()
+            dispatcher_count = len([a for a in all_actions if not a.promoted])
+            logger.info(f"[tool-trace {trace_id}] Added platform_execute dispatcher ({dispatcher_count} actions behind it)")
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
 
-        # PRD-108: First-class field tools for mission agents.
-        # These are registered in ActionRegistry but the dispatcher pattern
-        # requires the LLM to wrap calls in platform_execute(action=..., params=...).
-        # Adding dedicated schemas lets agents call them directly — the execution
-        # path at unified_executor.py:382 routes platform_* calls correctly,
-        # and field_id is auto-injected from the active mission.
-        _FIELD_TOOL_SCHEMAS = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "platform_field_query",
-                    "description": (
-                        "Search the shared mission field for findings from other agents. "
-                        "Returns results ranked by semantic relevance — important, frequently-accessed "
-                        "findings surface first. Always query before starting work to see what's known."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "What to search for, e.g. 'research findings about EU AI Act'",
-                            },
-                            "top_k": {
-                                "type": "integer",
-                                "description": "Max results to return (default 10)",
-                                "default": 10,
-                            },
-                        },
-                        "required": ["query"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "platform_field_inject",
-                    "description": (
-                        "Share a finding or conclusion with other mission agents by storing it "
-                        "in the shared field. Other agents will discover it when they query."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "key": {
-                                "type": "string",
-                                "description": "Short label, e.g. 'finding_1', 'competitor_analysis'",
-                            },
-                            "value": {
-                                "type": "string",
-                                "description": "The content — research finding, analysis, conclusion",
-                            },
-                            "strength": {
-                                "type": "number",
-                                "description": "Importance 0.0-1.0 (default 1.0). Lower for uncertain findings.",
-                                "default": 1.0,
-                            },
-                        },
-                        "required": ["key", "value"],
-                    },
-                },
-            },
-        ]
-        openai_tools.extend(_FIELD_TOOL_SCHEMAS)
-        logger.info(f"[tool-trace {trace_id}] Added {len(_FIELD_TOOL_SCHEMAS)} first-class field tool schemas")
+        # PRD-122: First-class schemas for promoted actions.
+        # Promoted actions get their own OpenAI tool schemas instead of
+        # going through the platform_execute dispatcher — the LLM can call
+        # them directly. The execution path at unified_executor.py routes
+        # platform_* calls correctly regardless of how the schema was defined.
+        try:
+            if not action_registry:
+                raise RuntimeError("action_registry not initialized")
+            promoted_schemas = action_registry.to_first_class_schemas(exclude_admin=not is_admin)
+            openai_tools.extend(promoted_schemas)
+            logger.info(f"[tool-trace {trace_id}] Added {len(promoted_schemas)} promoted action schemas")
+        except Exception as e:
+            logger.debug(f"[tool-trace {trace_id}] Promoted schemas unavailable: {e}")
 
         elapsed_ms = int((time.time() - start_time) * 1000)
         logger.info(
@@ -345,6 +319,7 @@ async def execute_tool(
     agent_id: int = 1,
     workspace_id: Optional[UUID] = None,
     trace_id: Optional[str] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Execute a tool via modules.tools.UnifiedToolExecutor.
@@ -380,7 +355,8 @@ async def execute_tool(
             tool_args,
             agent_id,
             workspace_id=workspace_id,
-            trace_id=trace
+            trace_id=trace,
+            caller_context=caller_context,
         )
         db_session.commit()
         logger.info(
@@ -417,6 +393,7 @@ class ToolRouter:
         agent_id: int = 1,
         workspace_id: Optional[UUID] = None,
         original_intent: Optional[str] = None,
+        caller_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Execute a tool and return formatted results.
@@ -470,6 +447,7 @@ class ToolRouter:
                     agent_id,
                     workspace_id=workspace_id,
                     trace_id=trace_id,
+                    caller_context=caller_context,
                 )
 
             # Check success (support multiple executor result shapes)

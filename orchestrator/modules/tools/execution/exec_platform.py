@@ -32,8 +32,17 @@ async def execute_platform_action(
     parameters: Dict[str, Any],
     workspace_id: Optional[UUID] = None,
     trace_id: Optional[str] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Execute a platform action via PlatformActionExecutor."""
+    """Execute a platform action via PlatformActionExecutor.
+
+    Args:
+        caller_context: Optional dict with keys user_id, system_role, workspace_role.
+            Used for admin_only permission gating (US-002/US-003).
+            If None, falls back to workspace-scoped check via
+            _workspace_has_admin_owner() — admin workspace grants access,
+            non-admin workspace denies.
+    """
     if not workspace_id:
         return {
             "success": False,
@@ -44,7 +53,7 @@ async def execute_platform_action(
     try:
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
         executor_inst = PlatformActionExecutor(db=executor.db, workspace_id=workspace_id)
-        result = await executor_inst.execute(tool_name, parameters)
+        result = await executor_inst.execute(tool_name, parameters, caller_context=caller_context)
         logger.info(
             f"[tool-trace {trace_id or 'no-trace'}] Platform action {tool_name} "
             f"success={result.get('success')}"

@@ -35,6 +35,8 @@ class ActionDefinition:
     permission_level: str = "read"      # "read" | "write" | "destructive"
     requires_confirmation: bool = False
     workspace_scoped: bool = True
+    admin_only: bool = False
+    promoted: bool = False
     tags: List[str] = field(default_factory=list)
     examples: List[str] = field(default_factory=list)
 
@@ -109,15 +111,58 @@ class ActionRegistry:
             actions = [a for a in actions if a.permission_level == permission_filter]
         return [a.to_openai_schema() for a in actions]
 
-    def to_dispatcher_schema(self) -> Dict[str, Any]:
+    def get_promoted(self) -> List[ActionDefinition]:
+        """Get all actions marked as promoted."""
+        self._ensure_initialized()
+        return [a for a in self._actions.values() if a.promoted]
+
+    def to_first_class_schemas(self, exclude_admin: bool = False) -> List[Dict[str, Any]]:
+        """
+        Return OpenAI function schemas for promoted actions.
+
+        Promoted actions get their own first-class tool schemas instead of
+        going through the platform_execute dispatcher.
+
+        Args:
+            exclude_admin: If True, admin_only promoted actions are excluded
+                (non-admin callers won't get schemas for admin tools).
+        """
+        self._ensure_initialized()
+        promoted = [a for a in self._actions.values() if a.promoted]
+        if exclude_admin:
+            promoted = [a for a in promoted if not a.admin_only]
+        return [a.to_openai_schema() for a in promoted]
+
+    def to_dispatcher_schema(self, exclude_admin: bool = False, exclude_promoted: bool = True) -> Dict[str, Any]:
         """
         Return a SINGLE OpenAI tool schema (platform_execute) that wraps
         all platform actions behind one dispatcher.
 
         The LLM learns available actions from the system prompt (markdown),
         not from the schema.  This keeps the tool payload small.
+
+        Args:
+            exclude_admin: If True, admin_only actions are excluded from the
+                dispatcher (non-admin callers won't see them).
+            exclude_promoted: If True (default), promoted actions are excluded
+                from the dispatcher since they have first-class schemas.
         """
         self._ensure_initialized()
+
+        # Build enum of valid action names for the dispatcher
+        valid_actions = sorted(
+            a.name for a in self._actions.values()
+            if (not exclude_promoted or not a.promoted)
+            and (not exclude_admin or not a.admin_only)
+        )
+
+        action_property: Dict[str, Any] = {
+            "type": "string",
+            "description": "The exact platform action name (e.g. 'platform_configure_agent_heartbeat')",
+        }
+        if valid_actions:
+            action_property["enum"] = valid_actions
+
         return {
             "type": "function",
             "function": {
@@ -133,10 +178,7 @@ class ActionRegistry:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "action": {
-                            "type": "string",
-                            "description": "The exact platform action name (e.g. 'platform_list_agents')",
-                        },
+                        "action": action_property,
                         "params": {
                             "type": "object",
                             "description": (
@@ -151,14 +193,24 @@ class ActionRegistry:
             },
         }
 
-    def build_prompt_summary(self) -> str:
+    def build_prompt_summary(self, exclude_admin: bool = False, exclude_promoted: bool = True) -> str:
         """
         Build a markdown summary of all platform actions for injection
         into the agent's system prompt.  Grouped by category.
+
+        Args:
+            exclude_admin: If True, admin_only actions are skipped from the
+                summary (non-admin callers won't see them).
+            exclude_promoted: If True (default), promoted actions are skipped
+                since they have their own first-class schemas.
         """
         self._ensure_initialized()
         by_category: Dict[str, List[ActionDefinition]] = {}
         for action in self._actions.values():
+            if exclude_admin and action.admin_only:
+                continue
+            if exclude_promoted and action.promoted:
+                continue
             by_category.setdefault(action.category, []).append(action)
 
         lines = ["\n## Available Platform Actions\n"]

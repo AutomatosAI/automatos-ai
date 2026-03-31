@@ -35,6 +35,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        promoted=True,
         tags=["marketplace", "plugins", "browse", "search"],
         examples=[
             "browse marketplace plugins",
@@ -71,6 +72,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        promoted=True,
         tags=["marketplace", "agents", "browse", "search", "hire"],
         examples=[
             "browse marketplace agents",
@@ -108,6 +110,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        promoted=True,
         tags=["marketplace", "skills", "browse", "search"],
         examples=[
             "browse marketplace skills",
@@ -213,6 +216,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="write",
+        promoted=True,
         tags=["marketplace", "plugins", "install", "enable"],
         examples=[
             "install the code review plugin",
@@ -244,6 +248,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="write",
+        promoted=True,
         tags=["marketplace", "skills", "install", "enable"],
         examples=[
             "install the summarization skill",

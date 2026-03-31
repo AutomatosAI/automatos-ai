@@ -51,7 +51,7 @@ class PlatformActionsSection(BaseSection):
         from modules.tools.discovery.action_registry import get_action_registry
 
         registry = get_action_registry()
-        content: str = registry.build_prompt_summary()
+        content: str = registry.build_prompt_summary(exclude_promoted=True, exclude_admin=True)
 
         if not content:
             logger.warning(

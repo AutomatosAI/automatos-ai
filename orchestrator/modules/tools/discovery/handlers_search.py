@@ -19,8 +19,14 @@ async def search_chat_history(db: Session, workspace_id: UUID, params: Dict[str,
     if not query:
         return {"success": False, "error": "query parameter is required"}
 
-    days = min(params.get("days", 30), 365)
-    limit = min(params.get("limit", 20), 100)
+    try:
+        days = min(int(params.get("days", 30)), 365)
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        limit = min(int(params.get("limit", 20)), 100)
+    except (TypeError, ValueError):
+        limit = 20
     search_term = f"%{query}%"
 
     try:
@@ -30,8 +36,10 @@ async def search_chat_history(db: Session, workspace_id: UUID, params: Dict[str,
                        c.title AS chat_title
                 FROM messages m
                 JOIN chats c ON c.id = m.chat_id
-                WHERE c.user_id = (SELECT id FROM users LIMIT 1)
-                  AND m.created_at >= NOW() - INTERVAL ':days days'
+                JOIN workspace_members wm ON wm.user_id = c.user_id
+                WHERE wm.workspace_id = :workspace_id
+                  AND wm.is_active = true
+                  AND m.created_at >= NOW() - make_interval(days => :days)
                   AND EXISTS (
                       SELECT 1 FROM jsonb_array_elements(m.parts) AS p
                       WHERE p->>'text' ILIKE :search
@@ -39,7 +47,7 @@ async def search_chat_history(db: Session, workspace_id: UUID, params: Dict[str,
                 ORDER BY m.created_at DESC
                 LIMIT :lim
             """),
-            {"days": days, "search": search_term, "lim": limit},
+            {"workspace_id": str(workspace_id), "days": days, "search": search_term, "lim": limit},
         ).fetchall()
 
         results = []
@@ -85,7 +93,10 @@ async def search_memory(db: Session, workspace_id: UUID, params: Dict[str, Any])
         return {"success": False, "error": "query parameter is required"}
 
     agent_id = params.get("agent_id")
-    limit = min(params.get("limit", 10), 50)
+    try:
+        limit = min(int(params.get("limit", 10)), 50)
+    except (TypeError, ValueError):
+        limit = 10
     result_char_limit = 150
 
     try:

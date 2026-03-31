@@ -75,6 +75,7 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
             "required": ["content"],
         },
         permission_level="write",
+        promoted=True,
         requires_confirmation=False,
         tags=["memory", "store", "write"],
         examples=[
@@ -176,6 +177,8 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        admin_only=True,
+        promoted=True,
         tags=["health", "status", "infrastructure", "monitoring"],
         examples=[
             "is the system healthy?",

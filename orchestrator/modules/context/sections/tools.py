@@ -114,7 +114,7 @@ class ToolsSection(BaseSection):
         from modules.tools.discovery.action_registry import get_action_registry
 
         registry = get_action_registry()
-        schema = registry.to_dispatcher_schema()
+        schema = registry.to_dispatcher_schema(exclude_admin=True)
         return [schema], "auto"
 
     def _load_full(

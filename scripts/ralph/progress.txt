@@ -1,110 +1,124 @@
-# PRD-120 Phase 2: Skill Rewrites — Progress Log
+# PRD-122: Tool Routing Promotion, Permission Enforcement & First-Class Schemas — Progress Log
 
-## US-001: SKILL-GUIDE.md + seed script updates (2026-03-25)
-- Created automatos-skills/SKILL-GUIDE.md with full format spec, tool reference, examples
-- Updated seed script frontmatter parser to handle tools: [{name, description}] dicts
-- Added CATEGORY_MODEL_MAP (category → default model slug)
-- Added SLUG_MODEL_OVERRIDES (13 opus, 3 haiku overrides)
-- Removed reliance on recommended_model/recommended_tools frontmatter fields
-- Fixed identity extraction to handle both ## Identity and # Title paragraph formats
-- Dry run: 97 entries, correct model assignments
+## 2026-03-31 — US-001: admin_only field + 6 infra tools gated
+- Added `admin_only: bool = False` to ActionDefinition dataclass (after workspace_scoped)
+- Marked 6 tools as admin_only=True:
+  - actions_monitoring.py: platform_query_loki_logs, platform_query_prometheus, platform_get_alerts, platform_get_logs, platform_list_services
+  - actions_workspace.py: platform_get_system_health (registered here, not actions_monitoring.py as PRD assumed)
+- to_openai_schema() unaffected (admin_only is metadata only)
+- Syntax validation passed
 
-## US-002: Engineering batch 1 — 8 skills rewritten (2026-03-25)
-- Rewrote: frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer
-- All skills: frontmatter with tools:{name,description}, identity paragraph, 6-step workflow with JSON tool calls, output format template, "What NOT To Do" section
-- Line counts: 91-98 lines (within 60-100 target)
-- Each skill uses 6 tools from the Engineering Tool Kit
-- Seed script dry-run: 97 entries, no errors
+## 2026-03-31 — US-002: Thread caller_context through executor chain
+- Added `caller_context: Optional[Dict[str, Any]] = None` to `execute_tool()` in unified_executor.py
+- Passed caller_context through both platform_execute dispatcher path and direct platform_* routing
+- Updated delegate `_execute_platform_action()` to accept and forward caller_context
+- Updated `exec_platform.execute_platform_action()` to accept and pass caller_context to PlatformActionExecutor
+- Updated `PlatformActionExecutor.execute()` to accept `caller_context: Dict[str, Any] | None = None`
+- All parameters have defaults (None) — existing callers unaffected
+- Syntax validation passed for all 3 files
+- NOTE: unified_executor.py is at `modules/tools/execution/` not `modules/tools/` as PRD assumed
 
-## US-003: Engineering batch 2 — 8 skills rewritten (2026-03-25)
-- Rewrote: code-reviewer, software-architect, technical-writer, mobile-app-builder, senior-developer, git-workflow-master, rapid-prototyper, incident-response-commander
-- All skills: frontmatter with tools:{name,description}, identity paragraph, 6-step workflow with JSON tool calls, output format template, "What NOT To Do" section
-- Line counts: 92-100 lines (within 60-100 target)
-- Each skill uses 6-7 tools from the Engineering Tool Kit
-- incident-response-commander uses platform_get_system_health, platform_get_logs, platform_query_loki_logs (crisis monitoring tools as specified)
+## 2026-03-31 — US-003: Admin gate + destructive safety check in platform_executor.py
+- Added admin_only gate BEFORE requires_confirmation check:
+  - Looks up action_def from registry, checks admin_only flag
+  - If admin_only: caller must have workspace_role in (owner, admin) OR system_role == admin
+  - If caller_context is None (no identity), admin_only actions are denied (fail-closed)
+  - Returns {success: False, permission_denied: True, error: ...}
+  - Logs denial at WARNING with action name, workspace_id, and sanitized caller_context (no user_id)
+- Added destructive safety check AFTER rate limit block:
+  - If permission_level == "destructive" and requires_confirmation is False, reject with internal error
+  - Logs at ERROR level (misconfigured action)
+- Syntax validation passed
 
-## US-004: Engineering batch 3 — 5 skills rewritten (2026-03-25)
-- Rewrote: threat-detection-engineer, solidity-smart-contract-engineer, embedded-firmware-engineer, ai-data-remediation-engineer, autonomous-optimization-architect
-- All skills: frontmatter with tools:{name,description}, identity paragraph, 6-8 step workflow with JSON tool calls, output format template, "What NOT To Do" section
-- Line counts: 94-103 lines (within target range)
-- threat-detection-engineer uses platform_query_loki_logs for threat hunting (LogQL queries)
-- autonomous-optimization-architect uses platform_get_cost_breakdown + platform_get_llm_usage for cost analysis
-- Removed workspace_write_file from autonomous-optimization-architect tools (not needed for report-only agent)
+## 2026-03-31 — US-004: Filter admin_only tools from non-admin callers
+- Added `is_admin: bool = False` param to `get_tools_for_agent()` in tool_router.py
+- Added `exclude_admin: bool = False` param to `to_dispatcher_schema()` in action_registry.py
+- Added `exclude_admin: bool = False` param to `build_prompt_summary()` in action_registry.py
+- build_prompt_summary skips admin_only actions when exclude_admin=True
+- get_tools_for_agent passes `exclude_admin=not is_admin` to dispatcher schema
+- All params default to False — existing callers unaffected
+- Validated: admin actions correctly filtered from summary, dispatcher schema accepts param, is_admin in function signature
 
-## US-005: Marketing — 16 skills rewritten (2026-03-25)
-- Rewrote: growth-hacker, content-creator, seo-specialist, social-media-strategist, linkedin-content-creator, twitter-engager, tiktok-strategist, instagram-curator, podcast-strategist, reddit-community-builder, app-store-optimizer, carousel-growth-engine, short-video-editing-coach, ai-citation-strategist, book-co-author, cross-border-ecommerce
-- All skills: frontmatter with tools:{name,description}, identity paragraph, 5-step workflow with JSON tool calls, output format template, "What NOT To Do" section
-- Line counts: 87-100 lines (within 60-100 target)
-- Social media skills (linkedin, twitter) use composio_execute for platform-specific actions
-- Content skills use platform_publish_blog_post for publishing
-- Growth-hacker uses composio_execute with GOOGLE_ANALYTICS for metrics
-- SEO specialist uses composio_execute with GOOGLE_ANALYTICS + workspace tools for auditing
-- Fixed ai-citation-strategist: removed specific AI model brand names per no-external-platform rule
+## 2026-03-31 — US-005: Fix search_chat_history multi-tenancy bug
+- Replaced `WHERE c.user_id = (SELECT id FROM users LIMIT 1)` with workspace-scoped JOIN
+- Chats table has no workspace_id column — joined through workspace_members: `JOIN workspace_members wm ON wm.user_id = c.user_id WHERE wm.workspace_id = :workspace_id AND wm.is_active = true`
+- Also fixed INTERVAL bug: `INTERVAL ':days days'` doesn't parameterize (days is inside string literal) — replaced with `make_interval(days => :days)`
+- workspace_id parameter was already available in the handler function signature
+- Syntax validation passed
 
-## US-006: Sales — 8 skills rewritten (2026-03-25)
-- Rewrote: outbound-strategist, discovery-coach, deal-strategist, pipeline-analyst, account-strategist, coach (Sales Coach), engineer (Sales Engineer), proposal-strategist
-- All skills: frontmatter with tools:{name,description}, identity paragraph, 5-6 step workflow with JSON tool calls, output format template, "What NOT To Do" section
-- Line counts: 86-97 lines (within 60-100 target)
-- CRM skills (outbound-strategist, deal-strategist, pipeline-analyst, account-strategist) use composio_execute with HUBSPOT actions
-- Outreach skill (outbound-strategist) uses composio_execute with GMAIL_SEND_EMAIL
-- account-strategist uses platform_workspace_stats for usage health cross-referencing
-- coach and discovery-coach focus on workspace_read_file for transcript/performance analysis
-- proposal-strategist uses workspace_grep for searching proposal content library by win theme
+## 2026-03-31 — US-006: Add promoted field + schema generation methods
+- Added `promoted: bool = False` to ActionDefinition dataclass (after admin_only)
+- Added `get_promoted()` method to ActionRegistry — returns list of promoted ActionDefinitions
+- Added `to_first_class_schemas(exclude_admin=False)` method — returns OpenAI function schemas for promoted actions
+  - When exclude_admin=True, admin_only promoted actions are excluded (non-admin callers don't see them)
+- All new fields/params have defaults — existing callers unaffected
+- Validated with isolated import: promoted field works, get_promoted filters correctly, to_first_class_schemas respects exclude_admin
 
-## US-007: Design — 8 skills rewritten (2026-03-25)
-- Rewrote: ui-designer, ux-researcher, ux-architect, brand-guardian, visual-storyteller, image-prompt-engineer, inclusive-visuals-specialist, whimsy-injector
-- All skills: frontmatter with tools:{name,description}, identity paragraph, 4-7 step workflow with JSON tool calls, output format template, "What NOT To Do" section
-- Line counts: 94-100 lines (within 60-100 target)
-- ui-designer: grep-based audit for hardcoded colors/inline styles, writes component specs
-- ux-architect: maps routes via list_dir + grep, documents IA and user flows
-- brand-guardian: retrieves brand standards from memory, scans terminology + color violations
-- whimsy-injector: audits empty states/loading/error copy, writes delight library
-- image-prompt-engineer: maintains prompt library with subject/style/lighting/mood structure
-- inclusive-visuals-specialist: separate tracks for accessibility vs representation
-- Fixed batch 2 skills: changed "input" to "params" in JSON tool call blocks (matching Sentinel format)
+## 2026-03-31 — US-007: Exclude promoted actions from prompt summary + dispatcher
+- Added `exclude_promoted: bool = True` param to `build_prompt_summary()` in action_registry.py
+  - When True (default), actions with promoted=True are skipped from the markdown catalog
+  - Filter applied alongside existing exclude_admin filter
+- Added `exclude_promoted: bool = True` param to `to_dispatcher_schema()` in action_registry.py
+  - Parameter accepted for forward compatibility — actual enum filtering will be added in US-012
+  - Default True ensures promoted actions will be excluded from dispatcher enum by default
+- All params have defaults — existing callers unaffected
+- Syntax validation passed (py_compile OK)
 
-## US-008: Product + PM — 11 skills rewritten (2026-03-25)
-- Rewrote: sprint-prioritizer, trend-researcher, feedback-synthesizer, behavioral-nudge-engine, manager, project-shepherd, studio-producer, experiment-tracker, jira-workflow-steward, project-manager-senior, studio-operations
-- All skills: frontmatter with tools:{name,description}, identity paragraph, 6-step workflow with JSON tool calls, output format template, "What NOT To Do" section
-- Line counts: 95-101 lines (within target range)
-- PM skills heavily use platform_create_task, platform_list_tasks, platform_board_summary for board management
-- jira-workflow-steward uses composio_execute with JIRA_LIST_ISSUES and JIRA_UPDATE_ISSUE
-- manager uses ICE scoring framework (Impact x Confidence x Ease)
-- sprint-prioritizer uses priority formula: (Impact x 2 + Urgency) / Effort
-- feedback-synthesizer mines platform_search_chat_history for user feedback signals
-- behavioral-nudge-engine searches chat history for drop-off/confusion patterns
-- project-shepherd and studio-operations use platform_schedule_task for recurring reviews
+## 2026-03-31 — US-008: Mark ~13 high-value actions as promoted=True
+- Added promoted=True to 13 actions across 5 files:
+  - actions_agents.py (4): platform_list_agents, platform_get_agent, platform_create_agent, platform_update_agent
+  - actions_marketplace.py (5): platform_browse_marketplace_agents, platform_browse_marketplace_skills, platform_browse_marketplace_plugins, platform_install_skill, platform_install_plugin
+  - actions_workspace.py (2): platform_store_memory, platform_get_system_health (also admin_only=True)
+  - actions_analytics.py (1): platform_get_activity_feed
+  - actions_search.py (1): platform_search_memory
+- Note: platform_store_memory and platform_get_system_health are in actions_workspace.py, not actions_search.py/actions_monitoring.py as PRD assumed
+- Validated: 97 total actions, 13 promoted, 6 admin-only. platform_get_system_health is both promoted + admin_only
+- Syntax validation passed (py_compile OK for all 5 files)
 
-## US-009: Support + Testing — 9 skills rewritten (2026-03-25)
-- Rewrote: support-responder, analytics-reporter, finance-tracker, legal-compliance-checker, executive-summary-generator, infrastructure-maintainer, performance-benchmarker, api-tester, accessibility-auditor
-- All skills: frontmatter with tools:{name,description}, identity paragraph, 4-7 step workflow with JSON tool calls, output format template, "What NOT To Do" section
-- Line counts: 74-101 lines (within target range)
-- support-responder: uses platform_search_chat_history + platform_search_memory for issue resolution
-- analytics-reporter: pulls platform_workspace_stats + platform_get_cost_breakdown for trend reports
-- finance-tracker: budget anomaly detection with WARNING/CRITICAL thresholds on LLM spend
-- legal-compliance-checker: workspace_grep for PII/secrets scanning, creates remediation tasks
-- executive-summary-generator: reads reports from all other agents, synthesizes into 300-word brief
-- infrastructure-maintainer: platform_get_system_health + platform_query_loki_logs + workspace_exec for infra checks
-- performance-benchmarker: workspace_exec for benchmark suite, compares p50/p95/p99 against baselines
-- api-tester: workspace_grep for endpoint discovery, workspace_exec for pytest suite, contract validation
-- accessibility-auditor: workspace_grep for missing ARIA/alt/labels, workspace_exec for eslint a11y rules
+## 2026-03-31 — US-009: Append promoted schemas in tool_router + consolidate field tools
+- Replaced hardcoded _FIELD_TOOL_SCHEMAS block (60 lines) in tool_router.py with `action_registry.to_first_class_schemas(exclude_admin=not is_admin)`
+  - All promoted actions now get first-class schemas dynamically from ActionRegistry
+  - Admin-only promoted actions excluded for non-admin callers
+  - Log line: "Added {n} promoted action schemas"
+- Marked platform_field_query and platform_field_inject as promoted=True in actions_field.py
+  - platform_field_stability left as non-promoted (not a high-value direct-call tool)
+- Field tool schemas now come from ActionDefinition.to_openai_schema() instead of hardcoded dicts
+  - Schema structure matches: same type/function/name/description/parameters pattern
+  - Descriptions are richer in ActionDefinition (more context for LLM) — improvement, not regression
+- Total promoted count: 15 (13 from US-008 + 2 field tools)
+- Syntax validation passed (py_compile OK for actions_field.py + tool_router.py)
 
-## US-010: Paid Media + Specialized — 8 skills rewritten (2026-03-25)
-- Rewrote: ppc-strategist, creative-strategist, auditor, document-generator, compliance-auditor, recruitment-specialist, supply-chain-strategist, developer-advocate
-- All skills: frontmatter with tools:{name,description}, identity paragraph, 5-7 step workflow with JSON tool calls, output format template, "What NOT To Do" section
-- Line counts: 83-100 lines (within 60-100 target)
-- Paid media skills (ppc-strategist, auditor) use composio_execute with GOOGLE_ADS and GOOGLE_ANALYTICS
-- creative-strategist uses workspace_grep for creative library audit, workspace_write_file for ad copy batches
-- compliance-auditor uses workspace_grep for secret scanning, workspace_exec for license checks
-- recruitment-specialist uses composio_execute with LINKEDIN_SEND_MESSAGE for candidate outreach
-- supply-chain-strategist uses composio_execute with GOOGLE_SHEETS for inventory tracking
-- developer-advocate uses composio_execute with GITHUB_LIST_ISSUES + platform_publish_blog_post
-- document-generator uses platform_search_memory for brand guidelines retrieval
-- Removed China-specific content from recruitment-specialist and supply-chain-strategist (generic/global now)
+## 2026-03-31 — US-010: Update SmartToolRouter with promoted tool categories
+- Added ALWAYS_INCLUDE set with 6 critical promoted tools that bypass intent filtering:
+  - platform_list_agents, platform_get_agent, platform_search_memory, platform_store_memory, platform_field_query, platform_field_inject
+- Added 5 new TOOL_CATEGORIES for promoted tools:
+  - platform_management (list/get/create/update agents)
+  - marketplace (browse agents/skills/plugins, install skill/plugin)
+  - monitoring (system health, activity feed)
+  - memory (search/store memory)
+  - fields (field query/inject)
+- Updated INTENT_TO_TOOLS mappings:
+  - DATA_QUERY: added "fields"
+  - SEARCH: added "memory"
+  - EXTERNAL_ACTION: added "platform_management"
+  - CREATION: added "platform_management"
+  - MULTI_STEP: added all 5 promoted categories
+  - MEMORY_RECALL: now includes "memory" (was empty)
+- Applied ALWAYS_INCLUDE in _filter_tools_by_categories alongside CORE_TOOLS
+- Syntax validation passed (py_compile OK)
 
-## US-011: Validation — all 81 skills pass (2026-03-25)
-- Wrote validate_skills.py (stdlib only) checking: frontmatter fields, tools format, workflow+JSON blocks, output format, anti-patterns, no banned refs, line count
-- 81 rewritten skills validated, 19 pre-existing exempt
-- Fixed 1 issue: ai-engineer had "openai" in a grep pattern (replaced with generic SDK terms)
-- Seed script dry-run: 97 entries would be upserted, correct model assignments (13 opus, 3 haiku, rest sonnet)
-- All acceptance criteria met
+## 2026-03-31 — US-011: Update PlatformActionsSection to exclude promoted actions
+- Updated PlatformActionsSection._build() to pass exclude_promoted=True to registry.build_prompt_summary()
+- Parameter was already the default (True from US-007), but now explicit per acceptance criteria
+- Promoted actions no longer appear in the markdown catalog injected into the system prompt
+- Non-promoted actions still appear as before
+- Syntax validation passed (py_compile OK)
+
+## 2026-03-31 — US-012: Add enum to dispatcher schema for remaining actions
+- Added enum of valid action names to the `action` parameter in `to_dispatcher_schema()`
+- Enum is built dynamically from registered actions, respecting both exclude_promoted and exclude_admin filters
+- Sorted alphabetically for consistent output
+- When no actions match (empty registry), enum key is omitted entirely
+- Token impact: ~78 non-promoted action names x ~10 tokens = ~780 tokens — acceptable
+- Syntax validation passed (py_compile OK)
+- Tested: 5 scenarios (exclude both, exclude promoted only, exclude nothing, sorted order, empty registry)

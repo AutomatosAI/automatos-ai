@@ -314,7 +314,8 @@ class UnifiedToolExecutor:
         agent_id: int = 0,
         tenant_id: Optional[UUID] = None,
         workspace_id: Optional[UUID] = None,
-        trace_id: Optional[str] = None
+        trace_id: Optional[str] = None,
+        caller_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Execute a tool by name, routing to the appropriate executor.
@@ -324,6 +325,12 @@ class UnifiedToolExecutor:
             parameters: Tool parameters
             agent_id: ID of the agent calling the tool
             tenant_id: UUID of the tenant (reserved for future use)
+            workspace_id: UUID of the workspace for scoping
+            trace_id: Optional trace ID for log correlation
+            caller_context: Optional dict with keys user_id, system_role,
+                workspace_role. Forwarded to PlatformActionExecutor for
+                admin_only gating.  If None, executor falls back to
+                workspace-scoped admin check.
 
         Returns:
             Tool execution result with standard format
@@ -385,14 +392,16 @@ class UnifiedToolExecutor:
                         action_name, action_params, workspace_id=workspace_id, trace_id=trace
                     )
                 return await self._execute_platform_action(
-                    action_name, action_params, workspace_id=workspace_id, trace_id=trace
+                    action_name, action_params, workspace_id=workspace_id, trace_id=trace,
+                    caller_context=caller_context,
                 )
 
             # PRD-64: Route platform_* actions to PlatformActionExecutor (direct calls)
             if tool_name.startswith("platform_"):
                 logger.info(f"[tool-trace {trace}] Routing to PlatformActionExecutor: {tool_name}")
                 return await self._execute_platform_action(
-                    tool_name, parameters, workspace_id=workspace_id, trace_id=trace
+                    tool_name, parameters, workspace_id=workspace_id, trace_id=trace,
+                    caller_context=caller_context,
                 )
 
             # Workspace tools: proxy to worker via WorkspaceClient
@@ -485,8 +494,8 @@ class UnifiedToolExecutor:
     async def _execute_platform_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_platform.execute_platform_tool(self, tool_name, parameters, agent_id)
 
-    async def _execute_platform_action(self, tool_name, parameters, workspace_id=None, trace_id=None):
-        return await exec_platform.execute_platform_action(self, tool_name, parameters, workspace_id=workspace_id, trace_id=trace_id)
+    async def _execute_platform_action(self, tool_name, parameters, workspace_id=None, trace_id=None, caller_context=None):
+        return await exec_platform.execute_platform_action(self, tool_name, parameters, workspace_id=workspace_id, trace_id=trace_id, caller_context=caller_context)
 
     async def _execute_database_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_research.execute_database_tool(self, tool_name, parameters, agent_id)

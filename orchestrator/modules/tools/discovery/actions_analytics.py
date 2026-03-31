@@ -122,6 +122,7 @@ def register_analytics_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
+        promoted=True,
         tags=["activity", "feed", "analytics", "history"],
         examples=[
             "what's been happening?",

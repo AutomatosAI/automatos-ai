@@ -1,107 +1,72 @@
-# PRD-120 Phase 2: Skill Rewrites — Implementation Plan
+# PRD-122: Tool Routing Promotion & Permission Enforcement — Implementation Plan
 
 ## Overview
-Rewrite all 81 imported skills to Automatos production quality. Each skill must have: proper persona, real platform/workspace/composio tool mappings with JSON call examples, structured workflows, output formats, and anti-patterns. Quality bar = Sentinel + Scout skills.
 
-## Branch: ralph/prd-120-skill-rewrites
+Two problems, one fix:
+1. **Auto can't reliably call platform tools** — they're behind `platform_execute` dispatcher indirection. Promote ~13 high-value actions to first-class OpenAI tool schemas.
+2. **`permission_level` is declared but never enforced** — 6 infrastructure tools expose system internals to every user. Enforce admin gating before promoting.
 
----
+## Architecture
 
-## Tasks
+```
+get_tools_for_agent() [tool_router.py:129]
+  ├── ToolRegistry.get_all() → core tool schemas
+  ├── ActionRegistry.to_dispatcher_schema() → platform_execute (non-promoted only)
+  ├── ActionRegistry.to_first_class_schemas() → promoted schemas [NEW]
+  └── ComposioActionCache enrichment → composio_execute params
 
-### Phase 1: Infrastructure
-- [x] US-001: Create SKILL-GUIDE.md reference + fix seed script frontmatter parsing for tools:{name,description} format
+Execution: unified_executor.py routes platform_* → PlatformActionExecutor (no changes needed)
+```
 
-### Phase 2: Skill Rewrites by Category
-- [x] US-002: Engineering batch 1 (8): frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer
-- [x] US-003: Engineering batch 2 (8): code-reviewer, software-architect, technical-writer, mobile-app-builder, senior-developer, git-workflow-master, rapid-prototyper, incident-response-commander
-- [x] US-004: Engineering batch 3 (5): threat-detection-engineer, solidity-smart-contract-engineer, embedded-firmware-engineer, ai-data-remediation-engineer, autonomous-optimization-architect
-- [x] US-005: Marketing (16): growth-hacker, content-creator, seo-specialist, social-media-strategist, linkedin-content-creator, twitter-engager, tiktok-strategist, instagram-curator, podcast-strategist, reddit-community-builder, app-store-optimizer, carousel-growth-engine, short-video-editing-coach, ai-citation-strategist, book-co-author, cross-border-ecommerce
-- [x] US-006: Sales (8): outbound-strategist, discovery-coach, deal-strategist, pipeline-analyst, account-strategist, coach, engineer, proposal-strategist
-- [x] US-007: Design (8): ui-designer, ux-researcher, ux-architect, brand-guardian, visual-storyteller, image-prompt-engineer, inclusive-visuals-specialist, whimsy-injector
-- [x] US-008: Product + PM (11): sprint-prioritizer, trend-researcher, feedback-synthesizer, behavioral-nudge-engine, manager, project-shepherd, studio-producer, experiment-tracker, jira-workflow-steward, project-manager-senior, studio-operations
-- [x] US-009: Support + Testing (9): support-responder, analytics-reporter, finance-tracker, legal-compliance-checker, executive-summary-generator, infrastructure-maintainer, performance-benchmarker, api-tester, accessibility-auditor
-- [x] US-010: Paid Media + Specialized (8): ppc-strategist, creative-strategist, auditor, document-generator, compliance-auditor, recruitment-specialist, supply-chain-strategist, developer-advocate
-
-### Phase 3: Validation
-- [x] US-011: Validate all 81 skills, run seed dry-run, commit to skills repo
-
----
-
-## Key References
+## Key Files
 
 | File | Purpose |
 |------|---------|
-| `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/sentinel/SKILL.md` | Gold standard: monitoring skill with tool calls |
-| `/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/scout/SKILL.md` | Gold standard: sales/outreach skill with CRM tools |
-| `scripts/seed_agent_catalog.py` | Seed script — parses SKILL.md, populates DB |
-| `orchestrator/modules/tools/discovery/platform_actions.py` | All platform tool registrations |
-| `orchestrator/modules/tools/discovery/workspace_actions.py` | All workspace tool registrations |
-| `orchestrator/modules/context/sections/skills.py` | How skill content gets injected into agent prompts |
-| `orchestrator/core/models/core.py` | Agent + Skill SQLAlchemy models |
+| `orchestrator/modules/tools/discovery/action_registry.py` | ActionDefinition dataclass (line 27) + ActionRegistry class (line 53) |
+| `orchestrator/modules/tools/discovery/platform_executor.py` | execute() at line 273, permission checks at 286-334 |
+| `orchestrator/modules/tools/tool_router.py` | get_tools_for_agent() at line 129, dispatcher at 242 |
+| `orchestrator/modules/tools/discovery/actions_monitoring.py` | 6 infrastructure tool registrations |
+| `orchestrator/modules/tools/discovery/handlers_search.py` | search_chat_history handler, broken WHERE at line 33 |
+| `orchestrator/consumers/chatbot/smart_tool_router.py` | TOOL_CATEGORIES at 65, INTENT_TO_TOOLS at 77 |
+| `orchestrator/modules/context/sections/platform_actions.py` | PlatformActionsSection._build() at ~50 |
+| `orchestrator/modules/tools/discovery/actions_agents.py` | Agent action registrations |
+| `orchestrator/modules/tools/discovery/actions_marketplace.py` | Marketplace action registrations |
+| `orchestrator/modules/tools/discovery/actions_search.py` | Memory + search action registrations |
+| `orchestrator/modules/tools/unified_executor.py` | execute_tool() routing at ~310 |
 
-## Quality Bar (CRITICAL)
+## Tasks
 
-Every rewritten skill MUST have:
+### Phase 0: Permission Enforcement (P0)
 
-1. **Frontmatter**: name, description (1 sentence), version, tags, category: agent-role, tools: [{name, description}]
-2. **Identity**: 1-2 sentences — who this agent is in the Automatos context
-3. **Workflow**: Numbered steps with ```json code blocks showing exact tool calls with realistic params
-4. **Output Format**: Structured template (like Sentinel's status report)
-5. **What NOT To Do**: 3-5 anti-patterns specific to the role
-6. **Length**: 60-100 lines, no filler, every line actionable
+- [x] **US-001**: Add `admin_only: bool = False` to ActionDefinition + mark 6 infra tools (5 in actions_monitoring.py, 1 in actions_workspace.py)
+- [x] **US-002**: Thread caller_context (user_id, system_role, workspace_role) through unified_executor → platform_executor
+- [x] **US-003**: Add admin gate (before requires_confirmation) + destructive safety check (after rate limit) in platform_executor.py
+- [x] **US-004**: Add is_admin param to get_tools_for_agent() + exclude_admin to to_dispatcher_schema/build_prompt_summary
+- [x] **US-005**: Fix search_chat_history WHERE clause to scope by workspace_id
 
-## Tool Reference
+### Phase 1: Promote High-Value Actions (P1)
 
-### Platform Tools (agents call these via function calling)
-- `platform_get_system_health` — service health + response times
-- `platform_get_logs` — app logs by severity (params: severity, limit)
-- `platform_get_llm_usage` — token usage + cost metrics
-- `platform_get_cost_breakdown` — detailed cost analysis
-- `platform_workspace_stats` — workspace metrics
-- `platform_submit_report` — submit status/standup/audit report (params: title, report_type, status, content, metrics, summary)
-- `platform_get_latest_report` — read previous report (params: agent_name)
-- `platform_create_task` — create board task (params: title, description, priority, status)
-- `platform_list_tasks` — list board tasks (params: status filter)
-- `platform_board_summary` — board state overview
-- `platform_search_memory` — search workspace knowledge
-- `platform_search_chat_history` — search past conversations
-- `platform_query_loki_logs` — LogQL query
-- `platform_publish_blog_post` — publish content
-- `platform_schedule_task` — schedule recurring work
+- [x] **US-006**: Add `promoted: bool = False` to ActionDefinition + get_promoted() + to_first_class_schemas() methods
+- [x] **US-007**: Update build_prompt_summary(exclude_promoted=True) + to_dispatcher_schema(exclude_promoted=True)
+- [x] **US-008**: Mark ~13 actions as promoted=True in actions_agents, actions_marketplace, actions_monitoring, actions_search
+- [x] **US-009**: Append promoted schemas in tool_router.py + remove hardcoded _FIELD_TOOL_SCHEMAS + promote field tools
+- [x] **US-010**: Update SmartToolRouter with ALWAYS_INCLUDE set + promoted tool categories
+- [x] **US-011**: Update PlatformActionsSection._build() to pass exclude_promoted=True
 
-### Workspace Tools (file/code operations)
-- `workspace_read_file` — read file (params: path)
-- `workspace_write_file` — write file (params: path, content)
-- `workspace_list_dir` — list directory (params: path)
-- `workspace_grep` — regex search (params: pattern, path, include, max_results)
-- `workspace_exec` — run command (params: command, cwd, timeout)
-- `workspace_git` — git operations (params: operation, args)
+### Phase 2: Dispatcher Enum (P2)
 
-### Composio (external service actions)
-- `composio_execute` — execute external action (params: action, app_name, ...)
-  - HUBSPOT: LIST_CONTACTS, CREATE_CONTACT, UPDATE_CONTACT, CREATE_DEAL
-  - GMAIL: SEND_EMAIL, LIST_EMAILS
-  - LINKEDIN: SEND_MESSAGE, CREATE_POST
-  - TWITTER: CREATE_TWEET
-  - GOOGLE_SHEETS: READ_RANGE, WRITE_RANGE
-  - GOOGLE_ANALYTICS: GET_REPORT
-  - JIRA: CREATE_ISSUE, LIST_ISSUES, UPDATE_ISSUE
-  - GITHUB: CREATE_ISSUE, LIST_REPOS
-  - SLACK: SEND_MESSAGE
+- [x] **US-012**: Add enum of non-promoted action names to to_dispatcher_schema()
 
-## Validation
+## Constraints
 
-Seed script dry-run:
-```bash
-python3 scripts/seed_agent_catalog.py --dry-run 2>&1 | tail -5
-```
+- **No execution layer changes** — unified_executor.py already routes `platform_*` directly (line 392). Only adding caller_context passthrough.
+- **No migration needed** — workspace_members.role column already exists with owner|admin|editor|viewer|member values.
+- **Backward compatible** — all new parameters default to None/False. Existing callers unaffected.
+- **Field tool consolidation** — must verify to_openai_schema() output matches old hardcoded _FIELD_TOOL_SCHEMAS exactly.
 
-Skill count:
-```bash
-find /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills -name "SKILL.md" | wc -l
-```
+## Quality Bar
 
-## Discovered Issues
-
-(Ralph will log issues here during implementation)
+- Every change is additive (new fields with defaults, new optional parameters)
+- Admin gate is fail-closed (no caller_context = denied)
+- Promoted actions are excluded from dispatcher (no dual paths)
+- Log all permission denials at WARNING level

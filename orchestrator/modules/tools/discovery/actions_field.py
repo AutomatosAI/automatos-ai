@@ -16,6 +16,7 @@ def register_field_actions(registry: ActionRegistry) -> None:
             "Always query the field before starting work to see what's already known."
         ),
         category="field",
+        promoted=True,
         parameters={
             "type": "object",
             "properties": {
@@ -42,6 +43,7 @@ def register_field_actions(registry: ActionRegistry) -> None:
             "Use this for key discoveries, intermediate results, and conclusions."
         ),
         category="field",
+        promoted=True,
         parameters={
             "type": "object",
             "properties": {

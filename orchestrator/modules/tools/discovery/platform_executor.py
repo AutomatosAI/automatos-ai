@@ -8,8 +8,9 @@ Each handler is a standalone async function in modules/tools/discovery/handlers_
 All queries are workspace-scoped for multi-tenant isolation.
 """
 
+import json
 import logging
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -270,12 +271,58 @@ class PlatformActionExecutor:
             "platform_get_sla_compliance": get_sla_compliance,
         }
 
-    async def execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a platform action by name with permission checking."""
+    def _workspace_has_admin_owner(self) -> bool:
+        """Check if the workspace owner has an admin/owner role.
+
+        Used when no caller_context is available (heartbeat, agent factory).
+        Agents inherit admin privileges from their workspace owner.
+        Fail-closed: returns False on any error.
+        """
+        try:
+            from core.workspaces.models import WorkspaceMember
+
+            member = (
+                self.db.query(WorkspaceMember)
+                .filter(
+                    WorkspaceMember.workspace_id == self.workspace_id,
+                    WorkspaceMember.role.in_(("owner", "admin")),
+                    WorkspaceMember.is_active.is_(True),
+                )
+                .first()
+            )
+            if member:
+                logger.debug(
+                    "[PlatformExecutor] Workspace %s has admin/owner member — "
+                    "granting admin_only access to agent",
+                    self.workspace_id,
+                )
+                return True
+            return False
+        except Exception:
+            logger.exception(
+                "[PlatformExecutor] Failed to resolve workspace owner role for %s",
+                self.workspace_id,
+            )
+            return False
+
+    async def execute(
+        self,
+        action_name: str,
+        params: Dict[str, Any],
+        caller_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Execute a platform action by name with permission checking.
+
+        Args:
+            action_name: Registered platform action name.
+            params: Action parameters.
+            caller_context: Optional dict with keys user_id, system_role,
+                workspace_role.  Used by admin_only gate (US-003).
+                If None, admin_only actions are denied (fail-closed).
+        """
         # LLMs sometimes send params as a JSON string instead of a dict
         if isinstance(params, str):
             try:
-                import json
                 params = json.loads(params)
             except (json.JSONDecodeError, TypeError):
                 return {"success": False, "error": f"Invalid params format: expected dict, got string"}
@@ -287,6 +334,38 @@ class PlatformActionExecutor:
         try:
             from modules.tools.discovery import get_action_registry
             action_def = get_action_registry().get(action_name)
+
+            # US-003: Admin gate — deny admin_only actions for non-admin callers
+            if action_def and action_def.admin_only:
+                is_admin = False
+                if caller_context is not None:
+                    # Explicit caller identity — check roles directly.
+                    # A dict with no role keys means "known non-admin user".
+                    is_admin = (
+                        caller_context.get("workspace_role") in ("owner", "admin")
+                        or caller_context.get("system_role") == "admin"
+                    )
+                else:
+                    # No caller_context (heartbeat, agent factory, etc.) —
+                    # resolve from workspace owner's role.  Agents inherit
+                    # admin privileges from their workspace owner.
+                    is_admin = self._workspace_has_admin_owner()
+                if not is_admin:
+                    logger.warning(
+                        "[PlatformExecutor] Admin-only action '%s' denied — "
+                        "workspace_id=%s, caller_context=%s",
+                        action_name,
+                        self.workspace_id,
+                        {k: v for k, v in (caller_context or {}).items() if k != "user_id"},
+                    )
+                    return {
+                        "success": False,
+                        "permission_denied": True,
+                        "error": (
+                            f"Action '{action_name}' requires workspace admin or owner role."
+                        ),
+                    }
+
             if action_def and action_def.requires_confirmation:
                 return {
                     "success": False,
@@ -330,8 +409,27 @@ class PlatformActionExecutor:
                         "error": "Rate limit exceeded: max 10 write actions per minute. Try again shortly.",
                     }
                 raise
-            except Exception:
-                pass  # Fail open
+            except Exception as exc:
+                logger.warning("[PlatformExecutor] Rate limiter unavailable, failing open: %s", exc)
+
+        # US-003: Destructive safety check — destructive actions must require confirmation
+        if (
+            action_def
+            and action_def.permission_level == "destructive"
+            and not action_def.requires_confirmation
+        ):
+            logger.error(
+                "[PlatformExecutor] Destructive action '%s' missing requires_confirmation flag — "
+                "rejecting as safety precaution",
+                action_name,
+            )
+            return {
+                "success": False,
+                "error": (
+                    f"Internal error: destructive action '{action_name}' is misconfigured "
+                    "(missing confirmation requirement). Contact platform admin."
+                ),
+            }
 
         # PRD-108: Auto-inject field_id for field tools from active mission
         if action_name.startswith("platform_field_") and "field_id" not in params:

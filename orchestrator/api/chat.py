@@ -319,6 +319,10 @@ async def stream_chat(
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""
     logger.info(f"[chat] RequestContext workspace_id={ctx.workspace_id}")
     chat_service = ChatService(db)
+    # PRD-122: Admin gate is workspace-scoped, not user-scoped.
+    # caller_context=None lets PlatformActionExecutor fall through to
+    # _workspace_has_admin_owner() which checks if the workspace has an
+    # admin/owner member.  Admin workspace → all tools; user workspace → restricted.
     streaming_service = StreamingChatService(db, workspace_id=ctx.workspace_id)
     user_id = get_user_id(db)
 
