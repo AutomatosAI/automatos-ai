@@ -50,7 +50,7 @@ Execution: unified_executor.py routes platform_* → PlatformActionExecutor (no 
 - [x] **US-007**: Update build_prompt_summary(exclude_promoted=True) + to_dispatcher_schema(exclude_promoted=True)
 - [x] **US-008**: Mark ~13 actions as promoted=True in actions_agents, actions_marketplace, actions_monitoring, actions_search
 - [x] **US-009**: Append promoted schemas in tool_router.py + remove hardcoded _FIELD_TOOL_SCHEMAS + promote field tools
-- [ ] **US-010**: Update SmartToolRouter with ALWAYS_INCLUDE set + promoted tool categories
+- [x] **US-010**: Update SmartToolRouter with ALWAYS_INCLUDE set + promoted tool categories
 - [ ] **US-011**: Update PlatformActionsSection._build() to pass exclude_promoted=True
 
 ### Phase 2: Dispatcher Enum (P2)

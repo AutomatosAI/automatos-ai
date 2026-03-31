@@ -61,6 +61,17 @@ class SmartToolRouter:
         "generate_document",
     }
 
+    # Promoted platform tools that bypass intent filtering —
+    # always included regardless of detected intent (PRD-122 US-010)
+    ALWAYS_INCLUDE = {
+        "platform_list_agents",
+        "platform_get_agent",
+        "platform_search_memory",
+        "platform_store_memory",
+        "platform_field_query",
+        "platform_field_inject",
+    }
+
     # Tool categories
     TOOL_CATEGORIES = {
         "data": ["query_database", "smart_query_database", "sql_query"],
@@ -71,16 +82,39 @@ class SmartToolRouter:
         "creation": ["write_file", "create_directory", "generate_document"],
         "document": ["generate_document", "write_file"],
         "code": ["search_codebase", "execute_code", "run_command"],
+        # Promoted platform tool categories (PRD-122 US-010)
+        "platform_management": [
+            "platform_list_agents", "platform_get_agent",
+            "platform_create_agent", "platform_update_agent",
+        ],
+        "marketplace": [
+            "platform_browse_marketplace_agents",
+            "platform_browse_marketplace_skills",
+            "platform_browse_marketplace_plugins",
+            "platform_install_skill", "platform_install_plugin",
+        ],
+        "monitoring": [
+            "platform_get_system_health", "platform_get_activity_feed",
+        ],
+        "memory": [
+            "platform_search_memory", "platform_store_memory",
+        ],
+        "fields": [
+            "platform_field_query", "platform_field_inject",
+        ],
     }
 
     # Intent to tool category mapping
     INTENT_TO_TOOLS = {
-        Intent.DATA_QUERY: ["data", "search"],
-        Intent.SEARCH: ["search", "code"],
-        Intent.EXTERNAL_ACTION: ["external", "document"],
-        Intent.CREATION: ["files", "creation", "document", "external"],
-        Intent.MULTI_STEP: ["data", "search", "files", "external", "document", "code"],  # All tools
-        Intent.MEMORY_RECALL: [],  # No tools needed
+        Intent.DATA_QUERY: ["data", "search", "fields"],
+        Intent.SEARCH: ["search", "code", "memory"],
+        Intent.EXTERNAL_ACTION: ["external", "document", "platform_management"],
+        Intent.CREATION: ["files", "creation", "document", "external", "platform_management"],
+        Intent.MULTI_STEP: [
+            "data", "search", "files", "external", "document", "code",
+            "platform_management", "marketplace", "monitoring", "memory", "fields",
+        ],
+        Intent.MEMORY_RECALL: ["memory"],  # Memory tools for recall intents
         Intent.GREETING: [],  # No tools needed
         Intent.CHITCHAT: [],  # No tools needed
         Intent.FACTUAL: [],  # Try without tools first
@@ -309,8 +343,9 @@ class SmartToolRouter:
         for category in categories:
             relevant_names.update(self.TOOL_CATEGORIES.get(category, []))
 
-        # Always include core tools
+        # Always include core tools and promoted always-include tools
         relevant_names.update(self.CORE_TOOLS)
+        relevant_names.update(self.ALWAYS_INCLUDE)
 
         # Filter
         filtered = []

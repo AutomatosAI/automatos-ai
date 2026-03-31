@@ -87,3 +87,22 @@
   - Descriptions are richer in ActionDefinition (more context for LLM) — improvement, not regression
 - Total promoted count: 15 (13 from US-008 + 2 field tools)
 - Syntax validation passed (py_compile OK for actions_field.py + tool_router.py)
+
+## 2026-03-31 — US-010: Update SmartToolRouter with promoted tool categories
+- Added ALWAYS_INCLUDE set with 6 critical promoted tools that bypass intent filtering:
+  - platform_list_agents, platform_get_agent, platform_search_memory, platform_store_memory, platform_field_query, platform_field_inject
+- Added 5 new TOOL_CATEGORIES for promoted tools:
+  - platform_management (list/get/create/update agents)
+  - marketplace (browse agents/skills/plugins, install skill/plugin)
+  - monitoring (system health, activity feed)
+  - memory (search/store memory)
+  - fields (field query/inject)
+- Updated INTENT_TO_TOOLS mappings:
+  - DATA_QUERY: added "fields"
+  - SEARCH: added "memory"
+  - EXTERNAL_ACTION: added "platform_management"
+  - CREATION: added "platform_management"
+  - MULTI_STEP: added all 5 promoted categories
+  - MEMORY_RECALL: now includes "memory" (was empty)
+- Applied ALWAYS_INCLUDE in _filter_tools_by_categories alongside CORE_TOOLS
+- Syntax validation passed (py_compile OK)
