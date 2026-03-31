@@ -330,6 +330,8 @@ def _run_to_response(run: OrchestrationRun) -> dict:
         "parallel_groups": parallel_groups,
         "has_synthesis_tasks": has_synthesis_tasks,
         "created_by": run.created_by,
+        "stop_reason": getattr(run, "stop_reason", None),
+        "stop_detail": getattr(run, "stop_detail", None),
         "started_at": run.started_at,
         "completed_at": run.completed_at,
         "created_at": run.created_at,
@@ -859,9 +861,22 @@ async def get_mission(
             .all()
         )
 
+        # PRD-123 Pattern #5: Extract permission denial events
+        permission_denials = [
+            {
+                "agent_name": (e.payload or {}).get("agent_name"),
+                "tool_name": (e.payload or {}).get("tool_name"),
+                "reason": (e.payload or {}).get("reason"),
+                "denied_at": e.created_at,
+            }
+            for e in events
+            if e.event_type == "permission_denied"
+        ]
+
         result = _run_to_response(run)
         result["tasks"] = [_task_to_response(t) for t in tasks]
         result["recent_events"] = [_event_to_response(e) for e in events]
+        result["permission_denials"] = permission_denials
         return result
 
     except HTTPException:

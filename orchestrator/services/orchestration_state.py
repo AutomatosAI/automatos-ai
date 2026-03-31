@@ -182,6 +182,8 @@ def transition_run(
     actor_type: ActorType,
     actor_id: Optional[str] = None,
     reason: Optional[str] = None,
+    stop_reason: Optional[str] = None,
+    stop_detail: Optional[str] = None,
 ) -> OrchestrationEvent:
     """
     Transition an orchestration run to a new state with dual-write event.
@@ -195,6 +197,8 @@ def transition_run(
         actor_type: Who is triggering this transition.
         actor_id: Optional identifier of the actor.
         reason: Optional human-readable reason for the transition.
+        stop_reason: Named stop reason (PRD-123 Pattern #6), set on terminal transitions.
+        stop_detail: Human-readable detail about why the mission stopped.
 
     Returns:
         The created OrchestrationEvent.
@@ -229,11 +233,20 @@ def transition_run(
 
     if new_state in TERMINAL_RUN_STATES:
         run.completed_at = now
+        # PRD-123 Pattern #6: Named Stop Reasons
+        if stop_reason:
+            run.stop_reason = stop_reason
+        if stop_detail:
+            run.stop_detail = stop_detail
 
     # Build event payload
     payload = {}
     if reason:
         payload["reason"] = reason
+    if stop_reason:
+        payload["stop_reason"] = stop_reason
+    if stop_detail:
+        payload["stop_detail"] = stop_detail
 
     # Create event (dual-write)
     event = OrchestrationEvent(

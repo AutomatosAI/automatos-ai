@@ -1054,6 +1054,8 @@ class CoordinatorService:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
                 reason="Plan validation failed after all retries",
+                stop_reason="coordinator_error",
+                stop_detail="Plan validation failed after all retries",
             )
             raise
 
@@ -1260,6 +1262,8 @@ class CoordinatorService:
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
             reason=reason,
+            stop_reason="human_cancelled",
+            stop_detail=f"Plan rejected: {reason}",
         )
 
         emit_event(
@@ -1504,6 +1508,8 @@ class CoordinatorService:
             new_state=RunState.CANCELLED,
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
+            stop_reason="human_cancelled",
+            stop_detail=f"Cancelled by user {actor_id}",
         )
 
         emit_event(
@@ -1651,6 +1657,8 @@ class CoordinatorService:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
                 reason="Replan validation failed after all retries",
+                stop_reason="coordinator_error",
+                stop_detail="Replan validation failed after all retries",
             )
             raise
 
@@ -2247,6 +2255,8 @@ class CoordinatorService:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
                 reason="All tasks verified — mission complete",
+                stop_reason="completed",
+                stop_detail="All tasks verified successfully",
             )
 
             emit_event(
