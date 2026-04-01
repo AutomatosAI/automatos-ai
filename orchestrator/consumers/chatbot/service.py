@@ -1853,42 +1853,6 @@ class StreamingChatService:
                 else:
                     llm_messages.insert(0, {"role": "system", "content": _mission_directive})
 
-            # PRD-125: Inject web research directive when external/research intent detected
-            # Forces the agent to use composio_execute with web search actions instead of
-            # defaulting to internal search_knowledge for everything.
-            if orchestrated and llm_messages and use_tools:
-                _intent = orchestrated.intent.value if orchestrated.intent else ""
-                _query_lower = latest_text.lower() if latest_text else ""
-                _web_keywords = {"research", "competitor", "competitors", "competition",
-                                 "market", "industry", "pricing", "trends", "online", "web",
-                                 "latest", "current", "recent", "news"}
-                _has_web_intent = (
-                    _intent == "external"
-                    or (_intent in ("data_query", "multi_step", "search") and bool(set(_query_lower.split()) & _web_keywords))
-                )
-                _has_composio = any(
-                    t.get("function", {}).get("name") == "composio_execute"
-                    for t in use_tools
-                )
-                if _has_web_intent and _has_composio:
-                    _web_directive = (
-                        "\n\n## Web Research Required\n"
-                        "This request requires EXTERNAL information (not internal documents). "
-                        "You MUST use `composio_execute` with a web search action "
-                        "(e.g. TAVILY_TAVILY_SEARCH, or any action containing SEARCH in its name) "
-                        "to find real, current information from the internet.\n"
-                        "- Do NOT use search_knowledge or semantic_search for external research — "
-                        "those only search internal documents.\n"
-                        "- Do NOT make up information or rely on training data for market/competitor data.\n"
-                        "- Call composio_execute with action='TAVILY_TAVILY_SEARCH' and the relevant query.\n"
-                        "- If TAVILY is not available, check the composio_execute description for other search actions."
-                    )
-                    if llm_messages[0].get("role") == "system":
-                        llm_messages[0]["content"] = llm_messages[0].get("content", "") + _web_directive
-                    else:
-                        llm_messages.insert(0, {"role": "system", "content": _web_directive})
-                    logger.info(f"[PRD-125] Injected web research directive for intent={_intent}")
-
             # US-015: Emit memory-injected SSE event
             if orchestrated and orchestrated.memory_context:
                 smart_chat = getattr(self, '_smart_chat', None)
