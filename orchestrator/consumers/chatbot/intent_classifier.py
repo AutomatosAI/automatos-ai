@@ -121,7 +121,13 @@ class SmartIntentClassifier:
         r"\b(post|share|publish)\b.*\b(to|on)\b",
         r"\bgithub\b", r"\bgitlab\b", r"\bjira\b", r"\bslack\b", r"\bgmail\b",
         r"\bcreate\b.*\b(issue|pr|pull request|ticket)\b",
-        r"\bcheck my\b.*\b(email|inbox|notifications)\b"
+        r"\bcheck my\b.*\b(email|inbox|notifications)\b",
+        # Web research — needs external search tools (Tavily, Composio Search, etc.)
+        r"\bresearch\b.*\b(competitor|market|company|industry|pricing|product)\b",
+        r"\bcompetitor\b", r"\bcompetition\b", r"\bmarket research\b",
+        r"\b(search|look up|find)\b.*\b(online|web|internet|google)\b",
+        r"\b(latest|current|recent)\b.*\b(news|trends?|updates?|data)\b",
+        r"\bwhat (is|are)\b.*\b(company|companies|startup|competitors?)\b.*\b(doing|offering|pricing)\b",
     ]
 
     # Creation patterns - need file/document tools
@@ -285,18 +291,26 @@ class SmartIntentClassifier:
         is_creation = self._matches_patterns(query, self._creation_re)
         is_external = self._matches_patterns(query, self._external_re)
 
+        # Detect web research intent — external patterns that involve research/search
+        _web_research_keywords = {"research", "competitor", "competitors", "competition",
+                                  "market", "industry", "pricing", "trends", "online", "web"}
+        _is_web_research = is_external and bool(words & _web_research_keywords)
+
         if is_search and is_creation:
+            _suggested = ["search_knowledge", "generate_document"]
+            if _is_web_research:
+                _suggested.append("composio_execute")
             return IntentResult(
                 primary_intent=Intent.MULTI_STEP,
                 confidence=0.9,
                 requires_tools=True,
                 requires_memory=False,
-                suggested_tools=["search_knowledge", "generate_document"],
+                suggested_tools=_suggested,
                 reasoning="Multi-step: search knowledge then generate document",
                 is_simple=False
             )
 
-        if is_search:
+        if is_search and not _is_web_research:
             return IntentResult(
                 primary_intent=Intent.SEARCH,
                 confidence=0.85,
@@ -326,7 +340,7 @@ class SmartIntentClassifier:
                 requires_tools=True,
                 requires_memory=False,
                 suggested_tools=["composio_execute"],
-                reasoning="External app action requested",
+                reasoning="External action or web research requested",
                 is_simple=False
             )
 
