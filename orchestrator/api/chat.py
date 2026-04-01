@@ -583,26 +583,10 @@ async def stream_chat(
                 })
                 yield suggestion_event
 
-            # PRD-125: Inject mission hint into agent context so it suggests a mission
-            _effective_history = message_history
-            if _suggest_mission:
-                _mission_hint = {
-                    "role": "system",
-                    "content": (
-                        "IMPORTANT: This task has been classified as complex (multi-step, multi-tool). "
-                        "You should attempt to help, but also let the user know: "
-                        "\"This is a complex task that could benefit from a Multi-Agent Mission. "
-                        "Would you like me to launch a mission for this?\" "
-                        "Explain briefly what a mission does (coordinates multiple agents, "
-                        "plans steps, verifies results). Then proceed to help with what you can."
-                    ),
-                }
-                _effective_history = [*message_history, _mission_hint]
-
             # Normal agent streaming (RESPOND, DELEGATE, or MISSION fallback)
             async for chunk in streaming_service.stream_response_with_agent(
                 chat_id=chat_id,
-                messages=_effective_history,
+                messages=message_history,
                 agent_id=effective_agent_id,
                 user_id=user_id,
                 use_system_llm=use_system_llm,
@@ -610,6 +594,7 @@ async def stream_chat(
                 complexity_assessment=complexity_assessment,
                 mission_mode=bool(request.missionMode),
                 plan_mode=bool(request.planMode),
+                suggest_mission=_suggest_mission,
             ):
                 yield chunk
 
