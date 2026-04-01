@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService
-from consumers.chatbot.auto import AutoBrain, Action
+from consumers.chatbot.auto import AutoBrain, Action, Complexity
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.routing.cache import get_routing_cache
@@ -462,6 +462,68 @@ async def stream_chat(
             f"tools={complexity_assessment.matched_tools} "
             f"reasoning={complexity_assessment.reasoning}"
         )
+
+        # PRD-125: Conversation continuity — if the previous assistant message
+        # contained a mission suggestion (the user declined and said "go ahead"),
+        # the follow-up is a continuation of the original complex task.
+        # Override AutoBrain's reclassification to maintain the original context:
+        # keep DELEGATE action + inject tool hints from the original request.
+        if (
+            complexity_assessment.action in (Action.RESPOND, Action.DELEGATE)
+            and len(message_history) >= 3  # at least: user, assistant, user
+        ):
+            _prev_assistant = None
+            _prev_user = None
+            for msg in reversed(message_history[:-1]):  # skip current user msg
+                if msg.get("role") == "assistant" and _prev_assistant is None:
+                    _prev_assistant = msg
+                elif msg.get("role") == "user" and _prev_user is None:
+                    _prev_user = msg
+                if _prev_assistant and _prev_user:
+                    break
+
+            if _prev_assistant and _prev_user:
+                _prev_text = ""
+                _prev_parts = _prev_assistant.get("parts", [])
+                if _prev_parts and isinstance(_prev_parts, list):
+                    for p in _prev_parts:
+                        if isinstance(p, dict) and p.get("type") == "text":
+                            _prev_text = p.get("text", "")
+                            break
+                        elif isinstance(p, str):
+                            _prev_text = p
+                            break
+
+                if "multi-agent mission" in _prev_text.lower() or "launch a mission" in _prev_text.lower():
+                    # The previous response suggested a mission — user is following up.
+                    # Elevate to DELEGATE with research tool hints so Tavily gets loaded.
+                    _orig_user_text = ""
+                    _orig_parts = _prev_user.get("parts", [])
+                    if _orig_parts and isinstance(_orig_parts, list):
+                        for p in _orig_parts:
+                            if isinstance(p, dict) and p.get("type") == "text":
+                                _orig_user_text = p.get("text", "")
+                                break
+
+                    complexity_assessment.action = Action.DELEGATE
+                    complexity_assessment.complexity = Complexity.ORGAN
+                    # Merge original tool hints: ensure search is always present
+                    if not complexity_assessment.tool_hints:
+                        complexity_assessment.tool_hints = ["search"]
+                    elif "search" not in complexity_assessment.tool_hints:
+                        complexity_assessment.tool_hints.append("search")
+                    complexity_assessment.needs_memory = True
+
+                    # Override the routing message to use the ORIGINAL task,
+                    # not the follow-up ("no go ahead")
+                    if _orig_user_text:
+                        message_text = _orig_user_text
+
+                    logger.info(
+                        f"[PRD-125] Mission follow-up detected — elevated to DELEGATE/ORGAN, "
+                        f"tool_hints={complexity_assessment.tool_hints}, "
+                        f"original_task={message_text[:80]!r}"
+                    )
 
         # Platform management is Auto's core job — never delegate it.
         # When tool_hints include "platform", Auto handles directly with
