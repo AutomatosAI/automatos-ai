@@ -35,6 +35,8 @@ from dotenv import load_dotenv
 TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
 API_TESTS = TESTS_DIR / "api"
+REGRESSIONS_DIR = TESTS_DIR / "regressions"
+CONTRACTS_DIR = TESTS_DIR / "contracts"
 EXTRA_REGRESSION_TESTS = [
     REPO_ROOT / "orchestrator" / "tests" / "test_memory_fixes.py",
 ]
@@ -71,6 +73,11 @@ def run_pytest() -> int:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
     test_targets = [str(API_TESTS)]
+    # Include regressions and contracts directories if they exist
+    if REGRESSIONS_DIR.exists():
+        test_targets.append(str(REGRESSIONS_DIR))
+    if CONTRACTS_DIR.exists():
+        test_targets.append(str(CONTRACTS_DIR))
     missing_regressions = [str(path) for path in EXTRA_REGRESSION_TESTS if not path.exists()]
     if missing_regressions:
         print("[runner] ERROR: required regression tests missing:")

@@ -27,6 +27,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
 
 TARGETS = [
+    # Core API tests
     TESTS_DIR / "api" / "test_health.py",
     TESTS_DIR / "api" / "test_chat.py",
     TESTS_DIR / "api" / "test_agents.py",
@@ -34,6 +35,33 @@ TARGETS = [
     TESTS_DIR / "api" / "test_workflows.py",
     TESTS_DIR / "api" / "test_heartbeat.py",
     TESTS_DIR / "api" / "test_user_journeys.py",
+    # Deepened journey tests
+    TESTS_DIR / "api" / "test_chat_errors.py",
+    TESTS_DIR / "api" / "test_memory_journeys.py",
+    TESTS_DIR / "api" / "test_workflow_journeys.py",
+    TESTS_DIR / "api" / "test_heartbeat_journeys.py",
+    # Error path tests (guard against 500s)
+    TESTS_DIR / "api" / "test_agent_errors.py",
+    TESTS_DIR / "api" / "test_document_errors.py",
+    TESTS_DIR / "api" / "test_memory_errors.py",
+    TESTS_DIR / "api" / "test_workspace_errors.py",
+    # PRD-123 harness features
+    TESTS_DIR / "api" / "test_missions.py",
+    TESTS_DIR / "api" / "test_permissions.py",
+    TESTS_DIR / "api" / "test_health_bootstrap.py",
+    # Mission lifecycle
+    TESTS_DIR / "api" / "test_mission_journeys.py",
+    # Performance baselines
+    TESTS_DIR / "api" / "test_performance_baselines.py",
+    # User journey tests (cross-domain)
+    TESTS_DIR / "api" / "test_onboarding_journey.py",
+    TESTS_DIR / "api" / "test_daily_workflow_journey.py",
+    # Regression pins (highest signal)
+    TESTS_DIR / "regressions" / "test_memory_regressions.py",
+    TESTS_DIR / "regressions" / "test_workspace_isolation.py",
+    TESTS_DIR / "regressions" / "test_agent_factory_regressions.py",
+    TESTS_DIR / "regressions" / "test_document_sync_regressions.py",
+    # Orchestrator-level regressions
     REPO_ROOT / "orchestrator" / "tests" / "test_memory_fixes.py",
 ]
 
@@ -89,11 +117,14 @@ def classify_category(nodeid: str, longrepr: str) -> str:
         ("memory", ["memory", "mem0", "context"]),
         ("workflow", ["workflow", "recipe", "execution"]),
         ("agents", ["agent", "model-config"]),
+        ("missions", ["mission", "checkpoint", "stop_reason"]),
         ("heartbeat", ["heartbeat"]),
         ("routing", ["routing", "route"]),
         ("channels", ["channel", "slack", "discord", "telegram"]),
         ("documents", ["document", "upload", "pdf"]),
         ("knowledge", ["knowledge", "rag", "search"]),
+        ("performance", ["latency", "slo", "performance", "baseline"]),
+        ("permissions", ["permission", "tier", "assign", "revoke"]),
     ]
     for category, keywords in category_map:
         if any(keyword in text for keyword in keywords):
