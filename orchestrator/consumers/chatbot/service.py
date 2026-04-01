@@ -1724,6 +1724,7 @@ class StreamingChatService:
         complexity_assessment: Optional[Any] = None,
         mission_mode: bool = False,
         plan_mode: bool = False,
+        suggest_mission: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
@@ -1831,6 +1832,26 @@ class StreamingChatService:
                 )
             else:
                 logger.info("[PRD-68] ATOM — no orchestration, direct LLM")
+
+            # PRD-125: Inject mission suggestion directive into system prompt
+            # Must happen AFTER _prepare_messages() since it rebuilds the system prompt.
+            if suggest_mission and llm_messages:
+                _mission_directive = (
+                    "\n\n## IMPORTANT — Mission Suggestion Required\n"
+                    "This task has been classified as complex (multi-step, multi-tool). "
+                    "You MUST include the following in your response:\n"
+                    "1. Briefly acknowledge the task\n"
+                    "2. Tell the user: \"This is a complex task that could benefit from a "
+                    "**Multi-Agent Mission**. A mission coordinates multiple specialized agents, "
+                    "plans the steps, executes them in sequence, and verifies the results. "
+                    "Would you like me to launch a mission for this?\"\n"
+                    "3. Then proceed to help with what you can as a single agent.\n"
+                    "Do NOT skip the mission suggestion — it is mandatory."
+                )
+                if llm_messages[0].get("role") == "system":
+                    llm_messages[0]["content"] = llm_messages[0].get("content", "") + _mission_directive
+                else:
+                    llm_messages.insert(0, {"role": "system", "content": _mission_directive})
 
             # US-015: Emit memory-injected SSE event
             if orchestrated and orchestrated.memory_context:
