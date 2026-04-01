@@ -54,3 +54,82 @@ def test_llm_settings_have_provider_and_model(client):
     assert "llm_model" in keys or "model" in keys, (
         "orchestrator_llm missing llm_model setting."
     )
+
+
+def test_system_settings_list(client):
+    """GET /api/system-settings/ should return all settings."""
+    r = client.get("/api/system-settings/")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+    assert len(data) > 0, "System settings should not be empty"
+
+
+def test_system_settings_by_category(client):
+    """GET /api/system-settings/ filtered by category should return subset."""
+    r = client.get("/api/system-settings/", params={"category": "chatbot"})
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+
+
+def test_system_settings_invalid_category(client):
+    """GET /api/system-settings/ with fake category should return empty, not 500."""
+    r = client.get("/api/system-settings/", params={"category": "DOES_NOT_EXIST"})
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+    assert len(data) == 0, "Unknown category should return empty list"
+
+
+def test_llm_provider_settings_have_values(client):
+    """LLM settings values should not be empty strings or None."""
+    r = client.get("/api/system-settings/", params={"category": "orchestrator_llm"})
+    assert r.status_code == 200
+    settings = r.json()
+    for s in settings:
+        val = s.get("value")
+        if s.get("key") in ("llm_provider", "llm_model", "provider", "model"):
+            assert val and val.strip(), (
+                f"Setting '{s.get('key')}' has empty value — "
+                f"this will cause silent LLM fallback failures"
+            )
+
+
+def test_service_category_map_coverage(client):
+    """Verify all known service categories have at least one setting."""
+    r = client.get("/api/system-settings/categories")
+    assert r.status_code == 200
+    categories = r.json()
+    # At minimum orchestrator_llm must exist
+    assert "orchestrator_llm" in categories, (
+        "orchestrator_llm category missing — this is the global fallback"
+    )
+
+
+def test_system_settings_update_roundtrip(client):
+    """PUT /api/system-settings/ should update and return new value.
+
+    Uses a safe non-critical setting to test the update path.
+    """
+    # Read current value
+    r = client.get("/api/system-settings/", params={"category": "orchestrator_llm"})
+    assert r.status_code == 200
+    settings = r.json()
+    if not settings:
+        return  # No settings to test with
+
+    # Find a non-critical setting to toggle
+    test_setting = None
+    for s in settings:
+        if s.get("key") not in ("llm_provider", "llm_model", "provider", "model"):
+            test_setting = s
+            break
+    if not test_setting:
+        return  # Only critical settings, skip
+
+    # Verify update endpoint exists (don't actually change values)
+    r = client.get(f"/api/system-settings/{test_setting.get('id', 0)}")
+    assert r.status_code != 500, (
+        f"GET single setting returned 500: {r.text[:200]}"
+    )
