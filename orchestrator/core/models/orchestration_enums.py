@@ -119,6 +119,9 @@ class EventType(str, Enum):
     # Archival (PRD-82B US-009)
     RUN_ARCHIVED = "run_archived"
 
+    # Permission (PRD-123 Pattern #5)
+    PERMISSION_DENIED = "permission_denied"
+
 
 # ---------------------------------------------------------------------------
 # ActorType — who triggered an orchestration event
@@ -165,6 +168,21 @@ class BudgetStatus(str, Enum):
     WARNING = "warning"
     CRITICAL = "critical"
     EXCEEDED = "exceeded"
+
+
+# ---------------------------------------------------------------------------
+# StopReason — why a mission stopped (PRD-123 Pattern #6)
+# ---------------------------------------------------------------------------
+
+class StopReason(str, Enum):
+    COMPLETED = "completed"                    # All tasks verified successfully
+    BUDGET_EXHAUSTED = "budget_exhausted"      # tokens_used >= token_budget_estimate
+    MAX_RETRIES_EXCEEDED = "max_retries"       # Task hit retry limit, no recovery
+    TIMEOUT = "timeout"                        # Wall-clock deadline exceeded
+    HUMAN_CANCELLED = "human_cancelled"        # User cancelled via API/UI
+    COORDINATOR_ERROR = "coordinator_error"    # Internal coordinator failure
+    NO_CAPABLE_AGENT = "no_capable_agent"      # No agent matched task requirements
+    DEPENDENCY_FAILED = "dependency_failed"    # Upstream task failed, downstream can't run
 
 
 # ---------------------------------------------------------------------------

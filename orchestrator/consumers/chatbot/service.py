@@ -1086,6 +1086,68 @@ class StreamingChatService:
                 tool_calls_prepared.append((tool_id, tool_name, tool_call))
 
             # Phase 2: Execute each tool
+            # Concurrency classification: log batch composition for future
+            # parallel execution optimization (free-code pattern).
+            try:
+                from modules.tools.execution.concurrency import partition_tool_batch
+                _read_safe, _mutating = partition_tool_batch(tool_calls_prepared)
+                if len(_read_safe) > 1 and len(_mutating) == 0:
+                    logger.info(
+                        f"[tool-batch] All {len(_read_safe)} tools are read-safe — "
+                        f"eligible for parallel execution"
+                    )
+            except Exception:
+                pass  # Classification is non-critical
+
+            # ── finish_reason: length → truncated tool call JSON ──
+            # When the LLM runs out of output tokens mid-tool-call, the JSON
+            # arguments are truncated. Detect this and ask the LLM to retry
+            # with shorter content instead of failing repeatedly.
+            _finish_reason = getattr(current_response, 'finish_reason', None)
+            if _finish_reason == 'length' and tool_calls_prepared:
+                logger.warning(
+                    f"LLM output truncated (finish_reason=length) with "
+                    f"{len(tool_calls_prepared)} tool calls — arguments likely malformed"
+                )
+                # Check if any tool call has unparseable JSON
+                _has_bad_json = False
+                for _tid, _tname, _tc in tool_calls_prepared:
+                    _astr = _tc.get('function', {}).get('arguments', '{}')
+                    if isinstance(_astr, str):
+                        try:
+                            json.loads(_astr)
+                        except json.JSONDecodeError:
+                            _has_bad_json = True
+                            break
+                if _has_bad_json:
+                    # Inject a system message telling the LLM to use shorter content
+                    llm_messages.append({
+                        "role": "system",
+                        "content": (
+                            "Your previous response was truncated (output token limit reached) "
+                            "while writing tool call arguments. The JSON was incomplete and could "
+                            "not be parsed. Please retry with SHORTER content — use concise text, "
+                            "fewer sections, or summarise instead of writing full prose in the "
+                            "tool arguments."
+                        ),
+                    })
+                    # Re-call LLM without tools to get a text response, or with tools
+                    # but the system message should guide it to be more concise
+                    current_response = await agent_runtime.llm_manager.generate_response(
+                        messages=llm_messages, tools=use_tools,
+                    )
+                    # If the retry also has tool calls, continue the loop normally
+                    # Otherwise yield the text response
+                    if not current_response.tool_calls:
+                        yield {"_final_response": current_response}
+                        return
+                    # Rebuild tool_calls_prepared from retry
+                    tool_calls_prepared = []
+                    for tool_call in current_response.tool_calls:
+                        t_name = tool_call.get('function', {}).get('name', 'unknown')
+                        t_id = tool_call.get('id', f'call_{int(time.time() * 1000)}')
+                        tool_calls_prepared.append((t_id, t_name, tool_call))
+
             tool_results: List[Dict[str, Any]] = []
             for tool_id, tool_name, tool_call in tool_calls_prepared:
                 try:
@@ -1290,10 +1352,33 @@ class StreamingChatService:
                 )}
                 return
 
-            # Phase 5: Next LLM call
-            current_response = await agent_runtime.llm_manager.generate_response(
-                messages=llm_messages, tools=use_tools,
-            )
+            # Phase 5: Next LLM call — withhold errors during recovery
+            try:
+                current_response = await agent_runtime.llm_manager.generate_response(
+                    messages=llm_messages, tools=use_tools,
+                )
+            except Exception as llm_err:
+                # Withhold error: attempt compaction + retry before surfacing
+                logger.warning(
+                    f"LLM call failed (iteration {iteration}), attempting recovery: {llm_err}"
+                )
+                try:
+                    from core.context_guard import ContextGuard
+                    guard = ContextGuard()
+                    llm_messages, compacted, use_tools = await guard.check_and_compact(
+                        llm_messages, use_tools, agent_runtime.llm_manager,
+                        workspace_id=self.workspace_id,
+                    )
+                    if compacted:
+                        logger.info("Recovery compaction succeeded, retrying LLM call")
+                        current_response = await agent_runtime.llm_manager.generate_response(
+                            messages=llm_messages, tools=use_tools,
+                        )
+                    else:
+                        raise  # No compaction possible, surface original error
+                except Exception:
+                    logger.error(f"Recovery failed, surfacing error: {llm_err}", exc_info=True)
+                    raise llm_err
             logger.info(f"Iteration {iteration} complete. More tool calls: {bool(current_response.tool_calls)}, Has content: {bool(current_response.content)}")
 
             if not current_response.tool_calls:

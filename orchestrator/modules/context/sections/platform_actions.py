@@ -47,17 +47,27 @@ class PlatformActionsSection(BaseSection):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    _PREAMBLE = (
+        "## Platform Actions\n\n"
+        "You can execute these actions via `platform_execute`. Always specify the "
+        "action name and include all required parameters. If an action fails, check "
+        "the error and retry with corrected parameters — do not guess or fabricate "
+        "results.\n\n"
+    )
+
     def _build(self) -> str:
         from modules.tools.discovery.action_registry import get_action_registry
 
         registry = get_action_registry()
-        content: str = registry.build_prompt_summary(exclude_promoted=True, exclude_admin=True)
+        catalog: str = registry.build_prompt_summary(exclude_promoted=True, exclude_admin=True)
 
-        if not content:
+        if not catalog:
             logger.warning(
                 "PlatformActionsSection: ActionRegistry returned empty summary"
             )
             return ""
+
+        content = self._PREAMBLE + catalog
 
         if self.max_tokens:
             content = self.truncate(content, self.max_tokens)

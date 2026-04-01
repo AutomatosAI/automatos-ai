@@ -692,6 +692,21 @@ class AgentPlatformTools:
                 data = parameters.get("data", {})
                 template_name = parameters.get("template_name")
 
+                # Guard: reject empty data — LLM must provide actual content
+                if not data or (fmt == "pdf" and not data.get("sections") and not data.get("content")):
+                    return ToolResultFormatter.standardize_result(
+                        {
+                            "success": False,
+                            "error": (
+                                "Missing document content. The 'data' parameter must include "
+                                "'sections' (a list of {title, content} objects with substantial text) "
+                                "or 'content' (a string). Generate the actual text content first, "
+                                "then call this tool again with the content in the 'data' parameter."
+                            ),
+                        },
+                        tool_name,
+                    )
+
                 self.logger.info(f"  📄 Generating {fmt.upper()} document: '{title}'")
 
                 # Resolve workspace_id from agent

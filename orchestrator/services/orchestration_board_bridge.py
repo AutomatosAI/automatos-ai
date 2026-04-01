@@ -23,7 +23,12 @@ from sqlalchemy.orm import Session
 
 from core.models.core import BoardTask
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
-from core.models.orchestration_enums import BOARD_STATUS_MAP, TaskState
+from core.models.orchestration_enums import (
+    BOARD_STATUS_MAP,
+    TERMINAL_RUN_STATES,
+    RunState,
+    TaskState,
+)
 
 # Priority → SLA deadline hours
 _PRIORITY_SLA_HOURS: dict[str, int] = {
@@ -288,4 +293,90 @@ def sync_board_status(
         new_status,
         task.id,
         task_state.value,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Mission-level board status sync
+# ---------------------------------------------------------------------------
+
+_RUN_STATE_TO_BOARD_STATUS: dict[str, str] = {
+    RunState.PENDING.value: "inbox",
+    RunState.PLANNING.value: "inbox",
+    RunState.AWAITING_APPROVAL.value: "review",
+    RunState.RUNNING.value: "in_progress",
+    RunState.PAUSED.value: "blocked",
+    RunState.REPLANNING.value: "in_progress",
+    RunState.VERIFYING.value: "in_progress",
+    RunState.AWAITING_HUMAN.value: "review",
+    RunState.COMPLETED.value: "done",
+    RunState.FAILED.value: "done",
+    RunState.CANCELLED.value: "done",
+}
+
+
+def sync_mission_board_status(
+    db: Session,
+    run: OrchestrationRun,
+) -> None:
+    """
+    Sync the mission-level BoardTask status to match the run's current state.
+
+    Should be called whenever the run transitions state — especially to
+    terminal states (completed, failed, cancelled) so the mission card
+    moves out of inbox/in_progress on the board.
+
+    Args:
+        db: SQLAlchemy session (caller manages transaction).
+        run: The OrchestrationRun whose board card should be updated.
+    """
+    board_task = db.query(BoardTask).filter(
+        BoardTask.source_type == "orchestration",
+        BoardTask.orchestration_run_id == run.id,
+    ).first()
+
+    if board_task is None:
+        logger.debug(
+            "No mission board task found for run %s — skipping sync",
+            run.id,
+        )
+        return
+
+    run_state = RunState(run.state)
+    new_status = _RUN_STATE_TO_BOARD_STATUS.get(run_state.value, "inbox")
+
+    if board_task.status == new_status:
+        return
+
+    old_status = board_task.status
+    board_task.status = new_status
+
+    # Sync timestamps
+    if new_status == "in_progress" and board_task.started_at is None:
+        board_task.started_at = run.started_at or datetime.now(timezone.utc)
+
+    if new_status == "done" and board_task.completed_at is None:
+        board_task.completed_at = run.completed_at or datetime.now(timezone.utc)
+
+    # Store failure info when mission fails
+    if run_state == RunState.FAILED:
+        board_task.error_message = run.stop_detail or run.stop_reason or "Mission failed"
+
+    # Blocked metadata for paused runs
+    if new_status == "blocked" and old_status != "blocked":
+        board_task.blocked_at = datetime.now(timezone.utc)
+        board_task.blocked_reason = "Mission paused"
+    elif new_status != "blocked" and old_status == "blocked":
+        board_task.blocked_at = None
+        board_task.blocked_reason = None
+
+    db.flush()
+
+    logger.info(
+        "Synced mission board task %s status: %s → %s (run %s state=%s)",
+        board_task.id,
+        old_status,
+        new_status,
+        run.id,
+        run_state.value,
     )

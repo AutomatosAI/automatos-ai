@@ -330,6 +330,8 @@ def _run_to_response(run: OrchestrationRun) -> dict:
         "parallel_groups": parallel_groups,
         "has_synthesis_tasks": has_synthesis_tasks,
         "created_by": run.created_by,
+        "stop_reason": getattr(run, "stop_reason", None),
+        "stop_detail": getattr(run, "stop_detail", None),
         "started_at": run.started_at,
         "completed_at": run.completed_at,
         "created_at": run.created_at,
@@ -859,9 +861,22 @@ async def get_mission(
             .all()
         )
 
+        # PRD-123 Pattern #5: Extract permission denial events
+        permission_denials = [
+            {
+                "agent_name": (e.payload or {}).get("agent_name"),
+                "tool_name": (e.payload or {}).get("tool_name"),
+                "reason": (e.payload or {}).get("reason"),
+                "denied_at": e.created_at,
+            }
+            for e in events
+            if e.event_type == "permission_denied"
+        ]
+
         result = _run_to_response(run)
         result["tasks"] = [_task_to_response(t) for t in tasks]
         result["recent_events"] = [_event_to_response(e) for e in events]
+        result["permission_denials"] = permission_denials
         return result
 
     except HTTPException:
@@ -1737,3 +1752,92 @@ async def get_agent_mission_history(
     except Exception as exc:
         logger.error("Failed to get mission history for agent %s: %s", agent_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# PRD-123 Pattern #8: Session Checkpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{mission_id}/checkpoints")
+async def list_mission_checkpoints(
+    mission_id: str,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """List available checkpoints for a mission."""
+    from services.checkpoint_service import list_checkpoints
+
+    run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+    checkpoints = await list_checkpoints(run.id)
+    return {
+        "mission_id": str(run.id),
+        "checkpoint_count": run.checkpoint_count,
+        "checkpoints": checkpoints,
+    }
+
+
+@router.post("/{mission_id}/resume")
+async def resume_mission(
+    mission_id: str,
+    from_checkpoint: Optional[str] = Query(default="latest"),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """
+    Resume a failed/cancelled mission from a checkpoint.
+
+    Args:
+        from_checkpoint: Checkpoint number or 'latest' (default).
+    """
+    from services.checkpoint_service import read_checkpoint
+
+    run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+
+    # Only resume from terminal states
+    from core.models.orchestration_enums import TERMINAL_RUN_STATES, RunState
+    if RunState(run.state) not in TERMINAL_RUN_STATES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mission is in state '{run.state}' — can only resume from terminal states",
+        )
+
+    # Read checkpoint
+    try:
+        cp_number = None if from_checkpoint == "latest" else int(from_checkpoint)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid checkpoint number: {from_checkpoint!r} — must be an integer or 'latest'",
+        )
+    checkpoint = await read_checkpoint(run.id, cp_number)
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="No checkpoint found for this mission")
+
+    # Transition back to running
+    from services.orchestration_state import transition_run
+    from core.models.orchestration_enums import ActorType
+    try:
+        transition_run(
+            db=db,
+            run=run,
+            new_state=RunState.RUNNING,
+            actor_type=ActorType.USER,
+            actor_id=str(ctx.user_id) if ctx.user_id else None,
+            reason=f"Resumed from checkpoint {checkpoint.get('checkpoint_number')}",
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        # InvalidTransitionError, ConflictError (stale version), or DB errors
+        raise HTTPException(
+            status_code=409,
+            detail=f"Failed to resume mission: {exc}",
+        )
+
+    return {
+        "mission_id": str(run.id),
+        "state": run.state,
+        "resumed_from_checkpoint": checkpoint.get("checkpoint_number"),
+        "message": "Mission resumed — coordinator will pick up on next tick",
+    }

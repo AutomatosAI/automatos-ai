@@ -28,6 +28,7 @@ from core.database.base import Base
 from core.models.orchestration_enums import (
     RunState,
     StateType,
+    StopReason,
     TaskState,
     RUN_STATE_TYPE,
     TASK_STATE_TYPE,
@@ -102,6 +103,13 @@ class OrchestrationRun(Base):
 
     # Replan tracking (PRD-82B US-005)
     replan_count = Column(Integer, nullable=False, server_default="0")
+
+    # Stop reason (PRD-123 Pattern #6)
+    stop_reason = Column(String(50), nullable=True)
+    stop_detail = Column(Text, nullable=True)
+
+    # PRD-123 Pattern #8: Session checkpointing
+    checkpoint_count = Column(Integer, nullable=False, server_default="0")
 
     # Governance: mission budget tracking
     budget_config = Column(JSONB, nullable=True)   # {max_cost, max_tokens, alert_at_pct}
@@ -466,3 +474,65 @@ class OrchestrationEvent(Base):
             f"<OrchestrationEvent id={self.id} run={self.run_id} "
             f"type={self.event_type} {self.old_state}→{self.new_state}>"
         )
+
+
+# ===========================================================================
+# Frozen dataclasses — immutable records for orchestration flow
+# PRD-123 Patterns #5, #1
+# ===========================================================================
+
+from dataclasses import dataclass, field
+from datetime import datetime as _dt
+from uuid import UUID as _UUID
+
+
+@dataclass(frozen=True)
+class PermissionDenial:
+    """Immutable record of a denied tool/action access (PRD-123 Pattern #5)."""
+
+    agent_id: int
+    tool_name: str
+    reason: str
+    workspace_id: _UUID
+    denied_at: _dt
+    context: str  # 'orchestration', 'chat', 'workflow'
+
+
+@dataclass(frozen=True)
+class TaskTransition:
+    """Immutable record of a task state change (PRD-123 Pattern #1)."""
+
+    task_id: _UUID
+    from_state: str
+    to_state: str
+    triggered_by: str  # 'coordinator', 'agent', 'user', 'system'
+    reason: str | None = None
+    stop_reason: str | None = None
+    timestamp: _dt = field(default_factory=lambda: _dt.now(__import__("datetime").timezone.utc))
+    metadata: dict | None = None
+
+
+@dataclass(frozen=True)
+class RunTransition:
+    """Immutable record of a run state change (PRD-123 Pattern #1)."""
+
+    run_id: _UUID
+    from_state: str
+    to_state: str
+    triggered_by: str  # 'coordinator', 'agent', 'user', 'system'
+    stop_reason: str | None = None
+    timestamp: _dt = field(default_factory=lambda: _dt.now(__import__("datetime").timezone.utc))
+    metadata: dict | None = None
+
+
+@dataclass(frozen=True)
+class SessionCheckpoint:
+    """Immutable session checkpoint for mission crash recovery (PRD-123 Pattern #8)."""
+
+    run_id: _UUID
+    task_id: _UUID | None
+    messages: tuple[dict, ...]
+    memory_snapshot: dict
+    tokens_used: int
+    checkpoint_number: int
+    created_at: _dt = field(default_factory=lambda: _dt.now(__import__("datetime").timezone.utc))

@@ -157,6 +157,7 @@ class IdentitySection(BaseSection):
             AutomatosPersonality.get_platform_skill(),
             AutomatosPersonality.get_tool_guidance_prompt(has_tools=True),
             AutomatosPersonality.get_action_response_style(),
+            AutomatosPersonality.get_anti_patterns(),
             AutomatosPersonality.get_self_learning_instruction(),
         ]
 

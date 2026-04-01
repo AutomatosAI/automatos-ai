@@ -1115,9 +1115,10 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             name="generate_document",
             category=ToolCategory.FILE_OPERATIONS,
             description=(
-                "Generate a polished PDF, DOCX, or XLSX document from data. "
-                "Use when the user asks for a report, invoice, export, summary document, "
-                "or any formatted document. Returns a download URL for the generated file."
+                "Generate a polished PDF, DOCX, or XLSX document. "
+                "IMPORTANT: You MUST provide the 'data' parameter with actual written content — "
+                "the document will be blank without it. For PDFs, include 'sections' with full paragraphs. "
+                "Returns a download URL for the generated file."
             ),
             executor_class="AgentPlatformTools",
             executor_method="execute_tool",
@@ -1139,10 +1140,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                     name="data",
                     type="object",
                     description=(
-                        "Data to populate the document. "
-                        "For reports: {\"sections\": [{\"title\": \"Section Name\", \"content\": \"Full paragraph text...\"}], "
+                        "REQUIRED — the actual document content. Without this the document will be blank. "
+                        "For PDF/DOCX reports: {\"sections\": [{\"title\": \"Section Name\", \"content\": \"Write full "
+                        "paragraphs of text here — this is the body of the document.\"}], "
                         "\"author\": \"...\", \"date\": \"...\"}. "
-                        "Each section MUST have 'title' and 'content' keys with substantial text in content. "
+                        "You MUST write out the full text content for each section — do not leave sections empty. "
                         "For tables/xlsx: {\"columns\": [\"col1\", \"col2\"], \"rows\": [[\"val1\", \"val2\"]]}."
                     ),
                     required=True
@@ -1223,7 +1225,34 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
         
         if not tool.is_active:
             return False, f"Tool '{tool_name}' is not active"
-        
+
+        # -----------------------------------------------------------------
+        # PRD-123 Pattern #4: Tool Tier Policy Enforcement
+        # system  → always available (skip all further checks)
+        # platform → available by default (skip assignment checks)
+        # marketplace/custom → require explicit assignment (existing logic)
+        # -----------------------------------------------------------------
+        tool_tier = getattr(tool, "tier", None) or "marketplace"
+        # Resolve from DB model if the registry tool doesn't carry tier
+        if tool_tier == "marketplace" and db:
+            try:
+                from core.models.tools import Tool as ToolModel
+                db_tool = db.query(ToolModel).filter(ToolModel.name == tool_name).first()
+                if db_tool and db_tool.tier:
+                    tool_tier = db_tool.tier
+            except Exception:
+                pass  # fall through to default marketplace behavior
+
+        if tool_tier == "system":
+            return True, None  # system tools always pass
+
+        if tool_tier == "platform":
+            # Platform tools available by default — only blocked if workspace explicitly disables
+            # (workspace-level disable not yet implemented — allow for now)
+            return True, None
+
+        # marketplace and custom tiers continue to existing assignment checks below
+
         # ---------------------------------------------------------------------
         # Hard gating for Composio execution:
         # Only expose Composio tools when the agent has EXTERNAL app assignments

@@ -229,7 +229,13 @@ class ToolExecutionLog(Base):
     # Performance
     execution_time_ms = Column(Integer)
     token_usage = Column(JSONB)  # {"input": 100, "output": 50, "total": 150}
-    
+
+    # PRD-123 Pattern #12: Cost tracking
+    estimated_cost = Column(Float, default=0.0)  # Estimated cost in USD
+    rate_limit_remaining = Column(Integer, nullable=True)  # Provider rate limit remaining
+    # Note: execution_ms column exists in DB (migration prd123_cost_tracking) but is
+    # intentionally unmapped — use execution_time_ms instead to avoid ambiguity.
+
     # Metadata
     router_decision = Column(JSONB)  # How the tool was selected
     cache_hit = Column(Boolean, default=False)

@@ -13,6 +13,7 @@ class TestContextMode:
         "chatbot", "task_execution", "heartbeat_orchestrator",
         "heartbeat_agent", "recipe",
         "router", "orchestrator_stage", "nl2sql",
+        "coordinator",
     }
 
     def test_all_expected_modes_exist(self):
@@ -114,6 +115,7 @@ class TestSectionRegistry:
         "platform_actions", "memory", "tools",
         "task_context", "playbook_context", "datetime_context",
         "conversation", "custom",
+        "onboarding", "mission_context", "agent_roster",
     }
 
     def test_all_expected_sections_registered(self):

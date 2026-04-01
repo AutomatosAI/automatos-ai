@@ -39,7 +39,7 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
     # is inappropriate for task-executing or orchestration agents.
     ContextMode.CHATBOT: ModeConfig(
         sections=[
-            "identity", "skills", "composio", "plugins",
+            "identity", "onboarding", "skills", "composio", "plugins",
             "platform_actions", "memory",
             "datetime_context", "conversation",
         ],

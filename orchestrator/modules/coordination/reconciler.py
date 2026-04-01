@@ -877,6 +877,8 @@ class MissionReconciler:
                     actor_type=ActorType.COORDINATOR,
                     actor_id="reconciler",
                     reason=f"Tasks failed: {', '.join(failed_titles)}",
+                    stop_reason="dependency_failed",
+                    stop_detail=f"Tasks failed: {', '.join(failed_titles)}",
                 )
                 logger.info(
                     "Run %s → failed (%d of %d tasks failed)",
@@ -907,6 +909,8 @@ class MissionReconciler:
                         actor_type=ActorType.COORDINATOR,
                         actor_id="reconciler",
                         reason=f"{len(skipped_tasks)} tasks skipped due to dependency failure",
+                        stop_reason="dependency_failed",
+                        stop_detail=f"{len(skipped_tasks)} tasks skipped due to upstream failure",
                     )
                     return ReconcileResult(
                         **result_kwargs,
@@ -955,6 +959,7 @@ class MissionReconciler:
                 )
 
                 try:
+                    _stop = "max_retries" if "retries" in str(task.failure_reason_code).lower() else "dependency_failed"
                     transition_run(
                         db=db,
                         run=run,
@@ -965,6 +970,8 @@ class MissionReconciler:
                             f"Task '{task.title}' failed fatally: "
                             f"{task.failure_reason_code}"
                         ),
+                        stop_reason=_stop,
+                        stop_detail=f"Task '{task.title}' failed: {task.failure_reason_code}",
                     )
                     emit_event(
                         db=db,
