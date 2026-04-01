@@ -43,7 +43,7 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
             "platform_actions", "memory",
             "datetime_context", "conversation",
         ],
-        tool_loading="filtered",
+        tool_loading="full",
         personality=True,
         max_tokens=None,
     ),
