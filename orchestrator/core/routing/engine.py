@@ -637,6 +637,23 @@ class UniversalRouter:
         Includes a synthetic "Auto" entry (id=0) so the LLM can explicitly
         route back to the orchestrator when no specialized agent fits.
         """
+        # Resolve workspace-connected apps once (for inheritance fallback)
+        workspace_apps: List[str] = []
+        if agents:
+            workspace_id = agents[0].workspace_id
+            try:
+                from core.composio.entity_manager import EntityManager
+                manager = EntityManager(self._db)
+                entity = manager.get_entity_by_workspace(workspace_id)
+                if entity:
+                    workspace_apps = [
+                        (c.get("app_name") or "").upper()
+                        for c in manager.get_entity_connections(str(entity["id"]))
+                        if c.get("status") in ("active", "pending")
+                    ]
+            except Exception:
+                logger.warning("[router] Failed to resolve workspace apps for inheritance")
+
         descriptions: List[Dict] = []
         for agent in agents:
             # Look up assigned app names
@@ -649,6 +666,12 @@ class UniversalRouter:
                 .all()
             )
             app_names = [a.app_name for a in app_assignments]
+
+            # Workspace inheritance: if agent has no per-agent assignments,
+            # inherit workspace-connected apps (same pattern as
+            # ComposioToolService and ComposioHintService)
+            if not app_names and workspace_apps:
+                app_names = workspace_apps
 
             descriptions.append(
                 {

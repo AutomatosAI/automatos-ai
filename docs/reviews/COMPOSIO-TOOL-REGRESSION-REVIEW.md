@@ -16,20 +16,23 @@ Automatos agents have become "dumb" — they no longer use web search (Tavily), 
 
 **Critical discovery during review:** The chat streaming service (`service.py`) already has `ComposioToolService` wired in correctly (lines 858-927). The agent factory (`agent_factory.py`) does NOT — it still uses the inferior `ComposioHintService`. Missions, heartbeats, and tasks flow through the agent factory, meaning they are all affected.
 
+**Critical discovery #2 (routing blind spot):** Auto is a router/delegator, not an executor. The real problem is that the **UniversalRouter cannot see which agents have Composio tools**. Router logs show `apps=[none]` for ALL agents because `_build_agent_descriptions()` (engine.py:634-680) queries `AgentAppAssignment` directly but has **no workspace inheritance fallback**. Both `ComposioToolService` and `ComposioHintService` have this fallback (auto-inherit workspace-connected apps when no per-agent assignments exist), but the router does not. Result: "research competitors" routes to PROSPECT (name match) instead of an agent that actually HAS Tavily/web search tools.
+
 ---
 
 ## Table of Contents
 
 1. [Timeline of the Regression](#1-timeline-of-the-regression)
 2. [Architecture: How Tools Reach the LLM](#2-architecture-how-tools-reach-the-llm)
-3. [The Three Compounding Failures](#3-the-three-compounding-failures)
+3. [The Four Compounding Failures](#3-the-three-compounding-failures)
 4. [File-by-File Evidence](#4-file-by-file-evidence)
 5. [What Works vs What Doesn't](#5-what-works-vs-what-doesnt)
 6. [PRD Cross-Reference Analysis](#6-prd-cross-reference-analysis)
 7. [Composio SDK State of the Art](#7-composio-sdk-state-of-the-art)
-8. [Proposed Fix Architecture](#8-proposed-fix-architecture)
-9. [Risk Assessment](#9-risk-assessment)
-10. [Open Questions for Reviewers](#10-open-questions-for-reviewers)
+8. [The Fourth Failure: Routing Blind Spot](#8-the-fourth-failure-routing-blind-spot)
+9. [Proposed Fix Architecture (Updated)](#9-proposed-fix-architecture-updated)
+10. [Risk Assessment](#10-risk-assessment)
+11. [Open Questions for Reviewers](#11-open-questions-for-reviewers)
 
 ---
 
@@ -133,7 +136,7 @@ PATH C: Recipe Executor (recipe_executor.py) — ALREADY CORRECT
 
 ---
 
-## 3. The Three Compounding Failures
+## 3. The Four Compounding Failures
 
 ### Failure 1: Enrichment Gap in `tool_router.py` (Pre-existing)
 
@@ -216,6 +219,38 @@ Four prompt sections rewritten in `consumers/chatbot/personality.py`:
 2. Sees `composio_execute` — vague, unenriched (no actions listed)
 3. Reads prompt guidance: "Don't spray tool calls", "Use tools only when they genuinely help"
 4. **Conclusion:** Use `search_knowledge` (safe, understood) instead of `composio_execute` (risky, unclear)
+
+### Failure 4: Router Cannot See Agent Tool Capabilities
+
+**File:** `orchestrator/core/routing/engine.py:634-680`
+
+The UniversalRouter's Tier 3 LLM classification builds an agent list for the routing prompt. Each agent includes an `Apps: [...]` field. But the app lookup queries `AgentAppAssignment` directly with **no workspace inheritance fallback**:
+
+```python
+# engine.py:643-651
+app_assignments = (
+    self._db.query(AgentAppAssignment)
+    .filter(
+        AgentAppAssignment.agent_id == agent.id,
+        AgentAppAssignment.is_active.is_(True),
+    )
+    .all()
+)
+app_names = [a.app_name for a in app_assignments]
+# When empty → apps=[none]. No fallback to workspace connections.
+```
+
+**Impact:** The routing LLM sees `Apps: [none]` for every agent. It routes by name/description/tags only. "Research competitors" goes to PROSPECT (because "prospect" and "research" are in its tags) instead of an agent with TAVILY or web search tools.
+
+**This is the most critical failure** because even if per-action schemas are loaded correctly after routing, the **wrong agent** was selected. A sales prospecting agent doing research gets a different personality, prompt, and approach than a dedicated research agent.
+
+| File | Line | Has Workspace Inheritance? |
+|------|------|---------------------------|
+| `tool_registry.py` | 1290-1299 | YES |
+| `composio_hint_service.py` | 255-263 | YES |
+| `composio_tool_service.py` | 324-332 | YES |
+| `tool_router.py` | 184-194 | NO |
+| **`engine.py`** | **643-651** | **NO** |
 
 ---
 
@@ -496,11 +531,99 @@ Per-action schemas eliminate all three problems — the LLM sees typed function 
 
 ---
 
-## 8. Proposed Fix Architecture
+## 8. The Fourth Failure: Routing Blind Spot
+
+### The Architectural Insight
+
+Auto is a **router/delegator**, not an executor. When a user says "research competitors," Auto's job is to pick the right agent — not to use Composio tools itself. The problem isn't just that agents lack per-action schemas; it's that **the router picks the wrong agent entirely**.
+
+### Evidence from Production Logs
+
+```
+[router] Tier 3 agent: id=312 name='PROSPECT' apps=[none] desc=''
+[router] Tier 3 agent: id=185 name='SCOUT' apps=[none] desc='Lead intelligence agent...'
+[router] Tier 3: LLM response: {"route":"PROSPECT","confidence":0.83,
+  "reasoning":"PROSPECT is the strongest match because its tags include prospect and research"}
+```
+
+Every agent shows `apps=[none]`. The router LLM selects based on name/description/tags only — it has **zero visibility into which agents have web search or Composio tools**.
+
+### Root Cause: Missing Workspace Inheritance in Router
+
+`_build_agent_descriptions()` in `engine.py:634-680`:
+
+```python
+# Lines 643-651 — Router's app lookup (NO INHERITANCE)
+app_assignments = (
+    self._db.query(AgentAppAssignment)
+    .filter(
+        AgentAppAssignment.agent_id == agent.id,
+        AgentAppAssignment.is_active.is_(True),
+    )
+    .all()
+)
+app_names = [a.app_name for a in app_assignments]
+# When empty → apps=[none] in the prompt. NO FALLBACK.
+```
+
+Compare with `ComposioToolService._resolve_allowed_apps()` at line 294-338:
+
+```python
+# Lines 324-331 — ComposioToolService (HAS INHERITANCE)
+if not assigned_apps:
+    if connected_apps:
+        logger.info(
+            "[ComposioToolService] Agent %s has no app assignments — "
+            "inheriting %d workspace apps", agent_id, len(connected_apps)
+        )
+        return connected_apps
+    return []
+```
+
+And `ComposioHintService._resolve_allowed_apps()` at line 217-275 — same pattern.
+
+**Both Composio services auto-inherit workspace-connected apps when no per-agent assignments exist. The router does not.**
+
+### Impact
+
+The LLM routing prompt includes `Apps: [none]` for every agent. The routing LLM:
+- Cannot factor tool capability into its decision
+- Routes "research competitors" to PROSPECT (name contains "prospect"/"research")
+- Ignores agents that actually have Tavily, web search, or research tools connected
+- Even if the selected agent later gets ComposioToolService tools via inheritance, the WRONG agent was selected — a sales prospecting agent doing research gets a different personality, prompt, and approach than a dedicated research agent
+
+### Why This Wasn't Caught
+
+1. **Testing gap:** Router unit tests check tier logic, not app enrichment accuracy
+2. **Logs misleading:** `apps=[none]` looks like "no apps assigned" which seems correct if you don't know about workspace inheritance
+3. **Partial success:** Some requests work because the LLM routing happens to pick an agent that can handle it (coincidence, not capability matching)
+
+### The Fix
+
+The router's `_build_agent_descriptions()` needs the same workspace inheritance as `ComposioToolService._resolve_allowed_apps()`:
+
+1. Query `AgentAppAssignment` for the agent (existing code)
+2. If empty, query `EntityManager.get_entity_connections()` for workspace-connected apps
+3. Include the inherited apps in the `Apps: [...]` field of the LLM routing prompt
+4. The routing LLM can now see: "SCOUT has [TAVILY, COMPOSIO_SEARCH_WEB, GITHUB]" and correctly route research tasks to SCOUT
+
+This is a **single-method change** in `engine.py:_build_agent_descriptions()` — ~15 lines of code, following a proven pattern from two existing services.
+
+---
+
+## 9. Proposed Fix Architecture (Updated)
+
+### Design Principle: Auto Routes, Agents Execute
+
+The fix has two independent parts:
+1. **Fix routing** — Router sees agent tool capabilities → picks the right agent
+2. **Fix execution** — Agent factory gets per-action Composio schemas → agent can use tools
+
+Both are needed. Fixing routing alone means the right agent is picked but still can't use tools efficiently. Fixing execution alone means agents have tools but the wrong agent is selected.
 
 ### What Needs to Change
 
-The fix is completing `ComposioToolService` Phase 2 — the same service that already makes recipes and chat streaming work — into the agent factory path.
+The fix is completing `ComposioToolService` Phase 2 — the same service that already makes recipes and chat streaming work — into the agent factory path. **AND** adding workspace inheritance to the router.
 
 ### Approach: Two-Phase Tool Loading
 
@@ -537,15 +660,22 @@ PROPOSED (matches chat streaming + recipe pattern):
 - **Pros:** Truly single source, all callers benefit automatically
 - **Cons:** Changes a widely-used interface, mixes prompt-dependent and prompt-independent logic
 
-### Recommended: Option A First, Then Option B
+### Recommended Fix Order
 
-1. **Immediate fix (Option A):** Wire `ComposioToolService` into `agent_factory.py:_inject_composio_hints()`, following the exact pattern from `service.py:858-927`. This fixes missions, heartbeats, and tasks immediately.
+**Phase 0: Fix Routing (HIGHEST PRIORITY — ~15 lines)**
+Add workspace inheritance to `engine.py:_build_agent_descriptions()`. Without this, the wrong agent is selected regardless of tool availability. This is the smallest change with the biggest impact.
 
-2. **Architectural improvement (Option B):** Extract the ComposioToolService integration into ContextService so all paths share one implementation. This prevents future drift between service.py and agent_factory.py.
+**Phase 1: Fix Execution (Option A — matches chat streaming pattern)**
+Wire `ComposioToolService` into `agent_factory.py:_inject_composio_hints()`, following the exact pattern from `service.py:858-927`. This fixes missions, heartbeats, and tasks immediately.
 
-3. **Also fix:** Add workspace inheritance to `tool_router.py:184-192` for the `composio_execute` enrichment code. Even though per-action schemas are the primary path, `composio_execute` remains as a fallback and should work correctly.
+**Phase 2: Fix Enrichment Gap**
+Add workspace inheritance to `tool_router.py:184-192` for the `composio_execute` enrichment code. Even though per-action schemas are the primary path, `composio_execute` remains as a fallback and should work correctly.
 
-4. **Also fix:** Populate `unified_executor.composio_actions` dict when per-action tools are resolved. Currently dead code — the routing logic at `unified_executor.py:414-426` exists but the dict is always empty.
+**Phase 3: Architectural Unification (Option B)**
+Extract the ComposioToolService integration into ContextService so all paths share one implementation. This prevents future drift between service.py and agent_factory.py.
+
+**Phase 4: Dead Code Cleanup**
+Either populate `unified_executor.composio_actions` dict when per-action tools are resolved, or remove the dead routing logic at `unified_executor.py:414-426`.
 
 ### Gotchas and Risks
 
@@ -568,7 +698,7 @@ The agent factory execution path uses `unified_executor.execute_tool()` which ch
 
 ---
 
-## 9. Risk Assessment
+## 10. Risk Assessment
 
 ### What Will NOT Break
 
@@ -601,7 +731,7 @@ The agent factory execution path uses `unified_executor.execute_tool()` which ch
 
 ---
 
-## 10. Open Questions for Reviewers
+## 11. Open Questions for Reviewers
 
 ### Architecture Questions
 
@@ -649,6 +779,7 @@ The agent factory execution path uses `unified_executor.execute_tool()` which ch
 
 | File | Lines | Role |
 |------|-------|------|
+| `core/routing/engine.py` | 634-680 | UniversalRouter agent descriptions — MISSING WORKSPACE INHERITANCE |
 | `modules/tools/tool_router.py` | 129-309 | Central tool assembly — has enrichment gap |
 | `consumers/chatbot/service.py` | 858-927 | Chat ComposioToolService integration (WORKS) |
 | `consumers/chatbot/service.py` | 1182-1191 | Chat per-action execution routing (WORKS) |

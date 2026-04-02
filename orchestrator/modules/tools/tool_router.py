@@ -191,8 +191,27 @@ def get_tools_for_agent(
                         .all()
                     )
 
-                    if assignments:
-                        app_names = [a.app_name for a in assignments if a.app_name]
+                    app_names = [a.app_name for a in assignments if a.app_name]
+
+                    # Workspace inheritance: if no per-agent assignments,
+                    # fall back to workspace-connected apps
+                    if not app_names and workspace_id:
+                        try:
+                            from core.composio.entity_manager import EntityManager
+                            manager = EntityManager(session_used)
+                            entity = manager.get_entity_by_workspace(workspace_id)
+                            if entity:
+                                app_names = [
+                                    (c.get("app_name") or "").upper()
+                                    for c in manager.get_entity_connections(str(entity["id"]))
+                                    if c.get("status") in ("active", "pending")
+                                ]
+                                if app_names:
+                                    logger.info(f"[tool-trace {trace_id}] Agent {agent_id} inheriting {len(app_names)} workspace apps")
+                        except Exception:
+                            logger.warning(f"[tool-trace {trace_id}] Workspace app inheritance lookup failed")
+
+                    if app_names:
 
                         # Get top actions for these apps from cache
                         actions = (
