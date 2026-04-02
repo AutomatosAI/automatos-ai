@@ -11,9 +11,10 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_browse_marketplace_plugins",
         description=(
-            "Browse or search the marketplace for approved plugins. Returns plugin name, "
-            "slug, description, category, skills count, and whether it's already enabled "
-            "in this workspace. Use when the user wants to discover new plugins."
+            "Browse the marketplace for plugins to ADD to workspace. "
+            "Use when discovering or searching for new plugins to install. "
+            "For plugins already installed, use platform_list_workspace_plugins instead. "
+            "Returns name, slug, description, category, skills count, and install status."
         ),
         category="marketplace",
         parameters={
@@ -48,9 +49,10 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_browse_marketplace_agents",
         description=(
-            "Browse or search the marketplace for pre-built agent templates. Returns agent name, "
-            "description, category, model, tools, skills, install count, and whether it's already "
-            "installed in this workspace. Use when designing teams or hiring new agents."
+            "Browse marketplace for pre-built agent templates to hire/install. "
+            "Use when designing teams or searching for new agents to add. "
+            "For agents already in workspace, use platform_list_agents instead. "
+            "Returns name, description, category, model, tools, skills, and install status."
         ),
         category="marketplace",
         parameters={
@@ -86,9 +88,10 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_browse_marketplace_skills",
         description=(
-            "Browse or search the global skills catalog (marketplace skills). Returns "
-            "skill name, description, category, estimated token cost, and whether it's "
-            "already enabled in this workspace. Use when the user wants to discover skills."
+            "Browse global skills catalog for skills to ADD. "
+            "Use when discovering or searching for new skills to install. "
+            "For skills already enabled, use platform_list_workspace_skills instead. "
+            "Returns name, description, category, token cost, and install status."
         ),
         category="marketplace",
         parameters={
@@ -125,9 +128,10 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_workspace_plugins",
         description=(
-            "List all plugins currently enabled for this workspace. Returns plugin name, "
-            "slug, description, category, skills count, and when it was enabled. "
-            "Use when the user asks what plugins they have installed."
+            "List plugins already ENABLED in this workspace. "
+            "Use when the user asks what plugins they have or what's installed. "
+            "For browsing new plugins to install, use platform_browse_marketplace_plugins instead. "
+            "Returns name, slug, description, category, skills count, and enabled date."
         ),
         category="workspace",
         parameters={
@@ -148,9 +152,10 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_workspace_skills",
         description=(
-            "List all skills currently enabled for this workspace. Returns skill name, "
-            "description, category, estimated token cost, and when it was enabled. "
-            "Use when the user asks what skills they have installed."
+            "List skills already ENABLED in this workspace. "
+            "Use when the user asks what skills they have or what's installed. "
+            "For browsing new skills to install, use platform_browse_marketplace_skills instead. "
+            "Returns name, description, category, token cost, and enabled date."
         ),
         category="workspace",
         parameters={
@@ -171,9 +176,9 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_workspace_models",
         description=(
-            "List all LLM models installed for this workspace, including default models. "
-            "Returns model ID, display name, provider, costs, context length, capabilities, "
-            "and source. Use when the user asks what models they have available."
+            "List LLM models currently INSTALLED for this workspace with costs, capabilities, "
+            "and context windows. Use when the user asks what models are available or wants to "
+            "compare options. Includes both user-installed and default models."
         ),
         category="workspace",
         parameters={
@@ -196,9 +201,10 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_install_plugin",
         description=(
-            "Enable a marketplace plugin for this workspace. Accepts plugin_id (UUID) "
-            "or plugin_slug. The plugin must be approved and active. Idempotent — "
-            "re-enabling an already-enabled plugin is a no-op."
+            "Enable a marketplace plugin for this workspace. "
+            "The plugin must be approved and active. Idempotent — re-enabling is safe. "
+            "Browse available plugins with platform_browse_marketplace_plugins first. "
+            "Accepts plugin_id (UUID) or plugin_slug."
         ),
         category="marketplace",
         parameters={
@@ -228,9 +234,10 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_install_skill",
         description=(
-            "Enable a marketplace skill for this workspace. Accepts skill_id (int) "
-            "or skill_name. The skill must be a global marketplace skill (not workspace-specific) "
-            "and active. Idempotent — re-enabling an already-enabled skill is a no-op."
+            "Enable a marketplace skill for this workspace. "
+            "Must be a global marketplace skill. Idempotent — re-enabling is safe. "
+            "Browse available skills with platform_browse_marketplace_skills first. "
+            "Accepts skill_id (int) or skill_name."
         ),
         category="marketplace",
         parameters={
@@ -260,10 +267,10 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_install_model",
         description=(
-            "Install an LLM model for this workspace from the OpenRouter catalog. "
-            "Accepts a model_id string (e.g., 'anthropic/claude-sonnet-4-20250514'). "
-            "Auto-creates the LLM registry entry from the OpenRouter cache if needed. "
-            "Idempotent — re-installing re-activates an inactive install."
+            "Install an LLM model from OpenRouter catalog. "
+            "Use the model_id format like 'anthropic/claude-sonnet-4-20250514'. "
+            "Idempotent — re-installing reactivates inactive installs. "
+            "Auto-creates registry entry from OpenRouter cache if needed."
         ),
         category="marketplace",
         parameters={

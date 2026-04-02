@@ -11,9 +11,10 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_playbooks",
         description=(
-            "List all playbooks in the current workspace. Returns playbook names, "
-            "trigger types, status, and step counts. Use when the user asks about their "
-            "playbooks, workflows, or automations."
+            "List all playbooks (automated workflows) in the workspace with names, "
+            "triggers, status, and step counts. Use when the user asks about their "
+            "playbooks, workflows, or automations. For details of ONE playbook, "
+            "use platform_get_playbook instead."
         ),
         category="playbooks",
         parameters={
@@ -39,9 +40,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_playbook",
         description=(
-            "Get detailed information about a specific playbook including its steps, "
-            "trigger configuration, and execution history. Use when the user asks "
-            "about a specific playbook's details."
+            "Get full details of ONE playbook — steps, trigger config, execution "
+            "history. Use when the user asks about a specific playbook's details. "
+            "For listing all playbooks, use platform_list_playbooks instead."
         ),
         category="playbooks",
         parameters={
@@ -71,9 +72,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_create_playbook",
         description=(
-            "Create a new playbook in the workspace. Requires a name and "
-            "description. The playbook starts as a draft with no steps — steps can "
-            "be added later. Use when the user asks to create a new playbook or automation."
+            "Create a new playbook (automated workflow). Starts as a draft with no "
+            "steps — add steps with platform_add_playbook_step after creating. "
+            "For one-off tasks, use platform_create_task instead."
         ),
         category="playbooks",
         parameters={
@@ -107,9 +108,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_playbook",
         description=(
-            "Update an existing playbook's metadata. Can change name, description, tags, "
-            "execution_config, or schedule_config. Use when the user asks to rename, "
-            "update, or reconfigure a playbook."
+            "Update a playbook's metadata — name, description, tags, execution config, "
+            "or schedule. Use when the user asks to rename, update, or reconfigure a "
+            "playbook. To modify steps, use platform_update_playbook_step instead."
         ),
         category="playbooks",
         parameters={
@@ -156,9 +157,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_add_playbook_step",
         description=(
-            "Add a new step to an existing playbook. The step is appended to the end "
-            "by default, or inserted at a specific order position. Use when the user "
-            "asks to add a step to a playbook or workflow."
+            "Append a new step to an existing playbook. Each step has a prompt "
+            "template and optional agent assignment. Steps execute sequentially."
         ),
         category="playbooks",
         parameters={
@@ -204,9 +204,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_playbook_step",
         description=(
-            "Update an existing step in a playbook. Specify the step by its 0-based index. "
-            "Can change the prompt, agent, order, error handling, or output key. "
-            "Use when the user asks to modify or edit a playbook step."
+            "Modify an existing playbook step by its 0-based index. Can change "
+            "prompt, agent, order, or error handling."
         ),
         category="playbooks",
         parameters={
@@ -256,8 +255,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_delete_playbook_step",
         description=(
-            "Delete a step from a playbook by its 0-based index. Remaining steps are "
-            "re-ordered automatically. Use when the user asks to remove a step."
+            "Remove a step from a playbook by its 0-based index. Remaining steps "
+            "are re-ordered automatically."
         ),
         category="playbooks",
         parameters={
@@ -288,9 +287,9 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_execute_playbook",
         description=(
-            "Trigger a playbook run asynchronously. Returns an execution_id immediately "
-            "that can be used to check status later. Use when the user asks to run, "
-            "execute, or trigger a playbook or automation."
+            "Trigger a playbook run asynchronously. Returns an execution_id "
+            "immediately — check status later with platform_get_playbook_execution. "
+            "For one-off agent tasks, use platform_create_task instead."
         ),
         category="playbooks",
         parameters={
@@ -324,9 +323,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_playbook_execution",
         description=(
-            "Check the status and results of a playbook execution. Returns execution "
-            "status, step results summary, and timing. Use when the user asks about "
-            "a playbook run's status or results."
+            "Check status and results of a running or completed playbook execution. "
+            "Returns step-by-step results and timing."
         ),
         category="playbooks",
         parameters={
@@ -357,9 +355,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_delete_playbook",
         description=(
-            "Delete a playbook with full cleanup — trigger subscriptions, scheduler, "
-            "and memory. System playbooks cannot be deleted. This is permanent. "
-            "Use only when the user explicitly asks to delete a playbook."
+            "Permanently delete a playbook with full cleanup (triggers, scheduler, "
+            "memory). System playbooks cannot be deleted. Only use when explicitly asked."
         ),
         category="playbooks",
         parameters={

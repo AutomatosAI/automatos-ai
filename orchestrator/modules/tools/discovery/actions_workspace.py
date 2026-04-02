@@ -15,9 +15,9 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_workspace_info",
         description=(
-            "Get information about the current workspace including name, "
-            "member count, creation date, and configuration summary. "
-            "Use when the user asks about their workspace or account."
+            "Get workspace metadata — name, member count, creation date, config "
+            "summary. Use when the user asks about their workspace or account. "
+            "For agent details, use platform_list_agents instead."
         ),
         category="workspace",
         parameters={
@@ -38,9 +38,9 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_memory_stats",
         description=(
-            "Get memory system statistics for the workspace. Shows total memories "
-            "stored, memory types, and storage usage. Use when the user asks about "
-            "memory, stored context, or what the system remembers."
+            "Get memory system statistics — total memories, types, storage usage. "
+            "Use when the user asks about memory stats or what the system remembers. "
+            "For searching specific memories, use platform_search_memory instead."
         ),
         category="memory",
         parameters={
@@ -60,10 +60,10 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_store_memory",
         description=(
-            "Store a curated fact in workspace memory for future conversations. "
-            "Use for: user facts, confirmed decisions, workspace patterns, and user corrections. "
-            "Do NOT use for: task artifacts, raw tool outputs, volatile data, or speculative context. "
-            "Format: lead with the fact, then context. Keep under 200 characters."
+            "Store a curated fact in workspace long-term memory for future conversations. "
+            "Use for: user facts, confirmed decisions, workspace patterns, user corrections. "
+            "Do NOT use for: task artifacts, raw tool outputs, volatile data. "
+            "Keep under 200 chars. For searching stored memories, use platform_search_memory."
         ),
         category="memory",
         parameters={
@@ -91,8 +91,9 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_browse_memories",
         description=(
-            "Browse all stored memories for the workspace. Returns a paginated "
-            "list of memories with content, agent, creation date, and metadata."
+            "Browse all stored memories with optional keyword filter. Returns "
+            "paginated list with content, agent, date. For storing new memories, "
+            "use platform_store_memory instead."
         ),
         category="memory",
         parameters={
@@ -121,7 +122,7 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_delete_memory",
-        description="Delete a specific memory by ID.",
+        description="Permanently delete a specific memory by ID. Cannot be undone.",
         category="memory",
         parameters={
             "type": "object",
@@ -144,9 +145,9 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_connected_apps",
         description=(
-            "List external apps connected to the workspace via Composio. "
-            "Shows app names, connection status, and available actions. "
-            "Use when the user asks about their integrations or connected services."
+            "List external apps connected to the workspace via Composio (Slack, "
+            "Gmail, GitHub, etc.) with connection status. Use to check what "
+            "integrations are available before using Composio tools."
         ),
         category="integrations",
         parameters={
@@ -168,9 +169,9 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_system_health",
         description=(
-            "Check system health — database, Redis, API, RAG pipeline, and server "
-            "metrics (CPU, memory, disk). Use when the user asks if the system is "
-            "healthy, working, or wants a status check."
+            "Check platform health — database, Redis, API, RAG pipeline, CPU, "
+            "memory, disk. Use for quick system status checks or when something "
+            "seems broken."
         ),
         category="infrastructure",
         parameters={
