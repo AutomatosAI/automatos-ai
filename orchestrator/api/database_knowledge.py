@@ -143,6 +143,16 @@ async def create_database_source(
         # Create tools for agents
         created_tools = tools.create_database_tools(result)
         
+        # PRD-126: Trigger knowledge graph update on new DB source
+        try:
+            from modules.knowledge.graph_service import get_graph_service
+            get_graph_service().schedule_incremental_update(
+                int(ctx.workspace_id),
+                [{"type": "db_schema", "path": source.name, "id": result.id}],
+            )
+        except Exception:
+            logger.debug("Graph update skipped — service not available")
+
         return {
             "success": True,
             "source_id": result.id,
@@ -150,7 +160,7 @@ async def create_database_source(
             "tools_created": len(created_tools),
             "schema_tables": len(result.schema_metadata.get('tables', {})) if result.schema_metadata else 0
         }
-    
+
     except Exception as e:
         logger.error(f"Failed to create database source: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Failed to create database source")

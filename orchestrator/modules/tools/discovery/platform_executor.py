@@ -137,6 +137,13 @@ from modules.tools.discovery.handlers_governance import (
     validate_agent_handler,
     check_budget_handler,
 )
+from modules.tools.discovery.handlers_graph import (
+    handle_query_graph,
+    handle_graph_neighbors,
+    handle_graph_communities,
+    handle_graph_impact,
+    handle_graph_stats,
+)
 from modules.tools.discovery.handlers_analytics_enhanced import (
     get_success_rate,
     get_completion_time,
@@ -278,6 +285,12 @@ class PlatformActionExecutor:
             "platform_harness_status": harness_status,
             "platform_harness_trigger": harness_trigger,
             "platform_harness_history": harness_history,
+            # PRD-126: Knowledge Graph
+            "platform_query_graph": handle_query_graph,
+            "platform_graph_neighbors": handle_graph_neighbors,
+            "platform_graph_communities": handle_graph_communities,
+            "platform_graph_impact": handle_graph_impact,
+            "platform_graph_stats": handle_graph_stats,
         }
 
     def _workspace_has_admin_owner(self) -> bool:

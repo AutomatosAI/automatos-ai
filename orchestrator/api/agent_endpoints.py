@@ -89,12 +89,22 @@ async def create_specialized_agent_endpoint(
         # Get status
         agent_status = await factory.get_agent_status(agent_runtime.agent_id)
         
+        # PRD-126: Trigger knowledge graph update on agent roster change
+        try:
+            from modules.knowledge.graph_service import get_graph_service
+            get_graph_service().schedule_incremental_update(
+                int(ctx.workspace_id),
+                [{"type": "roster", "path": name, "id": agent_runtime.agent_id}],
+            )
+        except Exception:
+            logger.debug("Graph update skipped — service not available")
+
         return {
             "status": "success",
             "message": f"Agent '{name}' created with verified LLM connection",
             "agent": agent_status
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to create agent: {str(e)}")
         raise HTTPException(
@@ -654,7 +664,17 @@ async def update_agent_model_config(
         db.commit()
         
         logger.info(f"Updated model config for agent {agent_id}: {model_id}")
-        
+
+        # PRD-126: Trigger knowledge graph update on agent roster change
+        try:
+            from modules.knowledge.graph_service import get_graph_service
+            get_graph_service().schedule_incremental_update(
+                int(ctx.workspace_id),
+                [{"type": "roster", "path": agent.name, "id": agent_id}],
+            )
+        except Exception:
+            logger.debug("Graph update skipped — service not available")
+
         return {
             "status": "success",
             "message": "Model configuration updated",
@@ -662,7 +682,7 @@ async def update_agent_model_config(
             "model_config": agent.model_config,
             "note": "Agent must be restarted for changes to take effect"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:

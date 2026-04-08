@@ -516,7 +516,20 @@ async def upload_document_multimodal(
                 knowledge_items_created += 1
             
             db.commit()
-            
+
+            # PRD-126: Trigger knowledge graph update after multimodal ingest
+            # Note: workspace_id not available on this endpoint yet;
+            # the primary hook lives in ingestion/manager.py where workspace context exists.
+            try:
+                from modules.knowledge.graph_service import get_graph_service
+                if document_id:
+                    get_graph_service().schedule_incremental_update(
+                        0,  # TODO: wire workspace_id when auth context is added
+                        [{"type": "document", "path": file.filename, "id": document_id}],
+                    )
+            except Exception:
+                logger.debug("Graph update skipped — service not available")
+
             # Calculate processing time
             processing_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
             
