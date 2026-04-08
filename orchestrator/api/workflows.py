@@ -3293,8 +3293,6 @@ async def download_execution_result_file(execution_id: int, file_path: str, db: 
 # links don't 404 silently. Safe to fully remove once Phase 3c (frontend
 # cleanup) drops the execution result UI components.
 _LEGACY_RESULT_ENDPOINTS_REMOVED = True  # grep marker for Phase 3c
-        logger.error(f"Error downloading file {file_path} from execution {execution_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/templates/recommended")
 async def get_recommended_workflow_templates(db: Session = Depends(get_db)):
