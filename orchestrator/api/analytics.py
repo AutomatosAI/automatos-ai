@@ -2,7 +2,11 @@
 Analytics API endpoints
 =======================
 
-Provides analytics and monitoring data for workflows, agents, and system performance.
+Provides analytics and monitoring data for missions, agents, and system performance.
+
+PRD-125 Phase 3: Removed 4 dead endpoints that depended on WorkflowAnalyticsService
+(trends, agent-performance, skill-demand, execution-report). None had frontend callers.
+Kept: dashboard/summary (UNION queries) and agent-selection/analysis.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,134 +18,12 @@ from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from sqlalchemy.orm import Session
-from consumers.workflows.analytics import WorkflowAnalyticsService
 from core.models import Workflow, WorkflowExecution as WorkflowExecutionModel, Agent as AgentModel
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import RunState
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 logger = logging.getLogger(__name__)
-
-
-@router.get("/workflows/{workflow_id}/trends")
-async def get_workflow_trends(
-    workflow_id: int,
-    days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid)
-) -> Dict[str, Any]:
-    """Get performance trends for a specific workflow"""
-
-    try:
-        workflow = db.query(Workflow).filter(
-            Workflow.id == workflow_id,
-            Workflow.workspace_id == ctx.workspace_id
-        ).first()
-        if not workflow:
-            raise HTTPException(status_code=404, detail="Workflow not found")
-
-        analytics_service = WorkflowAnalyticsService(db)
-        trends = analytics_service.get_workflow_performance_trends(workflow_id, days)
-        
-        return {
-            "success": True,
-            "data": trends
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting workflow trends: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.get("/agents/performance")
-async def get_agent_performance(
-    agent_id: Optional[int] = Query(None, description="Specific agent ID (optional)"),
-    days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid)
-) -> Dict[str, Any]:
-    """Get agent performance statistics"""
-
-    try:
-        if agent_id is not None:
-            agent = db.query(AgentModel).filter(
-                AgentModel.id == agent_id,
-                AgentModel.workspace_id == ctx.workspace_id
-            ).first()
-            if not agent:
-                raise HTTPException(status_code=404, detail="Agent not found")
-
-        analytics_service = WorkflowAnalyticsService(db)
-        stats = analytics_service.get_agent_performance_stats(agent_id, days)
-        
-        return {
-            "success": True,
-            "data": stats
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting agent performance: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.get("/skills/demand")
-async def get_skill_demand(
-    days: int = Query(30, ge=1, le=180, description="Number of days to analyze"),
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid)
-) -> Dict[str, Any]:
-    """Analyze skill demand and coverage"""
-    
-    try:
-        analytics_service = WorkflowAnalyticsService(db)
-        analysis = analytics_service.get_skill_demand_analysis(days)
-        
-        return {
-            "success": True,
-            "data": analysis
-        }
-        
-    except Exception as e:
-        logger.error(f"Error analyzing skill demand: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.get("/executions/{execution_id}/report")
-async def get_execution_report(
-    execution_id: int,
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid)
-) -> Dict[str, Any]:
-    """Get comprehensive report for a specific execution"""
-
-    try:
-        execution = db.query(WorkflowExecutionModel).filter(
-            WorkflowExecutionModel.id == execution_id,
-            WorkflowExecutionModel.workspace_id == ctx.workspace_id
-        ).first()
-        if not execution:
-            raise HTTPException(status_code=404, detail="Execution not found")
-
-        analytics_service = WorkflowAnalyticsService(db)
-        report = analytics_service.generate_execution_report(execution_id)
-        
-        if "error" in report:
-            raise HTTPException(status_code=404, detail=report["error"])
-        
-        return {
-            "success": True,
-            "data": report
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error generating execution report: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/dashboard/summary")
@@ -151,7 +33,7 @@ async def get_dashboard_summary(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Get summary statistics for dashboard"""
-    
+
     try:
         from core.models import WorkflowExecution, Agent, Workflow, ExecutionStatus
         from sqlalchemy import and_, func
@@ -270,7 +152,7 @@ async def get_dashboard_summary(
                 }
             }
         }
-        
+
     except Exception as e:
         logger.error(f"Error getting dashboard summary: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -283,13 +165,13 @@ async def analyze_agent_selection(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Analyze agent selection patterns and effectiveness"""
-    
+
     try:
         from core.models import WorkflowExecution, ExecutionStatus
         from sqlalchemy import and_
-        
+
         since_date = datetime.now() - timedelta(days=days)
-        
+
         # Get completed executions
         executions = db.query(WorkflowExecution).filter(
             and_(
@@ -298,30 +180,30 @@ async def analyze_agent_selection(
                 WorkflowExecution.status == ExecutionStatus.COMPLETED.value
             )
         ).all()
-        
+
         # Analyze agent selection patterns
         selection_patterns = {}
         skill_match_scores = []
         coverage_rates = []
-        
+
         for exec in executions:
             input_data = exec.input_data or {}
             agent_selection = input_data.get("agent_selection", {})
-            
+
             if agent_selection.get("is_real"):
                 summary = agent_selection.get("summary", {})
                 assignments = agent_selection.get("assignments", {})
-                
+
                 # Track coverage and scores
                 coverage_rates.append(summary.get("coverage", 0))
                 skill_match_scores.append(summary.get("avg_match_score", 0))
-                
+
                 # Analyze selection patterns
                 for subtask_id, matches in assignments.items():
                     if matches:
                         best_match = matches[0]
                         agent_type = best_match.get("agent_type", "unknown")
-                        
+
                         if agent_type not in selection_patterns:
                             selection_patterns[agent_type] = {
                                 "agent_type": agent_type,
@@ -329,11 +211,11 @@ async def analyze_agent_selection(
                                 "total_match_score": 0,
                                 "total_skill_coverage": 0
                             }
-                        
+
                         selection_patterns[agent_type]["selection_count"] += 1
                         selection_patterns[agent_type]["total_match_score"] += best_match.get("match_score", 0)
                         selection_patterns[agent_type]["total_skill_coverage"] += best_match.get("skill_coverage", 0)
-        
+
         # Calculate averages
         for pattern in selection_patterns.values():
             count = pattern["selection_count"]
@@ -342,14 +224,14 @@ async def analyze_agent_selection(
                 pattern["avg_skill_coverage"] = pattern["total_skill_coverage"] / count
             del pattern["total_match_score"]
             del pattern["total_skill_coverage"]
-        
+
         # Sort by selection count
         sorted_patterns = sorted(
             selection_patterns.values(),
             key=lambda x: x["selection_count"],
             reverse=True
         )
-        
+
         return {
             "success": True,
             "data": {
@@ -361,7 +243,7 @@ async def analyze_agent_selection(
                 "recommendations": []
             }
         }
-        
+
     except Exception as e:
         logger.error(f"Error analyzing agent selection: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

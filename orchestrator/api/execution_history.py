@@ -17,7 +17,7 @@ from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.models import WorkflowExecution, Workflow, Agent
-from consumers.workflows.analytics import WorkflowAnalyticsService
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/execution-history", tags=["execution-history"])

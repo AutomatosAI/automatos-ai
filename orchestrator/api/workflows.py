@@ -1555,13 +1555,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
     from modules.agents import AgentExecutionManager
     from modules.learning import LearningSystemUpdater
     from modules.memory.storage import HierarchicalMemorySystem
-    from core.services.workspace_manager import WorkspaceManager  # Unique workspace per execution
-    from consumers.workflows import ModelUsageTracker  # PRD-15
     import os
-    
-    # Create unique workspace for this execution
-    workspace_manager = WorkspaceManager(execution_id)
-    workspace_path = workspace_manager.create_workspace()
+
+    # PRD-125 Phase 3: Workflow execution pipeline is dead on Railway
+    # (WorkspaceManager requires writable filesystem, Railway is read-only).
+    # Keeping function shell for now; full removal in Phase 3b.
+    logger.error(f"⛔ execute_workflow_with_progress called for {execution_id} — "
+                 "legacy pipeline disabled (PRD-125). Use missions instead.")
+    return
     
     logger.info(f"📁 Execution {execution_id} workspace: {workspace_path}")
     logger.info(f"💾 Results will be saved to: {workspace_manager.get_results_path()}")
@@ -3162,16 +3163,10 @@ Key Learnings:
             execution.execution_log = f"COMPLETE PIPELINE + MEMORY{agent_selection_info}{context_info}{execution_info}{quality_info}{learning_info}{memory_info} - {len(steps)} subtasks in {total_duration:.1f}s"
             
             # Record workflow analytics for monitoring
+            # PRD-125 Phase 3: WorkflowAnalyticsService deleted — this execution path
+            # is already dead on Railway (WorkspaceManager mkdir fails before here)
             try:
-                from consumers.workflows.analytics import WorkflowAnalyticsService
-                from modules.orchestrator import orchestration_tracker
-                analytics_service = WorkflowAnalyticsService(db)
-                analytics = analytics_service.record_workflow_analytics(execution)
-                logger.info(
-                    f"📊 Analytics recorded: {analytics.completed_subtasks}/{analytics.total_subtasks} tasks, "
-                    f"{len(analytics.agents_used)} agents, ${analytics.total_cost:.4f} cost, "
-                    f"{analytics.overall_quality_score:.1%} quality"
-                )
+                logger.info("📊 Skipping legacy workflow analytics (PRD-125 removed)")
             except Exception as e:
                 logger.error(f"Failed to record analytics: {e}")
             
