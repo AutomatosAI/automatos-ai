@@ -1,6 +1,12 @@
 """
-Workflow Analytics Service
-==========================
+Workflow Analytics Service  [DEPRECATED — PRD-125]
+===================================================
+
+DEPRECATED: This service queries legacy WorkflowExecution data only.
+New callers should use GET /api/missions/stats for mission analytics, or the
+UNION queries in api/analytics_real.py which combine both sources.
+
+This file will be deleted in Phase 3 of PRD-125.
 
 Records and analyzes workflow execution data for monitoring and improvement.
 Tracks agent selection, task completion, costs, and performance metrics.

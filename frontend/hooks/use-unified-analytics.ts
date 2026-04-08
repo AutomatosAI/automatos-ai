@@ -56,11 +56,13 @@ export function useAnalyticsOverview(days: number = 30) {
           return fallback
         })
 
-      const [agents, llmSummary, workflowStats, docStats] = await Promise.all([
+      const [agents, llmSummary, workflowStats, docStats, missionStats] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
         safeRequest(() => apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`), null),
         safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
         safeRequest(() => apiClient.getAnalyticsOverview(), null),
+        // PRD-125 Phase 2: Fetch mission stats alongside workflow stats
+        safeRequest(() => apiClient.request<any>(`/api/missions/stats?period=${period}`), null),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
@@ -79,6 +81,14 @@ export function useAnalyticsOverview(days: number = 30) {
           total: (workflowStats as any)?.overview?.total_workflows || 0,
           active: (workflowStats as any)?.overview?.running_executions || 0,
           successRate: (workflowStats as any)?.today?.success_rate_today || 0,
+        },
+        // PRD-125 Phase 2: Mission stats
+        missions: {
+          total: (missionStats as any)?.total_missions || 0,
+          completed: Math.round(((missionStats as any)?.total_missions || 0) * ((missionStats as any)?.success_rate || 0)),
+          successRate: ((missionStats as any)?.success_rate || 0) * 100,
+          avgDurationMinutes: (missionStats as any)?.avg_duration_minutes || null,
+          avgTokensUsed: (missionStats as any)?.avg_tokens_used || 0,
         },
         documents: {
           total: (docStats as any)?.total_documents || 0,
