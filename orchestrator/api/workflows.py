@@ -27,7 +27,6 @@ from core.models import (
 )
 from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
 # websocket_manager removed - using AI SDK SSE streaming
-from core.services.workspace_manager import WorkspaceManager
 from core.auth.hybrid import get_request_context_hybrid
 from core.task_runner import get_task_runner, AgentTask, TaskType, TaskPriority
 from core.auth.dependencies import RequestContext
@@ -3282,76 +3281,18 @@ Key Learnings:
 
 @router.get("/executions/{execution_id}/results")
 async def get_execution_results_files(execution_id: int, db: Session = Depends(get_db)):
-    """
-    Get list of result files for a workflow execution.
-    
-    Returns metadata about all files created during execution that are available for download.
-    """
-    try:
-        from core.services.workspace_manager import WorkspaceManager
-        
-        # Verify execution exists
-        execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
-        if not execution:
-            raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
-        
-        # Get result files
-        workspace_manager = WorkspaceManager(execution_id)
-        result_files = workspace_manager.get_result_files()
-        
-        return {
-            "execution_id": execution_id,
-            "status": execution.status,
-            "files": result_files,
-            "results_directory": workspace_manager.get_results_path()
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting execution results {execution_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    """Legacy endpoint — filesystem workspaces removed (PRD-125)."""
+    raise HTTPException(status_code=410, detail="Workflow filesystem results removed. Use mission outputs instead.")
 
 @router.get("/executions/{execution_id}/results/{file_path:path}")
 async def download_execution_result_file(execution_id: int, file_path: str, db: Session = Depends(get_db)):
-    """
-    Download a specific result file from a workflow execution.
-    
-    Args:
-        execution_id: The workflow execution ID
-        file_path: Relative path to the file within the results directory
-    """
-    try:
-        # Verify execution exists
-        execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
-        if not execution:
-            raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
-        
-        # Get results directory
-        workspace_manager = WorkspaceManager(execution_id)
-        results_dir = Path(workspace_manager.get_results_dir()).resolve()
-        
-        # Build full file path
-        full_path = (results_dir / file_path).resolve()
-        
-        # Security check: ensure path is within results directory using Path API
-        if not full_path.is_relative_to(results_dir):
-            raise HTTPException(status_code=403, detail="Access denied: path outside results directory")
-        
-        # Check if file exists
-        if not full_path.exists():
-            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-        
-        # Return file for download
-        return FileResponse(
-            path=str(full_path),
-            filename=full_path.name,
-            media_type='application/octet-stream'
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
+    """Legacy endpoint — filesystem workspaces removed (PRD-125)."""
+    raise HTTPException(status_code=410, detail="Workflow filesystem results removed. Use mission outputs instead.")
+
+# PRD-125: Kept endpoint stubs returning 410 Gone so existing frontend
+# links don't 404 silently. Safe to fully remove once Phase 3c (frontend
+# cleanup) drops the execution result UI components.
+_LEGACY_RESULT_ENDPOINTS_REMOVED = True  # grep marker for Phase 3c
         logger.error(f"Error downloading file {file_path} from execution {execution_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
