@@ -141,7 +141,7 @@ export function AnalyticsWorkflows({ days }: Props) {
     <div className="space-y-6">
       {/* ===== WORKFLOWS SECTION ===== */}
       <StatsBar stats={[
-        { label: 'Total Workflows', value: data?.summary?.totalWorkflows || 0, icon: GitBranch, iconColor: 'text-primary', globalIconKey: 'global_workflow' },
+        { label: 'Total Missions', value: data?.summary?.totalWorkflows || 0, icon: GitBranch, iconColor: 'text-primary', globalIconKey: 'global_workflow' },
         { label: 'Executions', value: data?.summary?.totalExecutions || 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_activity' },
         { label: 'Success Rate', value: `${(data?.summary?.successRate || 0).toFixed(0)}%`, icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]', globalIconKey: 'global_performance' },
         { label: 'Avg Duration', value: data?.summary?.avgDuration || '0s', icon: Clock, iconColor: 'text-[hsl(var(--agent))]' },
@@ -200,7 +200,7 @@ export function AnalyticsWorkflows({ days }: Props) {
                 <tr>
                   <td colSpan={7} className="p-12 text-center text-muted-foreground">
                     <GitBranch className="w-10 h-10 mx-auto mb-3 opacity-50" />
-                    <p>No workflows found</p>
+                    <p>No missions found</p>
                   </td>
                 </tr>
               ) : (

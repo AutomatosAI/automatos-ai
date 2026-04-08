@@ -434,7 +434,7 @@ export function usePlanUsage() {
         planTier: 'pilot',
         usage: {
           agents: { used: agentList.length, limit: null as number | null, label: 'Agents' },
-          workflows: { used: workflowList.length, limit: null as number | null, label: 'Workflows' },
+          workflows: { used: workflowList.length, limit: null as number | null, label: 'Missions' },
           documents: { used: docList.length, limit: null as number | null, label: 'Documents' },
           storageGb: { used: parseFloat((storageMb / 1024).toFixed(2)), limit: null as number | null, label: 'Storage (GB)' },
           apiCalls: { used: totalRequests, limit: null as number | null, label: 'API Calls' },

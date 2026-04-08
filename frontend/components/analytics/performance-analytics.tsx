@@ -804,7 +804,7 @@ export function PerformanceAnalytics() {
                         <div className="text-center">
                           <Trophy className="w-8 h-8 mx-auto mb-2 text-yellow-400" />
                           <p className="text-2xl font-bold">{benchmarkData?.period?.total_executions || 0}</p>
-                          <p className="text-xs text-muted-foreground">Workflows Analyzed</p>
+                          <p className="text-xs text-muted-foreground">Executions Analyzed</p>
                         </div>
                         <div className="text-center">
                           <BookOpen className="w-8 h-8 mx-auto mb-2 text-purple-400" />
@@ -825,13 +825,13 @@ export function PerformanceAnalytics() {
                           {benchmarkData?.overall_improvement > 20 && (
                             <div className="flex items-center space-x-2 text-sm">
                               <CheckCircle className="w-4 h-4 text-green-400" />
-                              <span>Excellent progress! Consider increasing workflow complexity.</span>
+                              <span>Excellent progress! Consider increasing mission complexity.</span>
                             </div>
                           )}
                           {learningMetrics?.summary?.avg_memory_hit_rate < 50 && (
                             <div className="flex items-center space-x-2 text-sm">
                               <AlertTriangle className="w-4 h-4 text-yellow-400" />
-                              <span>Memory utilization could be improved. Run more similar workflows.</span>
+                              <span>Memory utilization could be improved. Run more similar missions.</span>
                             </div>
                           )}
                           {agentPerformance?.summary?.avg_improvement < 5 && (

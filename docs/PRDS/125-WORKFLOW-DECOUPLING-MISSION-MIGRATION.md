@@ -356,6 +356,19 @@ The mission system already has `OrchestrationEvent` with 30+ event types — ric
 
 ## 8. Phase 3 — Remove Workflow Execution Path (Week 3)
 
+> **IMPORTANT — Corrected Execution Order (Review 2026-04-08)**
+>
+> The original order (3a → 3b → 3c) is WRONG. `analytics.py`, `usage_tracker.py`, and `workspace_manager.py` are actively imported by `api/workflows.py` execution code. They can only be deleted AFTER workflows.py is trimmed.
+>
+> **Correct order:** 3b (trim workflows.py) → 3a (delete now-dead files) → 3c (frontend cleanup)
+>
+> Files NOT safe to delete until 3b completes:
+> - `consumers/workflows/analytics.py` — used by `api/analytics.py` (4 endpoints), `api/execution_history.py`
+> - `consumers/workflows/usage_tracker.py` — used in `execute_workflow_with_progress()`
+> - `core/services/workspace_manager.py` — used extensively in workflows.py execution + result APIs
+>
+> `modules/orchestrator/pipeline.py` is NEW PRD-59 code (not legacy) — keep if needed for Phase 4 recipe execution.
+
 ### 8.1 Delete Execution Pipeline
 
 #### Problem
