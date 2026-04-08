@@ -645,11 +645,17 @@ class MissionPlanner:
                 workspace_id,
             )
 
+            # PRD-125 Phase 1: Extract chat context from config when source is "chat"
+            chat_context = None
+            if (config or {}).get("source") == "chat":
+                chat_context = (config or {}).get("context_messages")
+
             prompt = _build_decomposition_prompt(
                 goal=goal,
                 agent_roster=agent_roster,
                 validation_errors=last_errors if attempt > 1 else None,
                 attachment_contents=attachment_contents,
+                chat_context=chat_context,
             )
 
             messages = [
@@ -760,11 +766,21 @@ def _build_decomposition_prompt(
     agent_roster: str,
     validation_errors: Optional[List[str]] = None,
     attachment_contents: Optional[List[Dict[str, str]]] = None,
+    chat_context: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """Build the user prompt for goal decomposition."""
     parts = [
         f"## Goal\n<user_goal>\n{goal}\n</user_goal>\n",
     ]
+
+    # PRD-125 Phase 1: Include recent chat context when mission is launched from chat
+    if chat_context:
+        parts.append("## Conversation Context\nRecent chat messages that led to this mission:\n")
+        for msg in chat_context[-5:]:
+            role = msg.get("role", "user")
+            content = (msg.get("content") or "")[:500]
+            parts.append(f"**{role}:** {content}\n")
+        parts.append("")
 
     # Inject attachment content so the LLM has full context
     if attachment_contents:
