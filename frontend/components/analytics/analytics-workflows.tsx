@@ -229,8 +229,9 @@ export function AnalyticsWorkflows({ days }: Props) {
                     </td>
                     <td className="p-4 hidden md:table-cell">
                       <Badge variant="outline" className={
-                        wf.status === 'active' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' :
-                        wf.status === 'failed' ? 'text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/30' : ''
+                        wf.status === 'active' || wf.status === 'completed' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' :
+                        wf.status === 'failed' ? 'text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/30' :
+                        wf.status === 'running' || wf.status === 'executing' ? 'text-[hsl(var(--info))] border-[hsl(var(--info))]/30' : ''
                       }>
                         {wf.status || 'idle'}
                       </Badge>
