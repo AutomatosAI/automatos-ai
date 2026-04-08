@@ -575,12 +575,14 @@ async def stream_chat(
         async with session_queue.acquire(session_key):
             # PRD-125: Emit mission suggestion data event (for frontend to render card)
             if _suggest_mission:
-                suggestion_event = streaming_service.streaming_handler.format_aisdk_data({
-                    "type": "mission-suggestion",
-                    "goal": message_text,
-                    "complexity": complexity_assessment.complexity.value if complexity_assessment else "organ",
-                    "agent_id": effective_agent_id,
-                })
+                suggestion_event = streaming_service.streaming_handler.format_aisdk_data(
+                    "mission-suggestion",
+                    {
+                        "goal": message_text,
+                        "complexity": complexity_assessment.complexity.value if complexity_assessment else "organ",
+                        "agent_id": effective_agent_id,
+                    },
+                )
                 yield suggestion_event
 
             # Normal agent streaming (RESPOND, DELEGATE, or MISSION fallback)
