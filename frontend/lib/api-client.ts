@@ -1572,8 +1572,7 @@ class ApiClient {
       }
     }
 
-    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
-    const url = `${BACKEND_URL}/api/knowledge/graph/import`
+    const url = `${this.baseUrl}/api/knowledge/graph/import`
     console.log('[GraphImport] Uploading to:', url, 'file:', file.name, file.size, 'bytes')
 
     const response = await fetch(url, {
@@ -1594,8 +1593,7 @@ class ApiClient {
   }
 
   async buildBusinessGraph() {
-    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
-    const url = `${BACKEND_URL}/api/knowledge/graph/build`
+    const url = `${this.baseUrl}/api/knowledge/graph/build`
 
     const headers: any = { ...this.defaultHeaders }
     if (typeof window !== 'undefined') {

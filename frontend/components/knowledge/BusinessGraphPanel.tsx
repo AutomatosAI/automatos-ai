@@ -74,7 +74,9 @@ export function BusinessGraphPanel() {
   const handleImport = useCallback(async (file: File, merge: boolean = false) => {
     console.log('[GraphImport] Starting import:', file.name, file.size, 'bytes, merge:', merge, 'workspace:', workspaceId)
     if (!workspaceId) {
-      console.error('[GraphImport] No workspaceId — aborting')
+      const msg = 'No workspaceId — cannot import'
+      console.error('[GraphImport]', msg)
+      setImportError(msg)
       return
     }
     setImporting(true)
@@ -84,8 +86,11 @@ export function BusinessGraphPanel() {
       console.log('[GraphImport] Success:', result)
       queryClient.invalidateQueries({ queryKey: ['business-graph'] })
     } catch (err: any) {
-      console.error('[GraphImport] Error:', err)
-      setImportError(err.message || 'Import failed')
+      const msg = err?.message || String(err) || 'Import failed (unknown error)'
+      console.error('[GraphImport] Error:', msg, err)
+      setImportError(msg)
+      // Temporary: make error impossible to miss
+      alert(`Graph import failed: ${msg}`)
     } finally {
       setImporting(false)
     }
