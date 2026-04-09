@@ -1,0 +1,85 @@
+# =============================================================================
+# Automatos AI Platform — Memory Services
+# =============================================================================
+# Services: Mem0 OpenMemory Server, dedicated pgvector instance
+# Source repo: AutomatosAI/automatos-mem0
+#
+# Railway production:
+#   - automatos-ai-mem0-Server    (internal only)
+#   - automatos-ai-mem0-pgvector  → pgvector/pgvector:pg18 (internal only)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Mem0 pgvector — Dedicated PostgreSQL for memory embeddings
+  # Railway: image=pgvector/pgvector:pg18, volume=/var/lib/postgresql/data/
+  # Separate from main pgvector to isolate memory workloads
+  # ---------------------------------------------------------------------------
+  mem0-pgvector:
+    image: pgvector/pgvector:pg18
+    container_name: automatos_mem0_pgvector
+    restart: on-failure:10
+    ports:
+      - "${MEM0_PG_PORT:-5433}:5432"
+    environment:
+      POSTGRES_DB: ${MEM0_PG_DB:-mem0}
+      POSTGRES_USER: ${MEM0_PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${MEM0_PG_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - mem0_pgvector_data:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MEM0_PG_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - automatos
+
+  # ---------------------------------------------------------------------------
+  # Mem0 OpenMemory Server — Long-term memory API
+  # Railway: repo=automatos-mem0, root=/openmemory/api
+  #          dockerfile=/openmemory/api/Dockerfile, port=8765
+  # ---------------------------------------------------------------------------
+  mem0-server:
+    build:
+      context: ../automatos-mem0/openmemory/api
+      dockerfile: Dockerfile
+    container_name: automatos_mem0_server
+    restart: on-failure:10
+    ports:
+      - "${MEM0_PORT:-8765}:8765"
+    environment:
+      # Database (points to dedicated mem0 pgvector)
+      DATABASE_URL: postgresql://${MEM0_PG_USER:-postgres}:${MEM0_PG_PASSWORD}@mem0-pgvector:5432/${MEM0_PG_DB:-mem0}
+      PG_HOST: mem0-pgvector
+      PG_PORT: 5432
+      PG_DB: ${MEM0_PG_DB:-mem0}
+      PG_USER: ${MEM0_PG_USER:-postgres}
+      PG_PASSWORD: ${MEM0_PG_PASSWORD}
+      # OpenAI for embeddings
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Observability
+      LOG_RELAY_ENABLED: ${LOG_RELAY_ENABLED:-false}
+      SERVICE_NAME: automatos-ai-mem0-Server
+    depends_on:
+      mem0-pgvector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - automatos
+
+volumes:
+  mem0_pgvector_data:
+    name: automatos_mem0_pgvector_data
+
+networks:
+  automatos:
+    name: automatos_network
+    external: true

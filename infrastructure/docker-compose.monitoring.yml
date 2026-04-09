@@ -1,0 +1,200 @@
+# =============================================================================
+# Automatos AI Platform — Monitoring & Observability Stack
+# =============================================================================
+# Services: Prometheus, Grafana, Loki, Log-Relay, Alertmanager,
+#           Postgres-Exporter, Redis-Exporter
+# Source repo: AutomatosAI/automatos-monitoring (custom services)
+# Images: prom/prometheus, grafana/grafana, grafana/loki, prom/alertmanager,
+#         prometheuscommunity/postgres-exporter, oliver006/redis_exporter
+#
+# Railway production:
+#   - grafana    → grafana-production-5f61.up.railway.app
+#   - log-relay  → log-relay-production.up.railway.app
+#   - All others internal only
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Prometheus — Metrics Collection
+  # Railway: repo=automatos-monitoring, root=/services/prometheus
+  #          volume=/prometheus (50GB)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    build:
+      context: ../automatos-monitoring/services/prometheus
+      dockerfile: Dockerfile
+    container_name: automatos_prometheus
+    restart: on-failure:10
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    environment:
+      PORT: 9090
+    volumes:
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - automatos
+      - monitoring
+
+  # ---------------------------------------------------------------------------
+  # Grafana — Dashboards & Visualisation
+  # Railway: repo=automatos-monitoring, root=/services/grafana
+  #          volume=/var/lib/grafana (50GB), public domain
+  # ---------------------------------------------------------------------------
+  grafana:
+    build:
+      context: ../automatos-monitoring/services/grafana
+      dockerfile: Dockerfile
+    container_name: automatos_grafana
+    restart: on-failure:10
+    ports:
+      - "${GRAFANA_PORT:-3030}:3000"
+    environment:
+      PORT: 3000
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: ${GF_SERVER_ROOT_URL:-http://localhost:3030}
+      GF_USERS_ALLOW_SIGN_UP: ${GF_USERS_ALLOW_SIGN_UP:-false}
+      GF_AUTH_ANONYMOUS_ENABLED: ${GF_AUTH_ANONYMOUS_ENABLED:-false}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - monitoring
+
+  # ---------------------------------------------------------------------------
+  # Loki — Log Aggregation
+  # Railway: repo=automatos-monitoring, root=/services/loki
+  #          volume=/loki (50GB), internal only
+  # ---------------------------------------------------------------------------
+  loki:
+    build:
+      context: ../automatos-monitoring/services/loki
+      dockerfile: Dockerfile
+    container_name: automatos_loki
+    restart: on-failure:10
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    environment:
+      PORT: 3100
+    volumes:
+      - loki_data:/loki
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - monitoring
+
+  # ---------------------------------------------------------------------------
+  # Log Relay — Railway Log Drain → Loki bridge
+  # Railway: repo=automatos-monitoring, root=/services/log-relay
+  #          port=8080, public domain (receives Railway log drain webhooks)
+  # ---------------------------------------------------------------------------
+  log-relay:
+    build:
+      context: ../automatos-monitoring/services/log-relay
+      dockerfile: Dockerfile
+    container_name: automatos_log_relay
+    restart: on-failure:10
+    ports:
+      - "${LOG_RELAY_PORT:-3200}:8080"
+    environment:
+      PORT: 8080
+      LOKI_PUSH_URL: ${LOKI_PUSH_URL:-http://loki:3100/loki/api/v1/push}
+      LOG_RELAY_SECRET: ${LOG_RELAY_SECRET}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - monitoring
+
+  # ---------------------------------------------------------------------------
+  # Alertmanager — Alert Routing & Notification
+  # Railway: repo=automatos-monitoring, root=/services/alertmanager
+  #          volume=/alertmanager (50GB), internal only
+  # ---------------------------------------------------------------------------
+  alertmanager:
+    build:
+      context: ../automatos-monitoring/services/alertmanager
+      dockerfile: Dockerfile
+    container_name: automatos_alertmanager
+    restart: on-failure:10
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    environment:
+      PORT: 9093
+      ALERT_INGEST_TOKEN: ${ALERT_INGEST_TOKEN}
+    volumes:
+      - alertmanager_data:/alertmanager
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - automatos
+      - monitoring
+
+  # ---------------------------------------------------------------------------
+  # Postgres Exporter — PostgreSQL metrics for Prometheus
+  # Railway: image=prometheuscommunity/postgres-exporter:v0.19.1
+  # ---------------------------------------------------------------------------
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.19.1
+    container_name: automatos_postgres_exporter
+    restart: on-failure:10
+    ports:
+      - "${PG_EXPORTER_PORT:-9187}:9187"
+    environment:
+      DATA_SOURCE_NAME: ${DATA_SOURCE_NAME:-postgresql://postgres:postgres@pgvector:5432/orchestrator_db?sslmode=disable}
+    networks:
+      - automatos
+      - monitoring
+
+  # ---------------------------------------------------------------------------
+  # Redis Exporter — Redis metrics for Prometheus
+  # Railway: image=oliver006/redis_exporter:v1.82.0
+  # ---------------------------------------------------------------------------
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.82.0
+    container_name: automatos_redis_exporter
+    restart: on-failure:10
+    ports:
+      - "${REDIS_EXPORTER_PORT:-9121}:9121"
+    environment:
+      REDIS_ADDR: ${REDIS_ADDR:-redis://default:${REDIS_PASSWORD}@redis:6379}
+    networks:
+      - automatos
+      - monitoring
+
+volumes:
+  prometheus_data:
+    name: automatos_prometheus_data
+  grafana_data:
+    name: automatos_grafana_data
+  loki_data:
+    name: automatos_loki_data
+  alertmanager_data:
+    name: automatos_alertmanager_data
+
+networks:
+  automatos:
+    name: automatos_network
+    external: true
+  monitoring:
+    name: automatos_monitoring
+    driver: bridge
