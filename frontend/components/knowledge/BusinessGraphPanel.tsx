@@ -226,7 +226,10 @@ export function BusinessGraphPanel() {
         </p>
         <div className="flex items-center justify-center gap-3">
           <Button
-            onClick={handleImportClick}
+            onClick={() => {
+              alert('BUTTON CLICKED')
+              handleImportClick()
+            }}
             disabled={importing}
             className="gradient-accent hover:opacity-90 text-white"
           >
