@@ -184,11 +184,14 @@ async def handle_graph_neighbors(
     """Find all neighbors of a given node.
 
     Params:
-        node (str): Node label or ID to look up.
+        concept (str): Node label or ID to look up.
+        relation_filter (str, optional): Only return edges with this relation type.
     """
-    node_label = (params.get("node") or "").strip()
-    if not node_label:
-        return {"success": False, "error": "node is required"}
+    concept_label = (params.get("concept") or "").strip()
+    if not concept_label:
+        return {"success": False, "error": "concept is required"}
+
+    relation_filter = (params.get("relation_filter") or "").strip().lower() or None
 
     try:
         svc = _get_service()
@@ -203,22 +206,25 @@ async def handle_graph_neighbors(
         agent_team = _resolve_agent_team(db, params.get("_agent_id"))
         graph = _get_filtered_graph(graph, agent_team)
 
-        node_id = _find_node_by_label(graph, node_label)
+        node_id = _find_node_by_label(graph, concept_label)
         if node_id is None:
             return {
                 "success": False,
-                "error": f"Node '{node_label}' not found in the graph.",
+                "error": f"Node '{concept_label}' not found in the graph.",
             }
 
         neighbors: List[Dict[str, Any]] = []
         for u, v, edge_data in graph.edges(node_id, data=True):
+            relation = edge_data.get("relation", "related_to")
+            if relation_filter and relation.lower() != relation_filter:
+                continue
             target = v if u == node_id else u
             target_attrs = graph.nodes.get(target, {})
             neighbors.append(
                 {
                     "target": str(target),
                     "target_label": target_attrs.get("label", str(target)),
-                    "relation": edge_data.get("relation", "related_to"),
+                    "relation": relation,
                     "confidence": edge_data.get("confidence", edge_data.get("weight", 1.0)),
                 }
             )

@@ -28,6 +28,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import tempfile
 import time
 from datetime import date
 from functools import partial
@@ -167,14 +169,16 @@ class GraphifyService:
             graph.number_of_edges(),
         )
 
-        # 4. Cluster
-        graph = await loop.run_in_executor(None, partial(cluster, graph))
-        communities = await loop.run_in_executor(None, partial(score_all, graph))
+        # 4. Cluster — returns {community_id: [node_ids]} (does NOT mutate graph)
+        communities = await loop.run_in_executor(None, partial(cluster, graph))
+        community_scores = await loop.run_in_executor(
+            None, partial(score_all, graph, communities)
+        )
 
         # 5. Analyze
         top_gods = await loop.run_in_executor(None, partial(god_nodes, graph))
         surprises = await loop.run_in_executor(
-            None, partial(surprising_connections, graph)
+            None, partial(surprising_connections, graph, communities)
         )
 
         # 6. Export artefacts
@@ -188,7 +192,9 @@ class GraphifyService:
         self._cache[workspace_id] = graph
 
         # 9. Save history snapshot + compute diff (US-010)
-        graph_data = await loop.run_in_executor(None, partial(to_json, graph))
+        graph_data = await loop.run_in_executor(
+            None, partial(nx.node_link_data, graph)
+        )
         diff_result = await self._snapshot_and_diff(ws, graph, graph_data, loop)
         if diff_result is not None:
             meta["diff_summary"] = diff_result.get("summary", "")
@@ -425,65 +431,56 @@ class GraphifyService:
         self,
         ws: WorkspaceClient,
         graph: nx.Graph,
-        communities: Any,
+        communities: Dict[int, List[str]],
         god_node_list: List[Any],
     ) -> None:
         """Export graph artefacts to workspace files."""
         loop = asyncio.get_event_loop()
 
-        # graph.json — node_link_data format
+        # graph.json — NetworkX node_link_data (in-memory, not graphify's to_json)
         graph_data = await loop.run_in_executor(
-            None, partial(to_json, graph)
+            None, partial(nx.node_link_data, graph)
         )
         await self._write_json(ws, _GRAPH_JSON_PATH, graph_data)
 
         # communities.json
-        community_data = self._format_communities(graph, communities)
+        community_data = self._format_communities(communities)
         await self._write_json(ws, _COMMUNITIES_JSON_PATH, community_data)
 
-        # graph.html — interactive visualization
-        html_content: str = await loop.run_in_executor(
-            None, partial(to_html, graph)
-        )
+        # graph.html — use graphify's to_html (writes to temp file, then upload)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            html_path = os.path.join(tmpdir, "graph.html")
+            await loop.run_in_executor(
+                None, partial(to_html, graph, communities, html_path)
+            )
+            with open(html_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
         await ws.write_file(_GRAPH_HTML_PATH, html_content)
 
     @staticmethod
     def _format_communities(
-        graph: nx.Graph, communities: Any
+        communities: Dict[int, List[str]],
     ) -> List[Dict[str, Any]]:
         """Format community data for export.
 
-        Extracts community labels from node attributes and groups members.
+        Takes the communities dict from ``cluster()`` (maps community_id → member list).
         """
-        community_map: Dict[int, List[str]] = {}
-        for node_id, attrs in graph.nodes(data=True):
-            comm_id = attrs.get("community", -1)
-            if comm_id not in community_map:
-                community_map[comm_id] = []
-            community_map[comm_id].append(str(node_id))
-
         return [
             {"community_id": cid, "member_count": len(members), "members": members}
-            for cid, members in sorted(community_map.items())
+            for cid, members in sorted(communities.items())
         ]
 
     @staticmethod
     def _build_meta(
         graph: nx.Graph,
-        communities: Any,
+        communities: Dict[int, List[str]],
         god_node_list: List[Any],
     ) -> Dict[str, Any]:
         """Build the meta.json payload."""
-        # Count unique communities from node attributes
-        community_ids = {
-            attrs.get("community", -1)
-            for _, attrs in graph.nodes(data=True)
-        }
-
         return {
             "node_count": graph.number_of_nodes(),
             "edge_count": graph.number_of_edges(),
-            "community_count": len(community_ids),
+            "community_count": len(communities),
             "last_built": time.time(),
             "god_nodes": [
                 str(g) if not isinstance(g, dict) else g
