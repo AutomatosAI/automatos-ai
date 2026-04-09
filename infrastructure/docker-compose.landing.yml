@@ -2,7 +2,7 @@
 # Automatos AI Platform — Landing Page
 # =============================================================================
 # Services: Marketing/landing page (Vite SPA + Node server)
-# Source repo: AutomatosAI/automatos-ai-landing
+# Source repo: Automatos../../automatos-ai-landing
 #
 # Railway production:
 #   - automatos-ai-landing → automatos.app
@@ -15,7 +15,7 @@ services:
   # ---------------------------------------------------------------------------
   automatos-ai-landing:
     build:
-      context: ../automatos-ai-landing
+      context: ../../automatos-ai-landing
       dockerfile: Dockerfile
       args:
         VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}

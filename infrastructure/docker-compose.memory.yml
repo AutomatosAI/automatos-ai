@@ -2,7 +2,7 @@
 # Automatos AI Platform — Memory Services
 # =============================================================================
 # Services: Mem0 OpenMemory Server, dedicated pgvector instance
-# Source repo: AutomatosAI/automatos-mem0
+# Source repo: Automatos../../automatos-mem0
 #
 # Railway production:
 #   - automatos-ai-mem0-Server    (internal only)
@@ -44,7 +44,7 @@ services:
   # ---------------------------------------------------------------------------
   mem0-server:
     build:
-      context: ../automatos-mem0/openmemory/api
+      context: ../../automatos-mem0/openmemory/api
       dockerfile: Dockerfile
     container_name: automatos_mem0_server
     restart: on-failure:10

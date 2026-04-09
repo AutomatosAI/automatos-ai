@@ -3,7 +3,7 @@
 # =============================================================================
 # Services: Prometheus, Grafana, Loki, Log-Relay, Alertmanager,
 #           Postgres-Exporter, Redis-Exporter
-# Source repo: AutomatosAI/automatos-monitoring (custom services)
+# Source repo: Automatos../../automatos-monitoring (custom services)
 # Images: prom/prometheus, grafana/grafana, grafana/loki, prom/alertmanager,
 #         prometheuscommunity/postgres-exporter, oliver006/redis_exporter
 #
@@ -21,7 +21,7 @@ services:
   # ---------------------------------------------------------------------------
   prometheus:
     build:
-      context: ../automatos-monitoring/services/prometheus
+      context: ../../automatos-monitoring/services/prometheus
       dockerfile: Dockerfile
     container_name: automatos_prometheus
     restart: on-failure:10
@@ -47,7 +47,7 @@ services:
   # ---------------------------------------------------------------------------
   grafana:
     build:
-      context: ../automatos-monitoring/services/grafana
+      context: ../../automatos-monitoring/services/grafana
       dockerfile: Dockerfile
     container_name: automatos_grafana
     restart: on-failure:10
@@ -80,7 +80,7 @@ services:
   # ---------------------------------------------------------------------------
   loki:
     build:
-      context: ../automatos-monitoring/services/loki
+      context: ../../automatos-monitoring/services/loki
       dockerfile: Dockerfile
     container_name: automatos_loki
     restart: on-failure:10
@@ -105,7 +105,7 @@ services:
   # ---------------------------------------------------------------------------
   log-relay:
     build:
-      context: ../automatos-monitoring/services/log-relay
+      context: ../../automatos-monitoring/services/log-relay
       dockerfile: Dockerfile
     container_name: automatos_log_relay
     restart: on-failure:10
@@ -129,7 +129,7 @@ services:
   # ---------------------------------------------------------------------------
   alertmanager:
     build:
-      context: ../automatos-monitoring/services/alertmanager
+      context: ../../automatos-monitoring/services/alertmanager
       dockerfile: Dockerfile
     container_name: automatos_alertmanager
     restart: on-failure:10

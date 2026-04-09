@@ -18,7 +18,7 @@ services:
   # ---------------------------------------------------------------------------
   automatos-ai-api:
     build:
-      context: ../automatos-ai/orchestrator
+      context: ../orchestrator
       dockerfile: Dockerfile
       target: production
     container_name: automatos_api
@@ -130,7 +130,7 @@ services:
   # ---------------------------------------------------------------------------
   automotas-ai-frontend:
     build:
-      context: ../automatos-ai/frontend
+      context: ../frontend
       dockerfile: Dockerfile
       target: production
       args:
@@ -171,7 +171,7 @@ services:
   # ---------------------------------------------------------------------------
   agent-workspace-worker:
     build:
-      context: ../automatos-ai/services/workspace-worker
+      context: ../services/workspace-worker
       dockerfile: Dockerfile
     container_name: automatos_workspace_worker
     restart: on-failure:10
@@ -210,7 +210,7 @@ services:
   # ---------------------------------------------------------------------------
   agent-opt-worker:
     build:
-      context: ../automatos-ai/services/agent-opt-worker
+      context: ../services/agent-opt-worker
       dockerfile: Dockerfile
     container_name: automatos_opt_worker
     restart: on-failure:10

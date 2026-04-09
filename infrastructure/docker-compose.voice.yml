@@ -2,7 +2,7 @@
 # Automatos AI Platform — Voice Services
 # =============================================================================
 # Services: Voice Service (TTS/STT), Voice Pipeline (orchestration)
-# Source repo: AutomatosAI/automatos-voice
+# Source repo: Automatos../../automatos-voice
 #
 # Railway production:
 #   - voice-service   → voice-service-production-bb28.up.railway.app (sleep=true)
@@ -16,7 +16,7 @@ services:
   # ---------------------------------------------------------------------------
   voice-service:
     build:
-      context: ../automatos-voice
+      context: ../../automatos-voice
       dockerfile: services/voice-service/Dockerfile
     container_name: automatos_voice_service
     restart: on-failure:10
@@ -53,7 +53,7 @@ services:
   # ---------------------------------------------------------------------------
   voice-pipeline:
     build:
-      context: ../automatos-voice
+      context: ../../automatos-voice
       dockerfile: services/voice-pipeline/Dockerfile
     container_name: automatos_voice_pipeline
     restart: on-failure:10
