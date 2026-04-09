@@ -277,6 +277,8 @@ async def extract_from_document(
 
     try:
         llm = create_llm_manager(service_name="orchestrator")
+        # Graph extraction produces large JSON — default 2000 tokens truncates
+        llm.config.max_tokens = 8000
         response = await llm.generate_response([
             {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
             {"role": "user", "content": prompt},
@@ -320,6 +322,7 @@ async def extract_from_report(
 
     try:
         llm = create_llm_manager(service_name="orchestrator")
+        llm.config.max_tokens = 8000
         response = await llm.generate_response([
             {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
             {"role": "user", "content": prompt},
