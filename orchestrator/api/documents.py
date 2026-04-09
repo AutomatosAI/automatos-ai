@@ -110,6 +110,7 @@ async def handle_request(
     file: UploadFile = File(...),
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
+    team_access: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """Upload and process a document"""
@@ -190,7 +191,12 @@ async def handle_request(
         tag_list = []
         if tags:
             tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
-        
+
+        # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
+        team_access_list: list[str] = []
+        if team_access:
+            team_access_list = [t.strip() for t in team_access.split(",") if t.strip()]
+
         # Create document record
         # TEMPORARY FIX: Tags field commented out to unblock critical vector DB testing
         # Tags are cosmetic metadata - not needed for embeddings, RAG, or semantic search
@@ -206,6 +212,7 @@ async def handle_request(
             status="uploaded",
             # tags=tag_list if tag_list else None,  # TEMPORARILY DISABLED - SQLAlchemy array bug
             description=description,
+            team_access=team_access_list,
             created_by="system"  # TODO: Get from auth context
         )
         
