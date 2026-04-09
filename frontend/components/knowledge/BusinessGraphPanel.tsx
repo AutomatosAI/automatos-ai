@@ -73,13 +73,19 @@ export function BusinessGraphPanel() {
   // ── Import handler ──
 
   const handleImport = useCallback(async (file: File, merge: boolean = false) => {
-    if (!workspaceId) return
+    console.log('[GraphImport] Starting import:', file.name, file.size, 'bytes, merge:', merge, 'workspace:', workspaceId)
+    if (!workspaceId) {
+      console.error('[GraphImport] No workspaceId — aborting')
+      return
+    }
     setImporting(true)
     setImportError(null)
     try {
-      await apiClient.importBusinessGraph(file, merge)
+      const result = await apiClient.importBusinessGraph(file, merge)
+      console.log('[GraphImport] Success:', result)
       queryClient.invalidateQueries({ queryKey: ['business-graph'] })
     } catch (err: any) {
+      console.error('[GraphImport] Error:', err)
       setImportError(err.message || 'Import failed')
     } finally {
       setImporting(false)
@@ -101,8 +107,12 @@ export function BusinessGraphPanel() {
   }, [workspaceId, queryClient])
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('[GraphImport] File input changed:', e.target.files?.length, 'files')
     const file = e.target.files?.[0]
-    if (file) handleImport(file)
+    if (file) {
+      console.log('[GraphImport] Selected file:', file.name, file.size)
+      handleImport(file)
+    }
     // Reset so same file can be re-selected
     e.target.value = ''
   }, [handleImport])
