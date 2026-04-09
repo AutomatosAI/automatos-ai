@@ -420,7 +420,7 @@ export function DocumentManagement() {
     ]
   }, [typedDocuments])
 
-  const handleFileUpload = async (files: FileList | null) => {
+  const handleFileUpload = async (files: FileList | null, teamAccess?: string[]) => {
     console.log('[DocumentManagement] handleFileUpload called with files:', files)
 
     if (!files || files.length === 0) {
@@ -437,7 +437,7 @@ export function DocumentManagement() {
 
         await uploadDocumentMutation.mutateAsync({
           file,
-          metadata: { description: '', tags: [] }
+          metadata: { description: '', tags: [], team_access: teamAccess || [] }
         })
 
         console.log('[DocumentManagement] File uploaded successfully:', file.name)
@@ -455,17 +455,17 @@ export function DocumentManagement() {
     }
   }
 
-  const handleProviderUpload = async (files: FileList, providerId: string, connectionId?: number) => {
-    console.log('[DocumentManagement] handleProviderUpload called', { providerId, connectionId, fileCount: files.length })
+  const handleProviderUpload = async (files: FileList, providerId: string, connectionId?: number, teamAccess?: string[]) => {
+    console.log('[DocumentManagement] handleProviderUpload called', { providerId, connectionId, fileCount: files.length, teamAccess })
 
     if (providerId === 'manual') {
       // Upload to Automatos local storage
-      await handleFileUpload(files)
+      await handleFileUpload(files, teamAccess)
     } else {
       // TODO: Upload to cloud provider via API
       // For now, fall back to local upload
       console.log('[DocumentManagement] Cloud provider upload not yet implemented, using local upload')
-      await handleFileUpload(files)
+      await handleFileUpload(files, teamAccess)
     }
   }
 

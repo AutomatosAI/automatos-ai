@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Upload,
@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 
 interface Provider {
   id: string
@@ -37,7 +38,7 @@ interface UploadProviderModalProps {
   open: boolean
   onClose: () => void
   providers: Provider[]
-  onUpload: (files: FileList, providerId: string, connectionId?: number) => Promise<void>
+  onUpload: (files: FileList, providerId: string, connectionId?: number, teamAccess?: string[]) => Promise<void>
 }
 
 export function UploadProviderModal({
@@ -47,6 +48,8 @@ export function UploadProviderModal({
   onUpload
 }: UploadProviderModalProps) {
   const [selectedProviderId, setSelectedProviderId] = useState<string>('manual')
+  const [teamAccess, setTeamAccess] = useState<string[]>([])
+  const [newTeam, setNewTeam] = useState('')
   const [dragActive, setDragActive] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -73,7 +76,7 @@ export function UploadProviderModal({
         })
       }, 200)
 
-      await onUpload(files, selectedProvider.id, selectedProvider.connectionId)
+      await onUpload(files, selectedProvider.id, selectedProvider.connectionId, teamAccess.length > 0 ? teamAccess : undefined)
 
       clearInterval(progressInterval)
       setUploadProgress(100)
@@ -93,6 +96,8 @@ export function UploadProviderModal({
   const handleClose = () => {
     if (!uploading) {
       setSelectedProviderId('manual')
+      setTeamAccess([])
+      setNewTeam('')
       setUploadProgress(0)
       setUploadComplete(false)
       setUploading(false)
@@ -187,6 +192,59 @@ export function UploadProviderModal({
                     })}
                   </div>
                 </RadioGroup>
+              </div>
+
+              {/* Team Access */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Team Access</Label>
+                <p className="text-xs text-muted-foreground">
+                  Restrict visibility to specific teams. Leave empty for all teams.
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Add team..."
+                    value={newTeam}
+                    onChange={(e) => setNewTeam(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const trimmed = newTeam.trim()
+                        if (trimmed && !teamAccess.includes(trimmed)) {
+                          setTeamAccess(prev => [...prev, trimmed])
+                        }
+                        setNewTeam('')
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const trimmed = newTeam.trim()
+                      if (trimmed && !teamAccess.includes(trimmed)) {
+                        setTeamAccess(prev => [...prev, trimmed])
+                      }
+                      setNewTeam('')
+                    }}
+                  >
+                    +
+                  </Button>
+                </div>
+                {teamAccess.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {teamAccess.map(team => (
+                      <Badge
+                        key={team}
+                        variant="outline"
+                        className="cursor-pointer text-xs"
+                        onClick={() => setTeamAccess(prev => prev.filter(t => t !== team))}
+                      >
+                        {team} <X className="w-3 h-3 ml-1" />
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* File Drop Zone */}
