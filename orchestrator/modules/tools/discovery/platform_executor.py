@@ -453,6 +453,27 @@ class PlatformActionExecutor:
                 ),
             }
 
+        # PRD-124/126: Auto-inject _agent_id for graph tools (team scoping)
+        if action_name.startswith("platform_graph") or action_name == "platform_query_graph":
+            if "_agent_id" not in params:
+                # Resolve agent_id from the active mission or caller context
+                try:
+                    from core.models.orchestration import OrchestrationRun
+                    active_run = (
+                        self.db.query(OrchestrationRun)
+                        .filter(
+                            OrchestrationRun.workspace_id == self.workspace_id,
+                            OrchestrationRun.state == "running",
+                        )
+                        .first()
+                    )
+                    if active_run:
+                        _aid = (active_run.config or {}).get("agent_id")
+                        if _aid:
+                            params = {**params, "_agent_id": int(_aid)}
+                except Exception as e:
+                    logger.debug("[PRD-124] Failed to resolve _agent_id for graph tool: %s", e)
+
         # PRD-108: Auto-inject field_id for field tools from active mission
         if action_name.startswith("platform_field_") and "field_id" not in params:
             try:

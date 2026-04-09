@@ -44,6 +44,7 @@ def _node(
     source_location: str | None = None,
     confidence: str = "EXTRACTED",
     weight: float = 1.0,
+    team_access: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": node_id,
@@ -53,6 +54,7 @@ def _node(
         "source_location": source_location,
         "confidence": confidence,
         "weight": weight,
+        "team_access": team_access or [],
     }
 
 
@@ -195,8 +197,16 @@ def _parse_llm_json(raw: str) -> dict[str, list] | None:
 def _normalise_extraction(
     raw: dict,
     source_file: str,
+    team_access: list[str] | None = None,
 ) -> dict[str, list]:
-    """Ensure every node/edge/hyperedge has all required fields."""
+    """Ensure every node/edge/hyperedge has all required fields.
+
+    Args:
+        raw: Parsed LLM JSON output.
+        source_file: Provenance path for nodes/edges.
+        team_access: PRD-124 team scoping. Nodes inherit this from their
+            source document. Empty list = visible to all agents.
+    """
     result = _empty_graph()
 
     for n in raw.get("nodes", []):
@@ -207,6 +217,7 @@ def _normalise_extraction(
             source_file=n.get("source_file", source_file),
             confidence=n.get("confidence", "EXTRACTED"),
             weight=float(n.get("weight", 1.0)),
+            team_access=team_access,
         ))
 
     for e in raw.get("edges", []):
@@ -244,6 +255,7 @@ async def extract_from_document(
     doc_text: str,
     doc_path: str,
     workspace_id: int,
+    team_access: list[str] | None = None,
 ) -> dict[str, list]:
     """Extract knowledge graph from a business document via LLM.
 
@@ -251,6 +263,8 @@ async def extract_from_document(
         doc_text: Full text of the document.
         doc_path: Path/identifier for provenance tracking.
         workspace_id: Workspace that owns the document (for future scoping).
+        team_access: Teams that can access this document (PRD-124).
+            Empty list or None means visible to all agents.
 
     Returns:
         ``{"nodes": [...], "edges": [...], "hyperedges": [...]}``
@@ -276,7 +290,7 @@ async def extract_from_document(
     if parsed is None:
         return _empty_graph()
 
-    return _normalise_extraction(parsed, source_file=doc_path)
+    return _normalise_extraction(parsed, source_file=doc_path, team_access=team_access)
 
 
 async def extract_from_report(

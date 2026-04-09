@@ -50,14 +50,20 @@ class GraphSection(BaseSection):
             return ""
 
         # 2. Load graph
-        from modules.knowledge.graph_service import get_graph_service
+        from modules.knowledge.graph_service import get_graph_service, team_filtered_view
 
         service = get_graph_service()
         graph = await service.load_graph(int(ctx.workspace_id))
         if graph is None or graph.number_of_nodes() == 0:
             return ""
 
-        # 3. Score nodes against message terms
+        # 3. PRD-124: filter graph by agent team
+        agent_team = getattr(ctx.agent, "team", None) if ctx.agent else None
+        graph = team_filtered_view(graph, agent_team)
+        if graph.number_of_nodes() == 0:
+            return ""
+
+        # 4. Score nodes against message terms
         terms = [t.lower() for t in message.split() if len(t) > 2]
         if not terms:
             return ""

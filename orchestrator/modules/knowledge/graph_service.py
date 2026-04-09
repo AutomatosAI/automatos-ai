@@ -76,6 +76,47 @@ _DEBOUNCE_SECONDS = 60
 
 
 # ---------------------------------------------------------------------------
+# Team scoping (PRD-124 integration)
+# ---------------------------------------------------------------------------
+
+
+def node_is_visible(graph: nx.Graph, node_id: str, agent_team: Optional[str]) -> bool:
+    """Check if a node is visible to an agent based on team_access.
+
+    PRD-124 filtering rule:
+      - team_access == []  → visible to all agents
+      - agent_team is None → agent sees everything (e.g. AUTO/CTO)
+      - agent_team in team_access → visible
+      - otherwise → hidden
+
+    Returns True if the node should be visible.
+    """
+    if agent_team is None:
+        return True
+    attrs = graph.nodes.get(node_id, {})
+    team_access = attrs.get("team_access", [])
+    if not team_access:
+        return True
+    return agent_team in team_access
+
+
+def team_filtered_view(graph: nx.Graph, agent_team: Optional[str]) -> nx.Graph:
+    """Return a subgraph containing only nodes visible to *agent_team*.
+
+    If agent_team is None (no team restriction), returns the original graph
+    unchanged. Otherwise creates a filtered view that excludes team-blocked
+    nodes and all edges touching them.
+    """
+    if agent_team is None:
+        return graph
+    visible = [
+        n for n in graph.nodes
+        if node_is_visible(graph, n, agent_team)
+    ]
+    return graph.subgraph(visible).copy()
+
+
+# ---------------------------------------------------------------------------
 # GraphifyService
 # ---------------------------------------------------------------------------
 

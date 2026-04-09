@@ -42,6 +42,28 @@ def _get_service():
     return get_graph_service()
 
 
+def _resolve_agent_team(db: Session, agent_id: Optional[int]) -> Optional[str]:
+    """Look up the agent's team from the DB. Returns None if no team set.
+
+    PRD-124: agent with team=NULL sees all nodes (no filtering).
+    """
+    if not agent_id:
+        return None
+    try:
+        from core.models.core import Agent
+        agent = db.query(Agent.team).filter(Agent.id == agent_id).first()
+        return agent.team if agent else None
+    except Exception:
+        logger.debug("_resolve_agent_team: failed for agent_id=%s", agent_id)
+        return None
+
+
+def _get_filtered_graph(graph, agent_team: Optional[str]):
+    """Apply PRD-124 team filtering to the graph."""
+    from modules.knowledge.graph_service import team_filtered_view
+    return team_filtered_view(graph, agent_team)
+
+
 def _find_node_by_label(graph, label: str) -> Optional[str]:
     """Find a node ID by case-insensitive label match, falling back to ID match."""
     label_lower = label.lower()
@@ -101,6 +123,10 @@ async def handle_query_graph(
                 "success": False,
                 "error": "No knowledge graph built for this workspace yet.",
             }
+
+        # PRD-124: filter graph to team-visible nodes
+        agent_team = _resolve_agent_team(db, params.get("_agent_id"))
+        graph = _get_filtered_graph(graph, agent_team)
 
         # Score nodes against the question terms
         terms = question.split()
@@ -173,6 +199,10 @@ async def handle_graph_neighbors(
                 "error": "No knowledge graph built for this workspace yet.",
             }
 
+        # PRD-124: filter graph to team-visible nodes
+        agent_team = _resolve_agent_team(db, params.get("_agent_id"))
+        graph = _get_filtered_graph(graph, agent_team)
+
         node_id = _find_node_by_label(graph, node_label)
         if node_id is None:
             return {
@@ -223,6 +253,8 @@ async def handle_graph_communities(
         community_id (int, optional): Specific community to return.
     """
     community_id = params.get("community_id")
+    # PRD-124: resolve agent team for member filtering
+    agent_team = _resolve_agent_team(db, params.get("_agent_id"))
 
     try:
         from core.workspace_client import WorkspaceClient
@@ -250,6 +282,20 @@ async def handle_graph_communities(
             )
             return {"success": False, "error": "Corrupt communities data."}
 
+        # PRD-124: filter community members by team visibility
+        if agent_team is not None:
+            svc = _get_service()
+            graph = await svc.load_graph(int(str(workspace_id)))
+            if graph is not None:
+                from modules.knowledge.graph_service import node_is_visible
+                for c in communities:
+                    members = c.get("members", [])
+                    c["members"] = [
+                        m for m in members
+                        if node_is_visible(graph, m, agent_team)
+                    ]
+                    c["member_count"] = len(c["members"])
+
         # Filter to specific community if requested
         if community_id is not None:
             cid = int(community_id)
@@ -264,18 +310,19 @@ async def handle_graph_communities(
                 "community": matched[0],
             }
 
-        # Return summary of all communities
+        # Return summary of all communities (exclude empty after filtering)
         summary = [
             {
                 "community_id": c.get("community_id"),
                 "member_count": c.get("member_count", len(c.get("members", []))),
             }
             for c in communities
+            if c.get("member_count", len(c.get("members", []))) > 0
         ]
 
         return {
             "success": True,
-            "community_count": len(communities),
+            "community_count": len(summary),
             "communities": summary,
         }
 
@@ -316,6 +363,10 @@ async def handle_graph_impact(
                 "success": False,
                 "error": "No knowledge graph built for this workspace yet.",
             }
+
+        # PRD-124: filter graph to team-visible nodes
+        agent_team = _resolve_agent_team(db, params.get("_agent_id"))
+        graph = _get_filtered_graph(graph, agent_team)
 
         start = _find_node_by_label(graph, concept)
         if start is None:
