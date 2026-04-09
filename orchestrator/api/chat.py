@@ -596,7 +596,6 @@ async def stream_chat(
                 complexity_assessment=complexity_assessment,
                 mission_mode=bool(request.missionMode),
                 plan_mode=bool(request.planMode),
-                suggest_mission=_suggest_mission,
             ):
                 yield chunk
 
