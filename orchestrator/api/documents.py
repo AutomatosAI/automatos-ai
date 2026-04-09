@@ -1812,3 +1812,92 @@ async def get_reprocess_status(
     except Exception as e:
         logger.error(f"Error getting re-process status: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# PRD-124: Team access management
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel as _BaseModel, Field as _Field
+
+
+class _TeamAccessUpdate(_BaseModel):
+    team_access: List[str] = _Field(..., description="List of team names")
+
+
+class _BulkTeamAccessUpdate(_BaseModel):
+    document_ids: List[int] = _Field(..., min_length=1, description="Document IDs to update")
+    team_access: List[str] = _Field(..., description="List of team names")
+
+
+@router.patch("/{document_id}/team-access")
+async def update_document_team_access(
+    document_id: int,
+    body: _TeamAccessUpdate,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Update team_access on a single document."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    # Validate team names
+    for t in body.team_access:
+        if not t or not t.strip():
+            raise HTTPException(422, "Team names must be non-empty strings")
+
+    clean_teams = [t.strip() for t in body.team_access]
+
+    result = db.execute(
+        text(
+            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "WHERE id = :doc_id AND workspace_id = :ws "
+            "RETURNING id, title, team_access"
+        ),
+        {"teams": clean_teams, "doc_id": document_id, "ws": str(ctx.workspace_id)},
+    ).fetchone()
+    db.commit()
+
+    if not result:
+        raise HTTPException(404, "Document not found in this workspace")
+
+    return {
+        "id": result.id,
+        "title": result.title,
+        "team_access": result.team_access,
+    }
+
+
+@router.post("/bulk-team-access")
+async def bulk_update_team_access(
+    body: _BulkTeamAccessUpdate,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Update team_access on multiple documents at once."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    for t in body.team_access:
+        if not t or not t.strip():
+            raise HTTPException(422, "Team names must be non-empty strings")
+
+    clean_teams = [t.strip() for t in body.team_access]
+
+    rows = db.execute(
+        text(
+            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "WHERE id = ANY(:ids) AND workspace_id = :ws "
+            "RETURNING id, title, team_access"
+        ),
+        {"teams": clean_teams, "ids": body.document_ids, "ws": str(ctx.workspace_id)},
+    ).fetchall()
+    db.commit()
+
+    return {
+        "updated": len(rows),
+        "documents": [
+            {"id": r.id, "title": r.title, "team_access": r.team_access}
+            for r in rows
+        ],
+    }
