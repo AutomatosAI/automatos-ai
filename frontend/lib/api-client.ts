@@ -1552,14 +1552,69 @@ class ApiClient {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('merge', String(merge))
-    return this.request('/api/knowledge/graph/import', {
+
+    // Use raw fetch (same pattern as uploadDocument) — this.request() has
+    // Content-Type issues with FormData and may route through Next.js proxy.
+    const headers: any = { ...this.defaultHeaders }
+    delete headers['Content-Type'] // Let browser set multipart/form-data with boundary
+
+    if (typeof window !== 'undefined') {
+      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (workspaceId) headers['X-Workspace-ID'] = workspaceId
+    }
+
+    if (this.getClerkToken) {
+      try {
+        const token = await this.getClerkToken()
+        if (token) headers['Authorization'] = `Bearer ${token}`
+      } catch (error) {
+        console.warn('[GraphImport] Failed to get Clerk token:', error)
+      }
+    }
+
+    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
+    const url = `${BACKEND_URL}/api/knowledge/graph/import`
+    console.log('[GraphImport] Uploading to:', url, 'file:', file.name, file.size, 'bytes')
+
+    const response = await fetch(url, {
       method: 'POST',
+      headers,
       body: formData,
     })
+
+    console.log('[GraphImport] Response:', response.status, response.statusText)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('[GraphImport] Error:', errorText)
+      throw new Error(errorText || `HTTP ${response.status}`)
+    }
+
+    return response.json()
   }
 
   async buildBusinessGraph() {
-    return this.request('/api/knowledge/graph/build', { method: 'POST' })
+    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
+    const url = `${BACKEND_URL}/api/knowledge/graph/build`
+
+    const headers: any = { ...this.defaultHeaders }
+    if (typeof window !== 'undefined') {
+      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (workspaceId) headers['X-Workspace-ID'] = workspaceId
+    }
+    if (this.getClerkToken) {
+      try {
+        const token = await this.getClerkToken()
+        if (token) headers['Authorization'] = `Bearer ${token}`
+      } catch (_) {}
+    }
+
+    const response = await fetch(url, { method: 'POST', headers })
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(errorText || `HTTP ${response.status}`)
+    }
+    return response.json()
   }
 
   // ===== DOCUMENT ENDPOINTS =====
