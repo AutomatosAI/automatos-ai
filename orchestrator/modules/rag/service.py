@@ -252,7 +252,10 @@ class RAGService:
             except Exception as e:
                 logger.warning(f"Query enhancement failed, using original: {e}")
         
-        # PRD-124: over-fetch when team filtering to compensate for post-filter reduction
+        # PRD-124: normalize team name and over-fetch to compensate for post-filter reduction
+        if team:
+            from core.team_access import normalize_team
+            team = normalize_team(team)
         team_multiplier = 2 if team else 1
 
         # Multi-query retrieval with RRF fusion
