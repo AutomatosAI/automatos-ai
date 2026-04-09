@@ -128,12 +128,22 @@ export function BusinessGraphPanel() {
     }
   }, [workspaceId, queryClient])
 
+  const handleChooseFile = useCallback(() => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      if (file) handleImport(file)
+    }
+    input.click()
+  }, [handleImport])
+
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
       handleImport(file)
     }
-    // Reset so same file can be re-selected
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -315,7 +325,7 @@ export function BusinessGraphPanel() {
               <div className="flex items-center justify-center gap-3">
                 <Button
                   className="gradient-accent hover:opacity-90"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={handleChooseFile}
                 >
                   <Plus className="w-4 h-4 mr-2" />
                   Import graph.json
@@ -389,7 +399,7 @@ export function BusinessGraphPanel() {
             size="sm"
             variant="ghost"
             className="h-7 text-xs"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={handleChooseFile}
             disabled={importing}
           >
             {importing ? (
