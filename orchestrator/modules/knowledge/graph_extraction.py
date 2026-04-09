@@ -99,17 +99,17 @@ Given the document below, extract:
 6. RELATIONSHIPS — how the above connect to each other
 
 Output JSON:
-{
+{{
   "nodes": [
-    {"id": "snake_case_id", "label": "Human Name", "file_type": "concept|entity|process|metric|rule", "source_file": "<doc_path>"}
+    {{"id": "snake_case_id", "label": "Human Name", "file_type": "concept|entity|process|metric|rule", "source_file": "<doc_path>"}}
   ],
   "edges": [
-    {"source": "node_id_a", "target": "node_id_b", "relation": "<relation_type>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}
+    {{"source": "node_id_a", "target": "node_id_b", "relation": "<relation_type>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
   ],
   "hyperedges": [
-    {"id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<doc_path>"}
+    {{"id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<doc_path>"}}
   ]
-}
+}}
 
 Rules:
 - Use snake_case IDs derived from the label
