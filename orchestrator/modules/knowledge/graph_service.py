@@ -384,29 +384,159 @@ class GraphifyService:
     async def _collect_sources(self, workspace_id: str) -> List[Dict[str, Any]]:
         """Collect all indexable sources for a workspace.
 
-        This is a seam for future integration with the document system,
-        cloud sync, and other source providers. Currently returns an empty
-        list — callers (build_graph) handle the empty case gracefully.
+        Queries completed documents (with chunk text) and the agent roster
+        from the database.  Each returned dict has a ``type`` key so that
+        ``_extract_all`` can dispatch to the right extractor.
+
+        Source types:
+          - ``document`` — text content assembled from document_chunks
+          - ``agents``   — agent roster rows for deterministic mapping
         """
-        # TODO: PRD-126 US-002+ will wire this to document/cloud source providers
-        logger.debug("_collect_sources: stub for workspace %s", workspace_id)
-        return []
+        from sqlalchemy import text as sa_text
+
+        from core.database.database import get_db_session
+        from core.models.core import Agent, Document
+
+        sources: List[Dict[str, Any]] = []
+
+        try:
+            with get_db_session() as db:
+                # --- Documents with chunk content -------------------------
+                docs = (
+                    db.query(Document)
+                    .filter(
+                        Document.workspace_id == workspace_id,
+                        Document.status.in_(["completed", "processed"]),
+                    )
+                    .all()
+                )
+                for doc in docs:
+                    # Assemble full text from chunks (ordered by chunk_index)
+                    rows = db.execute(
+                        sa_text(
+                            "SELECT content FROM document_chunks "
+                            "WHERE document_id = :doc_id "
+                            "ORDER BY chunk_index"
+                        ),
+                        {"doc_id": doc.id},
+                    ).fetchall()
+                    full_text = "\n\n".join(r[0] for r in rows if r[0])
+                    if not full_text.strip():
+                        logger.debug(
+                            "_collect_sources: skipping doc %s (no chunk text)",
+                            doc.id,
+                        )
+                        continue
+
+                    sources.append({
+                        "type": "document",
+                        "id": doc.id,
+                        "path": doc.original_filename or doc.filename or f"doc_{doc.id}",
+                        "text": full_text,
+                        "team_access": list(doc.team_access or []),
+                    })
+
+                # --- Agent roster -----------------------------------------
+                agents = (
+                    db.query(Agent)
+                    .filter(
+                        Agent.workspace_id == workspace_id,
+                        Agent.status == "active",
+                    )
+                    .all()
+                )
+                if agents:
+                    agent_rows = [
+                        {
+                            "id": a.id,
+                            "name": a.name,
+                            "role": a.agent_type,
+                            "reports_to": (a.configuration or {}).get("reports_to"),
+                        }
+                        for a in agents
+                    ]
+                    sources.append({"type": "agents", "rows": agent_rows})
+
+        except Exception:
+            logger.exception(
+                "_collect_sources: failed to query DB for workspace %s",
+                workspace_id,
+            )
+            return []
+
+        logger.info(
+            "_collect_sources: found %d sources for workspace %s "
+            "(docs=%d, agent_roster=%s)",
+            len(sources),
+            workspace_id,
+            sum(1 for s in sources if s["type"] == "document"),
+            "yes" if any(s["type"] == "agents" for s in sources) else "no",
+        )
+        return sources
 
     async def _extract_all(
         self, workspace_id: str, sources: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Run entity/relation extraction on each source.
 
-        Delegates to the graph_extraction module (future US).
-        Returns a list of extraction dicts ready for merging.
+        Dispatches each source to the appropriate extractor:
+          - ``document`` → LLM-based ``extract_from_document``
+          - ``agents``   → deterministic ``map_agent_roster``
+
+        Returns a list of extraction dicts (each with nodes/edges keys).
         """
-        # TODO: PRD-126 — wire to graph_extraction module
-        logger.debug(
-            "_extract_all: stub for workspace %s (%d sources)",
-            workspace_id,
-            len(sources),
+        from modules.knowledge.graph_extraction import (
+            extract_from_document,
+            map_agent_roster,
         )
-        return sources
+
+        extractions: List[Dict[str, Any]] = []
+
+        for source in sources:
+            src_type = source.get("type", "")
+            try:
+                if src_type == "document":
+                    extraction = await extract_from_document(
+                        doc_text=source["text"],
+                        doc_path=source["path"],
+                        workspace_id=int(workspace_id) if workspace_id.isdigit() else 0,
+                        team_access=source.get("team_access"),
+                    )
+                    extractions.append(extraction)
+                    logger.debug(
+                        "_extract_all: doc '%s' → %d nodes, %d edges",
+                        source["path"],
+                        len(extraction.get("nodes", [])),
+                        len(extraction.get("edges", [])),
+                    )
+
+                elif src_type == "agents":
+                    extraction = map_agent_roster(source["rows"])
+                    extractions.append(extraction)
+                    logger.debug(
+                        "_extract_all: agent roster → %d nodes, %d edges",
+                        len(extraction.get("nodes", [])),
+                        len(extraction.get("edges", [])),
+                    )
+
+                else:
+                    logger.warning(
+                        "_extract_all: unknown source type '%s', skipping",
+                        src_type,
+                    )
+            except Exception:
+                logger.exception(
+                    "_extract_all: extraction failed for source type '%s'",
+                    src_type,
+                )
+
+        logger.info(
+            "_extract_all: completed %d/%d extractions for workspace %s",
+            len(extractions),
+            len(sources),
+            workspace_id,
+        )
+        return extractions
 
     @staticmethod
     def _merge_extractions(extractions: List[Dict[str, Any]]) -> Dict[str, Any]:
