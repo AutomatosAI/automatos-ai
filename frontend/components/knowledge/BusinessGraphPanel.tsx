@@ -193,7 +193,11 @@ export function BusinessGraphPanel() {
     error: graphError,
   } = useQuery<GraphData>({
     queryKey: graphQueryKeys.data(workspaceId ?? ''),
-    queryFn: () => apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json'),
+    queryFn: async () => {
+      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/graph.json')
+      const content = result?.content ?? result
+      return typeof content === 'string' ? JSON.parse(content) : content
+    },
     enabled: !!workspaceId,
     staleTime: 5 * 60 * 1000,
   })
@@ -203,7 +207,11 @@ export function BusinessGraphPanel() {
     isLoading: metaLoading,
   } = useQuery<GraphMeta>({
     queryKey: graphQueryKeys.meta(workspaceId ?? ''),
-    queryFn: () => apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json'),
+    queryFn: async () => {
+      const result = await apiClient.getWorkspaceFileContent(workspaceId!, 'graph/meta.json')
+      const content = result?.content ?? result
+      return typeof content === 'string' ? JSON.parse(content) : content
+    },
     enabled: !!workspaceId,
     staleTime: 5 * 60 * 1000,
   })
