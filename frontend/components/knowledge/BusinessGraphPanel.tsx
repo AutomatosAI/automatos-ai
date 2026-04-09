@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { BusinessGraphVisualization } from './BusinessGraphVisualization'
 import {
   Network, Loader2, Search, X, ChevronRight,
-  FileText, Clock, Layers, Upload, RefreshCw, GitMerge,
+  FileText, Clock, Layers, Upload, RefreshCw,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -59,7 +59,6 @@ const graphQueryKeys = {
 export function BusinessGraphPanel() {
   const { workspaceId } = useWorkspace()
   const queryClient = useQueryClient()
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // UI state
   const [searchTerm, setSearchTerm] = useState('')
@@ -212,31 +211,27 @@ export function BusinessGraphPanel() {
   if (graphError || !graphData?.nodes?.length) {
     return (
       <div className="text-center py-24">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json"
-          onChange={handleFileChange}
-          className="hidden"
-        />
         <Network className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
         <h3 className="text-lg font-semibold mb-2">No business graph yet</h3>
         <p className="text-sm text-muted-foreground mb-6">
           Upload documents to auto-build, or import a graph.json from graphify.
         </p>
         <div className="flex items-center justify-center gap-3">
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-            className="gradient-accent hover:opacity-90"
-          >
+          <label className="inline-flex items-center justify-center rounded-md text-sm font-medium h-10 px-4 py-2 cursor-pointer gradient-accent hover:opacity-90 text-white">
             {importing ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
               <Upload className="w-4 h-4 mr-2" />
             )}
             Import graph.json
-          </Button>
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleFileChange}
+              className="sr-only"
+              disabled={importing}
+            />
+          </label>
           <Button
             variant="outline"
             onClick={handleBuild}
@@ -289,30 +284,21 @@ export function BusinessGraphPanel() {
               Last built {lastBuilt}
             </span>
           )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleFileChange}
-            className="hidden"
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            onClick={() => {
-              // Hold shift to merge instead of replace
-              fileInputRef.current?.click()
-            }}
-            disabled={importing}
-          >
+          <label className="inline-flex items-center justify-center rounded-md text-sm font-medium h-7 px-2 cursor-pointer hover:bg-accent hover:text-accent-foreground text-xs">
             {importing ? (
               <Loader2 className="w-3 h-3 mr-1 animate-spin" />
             ) : (
               <Upload className="w-3 h-3 mr-1" />
             )}
             Import
-          </Button>
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleFileChange}
+              className="sr-only"
+              disabled={importing}
+            />
+          </label>
           <Button
             size="sm"
             variant="ghost"
