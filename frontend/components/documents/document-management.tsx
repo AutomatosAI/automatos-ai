@@ -75,6 +75,7 @@ interface BackendDocument {
   chunk_count?: number;
   upload_date?: string;
   processed_date?: string | null;
+  team_access?: string[];
 }
 
 // Stats will be calculated dynamically from real data

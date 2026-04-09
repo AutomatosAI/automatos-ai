@@ -36,6 +36,7 @@ interface LocalDocument {
   status?: string
   chunk_count?: number
   upload_date?: string
+  team_access?: string[]
 }
 
 interface LocalStorageBrowserProps {
@@ -69,13 +70,23 @@ export function LocalStorageBrowser({
   const [viewMode, setViewMode] = useViewMode('documents')
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [filterTeam, setFilterTeam] = useState<string>('all')
+
+  // Collect unique team names from all documents
+  const availableTeams = Array.from(
+    new Set(documents.flatMap(d => d.team_access || []).filter(Boolean))
+  ).sort()
 
   const filteredDocuments = documents.filter(doc => {
     const matchesSearch = doc.filename.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesFilter =
       filterStatus === 'all' ||
       (doc.status || 'completed').toLowerCase() === filterStatus
-    return matchesSearch && matchesFilter
+    const matchesTeam =
+      filterTeam === 'all' ||
+      !doc.team_access?.length ||
+      doc.team_access.includes(filterTeam)
+    return matchesSearch && matchesFilter && matchesTeam
   })
 
   const stats = {
@@ -114,7 +125,7 @@ export function LocalStorageBrowser({
         </div>
       </div>
 
-      {/* Search + View Toggle */}
+      {/* Search + Team Filter + View Toggle */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -125,6 +136,18 @@ export function LocalStorageBrowser({
             className="pl-10 bg-secondary/50"
           />
         </div>
+        {availableTeams.length > 0 && (
+          <select
+            value={filterTeam}
+            onChange={(e) => setFilterTeam(e.target.value)}
+            className="h-10 rounded-md border border-input bg-secondary/50 px-3 text-sm"
+          >
+            <option value="all">All Teams</option>
+            {availableTeams.map(team => (
+              <option key={team} value={team}>{team}</option>
+            ))}
+          </select>
+        )}
         <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
 
@@ -178,6 +201,15 @@ export function LocalStorageBrowser({
                               <span>{new Date(doc.upload_date).toLocaleDateString()}</span>
                             )}
                           </div>
+                          {doc.team_access && doc.team_access.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {doc.team_access.map(team => (
+                                <Badge key={team} variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+                                  {team}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
@@ -273,7 +305,7 @@ export function LocalStorageBrowser({
                         </DropdownMenu>
                       </div>
                       <p className="font-semibold text-sm truncate mb-1">{doc.filename}</p>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
                         <span>{doc.file_type?.toUpperCase()}</span>
                         {doc.file_size && (
                           <>
@@ -282,6 +314,15 @@ export function LocalStorageBrowser({
                           </>
                         )}
                       </div>
+                      {doc.team_access && doc.team_access.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {doc.team_access.map(team => (
+                            <Badge key={team} variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+                              {team}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                       <div className="flex items-center justify-between">
                         <Badge
                           variant={status === 'completed' ? 'outline' : 'secondary'}

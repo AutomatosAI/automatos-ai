@@ -574,6 +574,7 @@ async def list_documents(
                 chunk_count=doc.chunk_count,
                 tags=doc.tags or [],
                 description=doc.description,
+                team_access=doc.team_access or [],
                 upload_date=doc.upload_date,
                 processed_date=doc.processed_date,
                 created_by=doc.created_by

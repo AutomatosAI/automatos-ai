@@ -791,6 +791,7 @@ class DocumentResponse(BaseModel):
     chunk_count: Optional[int]
     tags: Optional[List[str]]
     description: Optional[str]
+    team_access: Optional[List[str]] = None
     upload_date: datetime
     processed_date: Optional[datetime]
     created_by: Optional[str] = None
