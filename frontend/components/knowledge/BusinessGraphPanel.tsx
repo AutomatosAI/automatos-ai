@@ -110,13 +110,18 @@ export function BusinessGraphPanel() {
     }
   }, [workspaceId, queryClient])
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    alert('FILE CHANGE FIRED: ' + (e.target.files?.[0]?.name ?? 'no file'))
-    const file = e.target.files?.[0]
-    if (file) {
-      handleImport(file)
+  const handleImportClick = useCallback(() => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      if (file) {
+        alert('Selected: ' + file.name + ' (' + file.size + ' bytes)')
+        handleImport(file)
+      }
     }
-    e.target.value = ''
+    input.click()
   }, [handleImport])
 
   // ── Data fetching ──
@@ -220,21 +225,18 @@ export function BusinessGraphPanel() {
           Upload documents to auto-build, or import a graph.json from graphify.
         </p>
         <div className="flex items-center justify-center gap-3">
-          <label className="inline-flex items-center justify-center rounded-md text-sm font-medium h-10 px-4 py-2 cursor-pointer gradient-accent hover:opacity-90 text-white">
+          <Button
+            onClick={handleImportClick}
+            disabled={importing}
+            className="gradient-accent hover:opacity-90 text-white"
+          >
             {importing ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
               <Upload className="w-4 h-4 mr-2" />
             )}
             Import graph.json
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleFileChange}
-              className="sr-only"
-              disabled={importing}
-            />
-          </label>
+          </Button>
           <Button
             variant="outline"
             onClick={handleBuild}
@@ -287,21 +289,18 @@ export function BusinessGraphPanel() {
               Last built {lastBuilt}
             </span>
           )}
-          <label className="inline-flex items-center justify-center rounded-md text-sm font-medium h-7 px-2 cursor-pointer hover:bg-accent hover:text-accent-foreground text-xs">
+          <button
+            onClick={handleImportClick}
+            disabled={importing}
+            className="inline-flex items-center justify-center rounded-md text-sm font-medium h-7 px-2 hover:bg-accent hover:text-accent-foreground text-xs"
+          >
             {importing ? (
               <Loader2 className="w-3 h-3 mr-1 animate-spin" />
             ) : (
               <Upload className="w-3 h-3 mr-1" />
             )}
             Import
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleFileChange}
-              className="sr-only"
-              disabled={importing}
-            />
-          </label>
+          </button>
           <Button
             size="sm"
             variant="ghost"
