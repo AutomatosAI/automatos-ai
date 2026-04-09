@@ -81,7 +81,42 @@ export function BusinessGraphPanel() {
     setImporting(true)
     setImportError(null)
     try {
-      const result = await apiClient.importBusinessGraph(file, merge)
+      // Inline fetch — bypass apiClient entirely, copy uploadDocument exactly
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('merge', String(merge))
+
+      const headers: Record<string, string> = {}
+
+      // Workspace ID from localStorage (same as uploadDocument)
+      const wsId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (wsId) headers['X-Workspace-ID'] = wsId
+
+      // Clerk auth (same as uploadDocument)
+      try {
+        const token = await (apiClient as any).getClerkToken?.()
+        if (token) headers['Authorization'] = `Bearer ${token}`
+      } catch (_) {}
+
+      const BACKEND = process.env.NEXT_PUBLIC_API_URL || ''
+      const url = `${BACKEND}/api/knowledge/graph/import`
+
+      console.log('[GraphImport] fetch', url, file.name, file.size, 'bytes')
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: formData,
+      })
+
+      console.log('[GraphImport] status:', response.status)
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
       console.log('[GraphImport] Success:', result)
       queryClient.invalidateQueries({ queryKey: ['business-graph'] })
     } catch (err: any) {
