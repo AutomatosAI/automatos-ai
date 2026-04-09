@@ -506,7 +506,8 @@ class RAGService:
         max_chunks: int = None,
         max_tokens: int = 2000,
         min_similarity: float = 0.5,
-        workspace_id: str = None
+        workspace_id: str = None,
+        team: str = None,
     ) -> RAGResult:
         """Backward-compatible alias for retrieve()."""
         chunks = max_chunks if max_chunks is not None else top_k
@@ -515,7 +516,8 @@ class RAGService:
             max_chunks=chunks,
             max_tokens=max_tokens,
             diversity=0.3,
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
+            team=team,
         )
     
     
