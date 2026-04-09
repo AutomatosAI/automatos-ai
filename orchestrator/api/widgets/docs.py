@@ -69,14 +69,15 @@ class DocsCategoryItem(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+from core.team_access import effective_team as _effective_team_raw, TEAM_FILTER_CLAUSE
+
+
 def _effective_team(auth: WidgetAuthContext, request_team: Optional[str]) -> Optional[str]:
-    """API key team overrides request-level team parameter."""
-    return auth.team or request_team or None
+    """API key team overrides request-level team parameter (normalized)."""
+    return _effective_team_raw(auth.team, request_team)
 
 
-_TEAM_FILTER_CLAUSE = (
-    "AND (team_access = '{}' OR :team = ANY(team_access))"
-)
+_TEAM_FILTER_CLAUSE = TEAM_FILTER_CLAUSE
 
 
 # ---------------------------------------------------------------------------

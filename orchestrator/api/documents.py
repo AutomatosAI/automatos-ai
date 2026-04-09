@@ -193,9 +193,10 @@ async def handle_request(
             tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
 
         # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
+        from core.team_access import normalize_teams
         team_access_list: list[str] = []
         if team_access:
-            team_access_list = [t.strip() for t in team_access.split(",") if t.strip()]
+            team_access_list = normalize_teams(team_access.split(","))
 
         # Create document record
         # TEMPORARY FIX: Tags field commented out to unblock critical vector DB testing
@@ -1847,7 +1848,8 @@ async def update_document_team_access(
         if not t or not t.strip():
             raise HTTPException(422, "Team names must be non-empty strings")
 
-    clean_teams = [t.strip() for t in body.team_access]
+    from core.team_access import normalize_teams
+    clean_teams = normalize_teams(body.team_access)
 
     result = db.execute(
         text(
@@ -1883,7 +1885,8 @@ async def bulk_update_team_access(
         if not t or not t.strip():
             raise HTTPException(422, "Team names must be non-empty strings")
 
-    clean_teams = [t.strip() for t in body.team_access]
+    from core.team_access import normalize_teams
+    clean_teams = normalize_teams(body.team_access)
 
     rows = db.execute(
         text(

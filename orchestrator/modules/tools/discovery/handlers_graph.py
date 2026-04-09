@@ -52,7 +52,10 @@ def _resolve_agent_team(db: Session, agent_id: Optional[int]) -> Optional[str]:
     try:
         from core.models.core import Agent
         agent = db.query(Agent.team).filter(Agent.id == agent_id).first()
-        return agent.team if agent else None
+        if agent and agent.team:
+            from core.team_access import normalize_team
+            return normalize_team(agent.team)
+        return None
     except Exception:
         logger.debug("_resolve_agent_team: failed for agent_id=%s", agent_id)
         return None
