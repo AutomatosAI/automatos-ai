@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useRef, useMemo, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { BusinessGraphVisualization } from './BusinessGraphVisualization'
 import {
   Network, Loader2, Search, X, ChevronRight,
-  FileText, Clock, Layers, Upload, RefreshCw,
+  FileText, Clock, Layers, Upload, RefreshCw, Plus,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -59,6 +59,7 @@ const graphQueryKeys = {
 export function BusinessGraphPanel() {
   const { workspaceId } = useWorkspace()
   const queryClient = useQueryClient()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // UI state
   const [searchTerm, setSearchTerm] = useState('')
@@ -68,15 +69,13 @@ export function BusinessGraphPanel() {
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
   const [building, setBuilding] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
 
-  // ── Import handler ──
+  // ── File handling (matches document-management.tsx pattern) ──
 
   const handleImport = useCallback(async (file: File, merge: boolean = false) => {
-    console.log('[GraphImport] Starting import:', file.name, file.size, 'bytes, merge:', merge, 'workspace:', workspaceId)
     if (!workspaceId) {
-      const msg = 'No workspaceId — cannot import'
-      console.error('[GraphImport]', msg)
-      setImportError(msg)
+      setImportError('No workspace selected')
       return
     }
     setImporting(true)
@@ -86,15 +85,46 @@ export function BusinessGraphPanel() {
       console.log('[GraphImport] Success:', result)
       queryClient.invalidateQueries({ queryKey: ['business-graph'] })
     } catch (err: any) {
-      const msg = err?.message || String(err) || 'Import failed (unknown error)'
+      const msg = err?.message || String(err) || 'Import failed'
       console.error('[GraphImport] Error:', msg, err)
       setImportError(msg)
-      // Temporary: make error impossible to miss
-      alert(`Graph import failed: ${msg}`)
     } finally {
       setImporting(false)
     }
   }, [workspaceId, queryClient])
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      handleImport(file)
+    }
+    // Reset so same file can be re-selected
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }, [handleImport])
+
+  const handleDrag = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true)
+    } else if (e.type === 'dragleave') {
+      setDragActive(false)
+    }
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragActive(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file && file.name.endsWith('.json')) {
+      handleImport(file)
+    } else if (file) {
+      setImportError('Only .json files are supported')
+    }
+  }, [handleImport])
 
   const handleBuild = useCallback(async () => {
     if (!workspaceId) return
@@ -109,20 +139,6 @@ export function BusinessGraphPanel() {
       setBuilding(false)
     }
   }, [workspaceId, queryClient])
-
-  const handleImportClick = useCallback(() => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = '.json'
-    input.onchange = () => {
-      const file = input.files?.[0]
-      if (file) {
-        alert('Selected: ' + file.name + ' (' + file.size + ' bytes)')
-        handleImport(file)
-      }
-    }
-    input.click()
-  }, [handleImport])
 
   // ── Data fetching ──
 
@@ -214,47 +230,80 @@ export function BusinessGraphPanel() {
     )
   }
 
-  // ── Empty state ──
+  // ── Empty state — drag-and-drop zone (matches document upload pattern) ──
 
   if (graphError || !graphData?.nodes?.length) {
     return (
-      <div className="text-center py-24">
-        <Network className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-        <h3 className="text-lg font-semibold mb-2">No business graph yet</h3>
-        <p className="text-sm text-muted-foreground mb-6">
-          Upload documents to auto-build, or import a graph.json from graphify.
-        </p>
-        <div className="flex items-center justify-center gap-3">
-          <Button
-            onClick={() => {
-              alert('BUTTON CLICKED')
-              handleImportClick()
-            }}
-            disabled={importing}
-            className="gradient-accent hover:opacity-90 text-white"
-          >
-            {importing ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Upload className="w-4 h-4 mr-2" />
-            )}
-            Import graph.json
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleBuild}
-            disabled={building}
-          >
-            {building ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4 mr-2" />
-            )}
-            Build from Documents
-          </Button>
+      <div className="space-y-6">
+        {/* Hidden file input — same pattern as document-management.tsx */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          onChange={handleFileChange}
+          className="hidden"
+        />
+
+        <div
+          className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
+            dragActive
+              ? 'border-primary bg-primary/5'
+              : 'border-border/50 hover:border-primary/50'
+          }`}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+        >
+          {importing ? (
+            <div className="space-y-4">
+              <Upload className="w-12 h-12 mx-auto text-primary animate-bounce" />
+              <h3 className="text-lg font-semibold">Importing graph...</h3>
+              <div className="w-full max-w-xs mx-auto bg-secondary rounded-full h-2">
+                <div className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-300 animate-pulse" />
+              </div>
+              <p className="text-sm text-muted-foreground">Processing nodes and edges...</p>
+            </div>
+          ) : (
+            <>
+              <Network className={`w-12 h-12 mx-auto mb-4 ${
+                dragActive ? 'text-primary' : 'text-muted-foreground opacity-50'
+              }`} />
+              <h3 className="text-lg font-semibold mb-2">
+                {dragActive ? 'Drop graph.json here' : 'No business graph yet'}
+              </h3>
+              <p className="text-muted-foreground mb-4">
+                {dragActive
+                  ? 'Release to import your knowledge graph'
+                  : 'Drag and drop a graph.json file, or choose one below'}
+              </p>
+              <div className="flex items-center justify-center gap-3">
+                <Button
+                  className="gradient-accent hover:opacity-90"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Import graph.json
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleBuild}
+                  disabled={building}
+                >
+                  {building ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                  )}
+                  Build from Documents
+                </Button>
+              </div>
+            </>
+          )}
         </div>
+
         {importError && (
-          <p className="text-sm text-red-400 mt-4">{importError}</p>
+          <p className="text-sm text-red-400 text-center">{importError}</p>
         )}
       </div>
     )
@@ -271,6 +320,15 @@ export function BusinessGraphPanel() {
 
   return (
     <div className="space-y-4">
+      {/* Hidden file input for stats bar import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
       {/* Stats Bar */}
       <div className="glass-card bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
         <span className="flex items-center gap-1.5">
@@ -292,10 +350,12 @@ export function BusinessGraphPanel() {
               Last built {lastBuilt}
             </span>
           )}
-          <button
-            onClick={handleImportClick}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() => fileInputRef.current?.click()}
             disabled={importing}
-            className="inline-flex items-center justify-center rounded-md text-sm font-medium h-7 px-2 hover:bg-accent hover:text-accent-foreground text-xs"
           >
             {importing ? (
               <Loader2 className="w-3 h-3 mr-1 animate-spin" />
@@ -303,7 +363,7 @@ export function BusinessGraphPanel() {
               <Upload className="w-3 h-3 mr-1" />
             )}
             Import
-          </button>
+          </Button>
           <Button
             size="sm"
             variant="ghost"
