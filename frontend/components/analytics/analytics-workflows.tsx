@@ -15,6 +15,8 @@ import {
   ChefHat,
   Star,
   Shield,
+  Rocket,
+  Coins,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -141,7 +143,7 @@ export function AnalyticsWorkflows({ days }: Props) {
     <div className="space-y-6">
       {/* ===== WORKFLOWS SECTION ===== */}
       <StatsBar stats={[
-        { label: 'Total Workflows', value: data?.summary?.totalWorkflows || 0, icon: GitBranch, iconColor: 'text-primary', globalIconKey: 'global_workflow' },
+        { label: 'Total Missions', value: data?.summary?.totalWorkflows || 0, icon: GitBranch, iconColor: 'text-primary', globalIconKey: 'global_workflow' },
         { label: 'Executions', value: data?.summary?.totalExecutions || 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_activity' },
         { label: 'Success Rate', value: `${(data?.summary?.successRate || 0).toFixed(0)}%`, icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]', globalIconKey: 'global_performance' },
         { label: 'Avg Duration', value: data?.summary?.avgDuration || '0s', icon: Clock, iconColor: 'text-[hsl(var(--agent))]' },
@@ -180,62 +182,119 @@ export function AnalyticsWorkflows({ days }: Props) {
         </Card>
       )}
 
-      {/* Workflow Table */}
+      {/* Missions & Workflows Table */}
       <Card className="glass-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full table-fixed">
             <thead>
               <tr className="border-b border-border/50">
-                <th className="text-left p-4"><SortHeader field="name">Name</SortHeader></th>
-                <th className="text-left p-4"><SortHeader field="totalRuns">Runs</SortHeader></th>
-                <th className="text-left p-4"><SortHeader field="successRate">Success Rate</SortHeader></th>
-                <th className="text-left p-4 hidden md:table-cell"><SortHeader field="avgDuration">Avg Duration</SortHeader></th>
-                <th className="text-left p-4 hidden lg:table-cell"><SortHeader field="cost">Cost</SortHeader></th>
-                <th className="text-left p-4 hidden lg:table-cell"><span className="text-xs font-medium text-muted-foreground">Last Run</span></th>
-                <th className="text-left p-4 hidden md:table-cell"><span className="text-xs font-medium text-muted-foreground">Status</span></th>
+                <th className="text-left p-4 w-[40%]"><SortHeader field="name">Name</SortHeader></th>
+                <th className="text-left p-4 w-[8%]"><SortHeader field="totalRuns">Runs</SortHeader></th>
+                <th className="text-left p-4 w-[10%]"><SortHeader field="successRate">Success</SortHeader></th>
+                <th className="text-left p-4 w-[10%] hidden md:table-cell"><SortHeader field="avgDuration">Duration</SortHeader></th>
+                <th className="text-left p-4 w-[8%] hidden lg:table-cell"><span className="text-xs font-medium text-muted-foreground">Tokens</span></th>
+                <th className="text-left p-4 w-[12%] hidden lg:table-cell"><span className="text-xs font-medium text-muted-foreground">Last Run</span></th>
+                <th className="text-left p-4 w-[12%] hidden md:table-cell"><span className="text-xs font-medium text-muted-foreground">Status</span></th>
               </tr>
             </thead>
             <tbody>
               {sortedWorkflows.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-12 text-center text-muted-foreground">
-                    <GitBranch className="w-10 h-10 mx-auto mb-3 opacity-50" />
-                    <p>No workflows found</p>
+                    <Rocket className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                    <p>No missions found</p>
                   </td>
                 </tr>
               ) : (
-                sortedWorkflows.map((wf) => (
-                  <tr
-                    key={wf.id}
-                    className="border-b border-border/30 hover:bg-secondary/20 cursor-pointer transition-colors"
-                    onClick={() => setExpandedWf(expandedWf === wf.id.toString() ? null : wf.id.toString())}
-                  >
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        {expandedWf === wf.id.toString() ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        <span className="font-medium">{wf.name}</span>
-                      </div>
-                    </td>
-                    <td className="p-4">{wf.totalRuns}</td>
-                    <td className="p-4">
-                      <span className={wf.successRate < 80 && wf.successRate > 0 ? 'text-[hsl(var(--destructive))]' : ''}>
-                        {wf.successRate > 0 ? `${wf.successRate.toFixed(0)}%` : '-'}
-                      </span>
-                    </td>
-                    <td className="p-4 hidden md:table-cell">{wf.avgDuration || '-'}</td>
-                    <td className="p-4 hidden lg:table-cell">{wf.cost > 0 ? `$${wf.cost.toFixed(2)}` : '-'}</td>
-                    <td className="p-4 hidden lg:table-cell text-sm text-muted-foreground">
-                      {wf.lastRun ? new Date(wf.lastRun).toLocaleDateString() : '-'}
-                    </td>
-                    <td className="p-4 hidden md:table-cell">
-                      <Badge variant="outline" className={
-                        wf.status === 'active' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' :
-                        wf.status === 'failed' ? 'text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/30' : ''
-                      }>
-                        {wf.status || 'idle'}
-                      </Badge>
-                    </td>
-                  </tr>
+                sortedWorkflows.map((wf: any) => (
+                  <Fragment key={wf.id}>
+                    <tr
+                      className="border-b border-border/30 hover:bg-secondary/20 cursor-pointer transition-colors"
+                      onClick={() => setExpandedWf(expandedWf === wf.id.toString() ? null : wf.id.toString())}
+                    >
+                      <td className="p-4">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="shrink-0">
+                            {expandedWf === wf.id.toString() ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </span>
+                          {wf.source === 'mission' ? (
+                            <Rocket className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                          ) : (
+                            <GitBranch className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          )}
+                          <span className="font-medium truncate" title={wf.name}>
+                            {wf.name}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-4">{wf.totalRuns}</td>
+                      <td className="p-4">
+                        <span className={wf.successRate < 80 && wf.successRate > 0 ? 'text-[hsl(var(--destructive))]' : ''}>
+                          {wf.successRate >= 0 ? `${wf.successRate.toFixed(0)}%` : '-'}
+                        </span>
+                      </td>
+                      <td className="p-4 hidden md:table-cell">{wf.avgDuration || '-'}</td>
+                      <td className="p-4 hidden lg:table-cell text-sm text-muted-foreground">
+                        {wf.tokensUsed > 0 ? wf.tokensUsed.toLocaleString() : '-'}
+                      </td>
+                      <td className="p-4 hidden lg:table-cell text-sm text-muted-foreground">
+                        {wf.lastRun ? new Date(wf.lastRun).toLocaleDateString() : '-'}
+                      </td>
+                      <td className="p-4 hidden md:table-cell">
+                        <Badge variant="outline" className={
+                          wf.status === 'active' || wf.status === 'completed' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' :
+                          wf.status === 'failed' ? 'text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/30' :
+                          wf.status === 'running' || wf.status === 'executing' ? 'text-[hsl(var(--info))] border-[hsl(var(--info))]/30' :
+                          wf.status === 'pending_approval' || wf.status === 'pending_review' || wf.status === 'awaiting_approval' || wf.status === 'awaiting_review' ? 'text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30' : ''
+                        }>
+                          {(wf.status || 'idle').replace(/_/g, ' ')}
+                        </Badge>
+                      </td>
+                    </tr>
+                    <AnimatePresence>
+                      {expandedWf === wf.id.toString() && (
+                        <tr>
+                          <td colSpan={7} className="p-0">
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="px-6 py-4 bg-secondary/10 border-b border-border/30 space-y-2">
+                                <p className="text-sm text-muted-foreground">{wf.name}</p>
+                                <div className="flex flex-wrap gap-4 text-xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <Badge variant="secondary" className="text-[10px]">
+                                      {wf.source === 'mission' ? 'Mission' : 'Workflow'}
+                                    </Badge>
+                                  </div>
+                                  {wf.avgDuration && wf.avgDuration !== '0s' && (
+                                    <div className="flex items-center gap-1 text-muted-foreground">
+                                      <Clock className="w-3 h-3" />
+                                      <span>{wf.avgDuration}</span>
+                                    </div>
+                                  )}
+                                  {wf.tokensUsed > 0 && (
+                                    <div className="flex items-center gap-1 text-muted-foreground">
+                                      <Coins className="w-3 h-3" />
+                                      <span>{wf.tokensUsed.toLocaleString()} tokens</span>
+                                    </div>
+                                  )}
+                                  {wf.cost > 0 && (
+                                    <div className="flex items-center gap-1 text-muted-foreground">
+                                      <span>${wf.cost.toFixed(4)}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </motion.div>
+                          </td>
+                        </tr>
+                      )}
+                    </AnimatePresence>
+                  </Fragment>
                 ))
               )}
             </tbody>

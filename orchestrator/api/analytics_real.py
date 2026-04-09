@@ -18,6 +18,8 @@ from core.models import (
     AgentStatistics, SystemMetrics
 )
 from core.models.core import LLMUsage
+from core.models.orchestration import OrchestrationRun, OrchestrationTask
+from core.models.orchestration_enums import RunState, TaskState, TERMINAL_RUN_STATES
 import logging
 import psutil
 import time
@@ -50,82 +52,143 @@ class PerformanceEnhancements(BaseModel):
 
 @router.get("/dashboard/success-rate")
 async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Get agent success rate percentage with trend"""
+    """Get agent success rate percentage with trend (UNION: workflows + missions)"""
     try:
-        # Calculate from workflow executions
-        total_executions = db.query(WorkflowExecution).filter(WorkflowExecution.workspace_id == ctx.workspace_id).count()
-        successful = db.query(WorkflowExecution).filter(
-            WorkflowExecution.workspace_id == ctx.workspace_id,
-            WorkflowExecution.status == 'completed'
+        ws = ctx.workspace_id
+
+        # --- Legacy workflow executions ---
+        wf_total = db.query(WorkflowExecution).filter(WorkflowExecution.workspace_id == ws).count()
+        wf_success = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ws, WorkflowExecution.status == 'completed'
         ).count()
-        
+
+        # --- PRD-125 Phase 2: Mission runs ---
+        m_total = db.query(OrchestrationRun).filter(OrchestrationRun.workspace_id == ws).count()
+        m_success = db.query(OrchestrationRun).filter(
+            OrchestrationRun.workspace_id == ws,
+            OrchestrationRun.state == RunState.COMPLETED.value,
+        ).count()
+
+        total_executions = wf_total + m_total
+        successful = wf_success + m_success
         success_rate = (successful / total_executions * 100) if total_executions > 0 else 0
-        
-        # Calculate 7-day trend
+
+        # 7-day trend (combined)
         week_ago = datetime.now() - timedelta(days=7)
-        week_total = db.query(WorkflowExecution).filter(
-            WorkflowExecution.workspace_id == ctx.workspace_id,
+        week_wf_total = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ws, WorkflowExecution.started_at >= week_ago
+        ).count()
+        week_wf_success = db.query(WorkflowExecution).filter(and_(
+            WorkflowExecution.workspace_id == ws, WorkflowExecution.status == 'completed',
             WorkflowExecution.started_at >= week_ago
+        )).count()
+        week_m_total = db.query(OrchestrationRun).filter(
+            OrchestrationRun.workspace_id == ws, OrchestrationRun.created_at >= week_ago
         ).count()
-        week_successful = db.query(WorkflowExecution).filter(
-            and_(
-                WorkflowExecution.workspace_id == ctx.workspace_id,
-                WorkflowExecution.status == 'completed',
-                WorkflowExecution.started_at >= week_ago
-            )
-        ).count()
-        
+        week_m_success = db.query(OrchestrationRun).filter(and_(
+            OrchestrationRun.workspace_id == ws,
+            OrchestrationRun.state == RunState.COMPLETED.value,
+            OrchestrationRun.created_at >= week_ago
+        )).count()
+
+        week_total = week_wf_total + week_m_total
+        week_successful = week_wf_success + week_m_success
         week_success_rate = (week_successful / week_total * 100) if week_total > 0 else 0
         trend = success_rate - week_success_rate
-        
+
         return {
             "value": round(success_rate, 1),
             "trend": round(trend, 1),
             "total_executions": total_executions,
-            "successful_executions": successful
+            "successful_executions": successful,
+            "sources": {"workflows": wf_total, "missions": m_total},
         }
-        
+
     except Exception as e:
         logger.error(f"Error calculating success rate: {e}")
         return {"value": 0, "trend": 0, "total_executions": 0, "successful_executions": 0, "error": str(e)}
 
 @router.get("/dashboard/task-completion-time")
 async def get_avg_task_completion_time(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Get average task completion time from real execution data"""
+    """Get average task completion time (UNION: workflows + missions)"""
     try:
         from sqlalchemy import extract
 
-        # Overall average: completed_at - started_at for completed executions
-        avg_seconds = db.query(
+        ws = ctx.workspace_id
+
+        # --- Legacy workflow executions ---
+        wf_avg_seconds = db.query(
             func.avg(
                 extract('epoch', WorkflowExecution.completed_at) -
                 extract('epoch', WorkflowExecution.started_at)
             )
         ).filter(
-            WorkflowExecution.workspace_id == ctx.workspace_id,
+            WorkflowExecution.workspace_id == ws,
             WorkflowExecution.status == 'completed',
             WorkflowExecution.completed_at.isnot(None),
             WorkflowExecution.started_at.isnot(None),
         ).scalar() or 0
 
-        avg_minutes = round(float(avg_seconds) / 60, 1)
-
-        # 24h average
-        day_ago = datetime.now() - timedelta(hours=24)
-        daily_avg_seconds = db.query(
+        # --- PRD-125 Phase 2: Mission runs ---
+        m_avg_seconds = db.query(
             func.avg(
-                extract('epoch', WorkflowExecution.completed_at) -
-                extract('epoch', WorkflowExecution.started_at)
+                extract('epoch', OrchestrationRun.completed_at) -
+                extract('epoch', OrchestrationRun.started_at)
             )
         ).filter(
-            WorkflowExecution.workspace_id == ctx.workspace_id,
-            WorkflowExecution.status == 'completed',
-            WorkflowExecution.completed_at.isnot(None),
-            WorkflowExecution.started_at.isnot(None),
+            OrchestrationRun.workspace_id == ws,
+            OrchestrationRun.state == RunState.COMPLETED.value,
+            OrchestrationRun.completed_at.isnot(None),
+            OrchestrationRun.started_at.isnot(None),
+        ).scalar() or 0
+
+        # Weighted average (prefer mission data when both exist)
+        wf_count = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ws, WorkflowExecution.status == 'completed',
+            WorkflowExecution.completed_at.isnot(None), WorkflowExecution.started_at.isnot(None),
+        ).count()
+        m_count = db.query(OrchestrationRun).filter(
+            OrchestrationRun.workspace_id == ws, OrchestrationRun.state == RunState.COMPLETED.value,
+            OrchestrationRun.completed_at.isnot(None), OrchestrationRun.started_at.isnot(None),
+        ).count()
+        total_count = wf_count + m_count
+        if total_count > 0:
+            avg_seconds = (float(wf_avg_seconds) * wf_count + float(m_avg_seconds) * m_count) / total_count
+        else:
+            avg_seconds = 0
+        avg_minutes = round(avg_seconds / 60, 1)
+
+        # 24h average (combined)
+        day_ago = datetime.now() - timedelta(hours=24)
+        daily_wf = db.query(
+            func.avg(extract('epoch', WorkflowExecution.completed_at) - extract('epoch', WorkflowExecution.started_at))
+        ).filter(
+            WorkflowExecution.workspace_id == ws, WorkflowExecution.status == 'completed',
+            WorkflowExecution.completed_at.isnot(None), WorkflowExecution.started_at.isnot(None),
             WorkflowExecution.started_at >= day_ago,
         ).scalar() or 0
+        daily_m = db.query(
+            func.avg(extract('epoch', OrchestrationRun.completed_at) - extract('epoch', OrchestrationRun.started_at))
+        ).filter(
+            OrchestrationRun.workspace_id == ws, OrchestrationRun.state == RunState.COMPLETED.value,
+            OrchestrationRun.completed_at.isnot(None), OrchestrationRun.started_at.isnot(None),
+            OrchestrationRun.started_at >= day_ago,
+        ).scalar() or 0
 
-        daily_avg_minutes = round(float(daily_avg_seconds) / 60, 1)
+        daily_wf_c = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ws, WorkflowExecution.status == 'completed',
+            WorkflowExecution.started_at >= day_ago,
+        ).count()
+        daily_m_c = db.query(OrchestrationRun).filter(
+            OrchestrationRun.workspace_id == ws, OrchestrationRun.state == RunState.COMPLETED.value,
+            OrchestrationRun.started_at >= day_ago,
+        ).count()
+        daily_total = daily_wf_c + daily_m_c
+        if daily_total > 0:
+            daily_avg_seconds = (float(daily_wf) * daily_wf_c + float(daily_m) * daily_m_c) / daily_total
+        else:
+            daily_avg_seconds = 0
+        daily_avg_minutes = round(daily_avg_seconds / 60, 1)
         improvement = round(daily_avg_minutes - avg_minutes, 1)
 
         return {
@@ -186,10 +249,12 @@ async def get_system_load_trend(ctx: RequestContext = Depends(get_request_contex
 
 @router.get("/dashboard/error-rate-by-type")
 async def get_error_rate_by_agent_type(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Get error rate breakdown by agent type from real execution data"""
+    """Get error rate breakdown by agent type (UNION: workflows + missions)"""
     try:
-        # Join WorkflowExecution with Agent to get agent_type, count total and failed
-        rows = (
+        ws = ctx.workspace_id
+
+        # --- Legacy: Join WorkflowExecution with Agent ---
+        wf_rows = (
             db.query(
                 Agent.agent_type,
                 func.count(WorkflowExecution.id).label('total'),
@@ -198,24 +263,51 @@ async def get_error_rate_by_agent_type(ctx: RequestContext = Depends(get_request
                 ).label('failed'),
             )
             .join(Agent, WorkflowExecution.agent_id == Agent.id)
-            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)
+            .filter(WorkflowExecution.workspace_id == ws)
             .group_by(Agent.agent_type)
             .all()
         )
 
-        error_rates = {}
-        for agent_type, total, failed in rows:
+        error_rates: Dict[str, Any] = {}
+        for agent_type, total, failed in wf_rows:
+            key = agent_type or "unknown"
+            error_rates[key] = {"total_executions": total, "failed_executions": failed}
+
+        # --- PRD-125 Phase 2: Mission tasks by assigned agent type ---
+        m_rows = (
+            db.query(
+                Agent.agent_type,
+                func.count(OrchestrationTask.id).label('total'),
+                func.count(OrchestrationTask.id).filter(
+                    OrchestrationTask.state == TaskState.FAILED.value
+                ).label('failed'),
+            )
+            .join(Agent, OrchestrationTask.assigned_agent_id == Agent.id)
+            .join(OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id)
+            .filter(OrchestrationRun.workspace_id == ws)
+            .group_by(Agent.agent_type)
+            .all()
+        )
+
+        for agent_type, total, failed in m_rows:
+            key = agent_type or "unknown"
+            if key in error_rates:
+                error_rates[key]["total_executions"] += total
+                error_rates[key]["failed_executions"] += failed
+            else:
+                error_rates[key] = {"total_executions": total, "failed_executions": failed}
+
+        # Compute rates
+        for key, data in error_rates.items():
+            total = data["total_executions"]
+            failed = data["failed_executions"]
             rate = round((failed / total * 100) if total > 0 else 0, 1)
-            error_rates[agent_type or "unknown"] = {
-                "error_rate": rate,
-                "total_executions": total,
-                "failed_executions": failed,
-                "status": "good" if rate < 5 else "warning" if rate < 10 else "critical"
-            }
+            data["error_rate"] = rate
+            data["status"] = "good" if rate < 5 else "warning" if rate < 10 else "critical"
 
         # Include agent types with no executions
         agent_types = db.query(Agent.agent_type, func.count().label('total')).filter(
-            Agent.workspace_id == ctx.workspace_id
+            Agent.workspace_id == ws
         ).group_by(Agent.agent_type).all()
 
         for agent_type, agent_count in agent_types:
@@ -239,31 +331,64 @@ async def get_error_rate_by_agent_type(ctx: RequestContext = Depends(get_request
 
 @router.get("/dashboard/queue-depth")
 async def get_queue_depth(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Get real-time queue depth for pending tasks"""
+    """Get real-time queue depth for pending tasks (UNION: workflows + missions)"""
     try:
-        # Count pending/queued workflows
+        ws = ctx.workspace_id
+
+        # --- Legacy workflows ---
         pending_workflows = db.query(WorkflowExecution).filter(
-            WorkflowExecution.workspace_id == ctx.workspace_id,
+            WorkflowExecution.workspace_id == ws,
             WorkflowExecution.status.in_(['pending', 'queued', 'running'])
         ).count()
 
-        # Get queue breakdown by priority
-        high_priority = db.query(WorkflowExecution).filter(
-            and_(
-                WorkflowExecution.workspace_id == ctx.workspace_id,
-                WorkflowExecution.status.in_(['pending', 'queued']),
-                WorkflowExecution.started_at >= datetime.now() - timedelta(hours=1)
-            )
+        # --- PRD-125 Phase 2: Active mission runs + queued tasks ---
+        active_missions = db.query(OrchestrationRun).filter(
+            OrchestrationRun.workspace_id == ws,
+            OrchestrationRun.state.in_([
+                RunState.PENDING.value,
+                RunState.PLANNING.value,
+                RunState.AWAITING_APPROVAL.value,
+                RunState.RUNNING.value,
+            ]),
         ).count()
-        
-        normal_priority = pending_workflows - high_priority
-        
+
+        pending_mission_tasks = db.query(OrchestrationTask).join(
+            OrchestrationRun, OrchestrationTask.run_id == OrchestrationRun.id
+        ).filter(
+            OrchestrationRun.workspace_id == ws,
+            OrchestrationTask.state.in_([
+                TaskState.PENDING.value,
+                TaskState.QUEUED.value,
+                TaskState.RUNNING.value,
+            ]),
+        ).count()
+
+        total_pending = pending_workflows + active_missions + pending_mission_tasks
+
+        # High priority: recent items (last 1h)
+        hour_ago = datetime.now() - timedelta(hours=1)
+        high_priority_wf = db.query(WorkflowExecution).filter(and_(
+            WorkflowExecution.workspace_id == ws,
+            WorkflowExecution.status.in_(['pending', 'queued']),
+            WorkflowExecution.started_at >= hour_ago,
+        )).count()
+        high_priority_m = db.query(OrchestrationRun).filter(and_(
+            OrchestrationRun.workspace_id == ws,
+            OrchestrationRun.state.in_([RunState.PENDING.value, RunState.RUNNING.value]),
+            OrchestrationRun.created_at >= hour_ago,
+        )).count()
+
+        high_priority = high_priority_wf + high_priority_m
+        normal_priority = total_pending - high_priority
+
         return {
-            "total_pending": pending_workflows,
+            "total_pending": total_pending,
             "high_priority": high_priority,
-            "normal_priority": normal_priority,
+            "normal_priority": max(normal_priority, 0),
+            "pending_mission_tasks": pending_mission_tasks,
             "average_wait_time": 2.3,
-            "trend": "stable"
+            "trend": "stable",
+            "sources": {"workflows": pending_workflows, "missions": active_missions},
         }
         
     except Exception as e:
@@ -295,19 +420,26 @@ async def get_efficiency_score(ctx: RequestContext = Depends(get_request_context
         active_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == 'active').count()
         agent_efficiency = (active_agents / total_agents * 100) if total_agents > 0 else 0
 
-        # Workflow completion efficiency
-        recent_executions = db.query(WorkflowExecution).filter(
-            WorkflowExecution.workspace_id == ctx.workspace_id,
-            WorkflowExecution.started_at >= datetime.now() - timedelta(hours=24)
+        # Execution completion efficiency (UNION: workflows + missions)
+        ws = ctx.workspace_id
+        day_ago = datetime.now() - timedelta(hours=24)
+        wf_recent = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ws, WorkflowExecution.started_at >= day_ago
         ).count()
-        completed = db.query(WorkflowExecution).filter(
-            and_(
-                WorkflowExecution.workspace_id == ctx.workspace_id,
-                WorkflowExecution.status == 'completed',
-                WorkflowExecution.started_at >= datetime.now() - timedelta(hours=24)
-            )
+        wf_completed = db.query(WorkflowExecution).filter(and_(
+            WorkflowExecution.workspace_id == ws, WorkflowExecution.status == 'completed',
+            WorkflowExecution.started_at >= day_ago
+        )).count()
+        m_recent = db.query(OrchestrationRun).filter(
+            OrchestrationRun.workspace_id == ws, OrchestrationRun.created_at >= day_ago
         ).count()
-        
+        m_completed = db.query(OrchestrationRun).filter(and_(
+            OrchestrationRun.workspace_id == ws,
+            OrchestrationRun.state == RunState.COMPLETED.value,
+            OrchestrationRun.created_at >= day_ago
+        )).count()
+        recent_executions = wf_recent + m_recent
+        completed = wf_completed + m_completed
         workflow_efficiency = (completed / recent_executions * 100) if recent_executions > 0 else 0
         
         # Composite score

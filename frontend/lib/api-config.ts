@@ -44,9 +44,7 @@ export const API_ENDPOINTS = {
   // Analytics
   PERFORMANCE_ANALYTICS: '/api/analytics/performance',
   USAGE_ANALYTICS: '/api/analytics/usage',
-  AGENT_ANALYTICS: '/api/analytics/agents',
   DOCUMENT_ANALYTICS_TIME: '/api/analytics/documents',
-  WORKFLOW_ANALYTICS: '/api/analytics/workflows',
   ERROR_ANALYTICS: '/api/analytics/errors',
   
   // Settings

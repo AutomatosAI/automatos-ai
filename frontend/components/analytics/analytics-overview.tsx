@@ -70,7 +70,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       bgColor: 'from-orange-500/20 to-orange-500/5',
     },
     {
-      label: 'Workflows',
+      label: 'Missions',
       value: overview?.workflows.total || 0,
       sub: `${overview?.workflows.successRate?.toFixed(0) || 0}% success rate`,
       icon: GitBranch,

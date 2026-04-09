@@ -554,7 +554,7 @@ async def get_mission_stats(
             )
             .scalar()
         )
-        avg_duration_minutes = round(avg_duration_row / 60.0, 2) if avg_duration_row else None
+        avg_duration_minutes = round(float(avg_duration_row) / 60.0, 2) if avg_duration_row else None
 
         # Average tokens used
         avg_tokens = (

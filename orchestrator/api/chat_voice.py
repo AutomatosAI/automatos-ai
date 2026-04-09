@@ -87,7 +87,7 @@ async def _collect_streaming_response(
             from api.chat import get_default_agent_id
             effective_agent_id = get_default_agent_id(db, workspace_id)
             use_system_llm = True
-        elif complexity_assessment.action in (Action.DELEGATE, Action.WORKFLOW):
+        elif complexity_assessment.action in (Action.DELEGATE, Action.MISSION):
             from core.routing.cache import get_routing_cache
             from core.routing.engine import UniversalRouter
             from core.routing.ingestors.chatbot import ChatbotIngestor

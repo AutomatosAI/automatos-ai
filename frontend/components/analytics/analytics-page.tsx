@@ -51,7 +51,7 @@ export function AnalyticsPage() {
   const tabDefs = [
     { value: 'overview', label: 'Overview', icon: BarChart3 },
     { value: 'agents', label: 'Agents', icon: Bot },
-    { value: 'workflows', label: 'Workflows', icon: GitBranch },
+    { value: 'workflows', label: 'Missions', icon: GitBranch },
     { value: 'documents', label: 'Documents', icon: FileText },
     { value: 'costs', label: 'LLM & Costs', icon: DollarSign },
     { value: 'tools', label: 'Tools & Integrations', icon: Wrench },

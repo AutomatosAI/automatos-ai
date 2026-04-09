@@ -11,9 +11,9 @@ def register_agents_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_agents",
         description=(
-            "List all agents in the current workspace. Returns agent names, types, "
-            "status, and brief descriptions. Use when the user asks about their agents, "
-            "what agents exist, or wants an overview of available agents."
+            "List all agents in the current workspace with names, types, status, and descriptions. "
+            "Use when asked about available agents or for an overview. "
+            "For details about ONE specific agent, use platform_get_agent instead."
         ),
         category="agents",
         parameters={
@@ -40,9 +40,9 @@ def register_agents_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_agent",
         description=(
-            "Get detailed information about a specific agent by name or ID. "
-            "Returns configuration, assigned tools, model settings, and recent activity. "
-            "Use when the user asks about a specific agent's details or configuration."
+            "Get detailed config for ONE specific agent by name or ID — model, tools, prompt, activity. "
+            "Use when asked about a specific agent's setup. "
+            "For listing ALL agents, use platform_list_agents instead."
         ),
         category="agents",
         parameters={

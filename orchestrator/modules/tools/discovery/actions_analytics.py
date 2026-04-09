@@ -9,9 +9,9 @@ def register_analytics_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_llm_usage",
         description=(
-            "Get LLM usage statistics for the workspace over a time period. "
-            "Returns total requests, tokens consumed, and model breakdown. "
-            "Use when the user asks about token usage, API calls, or LLM activity."
+            "Get LLM token usage statistics over a time period — total requests, "
+            "tokens consumed, model breakdown. For cost estimates, use "
+            "platform_get_cost_breakdown instead."
         ),
         category="analytics",
         parameters={
@@ -36,9 +36,9 @@ def register_analytics_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_cost_breakdown",
         description=(
-            "Get cost breakdown by model and agent for the workspace. "
-            "Shows estimated costs based on token usage and model pricing. "
-            "Use when the user asks about costs, spending, or budget."
+            "Get cost breakdown by model, agent, or day. For raw token counts, "
+            "use platform_get_llm_usage instead. For a quick composite score, "
+            "use platform_get_efficiency_score."
         ),
         category="analytics",
         parameters={
@@ -68,9 +68,9 @@ def register_analytics_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_workspace_stats",
         description=(
-            "Get workspace usage statistics — LLM usage, top models, top agents, "
-            "routing distribution, and resource counts. Use when the user asks for "
-            "a dashboard view, usage summary, or platform health check."
+            "Get a dashboard overview — LLM usage, top models, top agents, "
+            "routing distribution, resource counts. Use for a quick summary. "
+            "For deep-dive into specific metrics, use the specialized analytics tools."
         ),
         category="analytics",
         parameters={

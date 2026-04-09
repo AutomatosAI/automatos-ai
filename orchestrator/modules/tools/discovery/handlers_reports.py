@@ -61,7 +61,7 @@ async def submit_report(db: Session, workspace_id: UUID, params: Dict[str, Any])
         agent_name = agent.name
 
     svc = ReportService(db, workspace_id)
-    return await svc.create_report(
+    result = await svc.create_report(
         agent_id=agent_id,
         agent_name=agent_name,
         title=title,
@@ -73,6 +73,18 @@ async def submit_report(db: Session, workspace_id: UUID, params: Dict[str, Any])
         attachments=params.get("attachments"),
         heartbeat_result_id=params.get("_heartbeat_result_id"),
     )
+
+    # PRD-126: Trigger knowledge graph update on report submission
+    try:
+        from modules.knowledge.graph_service import get_graph_service
+        get_graph_service().schedule_incremental_update(
+            int(workspace_id),
+            [{"type": "report", "path": title, "id": result.get("report_id")}],
+        )
+    except Exception:
+        logger.debug("Graph update skipped — service not available")
+
+    return result
 
 
 async def get_latest_report(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

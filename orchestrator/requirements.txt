@@ -111,3 +111,6 @@ docxtpl>=0.18.0
 xlsxwriter>=3.2.0
 gotenberg-client>=0.8.0
 prometheus-client>=0.20.0
+
+# PRD-126: Business Knowledge Graph (Graphify Integration)
+graphifyy[leiden]>=0.1.0

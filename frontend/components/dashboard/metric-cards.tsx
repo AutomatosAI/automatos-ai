@@ -140,7 +140,7 @@ export function MetricCards() {
       gradient: 'from-blue-500 to-purple-500',
     },
     {
-      title: 'Active Workflows',
+      title: 'Active Missions',
       value: runningWorkflows,
       change: totalWorkflows > 0 ? `${totalWorkflows} total` : '0 total',
       changeType: runningWorkflows > 0 ? 'positive' : 'neutral' as const,

@@ -299,6 +299,10 @@ export function useChat({
                 } else if (data.type === 'workflow-update' && data.data) {
                   if (onData) onData({ type: 'workflow-update', data: data.data })
                 }
+                // PRD-125 Phase 1: Forward mission-suggestion to onData for chat card
+                else if (data.type === 'mission-suggestion' && data.data) {
+                  if (onData) onData({ type: 'mission-suggestion', data: data.data })
+                }
               } catch (e) {
                 // Skip parse errors
               }
@@ -341,6 +345,8 @@ export function useChat({
                     totalTokens: payload.data.totalTokens || 0,
                   })
                   if (onData) onData({ type: 'data-usage', data: payload.data })
+                } else if (payload.type === 'mission-suggestion' && payload.data) {
+                  if (onData) onData({ type: 'mission-suggestion', data: payload.data })
                 } else if (payload.type === 'error') {
                   setStatus('error')
                 } else if (payload.type === 'done') {

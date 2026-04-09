@@ -139,7 +139,7 @@ export function ActivityChart() {
               stroke="#3b82f6" 
               strokeWidth={2}
               dot={{ fill: '#3b82f6', strokeWidth: 2, r: 3 }}
-              name="Running Workflows"
+              name="Active Missions"
             />
             <Line 
               type="monotone" 
@@ -160,7 +160,7 @@ export function ActivityChart() {
         </div>
         <div className="flex items-center space-x-2">
           <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-          <span className="text-muted-foreground">Running Workflows</span>
+          <span className="text-muted-foreground">Active Missions</span>
         </div>
         <div className="flex items-center space-x-2">
           <div className="w-3 h-3 bg-green-500 rounded-full"></div>

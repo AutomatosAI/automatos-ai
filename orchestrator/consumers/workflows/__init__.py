@@ -2,16 +2,12 @@
 Workflows Consumer
 ==================
 
-Business logic for workflow execution - consumes modules.orchestrator.
+Business logic for workflow streaming.
 
-Components:
-- analytics.py     - Workflow analytics
-- streaming.py     - SSE streaming for workflow progress
-- usage_tracker.py - LLM usage/cost tracking (PRD-15)
+PRD-125 Phase 3: Removed WorkflowAnalyticsService and ModelUsageTracker (dead code).
+Streaming is still used by chat.py and execution_manager.py.
 """
 
-from consumers.workflows.analytics import WorkflowAnalyticsService
-from consumers.workflows.usage_tracker import ModelUsageTracker
 from consumers.workflows.streaming import (
     stream_workflow_execution,
     stream_workflow_as_aisdk,
@@ -20,11 +16,8 @@ from consumers.workflows.streaming import (
 )
 
 __all__ = [
-    'WorkflowAnalyticsService',
-    'ModelUsageTracker',
     'stream_workflow_execution',
     'stream_workflow_as_aisdk',
     'get_stream_manager',
     'WorkflowStreamManager',
 ]
-

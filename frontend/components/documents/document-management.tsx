@@ -24,6 +24,7 @@ import {
   Layout,
   ExternalLink,
   Brain,
+  Network,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,6 +40,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
+import { BusinessGraphPanel } from '@/components/knowledge/BusinessGraphPanel'
+import { GraphDiffBanner } from '@/components/knowledge/GraphDiffBanner'
 import { MultimodalKnowledgePanel } from '@/components/knowledge/MultimodalKnowledgePanel'
 import { DatabaseQueryExplorer } from '@/components/knowledge/DatabaseQueryExplorer'
 import { QueryTemplatesGrid } from '@/components/knowledge/QueryTemplatesGrid'
@@ -635,6 +638,10 @@ export function DocumentManagement() {
               <Database className="w-4 h-4" />
               <span>CodeGraph</span>
             </TabsTrigger>
+            <TabsTrigger value="businessgraph" className="flex items-center space-x-2">
+              <Network className="w-4 h-4" />
+              <span>Business Graph</span>
+            </TabsTrigger>
             {/* Analytics tab removed — see /analytics */}
           </TabsList>
 
@@ -1086,6 +1093,11 @@ export function DocumentManagement() {
 
           <TabsContent value="codegraph" className="space-y-6">
             <CodeGraphPanel />
+          </TabsContent>
+
+          <TabsContent value="businessgraph" className="space-y-6">
+            <GraphDiffBanner />
+            <BusinessGraphPanel />
           </TabsContent>
         </Tabs>
       </motion.div>

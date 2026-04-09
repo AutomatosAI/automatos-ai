@@ -11,10 +11,11 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_query_loki_logs",
         description=(
-            "Search application logs stored in Loki (the centralized log system). "
-            "Query by service, severity level, keyword, or time range. Returns structured "
-            "log entries with timestamps. Much more powerful than Railway deploy logs — "
-            "this searches ALL log history (7-day retention) across all services."
+            "Search centralized application logs across ALL services (7-day retention). "
+            "Much more powerful than Railway deploy logs. Use for investigating errors, "
+            "tracing requests, and debugging production issues. "
+            "Filter by service, severity, keyword, or time range. "
+            "For log content from a single Railway deploy, use platform_get_logs instead."
         ),
         category="monitoring",
         parameters={
@@ -66,9 +67,11 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_query_prometheus",
         description=(
-            "Query Prometheus metrics for real-time system health. Supports PromQL queries "
-            "or preset health checks. Use to check service uptime, error rates, response "
-            "times, database connections, Redis memory, and more."
+            "Query real-time system metrics via PromQL. "
+            "Use for checking uptime, error rates, response times, database connections, "
+            "Redis memory. Supports raw PromQL or preset names ('health', 'error_rate', "
+            "'latency', 'postgres', 'redis', 'all'). "
+            "For log content, use platform_query_loki_logs instead."
         ),
         category="monitoring",
         parameters={
@@ -108,9 +111,10 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_alerts",
         description=(
-            "Get infrastructure alerts from the monitoring system. Shows firing, "
-            "resolved, and recent alerts with severity, service, and details. "
-            "Use to understand current system health issues."
+            "Get infrastructure alerts — firing, resolved, and recent. "
+            "Use to understand current system health issues. "
+            "For deeper investigation, follow up with platform_query_loki_logs "
+            "or platform_query_prometheus. Filter by status, severity, or time range."
         ),
         category="monitoring",
         parameters={
@@ -147,10 +151,11 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_logs",
         description=(
-            "Fetch deployment logs from a Railway service. Returns recent log lines "
-            "with timestamps and severity levels. Use to investigate errors, capture "
-            "server-side context for bug reports, or monitor service health. "
-            "Supports filtering by keyword (e.g. 'error', 'timeout', 'Exception')."
+            "Fetch Railway deployment logs for a specific service. "
+            "For searching across ALL services, use platform_query_loki_logs instead "
+            "(more powerful, 7-day retention). "
+            "Use platform_list_services first to discover available service names. "
+            "Supports keyword filtering (e.g. 'error', 'timeout', 'Exception')."
         ),
         category="infrastructure",
         parameters={
@@ -192,8 +197,8 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_services",
         description=(
-            "List all Railway services in the project. Returns service names and IDs. "
-            "Use to discover available services before fetching logs."
+            "List all Railway services in the project with names and IDs. "
+            "Use before platform_get_logs to discover available service names."
         ),
         category="infrastructure",
         parameters={

@@ -1209,9 +1209,20 @@ class DocumentManager:
             conn.commit()
             cursor.close()
             conn.close()
-            
+
             logger.info(f"Document {document_id} processed successfully with {len(chunks)} chunks")
-            
+
+            # PRD-126: Trigger knowledge graph update on document ingest
+            try:
+                from modules.knowledge.graph_service import get_graph_service
+                if self.workspace_id:
+                    get_graph_service().schedule_incremental_update(
+                        int(self.workspace_id),
+                        [{"type": "document", "path": file_path, "id": document_id}],
+                    )
+            except Exception:
+                logger.debug("Graph update skipped — service not available")
+
         except Exception as e:
             logger.error(f"Error processing document {document_id}: {e}")
             
