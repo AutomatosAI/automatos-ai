@@ -852,6 +852,11 @@ class ApiClient {
       ...(options.headers as Record<string, string>),
     }
 
+    // FormData needs browser-set Content-Type with multipart boundary
+    if (body instanceof FormData) {
+      delete headers['Content-Type']
+    }
+
     // Inject Workspace ID: admin override takes priority over localStorage
     if (typeof window !== 'undefined') {
       const workspaceId = _adminWorkspaceOverride
