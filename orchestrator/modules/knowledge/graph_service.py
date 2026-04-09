@@ -133,10 +133,18 @@ class GraphifyService:
     """
 
     def __init__(self) -> None:
-        self._cache: LRUCache[int, nx.Graph] = LRUCache(maxsize=_CACHE_MAX_SIZE)
-        self._debounce_handles: Dict[int, asyncio.TimerHandle] = {}
+        self._cache: LRUCache[str, nx.Graph] = LRUCache(maxsize=_CACHE_MAX_SIZE)
+        self._debounce_handles: Dict[str, asyncio.TimerHandle] = {}
         # Accumulate changed source IDs across debounce window
         self._pending_sources: Dict[str, List[Dict[str, Any]]] = {}
+        # Per-workspace build lock — prevents concurrent builds clobbering each other
+        self._build_locks: Dict[str, asyncio.Lock] = {}
+
+    def _lock_for(self, workspace_id: str) -> asyncio.Lock:
+        """Return (or create) the per-workspace build lock."""
+        if workspace_id not in self._build_locks:
+            self._build_locks[workspace_id] = asyncio.Lock()
+        return self._build_locks[workspace_id]
 
     # ------------------------------------------------------------------
     # Public API
@@ -147,6 +155,11 @@ class GraphifyService:
 
         Returns a meta dict on success, or raises on failure.
         """
+        async with self._lock_for(workspace_id):
+            return await self._build_graph_unlocked(workspace_id)
+
+    async def _build_graph_unlocked(self, workspace_id: str) -> Dict[str, Any]:
+        """Full graph build (caller must hold the workspace lock)."""
         logger.info("build_graph: starting for workspace %s", workspace_id)
         ws = WorkspaceClient(str(workspace_id))
 
@@ -274,6 +287,15 @@ class GraphifyService:
         Returns:
             Meta dict with node_count, edge_count, community_count.
         """
+        async with self._lock_for(workspace_id):
+            return await self._import_graph_unlocked(
+                workspace_id, graph_data, merge=merge
+            )
+
+    async def _import_graph_unlocked(
+        self, workspace_id: str, graph_data: Dict[str, Any], *, merge: bool = False
+    ) -> Dict[str, Any]:
+        """Import graph (caller must hold the workspace lock)."""
         logger.info(
             "import_graph: importing for workspace %s (merge=%s, nodes=%d)",
             workspace_id, merge, len(graph_data.get("nodes", [])),
@@ -891,9 +913,9 @@ class GraphifyService:
     async def _debounced_rebuild(self, workspace_id: str) -> None:
         """Execute the deferred rebuild after debounce window expires.
 
-        If a graph already exists for this workspace, runs an incremental
-        build that only extracts the changed documents.  Falls back to a
-        full rebuild when no prior graph is found.
+        Acquires the per-workspace build lock so concurrent rebuilds cannot
+        clobber each other.  If a graph already exists, runs incremental;
+        otherwise falls back to a full rebuild.
         """
         self._debounce_handles.pop(workspace_id, None)
         pending = self._pending_sources.pop(workspace_id, [])
@@ -903,14 +925,16 @@ class GraphifyService:
             len(pending),
         )
         try:
-            existing_graph = await self.load_graph(workspace_id)
-            if existing_graph is not None and pending:
-                # Incremental: only extract changed docs, merge into existing
-                await self._incremental_build(workspace_id, existing_graph, pending)
-            else:
-                # Full rebuild: first time or no pending info
+            async with self._lock_for(workspace_id):
+                # Invalidate cache and reload from file so we read the
+                # latest version written by a previous build.
                 self.invalidate_cache(workspace_id)
-                await self.build_graph(workspace_id)
+                existing_graph = await self.load_graph(workspace_id)
+                if existing_graph is not None and pending:
+                    await self._incremental_build(workspace_id, existing_graph, pending)
+                else:
+                    self.invalidate_cache(workspace_id)
+                    await self._build_graph_unlocked(workspace_id)
         except Exception:
             logger.exception(
                 "_debounced_rebuild: failed for workspace %s", workspace_id
@@ -1020,15 +1044,17 @@ class GraphifyService:
     async def _write_json(
         ws: WorkspaceClient, path: str, data: Any
     ) -> None:
-        """Serialize data to JSON and write to workspace."""
+        """Serialize data to JSON and write to workspace.
+
+        Raises RuntimeError if the workspace worker rejects the write so
+        callers know the export failed instead of silently losing data.
+        """
         content = json.dumps(data, default=str, indent=2)
         result = await ws.write_file(path, content)
         if not result.get("success"):
-            logger.error(
-                "_write_json: failed to write %s: %s",
-                path,
-                result.get("error", "unknown"),
-            )
+            error_msg = result.get("error", "unknown")
+            logger.error("_write_json: failed to write %s: %s", path, error_msg)
+            raise RuntimeError(f"Failed to write {path}: {error_msg}")
 
 
 # ---------------------------------------------------------------------------
