@@ -135,6 +135,8 @@ class GraphifyService:
     def __init__(self) -> None:
         self._cache: LRUCache[int, nx.Graph] = LRUCache(maxsize=_CACHE_MAX_SIZE)
         self._debounce_handles: Dict[int, asyncio.TimerHandle] = {}
+        # Accumulate changed source IDs across debounce window
+        self._pending_sources: Dict[str, List[Dict[str, Any]]] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -262,8 +264,15 @@ class GraphifyService:
         """Schedule a debounced rebuild.
 
         Multiple calls within ``_DEBOUNCE_SECONDS`` reset the timer so only
-        one rebuild fires per window.
+        one rebuild fires per window.  Changed source metadata is accumulated
+        so the rebuild can run incrementally instead of re-extracting every
+        document.
         """
+        # Accumulate changed sources across the debounce window
+        if workspace_id not in self._pending_sources:
+            self._pending_sources[workspace_id] = []
+        self._pending_sources[workspace_id].extend(changed_sources)
+
         # Cancel existing timer if present
         existing = self._debounce_handles.pop(workspace_id, None)
         if existing is not None:
@@ -381,14 +390,20 @@ class GraphifyService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _collect_sources(self, workspace_id: str) -> List[Dict[str, Any]]:
-        """Collect all indexable sources for a workspace.
+    async def _collect_sources(
+        self,
+        workspace_id: str,
+        doc_ids: Optional[set] = None,
+    ) -> List[Dict[str, Any]]:
+        """Collect indexable sources for a workspace.
 
-        Queries completed documents (with chunk text) and the agent roster
-        from the database.  Each returned dict has a ``type`` key so that
-        ``_extract_all`` can dispatch to the right extractor.
+        Args:
+            workspace_id: Target workspace.
+            doc_ids: If provided, only collect these document IDs
+                (incremental mode).  ``None`` means collect everything
+                (full rebuild).
 
-        Source types:
+        Source types returned:
           - ``document`` — text content assembled from document_chunks
           - ``agents``   — agent roster rows for deterministic mapping
         """
@@ -397,19 +412,21 @@ class GraphifyService:
         from core.database.database import get_db_session
         from core.models.core import Agent, Document
 
+        _MAX_DOC_CHARS = 8000  # cap text sent to LLM extraction
+
         sources: List[Dict[str, Any]] = []
 
         try:
             with get_db_session() as db:
                 # --- Documents with chunk content -------------------------
-                docs = (
-                    db.query(Document)
-                    .filter(
-                        Document.workspace_id == workspace_id,
-                        Document.status.in_(["completed", "processed"]),
-                    )
-                    .all()
+                query = db.query(Document).filter(
+                    Document.workspace_id == workspace_id,
+                    Document.status.in_(["completed", "processed"]),
                 )
+                if doc_ids is not None:
+                    query = query.filter(Document.id.in_(doc_ids))
+                docs = query.all()
+
                 for doc in docs:
                     # Assemble full text from chunks (ordered by chunk_index)
                     rows = db.execute(
@@ -428,6 +445,16 @@ class GraphifyService:
                         )
                         continue
 
+                    # Cap text to avoid LLM truncation on large docs
+                    if len(full_text) > _MAX_DOC_CHARS:
+                        logger.debug(
+                            "_collect_sources: capping doc %s from %d to %d chars",
+                            doc.id,
+                            len(full_text),
+                            _MAX_DOC_CHARS,
+                        )
+                        full_text = full_text[:_MAX_DOC_CHARS]
+
                     sources.append({
                         "type": "document",
                         "id": doc.id,
@@ -436,26 +463,27 @@ class GraphifyService:
                         "team_access": list(doc.team_access or []),
                     })
 
-                # --- Agent roster -----------------------------------------
-                agents = (
-                    db.query(Agent)
-                    .filter(
-                        Agent.workspace_id == workspace_id,
-                        Agent.status == "active",
+                # --- Agent roster (only on full rebuild) ------------------
+                if doc_ids is None:
+                    agents = (
+                        db.query(Agent)
+                        .filter(
+                            Agent.workspace_id == workspace_id,
+                            Agent.status == "active",
+                        )
+                        .all()
                     )
-                    .all()
-                )
-                if agents:
-                    agent_rows = [
-                        {
-                            "id": a.id,
-                            "name": a.name,
-                            "role": a.agent_type,
-                            "reports_to": (a.configuration or {}).get("reports_to"),
-                        }
-                        for a in agents
-                    ]
-                    sources.append({"type": "agents", "rows": agent_rows})
+                    if agents:
+                        agent_rows = [
+                            {
+                                "id": a.id,
+                                "name": a.name,
+                                "role": a.agent_type,
+                                "reports_to": (a.configuration or {}).get("reports_to"),
+                            }
+                            for a in agents
+                        ]
+                        sources.append({"type": "agents", "rows": agent_rows})
 
         except Exception:
             logger.exception(
@@ -781,16 +809,132 @@ class GraphifyService:
             )
 
     async def _debounced_rebuild(self, workspace_id: str) -> None:
-        """Execute the deferred rebuild after debounce window expires."""
+        """Execute the deferred rebuild after debounce window expires.
+
+        If a graph already exists for this workspace, runs an incremental
+        build that only extracts the changed documents.  Falls back to a
+        full rebuild when no prior graph is found.
+        """
         self._debounce_handles.pop(workspace_id, None)
-        logger.info("_debounced_rebuild: executing for workspace %s", workspace_id)
+        pending = self._pending_sources.pop(workspace_id, [])
+        logger.info(
+            "_debounced_rebuild: executing for workspace %s (%d pending sources)",
+            workspace_id,
+            len(pending),
+        )
         try:
-            self.invalidate_cache(workspace_id)
-            await self.build_graph(workspace_id)
+            existing_graph = await self.load_graph(workspace_id)
+            if existing_graph is not None and pending:
+                # Incremental: only extract changed docs, merge into existing
+                await self._incremental_build(workspace_id, existing_graph, pending)
+            else:
+                # Full rebuild: first time or no pending info
+                self.invalidate_cache(workspace_id)
+                await self.build_graph(workspace_id)
         except Exception:
             logger.exception(
                 "_debounced_rebuild: failed for workspace %s", workspace_id
             )
+
+    async def _incremental_build(
+        self,
+        workspace_id: str,
+        existing_graph: nx.Graph,
+        pending: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Incremental graph update — only extracts changed documents.
+
+        1. Collect ONLY the documents referenced in *pending*
+        2. Extract entities/relations from those docs
+        3. Merge new nodes/edges into the existing graph
+        4. Re-cluster, re-export, update cache
+        """
+        logger.info(
+            "_incremental_build: %d changed sources for workspace %s",
+            len(pending),
+            workspace_id,
+        )
+        ws = WorkspaceClient(str(workspace_id))
+
+        # Collect only the changed document IDs
+        changed_doc_ids = {
+            s.get("id") for s in pending
+            if s.get("type") == "document" and s.get("id")
+        }
+
+        if not changed_doc_ids:
+            logger.info("_incremental_build: no document IDs in pending, skipping")
+            return {"node_count": existing_graph.number_of_nodes(),
+                    "edge_count": existing_graph.number_of_edges()}
+
+        # Collect only those docs from DB
+        sources = await self._collect_sources(
+            workspace_id, doc_ids=changed_doc_ids
+        )
+        if not sources:
+            logger.info("_incremental_build: changed docs not found in DB, skipping")
+            return {"node_count": existing_graph.number_of_nodes(),
+                    "edge_count": existing_graph.number_of_edges()}
+
+        # Extract and merge new nodes/edges
+        extractions = await self._extract_all(workspace_id, sources)
+        merged = self._merge_extractions(extractions)
+
+        # Add new nodes and edges to existing graph
+        for node in merged.get("nodes", []):
+            node_id = node.get("id", "")
+            if node_id:
+                existing_graph.add_node(node_id, **node)
+
+        for edge in merged.get("edges", []):
+            src = edge.get("source", edge.get("_src", ""))
+            tgt = edge.get("target", edge.get("_tgt", ""))
+            if src and tgt and src in existing_graph and tgt in existing_graph:
+                existing_graph.add_edge(src, tgt, **edge)
+
+        logger.info(
+            "_incremental_build: graph now has %d nodes, %d edges",
+            existing_graph.number_of_nodes(),
+            existing_graph.number_of_edges(),
+        )
+
+        # Re-cluster and re-export (same as full build steps 4-11)
+        loop = asyncio.get_event_loop()
+        communities = await loop.run_in_executor(
+            None, partial(cluster, existing_graph)
+        )
+        top_gods = await loop.run_in_executor(
+            None, partial(god_nodes, existing_graph)
+        )
+
+        await self._export_graph(ws, existing_graph, communities, top_gods)
+
+        meta = self._build_meta(existing_graph, communities, top_gods)
+        await self._write_json(ws, _META_JSON_PATH, meta)
+
+        self._cache[workspace_id] = existing_graph
+
+        graph_data = await loop.run_in_executor(
+            None, partial(nx.node_link_data, existing_graph)
+        )
+        diff_result = await self._snapshot_and_diff(
+            ws, existing_graph, graph_data, loop
+        )
+        if diff_result is not None:
+            meta["diff_summary"] = diff_result.get("summary", "")
+
+        today = date.today().isoformat()
+        await self._write_build_report(ws, today, meta, diff_result)
+        await self._prune_history(ws)
+
+        logger.info(
+            "_incremental_build: completed for workspace %s "
+            "(+%d sources, %d total nodes)",
+            workspace_id,
+            len(sources),
+            existing_graph.number_of_nodes(),
+        )
+        return meta
 
     @staticmethod
     async def _write_json(
