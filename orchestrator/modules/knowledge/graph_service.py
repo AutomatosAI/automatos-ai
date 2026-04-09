@@ -140,7 +140,7 @@ class GraphifyService:
     # Public API
     # ------------------------------------------------------------------
 
-    async def build_graph(self, workspace_id: int) -> Dict[str, Any]:
+    async def build_graph(self, workspace_id: str) -> Dict[str, Any]:
         """Full graph build pipeline for a workspace.
 
         Returns a meta dict on success, or raises on failure.
@@ -209,7 +209,7 @@ class GraphifyService:
         logger.info("build_graph: completed for workspace %s", workspace_id)
         return meta
 
-    async def load_graph(self, workspace_id: int) -> Optional[nx.Graph]:
+    async def load_graph(self, workspace_id: str) -> Optional[nx.Graph]:
         """Load a workspace graph from LRU cache or workspace files.
 
         Returns None if no graph has been built yet.
@@ -251,13 +251,13 @@ class GraphifyService:
         )
         return graph
 
-    def invalidate_cache(self, workspace_id: int) -> None:
+    def invalidate_cache(self, workspace_id: str) -> None:
         """Remove a workspace graph from the LRU cache."""
         self._cache.pop(workspace_id, None)
         logger.debug("invalidate_cache: cleared workspace %s", workspace_id)
 
     def schedule_incremental_update(
-        self, workspace_id: int, changed_sources: List[Dict[str, Any]]
+        self, workspace_id: str, changed_sources: List[Dict[str, Any]]
     ) -> None:
         """Schedule a debounced rebuild.
 
@@ -287,7 +287,7 @@ class GraphifyService:
             len(changed_sources),
         )
 
-    async def get_meta(self, workspace_id: int) -> Optional[Dict[str, Any]]:
+    async def get_meta(self, workspace_id: str) -> Optional[Dict[str, Any]]:
         """Read ``/graph/meta.json`` without loading the full graph."""
         ws = WorkspaceClient(str(workspace_id))
         result = await ws.read_file(_META_JSON_PATH)
@@ -381,7 +381,7 @@ class GraphifyService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _collect_sources(self, workspace_id: int) -> List[Dict[str, Any]]:
+    async def _collect_sources(self, workspace_id: str) -> List[Dict[str, Any]]:
         """Collect all indexable sources for a workspace.
 
         This is a seam for future integration with the document system,
@@ -393,7 +393,7 @@ class GraphifyService:
         return []
 
     async def _extract_all(
-        self, workspace_id: int, sources: List[Dict[str, Any]]
+        self, workspace_id: str, sources: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Run entity/relation extraction on each source.
 
@@ -650,7 +650,7 @@ class GraphifyService:
                 to_delete,
             )
 
-    async def _debounced_rebuild(self, workspace_id: int) -> None:
+    async def _debounced_rebuild(self, workspace_id: str) -> None:
         """Execute the deferred rebuild after debounce window expires."""
         self._debounce_handles.pop(workspace_id, None)
         logger.info("_debounced_rebuild: executing for workspace %s", workspace_id)

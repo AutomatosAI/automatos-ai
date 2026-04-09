@@ -1217,11 +1217,11 @@ class DocumentManager:
                 from modules.knowledge.graph_service import get_graph_service
                 if self.workspace_id:
                     get_graph_service().schedule_incremental_update(
-                        int(self.workspace_id),
+                        str(self.workspace_id),
                         [{"type": "document", "path": file_path, "id": document_id}],
                     )
-            except Exception:
-                logger.debug("Graph update skipped — service not available")
+            except Exception as graph_err:
+                logger.warning("Graph update skipped: %s", graph_err)
 
         except Exception as e:
             logger.error(f"Error processing document {document_id}: {e}")
