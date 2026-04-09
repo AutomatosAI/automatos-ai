@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_GRAPH_DIR = "/graph"
+_GRAPH_DIR = "graph"
 _GRAPH_JSON_PATH = f"{_GRAPH_DIR}/graph.json"
 _META_JSON_PATH = f"{_GRAPH_DIR}/meta.json"
 _COMMUNITIES_JSON_PATH = f"{_GRAPH_DIR}/communities.json"
