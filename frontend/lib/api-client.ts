@@ -1541,6 +1541,23 @@ class ApiClient {
     return this.request('/api/code-graph/health')
   }
 
+  // ===== BUSINESS GRAPH ENDPOINTS =====
+
+  async importBusinessGraph(file: File, merge: boolean = false) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('merge', String(merge))
+    return this.request('/api/knowledge/graph/import', {
+      method: 'POST',
+      body: formData,
+      headers: {}, // Let browser set Content-Type with boundary
+    })
+  }
+
+  async buildBusinessGraph() {
+    return this.request('/api/knowledge/graph/build', { method: 'POST' })
+  }
+
   // ===== DOCUMENT ENDPOINTS =====
   async uploadDocument(file: File, metadata?: any) {
     console.log('[Upload] Starting document upload:', {

@@ -1,16 +1,17 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useMemo, useCallback, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { BusinessGraphVisualization } from './BusinessGraphVisualization'
 import {
   Network, Loader2, Search, X, ChevronRight,
-  FileText, Clock, Layers,
+  FileText, Clock, Layers, Upload, RefreshCw, GitMerge,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -57,12 +58,90 @@ const graphQueryKeys = {
 
 export function BusinessGraphPanel() {
   const { workspaceId } = useWorkspace()
+  const queryClient = useQueryClient()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // UI state
   const [searchTerm, setSearchTerm] = useState('')
   const [confidenceMin, setConfidenceMin] = useState(0)
   const [selectedCommunity, setSelectedCommunity] = useState<number | null>(null)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [building, setBuilding] = useState(false)
+
+  // ── Import handler ──
+
+  const handleImport = useCallback(async (file: File, merge: boolean = false) => {
+    if (!workspaceId) return
+    setImporting(true)
+    setImportError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('merge', String(merge))
+
+      const headers: Record<string, string> = {}
+      if (typeof window !== 'undefined') {
+        const wsId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+        if (wsId) headers['X-Workspace-ID'] = wsId
+      }
+      const token = (apiClient as any).authToken
+      if (token) headers['Authorization'] = `Bearer ${token}`
+
+      const res = await fetch(`${(apiClient as any).baseUrl || ''}/api/knowledge/graph/import`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || 'Import failed')
+      }
+      // Invalidate queries to refresh the graph
+      queryClient.invalidateQueries({ queryKey: ['business-graph'] })
+    } catch (err: any) {
+      setImportError(err.message || 'Import failed')
+    } finally {
+      setImporting(false)
+    }
+  }, [workspaceId, queryClient])
+
+  const handleBuild = useCallback(async () => {
+    if (!workspaceId) return
+    setBuilding(true)
+    setImportError(null)
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (typeof window !== 'undefined') {
+        const wsId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+        if (wsId) headers['X-Workspace-ID'] = wsId
+      }
+      const token = (apiClient as any).authToken
+      if (token) headers['Authorization'] = `Bearer ${token}`
+
+      const res = await fetch(`${(apiClient as any).baseUrl || ''}/api/knowledge/graph/build`, {
+        method: 'POST',
+        headers,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || 'Build failed')
+      }
+      queryClient.invalidateQueries({ queryKey: ['business-graph'] })
+    } catch (err: any) {
+      setImportError(err.message || 'Build failed')
+    } finally {
+      setBuilding(false)
+    }
+  }, [workspaceId, queryClient])
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) handleImport(file)
+    // Reset so same file can be re-selected
+    e.target.value = ''
+  }, [handleImport])
 
   // ── Data fetching ──
 
@@ -159,11 +238,47 @@ export function BusinessGraphPanel() {
   if (graphError || !graphData?.nodes?.length) {
     return (
       <div className="text-center py-24">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          onChange={handleFileChange}
+          className="hidden"
+        />
         <Network className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
         <h3 className="text-lg font-semibold mb-2">No business graph yet</h3>
-        <p className="text-sm text-muted-foreground">
-          Upload documents to get started.
+        <p className="text-sm text-muted-foreground mb-6">
+          Upload documents to auto-build, or import a graph.json from graphify.
         </p>
+        <div className="flex items-center justify-center gap-3">
+          <Button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="gradient-accent hover:opacity-90"
+          >
+            {importing ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4 mr-2" />
+            )}
+            Import graph.json
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleBuild}
+            disabled={building}
+          >
+            {building ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Build from Documents
+          </Button>
+        </div>
+        {importError && (
+          <p className="text-sm text-red-400 mt-4">{importError}</p>
+        )}
       </div>
     )
   }
@@ -193,11 +308,54 @@ export function BusinessGraphPanel() {
           <span className="font-semibold text-purple-400">{communityCount}</span>
           <span className="text-muted-foreground">clusters</span>
         </span>
-        {lastBuilt && (
-          <span className="flex items-center gap-1.5 text-muted-foreground ml-auto">
-            <Clock className="w-3.5 h-3.5" />
-            Last built {lastBuilt}
-          </span>
+        <span className="flex items-center gap-2 ml-auto">
+          {lastBuilt && (
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <Clock className="w-3.5 h-3.5" />
+              Last built {lastBuilt}
+            </span>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() => {
+              // Hold shift to merge instead of replace
+              fileInputRef.current?.click()
+            }}
+            disabled={importing}
+          >
+            {importing ? (
+              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            ) : (
+              <Upload className="w-3 h-3 mr-1" />
+            )}
+            Import
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={handleBuild}
+            disabled={building}
+          >
+            {building ? (
+              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3 h-3 mr-1" />
+            )}
+            Rebuild
+          </Button>
+        </span>
+        {importError && (
+          <span className="text-xs text-red-400 w-full">{importError}</span>
         )}
       </div>
 

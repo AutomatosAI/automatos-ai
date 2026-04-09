@@ -258,6 +258,86 @@ class GraphifyService:
         self._cache.pop(workspace_id, None)
         logger.debug("invalidate_cache: cleared workspace %s", workspace_id)
 
+    async def import_graph(
+        self, workspace_id: str, graph_data: Dict[str, Any], *, merge: bool = False
+    ) -> Dict[str, Any]:
+        """Import a graphify graph.json into a workspace.
+
+        Accepts NetworkX node_link_data format (same as graphify's graph.json).
+        Re-runs clustering, analysis, and exports all derived artefacts.
+
+        Args:
+            workspace_id: Target workspace.
+            graph_data: Parsed JSON from a graphify graph.json file.
+            merge: If True, merge into existing workspace graph instead of replacing.
+
+        Returns:
+            Meta dict with node_count, edge_count, community_count.
+        """
+        logger.info(
+            "import_graph: importing for workspace %s (merge=%s, nodes=%d)",
+            workspace_id, merge, len(graph_data.get("nodes", [])),
+        )
+        ws = WorkspaceClient(str(workspace_id))
+        loop = asyncio.get_event_loop()
+
+        # Parse the imported graph
+        imported: nx.Graph = await loop.run_in_executor(
+            None, partial(nx.node_link_graph, graph_data)
+        )
+
+        if imported.number_of_nodes() == 0:
+            raise ValueError("Imported graph.json contains no nodes")
+
+        # Merge with existing graph if requested
+        if merge:
+            existing = await self.load_graph(workspace_id)
+            if existing is not None:
+                # Add new nodes/edges into the existing graph
+                for node, attrs in imported.nodes(data=True):
+                    if node not in existing:
+                        existing.add_node(node, **attrs)
+                for u, v, attrs in imported.edges(data=True):
+                    if not existing.has_edge(u, v):
+                        existing.add_edge(u, v, **attrs)
+                graph = existing
+                logger.info(
+                    "import_graph: merged — %d nodes, %d edges",
+                    graph.number_of_nodes(), graph.number_of_edges(),
+                )
+            else:
+                graph = imported
+        else:
+            graph = imported
+
+        # Re-run the same pipeline as build_graph (steps 4-11)
+        communities = await loop.run_in_executor(None, partial(cluster, graph))
+        await loop.run_in_executor(None, partial(score_all, graph, communities))
+        top_gods = await loop.run_in_executor(None, partial(god_nodes, graph))
+
+        await self._export_graph(ws, graph, communities, top_gods)
+
+        meta = self._build_meta(graph, communities, top_gods)
+        meta["source"] = "import"
+        await self._write_json(ws, _META_JSON_PATH, meta)
+
+        self._cache[workspace_id] = graph
+
+        # Snapshot + diff
+        exported_data = await loop.run_in_executor(
+            None, partial(nx.node_link_data, graph)
+        )
+        diff_result = await self._snapshot_and_diff(ws, graph, exported_data, loop)
+        if diff_result is not None:
+            meta["diff_summary"] = diff_result.get("summary", "")
+
+        today = date.today().isoformat()
+        await self._write_build_report(ws, today, meta, diff_result)
+        await self._prune_history(ws)
+
+        logger.info("import_graph: completed for workspace %s", workspace_id)
+        return meta
+
     def schedule_incremental_update(
         self, workspace_id: str, changed_sources: List[Dict[str, Any]]
     ) -> None:
