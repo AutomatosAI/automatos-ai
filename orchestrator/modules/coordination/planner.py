@@ -778,7 +778,8 @@ def _build_decomposition_prompt(
         parts.append("## Conversation Context\nRecent chat messages that led to this mission:\n")
         for msg in chat_context[-5:]:
             role = msg.get("role", "user")
-            content = (msg.get("content") or "")[:500]
+            raw = msg.get("content") or ""
+            content = (raw if isinstance(raw, str) else str(raw))[:500]
             parts.append(f"**{role}:** {content}\n")
         parts.append("")
 

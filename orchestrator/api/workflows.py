@@ -861,7 +861,7 @@ async def get_workflow_dashboard_stats(ctx: RequestContext = Depends(get_request
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{workflow_id}/live-progress")
-async def get_workflow_live_progress(workflow_id: int, db: Session = Depends(get_db)):
+async def get_workflow_live_progress(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get live progress for a specific workflow execution"""
     try:
         # Get the workflow
@@ -1464,79 +1464,6 @@ async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session 
         logger.error(f"❌ Error creating AI SDK chat stream for execution {execution_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-
-
-@router.get("/executions/{execution_id}/results")
-async def get_execution_results(execution_id: int, db: Session = Depends(get_db)):
-    """Get workflow execution results"""
-    try:
-        execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
-        if not execution:
-            raise HTTPException(status_code=404, detail="Execution not found")
-        
-        return {
-            "execution_id": execution.id,
-            "workflow_id": execution.workflow_id,
-            "status": execution.status,
-            "results": execution.output_data or {},
-            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting execution results {execution_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-async def _adaptive_checkpoint(
-    stage_name: str,
-    stage_results: Dict[str, Any],
-    workflow_context: Dict[str, Any],
-    attempt: int,
-    stage_tracker,
-) -> "AdaptationDecision":
-    """
-    Two-tier adaptive checkpoint: heuristic → LLM evaluation.
-    Called after Stage 4 (execution) and Stage 7 (quality) to decide
-    whether to continue, retry, or abort.
-
-    Returns an AdaptationDecision from AdaptiveExecutionMonitor.
-    """
-    from modules.orchestrator.llm.adaptive_execution_monitor import (
-        AdaptiveExecutionMonitor,
-        AdaptationDecision,
-        InterventionAction,
-    )
-
-    await stage_tracker._emit("adaptive_checkpoint_start", {
-        "stage": stage_name,
-        "attempt": attempt,
-        "timestamp": datetime.now().isoformat(),
-    })
-
-    monitor = AdaptiveExecutionMonitor(max_retries=1)
-    decision = await monitor.evaluate_stage_outcome(
-        stage_name=stage_name,
-        stage_results=stage_results,
-        workflow_context=workflow_context,
-        attempt_number=attempt,
-    )
-
-    logger.info(
-        f"[Adaptive] Checkpoint after {stage_name}: {decision.action.value} "
-        f"(confidence={decision.confidence:.2f}, reason={decision.reasoning[:120]})"
-    )
-
-    await stage_tracker._emit("adaptive_checkpoint_decision", {
-        "stage": stage_name,
-        "attempt": attempt,
-        "action": decision.action.value,
-        "reasoning": decision.reasoning[:200],
-        "confidence": decision.confidence,
-        "timestamp": datetime.now().isoformat(),
-    })
-
-    return decision
 
 
 async def execute_workflow_with_progress(execution_id: int, options: Dict[str, Any]):

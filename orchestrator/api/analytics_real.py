@@ -145,9 +145,11 @@ async def get_avg_task_completion_time(ctx: RequestContext = Depends(get_request
         # Weighted average (prefer mission data when both exist)
         wf_count = db.query(WorkflowExecution).filter(
             WorkflowExecution.workspace_id == ws, WorkflowExecution.status == 'completed',
+            WorkflowExecution.completed_at.isnot(None), WorkflowExecution.started_at.isnot(None),
         ).count()
         m_count = db.query(OrchestrationRun).filter(
             OrchestrationRun.workspace_id == ws, OrchestrationRun.state == RunState.COMPLETED.value,
+            OrchestrationRun.completed_at.isnot(None), OrchestrationRun.started_at.isnot(None),
         ).count()
         total_count = wf_count + m_count
         if total_count > 0:
@@ -361,7 +363,7 @@ async def get_queue_depth(ctx: RequestContext = Depends(get_request_context_hybr
             ]),
         ).count()
 
-        total_pending = pending_workflows + active_missions
+        total_pending = pending_workflows + active_missions + pending_mission_tasks
 
         # High priority: recent items (last 1h)
         hour_ago = datetime.now() - timedelta(hours=1)

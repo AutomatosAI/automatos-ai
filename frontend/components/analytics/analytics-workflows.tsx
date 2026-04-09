@@ -245,7 +245,7 @@ export function AnalyticsWorkflows({ days }: Props) {
                           wf.status === 'active' || wf.status === 'completed' ? 'text-[hsl(var(--success))] border-[hsl(var(--success))]/30' :
                           wf.status === 'failed' ? 'text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/30' :
                           wf.status === 'running' || wf.status === 'executing' ? 'text-[hsl(var(--info))] border-[hsl(var(--info))]/30' :
-                          wf.status === 'pending_approval' || wf.status === 'pending_review' ? 'text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30' : ''
+                          wf.status === 'pending_approval' || wf.status === 'pending_review' || wf.status === 'awaiting_approval' || wf.status === 'awaiting_review' ? 'text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30' : ''
                         }>
                           {(wf.status || 'idle').replace(/_/g, ' ')}
                         </Badge>

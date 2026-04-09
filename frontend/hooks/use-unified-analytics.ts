@@ -456,14 +456,14 @@ export function usePlanUsage() {
     queryKey: unifiedAnalyticsKeys.planUsage(),
     queryFn: async () => {
       // For now, return placeholder limits (pilot phase — limits TBD)
-      const [agents, workflows, documents] = await Promise.all([
+      const [agents, missions, documents] = await Promise.all([
         apiClient.getAgents().catch(() => []),
-        apiClient.getWorkflows().catch(() => []),
+        apiClient.request<any>('/api/missions?limit=100').catch(() => ({ items: [] })),
         apiClient.getDocuments().catch(() => []),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
-      const workflowList = Array.isArray(workflows) ? workflows : []
+      const missionItems = missions?.items || (Array.isArray(missions) ? missions : [])
       const docList = Array.isArray(documents) ? documents : []
 
       const totalTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
@@ -475,7 +475,7 @@ export function usePlanUsage() {
         planTier: 'pilot',
         usage: {
           agents: { used: agentList.length, limit: null as number | null, label: 'Agents' },
-          workflows: { used: workflowList.length, limit: null as number | null, label: 'Missions' },
+          missions: { used: missionItems.length, limit: null as number | null, label: 'Missions' },
           documents: { used: docList.length, limit: null as number | null, label: 'Documents' },
           storageGb: { used: parseFloat((storageMb / 1024).toFixed(2)), limit: null as number | null, label: 'Storage (GB)' },
           apiCalls: { used: totalRequests, limit: null as number | null, label: 'API Calls' },
