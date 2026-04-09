@@ -117,7 +117,7 @@ async def handle_query_graph(
 
     try:
         svc = _get_service()
-        graph = await svc.load_graph(int(str(workspace_id)))
+        graph = await svc.load_graph(str(workspace_id))
         if graph is None:
             return {
                 "success": False,
@@ -195,7 +195,7 @@ async def handle_graph_neighbors(
 
     try:
         svc = _get_service()
-        graph = await svc.load_graph(int(str(workspace_id)))
+        graph = await svc.load_graph(str(workspace_id))
         if graph is None:
             return {
                 "success": False,
@@ -266,7 +266,7 @@ async def handle_graph_communities(
         from core.workspace_client import WorkspaceClient
 
         ws = WorkspaceClient(str(workspace_id))
-        result = await ws.read_file("/graph/communities.json")
+        result = await ws.read_file("graph/communities.json")
 
         if not result.get("success"):
             return {
@@ -291,7 +291,7 @@ async def handle_graph_communities(
         # PRD-124: filter community members by team visibility
         if agent_team is not None:
             svc = _get_service()
-            graph = await svc.load_graph(int(str(workspace_id)))
+            graph = await svc.load_graph(str(workspace_id))
             if graph is not None:
                 from modules.knowledge.graph_service import node_is_visible
                 for c in communities:
@@ -363,7 +363,7 @@ async def handle_graph_impact(
 
     try:
         svc = _get_service()
-        graph = await svc.load_graph(int(str(workspace_id)))
+        graph = await svc.load_graph(str(workspace_id))
         if graph is None:
             return {
                 "success": False,
@@ -449,7 +449,7 @@ async def handle_graph_stats(
     """
     try:
         svc = _get_service()
-        meta = await svc.get_meta(int(str(workspace_id)))
+        meta = await svc.get_meta(str(workspace_id))
         if meta is None:
             return {
                 "success": False,

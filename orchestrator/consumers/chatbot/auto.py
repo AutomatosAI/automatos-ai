@@ -466,22 +466,29 @@ _PLATFORM_KEYWORDS = {
         "how does", "connected to", "relationship between", "relate to",
         "end to end", "flow", "process for", "overview of", "map of",
         "what connects", "trace from", "path between",
+        "knowledge graph", "query graph", "search graph", "graph query",
+        "what do we know about", "according to the graph",
+        "how are.*connected", "find in graph",
     ],
     "platform_graph_impact": [
         "what if we change", "impact of", "what breaks", "affects",
         "downstream", "upstream", "dependencies of", "depends on",
-        "consequences of", "ripple effect",
+        "consequences of", "ripple effect", "what would happen",
+        "risk of changing", "blast radius",
     ],
     "platform_graph_communities": [
         "what areas", "departments", "clusters", "domains",
         "groups of", "categories of", "themes in",
+        "knowledge domains", "graph communities", "topic clusters",
     ],
     "platform_graph_neighbors": [
         "related to", "associated with", "linked to", "touches", "involves",
+        "neighbors of", "connections of", "what links to",
     ],
     "platform_graph_stats": [
         "graph health", "knowledge coverage", "how complete",
-        "graph size", "how connected",
+        "graph size", "how connected", "graph stats", "graph status",
+        "how many nodes", "when was the graph built",
     ],
 }
 
