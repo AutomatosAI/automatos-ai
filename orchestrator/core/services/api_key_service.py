@@ -43,6 +43,7 @@ class ApiKeyService:
         rate_limit_requests: Optional[int] = None,
         rate_limit_tokens: Optional[int] = None,
         default_agent_id: Optional[int] = None,
+        team: Optional[str] = None,
         expires_at: Optional[datetime] = None,
     ) -> dict[str, Any]:
         """Create a new API key for a workspace.
@@ -69,6 +70,7 @@ class ApiKeyService:
             rate_limit_requests=rate_limit_requests,
             rate_limit_tokens=rate_limit_tokens,
             default_agent_id=default_agent_id,
+            team=team,
             expires_at=expires_at,
         )
 
@@ -84,6 +86,7 @@ class ApiKeyService:
             "key_type": record.key_type,
             "permissions": record.permissions,
             "default_agent_id": record.default_agent_id,
+            "team": record.team,
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
 
@@ -180,6 +183,7 @@ class ApiKeyService:
                 "key_type": r.key_type,
                 "permissions": r.permissions,
                 "default_agent_id": r.default_agent_id,
+                "team": getattr(r, "team", None),
                 "is_active": r.is_active,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "expires_at": r.expires_at.isoformat() if r.expires_at else None,

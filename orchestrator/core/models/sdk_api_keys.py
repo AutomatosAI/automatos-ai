@@ -54,6 +54,9 @@ class SdkApiKey(Base):
     # Agent lock — force all widget chats to use this agent
     default_agent_id = Column(Integer, nullable=True)
 
+    # PRD-124: Team lock — scope all requests through this key to a specific team
+    team = Column(String(100), nullable=True)
+
     # Access restrictions
     allowed_domains = Column(ARRAY(String), nullable=True)
     allowed_ips = Column(ARRAY(String), nullable=True)

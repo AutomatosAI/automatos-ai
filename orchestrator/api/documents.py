@@ -110,6 +110,7 @@ async def handle_request(
     file: UploadFile = File(...),
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
+    team_access: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """Upload and process a document"""
@@ -190,7 +191,12 @@ async def handle_request(
         tag_list = []
         if tags:
             tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
-        
+
+        # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
+        team_access_list: list[str] = []
+        if team_access:
+            team_access_list = [t.strip() for t in team_access.split(",") if t.strip()]
+
         # Create document record
         # TEMPORARY FIX: Tags field commented out to unblock critical vector DB testing
         # Tags are cosmetic metadata - not needed for embeddings, RAG, or semantic search
@@ -206,6 +212,7 @@ async def handle_request(
             status="uploaded",
             # tags=tag_list if tag_list else None,  # TEMPORARILY DISABLED - SQLAlchemy array bug
             description=description,
+            team_access=team_access_list,
             created_by="system"  # TODO: Get from auth context
         )
         
@@ -567,6 +574,7 @@ async def list_documents(
                 chunk_count=doc.chunk_count,
                 tags=doc.tags or [],
                 description=doc.description,
+                team_access=doc.team_access or [],
                 upload_date=doc.upload_date,
                 processed_date=doc.processed_date,
                 created_by=doc.created_by
@@ -1805,3 +1813,92 @@ async def get_reprocess_status(
     except Exception as e:
         logger.error(f"Error getting re-process status: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# PRD-124: Team access management
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel as _BaseModel, Field as _Field
+
+
+class _TeamAccessUpdate(_BaseModel):
+    team_access: List[str] = _Field(..., description="List of team names")
+
+
+class _BulkTeamAccessUpdate(_BaseModel):
+    document_ids: List[int] = _Field(..., min_length=1, description="Document IDs to update")
+    team_access: List[str] = _Field(..., description="List of team names")
+
+
+@router.patch("/{document_id}/team-access")
+async def update_document_team_access(
+    document_id: int,
+    body: _TeamAccessUpdate,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Update team_access on a single document."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    # Validate team names
+    for t in body.team_access:
+        if not t or not t.strip():
+            raise HTTPException(422, "Team names must be non-empty strings")
+
+    clean_teams = [t.strip() for t in body.team_access]
+
+    result = db.execute(
+        text(
+            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "WHERE id = :doc_id AND workspace_id = :ws "
+            "RETURNING id, title, team_access"
+        ),
+        {"teams": clean_teams, "doc_id": document_id, "ws": str(ctx.workspace_id)},
+    ).fetchone()
+    db.commit()
+
+    if not result:
+        raise HTTPException(404, "Document not found in this workspace")
+
+    return {
+        "id": result.id,
+        "title": result.title,
+        "team_access": result.team_access,
+    }
+
+
+@router.post("/bulk-team-access")
+async def bulk_update_team_access(
+    body: _BulkTeamAccessUpdate,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Update team_access on multiple documents at once."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    for t in body.team_access:
+        if not t or not t.strip():
+            raise HTTPException(422, "Team names must be non-empty strings")
+
+    clean_teams = [t.strip() for t in body.team_access]
+
+    rows = db.execute(
+        text(
+            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "WHERE id = ANY(:ids) AND workspace_id = :ws "
+            "RETURNING id, title, team_access"
+        ),
+        {"teams": clean_teams, "ids": body.document_ids, "ws": str(ctx.workspace_id)},
+    ).fetchall()
+    db.commit()
+
+    return {
+        "updated": len(rows),
+        "documents": [
+            {"id": r.id, "title": r.title, "team_access": r.team_access}
+            for r in rows
+        ],
+    }

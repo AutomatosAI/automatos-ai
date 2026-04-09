@@ -47,3 +47,9 @@ try:
     router.include_router(blog_router)
 except ImportError as e:
     logger.warning(f"Widget blog router not available: {e}")
+
+try:
+    from api.widgets.docs import router as docs_router
+    router.include_router(docs_router)
+except ImportError as e:
+    logger.warning(f"Widget docs router not available: {e}")

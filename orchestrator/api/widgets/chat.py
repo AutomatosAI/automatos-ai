@@ -170,6 +170,15 @@ async def widget_chat(
     # API key can lock the agent — ignore client-provided agent_id when set
     effective_agent_id = auth.default_agent_id or body.agent_id or 1
 
+    # PRD-124: Resolve agent team for document scoping
+    agent_team: Optional[str] = None
+    try:
+        from core.models.core import Agent
+        agent_row = db.query(Agent.team).filter(Agent.id == effective_agent_id).first()
+        agent_team = agent_row.team if agent_row else None
+    except Exception:
+        logger.debug("Could not resolve agent team for agent_id=%s", effective_agent_id)
+
     # ------------------------------------------------------------------
     # Stream
     # ------------------------------------------------------------------
@@ -190,6 +199,7 @@ async def widget_chat(
                 messages=message_history,
                 agent_id=effective_agent_id,
                 user_id=user_id,
+                team=agent_team,
             ):
                 # Skip internal dicts (e.g. _final_response)
                 if isinstance(chunk, dict):

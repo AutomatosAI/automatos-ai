@@ -1561,6 +1561,12 @@ class ApiClient {
       const tags = Array.isArray(metadata.tags) ? metadata.tags.join(',') : metadata.tags
       formData.append('tags', tags)
     }
+    if (metadata?.team_access) {
+      const teamAccess = Array.isArray(metadata.team_access) ? metadata.team_access.join(',') : metadata.team_access
+      if (teamAccess) {
+        formData.append('team_access', teamAccess)
+      }
+    }
 
     // Use fetch directly for file upload (don't use this.request which sets Content-Type)
     const headers: any = { ...this.defaultHeaders }

@@ -255,6 +255,7 @@ async def upload_document_multimodal(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
+    team_access: Optional[str] = Form(None),
     extract_tables: bool = Form(True),
     extract_images: bool = Form(True),
     extract_formulas: bool = Form(True),

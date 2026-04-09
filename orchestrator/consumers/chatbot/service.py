@@ -1724,7 +1724,7 @@ class StreamingChatService:
         complexity_assessment: Optional[Any] = None,
         mission_mode: bool = False,
         plan_mode: bool = False,
-        suggest_mission: bool = False,
+        team: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.

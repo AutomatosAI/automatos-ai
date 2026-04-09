@@ -53,6 +53,7 @@ interface FileUpload {
     description: string
     category: string
     tags: string[]
+    team_access: string[]
     auto_process: boolean
     auto_index: boolean
   }
@@ -99,9 +100,11 @@ export function DocumentUpload({ onUploadSuccess, categories }: DocumentUploadPr
     category: '',
     auto_process: true,
     auto_index: true,
-    tags: [] as string[]
+    tags: [] as string[],
+    team_access: [] as string[],
   })
   const [newTag, setNewTag] = useState('')
+  const [newTeam, setNewTeam] = useState('')
 
   const uploadMutation = useUploadDocument()
 
@@ -148,6 +151,7 @@ export function DocumentUpload({ onUploadSuccess, categories }: DocumentUploadPr
         description: '',
         category: defaultSettings.category,
         tags: [...defaultSettings.tags],
+        team_access: [...defaultSettings.team_access],
         auto_process: defaultSettings.auto_process,
         auto_index: defaultSettings.auto_index
       }
@@ -429,6 +433,69 @@ export function DocumentUpload({ onUploadSuccess, categories }: DocumentUploadPr
                       onClick={() => removeDefaultTag(tag)}
                     >
                       {tag} <X className="w-3 h-3 ml-1" />
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Team Access</Label>
+              <p className="text-xs text-muted-foreground">
+                Restrict document visibility to specific teams. Leave empty for all teams.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Add team..."
+                  value={newTeam}
+                  onChange={(e) => setNewTeam(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const trimmed = newTeam.trim()
+                      if (trimmed && !defaultSettings.team_access.includes(trimmed)) {
+                        setDefaultSettings(prev => ({
+                          ...prev,
+                          team_access: [...prev.team_access, trimmed],
+                        }))
+                      }
+                      setNewTeam('')
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const trimmed = newTeam.trim()
+                    if (trimmed && !defaultSettings.team_access.includes(trimmed)) {
+                      setDefaultSettings(prev => ({
+                        ...prev,
+                        team_access: [...prev.team_access, trimmed],
+                      }))
+                    }
+                    setNewTeam('')
+                  }}
+                >
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
+              {defaultSettings.team_access.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {defaultSettings.team_access.map(team => (
+                    <Badge
+                      key={team}
+                      variant="outline"
+                      className="cursor-pointer"
+                      onClick={() =>
+                        setDefaultSettings(prev => ({
+                          ...prev,
+                          team_access: prev.team_access.filter(t => t !== team),
+                        }))
+                      }
+                    >
+                      {team} <X className="w-3 h-3 ml-1" />
                     </Badge>
                   ))}
                 </div>

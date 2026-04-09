@@ -266,13 +266,17 @@ class AgentPlatformTools:
 
                 self.logger.info(f"  🔍 Searching knowledge base: '{query}' (limit: {limit})")
 
-                # Resolve workspace_id for multi-tenant isolation
+                # Resolve workspace_id and team for multi-tenant isolation
                 workspace_id = None
+                agent_team = None
                 try:
                     from core.models import Agent as AgentModel
                     agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
-                    if agent_row and getattr(agent_row, "workspace_id", None):
-                        workspace_id = str(agent_row.workspace_id)
+                    if agent_row:
+                        if getattr(agent_row, "workspace_id", None):
+                            workspace_id = str(agent_row.workspace_id)
+                        # PRD-124: Resolve agent team for document scoping
+                        agent_team = getattr(agent_row, "team", None)
                 except Exception:
                     workspace_id = None
 
@@ -288,7 +292,8 @@ class AgentPlatformTools:
                     query=query,
                     top_k=limit,
                     min_similarity=min_similarity,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
+                    team=agent_team,
                 )
                 
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)
@@ -368,13 +373,17 @@ class AgentPlatformTools:
 
                 self.logger.info(f"  🔍 Semantic search via RAG: '{query}'")
 
-                # Resolve workspace_id for multi-tenant isolation
+                # Resolve workspace_id and team for multi-tenant isolation
                 workspace_id = None
+                agent_team = None
                 try:
                     from core.models import Agent as AgentModel
                     agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
-                    if agent_row and getattr(agent_row, "workspace_id", None):
-                        workspace_id = str(agent_row.workspace_id)
+                    if agent_row:
+                        if getattr(agent_row, "workspace_id", None):
+                            workspace_id = str(agent_row.workspace_id)
+                        # PRD-124: Resolve agent team for document scoping
+                        agent_team = getattr(agent_row, "team", None)
                 except Exception:
                     workspace_id = None
 
@@ -389,7 +398,8 @@ class AgentPlatformTools:
                     query=query,
                     top_k=limit,
                     min_similarity=min_similarity,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
+                    team=agent_team,
                 )
                 
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)

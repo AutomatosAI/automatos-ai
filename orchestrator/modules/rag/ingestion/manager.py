@@ -796,10 +796,11 @@ class DocumentManager:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
 
-            # Fetch workspace_id from document record
-            cursor.execute("SELECT workspace_id FROM documents WHERE id = %s", (document_id,))
+            # Fetch workspace_id and team_access from document record
+            cursor.execute("SELECT workspace_id, team_access FROM documents WHERE id = %s", (document_id,))
             doc_row = cursor.fetchone()
             workspace_id = doc_row[0] if doc_row else None
+            doc_team_access = doc_row[1] if doc_row and doc_row[1] else []
             logger.info(f"Processing document {document_id} for workspace {workspace_id}")
 
             # Extract text (with enhanced extraction for PDFs and spreadsheets)
@@ -1056,7 +1057,8 @@ class DocumentManager:
             chunks = self.processor.chunk_document(text, file_type, {
                 'document_id': document_id,
                 'source_file': os.path.basename(file_path),
-                'file_path': file_path  # NEW: Add full path for downloads
+                'file_path': file_path,  # NEW: Add full path for downloads
+                'team_access': doc_team_access,  # PRD-124: team scoping in chunk metadata
             })
 
             # Append multimodal chunks to the regular chunks

@@ -544,6 +544,9 @@ class Document(Base):
     created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     is_shared = Column(Boolean, default=True)
     
+    # PRD-124: Team-based document scoping (empty = visible to all agents)
+    team_access = Column(PG_ARRAY(String), default=list)
+
     # PRD-37: Workspace isolation for multi-tenant SaaS
     workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
 
@@ -788,6 +791,7 @@ class DocumentResponse(BaseModel):
     chunk_count: Optional[int]
     tags: Optional[List[str]]
     description: Optional[str]
+    team_access: Optional[List[str]] = None
     upload_date: datetime
     processed_date: Optional[datetime]
     created_by: Optional[str] = None

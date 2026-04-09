@@ -214,7 +214,8 @@ class RAGService:
         max_tokens: int = None,
         diversity: float = None,
         context_type: str = "chatbot",
-        workspace_id: str = None
+        workspace_id: str = None,
+        team: str = None,
     ) -> RAGResult:
         """
         Retrieve optimized RAG context using existing ContextOptimizer.
@@ -251,11 +252,14 @@ class RAGService:
             except Exception as e:
                 logger.warning(f"Query enhancement failed, using original: {e}")
         
+        # PRD-124: over-fetch when team filtering to compensate for post-filter reduction
+        team_multiplier = 2 if team else 1
+
         # Multi-query retrieval with RRF fusion
         if len(queries_to_search) > 1 and self.config.enable_rrf_fusion:
             candidates = await self._multi_query_retrieval_with_rrf(
                 queries_to_search,
-                limit_per_query=max_chunks * 2,
+                limit_per_query=max_chunks * 2 * team_multiplier,
                 min_similarity=self.config.min_similarity,
                 workspace_id=workspace_id
             )
@@ -263,7 +267,7 @@ class RAGService:
             # Single query retrieval
             candidates = await self._get_candidates(
                 query,
-                limit=max_chunks * 3,
+                limit=max_chunks * 3 * team_multiplier,
                 min_similarity=self.config.min_similarity,
                 workspace_id=workspace_id
             )
@@ -276,7 +280,19 @@ class RAGService:
                 sources=[],
                 query=query
             )
-        
+
+        # PRD-124: Post-retrieval team filtering via PostgreSQL
+        if team and workspace_id:
+            candidates = await self._filter_by_team(candidates, team, workspace_id)
+            if not candidates:
+                return RAGResult(
+                    chunks=[],
+                    formatted_context="No relevant context found for your team.",
+                    total_tokens=0,
+                    sources=[],
+                    query=query
+                )
+
         # Optional: Cross-encoder re-ranking for higher precision
         if self.config.enable_reranking:
             candidates = await self._rerank_candidates(query, candidates)
@@ -329,6 +345,67 @@ class RAGService:
         except Exception as e:
             logger.debug(f"Document access tracking failed: {e}")
     
+    async def _filter_by_team(
+        self,
+        candidates: List[Dict],
+        team: str,
+        workspace_id: str,
+    ) -> List[Dict]:
+        """PRD-124: Filter candidates to only include chunks from team-accessible documents.
+
+        Queries PostgreSQL for document IDs where:
+          team_access = '{}' (empty = visible to all) OR team = ANY(team_access)
+        """
+        # Collect unique document IDs from candidates
+        doc_ids: set = set()
+        for c in candidates:
+            meta = c.get("metadata", {})
+            doc_id = meta.get("document_id") or meta.get("doc_id") or meta.get("external_file_id")
+            if doc_id:
+                doc_ids.add(str(doc_id))
+
+        if not doc_ids:
+            return candidates  # No doc IDs to filter — pass through
+
+        try:
+            from core.database.database import SessionLocal
+            from sqlalchemy import text as sa_text
+
+            db = SessionLocal()
+            try:
+                rows = db.execute(
+                    sa_text("""
+                        SELECT id::text FROM documents
+                        WHERE id = ANY(:ids)
+                          AND workspace_id = :ws
+                          AND (team_access = '{}' OR :team = ANY(team_access))
+                    """),
+                    {"ids": list(doc_ids), "ws": workspace_id, "team": team},
+                ).fetchall()
+                allowed_ids = {str(r[0]) for r in rows}
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning(f"Team filtering query failed, passing all candidates: {e}")
+            return candidates
+
+        filtered = [
+            c for c in candidates
+            if str(
+                c.get("metadata", {}).get("document_id")
+                or c.get("metadata", {}).get("doc_id")
+                or c.get("metadata", {}).get("external_file_id")
+                or ""
+            ) in allowed_ids
+            or not (  # Keep candidates without doc ID (shouldn't happen, but safe)
+                c.get("metadata", {}).get("document_id")
+                or c.get("metadata", {}).get("doc_id")
+                or c.get("metadata", {}).get("external_file_id")
+            )
+        ]
+        logger.info(f"PRD-124 team filter: {len(candidates)} → {len(filtered)} candidates (team={team})")
+        return filtered
+
     async def _multi_query_retrieval_with_rrf(
         self,
         queries: List[str],
@@ -429,7 +506,8 @@ class RAGService:
         max_chunks: int = None,
         max_tokens: int = 2000,
         min_similarity: float = 0.5,
-        workspace_id: str = None
+        workspace_id: str = None,
+        team: str = None,
     ) -> RAGResult:
         """Backward-compatible alias for retrieve()."""
         chunks = max_chunks if max_chunks is not None else top_k
@@ -438,7 +516,8 @@ class RAGService:
             max_chunks=chunks,
             max_tokens=max_tokens,
             diversity=0.3,
-            workspace_id=workspace_id
+            workspace_id=workspace_id,
+            team=team,
         )
     
     
