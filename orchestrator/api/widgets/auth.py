@@ -51,6 +51,8 @@ class WidgetAuthContext:
     api_key_id: UUID
     permissions: List[str] = field(default_factory=list)
     default_agent_id: Optional[int] = None
+    # PRD-124: Team lock — scope all requests through this key to a specific team
+    team: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +163,7 @@ async def widget_auth(
             api_key_id=api_key_id,
             permissions=permissions,
             default_agent_id=int(default_agent_id) if default_agent_id else None,
+            team=jwt_payload.get("team"),
         )
         request.state.workspace_id = workspace_id
         request.state.api_key_id = api_key_id
@@ -197,6 +200,7 @@ async def widget_auth(
         api_key_id=api_key_record.id,
         permissions=permissions,
         default_agent_id=api_key_record.default_agent_id,
+        team=getattr(api_key_record, "team", None),
     )
     request.state.workspace_id = api_key_record.workspace_id
     request.state.api_key_id = api_key_record.id

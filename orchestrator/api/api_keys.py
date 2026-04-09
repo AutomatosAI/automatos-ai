@@ -48,6 +48,7 @@ class ApiKeyCreateRequest(BaseModel):
     rate_limit_requests: Optional[int] = Field(None, ge=1, description="Max requests per minute")
     rate_limit_tokens: Optional[int] = Field(None, ge=1, description="Max tokens per minute")
     default_agent_id: Optional[int] = Field(None, description="Lock this key to a specific agent ID")
+    team: Optional[str] = Field(None, max_length=100, description="Lock this key to a specific team for document scoping")
     expires_at: Optional[datetime] = Field(None, description="Expiration timestamp (UTC)")
 
     @field_validator("key_type")
@@ -77,6 +78,7 @@ class ApiKeyCreateResponse(BaseModel):
     rate_limit_requests: Optional[int] = None
     rate_limit_tokens: Optional[int] = None
     default_agent_id: Optional[int] = None
+    team: Optional[str] = None
     expires_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
@@ -92,6 +94,7 @@ class ApiKeyListItem(BaseModel):
     rate_limit_requests: Optional[int] = None
     rate_limit_tokens: Optional[int] = None
     default_agent_id: Optional[int] = None
+    team: Optional[str] = None
     expires_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     last_used_at: Optional[datetime] = None
@@ -134,6 +137,7 @@ async def create_api_key(
         rate_limit_requests=body.rate_limit_requests,
         rate_limit_tokens=body.rate_limit_tokens,
         default_agent_id=body.default_agent_id,
+        team=body.team,
         expires_at=body.expires_at,
     )
 

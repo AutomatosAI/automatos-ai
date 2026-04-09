@@ -135,6 +135,11 @@ async def exchange_session_token(
     if api_key_record.default_agent_id is not None:
         payload["default_agent_id"] = api_key_record.default_agent_id
 
+    # PRD-124: Include team lock in JWT so widget requests are team-scoped
+    api_key_team = getattr(api_key_record, "team", None)
+    if api_key_team:
+        payload["team"] = api_key_team
+
     session_token = jwt.encode(
         payload,
         WIDGET_TOKEN_SECRET,
