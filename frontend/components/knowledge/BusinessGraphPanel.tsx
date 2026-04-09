@@ -111,13 +111,11 @@ export function BusinessGraphPanel() {
   }, [workspaceId, queryClient])
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('[GraphImport] File input changed:', e.target.files?.length, 'files')
+    alert('FILE CHANGE FIRED: ' + (e.target.files?.[0]?.name ?? 'no file'))
     const file = e.target.files?.[0]
     if (file) {
-      console.log('[GraphImport] Selected file:', file.name, file.size)
       handleImport(file)
     }
-    // Reset so same file can be re-selected
     e.target.value = ''
   }, [handleImport])
 
