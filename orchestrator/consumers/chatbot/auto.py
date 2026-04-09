@@ -461,6 +461,28 @@ _PLATFORM_KEYWORDS = {
         "harness runs", "optimization runs", "what has harness done",
         "harness changelog",
     ],
+    # PRD-126: Business Knowledge Graph
+    "platform_query_graph": [
+        "how does", "connected to", "relationship between", "relate to",
+        "end to end", "flow", "process for", "overview of", "map of",
+        "what connects", "trace from", "path between",
+    ],
+    "platform_graph_impact": [
+        "what if we change", "impact of", "what breaks", "affects",
+        "downstream", "upstream", "dependencies of", "depends on",
+        "consequences of", "ripple effect",
+    ],
+    "platform_graph_communities": [
+        "what areas", "departments", "clusters", "domains",
+        "groups of", "categories of", "themes in",
+    ],
+    "platform_graph_neighbors": [
+        "related to", "associated with", "linked to", "touches", "involves",
+    ],
+    "platform_graph_stats": [
+        "graph health", "knowledge coverage", "how complete",
+        "graph size", "how connected",
+    ],
 }
 
 _atom_re = [re.compile(p, re.IGNORECASE) for p in _ATOM_PATTERNS]

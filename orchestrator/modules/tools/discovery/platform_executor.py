@@ -137,6 +137,13 @@ from modules.tools.discovery.handlers_governance import (
     validate_agent_handler,
     check_budget_handler,
 )
+from modules.tools.discovery.handlers_graph import (
+    handle_query_graph,
+    handle_graph_neighbors,
+    handle_graph_communities,
+    handle_graph_impact,
+    handle_graph_stats,
+)
 from modules.tools.discovery.handlers_analytics_enhanced import (
     get_success_rate,
     get_completion_time,
@@ -278,6 +285,12 @@ class PlatformActionExecutor:
             "platform_harness_status": harness_status,
             "platform_harness_trigger": harness_trigger,
             "platform_harness_history": harness_history,
+            # PRD-126: Knowledge Graph
+            "platform_query_graph": handle_query_graph,
+            "platform_graph_neighbors": handle_graph_neighbors,
+            "platform_graph_communities": handle_graph_communities,
+            "platform_graph_impact": handle_graph_impact,
+            "platform_graph_stats": handle_graph_stats,
         }
 
     def _workspace_has_admin_owner(self) -> bool:
@@ -439,6 +452,27 @@ class PlatformActionExecutor:
                     "(missing confirmation requirement). Contact platform admin."
                 ),
             }
+
+        # PRD-124/126: Auto-inject _agent_id for graph tools (team scoping)
+        if action_name.startswith("platform_graph") or action_name == "platform_query_graph":
+            if "_agent_id" not in params:
+                # Resolve agent_id from the active mission or caller context
+                try:
+                    from core.models.orchestration import OrchestrationRun
+                    active_run = (
+                        self.db.query(OrchestrationRun)
+                        .filter(
+                            OrchestrationRun.workspace_id == self.workspace_id,
+                            OrchestrationRun.state == "running",
+                        )
+                        .first()
+                    )
+                    if active_run:
+                        _aid = (active_run.config or {}).get("agent_id")
+                        if _aid:
+                            params = {**params, "_agent_id": int(_aid)}
+                except Exception as e:
+                    logger.debug("[PRD-124] Failed to resolve _agent_id for graph tool: %s", e)
 
         # PRD-108: Auto-inject field_id for field tools from active mission
         if action_name.startswith("platform_field_") and "field_id" not in params:

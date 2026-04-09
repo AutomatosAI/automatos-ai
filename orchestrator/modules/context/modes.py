@@ -40,7 +40,7 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
     ContextMode.CHATBOT: ModeConfig(
         sections=[
             "identity", "onboarding", "skills", "composio", "plugins",
-            "platform_actions", "memory",
+            "platform_actions", "memory", "business_graph",
             "datetime_context", "conversation",
         ],
         tool_loading="filtered",
@@ -53,7 +53,7 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
     ContextMode.TASK_EXECUTION: ModeConfig(
         sections=[
             "identity", "skills", "composio", "plugins",
-            "platform_actions", "memory",
+            "platform_actions", "memory", "business_graph",
             "task_context", "datetime_context", "conversation",
         ],
         tool_loading="full",
