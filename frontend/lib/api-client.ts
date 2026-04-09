@@ -1550,7 +1550,6 @@ class ApiClient {
     return this.request('/api/knowledge/graph/import', {
       method: 'POST',
       body: formData,
-      headers: {}, // Let browser set Content-Type with boundary
     })
   }
 

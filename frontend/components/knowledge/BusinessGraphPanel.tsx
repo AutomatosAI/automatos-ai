@@ -77,28 +77,7 @@ export function BusinessGraphPanel() {
     setImporting(true)
     setImportError(null)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('merge', String(merge))
-
-      const headers: Record<string, string> = {}
-      if (typeof window !== 'undefined') {
-        const wsId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
-        if (wsId) headers['X-Workspace-ID'] = wsId
-      }
-      const token = (apiClient as any).authToken
-      if (token) headers['Authorization'] = `Bearer ${token}`
-
-      const res = await fetch(`${(apiClient as any).baseUrl || ''}/api/knowledge/graph/import`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }))
-        throw new Error(err.detail || 'Import failed')
-      }
-      // Invalidate queries to refresh the graph
+      await apiClient.importBusinessGraph(file, merge)
       queryClient.invalidateQueries({ queryKey: ['business-graph'] })
     } catch (err: any) {
       setImportError(err.message || 'Import failed')
@@ -112,22 +91,7 @@ export function BusinessGraphPanel() {
     setBuilding(true)
     setImportError(null)
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (typeof window !== 'undefined') {
-        const wsId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
-        if (wsId) headers['X-Workspace-ID'] = wsId
-      }
-      const token = (apiClient as any).authToken
-      if (token) headers['Authorization'] = `Bearer ${token}`
-
-      const res = await fetch(`${(apiClient as any).baseUrl || ''}/api/knowledge/graph/build`, {
-        method: 'POST',
-        headers,
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }))
-        throw new Error(err.detail || 'Build failed')
-      }
+      await apiClient.buildBusinessGraph()
       queryClient.invalidateQueries({ queryKey: ['business-graph'] })
     } catch (err: any) {
       setImportError(err.message || 'Build failed')
