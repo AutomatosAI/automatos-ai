@@ -52,7 +52,8 @@ class Action(str, Enum):
     """What Auto should do with this request."""
     RESPOND = "respond"      # Auto responds directly (no delegation)
     DELEGATE = "delegate"    # Route to a single sub-agent
-    WORKFLOW = "workflow"    # Trigger multi-agent workflow
+    WORKFLOW = "workflow"    # DEPRECATED — kept for backward compat parsing
+    MISSION = "mission"      # PRD-125: Complex multi-step → suggest mission to user
 
 
 @dataclass
@@ -665,14 +666,14 @@ Conversation turn: {conversation_length}
 Return ONLY valid JSON:
 {{
   "complexity": "atom|molecule|cell|organ|organism",
-  "action": "respond|delegate|workflow",
+  "action": "respond|delegate|mission",
   "tool_hints": [],
   "needs_memory": false,
   "needs_multi_agent": false,
   "reasoning": "one sentence"
 }}
 
-action mapping: "respond" for atom, "delegate" for molecule/cell, "workflow" for organ/organism.
+action mapping: "respond" for atom, "delegate" for molecule/cell, "mission" for organ/organism.
 tool_hints: short domain keywords like "email", "github", "jira", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
 
         try:
@@ -689,9 +690,13 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
             if json_match:
                 data = json.loads(json_match.group(0))
                 elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+                # PRD-125: Normalize "workflow" → MISSION (backward compat)
+                raw_action = data.get("action", "respond").lower()
+                if raw_action == "workflow":
+                    raw_action = "mission"
                 assessment = ComplexityAssessment(
                     complexity=Complexity(data.get("complexity", "atom").lower()),
-                    action=Action(data.get("action", "respond").lower()),
+                    action=Action(raw_action),
                     reasoning=data.get("reasoning", "LLM classified"),
                     confidence=0.85,
                     needs_memory=data.get("needs_memory", False),
@@ -755,9 +760,13 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
                         "workspace_id": self._workspace_id,
                     },
                 )
+                # PRD-125: Normalize cached "workflow" → "mission"
+                cached_action = data["action"]
+                if cached_action == "workflow":
+                    cached_action = "mission"
                 return ComplexityAssessment(
                     complexity=Complexity(data["complexity"]),
-                    action=Action(data["action"]),
+                    action=Action(cached_action),
                     reasoning=data.get("reasoning", "cached") + " (cached)",
                     confidence=data.get("confidence", 0.90),
                     needs_memory=data.get("needs_memory", False),

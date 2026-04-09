@@ -149,23 +149,32 @@ async def _stream_workflow_bridge(
         })
         await asyncio.sleep(0)
 
-        # 5. Kick off execution in background
+        # 5. Execute workflow with timeout (PRD-125: safety net — no more fire-and-forget)
         from api.workflows import execute_workflow_with_progress
 
-        async def _run_workflow():
-            try:
-                await execute_workflow_with_progress(execution.id, {})
-            except Exception as e:
-                logger.error(f"[PRD-68] Workflow execution failed: {e}", exc_info=True)
-
-        asyncio.create_task(_run_workflow())
-
-        # 6. Stream workflow events as AI SDK format back to chat
-        # Small delay to let the workflow register with the stream manager
-        await asyncio.sleep(0.3)
-
-        async for chunk in stream_workflow_as_aisdk(execution.id):
-            yield chunk
+        try:
+            await asyncio.wait_for(
+                execute_workflow_with_progress(execution.id, {}),
+                timeout=120,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"[PRD-68] Workflow execution timed out after 120s for execution_id={execution.id}")
+            yield streaming_service.streaming_handler.format_aisdk_data({
+                "type": "workflow-update",
+                "status": "error",
+                "error": "Workflow execution timed out after 2 minutes",
+            })
+            yield f'e:{json.dumps({"message": "Workflow execution timed out"})}\n'
+            return
+        except Exception as exec_err:
+            logger.error(f"[PRD-68] Workflow execution failed: {exec_err}", exc_info=True)
+            yield streaming_service.streaming_handler.format_aisdk_data({
+                "type": "workflow-update",
+                "status": "error",
+                "error": str(exec_err)[:500],
+            })
+            yield f'e:{json.dumps({"message": str(exec_err)[:200]})}\n'
+            return
 
         # 7. Save the workflow result as an assistant message in the chat
         db.refresh(execution)
@@ -426,7 +435,8 @@ async def stream_chat(
     routing_request_id = None
     use_system_llm = False  # True = use orchestrator LLM settings, not agent's model
     complexity_assessment = None
-    _use_workflow_bridge = False  # PRD-68: True when ORGAN/ORGANISM triggers workflow
+    _use_workflow_bridge = False  # PRD-68: DEPRECATED — kept for safety net only
+    _suggest_mission = False     # PRD-125: True when ORGAN/ORGANISM → suggest mission
 
     # PRD-67: Admin persona is CTO Agent (Auto with elevated access).
     # AutoBrain + Router run for ALL users — the CTO agent is the fallback
@@ -476,16 +486,15 @@ async def stream_chat(
                     f"[Auto] Direct response (complexity={complexity_assessment.complexity.value}): "
                     f"agent_id={effective_agent_id} with orchestrator LLM"
                 )
-        elif complexity_assessment.action == Action.WORKFLOW:
-            # PRD-68 Phase 2: ORGAN/ORGANISM → workflow execution via chat.
-            # Create transient workflow, execute through PRD-59 pipeline,
-            # stream stage events as AI SDK format back to chat.
+        elif complexity_assessment.action == Action.MISSION:
+            # PRD-125: Complex task detected — suggest mission to user,
+            # but still delegate to a single agent for an immediate response.
             logger.info(
-                f"[Auto] WORKFLOW detected (complexity={complexity_assessment.complexity.value})"
+                f"[Auto] MISSION suggested (complexity={complexity_assessment.complexity.value})"
             )
-            _use_workflow_bridge = True
+            _suggest_mission = True
 
-        if complexity_assessment.action in (Action.DELEGATE, Action.WORKFLOW):
+        if complexity_assessment.action in (Action.DELEGATE, Action.MISSION):
             # Universal Router picks the right specialized agent.
             try:
                 ingestor = ChatbotIngestor()
@@ -561,33 +570,35 @@ async def stream_chat(
     )
 
     async def _guarded_stream():
+        import json as _json
+
         async with session_queue.acquire(session_key):
-            if _use_workflow_bridge:
-                # PRD-68 Phase 2: Stream workflow execution as AI SDK events
-                async for chunk in _stream_workflow_bridge(
-                    db=db,
-                    chat_id=chat_id,
-                    message_text=message_text,
-                    workspace_id=ctx.workspace_id,
-                    agent_id=effective_agent_id,
-                    user_id=user_id,
-                    streaming_service=streaming_service,
-                    complexity_assessment=complexity_assessment,
-                ):
-                    yield chunk
-            else:
-                async for chunk in streaming_service.stream_response_with_agent(
-                    chat_id=chat_id,
-                    messages=message_history,
-                    agent_id=effective_agent_id,
-                    user_id=user_id,
-                    use_system_llm=use_system_llm,
-                    skip_composio=_skip_composio,
-                    complexity_assessment=complexity_assessment,
-                    mission_mode=bool(request.missionMode),
-                    plan_mode=bool(request.planMode),
-                ):
-                    yield chunk
+            # PRD-125: Emit mission suggestion data event (for frontend to render card)
+            if _suggest_mission:
+                suggestion_event = streaming_service.streaming_handler.format_aisdk_data(
+                    "mission-suggestion",
+                    {
+                        "goal": message_text,
+                        "complexity": complexity_assessment.complexity.value if complexity_assessment else "organ",
+                        "agent_id": effective_agent_id,
+                    },
+                )
+                yield suggestion_event
+
+            # Normal agent streaming (RESPOND, DELEGATE, or MISSION fallback)
+            async for chunk in streaming_service.stream_response_with_agent(
+                chat_id=chat_id,
+                messages=message_history,
+                agent_id=effective_agent_id,
+                user_id=user_id,
+                use_system_llm=use_system_llm,
+                skip_composio=_skip_composio,
+                complexity_assessment=complexity_assessment,
+                mission_mode=bool(request.missionMode),
+                plan_mode=bool(request.planMode),
+                suggest_mission=_suggest_mission,
+            ):
+                yield chunk
 
     return StreamingResponse(
         _guarded_stream(),

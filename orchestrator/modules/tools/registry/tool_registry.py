@@ -404,9 +404,11 @@ class ToolRegistry:
             name="search_knowledge",
             category=ToolCategory.RESEARCH,
             description=(
-                "Search the Automatos knowledge base for documentation, guides, and information about the platform. "
-                "NOTE: This tool has a 2-attempt limit. If results are insufficient, try a different search query "
-                "rather than repeating the same query. Do NOT call multiple times with similar queries."
+                "Search INTERNAL workspace knowledge base — uploaded documents, guides, PDFs, and ingested files. "
+                "Returns only content that was previously uploaded to this workspace. "
+                "IMPORTANT: For live/current information, competitor research, market data, or anything NOT in your "
+                "uploaded documents, use web search tools (TAVILY_SEARCH, COMPOSIO_SEARCH_WEB) instead. "
+                "This tool searches local docs only. 2-attempt limit — vary your query if first attempt misses."
             ),
             executor_class="AgentPlatformTools",
             executor_method="execute_tool",
@@ -435,7 +437,11 @@ class ToolRegistry:
         self.register_tool(ToolSpec(
             name="semantic_search",
             category=ToolCategory.RESEARCH,
-            description="Find semantically similar content across all platform documents using vector embeddings",
+            description=(
+                "Find semantically similar content across all INTERNAL workspace documents using vector embeddings. "
+                "Better than search_knowledge for concept-based queries where exact keywords may not match. "
+                "Searches uploaded documents only — for external/live data, use web search tools instead."
+            ),
             executor_class="AgentPlatformTools",
             executor_method="execute_tool",
             parameters=[
@@ -463,7 +469,11 @@ class ToolRegistry:
         self.register_tool(ToolSpec(
             name="search_codebase",
             category=ToolCategory.RESEARCH,
-            description="Search indexed codebases for functions, classes, and implementations",
+            description=(
+                "Search INTERNAL indexed codebases for functions, classes, and implementations. "
+                "Only searches code previously ingested into the workspace via CodeGraph. "
+                "For searching public repos or code on the internet, use web search tools instead."
+            ),
             executor_class="AgentPlatformTools",
             executor_method="execute_tool",
             parameters=[
@@ -503,7 +513,11 @@ class ToolRegistry:
         self.register_tool(ToolSpec(
             name="search_tables",
             category=ToolCategory.RESEARCH,
-            description="Search for tables and structured data extracted from documents. Returns tables with preserved structure in Markdown, CSV, and JSON formats",
+            description=(
+                "Search for tables and structured data extracted from UPLOADED documents. "
+                "Returns tables with preserved structure in Markdown, CSV, and JSON formats. "
+                "Only finds tables from documents already in the workspace knowledge base."
+            ),
             executor_class="MultimodalKnowledgeTools",
             executor_method="search_tables",
             parameters=[
@@ -532,7 +546,11 @@ class ToolRegistry:
         self.register_tool(ToolSpec(
             name="search_images",
             category=ToolCategory.RESEARCH,
-            description="Search for images, diagrams, and charts with AI-generated descriptions and OCR text. Useful for finding architecture diagrams, flowcharts, screenshots",
+            description=(
+                "Search for images, diagrams, and charts extracted from UPLOADED documents. "
+                "Matches against AI-generated descriptions and OCR text. "
+                "Useful for finding architecture diagrams, flowcharts, and screenshots from workspace docs."
+            ),
             executor_class="MultimodalKnowledgeTools",
             executor_method="search_images",
             parameters=[
@@ -561,7 +579,11 @@ class ToolRegistry:
         self.register_tool(ToolSpec(
             name="search_formulas",
             category=ToolCategory.RESEARCH,
-            description="Search for mathematical formulas and equations. Returns LaTeX format with variable and operator extraction",
+            description=(
+                "Search for mathematical formulas and equations extracted from UPLOADED documents. "
+                "Returns LaTeX format with variable and operator extraction. "
+                "Only finds formulas from documents already in the workspace knowledge base."
+            ),
             executor_class="MultimodalKnowledgeTools",
             executor_method="search_formulas",
             parameters=[
@@ -590,7 +612,11 @@ class ToolRegistry:
         self.register_tool(ToolSpec(
             name="search_multimodal",
             category=ToolCategory.RESEARCH,
-            description="Unified search across ALL knowledge types: documents, code, tables, images, formulas. Use this for comprehensive research when you need multiple content types",
+            description=(
+                "Unified search across ALL INTERNAL knowledge types: documents, code, tables, images, formulas. "
+                "Use this for comprehensive research across the workspace when you need multiple content types at once. "
+                "Searches uploaded/ingested content only — for external research, use web search tools."
+            ),
             executor_class="MultimodalKnowledgeTools",
             executor_method="search_multimodal",
             parameters=[
@@ -630,7 +656,12 @@ class ToolRegistry:
         self.register_tool(ToolSpec(
             name="query_database",
             category=ToolCategory.DATABASE_TOOLS,
-            description="Query databases using natural language. Converts your question to SQL and executes it against knowledge sources or the main Automatos database. Can also generate charts and insights via PandasAI.",
+            description=(
+                "Query CONNECTED databases using natural language. Converts your question to SQL and executes it "
+                "against knowledge sources or the main Automatos database. Can generate charts via PandasAI. "
+                "Use for structured data questions (counts, trends, metrics). For document content, use search_knowledge instead. "
+                "For live internet data, use web search tools."
+            ),
             executor_class="UnifiedToolExecutor",
             executor_method="_execute_database_tool",
             parameters=[
@@ -666,15 +697,11 @@ class ToolRegistry:
         self.register_tool(ToolSpec(
             name="smart_query_database",
             category=ToolCategory.DATABASE_TOOLS,
-            description="""Intelligent database query with advanced features:
-- Query Clarification: Asks for more details when query is ambiguous
-- Query Rephrasing: Improves vague queries for better SQL generation
-- Result Explanation: Explains what the data means in plain English
-- Visualization Suggestions: Recommends chart types based on data
-- Multi-turn Support: Maintains conversation context
-
-Use this for complex queries or when you want AI-powered assistance.
-IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT retry with the same query.""",
+            description=(
+                "Advanced database query with AI-powered clarification, rephrasing, explanation, and visualization. "
+                "PREFER this over query_database for complex or ambiguous questions — it asks follow-ups and explains results. "
+                "Use query_database for simple, direct queries. 2-attempt limit per turn — do NOT retry identical queries."
+            ),
             executor_class="UnifiedToolExecutor",
             executor_method="_execute_smart_database_tool",
             parameters=[
@@ -735,7 +762,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
         self.register_tool(ToolSpec(
             name="read_file",
             category=ToolCategory.FILE_OPERATIONS,
-            description="Read contents of a file from the workspace",
+            description=(
+                "Read contents of a file from the agent workspace filesystem. "
+                "Returns the raw file content. Use list_directory first if you need to find the file path. "
+                "For searching across document CONTENT, use search_knowledge instead."
+            ),
             executor_class="ActionExecutor",
             executor_method="read_file",
             parameters=[
@@ -763,7 +794,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
         self.register_tool(ToolSpec(
             name="write_file",
             category=ToolCategory.FILE_OPERATIONS,
-            description="Write content to a file in the workspace (creates file if it doesn't exist)",
+            description=(
+                "Write content to a file in the agent workspace (creates file if it doesn't exist, overwrites if it does). "
+                "Use for saving reports, analysis outputs, code, or any deliverable. "
+                "For polished documents (PDF/DOCX/XLSX), use generate_document instead."
+            ),
             executor_class="ActionExecutor",
             executor_method="write_file",
             parameters=[
@@ -797,7 +832,10 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
         self.register_tool(ToolSpec(
             name="delete_file",
             category=ToolCategory.FILE_OPERATIONS,
-            description="Delete a file or directory from the workspace",
+            description=(
+                "Permanently delete a file or directory from the agent workspace. Cannot be undone. "
+                "Use only when explicitly asked to remove a file."
+            ),
             executor_class="ActionExecutor",
             executor_method="delete_file",
             parameters=[
@@ -818,7 +856,10 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
         self.register_tool(ToolSpec(
             name="list_directory",
             category=ToolCategory.FILE_OPERATIONS,
-            description="List contents of a directory in the workspace",
+            description=(
+                "List files and subdirectories in a workspace directory. "
+                "Use to discover available files before reading them with read_file."
+            ),
             executor_class="ActionExecutor",
             executor_method="list_directory",
             parameters=[
@@ -840,7 +881,7 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
         self.register_tool(ToolSpec(
             name="create_directory",
             category=ToolCategory.FILE_OPERATIONS,
-            description="Create a new directory in the workspace",
+            description="Create a new directory in the agent workspace. Creates parent directories if needed.",
             executor_class="ActionExecutor",
             executor_method="create_directory",
             parameters=[
@@ -865,7 +906,12 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
         self.register_tool(ToolSpec(
             name="execute_command",
             category=ToolCategory.SHELL_COMMANDS,
-            description="Execute a shell command in the sandboxed workspace (whitelisted commands only)",
+            description=(
+                "Execute a shell command in the sandboxed agent workspace. "
+                "RESTRICTED to whitelisted commands only: ls, cat, grep, find, git, python, npm, docker. "
+                "Use for running scripts, git operations, or build commands. "
+                "For remote server commands, use ssh_execute instead."
+            ),
             executor_class="ActionExecutor",
             executor_method="execute_command",
             parameters=[
@@ -904,10 +950,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             name="http_request",
             category=ToolCategory.API_TOOLS,
             description=(
-                f"Make HTTP requests to whitelisted internal and platform URLs. "
-                f"Use this to test API endpoints, check health status, and verify responses. "
-                f"Only allowed domains: {config.INTERNAL_API_HOSTNAME}, {config.INTERNAL_FRONTEND_HOSTNAME}, "
-                f"api.automatos.app, ui.automatos.app, localhost."
+                f"Make HTTP requests to INTERNAL platform URLs only. "
+                f"Use for testing API endpoints, checking health status, and verifying responses. "
+                f"RESTRICTED to whitelisted domains: {config.INTERNAL_API_HOSTNAME}, {config.INTERNAL_FRONTEND_HOSTNAME}, "
+                f"api.automatos.app, ui.automatos.app, localhost. "
+                f"Will FAIL on external URLs. For external web requests, use web search tools or Composio actions."
             ),
             executor_class="UnifiedToolExecutor",
             executor_method="_execute_http_request",
@@ -977,10 +1024,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             name="ssh_execute",
             category=ToolCategory.SSH_TOOLS,
             description=(
-                "Execute commands on a remote server via SSH. "
-                "Use this to clone repositories, run tests, check server status, etc. "
+                "Execute commands on a REMOTE server via SSH. "
+                "Use for cloning repositories, running tests, deploying, or checking remote server status. "
                 "Requires SSH credentials (host, username, and either password or private key). "
-                "Commands run in a non-interactive shell with configurable timeout."
+                "For LOCAL workspace commands, use execute_command instead. "
+                "Commands run in a non-interactive shell. Timeout default: 60s, max: 300s."
             ),
             executor_class="UnifiedToolExecutor",
             executor_method="_execute_ssh",
@@ -1060,10 +1108,12 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                 name="composio_execute",
                 category=ToolCategory.API_TOOLS,
                 description=(
-                    "Execute an external app action via Composio (connected third-party apps). "
-                    "Use this for actions in email/messaging and developer tools. "
-                    "IMPORTANT: Action-specific parameters (e.g. issue_key, channel, text) "
-                    "MUST go inside the `params` object, NOT at the top level."
+                    "Execute any action across 1000+ external app integrations via Composio — "
+                    "web search, email, messaging, GitHub, CRM, calendars, databases, and more. "
+                    "If your tool list includes per-action tools (with typed parameters), prefer those "
+                    "for accuracy. Use composio_execute for any action not already in your tool list. "
+                    "Check platform_list_connected_apps to see what's available. "
+                    "IMPORTANT: action-specific parameters MUST go inside the `params` object, NOT at the top level."
                 ),
                 executor_class="ComposioToolExecutor",
                 executor_method="execute",
@@ -1115,10 +1165,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             name="generate_document",
             category=ToolCategory.FILE_OPERATIONS,
             description=(
-                "Generate a polished PDF, DOCX, or XLSX document. "
-                "IMPORTANT: You MUST provide the 'data' parameter with actual written content — "
-                "the document will be blank without it. For PDFs, include 'sections' with full paragraphs. "
-                "Returns a download URL for the generated file."
+                "Generate a polished PDF, DOCX, or XLSX document for download. "
+                "PREFER this over write_file when the user needs a formatted, downloadable document. "
+                "WILL produce a BLANK document if you omit the 'data' parameter — you MUST include "
+                "actual written content. For PDFs, include 'sections' with full paragraphs. "
+                "Returns a download URL."
             ),
             executor_class="AgentPlatformTools",
             executor_method="execute_tool",

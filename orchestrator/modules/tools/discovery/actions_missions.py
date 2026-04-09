@@ -9,11 +9,10 @@ def register_mission_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_create_mission",
         description=(
-            "Launch a mission — a multi-agent, multi-step autonomous workflow. "
-            "The mission coordinator decomposes the goal into tasks, assigns agents, "
-            "runs research/writing/editing steps, and delivers results to the workspace. "
-            "Use this for complex work that requires multiple agents collaborating: "
-            "deep research, content creation, code generation, audits, etc."
+            "Launch an autonomous multi-agent mission. The coordinator decomposes the "
+            "goal into tasks, assigns agents, and orchestrates execution. "
+            "Use for complex work requiring multiple agents: research, content creation, "
+            "code generation, audits. For single-agent tasks, use platform_create_task instead."
         ),
         category="missions",
         parameters={
@@ -53,9 +52,9 @@ def register_mission_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_missions",
         description=(
-            "List recent missions in the workspace. Returns mission ID, goal, "
-            "state (pending/planning/running/completed/failed), created date, "
-            "and task count. Use to check mission status or find past missions."
+            "List recent missions with ID, goal, state (pending/planning/running/"
+            "completed/failed), and task count. Use to check status or find past missions. "
+            "For full details of one mission, use platform_get_mission instead."
         ),
         category="missions",
         parameters={
@@ -86,8 +85,8 @@ def register_mission_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_mission",
         description=(
-            "Get full details of a specific mission by ID. Returns goal, state, "
-            "plan (task DAG), task statuses, results, and timing info."
+            "Get full details of ONE mission — goal, state, task DAG, step results, "
+            "and timing. For listing all missions, use platform_list_missions instead."
         ),
         category="missions",
         parameters={

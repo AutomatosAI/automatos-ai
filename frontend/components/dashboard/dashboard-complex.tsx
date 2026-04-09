@@ -336,7 +336,7 @@ export function Dashboard() {
               <GitBranch className="w-8 h-8 text-primary" />
               <Clock className="w-5 h-5 text-primary" />
             </div>
-            <h3 className="text-lg font-semibold text-card-foreground mb-2">Workflows</h3>
+            <h3 className="text-lg font-semibold text-card-foreground mb-2">Missions</h3>
             <p className="text-3xl font-bold text-primary">
               {data?.workflowMetrics?.completedWorkflows || 0}
             </p>

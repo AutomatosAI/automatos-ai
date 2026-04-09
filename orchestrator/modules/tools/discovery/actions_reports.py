@@ -9,10 +9,10 @@ def register_report_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_submit_report",
         description=(
-            "Submit a report after completing a task or heartbeat cycle. Writes the "
-            "report file to workspace storage and records metadata for tracking. "
-            "Call this after every heartbeat run, research completion, or deliverable. "
-            "The report will be visible on the Activity page and the agent's profile."
+            "Save a structured report after completing work — research, heartbeat, "
+            "audit, or deliverable. The report is stored persistently in the workspace "
+            "and visible on the Activity page and agent profile. ALWAYS submit a report "
+            "after finishing significant work. For ephemeral notes, use write_file instead."
         ),
         category="reports",
         parameters={
@@ -78,9 +78,9 @@ def register_report_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_latest_report",
         description=(
-            "Get the most recent report from a specific agent. Returns the report "
-            "metadata and full content. Use to read another agent's latest output "
-            "before taking action (e.g. reading research before sending a newsletter)."
+            "Read the most recent report from a specific agent. Use to check another "
+            "agent's latest output before taking action (e.g. reading research before "
+            "writing a newsletter). For historical reports, this returns only the latest one."
         ),
         category="reports",
         parameters={

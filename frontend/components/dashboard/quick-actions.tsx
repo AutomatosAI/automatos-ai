@@ -31,10 +31,10 @@ const actions = [
     type: 'link'
   },
   {
-    label: 'Start Workflow',
+    label: 'Start Mission',
     href: '/activity',
     icon: Play,
-    description: 'View activity and recipes',
+    description: 'Launch a new mission',
     type: 'link'
   },
   {

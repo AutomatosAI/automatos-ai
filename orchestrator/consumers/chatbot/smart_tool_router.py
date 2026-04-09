@@ -77,6 +77,10 @@ class SmartToolRouter:
         "data": ["query_database", "smart_query_database", "sql_query"],
         "search": ["search_knowledge", "semantic_search", "search_codebase", "search_multimodal",
                     "search_tables", "search_images", "search_formulas"],
+        "web_search": [
+            "TAVILY_TAVILY_SEARCH", "COMPOSIO_SEARCH_FETCH_URL_CONTENT",
+            "COMPOSIO_SEARCH_SEC_FILINGS", "composio_execute",
+        ],
         "files": ["read_file", "write_file", "list_directory", "create_directory", "delete_file"],
         "external": ["composio_execute", "composio_actions"],
         "creation": ["write_file", "create_directory", "generate_document"],
@@ -106,12 +110,12 @@ class SmartToolRouter:
 
     # Intent to tool category mapping
     INTENT_TO_TOOLS = {
-        Intent.DATA_QUERY: ["data", "search", "fields"],
-        Intent.SEARCH: ["search", "code", "memory"],
-        Intent.EXTERNAL_ACTION: ["external", "document", "platform_management"],
+        Intent.DATA_QUERY: ["data", "search", "web_search", "fields"],
+        Intent.SEARCH: ["search", "web_search", "code", "memory"],
+        Intent.EXTERNAL_ACTION: ["external", "web_search", "document", "platform_management"],
         Intent.CREATION: ["files", "creation", "document", "external", "platform_management"],
         Intent.MULTI_STEP: [
-            "data", "search", "files", "external", "document", "code",
+            "data", "search", "web_search", "files", "external", "document", "code",
             "platform_management", "marketplace", "monitoring", "memory", "fields",
         ],
         Intent.MEMORY_RECALL: ["memory"],  # Memory tools for recall intents

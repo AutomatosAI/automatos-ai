@@ -40,6 +40,7 @@ import { PinAgentPicker } from '@/components/chatbot/pin-agent-picker'
 import { usePinnedAgents } from '@/hooks/use-pinned-agents'
 import { useAgents } from '@/hooks/use-agent-api'
 import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
+import { MissionSuggestionCard } from '@/components/chatbot/mission-suggestion-card'
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 
 export interface ChatProps {
@@ -134,6 +135,13 @@ export function Chat({
   // Plan → Mission launch state
   const [planMissionModalOpen, setPlanMissionModalOpen] = useState(false)
   const [planMissionContent, setPlanMissionContent] = useState<{ goal: string; description: string } | null>(null)
+
+  // PRD-125 Phase 1: Mission suggestion from AutoBrain complexity detection
+  const [missionSuggestion, setMissionSuggestion] = useState<{
+    goal: string
+    complexity: string
+    agentId?: number | string
+  } | null>(null)
 
   const handleLaunchPlanAsMission = useCallback((content: string) => {
     // Extract first 2-3 sentences as goal, full content as description
@@ -417,6 +425,15 @@ export function Chat({
       if (dataPart.type === 'workflow-update' && dataPart.data) {
         dispatchWorkflowUpdate(dataPart.data)
       }
+
+      // PRD-125 Phase 1: Mission suggestion from AutoBrain
+      if (dataPart.type === 'mission-suggestion' && dataPart.data) {
+        setMissionSuggestion({
+          goal: dataPart.data.goal,
+          complexity: dataPart.data.complexity,
+          agentId: dataPart.data.agent_id,
+        })
+      }
     },
     onChatIdUpdate: (newChatId) => {
       setActiveChatId(newChatId)
@@ -461,6 +478,9 @@ export function Chat({
   // PRD-82A US-008: Handle /mission slash command + US-003: Mission mode intercept
   const handleSendMessage = useCallback(
     (message: any) => {
+      // PRD-125: Clear stale mission suggestion on new message
+      setMissionSuggestion(null)
+
       const text = typeof message === 'string' ? message : message?.content
       const trimmedText = text?.trim() ?? ''
 
@@ -834,6 +854,23 @@ export function Chat({
                         />
                       ))}
 
+                      {/* PRD-125 Phase 1: Mission suggestion card */}
+                      {missionSuggestion && !activePlanningMissionId && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          <MissionSuggestionCard
+                            goal={missionSuggestion.goal}
+                            complexity={missionSuggestion.complexity}
+                            agentId={missionSuggestion.agentId}
+                            chatId={id}
+                            recentMessages={messages.slice(-5).map(m => ({ role: m.role, content: m.content }))}
+                          />
+                        </motion.div>
+                      )}
+
                       {/* PRD-82A: Inline mission card after creation */}
                       {activePlanningMissionId && (
                         <motion.div
@@ -1140,6 +1177,23 @@ export function Chat({
                 </AnimatePresence>
 
                 {/* Typing indicator removed: we show "Thinking…" on the streaming message */}
+
+                {/* PRD-125 Phase 1: Mission suggestion card */}
+                {missionSuggestion && !activePlanningMissionId && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <MissionSuggestionCard
+                      goal={missionSuggestion.goal}
+                      complexity={missionSuggestion.complexity}
+                      agentId={missionSuggestion.agentId}
+                      chatId={id}
+                      recentMessages={messages.slice(-5).map(m => ({ role: m.role, content: m.content }))}
+                    />
+                  </motion.div>
+                )}
 
                 {/* PRD-82A: Inline mission card after creation */}
                 {activePlanningMissionId && (

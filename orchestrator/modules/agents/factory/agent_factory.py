@@ -1125,7 +1125,51 @@ class AgentFactory:
         original_user_prompt: str,
         workspace_id: Optional[Any],
     ):
-        """Inject Composio hints via hint service (default/chatbot path)."""
+        """Inject Composio per-action tools (primary) or hint fallback.
+
+        Primary: ComposioToolService returns per-action OpenAI function schemas
+        (e.g. TAVILY_SEARCH with typed params). Strips composio_execute and
+        replaces with per-action tools.
+
+        Fallback: ComposioHintService injects action names as system prompt
+        hints and constrains composio_execute's action enum.
+        """
+        try:
+            from modules.tools.services.composio_tool_service import ComposioToolService
+
+            composio_svc = ComposioToolService(self.db_session)
+            composio_result = composio_svc.get_tools_for_step(
+                agent_id=agent_runtime.agent_id,
+                workspace_id=workspace_id,
+                task_prompt=original_user_prompt,
+            )
+
+            if composio_result and composio_result.tools:
+                # Strip composio_execute, add per-action schemas
+                tool_schemas[:] = [
+                    t for t in tool_schemas
+                    if t.get("function", {}).get("name") != "composio_execute"
+                ] + composio_result.tools
+
+                # Add scope message so the LLM knows which apps are available
+                from api.recipe_executor import _composio_scope_message
+                insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+                messages.insert(insert_at, {
+                    "role": "system",
+                    "content": _composio_scope_message(composio_result.app_names),
+                })
+
+                self.logger.info(
+                    f"Composio (per-action): strategy={composio_result.strategy} "
+                    f"actions={len(composio_result.action_set)} "
+                    f"search_ms={composio_result.search_ms}"
+                )
+                return
+
+        except Exception as e:
+            self.logger.warning(f"ComposioToolService failed, falling back to hints: {e}")
+
+        # Fallback: hint-based injection
         try:
             from modules.tools.services.composio_hint_service import ComposioHintService
 
@@ -1150,13 +1194,10 @@ class AgentFactory:
                         }
                         break
 
-            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
-            app_names = [t.get("name") for t in composio_apps]
             self.logger.info(
-                f"Composio: hints={len(hint_result.hint_lines)} lines, "
-                f"strategy={hint_result.strategy_used}, "
+                f"Composio (hints fallback): strategy={hint_result.strategy_used}, "
                 f"constrained_actions={len(hint_result.matched_actions)}, "
-                f"apps={app_names}"
+                f"apps={hint_result.allowed_apps}"
             )
         except Exception as e:
             self.logger.warning(f"Failed to inject Composio hints: {e}")

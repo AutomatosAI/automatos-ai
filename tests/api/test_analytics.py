@@ -12,8 +12,9 @@ def test_memory_stats(client):
 
 
 def test_agent_performance(client):
+    """Endpoint removed in PRD-125 Phase 3 — verify it returns 404/405."""
     r = client.get("/analytics/agents/performance")
-    assert r.status_code == 200
+    assert r.status_code in (404, 405, 410)
 
 
 def test_system_settings(client):

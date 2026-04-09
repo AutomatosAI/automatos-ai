@@ -56,11 +56,13 @@ export function useAnalyticsOverview(days: number = 30) {
           return fallback
         })
 
-      const [agents, llmSummary, workflowStats, docStats] = await Promise.all([
+      const [agents, llmSummary, workflowStats, docStats, missionStats] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
         safeRequest(() => apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`), null),
         safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
         safeRequest(() => apiClient.getAnalyticsOverview(), null),
+        // PRD-125 Phase 2: Fetch mission stats alongside workflow stats
+        safeRequest(() => apiClient.request<any>(`/api/missions/stats?period=${period}`), null),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
@@ -79,6 +81,14 @@ export function useAnalyticsOverview(days: number = 30) {
           total: (workflowStats as any)?.overview?.total_workflows || 0,
           active: (workflowStats as any)?.overview?.running_executions || 0,
           successRate: (workflowStats as any)?.today?.success_rate_today || 0,
+        },
+        // PRD-125 Phase 2: Mission stats
+        missions: {
+          total: (missionStats as any)?.total_missions || 0,
+          completed: Math.round(((missionStats as any)?.total_missions || 0) * ((missionStats as any)?.success_rate || 0)),
+          successRate: ((missionStats as any)?.success_rate || 0) * 100,
+          avgDurationMinutes: (missionStats as any)?.avg_duration_minutes || null,
+          avgTokensUsed: (missionStats as any)?.avg_tokens_used || 0,
         },
         documents: {
           total: (docStats as any)?.total_documents || 0,
@@ -179,14 +189,57 @@ export function useWorkflowAnalytics(days: number = 30) {
           return fallback
         })
 
-      const [workflows, stats, recipesResp, recipeStats] = await Promise.all([
+      const period = days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
+
+      const [workflows, stats, recipesResp, recipeStats, missionsResp, missionStats] = await Promise.all([
         safeRequest(() => apiClient.getWorkflows(), []),
         safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
         safeRequest(() => apiClient.listWorkflowRecipes({ limit: 100 }), null),
         safeRequest(() => apiClient.request<any>('/api/workflow-recipes/stats/dashboard'), null),
+        safeRequest(() => apiClient.request<any>(`/api/missions?limit=100`), null),
+        safeRequest(() => apiClient.request<any>(`/api/missions/stats?period=${period}`), null),
       ])
 
       const workflowList = Array.isArray(workflows) ? workflows : []
+
+      // Normalize missions into same shape as workflows for the table
+      const missionList = (missionsResp?.missions || []).map((m: any) => {
+        const isCompleted = m.state === 'completed'
+        const isFailed = m.state === 'failed'
+        const durationMs = m.started_at && m.completed_at
+          ? new Date(m.completed_at).getTime() - new Date(m.started_at).getTime()
+          : 0
+        const durationStr = durationMs > 0 ? `${Math.round(durationMs / 1000)}s` : '0s'
+        return {
+          id: `mission-${m.id}`,
+          name: m.goal || 'Untitled Mission',
+          status: m.state,
+          totalRuns: 1,
+          successRate: isCompleted ? 100 : isFailed ? 0 : -1,
+          avgDuration: durationStr,
+          tokensUsed: m.tokens_used || 0,
+          cost: 0,
+          lastRun: m.completed_at || m.started_at || m.created_at,
+          source: 'mission' as const,
+        }
+      })
+
+      // Combine both sources
+      const combined = [
+        ...workflowList.map((wf: any) => ({
+          id: wf.id,
+          name: wf.name,
+          status: wf.status,
+          totalRuns: wf.execution_count || 0,
+          successRate: wf.success_rate || 0,
+          avgDuration: wf.avg_duration || '0s',
+          tokensUsed: wf.total_tokens || 0,
+          cost: wf.total_cost || 0,
+          lastRun: wf.last_executed_at || wf.updated_at,
+          source: 'workflow' as const,
+        })),
+        ...missionList,
+      ]
 
       // Normalize recipes
       const rawRecipes = (recipesResp as any)?.items || (Array.isArray(recipesResp) ? recipesResp : [])
@@ -214,23 +267,21 @@ export function useWorkflowAnalytics(days: number = 30) {
         statusBreakdown: recipeStats?.status_breakdown ?? null,
       }
 
+      const totalItems = combined.length
+      const missionSuccessRate = missionStats?.success_rate ?? 0
+      const legacySuccessRate = (stats as any)?.today?.success_rate_today || 0
+      const blendedSuccessRate = missionList.length > 0 && workflowList.length > 0
+        ? (legacySuccessRate * workflowList.length + missionSuccessRate * missionList.length) / totalItems
+        : missionList.length > 0 ? missionSuccessRate : legacySuccessRate
+
       return {
-        workflows: workflowList.map((wf: any) => ({
-          id: wf.id,
-          name: wf.name,
-          status: wf.status,
-          totalRuns: wf.execution_count || 0,
-          successRate: wf.success_rate || 0,
-          avgDuration: wf.avg_duration || '0s',
-          tokensUsed: wf.total_tokens || 0,
-          cost: wf.total_cost || 0,
-          lastRun: wf.last_executed_at || wf.updated_at,
-        })),
+        workflows: combined,
         summary: {
-          totalWorkflows: workflowList.length,
-          totalExecutions: (stats as any)?.overview?.total_executions || 0,
-          successRate: (stats as any)?.today?.success_rate_today || 0,
+          totalWorkflows: totalItems,
+          totalExecutions: ((stats as any)?.overview?.total_executions || 0) + (missionStats?.total_missions || 0),
+          successRate: blendedSuccessRate,
           avgDuration: (stats as any)?.today?.avg_duration_today || '0s',
+          sources: { workflows: workflowList.length, missions: missionList.length },
         },
         stats,
         recipes,
@@ -405,14 +456,14 @@ export function usePlanUsage() {
     queryKey: unifiedAnalyticsKeys.planUsage(),
     queryFn: async () => {
       // For now, return placeholder limits (pilot phase — limits TBD)
-      const [agents, workflows, documents] = await Promise.all([
+      const [agents, missions, documents] = await Promise.all([
         apiClient.getAgents().catch(() => []),
-        apiClient.getWorkflows().catch(() => []),
+        apiClient.request<any>('/api/missions?limit=100').catch(() => ({ items: [] })),
         apiClient.getDocuments().catch(() => []),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
-      const workflowList = Array.isArray(workflows) ? workflows : []
+      const missionItems = missions?.items || (Array.isArray(missions) ? missions : [])
       const docList = Array.isArray(documents) ? documents : []
 
       const totalTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
@@ -424,7 +475,7 @@ export function usePlanUsage() {
         planTier: 'pilot',
         usage: {
           agents: { used: agentList.length, limit: null as number | null, label: 'Agents' },
-          workflows: { used: workflowList.length, limit: null as number | null, label: 'Workflows' },
+          missions: { used: missionItems.length, limit: null as number | null, label: 'Missions' },
           documents: { used: docList.length, limit: null as number | null, label: 'Documents' },
           storageGb: { used: parseFloat((storageMb / 1024).toFixed(2)), limit: null as number | null, label: 'Storage (GB)' },
           apiCalls: { used: totalRequests, limit: null as number | null, label: 'API Calls' },
