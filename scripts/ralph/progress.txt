@@ -27,3 +27,14 @@ Started: 2026-04-10
   - Workspace-scoped via RequestContext; rejects requests without resolvable user_id (403)
   - Router registered in orchestrator/main.py (preferences_router import + include_router)
   - Syntax check: OK
+
+2026-04-10 US-006: Migrated HeartbeatService to NotificationDispatcher.
+  - orchestrator/services/heartbeat_service.py: new _dispatch_heartbeat_notification helper replaces 4 call sites of _deliver_notification in _orchestrator_tick (success+error) and _agent_tick (success+error)
+  - Deleted: _deliver_notification, _format_heartbeat_message, _send_via_integration, _send_via_webhook, _resolve_telegram_chat_id
+  - External telegram/slack/webhook now flow through core.services.notification_service.send_workspace_notification via the dispatcher
+  - Agent ticks resolve agent.name via Agent model; orchestrator ticks use "Orchestrator"
+  - Message body extracted from llm_analysis finding (fallback: concatenated details)
+  - link_type='heartbeat', link_id=_heartbeat_result_id
+  - Dedicated SessionLocal per dispatch; commits locally; try/except wraps whole helper (non-blocking)
+  - Tests: tests/test_prd128_notification_dispatcher.py still passes (6/6)
+  - Grep confirms no other callers of removed helpers

@@ -354,7 +354,7 @@ class HeartbeatService:
             await self._store_heartbeat_result(result)
 
             if _proactive_level != "silent":
-                await self._deliver_notification(result, hb_config)
+                await self._dispatch_heartbeat_notification(result)
 
             await self._auto_create_orchestrator_report(workspace_id, result)
 
@@ -372,7 +372,7 @@ class HeartbeatService:
             result["findings"].append({"check": "error", "detail": str(e)})
             await self._store_heartbeat_result(result)
             if _proactive_level != "silent":
-                await self._deliver_notification(result, hb_config)
+                await self._dispatch_heartbeat_notification(result)
             await self._auto_create_orchestrator_report(workspace_id, result)
         finally:
             self._running_ticks.pop(tick_key, None)
@@ -770,7 +770,7 @@ class HeartbeatService:
                 db.close()
 
             await self._store_heartbeat_result(result)
-            await self._deliver_notification(result, hb_config)
+            await self._dispatch_heartbeat_notification(result)
             await self._auto_create_report(agent_id, workspace_id, result)
             logger.info(
                 "[Heartbeat] Agent tick completed for agent=%s", agent_id
@@ -783,7 +783,7 @@ class HeartbeatService:
             result["status"] = "error"
             result["findings"].append({"check": "error", "detail": str(e)})
             await self._store_heartbeat_result(result)
-            await self._deliver_notification(result, hb_config)
+            await self._dispatch_heartbeat_notification(result)
             await self._auto_create_report(agent_id, workspace_id, result)
         finally:
             self._running_ticks.pop(tick_key, None)
@@ -942,224 +942,98 @@ class HeartbeatService:
             return None
 
     # ------------------------------------------------------------------
-    # Notification delivery
+    # Notification delivery (PRD-128: unified dispatcher)
     # ------------------------------------------------------------------
 
-    async def _deliver_notification(self, result: dict, hb_config: dict):
-        """Deliver heartbeat result to the configured destination.
+    async def _dispatch_heartbeat_notification(self, result: dict) -> None:
+        """Fan out a heartbeat completion event via ``NotificationDispatcher``.
 
-        report_to values:
-          - "orchestrator"  → DB only (no extra delivery)
-          - "direct"        → no-op for now (result is in DB, frontend polls)
-          - "telegram"      → push via workspace Telegram bot integration
-          - "slack"         → push via workspace Slack bot integration
-          - "webhook"       → HTTP POST to webhook_url
+        Reads ``notification_preferences`` for the workspace and delivers the
+        event to every enabled destination (in_app / telegram / slack /
+        webhook / silent). Opens a dedicated DB session so the in-app row is
+        committed independently of the caller's transaction. Non-blocking:
+        any failure is logged but never propagates back to the heartbeat tick.
         """
-        report_to = hb_config.get("report_to") or hb_config.get("notification_channel", "orchestrator")
-        # Map frontend values to backend values
-        _CHANNEL_MAP = {"in_app": "direct"}
-        report_to = _CHANNEL_MAP.get(report_to, report_to)
-
-        if report_to in ("orchestrator", "direct"):
+        workspace_id = result.get("workspace_id")
+        if not workspace_id:
             return
 
-        message = self._format_heartbeat_message(result)
-        workspace_id = result.get("workspace_id")
-
-        if report_to == "telegram":
-            await self._send_via_integration(workspace_id, "telegram", message, hb_config)
-        elif report_to == "slack":
-            await self._send_via_integration(workspace_id, "slack", message, hb_config)
-        elif report_to == "webhook":
-            webhook_url = hb_config.get("webhook_url")
-            if webhook_url:
-                await self._send_via_webhook(webhook_url, result, message)
-            else:
-                logger.debug("[Heartbeat] report_to=webhook but no webhook_url configured, skipping")
-
-    def _format_heartbeat_message(self, result: dict) -> str:
-        """Format heartbeat result as a clean notification message."""
-        status = result.get("status", "unknown")
-        status_icon = "OK" if status == "success" else "ERROR"
-
-        # Extract the main analysis text from findings
-        findings = result.get("findings", [])
-        analysis = ""
-        for f in findings:
-            if f.get("check") == "llm_analysis":
-                analysis = f.get("detail", "")
-                break
-
-        if analysis:
-            return f"[Heartbeat {status_icon}]\n{analysis[:2000]}"
-
-        # Fallback: summarize all findings
-        lines = [f"[Heartbeat {status_icon}]"]
-        for f in findings:
-            detail = f.get("detail", "")
-            if detail:
-                lines.append(detail[:300])
-
-        return "\n".join(lines) if len(lines) > 1 else f"[Heartbeat {status_icon}] No findings."
-
-    async def _send_via_integration(
-        self, workspace_id: str, platform: str, message: str, hb_config: dict
-    ):
-        """Send notification through workspace integration (Telegram, Slack, etc.)."""
         try:
             from core.database.database import SessionLocal
-            from core.models.workspaces import Workspace
+            from core.services.notification_dispatcher import NotificationDispatcher
+
+            source_type = result.get("source_type", "orchestrator")
+            hb_status = result.get("status", "success")
+            dispatch_status = "ok" if hb_status == "success" else "error"
+
+            # Extract LLM analysis (or fallback summary) for the message body
+            findings = result.get("findings", []) or []
+            message_body = ""
+            for f in findings:
+                if f.get("check") == "llm_analysis":
+                    message_body = (f.get("detail") or "")[:2000]
+                    break
+            if not message_body:
+                details = [
+                    (f.get("detail") or "")[:300]
+                    for f in findings
+                    if f.get("detail")
+                ]
+                message_body = "\n".join(details) if details else "No findings."
+
+            # Resolve agent metadata (agent tick only)
+            agent_id: Optional[int] = None
+            agent_name: Optional[str] = None
+            if source_type == "agent":
+                try:
+                    agent_id = int(result.get("source_id"))
+                except (TypeError, ValueError):
+                    agent_id = None
+                if agent_id is not None:
+                    db_lookup = SessionLocal()
+                    try:
+                        from core.models import Agent
+
+                        agent = db_lookup.query(Agent).get(agent_id)
+                        agent_name = agent.name if agent else f"agent-{agent_id}"
+                    finally:
+                        db_lookup.close()
+                title = f"{agent_name or 'Agent'} Heartbeat"
+            else:
+                agent_name = "Orchestrator"
+                title = "Orchestrator Heartbeat"
+
+            link_id = result.get("_heartbeat_result_id")
 
             db = SessionLocal()
             try:
-                ws = db.query(Workspace).get(workspace_id)
-                if not ws:
-                    logger.warning("[Heartbeat] Workspace %s not found for notification", workspace_id)
-                    return
-
-                integrations = (ws.settings or {}).get("integrations", {})
-
-                # Also check channel_connections for bot tokens
-                from sqlalchemy import text as sql_text
-                channel_config = {}
-                try:
-                    row = db.execute(
-                        sql_text(
-                            "SELECT config FROM channel_connections "
-                            "WHERE workspace_id = :ws AND platform = :plat "
-                            "ORDER BY created_at DESC LIMIT 1"
-                        ),
-                        {"ws": workspace_id, "plat": platform},
-                    ).fetchone()
-                    if row and row.config:
-                        channel_config = row.config if isinstance(row.config, dict) else json.loads(row.config)
-                except Exception as e:
-                    logger.debug("[Heartbeat] Could not load channel_connections for %s: %s", platform, e)
-
-                if platform == "telegram":
-                    token = (
-                        integrations.get("telegram_bot_token")
-                        or channel_config.get("bot_token")
-                    )
-                    if not token:
-                        logger.warning("[Heartbeat] No telegram bot token found for ws=%s", workspace_id)
-                        return
-
-                    raw_channel_id = hb_config.get("channel_id") or ""
-                    # Guard: ignore if someone accidentally saved a bot token as chat_id
-                    chat_id = (
-                        (raw_channel_id if raw_channel_id and ":" not in raw_channel_id else "")
-                        or integrations.get("telegram_default_chat_id")
-                        or channel_config.get("default_chat_id")
-                    )
-                    # Auto-resolve chat_id from Telegram API if not stored
-                    if not chat_id:
-                        chat_id = await self._resolve_telegram_chat_id(token)
-                    if not chat_id:
-                        logger.warning("[Heartbeat] Could not resolve Telegram chat_id for ws=%s", workspace_id)
-                        return
-
-                    from api.webhooks import _send_telegram_reply
-                    ok = await _send_telegram_reply(int(chat_id), message, token)
-                    if ok:
-                        logger.info("[Heartbeat] Telegram notification sent to chat %s", chat_id)
-                    else:
-                        logger.warning("[Heartbeat] Telegram send failed for chat %s", chat_id)
-
-                elif platform == "slack":
-                    token = (
-                        integrations.get("slack_bot_token")
-                        or channel_config.get("bot_token")
-                    )
-                    channel = (
-                        hb_config.get("channel_id")
-                        or integrations.get("slack_default_channel")
-                        or channel_config.get("default_channel")
-                    )
-                    if not token:
-                        logger.warning("[Heartbeat] No slack bot token found for ws=%s", workspace_id)
-                        return
-                    if not channel:
-                        logger.warning("[Heartbeat] No channel for Slack notification (ws=%s)", workspace_id)
-                        return
-
-                    from api.webhooks import _send_slack_reply
-                    ok = await _send_slack_reply(channel, message, token)
-                    if ok:
-                        logger.info("[Heartbeat] Slack notification sent to %s", channel)
-                    else:
-                        logger.warning("[Heartbeat] Slack send failed for %s", channel)
-
-                else:
-                    logger.warning("[Heartbeat] Unknown integration platform: %s", platform)
+                dispatcher = NotificationDispatcher(db, workspace_id)
+                dispatched = await dispatcher.dispatch(
+                    event_type="heartbeat_complete",
+                    title=title,
+                    message=message_body,
+                    link_type="heartbeat",
+                    link_id=str(link_id) if link_id is not None else None,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    status=dispatch_status,
+                )
+                db.commit()
+                logger.info(
+                    "[Heartbeat] Dispatched heartbeat_complete ws=%s → %s",
+                    workspace_id,
+                    dispatched.get("dispatched_to"),
+                )
+            except Exception:
+                db.rollback()
+                raise
             finally:
                 db.close()
         except Exception as e:
-            logger.error("[Heartbeat] Integration notification failed (%s): %s", platform, e)
-
-    async def _resolve_telegram_chat_id(self, bot_token: str) -> Optional[str]:
-        """Get the most recent chat_id from the Telegram Bot API."""
-        try:
-            import aiohttp
-
-            url = f"https://api.telegram.org/bot{bot_token}/getUpdates?limit=1&offset=-1"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
-                    results = data.get("result", [])
-                    if not results:
-                        return None
-                    # Extract chat_id from the most recent update
-                    update = results[0]
-                    msg = update.get("message") or update.get("channel_post") or {}
-                    chat = msg.get("chat", {})
-                    chat_id = chat.get("id")
-                    if chat_id:
-                        logger.info("[Heartbeat] Auto-resolved Telegram chat_id=%s", chat_id)
-                        return str(chat_id)
-        except Exception as e:
-            logger.debug("[Heartbeat] Failed to resolve Telegram chat_id: %s", e)
-        return None
-
-    async def _send_via_webhook(self, url: str, result: dict, message: str):
-        """POST heartbeat result to a webhook URL (with SSRF validation)."""
-        from core.security.url_validator import validate_webhook_url
-
-        is_valid, reason = validate_webhook_url(url)
-        if not is_valid:
-            logger.warning("[Heartbeat] Webhook URL blocked (%s): %s", reason, url)
-            return
-
-        try:
-            import aiohttp
-
-            payload = {
-                "source_type": result.get("source_type"),
-                "source_id": result.get("source_id"),
-                "status": result.get("status"),
-                "message": message,
-                "findings": result.get("findings", []),
-                "tokens_used": result.get("tokens_used", 0),
-            }
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status < 300:
-                        logger.info("[Heartbeat] Webhook delivered to %s (status %s)", url, resp.status)
-                    else:
-                        body = await resp.text()
-                        logger.warning(
-                            "[Heartbeat] Webhook %s returned %s: %s",
-                            url, resp.status, body[:200],
-                        )
-        except Exception as e:
-            logger.error("[Heartbeat] Webhook delivery failed to %s: %s", url, e)
+            logger.error(
+                "[Heartbeat] Notification dispatch failed for ws=%s: %s",
+                workspace_id, e, exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Public API (manual triggers)

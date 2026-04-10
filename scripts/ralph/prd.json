@@ -105,8 +105,8 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Replaced _deliver_notification with new _dispatch_heartbeat_notification helper in orchestrator/services/heartbeat_service.py that opens its own SessionLocal, builds NotificationDispatcher(db, workspace_id), resolves agent_name via Agent model (orchestrator tick uses 'Orchestrator'), derives message body from llm_analysis finding, passes link_type='heartbeat', link_id=_heartbeat_result_id, and commits. Deleted _deliver_notification, _format_heartbeat_message, _send_via_integration, _send_via_webhook, _resolve_telegram_chat_id (telegram/slack/webhook now handled by core.services.notification_service.send_workspace_notification via dispatcher). Grep confirms no remaining callers outside the single file. All 6 dispatcher unit tests still pass."
     },
     {
       "id": "US-007",
