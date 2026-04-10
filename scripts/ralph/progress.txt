@@ -74,3 +74,4 @@
 - Query keys scoped by workspaceId via existing useWorkspace() hook
 - Delete mutation invalidates all ['deliverables', workspaceId] queries
 - React Query v4 API (pageParam default via destructuring, no initialPageParam)
+2026-04-10 21:20 US-007: DeliverableCard component created
