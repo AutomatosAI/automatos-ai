@@ -18,7 +18,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from core.auth.hybrid import RequestContext, get_request_context_hybrid
+from core.auth.dependencies import RequestContext
+from core.auth.hybrid import get_request_context_hybrid
 from modules.attachments.store import (
     AttachmentNotFoundError,
     AttachmentRef,
