@@ -145,8 +145,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "New frontend/hooks/use-notifications-api.ts (react-query v4 hooks: useUnreadNotificationCount 30s poll, useNotifications enabled-on-open, useMarkNotificationRead, useMarkAllNotificationsRead, useDismissNotification, plus useNotificationPreferences + useUpdateNotificationPreferences for US-009). New frontend/components/notifications/notification-bell.tsx: Radix Popover, Bell icon with badge (hidden at 0, '9+' when >9), empty state, per-row dismiss-on-hover, Mark-all-read button, footer link to /settings/notifications. Click handler marks row read then router.push()es via linkFor() based on link_type -> Activity tab routes (task/mission/playbook/heartbeat/report/trigger) or /agents. Mounted in frontend/components/layout/header.tsx, replacing the static Bell + hardcoded '3' badge. React Query v4 compliant (isLoading, useRouter from next/navigation). tsc not runnable locally (no node_modules in this worktree); types cross-checked against existing hooks and components/ui/popover.tsx."
     },
     {
       "id": "US-009",

@@ -82,7 +82,7 @@ Settings:
 
 ### Phase 4: Frontend
 
-- [ ] **US-008**: `NotificationBell` component + navbar mount
+- [x] **US-008**: `NotificationBell` component + navbar mount
 - [ ] **US-009**: `/settings/notifications` page + sidebar link
 
 ### Phase 5: Verification

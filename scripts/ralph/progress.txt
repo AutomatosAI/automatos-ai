@@ -59,3 +59,11 @@ Started: 2026-04-10
   - Gotcha: PRD AC said orchestrator/api/tasks.py but that file is PRD-56 task_executions queue with no completion endpoint. The real user-facing task completion lives in board_tasks.py; wired there.
   - Validation: ast.parse clean on all 4 edited files; tests/test_prd128_notification_dispatcher.py still passes (6/6).
 
+
+2026-04-10 — US-008 NotificationBell component + navbar mount
+  - New frontend/hooks/use-notifications-api.ts: react-query v4 hooks for list, unread-count (30s poll), mark-read, mark-all-read, dismiss, preferences (GET + bulk PUT).
+  - New frontend/components/notifications/notification-bell.tsx: Popover dropdown, unread badge (9+ cap, hidden at 0), per-row click (mark read + router.push via linkFor), dismiss button, mark-all-read, empty state, footer link to /settings/notifications. linkFor routes heartbeat/task/mission/playbook/report/trigger/agent link_types to Activity tabs.
+  - frontend/components/layout/header.tsx: replaced the static <Bell/> + hardcoded "3" badge with <NotificationBell/>. Removed unused Bell import.
+  - React Query v4 compliance: isLoading (not isPending), useRouter().push() from next/navigation (not window.location).
+  - Uses apiClient.request with JSON.stringify on body to match existing hook patterns.
+  - Validation: tsc not runnable locally (node_modules not installed in this worktree); relied on type-safe imports against existing hooks/ and components/ui/popover.tsx which matches the expected Radix Popover shape. Will typecheck on next CI run.
