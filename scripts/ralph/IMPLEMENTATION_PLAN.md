@@ -45,7 +45,7 @@ backfill script (agent_reports) ──────┘                           
 
 ### Phase 1: Frontend
 
-- [ ] **US-006**: Create useDeliverables React Query hooks (infinite query)
+- [x] **US-006**: Create useDeliverables React Query hooks (infinite query) — `frontend/hooks/use-deliverables-api.ts`. Exports `Deliverable`, `FilterState`, `DEFAULT_FILTERS`, `useDeliverables` (useInfiniteQuery, PAGE_SIZE=24, offset-based `getNextPageParam`), `useDeliverable(id, includeContent)`, `useDeliverableStats()`, `useDeleteDeliverable()` mutation (invalidates `['deliverables', workspaceId]`). `date_range` translated to ISO `date_from` client-side ('today'/'week'/'month'). Workspace ID pulled from existing `useWorkspace()` hook — no separate `useWorkspaceId` exists in this repo; query keys still scoped by workspaceId so switching clears cache. React Query v4 API: no `initialPageParam` (v5-only) — `pageParam = 0` default via destructuring.
 - [ ] **US-007**: Build DeliverableCard component
 - [ ] **US-008**: Build FilterBar component
 - [ ] **US-009**: Build DeliverablePreview slide-over

@@ -64,3 +64,13 @@
   - Summary printed: Processed/Inserted/Updated/Skipped/Errors; exit 1 on errors
   - Local --help verified; full dry-run needs DB (runs on deploy)
   - Import fix: `from config import config` (NOT core.config)
+
+2026-04-10 US-006 — Create useDeliverables React Query hooks
+- New: frontend/hooks/use-deliverables-api.ts
+- Types: Deliverable, FilterState, DEFAULT_FILTERS, DeliverableListResponse, DeliverableDetailResponse, DeliverableStats
+- Hooks: useDeliverables (useInfiniteQuery), useDeliverable, useDeliverableStats, useDeleteDeliverable
+- PAGE_SIZE=24; offset-based pagination via getNextPageParam
+- date_range ('today'|'week'|'month'|'all') translated to ISO date_from client-side
+- Query keys scoped by workspaceId via existing useWorkspace() hook
+- Delete mutation invalidates all ['deliverables', workspaceId] queries
+- React Query v4 API (pageParam default via destructuring, no initialPageParam)
