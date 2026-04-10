@@ -1,72 +1,107 @@
-# PRD-122: Tool Routing Promotion & Permission Enforcement — Implementation Plan
+# PRD-128: Unified Notification System — Implementation Plan
 
 ## Overview
 
-Two problems, one fix:
-1. **Auto can't reliably call platform tools** — they're behind `platform_execute` dispatcher indirection. Promote ~13 high-value actions to first-class OpenAI tool schemas.
-2. **`permission_level` is declared but never enforced** — 6 infrastructure tools expose system internals to every user. Enforce admin gating before promoting.
+A single notification pipeline that captures completion events from every source (heartbeats, tasks, missions, playbooks, triggers, reports, agent errors), routes them via per-workspace preferences (in_app / telegram / slack / webhook / silent), and surfaces in-app notifications via a bell-icon dropdown. Reuses the existing `notification_service.py` fan-out and `channel_connections` table.
 
 ## Architecture
 
 ```
-get_tools_for_agent() [tool_router.py:129]
-  ├── ToolRegistry.get_all() → core tool schemas
-  ├── ActionRegistry.to_dispatcher_schema() → platform_execute (non-promoted only)
-  ├── ActionRegistry.to_first_class_schemas() → promoted schemas [NEW]
-  └── ComposioActionCache enrichment → composio_execute params
+<event source>
+  └─ NotificationDispatcher(db, workspace_id).dispatch(event_type, ...)
+       ├─ read notification_preferences (workspace defaults + user overrides)
+       ├─ for each enabled pref:
+       │    ├─ silent   → skip
+       │    ├─ in_app   → INSERT notifications row (no commit; caller owns txn)
+       │    ├─ telegram/slack/webhook → notification_service.send_workspace_notification
+       │    └─ channel  → send to specific channel_connection_id
+       └─ return {dispatched_to: [...]}
 
-Execution: unified_executor.py routes platform_* → PlatformActionExecutor (no changes needed)
+Frontend:
+  navbar <NotificationBell/>
+    ├─ poll /api/notifications/unread-count (30s)
+    ├─ open → GET /api/notifications?limit=20
+    └─ click row → POST /{id}/read + next/navigation router.push(linkFor(row))
+
+Settings:
+  /settings/notifications → GET /api/notification-preferences / PUT bulk upsert
 ```
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `orchestrator/modules/tools/discovery/action_registry.py` | ActionDefinition dataclass (line 27) + ActionRegistry class (line 53) |
-| `orchestrator/modules/tools/discovery/platform_executor.py` | execute() at line 273, permission checks at 286-334 |
-| `orchestrator/modules/tools/tool_router.py` | get_tools_for_agent() at line 129, dispatcher at 242 |
-| `orchestrator/modules/tools/discovery/actions_monitoring.py` | 6 infrastructure tool registrations |
-| `orchestrator/modules/tools/discovery/handlers_search.py` | search_chat_history handler, broken WHERE at line 33 |
-| `orchestrator/consumers/chatbot/smart_tool_router.py` | TOOL_CATEGORIES at 65, INTENT_TO_TOOLS at 77 |
-| `orchestrator/modules/context/sections/platform_actions.py` | PlatformActionsSection._build() at ~50 |
-| `orchestrator/modules/tools/discovery/actions_agents.py` | Agent action registrations |
-| `orchestrator/modules/tools/discovery/actions_marketplace.py` | Marketplace action registrations |
-| `orchestrator/modules/tools/discovery/actions_search.py` | Memory + search action registrations |
-| `orchestrator/modules/tools/unified_executor.py` | execute_tool() routing at ~310 |
+| Area | File | Purpose |
+|------|------|---------|
+| DB schema | `orchestrator/alembic/versions/prd128_notifications.py` | Tables + indexes (US-001) |
+| Provisioning | `orchestrator/core/auth/hybrid.py` | `_provision_new_user_workspace()` — seed 9 prefs (US-002) |
+| Service | `orchestrator/core/services/notification_dispatcher.py` | NEW dispatcher class (US-003) |
+| Fan-out reuse | `orchestrator/services/notification_service.py` | `send_workspace_notification` entry point |
+| API | `orchestrator/api/notifications.py` | NEW — notifications + preferences routers (US-004, US-005) |
+| Main | `orchestrator/main.py` | Include new routers |
+| Heartbeats | `orchestrator/services/heartbeat_service.py` | Replace `_deliver_notification` (US-006) |
+| Tasks | `orchestrator/api/tasks.py` | Dispatch task_complete (US-007) |
+| Missions | `orchestrator/services/coordinator_service.py` | mission_step_complete / mission_complete (US-007) |
+| Playbooks | `orchestrator/services/playbook_executor.py` | playbook_step_complete / playbook_complete (US-007) |
+| Reports | `orchestrator/services/report_service.py` | report_submitted (US-007) |
+| Bell UI | `frontend/components/notifications/notification-bell.tsx` | NEW popover (US-008) |
+| Navbar | `frontend/components/navbar.tsx` (or equivalent) | Mount bell component (US-008) |
+| Settings UI | `frontend/app/settings/notifications/page.tsx` | NEW settings page (US-009) |
+| Sidebar | `frontend/components/settings/*` | Add link (US-009) |
+| E2E | `tests/integration/test_notification_pipeline.py` | Smoke test (US-010) |
+
+## Event Types (9)
+
+| Event | Default | Description |
+|-------|---------|-------------|
+| `heartbeat_complete` | in_app | Heartbeat cycle finished |
+| `task_complete` | in_app | Board task marked complete |
+| `mission_step_complete` | silent | Per-step mission progress (noisy) |
+| `mission_complete` | in_app | Mission terminal state |
+| `playbook_step_complete` | silent | Per-step playbook progress (noisy) |
+| `playbook_complete` | in_app | Playbook finished |
+| `trigger_fired` | in_app | Composio trigger fired |
+| `report_submitted` | in_app | Agent submitted a report |
+| `agent_error` | in_app | Agent raised an error |
 
 ## Tasks
 
-### Phase 0: Permission Enforcement (P0)
+### Phase 1: Schema & Seed
 
-- [x] **US-001**: Add `admin_only: bool = False` to ActionDefinition + mark 6 infra tools (5 in actions_monitoring.py, 1 in actions_workspace.py)
-- [x] **US-002**: Thread caller_context (user_id, system_role, workspace_role) through unified_executor → platform_executor
-- [x] **US-003**: Add admin gate (before requires_confirmation) + destructive safety check (after rate limit) in platform_executor.py
-- [x] **US-004**: Add is_admin param to get_tools_for_agent() + exclude_admin to to_dispatcher_schema/build_prompt_summary
-- [x] **US-005**: Fix search_chat_history WHERE clause to scope by workspace_id
+- [x] **US-001**: Alembic migration — `notification_preferences` + `notifications` tables + all indexes
+- [ ] **US-002**: Seed 9 default prefs on workspace provisioning (idempotent)
 
-### Phase 1: Promote High-Value Actions (P1)
+### Phase 2: Dispatcher & API
 
-- [x] **US-006**: Add `promoted: bool = False` to ActionDefinition + get_promoted() + to_first_class_schemas() methods
-- [x] **US-007**: Update build_prompt_summary(exclude_promoted=True) + to_dispatcher_schema(exclude_promoted=True)
-- [x] **US-008**: Mark ~13 actions as promoted=True in actions_agents, actions_marketplace, actions_monitoring, actions_search
-- [x] **US-009**: Append promoted schemas in tool_router.py + remove hardcoded _FIELD_TOOL_SCHEMAS + promote field tools
-- [x] **US-010**: Update SmartToolRouter with ALWAYS_INCLUDE set + promoted tool categories
-- [x] **US-011**: Update PlatformActionsSection._build() to pass exclude_promoted=True
+- [ ] **US-003**: `NotificationDispatcher` service with full fan-out + unit tests
+- [ ] **US-004**: Notifications API — list, unread-count, read, read-all, dismiss
+- [ ] **US-005**: Preferences API — GET merged list, PUT bulk upsert
 
-### Phase 2: Dispatcher Enum (P2)
+### Phase 3: Wire Sources
 
-- [x] **US-012**: Add enum of non-promoted action names to to_dispatcher_schema()
+- [ ] **US-006**: Migrate `HeartbeatService` to dispatcher, delete `_deliver_notification`
+- [ ] **US-007**: Wire tasks, missions (step+complete), playbooks (step+complete), reports
+
+### Phase 4: Frontend
+
+- [ ] **US-008**: `NotificationBell` component + navbar mount
+- [ ] **US-009**: `/settings/notifications` page + sidebar link
+
+### Phase 5: Verification
+
+- [ ] **US-010**: End-to-end smoke test of notification pipeline
 
 ## Constraints
 
-- **No execution layer changes** — unified_executor.py already routes `platform_*` directly (line 392). Only adding caller_context passthrough.
-- **No migration needed** — workspace_members.role column already exists with owner|admin|editor|viewer|member values.
-- **Backward compatible** — all new parameters default to None/False. Existing callers unaffected.
-- **Field tool consolidation** — must verify to_openai_schema() output matches old hardcoded _FIELD_TOOL_SCHEMAS exactly.
+- **Dispatcher never commits** — caller owns the transaction so notification inserts roll back with the main work on failure.
+- **Multi-destination fan-out** — one event_type row may have multiple preference rows; all enabled rows fire (silent skips silently).
+- **User overrides workspace default** — when both exist for the same `(event_type, destination)`, user-specific wins.
+- **Non-blocking** — every new `dispatcher.dispatch` call is wrapped in try/except log-only so notification bugs never break the primary flow.
+- **workspace + user scoping** — all API queries enforce `workspace_id = ctx.workspace_id AND (user_id = ctx.user_id OR user_id IS NULL)`.
+- **react-query v4** — `isLoading` not `isPending`, `useRouter().push()` not `window.location.href`.
 
 ## Quality Bar
 
-- Every change is additive (new fields with defaults, new optional parameters)
-- Admin gate is fail-closed (no caller_context = denied)
-- Promoted actions are excluded from dispatcher (no dual paths)
-- Log all permission denials at WARNING level
+- Every DB query workspace-scoped
+- Dispatcher covered by unit tests: silent, in_app, multi-destination, user override, no-prefs default
+- Migration up/down clean against local postgres
+- Typecheck passes on every story
+- No silent failures — all exceptions logged with `exc_info=True`
