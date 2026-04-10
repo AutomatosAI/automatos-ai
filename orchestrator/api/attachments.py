@@ -28,7 +28,7 @@ from modules.attachments.validation import ValidationError
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/attachments", tags=["attachments"])
+router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
 
 class AttachmentResponse(BaseModel):
