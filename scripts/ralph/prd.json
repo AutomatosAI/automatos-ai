@@ -123,8 +123,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added _dispatch_task_complete in orchestrator/api/board_tasks.py wired into update_task (PATCH), approve_task (POST /approve), update_task_status (PATCH /{id}/status), and background _launch_task_execution on done transition (review path skipped). Added module-level _dispatch_mission_event in orchestrator/services/coordinator_service.py — mission_step_complete fires in _execute_task right after MissionDispatcher.record_task_completion, mission_complete fires in _build_and_advance_to_awaiting_human after transition_run(COMPLETED). Added _dispatch_playbook_event in orchestrator/api/recipe_executor.py — playbook_step_complete fires per successful step immediately before _persist_step_results, playbook_complete fires before the final db.commit() once execution.status='completed' (also removed the duplicate logger definition). In orchestrator/services/report_service.py create_report() dispatches report_submitted between the INSERT RETURNING and self.db.commit(). Every dispatch uses the caller's db session and joins the existing transaction (no extra commits); every call site is wrapped in try/except with exc_info=True so dispatcher failures never block the primary completion flow. PRD AC named orchestrator/api/tasks.py but that file is the PRD-56 task_executions queue with no completion endpoint — the real user-facing task completion path is orchestrator/api/board_tasks.py, which is where the wiring landed. ast.parse clean on all 4 edited files; tests/test_prd128_notification_dispatcher.py still passes (6/6)."
     },
     {
       "id": "US-008",

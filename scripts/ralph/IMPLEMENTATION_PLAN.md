@@ -78,7 +78,7 @@ Settings:
 ### Phase 3: Wire Sources
 
 - [x] **US-006**: Migrate `HeartbeatService` to dispatcher, delete `_deliver_notification`
-- [ ] **US-007**: Wire tasks, missions (step+complete), playbooks (step+complete), reports
+- [x] **US-007**: Wire tasks, missions (step+complete), playbooks (step+complete), reports
 
 ### Phase 4: Frontend
 

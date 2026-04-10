@@ -127,9 +127,33 @@ class ReportService:
                 },
             )
             row = result.fetchone()
-            self.db.commit()
-
             report_id = str(row[0]) if row else None
+
+            # PRD-128: dispatch report_submitted before commit so the
+            # notification row joins the same transaction as the report
+            # insert. Never blocks the report flow.
+            try:
+                from core.services.notification_dispatcher import NotificationDispatcher
+
+                dispatcher = NotificationDispatcher(self.db, str(self.workspace_id))
+                await dispatcher.dispatch(
+                    event_type="report_submitted",
+                    title=f"Report: {title}",
+                    message=(summary or "")[:500] or None,
+                    link_type="report",
+                    link_id=report_id,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    status=status,
+                )
+            except Exception:
+                logger.error(
+                    "[ReportService] report_submitted dispatch failed for report %s",
+                    report_id,
+                    exc_info=True,
+                )
+
+            self.db.commit()
 
             logger.info(
                 "[ReportService] Created report %s for agent %s (%s): %s",

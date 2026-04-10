@@ -38,3 +38,24 @@ Started: 2026-04-10
   - Dedicated SessionLocal per dispatch; commits locally; try/except wraps whole helper (non-blocking)
   - Tests: tests/test_prd128_notification_dispatcher.py still passes (6/6)
   - Grep confirms no other callers of removed helpers
+
+2026-04-10 US-007: Wired tasks/missions/playbooks/reports to NotificationDispatcher.
+  - orchestrator/api/board_tasks.py: new _dispatch_task_complete helper; dispatch task_complete on:
+      * update_task (PATCH) when body.status == "done"
+      * approve_task (POST /approve) — always
+      * update_task_status (PATCH /{id}/status) when new_status == "done"
+      * _launch_task_execution background when task reaches "done" (not "review")
+    All dispatches use request's db and happen before existing db.commit() (no extra commits).
+    Resolves agent_name from assigned_agent_id.
+  - orchestrator/services/coordinator_service.py: new module-level _dispatch_mission_event helper.
+      * mission_step_complete fired in _execute_task right after MissionDispatcher.record_task_completion (before the outer tick commit)
+      * mission_complete fired in _build_and_advance_to_awaiting_human after transition_run(COMPLETED)
+    Both default to silent/in_app per US-002 seed (step=silent, complete=in_app).
+  - orchestrator/api/recipe_executor.py: new _dispatch_playbook_event helper at module top (fixed duplicate logger definition while editing).
+      * playbook_step_complete fired per successful step right after appending compact result, before _persist_step_results (so notification insert joins the same commit)
+      * playbook_complete fired in _execute_recipe_inner before the final db.commit() once execution.status == 'completed'
+  - orchestrator/services/report_service.py: dispatch report_submitted inside create_report between the INSERT RETURNING and self.db.commit() — joins the same transaction.
+  - All new dispatches wrapped in try/except with exc_info=True logging; dispatcher failures never block primary completion flow.
+  - Gotcha: PRD AC said orchestrator/api/tasks.py but that file is PRD-56 task_executions queue with no completion endpoint. The real user-facing task completion lives in board_tasks.py; wired there.
+  - Validation: ast.parse clean on all 4 edited files; tests/test_prd128_notification_dispatcher.py still passes (6/6).
+
