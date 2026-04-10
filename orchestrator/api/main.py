@@ -551,6 +551,18 @@ async def health_check():
             "message": "System experiencing issues. Check logs for details."
         }
 
+@app.get("/api/debug/routes")
+async def debug_routes():
+    """List all registered routes - DEBUG endpoint"""
+    routes = []
+    for route in app.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            routes.append({"methods": list(route.methods), "path": route.path})
+    # Filter to show attachment routes
+    attachment_routes = [r for r in routes if 'attachment' in r['path'].lower()]
+    return {"total_routes": len(routes), "attachment_routes": attachment_routes}
+
+
 @app.get("/api/health/endpoints",
          summary="📡 API Endpoint Health",
          description="Get health statistics for all API endpoints including call counts and response times",

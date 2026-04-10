@@ -1,4 +1,5 @@
-print(">>> ATTACHMENTS MODULE LOADING <<<")  # DEBUG: Remove after fixing 404
+import logging as _early_logging
+_early_logging.warning(">>> ATTACHMENTS MODULE LOADING <<<")  # DEBUG
 """
 Attachments API — Ephemeral file uploads for chat, missions, tasks, channels (PRD-127)
 
