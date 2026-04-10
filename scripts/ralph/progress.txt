@@ -24,4 +24,14 @@
   - get_stats(): total, by_type (count), by_agent (list of {agent_id, agent_name, count})
   - All SQL uses sqlalchemy.text() with bound params. All exceptions logged with exc_info=True.
   - 26 unit tests, all passing (0.75s).
+2026-04-10 — US-003 complete: api/deliverables.py + tests/api/test_deliverables_api.py
+  - Routes: GET / (list + filters), GET /stats, GET /{id}?include_content=, DELETE /{id}
+  - /stats declared BEFORE /{deliverable_id} to avoid FastAPI capturing 'stats' as an id
+  - All endpoints use Depends(get_request_context_hybrid); svc scoped to ctx.workspace_id
+  - Registered in main.py inside try/except ImportError (mirrors reports router)
+  - 12 integration tests pass in 0.48s — covers list default, filter forwarding, limit>100 → 422,
+    stats, stats vs id path shadowing, get (found, 404, include_content), delete (success, 404),
+    and workspace isolation: X-Workspace-ID header is ignored, svc always gets ctx.workspace_id
+  - Test uses FastAPI dependency_overrides + patch('api.deliverables.DeliverableService')
+    with sys.modules stubs for jwt/clerk/core.database/core.auth — no DB or env needed.
 
