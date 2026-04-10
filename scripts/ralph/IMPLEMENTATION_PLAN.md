@@ -38,7 +38,7 @@ backfill script (agent_reports) ──────┘                           
 ### Phase 0: Backend Foundation
 
 - [x] **US-001**: Create deliverables table migration (alembic) — `prd129_deliverables.py`, standalone (down_revision=None), BIGINT size, unique partial index for idempotent register, import-test OK. DB not running locally — actual `alembic upgrade` will run on deploy.
-- [ ] **US-002**: Implement DeliverableService (register/list/get/stats/soft_delete + unit tests)
+- [x] **US-002**: Implement DeliverableService (register/list/get/stats/soft_delete + 26 unit tests, all passing). Uses `ON CONFLICT (workspace_id, file_path) WHERE deleted_at IS NULL` for idempotent register. Extra JSONB merged via `||` on conflict. Images skip file read (returns content_url). Never calls WorkspaceClient during register.
 - [ ] **US-003**: Add /api/deliverables endpoints + integration tests
 - [ ] **US-004**: Auto-register on workspace_write_file + report_service.create_report
 - [ ] **US-005**: Backfill script for existing agent_reports

@@ -9,3 +9,19 @@
   - Soft delete via deleted_at
   - 5 indices + UNIQUE partial index uq_deliverables_workspace_path WHERE deleted_at IS NULL
   - Import-tested OK; DB not running locally so `alembic upgrade` deferred to deploy.
+2026-04-10 — US-002 complete: services/deliverable_service.py + tests/services/test_deliverable_service.py
+  - DeliverableService class with register/list_deliverables/get_deliverable/get_stats/soft_delete
+  - Module-level EXTENSION_TO_ARTIFACT (~45 extensions across 9 categories), _slugify, _infer_artifact_type, _humanize_basename
+  - register() is idempotent via ON CONFLICT (workspace_id, file_path) WHERE deleted_at IS NULL
+    - DO UPDATE uses COALESCE to preserve old values when caller omits them
+    - `extra` JSONB merged via `||` operator (preserves prior keys)
+    - Returns {success, deliverable_id, created, artifact_type, title} — `created` tells insert vs update
+    - NEVER calls WorkspaceClient (confirmed by test_register_does_not_call_workspace_client)
+  - list_deliverables() supports artifact_type/source_type/agent_id/date_from/date_to/search filters
+    - LEFT JOINs agents for fallback agent_name
+    - Clamps limit to [1, 100], excludes deleted_at IS NOT NULL
+  - get_deliverable(include_content=True): reads file via WorkspaceClient for text; for images returns content_url
+  - get_stats(): total, by_type (count), by_agent (list of {agent_id, agent_name, count})
+  - All SQL uses sqlalchemy.text() with bound params. All exceptions logged with exc_info=True.
+  - 26 unit tests, all passing (0.75s).
+
