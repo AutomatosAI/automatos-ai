@@ -19,3 +19,11 @@ Started: 2026-04-10
   - 404 on visible-but-already-mutated rows avoided (distinguishes "not found" from "no-op")
   - Router registered in orchestrator/main.py
   - Syntax check: OK
+
+2026-04-10 — US-005 Notification preferences API
+  - NEW preferences_router in orchestrator/api/notifications.py at prefix /api/notification-preferences
+  - GET / — merged view (workspace defaults shadowed by user-specific rows per (event_type, destination)); backfills missing event_types from DEFAULT_NOTIFICATION_PREFERENCES so settings UI sees all 9 events
+  - PUT / — bulk upsert: deletes user-scoped rows for affected event_types then re-inserts. Validates event_type against VALID_EVENT_TYPES (dispatcher), destination against {in_app, telegram, slack, webhook, channel, silent}, channel_connection_id existence + workspace ownership
+  - Workspace-scoped via RequestContext; rejects requests without resolvable user_id (403)
+  - Router registered in orchestrator/main.py (preferences_router import + include_router)
+  - Syntax check: OK

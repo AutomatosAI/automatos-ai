@@ -30,13 +30,25 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
-from core.auth.hybrid import get_request_context_hybrid
+from core.auth.hybrid import (
+    DEFAULT_NOTIFICATION_PREFERENCES,
+    get_request_context_hybrid,
+)
 from core.database.database import get_db
 from core.models.core import User as UserModel
+from core.services.notification_dispatcher import VALID_EVENT_TYPES
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
+
+preferences_router = APIRouter(
+    prefix="/api/notification-preferences", tags=["notification-preferences"]
+)
+
+_VALID_DESTINATIONS: frozenset[str] = frozenset(
+    {"in_app", "telegram", "slack", "webhook", "channel", "silent"}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +296,254 @@ async def mark_read(
         raise HTTPException(status_code=500, detail="Failed to mark notification read")
 
     return SimpleSuccessResponse(success=True)
+
+
+# ---------------------------------------------------------------------------
+# Preferences models (US-005)
+# ---------------------------------------------------------------------------
+
+
+class PreferenceRow(BaseModel):
+    event_type: str
+    destination: str
+    enabled: bool
+    channel_connection_id: Optional[str] = None
+
+
+class PreferenceListResponse(BaseModel):
+    success: bool
+    preferences: List[PreferenceRow]
+
+
+class PreferenceBulkUpdateRequest(BaseModel):
+    preferences: List[PreferenceRow]
+
+
+class PreferenceBulkUpdateResponse(BaseModel):
+    success: bool
+    updated_count: int
+
+
+# ---------------------------------------------------------------------------
+# Preferences endpoints (US-005)
+# ---------------------------------------------------------------------------
+
+
+def _merge_preference_rows(
+    rows: List[Any], current_user_id: Optional[int]
+) -> List[PreferenceRow]:
+    """Merge workspace-default and user-specific rows.
+
+    For each ``(event_type, destination)`` tuple a user-specific row (if any)
+    shadows the workspace-default row. Workspace defaults whose destination is
+    not overridden by the current user remain visible.
+
+    Event types absent from the DB but present in the global default set are
+    materialised as ``in_app`` enabled rows so the settings UI always shows
+    every supported event.
+    """
+    user_rows: Dict[tuple, PreferenceRow] = {}
+    default_rows: Dict[tuple, PreferenceRow] = {}
+
+    for row in rows:
+        m = row._mapping if hasattr(row, "_mapping") else row
+        pr = PreferenceRow(
+            event_type=m["event_type"],
+            destination=m["destination"] or "in_app",
+            enabled=bool(m["enabled"]),
+            channel_connection_id=(
+                str(m["channel_connection_id"])
+                if m["channel_connection_id"] is not None
+                else None
+            ),
+        )
+        key = (pr.event_type, pr.destination)
+        if m["user_id"] is not None and m["user_id"] == current_user_id:
+            user_rows[key] = pr
+        elif m["user_id"] is None:
+            default_rows[key] = pr
+
+    merged: Dict[tuple, PreferenceRow] = {**default_rows, **user_rows}
+
+    # Backfill any event_type that has no row at all so the UI sees every event.
+    seen_event_types = {k[0] for k in merged.keys()}
+    for event_type, destination in DEFAULT_NOTIFICATION_PREFERENCES:
+        if event_type not in seen_event_types:
+            merged[(event_type, destination)] = PreferenceRow(
+                event_type=event_type,
+                destination=destination,
+                enabled=True,
+                channel_connection_id=None,
+            )
+
+    # Stable ordering: defined event order, then destination alphabetically.
+    event_order = {
+        et: i for i, (et, _) in enumerate(DEFAULT_NOTIFICATION_PREFERENCES)
+    }
+    return sorted(
+        merged.values(),
+        key=lambda p: (event_order.get(p.event_type, 999), p.destination),
+    )
+
+
+@preferences_router.get("", response_model=PreferenceListResponse)
+@preferences_router.get("/", response_model=PreferenceListResponse)
+async def list_preferences(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> PreferenceListResponse:
+    """Return merged notification preferences for the current workspace+user."""
+    user_id = _resolve_user_id(db, ctx)
+
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT user_id, event_type, destination, enabled, channel_connection_id
+                  FROM notification_preferences
+                 WHERE workspace_id = :workspace_id
+                   AND (user_id = :user_id OR user_id IS NULL)
+                """
+            ),
+            {"workspace_id": str(ctx.workspace_id), "user_id": user_id},
+        ).fetchall()
+    except Exception:
+        logger.exception("Failed to list notification preferences")
+        raise HTTPException(
+            status_code=500, detail="Failed to list notification preferences"
+        )
+
+    return PreferenceListResponse(
+        success=True, preferences=_merge_preference_rows(rows, user_id)
+    )
+
+
+@preferences_router.put("", response_model=PreferenceBulkUpdateResponse)
+@preferences_router.put("/", response_model=PreferenceBulkUpdateResponse)
+async def bulk_update_preferences(
+    payload: PreferenceBulkUpdateRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> PreferenceBulkUpdateResponse:
+    """Bulk-replace user-scoped preferences for every event_type in the payload.
+
+    For each unique ``event_type`` in ``payload.preferences`` we delete the
+    current user's existing rows for that event_type, then insert the new
+    rows. Workspace-default rows (``user_id IS NULL``) are never touched.
+    """
+    user_id = _resolve_user_id(db, ctx)
+    if user_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Notification preferences require an authenticated user",
+        )
+
+    # Validation pass — fail fast before any DB write
+    for pref in payload.preferences:
+        if pref.event_type not in VALID_EVENT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown event_type: {pref.event_type}",
+            )
+        if pref.destination not in _VALID_DESTINATIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown destination: {pref.destination}",
+            )
+        if pref.destination == "channel" and not pref.channel_connection_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"destination='channel' requires channel_connection_id "
+                    f"(event_type={pref.event_type})"
+                ),
+            )
+
+    # Validate any referenced channel_connection_id belongs to this workspace
+    referenced_connections = {
+        p.channel_connection_id for p in payload.preferences if p.channel_connection_id
+    }
+    if referenced_connections:
+        try:
+            valid_rows = db.execute(
+                text(
+                    "SELECT id FROM channel_connections "
+                    "WHERE workspace_id = :ws_id "
+                    "  AND id = ANY(:ids)"
+                ),
+                {
+                    "ws_id": str(ctx.workspace_id),
+                    "ids": list(referenced_connections),
+                },
+            ).fetchall()
+        except Exception:
+            logger.exception("Failed to validate channel_connection ids")
+            raise HTTPException(
+                status_code=500, detail="Failed to validate channel connections"
+            )
+        valid_ids = {str(r[0]) for r in valid_rows}
+        missing = referenced_connections - valid_ids
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"channel_connection_id not in workspace: {sorted(missing)}",
+            )
+
+    affected_event_types = {p.event_type for p in payload.preferences}
+
+    try:
+        # Delete every user-scoped row for the touched event_types in this workspace
+        if affected_event_types:
+            db.execute(
+                text(
+                    """
+                    DELETE FROM notification_preferences
+                     WHERE workspace_id = :ws_id
+                       AND user_id = :user_id
+                       AND event_type = ANY(:event_types)
+                    """
+                ),
+                {
+                    "ws_id": str(ctx.workspace_id),
+                    "user_id": user_id,
+                    "event_types": list(affected_event_types),
+                },
+            )
+
+        updated = 0
+        for pref in payload.preferences:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO notification_preferences
+                        (workspace_id, user_id, event_type, destination,
+                         channel_connection_id, enabled)
+                    VALUES (:ws_id, :user_id, :event_type, :destination,
+                            :channel_connection_id, :enabled)
+                    """
+                ),
+                {
+                    "ws_id": str(ctx.workspace_id),
+                    "user_id": user_id,
+                    "event_type": pref.event_type,
+                    "destination": pref.destination,
+                    "channel_connection_id": pref.channel_connection_id,
+                    "enabled": pref.enabled,
+                },
+            )
+            updated += 1
+
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to bulk-update notification preferences")
+        raise HTTPException(
+            status_code=500, detail="Failed to update notification preferences"
+        )
+
+    return PreferenceBulkUpdateResponse(success=True, updated_count=updated)
 
 
 @router.post("/read-all", response_model=ReadAllResponse)

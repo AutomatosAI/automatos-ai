@@ -89,8 +89,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added preferences_router at /api/notification-preferences in orchestrator/api/notifications.py. GET returns merged workspace+user prefs (backfilled with DEFAULT_NOTIFICATION_PREFERENCES). PUT validates event_type/destination/channel_connection_id ownership, deletes user-scoped rows for touched event_types, re-inserts. Registered in orchestrator/main.py."
     },
     {
       "id": "US-006",
