@@ -84,3 +84,4 @@
   - External-reset sync via second effect on filters.search
   - Typecheck not runnable locally (no node_modules in frontend/); imports verified against ui/* and use-deliverables-api
 US-009 DeliverablePreview slide-over built (2026-04-10)
+2026-04-10 21:26 US-010 GalleryView container (infinite scroll + preview slide-over)

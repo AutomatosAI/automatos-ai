@@ -144,7 +144,7 @@ handle_usage_limit() {
   CONSECUTIVE_FAILURES=0
 }
 
-echo -e "${GREEN}Ralph loop: BUILD mode — PRD-120 Phase 2: Skill Rewrites (11 stories)${NC}"
+echo -e "${GREEN}Ralph loop: BUILD mode — PRD-129: Workspace Outputs Hub (11 stories)${NC}"
 [[ $MAX_ITERATIONS -gt 0 ]] && echo "Max iterations: $MAX_ITERATIONS"
 echo "Press Ctrl+C to stop"
 echo "---"
