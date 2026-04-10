@@ -67,3 +67,13 @@ Started: 2026-04-10
   - React Query v4 compliance: isLoading (not isPending), useRouter().push() from next/navigation (not window.location).
   - Uses apiClient.request with JSON.stringify on body to match existing hook patterns.
   - Validation: tsc not runnable locally (node_modules not installed in this worktree); relied on type-safe imports against existing hooks/ and components/ui/popover.tsx which matches the expected Radix Popover shape. Will typecheck on next CI run.
+
+
+2026-04-10 — US-009 /settings/notifications page + settings tab link
+  - New frontend/components/settings/NotificationsSettingsTab.tsx: lists all 9 event types with label+description, each row has a destination Select (in_app/telegram/slack/webhook/silent) + enabled Switch; auto-saves on change via useUpdateNotificationPreferences (PUT bulk upsert). Loading/error/saving states shown via Loader2 and a Badge. Falls back to in_app+enabled for any event type missing from the API response so the UI always shows all 9 rows even before seeding.
+  - New frontend/app/settings/notifications/page.tsx: standalone route wrapping NotificationsSettingsTab inside MainLayout. usePageAPI('settings') preserves existing page-api registration. This route is what the NotificationBell footer "Settings" link already points to (wired in US-008).
+  - frontend/components/settings/SettingsPanel.tsx: added Notifications tab (Bell icon) between Channels and Voices so /settings lands users directly on the prefs tab. Matches "Accessible from the settings sidebar navigation" AC — the app uses tabs, not a sidebar, but this IS the settings navigation entry point.
+  - Optimistic UI: useUpdateNotificationPreferences already invalidates both notificationQueryKeys.preferences and notificationQueryKeys.all onSuccess (defined in US-008 hook), so the bell + settings refetch together.
+  - Switch is Radix-based; accepts checked + onCheckedChange. Select is Radix-based; accepts value + onValueChange. Both confirmed against frontend/components/ui/{switch,select}.tsx.
+  - Validation: tsc not runnable in this worktree (no node_modules). Type-safe against PreferenceRow from hooks/use-notifications-api.ts; no new imports from non-existent modules. Will typecheck on next CI run.
+  - Gotcha: AC says "sidebar" but settings is tab-based in this codebase. Added a Notifications tab to SettingsPanel so the entry point is discoverable from the existing navigation, and kept the standalone /settings/notifications route for the bell deep-link.

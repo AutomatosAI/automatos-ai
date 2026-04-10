@@ -163,8 +163,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "NotificationsSettingsTab renders all 9 events with Select+Switch, auto-saves via PUT /api/notification-preferences and invalidates react-query caches. Standalone page at /app/settings/notifications/page.tsx plus a new Notifications tab in SettingsPanel for discoverability."
     },
     {
       "id": "US-010",
