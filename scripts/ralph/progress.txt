@@ -83,3 +83,4 @@
   - Effect deps [debouncedSearch, filters.search, onFiltersChange] — no stale closure, no-op guarded
   - External-reset sync via second effect on filters.search
   - Typecheck not runnable locally (no node_modules in frontend/); imports verified against ui/* and use-deliverables-api
+US-009 DeliverablePreview slide-over built (2026-04-10)
