@@ -34,4 +34,24 @@
     and workspace isolation: X-Workspace-ID header is ignored, svc always gets ctx.workspace_id
   - Test uses FastAPI dependency_overrides + patch('api.deliverables.DeliverableService')
     with sys.modules stubs for jwt/clerk/core.database/core.auth — no DB or env needed.
+2026-04-10 — US-004 complete: auto-register deliverables on workspace_write_file + report_service
+  - Added AGENT_REGISTERABLE_ARTIFACT_TYPES (report/image/document/slide/spreadsheet/code) to deliverable_service.py
+  - exec_workspace.py: new _auto_register_deliverable() helper + _derive_source() that extracts
+    source_type/source_id from caller_context (heartbeat_id → 'heartbeat', mission_id → 'mission',
+    task_id → 'task', playbook_id → 'playbook', trigger_id → 'trigger', else 'chat').
+  - execute_workspace_action() now accepts agent_id + caller_context, calls auto-register on
+    successful workspace_write_file. Skips non-registerable extensions (archive/audio/video).
+    ALL failures caught via try/except with exc_info=True — never break the write.
+  - File size extracted from worker response (size/bytes_written/file_size_bytes/bytes keys).
+  - Agent name resolved via cheap DB lookup (SessionLocal + Agent.query).
+  - unified_executor.py: plumbed agent_id + caller_context into both workspace action paths
+    (platform_execute dispatcher branch + direct workspace_* branch).
+  - report_service.create_report(): mirrors reports into deliverables after DB insert with
+    artifact_type='report', source_type='heartbeat' (or 'task' if no heartbeat_result_id and
+    report_type != 'standup'), source_id from heartbeat_result_id or report_id.
+  - 11 unit tests in tests/modules/tools/execution/test_exec_workspace_deliverable.py — all pass.
+    Tests use sys.modules stubs for core.workspace_client, core.database.database, core.models.core,
+    and services.deliverable_service to avoid pulling pgvector + DB config into test import.
+    Covered: _derive_source precedence, successful register, skip non-registerable (.zip),
+    register failure does not break write, read_file does not register, default source=chat.
 

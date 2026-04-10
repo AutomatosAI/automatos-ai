@@ -92,6 +92,14 @@ def _infer_artifact_type(file_path: str) -> str:
     return EXTENSION_TO_ARTIFACT.get(ext, "document")
 
 
+# Artifact types that should auto-register when agents write files. Archives,
+# audio, and video are excluded because agents rarely produce them as primary
+# deliverables (usually intermediate/temp files).
+AGENT_REGISTERABLE_ARTIFACT_TYPES = frozenset({
+    "report", "image", "document", "slide", "spreadsheet", "code",
+})
+
+
 def _humanize_basename(file_path: str) -> str:
     """Turn 'weekly-sales-report.md' → 'Weekly Sales Report'."""
     base = os.path.basename(file_path or "")
