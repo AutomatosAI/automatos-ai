@@ -1,3 +1,4 @@
+print(">>> ATTACHMENTS MODULE LOADING <<<")  # DEBUG: Remove after fixing 404
 """
 Attachments API — Ephemeral file uploads for chat, missions, tasks, channels (PRD-127)
 
@@ -165,3 +166,5 @@ async def delete_attachment(
         raise HTTPException(status_code=400, detail="Invalid attachment ID")
 
     return {"deleted": True, "attachment_id": attachment_id}
+
+print(">>> ATTACHMENTS MODULE LOADED SUCCESSFULLY <<<")  # DEBUG: Remove after fixing 404
