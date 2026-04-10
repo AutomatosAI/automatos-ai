@@ -551,7 +551,7 @@ async def health_check():
             "message": "System experiencing issues. Check logs for details."
         }
 
-@app.get("/api/debug/routes")
+@app.get("/api/test-attachment-routes")
 async def debug_routes():
     """List all registered routes - DEBUG endpoint"""
     routes = []
