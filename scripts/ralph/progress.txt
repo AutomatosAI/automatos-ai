@@ -75,3 +75,11 @@
 - Delete mutation invalidates all ['deliverables', workspaceId] queries
 - React Query v4 API (pageParam default via destructuring, no initialPageParam)
 2026-04-10 21:20 US-007: DeliverableCard component created
+2026-04-10 — US-008 complete: frontend/components/workspace/gallery-view/filter-bar.tsx
+  - Debounced search (local useDebounce hook, 300ms) — no shared hook in repo
+  - Type/Source/Date Selects using shadcn Select (with 'all' sentinel — Radix rejects empty string values)
+  - Clear button only when hasActiveFilters; right-aligned total with pluralization
+  - Lucide icons only (Search, Calendar, FileType, Zap, X) — no emojis
+  - Effect deps [debouncedSearch, filters.search, onFiltersChange] — no stale closure, no-op guarded
+  - External-reset sync via second effect on filters.search
+  - Typecheck not runnable locally (no node_modules in frontend/); imports verified against ui/* and use-deliverables-api
