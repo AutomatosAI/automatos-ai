@@ -551,6 +551,18 @@ async def health_check():
             "message": "System experiencing issues. Check logs for details."
         }
 
+@app.get("/api/attachments-ping")
+async def attachments_ping():
+    """Simple GET to test if this path area works"""
+    return {"ping": "pong", "path": "/api/attachments-ping"}
+
+
+@app.post("/api/upload-test")
+async def upload_test(file: UploadFile = File(...)):
+    """Minimal test - just accepts file and returns filename"""
+    return {"received": file.filename, "size": file.size}
+
+
 @app.post("/api/attachments")
 async def upload_attachment_direct(
     file: UploadFile = File(...),
