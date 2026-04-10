@@ -32,6 +32,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
 
+@router.get("/health")
+async def attachments_health():
+    """Simple health check to verify router is loaded."""
+    return {"status": "ok", "router": "attachments"}
+
+
 class AttachmentResponse(BaseModel):
     """Response model for attachment uploads."""
 
