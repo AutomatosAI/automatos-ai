@@ -71,8 +71,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "orchestrator/api/notifications.py \u2014 5 endpoints, workspace+user scoped, registered in main.py"
     },
     {
       "id": "US-005",

@@ -72,7 +72,7 @@ Settings:
 ### Phase 2: Dispatcher & API
 
 - [x] **US-003**: `NotificationDispatcher` service with full fan-out + unit tests
-- [ ] **US-004**: Notifications API — list, unread-count, read, read-all, dismiss
+- [x] **US-004**: Notifications API — list, unread-count, read, read-all, dismiss
 - [ ] **US-005**: Preferences API — GET merged list, PUT bulk upsert
 
 ### Phase 3: Wire Sources

@@ -86,6 +86,7 @@ from api.workspace_skills import router as workspace_skills_router  # PRD-71: Wo
 from api.agent_plugins import router as agent_plugins_router  # PRD-42: Agent Plugin Assignment
 from api.personas import router as personas_router  # PRD-42: Persona API
 from api.generated_images import router as generated_images_router  # Generated image serving
+from api.notifications import router as notifications_router  # PRD-128: Unified notification system
 # Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
 try:
     from api.bug_reports import router as bug_reports_router
@@ -991,6 +992,7 @@ app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
+app.include_router(notifications_router)  # PRD-128: Unified notification system
 if widget_email_router is not None:
     app.include_router(widget_email_router)  # US-012: Widget Email operations
 if auth_router is not None:
