@@ -77,3 +77,13 @@ Started: 2026-04-10
   - Switch is Radix-based; accepts checked + onCheckedChange. Select is Radix-based; accepts value + onValueChange. Both confirmed against frontend/components/ui/{switch,select}.tsx.
   - Validation: tsc not runnable in this worktree (no node_modules). Type-safe against PreferenceRow from hooks/use-notifications-api.ts; no new imports from non-existent modules. Will typecheck on next CI run.
   - Gotcha: AC says "sidebar" but settings is tab-based in this codebase. Added a Notifications tab to SettingsPanel so the entry point is discoverable from the existing navigation, and kept the standalone /settings/notifications route for the bell deep-link.
+
+2026-04-10 US-010 — End-to-end smoke test of notification pipeline
+  Added tests/integration/__init__.py + tests/integration/test_notification_pipeline.py.
+  Stateful FakeDB replays the SQL patterns emitted by NotificationDispatcher and
+  api.notifications (INSERT notifications, SELECT list/count, UPDATE read_at/dismissed_at,
+  existence probe). Test drives dispatch("heartbeat_complete") → unread-count → list →
+  mark_read → dismiss in one pytest function and asserts every transition.
+  Run: python3 -m pytest tests/integration/test_notification_pipeline.py (1 passed).
+  Gotcha: pytest must run from the worktree root, not from orchestrator/, so the sys.path
+  insert in the test file picks up orchestrator/ before `import api.notifications`.

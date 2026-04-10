@@ -182,8 +182,8 @@
         "Tests pass"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "tests/integration/test_notification_pipeline.py drives NotificationDispatcher.dispatch → unread-count → list → read → dismiss against a stateful FakeDB that satisfies the dispatcher + API SQL patterns. Hermetic (no Postgres), single pytest run, all assertions green."
     }
   ]
 }

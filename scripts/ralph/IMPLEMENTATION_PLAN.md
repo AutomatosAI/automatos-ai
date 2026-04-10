@@ -87,7 +87,7 @@ Settings:
 
 ### Phase 5: Verification
 
-- [ ] **US-010**: End-to-end smoke test of notification pipeline
+- [x] **US-010**: End-to-end smoke test of notification pipeline
 
 ## Constraints
 
