@@ -456,8 +456,9 @@ class StreamingChatService:
 
             new_parts = []
             for part in parts:
-                if part.get("type") == "file" and part.get("url", "").startswith("document://"):
-                    doc_id_str = part["url"].replace("document://", "")
+                url = part.get("url") or ""
+                if part.get("type") == "file" and url.startswith("document://"):
+                    doc_id_str = url.replace("document://", "")
                     filename = part.get("filename", "uploaded file")
                     try:
                         doc_id = int(doc_id_str)
