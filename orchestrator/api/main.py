@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -394,7 +394,7 @@ app.include_router(models_router)  # PRD-15: Model management
 app.include_router(workflows_router)
 app.include_router(workflow_templates_router)
 app.include_router(documents_router)
-app.include_router(attachments_router)  # PRD-127: Ephemeral attachments
+# app.include_router(attachments_router)  # PRD-127: Disabled - using direct endpoint in main.py
 app.include_router(system_router)
 app.include_router(context_engineering_router)
 app.include_router(memory_router)
@@ -551,16 +551,42 @@ async def health_check():
             "message": "System experiencing issues. Check logs for details."
         }
 
-@app.get("/api/test-attachment-routes")
-async def debug_routes():
-    """List all registered routes - DEBUG endpoint"""
-    routes = []
-    for route in app.routes:
-        if hasattr(route, 'methods') and hasattr(route, 'path'):
-            routes.append({"methods": list(route.methods), "path": route.path})
-    # Filter to show attachment routes
-    attachment_routes = [r for r in routes if 'attachment' in r['path'].lower()]
-    return {"total_routes": len(routes), "attachment_routes": attachment_routes}
+@app.post("/api/attachments")
+async def upload_attachment_direct(
+    file: UploadFile = File(...),
+    authorization: str = Header(None),
+    x_workspace_id: str = Header(None, alias="X-Workspace-ID"),
+):
+    """Direct upload endpoint in main.py - bypasses router"""
+    from modules.attachments.store import get_attachment_store
+    from modules.attachments.validation import ValidationError
+    from uuid import UUID
+
+    if not x_workspace_id:
+        raise HTTPException(status_code=400, detail="Workspace ID required")
+
+    content = await file.read()
+    store = get_attachment_store()
+
+    try:
+        ref = await store.put(
+            workspace_id=UUID(x_workspace_id),
+            uploaded_by="direct-upload",
+            filename=file.filename or "attachment",
+            content=content,
+            declared_mime=file.content_type,
+        )
+        return {
+            "attachment_id": str(ref.attachment_id),
+            "filename": ref.filename,
+            "mime": ref.mime,
+            "media_type": ref.media_type.value,
+            "size_bytes": ref.size_bytes,
+        }
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
 
 @app.get("/api/health/endpoints",
