@@ -55,3 +55,12 @@
     Covered: _derive_source precedence, successful register, skip non-registerable (.zip),
     register failure does not break write, read_file does not register, default source=chat.
 
+2026-04-10 — US-005 complete: scripts/backfill_prd129_deliverables.py
+  - Iterates agent_reports via SQL (LEFT JOIN agents for name fallback)
+  - Calls DeliverableService.register() per row (artifact_type='report')
+  - source_type='heartbeat' if heartbeat_result_id set or report_type='standup', else 'task'
+  - Flags: --dry-run, --workspace-id <uuid>, --verbose
+  - Idempotent via US-001 unique partial index
+  - Summary printed: Processed/Inserted/Updated/Skipped/Errors; exit 1 on errors
+  - Local --help verified; full dry-run needs DB (runs on deploy)
+  - Import fix: `from config import config` (NOT core.config)
