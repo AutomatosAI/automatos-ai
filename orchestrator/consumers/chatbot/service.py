@@ -438,7 +438,13 @@ class StreamingChatService:
     # ─────────────────────────────────────────────────────────────────────
 
     def _resolve_file_parts(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Resolve document:// file parts to inline text content."""
+        """
+        DEPRECATED (PRD-127): Resolve document:// file parts to inline text content.
+
+        This is a 30-day compat layer for old messages with document:// URLs.
+        New messages use attachment_ids which are resolved via ContextService.build_context().
+        Sunset date: 2026-05-10 (30 days after PRD-127 ship).
+        """
         from sqlalchemy import text as sa_text
 
         resolved = []
@@ -488,6 +494,31 @@ class StreamingChatService:
             resolved.append({**msg, "parts": new_parts})
 
         return resolved
+
+    def _extract_attachment_ids(self, messages: List[Dict[str, Any]]) -> List[str]:
+        """
+        PRD-127: Extract attachment_ids from the latest user message.
+
+        Messages may have attachment_ids in their payload (new format).
+        Returns list of attachment UUIDs to pass to build_context().
+        """
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                # Check for attachment_ids in message metadata
+                attachment_ids = msg.get("attachment_ids", [])
+                if attachment_ids:
+                    return attachment_ids
+                # Also check attachments field (may have attachment_id key)
+                attachments = msg.get("attachments", [])
+                if attachments:
+                    ids = [
+                        att.get("attachment_id")
+                        for att in attachments
+                        if att.get("attachment_id")
+                    ]
+                    if ids:
+                        return ids
+        return []
 
     def _resolve_workspace_id(self, agent_id: int) -> Optional[str]:
         logger.info(f"[chat] resolve_workspace_id current={self.workspace_id} agent={agent_id}")
@@ -606,6 +637,8 @@ class StreamingChatService:
         cto_check_result: Any,
         mission_mode: bool = False,
         plan_mode: bool = False,
+        attachment_ids: Optional[List[str]] = None,
+        model_id: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], Optional[List[Dict[str, Any]]], Any]:
         """
         Prepare LLM messages with orchestration, persona, CTO override, and context guard.
@@ -640,6 +673,8 @@ class StreamingChatService:
             llm_messages, use_tools, orchestrated = await self._prepare_full_path(
                 messages, agent_runtime, agent_ctx, all_tools,
                 smart_chat, chat_id, complexity_assessment,
+                attachment_ids=attachment_ids,
+                model_id=model_id,
             )
 
         # PRD-67: CTO Agent system prompt override
@@ -772,6 +807,8 @@ class StreamingChatService:
         smart_chat,
         chat_id: str,
         complexity_assessment: Optional[Any],
+        attachment_ids: Optional[List[str]] = None,
+        model_id: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], Optional[List[Dict[str, Any]]], Any]:
         """Full pipeline: MOLECULE / CELL / ORGAN / ORGANISM."""
         from consumers.chatbot.integration import apply_orchestration_to_messages
@@ -785,6 +822,8 @@ class StreamingChatService:
             available_tools=all_tools or [],
             chat_id=chat_id,
             complexity_assessment=complexity_assessment,
+            attachment_ids=attachment_ids,
+            model_id=model_id,
         )
         llm_messages = apply_orchestration_to_messages(orchestrated)
         use_tools = orchestrated.tools if orchestrated.requires_tools else None
@@ -1790,8 +1829,15 @@ class StreamingChatService:
             yield self.streaming_handler.format_aisdk_data(_agent_info)
             await asyncio.sleep(0)
 
-            # Resolve file attachments
+            # Resolve file attachments (legacy document:// URLs - sunset 2026-05-10)
             messages = self._resolve_file_parts(messages)
+
+            # PRD-127: Extract attachment_ids and model_id for multimodal resolution
+            _attachment_ids = self._extract_attachment_ids(messages)
+            _model_id = None
+            _llm_config = getattr(agent_runtime.llm_manager, 'config', None)
+            if _llm_config:
+                _model_id = getattr(_llm_config, 'model', None)
 
             # Load agent context (persona, skills, etc.)
             from consumers.chatbot.auto import Complexity
@@ -1822,6 +1868,8 @@ class StreamingChatService:
                 chat_id, complexity_assessment, _is_cto_agent, _cto_check_result,
                 mission_mode=mission_mode,
                 plan_mode=plan_mode,
+                attachment_ids=_attachment_ids,
+                model_id=_model_id,
             )
 
             if orchestrated:

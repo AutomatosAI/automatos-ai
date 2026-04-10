@@ -18,6 +18,7 @@ export interface CreateTaskPayload {
   review_mode?: 'human' | 'llm' | 'auto'
   raw_prompt?: string
   planning_data?: any
+  attachment_ids?: string[]  // PRD-127: ephemeral attachments
 }
 
 export interface UpdateTaskPayload {

@@ -1617,6 +1617,72 @@ class ApiClient {
     return response.json()
   }
 
+  // ===== ATTACHMENT ENDPOINTS (PRD-127: Ephemeral Attachments) =====
+
+  /**
+   * Upload an ephemeral attachment for chat, missions, tasks, or channels.
+   * Files are stored with a 7-day TTL — use uploadDocument for persistent storage.
+   */
+  async uploadAttachment(file: File): Promise<{
+    attachment_id: string
+    filename: string
+    mime: string
+    media_type: 'image' | 'document'
+    size_bytes: number
+  }> {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    // Use fetch directly for file upload (don't use this.request which sets Content-Type)
+    const headers: Record<string, string> = { ...this.defaultHeaders }
+    delete headers['Content-Type'] // Let browser set multipart/form-data with boundary
+
+    // Inject Workspace ID from LocalStorage
+    if (typeof window !== 'undefined') {
+      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (workspaceId) {
+        headers['X-Workspace-ID'] = workspaceId
+      }
+    }
+
+    // Add Clerk JWT token if available
+    if (this.getClerkToken) {
+      try {
+        const token = await this.getClerkToken()
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`
+        }
+      } catch {
+        // Token retrieval failed — continue without auth
+      }
+    }
+
+    // Upload directly to backend, bypassing Next.js proxy
+    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
+    const url = `${BACKEND_URL}/api/attachments`
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Attachment upload failed (${response.status}): ${errorText || response.statusText}`)
+    }
+
+    return response.json()
+  }
+
+  async getAttachment(attachmentId: string) {
+    return this.request(`/api/attachments/${attachmentId}`)
+  }
+
+  async deleteAttachment(attachmentId: string) {
+    return this.request(`/api/attachments/${attachmentId}`, { method: 'DELETE' })
+  }
+
   // ===== DOCUMENT ENDPOINTS =====
   async uploadDocument(file: File, metadata?: any) {
     console.log('[Upload] Starting document upload:', {

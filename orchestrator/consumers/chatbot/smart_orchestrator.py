@@ -129,6 +129,8 @@ class SmartChatOrchestrator:
         available_tools: List[Dict[str, Any]],
         chat_id: Optional[str] = None,
         complexity_assessment: Optional[Any] = None,
+        attachment_ids: Optional[List[str]] = None,
+        model_id: Optional[str] = None,
     ) -> OrchestratedRequest:
         """
         Prepare a chat request for the LLM.
@@ -143,6 +145,8 @@ class SmartChatOrchestrator:
                 backward compatibility — ContextService loads tools internally)
             chat_id: Optional chat session ID
             complexity_assessment: Optional PRD-68 AutoBrain assessment
+            attachment_ids: PRD-127 ephemeral attachments to resolve
+            model_id: PRD-127 model identifier for vision capability check
 
         Returns:
             OrchestratedRequest ready for LLM
@@ -199,6 +203,8 @@ class SmartChatOrchestrator:
             widget_mode=self.widget_mode,
             complexity_assessment=complexity_assessment,
             tool_hints=_tool_hints,
+            attachment_ids=attachment_ids,  # PRD-127
+            model_id=model_id,  # PRD-127
             # Kwargs passed through to sections:
             intent_result=intent_result,
             skip_memory=not _wants_memory,

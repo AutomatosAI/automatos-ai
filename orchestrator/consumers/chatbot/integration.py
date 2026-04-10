@@ -72,6 +72,8 @@ class SmartChatIntegration:
         available_tools: List[Dict[str, Any]],
         chat_id: Optional[str] = None,
         complexity_assessment: Optional[Any] = None,
+        attachment_ids: Optional[List[str]] = None,
+        model_id: Optional[str] = None,
     ) -> OrchestratedRequest:
         """
         Prepare a chat request using smart orchestration.
@@ -86,6 +88,8 @@ class SmartChatIntegration:
             available_tools: All tools available to agent
             chat_id: Optional chat session ID
             complexity_assessment: Optional PRD-68 AutoBrain assessment
+            attachment_ids: PRD-127 ephemeral attachments to resolve
+            model_id: PRD-127 model identifier for vision capability check
 
         Returns:
             OrchestratedRequest ready for LLM
@@ -95,6 +99,8 @@ class SmartChatIntegration:
             available_tools=available_tools,
             chat_id=chat_id,
             complexity_assessment=complexity_assessment,
+            attachment_ids=attachment_ids,
+            model_id=model_id,
         )
 
     async def store(

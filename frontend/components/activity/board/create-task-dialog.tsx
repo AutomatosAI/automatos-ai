@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { toast } from 'react-hot-toast'
+import { Paperclip, X, FileText, Image } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -10,6 +11,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { useAgents } from '@/hooks/use-agent-api'
 import { useCreateTask, usePlanTask, useRefineTask } from '@/hooks/use-board-tasks-api'
 import type { CreateTaskPayload, PlanResponse, RefineResponse } from '@/hooks/use-board-tasks-api'
@@ -17,6 +19,15 @@ import type { TaskPriority, ReviewMode } from '@/types/board'
 import { QuickCreateForm } from './create-task-steps'
 import { PlanningForm } from './create-task-steps'
 import { RefinedPreview } from './create-task-steps'
+import { apiClient } from '@/lib/api-client'
+
+// PRD-127: Attachment metadata
+interface AttachmentMeta {
+  attachment_id: string
+  filename: string
+  mime: string
+  media_type: 'image' | 'document'
+}
 
 interface CreateTaskDialogProps {
   open: boolean
@@ -36,6 +47,11 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
   const [tags, setTags] = useState('')
   const [reviewMode, setReviewMode] = useState<ReviewMode>('auto')
 
+  // PRD-127: Attachment state
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
+  const [isUploading, setIsUploading] = useState(false)
+
   // Planning state
   const [planData, setPlanData] = useState<PlanResponse | null>(null)
   const [answers, setAnswers] = useState<Record<string, number>>({})
@@ -45,6 +61,45 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
   const createTask = useCreateTask()
   const planTask = usePlanTask()
   const refineTask = useRefineTask()
+
+  // PRD-127: Handle file upload
+  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0) return
+
+    setIsUploading(true)
+    try {
+      const results = await Promise.all(
+        files.map((file) => apiClient.uploadAttachment(file))
+      )
+      setAttachments((prev) => [
+        ...prev,
+        ...results.map((r) => ({
+          attachment_id: r.attachment_id,
+          filename: r.filename,
+          mime: r.mime,
+          media_type: r.media_type,
+        })),
+      ])
+      toast.success(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`)
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Upload failed'
+      toast.error(msg)
+    } finally {
+      setIsUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }, [])
+
+  const handleRemoveAttachment = useCallback(async (attachmentId: string) => {
+    try {
+      await apiClient.deleteAttachment(attachmentId)
+      setAttachments((prev) => prev.filter((a) => a.attachment_id !== attachmentId))
+    } catch {
+      // Ignore delete errors — just remove from UI
+      setAttachments((prev) => prev.filter((a) => a.attachment_id !== attachmentId))
+    }
+  }, [])
 
   const resetForm = useCallback(() => {
     setStep('quick')
@@ -57,6 +112,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
     setPlanData(null)
     setAnswers({})
     setRefinedData(null)
+    setAttachments([])  // PRD-127
   }, [])
 
   const handleOpenChange = useCallback((value: boolean) => {
@@ -80,8 +136,9 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
       review_mode: reviewMode,
       raw_prompt: description,
       planning_data: refinedData ?? undefined,
+      attachment_ids: attachments.map((a) => a.attachment_id),  // PRD-127
     }
-  }, [title, description, priority, agentId, tags, reviewMode, refinedData])
+  }, [title, description, priority, agentId, tags, reviewMode, refinedData, attachments])
 
   const handleCreate = useCallback(async () => {
     const payload = buildPayload()
@@ -145,6 +202,16 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="glass-card sm:max-w-[640px]">
+        {/* PRD-127: Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.md,.json,.py,.js,.ts,.tsx"
+          onChange={handleFileSelect}
+        />
+
         <DialogHeader>
           <DialogTitle className="text-base">
             {step === 'quick' && 'Create Task'}
@@ -157,6 +224,50 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
             {step === 'refined' && 'Review the AI-refined task before creating.'}
           </DialogDescription>
         </DialogHeader>
+
+        {/* PRD-127: Attachment bar */}
+        {step === 'quick' && (
+          <div className="flex items-center gap-2 pb-2 border-b border-border/50">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+              disabled={isUploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip className="w-4 h-4" />
+              <span className="text-xs">Attach</span>
+            </Button>
+            {isUploading && (
+              <span className="text-xs text-muted-foreground animate-pulse">Uploading...</span>
+            )}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {attachments.map((att) => (
+                  <div
+                    key={att.attachment_id}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/30 px-2.5 py-0.5 text-xs"
+                  >
+                    {att.media_type === 'image' ? (
+                      <Image className="w-3 h-3 text-blue-400" />
+                    ) : (
+                      <FileText className="w-3 h-3 text-amber-400" />
+                    )}
+                    <span className="max-w-[120px] truncate">{att.filename}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttachment(att.attachment_id)}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <AnimatePresence mode="wait">
           {step === 'quick' && (

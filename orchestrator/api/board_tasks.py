@@ -102,6 +102,11 @@ async def create_task(
     else:
         status = "assigned" if assigned_agent_id else "inbox"
 
+    # PRD-127: ephemeral attachments
+    attachment_ids = body.get("attachment_ids", [])
+    if attachment_ids and not isinstance(attachment_ids, list):
+        raise HTTPException(status_code=422, detail="attachment_ids must be a list")
+
     task = BoardTask(
         workspace_id=ctx.workspace_id,
         title=title,
@@ -116,6 +121,7 @@ async def create_task(
         parent_task_id=body.get("parent_task_id"),
         tags=body.get("tags", []),
         planning_data=planning_data,
+        attachment_ids=attachment_ids,  # PRD-127
         sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get(priority, 24)),
     )
     db.add(task)
@@ -293,6 +299,7 @@ async def update_task(
             workspace_id=str(ctx.workspace_id),
             prompt=task.raw_prompt or task.description or task.title,
             review_mode=task.review_mode or "auto",
+            attachment_ids=task.attachment_ids,  # PRD-127
         )
 
     logger.info("[BoardTasks] Updated task %d", task.id)
@@ -485,6 +492,7 @@ async def update_task_status(
             workspace_id=str(ctx.workspace_id),
             prompt=task.raw_prompt or task.description or task.title,
             review_mode=task.review_mode or "auto",
+            attachment_ids=task.attachment_ids,  # PRD-127
         )
 
     return {"id": task.id, "status": task.status}
@@ -498,6 +506,7 @@ def _launch_task_execution(
     workspace_id: str,
     prompt: str,
     review_mode: str = "auto",
+    attachment_ids: Optional[list] = None,  # PRD-127
 ):
     """Launch agent execution for a board task as a background coroutine."""
 
@@ -517,6 +526,7 @@ def _launch_task_execution(
                     "workspace_id": workspace_id,
                 },
                 use_memory=False,
+                attachment_ids=attachment_ids,  # PRD-127
             )
 
             # Extract response text

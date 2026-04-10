@@ -113,16 +113,53 @@ class SlackAdapter(BaseChannelAdapter):
             return {"status": "error", "detail": str(e)}
 
     async def _on_message(self, message: dict, say):
-        """Handle incoming Slack message."""
+        """Handle incoming Slack message (text and file uploads)."""
         # Ignore bot messages
         if message.get("bot_id") or message.get("subtype") == "bot_message":
             return
 
         text = message.get("text", "")
-        if not text:
+        files = message.get("files", [])
+
+        # Must have text or files
+        if not text and not files:
             return
 
         try:
+            # PRD-127: Handle file uploads by downloading and uploading to AttachmentStore
+            attachment_ids: list[str] = []
+
+            for file_info in files:
+                # Slack files have url_private that requires auth
+                url = file_info.get("url_private")
+                if not url:
+                    continue
+
+                try:
+                    import httpx
+
+                    bot_token = self.config.get("bot_token", "")
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(
+                            url,
+                            headers={"Authorization": f"Bearer {bot_token}"},
+                            follow_redirects=True,
+                        )
+                        if resp.status_code == 200:
+                            attachment_id = await self.upload_attachment(
+                                content=resp.content,
+                                filename=file_info.get("name", "slack_file"),
+                                mime_type=file_info.get("mimetype"),
+                            )
+                            if attachment_id:
+                                attachment_ids.append(attachment_id)
+                except Exception as e:
+                    logger.warning("[Slack:%s] Failed to download file %s: %s", self.connection_id, file_info.get("name"), e)
+
+            # If only files, add placeholder text
+            if not text and attachment_ids:
+                text = "[Attachment received]"
+
             platform_msg = {
                 "channel_id": message.get("channel"),
                 "reply_channel_id": message.get("channel"),
@@ -131,6 +168,7 @@ class SlackAdapter(BaseChannelAdapter):
                 "user_name": message.get("user"),
                 "text": text,
                 "message_ts": message.get("ts"),
+                "attachment_ids": attachment_ids,  # PRD-127
             }
 
             await self.handle_message(platform_msg)

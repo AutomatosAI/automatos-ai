@@ -50,7 +50,12 @@ export function MultimodalInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadQueue, setUploadQueue] = useState<string[]>([])
-  const [uploadedDocs, setUploadedDocs] = useState<Array<{ document_id: string; filename: string; status: string }>>([])
+  // PRD-127: Switch to ephemeral attachments
+  const [uploadedAttachments, setUploadedAttachments] = useState<Array<{
+    attachment_id: string
+    filename: string
+    media_type: 'image' | 'document'
+  }>>([])
   const [input, setInput] = useState('')
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
   const [voiceEnabled, setVoiceEnabled] = useState(false)
@@ -133,26 +138,29 @@ export function MultimodalInput({
     const trimmedInput = safeInput.trim()
     if (!trimmedInput || status === 'streaming') return
 
-    const parts: any[] = [
-      ...uploadedDocs.map((doc) => ({
-        type: 'file',
-        filename: doc.filename,
-        mediaType: 'application/octet-stream',
-        url: `document://${doc.document_id}`,
-      })),
-      { type: 'text', text: trimmedInput },
-    ]
+    // PRD-127: Send attachment_ids instead of document:// URLs
+    const attachment_ids = uploadedAttachments.map((att) => att.attachment_id)
 
-    // Send message with parts (text + uploaded document references)
+    // Build message payload with attachment_ids
     sendMessage({
       role: 'user',
       content: trimmedInput,
-      parts,
+      attachment_ids,  // PRD-127: new field for ephemeral attachments
+      // Keep parts for display purposes (filename chips in message history)
+      parts: [
+        ...uploadedAttachments.map((att) => ({
+          type: 'file',
+          filename: att.filename,
+          mediaType: att.media_type === 'image' ? 'image/*' : 'application/octet-stream',
+          attachment_id: att.attachment_id,
+        })),
+        { type: 'text', text: trimmedInput },
+      ],
     })
 
     // Clear input and attachments
     setInput('')
-    setUploadedDocs([])
+    setUploadedAttachments([])
 
     // Reset height and refocus
     if (textareaRef.current) {
@@ -172,11 +180,13 @@ export function MultimodalInput({
 
   return (
     <form onSubmit={handleSubmit} className="w-full" data-tour="chat-input-area">
+      {/* PRD-127: Ephemeral attachment upload */}
       <input
         ref={fileInputRef}
         type="file"
         className="hidden"
         multiple
+        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.md,.json,.py,.js,.ts,.tsx"
         onChange={async (event) => {
           const files = Array.from(event.target.files || [])
           if (files.length === 0) return
@@ -184,23 +194,24 @@ export function MultimodalInput({
           setUploadQueue(files.map((f) => f.name))
 
           try {
+            // PRD-127: Use uploadAttachment instead of uploadDocument
             const results = await Promise.all(
-              files.map((file) => apiClient.uploadDocument(file))
+              files.map((file) => apiClient.uploadAttachment(file))
             )
 
-            setUploadedDocs((prev) => [
+            setUploadedAttachments((prev) => [
               ...prev,
-              ...results.map((r: any, idx: number) => ({
-                document_id: String(r.document_id ?? r.id ?? ''),
-                filename: String(r.filename ?? files[idx]?.name ?? 'document'),
-                status: String(r.status ?? 'uploaded'),
+              ...results.map((r) => ({
+                attachment_id: r.attachment_id,
+                filename: r.filename,
+                media_type: r.media_type,
               })),
             ])
 
-            toast.success(`Uploaded ${files.length} document${files.length === 1 ? '' : 's'}`)
-          } catch (error: any) {
-            console.error('Document upload failed', error)
-            toast.error(error?.message || 'Failed to upload document(s)')
+            toast.success(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`)
+          } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : 'Upload failed'
+            toast.error(msg)
           } finally {
             setUploadQueue([])
             // Reset file input so selecting the same file again works
@@ -209,19 +220,23 @@ export function MultimodalInput({
         }}
       />
 
-      {(uploadedDocs.length > 0 || uploadQueue.length > 0) && (
+      {/* PRD-127: Display uploaded attachments */}
+      {(uploadedAttachments.length > 0 || uploadQueue.length > 0) && (
         <div className="mb-3 flex flex-wrap gap-2">
-          {uploadedDocs.map((doc) => (
+          {uploadedAttachments.map((att) => (
             <div
-              key={`${doc.document_id}-${doc.filename}`}
-              className="inline-flex items-center gap-2 rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs text-blue-200"
+              key={att.attachment_id}
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
+                att.media_type === 'image'
+                  ? 'border-blue-500/20 bg-blue-500/10 text-blue-200'
+                  : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+              }`}
             >
-              <span className="truncate max-w-[240px]">{doc.filename}</span>
-              <span className="text-blue-100/70">({doc.status})</span>
+              <span className="truncate max-w-[240px]">{att.filename}</span>
               <button
                 type="button"
-                className="ml-1 text-blue-100/70 hover:text-blue-100"
-                onClick={() => setUploadedDocs((prev) => prev.filter((d) => d.document_id !== doc.document_id))}
+                className="ml-1 opacity-70 hover:opacity-100"
+                onClick={() => setUploadedAttachments((prev) => prev.filter((a) => a.attachment_id !== att.attachment_id))}
                 aria-label="Remove attachment"
               >
                 ×

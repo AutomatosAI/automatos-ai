@@ -35,9 +35,12 @@ class TelegramAdapter(BaseChannelAdapter):
 
             self._app = ApplicationBuilder().token(token).build()
 
-            # Register message handler
+            # Register message handler — text, photos, and documents
             self._app.add_handler(
-                MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
+                MessageHandler(
+                    (filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND,
+                    self._on_message,
+                )
             )
 
             # Start polling in background
@@ -97,8 +100,16 @@ class TelegramAdapter(BaseChannelAdapter):
             return {"status": "error", "detail": str(e)}
 
     async def _on_message(self, update, context):
-        """Handle incoming Telegram message."""
-        if not update.message or not update.message.text:
+        """Handle incoming Telegram message (text, photos, documents)."""
+        if not update.message:
+            return
+
+        # Must have text, photo, or document
+        has_text = bool(update.message.text or update.message.caption)
+        has_photo = bool(update.message.photo)
+        has_document = bool(update.message.document)
+
+        if not (has_text or has_photo or has_document):
             return
 
         try:
@@ -107,13 +118,54 @@ class TelegramAdapter(BaseChannelAdapter):
                 chat_id=update.effective_chat.id, action="typing"
             )
 
+            # PRD-127: Handle photos and documents by uploading to AttachmentStore
+            attachment_ids: list[str] = []
+
+            if has_photo:
+                # Get highest resolution photo
+                photo = update.message.photo[-1]
+                try:
+                    file = await context.bot.get_file(photo.file_id)
+                    file_bytes = await file.download_as_bytearray()
+                    filename = f"telegram_photo_{photo.file_unique_id}.jpg"
+                    attachment_id = await self.upload_attachment(
+                        content=bytes(file_bytes),
+                        filename=filename,
+                        mime_type="image/jpeg",
+                    )
+                    if attachment_id:
+                        attachment_ids.append(attachment_id)
+                except Exception as e:
+                    logger.warning("[Telegram:%s] Failed to download photo: %s", self.connection_id, e)
+
+            if has_document:
+                doc = update.message.document
+                try:
+                    file = await context.bot.get_file(doc.file_id)
+                    file_bytes = await file.download_as_bytearray()
+                    attachment_id = await self.upload_attachment(
+                        content=bytes(file_bytes),
+                        filename=doc.file_name or f"telegram_doc_{doc.file_unique_id}",
+                        mime_type=doc.mime_type,
+                    )
+                    if attachment_id:
+                        attachment_ids.append(attachment_id)
+                except Exception as e:
+                    logger.warning("[Telegram:%s] Failed to download document: %s", self.connection_id, e)
+
+            # Use text or caption
+            text_content = update.message.text or update.message.caption or ""
+            if not text_content and attachment_ids:
+                text_content = "[Attachment received]"
+
             platform_msg = {
                 "channel_id": str(update.effective_chat.id),
                 "reply_channel_id": str(update.effective_chat.id),
                 "user_id": str(update.effective_user.id) if update.effective_user else None,
                 "user_name": update.effective_user.first_name if update.effective_user else None,
-                "text": update.message.text,
+                "text": text_content,
                 "message_id": str(update.message.message_id),
+                "attachment_ids": attachment_ids,  # PRD-127
             }
 
             await self.handle_message(platform_msg)

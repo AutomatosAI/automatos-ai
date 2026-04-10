@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { useAuth } from '@clerk/nextjs'
 import { useDropzone } from 'react-dropzone'
 import {
   Target, Loader2, Upload, X, FileText, Paperclip,
@@ -24,12 +23,14 @@ import { useMissionStore } from '@/stores/mission-store'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { apiClient } from '@/lib/api-client'
 
+// PRD-127: Ephemeral attachment metadata
 interface MissionAttachment {
-  document_id: number
+  attachment_id: string
   filename: string
-  size: number
-  content_type: string
+  mime: string
+  media_type: 'image' | 'document'
 }
 
 interface UploadingFile {
@@ -39,7 +40,14 @@ interface UploadingFile {
   error?: string
 }
 
+// PRD-127: Extended to include images
 const ALLOWED_TYPES: Record<string, string[]> = {
+  // Images
+  'image/jpeg': ['.jpg', '.jpeg'],
+  'image/png': ['.png'],
+  'image/gif': ['.gif'],
+  'image/webp': ['.webp'],
+  // Documents
   'application/pdf': ['.pdf'],
   'text/plain': ['.txt'],
   'text/markdown': ['.md'],
@@ -118,7 +126,6 @@ interface CreateMissionModalProps {
 
 export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDescription }: CreateMissionModalProps) {
   const router = useRouter()
-  const { getToken } = useAuth()
   const createMission = useCreateMission()
   const setActivePlanningMissionId = useMissionStore((s) => s.setActivePlanningMissionId)
 
@@ -144,33 +151,16 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
     .filter((f) => f.status === 'done' && f.attachment)
     .map((f) => f.attachment!)
 
+  // PRD-127: Use ephemeral attachment upload instead of document upload
   const uploadFile = useCallback(async (file: File): Promise<MissionAttachment> => {
-    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const headers: Record<string, string> = {}
-    const workspaceId = typeof window !== 'undefined'
-      ? localStorage.getItem('automatos_workspace_id')
-      : null
-    if (workspaceId) headers['X-Workspace-ID'] = workspaceId
-
-    const token = await getToken()
-    if (token) headers['Authorization'] = `Bearer ${token}`
-
-    const res = await fetch(`${BACKEND_URL}/api/missions/upload`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    })
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Upload failed' }))
-      throw new Error(err.detail || `Upload failed (${res.status})`)
+    const result = await apiClient.uploadAttachment(file)
+    return {
+      attachment_id: result.attachment_id,
+      filename: result.filename,
+      mime: result.mime,
+      media_type: result.media_type,
     }
-
-    return res.json()
-  }, [getToken])
+  }, [])
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -258,7 +248,10 @@ export function CreateMissionModal({ open, onOpenChange, initialGoal, initialDes
       .filter(Boolean)
     if (tagList.length > 0) config.tags = tagList
     if (name.trim()) config.name = name.trim()
-    if (attachments.length > 0) config.attachments = attachments
+    // PRD-127: Send attachment_ids (list of UUID strings) instead of document refs
+    if (attachments.length > 0) {
+      config.attachment_ids = attachments.map((a) => a.attachment_id)
+    }
     if (!budgetPauseEnabled) config.budget_pause_disabled = true
 
     // Add business plan fields to config for downstream agents

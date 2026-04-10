@@ -112,18 +112,39 @@ class DiscordAdapter(BaseChannelAdapter):
             return {"status": "error", "detail": str(e)}
 
     async def _on_message(self, message):
-        """Handle incoming Discord message."""
+        """Handle incoming Discord message (text and attachments)."""
         try:
             # Show typing indicator
             async with message.channel.typing():
+                # PRD-127: Handle attachments by downloading and uploading to AttachmentStore
+                attachment_ids: list[str] = []
+
+                for attachment in message.attachments:
+                    try:
+                        file_bytes = await attachment.read()
+                        attachment_id = await self.upload_attachment(
+                            content=file_bytes,
+                            filename=attachment.filename,
+                            mime_type=attachment.content_type,
+                        )
+                        if attachment_id:
+                            attachment_ids.append(attachment_id)
+                    except Exception as e:
+                        logger.warning("[Discord:%s] Failed to download attachment %s: %s", self.connection_id, attachment.filename, e)
+
+                text = message.content
+                if not text and attachment_ids:
+                    text = "[Attachment received]"
+
                 platform_msg = {
                     "channel_id": str(message.channel.id),
                     "reply_channel_id": str(message.channel.id),
                     "user_id": str(message.author.id),
                     "user_name": message.author.display_name,
-                    "text": message.content,
+                    "text": text,
                     "message_id": str(message.id),
                     "guild_id": str(message.guild.id) if message.guild else None,
+                    "attachment_ids": attachment_ids,  # PRD-127
                 }
 
                 await self.handle_message(platform_msg)

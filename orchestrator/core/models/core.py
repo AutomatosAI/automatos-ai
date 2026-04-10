@@ -1539,6 +1539,7 @@ class BoardTask(Base):
     sla_deadline = Column(DateTime(timezone=True), nullable=True)
     blocked_at = Column(DateTime(timezone=True), nullable=True)
     blocked_reason = Column(Text, nullable=True)
+    attachment_ids = Column(JSONB, default=list, server_default='[]')  # PRD-127: ephemeral attachments
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -1571,6 +1572,7 @@ class BoardTask(Base):
             "sla_deadline": self.sla_deadline.isoformat() if self.sla_deadline else None,
             "blocked_at": self.blocked_at.isoformat() if self.blocked_at else None,
             "blocked_reason": self.blocked_reason,
+            "attachment_ids": self.attachment_ids or [],  # PRD-127
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -12,7 +12,8 @@ and route them through the UniversalRouter.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 import logging
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,48 @@ class BaseChannelAdapter(ABC):
         ...
 
     # ------------------------------------------------------------------
+    # PRD-127: Attachment handling
+    # ------------------------------------------------------------------
+
+    async def upload_attachment(
+        self,
+        content: bytes,
+        filename: str,
+        mime_type: Optional[str] = None,
+    ) -> Optional[str]:
+        """Upload media bytes to AttachmentStore and return the attachment_id.
+
+        Subclasses call this when they receive inbound images/files from the
+        platform. Returns None on failure (logged, doesn't crash the pipeline).
+        """
+        try:
+            from modules.attachments.store import get_attachment_store
+
+            store = get_attachment_store()
+            ref = await store.put(
+                workspace_id=UUID(self.workspace_id),
+                uploaded_by=f"channel:{self.connection_id}",
+                filename=filename,
+                content=content,
+                declared_mime=mime_type,
+            )
+            logger.debug(
+                "[Channel:%s] Uploaded attachment %s (%s bytes)",
+                self.connection_id,
+                ref.attachment_id,
+                len(content),
+            )
+            return str(ref.attachment_id)
+        except Exception as e:
+            logger.warning(
+                "[Channel:%s] Failed to upload attachment %s: %s",
+                self.connection_id,
+                filename,
+                e,
+            )
+            return None
+
+    # ------------------------------------------------------------------
     # Ingest pipeline
     # ------------------------------------------------------------------
 
@@ -75,11 +118,19 @@ class BaseChannelAdapter(ABC):
         3. Execute via AgentFactory.execute_with_prompt()
         4. Send result back via send_message()
         5. Update activity stats on the channel connection
+
+        PRD-127: If platform_message contains 'attachment_ids' (list of UUIDs),
+        they are forwarded to execute_with_prompt for multimodal resolution.
+        Subclass adapters should call upload_attachment() for inbound media
+        and populate this field before calling handle_message().
         """
         try:
             envelope = self._to_envelope(platform_message)
             if not envelope:
                 return
+
+            # PRD-127: Extract attachment_ids from platform_message
+            attachment_ids: List[str] = platform_message.get("attachment_ids", [])
 
             # Lazy imports to avoid circular dependency at module load
             from core.routing.engine import UniversalRouter
@@ -118,6 +169,7 @@ class BaseChannelAdapter(ABC):
                         "workspace_id": str(envelope.workspace_id),
                         "connection_id": self.connection_id,
                     },
+                    attachment_ids=attachment_ids if attachment_ids else None,  # PRD-127
                 )
 
                 response_text = (result or {}).get("result") or (result or {}).get("response") or (result or {}).get("content") or ""
