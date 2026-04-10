@@ -746,12 +746,17 @@ class AgentFactory:
                 mode = ContextMode(context_mode) if context_mode else ContextMode.TASK_EXECUTION
                 db_agent = get_agent_with_context(self.db_session, agent_runtime.agent_id)
                 if db_agent:
+                    # Note: attachment_ids intentionally NOT passed here. AgentFactory
+                    # builds its own messages list and only consumes context_result's
+                    # system_prompt/tools, so any attachment parts ContextService injects
+                    # into context_result.messages would be discarded. Resolution happens
+                    # below after the user prompt is appended — single chokepoint for
+                    # both system_prompt-bypass and ContextService paths.
                     context_result = await ContextService(self.db_session).build_context(
                         mode=mode,
                         agent=db_agent,
                         workspace_id=agent_runtime.workspace_id,
                         task_description=prompt,
-                        attachment_ids=attachment_ids,  # PRD-127
                     )
                     messages.append({"role": "system", "content": context_result.system_prompt})
                 else:
@@ -824,6 +829,43 @@ class AgentFactory:
 
             # Add user prompt
             messages.append({"role": "user", "content": prompt})
+
+            # PRD-127: Single chokepoint for attachment resolution in non-chat LLM calls.
+            # Works for both branches above (system_prompt bypass + ContextService path)
+            # because it runs on the final messages list. Any entry point that forwards
+            # attachment_ids through to execute_with_prompt gets multimodal support for
+            # free — no per-handler wiring, no duplicated vision checks.
+            if attachment_ids:
+                try:
+                    from uuid import UUID as _UUID
+                    from modules.attachments.resolver import (
+                        AttachmentResolver,
+                        VisionNotSupportedError,
+                        inject_parts_into_last_user_message,
+                    )
+                    _llm_cfg = getattr(agent_runtime.llm_manager, "config", None)
+                    _model_id = getattr(_llm_cfg, "model", None) if _llm_cfg else None
+                    _resolver = AttachmentResolver(db_session=self.db_session)
+                    _parts = await _resolver.resolve(
+                        attachment_ids=[_UUID(a) for a in attachment_ids],
+                        workspace_id=_UUID(str(agent_runtime.workspace_id)),
+                        model_id=_model_id or "",
+                    )
+                    if _parts:
+                        messages = inject_parts_into_last_user_message(messages, _parts)
+                        self.logger.info(
+                            f"[PRD-127] AgentFactory resolved {len(_parts)} attachment parts "
+                            f"from {len(attachment_ids)} ids for agent {agent_id}"
+                        )
+                except VisionNotSupportedError as _vne:
+                    self.logger.warning(
+                        f"[PRD-127] AgentFactory vision not supported for agent {agent_id}: {_vne}"
+                    )
+                except Exception as _att_err:
+                    self.logger.error(
+                        f"[PRD-127] AgentFactory attachment resolution failed: {_att_err}",
+                        exc_info=True,
+                    )
 
             # --- Execute with retries ---
             last_error = None
