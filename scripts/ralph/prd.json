@@ -1,190 +1,249 @@
 {
   "project": "Automatos AI Platform",
-  "branchName": "ralph/prd-120-skill-rewrites",
-  "description": "PRD-120 Phase 2: Rewrite all 81 imported skills to Automatos quality — proper personas, real platform/workspace/composio tool mappings with JSON call examples, structured workflows, output formats, and anti-patterns. Match Sentinel/Scout quality bar.",
+  "branchName": "ralph/prd-129-workspace-outputs-hub",
+  "description": "PRD-129: Workspace Outputs Hub — transform the VS Code-style Workspace tab into a consumer-friendly Gallery of agent deliverables (reports, images, documents, code, slides). New deliverables table, DeliverableService, /api/deliverables endpoints, Gallery/Explorer/Activity view toggle, filter bar, card grid, preview slide-over. Auto-register deliverables when agents write files or submit reports.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create skill rewrite reference guide and fix seed script frontmatter parsing",
-      "description": "As a developer, I need a reference guide for skill authors and an updated seed script that parses the correct tools: frontmatter format.",
+      "title": "Create deliverables table migration",
+      "description": "As a developer, I need a deliverables table to store metadata about all agent outputs.",
       "acceptanceCriteria": [
-        "Create automatos-skills/SKILL-GUIDE.md documenting the Automatos SKILL.md format with: frontmatter spec (name, description, version, tags, category, tools list with {name, description}), body sections (identity, workflow with tool call JSON, output format, anti-patterns), and 2 annotated examples (Sentinel for monitoring, Scout for sales)",
-        "Update scripts/seed_agent_catalog.py to parse tools: as list of {name, description} dicts (current format) instead of recommended_tools (string list)",
-        "Update seed script to derive recommended_model from a CATEGORY_MODEL_MAP instead of reading recommended_model from frontmatter — engineering/testing: sonnet-4.6, marketing/sales/design/product/pm/support: sonnet-4.6, paid-media/specialized: sonnet-4.6, simple repetitive roles (support-responder, finance-tracker, analytics-reporter): haiku-4.5, complex reasoning (software-architect, security-engineer, deal-strategist, compliance-auditor): opus-4.6",
-        "Add SLUG_MODEL_OVERRIDES dict in seed script for per-skill model overrides that differ from category default",
-        "Update seed script to extract tool names from tools: [{name, description}] for the recommended_tools column",
-        "Seed script dry-run works with current skills repo: python3 scripts/seed_agent_catalog.py --dry-run",
+        "Create alembic migration file orchestrator/alembic/versions/prd129_deliverables.py with down_revision set to the current alembic head (check with `alembic heads` — do NOT hardcode prd128_notifications since it may not exist)",
+        "Table deliverables has columns: id UUID PK (gen_random_uuid default), workspace_id UUID NOT NULL FK workspaces(id) ON DELETE CASCADE, source_type VARCHAR(30) NOT NULL, source_id VARCHAR(255) NULL, agent_id INTEGER NULL FK agents(id) ON DELETE SET NULL, agent_name VARCHAR(100) NULL, artifact_type VARCHAR(30) NOT NULL, title VARCHAR(255) NOT NULL, summary VARCHAR(500) NULL, storage_type VARCHAR(20) NOT NULL DEFAULT 'workspace', file_path VARCHAR(1024) NOT NULL, file_name VARCHAR(255) NULL, file_type VARCHAR(50) NULL, file_size_bytes BIGINT NULL, preview_url VARCHAR(1024) NULL, preview_type VARCHAR(30) NULL, extra JSONB DEFAULT '{}', status VARCHAR(20) DEFAULT 'ready', deleted_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        "Column is named `extra` not `metadata` to avoid conflict with SQLAlchemy Base.metadata",
+        "file_size_bytes is BIGINT (not INTEGER) to support files >2GB",
+        "Includes deleted_at column (soft delete)",
+        "Create indices: ix_deliverables_workspace(workspace_id), ix_deliverables_agent(agent_id), ix_deliverables_type(workspace_id, artifact_type), ix_deliverables_source(workspace_id, source_type), ix_deliverables_created(workspace_id, created_at DESC)",
+        "Create UNIQUE constraint uq_deliverables_workspace_path ON (workspace_id, file_path) WHERE deleted_at IS NULL — for idempotent re-registration",
+        "upgrade() and downgrade() functions both implemented",
+        "Run migration successfully: `cd orchestrator && alembic upgrade head`",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "The seed script is at scripts/seed_agent_catalog.py. The skills repo is at /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills. The guide goes IN the skills repo. Read sentinel/SKILL.md and scout/SKILL.md as reference implementations — they define the quality bar. The frontmatter format is: tools: [{name: 'platform_foo', description: 'What it does'}]. The seed script currently reads recommended_tools (list of strings) and recommended_model (string) — both need updating. For model selection: most skills should be sonnet-4.6, only override to haiku for simple/repetitive or opus for complex reasoning."
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Rewrite Engineering skills batch 1 (8 skills)",
-      "description": "As a skill author, I want Engineering skills rewritten to Automatos quality with proper tool mappings and workflows.",
+      "title": "Implement DeliverableService with register/list/get/stats",
+      "description": "As a backend developer, I need a service that owns all deliverable CRUD and handles idempotent registration.",
       "acceptanceCriteria": [
-        "Rewrite these 8 skills in /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/: frontend-developer, backend-architect, devops-automator, security-engineer, ai-engineer, sre, data-engineer, database-optimizer",
-        "Each skill has frontmatter: name, description (1 sentence), version: 1.0.0, tags (3-5 relevant), category: agent-role, tools: list of {name, description} pairs",
-        "Each skill body has: identity paragraph (who this agent is in Automatos context), workflow (numbered steps with tool call JSON examples), output format (structured template), 'What NOT To Do' section",
-        "Tools are selected from the ENGINEERING TOOL KIT (see notes) — each skill uses 3-6 tools most relevant to its domain",
-        "Workflows reference specific tool calls with realistic parameters — not generic 'analyze and implement'",
-        "Each file is 60-100 lines, no filler, every line actionable",
-        "No references to external platforms (Cursor, OpenClaw, etc.)",
-        "All 8 files written to the skills repo directory"
+        "Create orchestrator/services/deliverable_service.py",
+        "Module-level EXTENSION_TO_ARTIFACT dict maps extensions to artifact types per PRD-129 §2 (images, reports, documents, slides, spreadsheets, code, archives, audio, video)",
+        "Module-level helpers: _slugify(value), _infer_artifact_type(file_path)",
+        "Class DeliverableService(db: Session, workspace_id: UUID)",
+        "register() method: ON CONFLICT (workspace_id, file_path) DO UPDATE — idempotent. Accepts file_path, title, source_type, source_id, agent_id, agent_name, artifact_type, summary, storage_type, extra. Infers artifact_type if None. Does NOT call WorkspaceClient during register — file_size_bytes accepted as optional kwarg so callers that already have the size can pass it in (no hot-path HTTP)",
+        "list_deliverables() method: filters by artifact_type, source_type, agent_id, date_from, date_to, search; supports limit/offset; excludes deleted_at IS NOT NULL; returns { success, deliverables, total, limit, offset }; LEFT JOIN agents to get current agent name fallback",
+        "get_deliverable(deliverable_id, include_content=False) method: returns single row; when include_content=True and storage_type=workspace and artifact_type != image, reads file via WorkspaceClient; for images returns content_url",
+        "get_stats() method: returns { success, total, by_type, by_agent }",
+        "soft_delete(deliverable_id) method: sets deleted_at = NOW()",
+        "All SQL uses sqlalchemy text() with bound params (no string interpolation of user input)",
+        "All methods return dict envelopes with success key",
+        "Exceptions logged with exc_info=True",
+        "Write unit tests in orchestrator/tests/services/test_deliverable_service.py covering register (new + idempotent update), list with filters, get_deliverable, soft_delete",
+        "Tests pass: `cd orchestrator && python -m pytest tests/services/test_deliverable_service.py -v`",
+        "Typecheck passes"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nREFERENCE: Read sentinel/SKILL.md and scout/SKILL.md first — match their quality.\n\nENGINEERING TOOL KIT:\n- workspace_read_file: Read source code, configs, logs\n- workspace_write_file: Write/update code, configs, docs\n- workspace_list_dir: Explore repo structure\n- workspace_grep: Search codebase for patterns, functions, errors\n- workspace_exec: Run tests, linters, builds, scripts (pytest, npm, pip, docker)\n- workspace_git: Git operations (status, diff, commit, push, log, blame)\n- platform_get_logs: Retrieve application logs by severity\n- platform_get_system_health: Check service health and response times\n- platform_query_loki_logs: Query centralized logs via LogQL\n- platform_submit_report: Submit findings/status report\n- platform_get_latest_report: Read previous reports for context\n- platform_create_task: Create board tasks for work items\n\nMODEL GUIDANCE:\n- frontend-developer: sonnet-4.6 (code gen)\n- backend-architect: opus-4.6 (complex design)\n- devops-automator: sonnet-4.6 (infrastructure)\n- security-engineer: opus-4.6 (security analysis)\n- ai-engineer: sonnet-4.6 (ML/AI work)\n- sre: sonnet-4.6 (reliability)\n- data-engineer: sonnet-4.6 (pipelines)\n- database-optimizer: sonnet-4.6 (query optimization)\n\nEXAMPLE WORKFLOW STEP (from Sentinel):\n### Step 1: Scan Codebase\n```json\n{ \"tool\": \"workspace_grep\", \"params\": { \"pattern\": \"TODO|FIXME|HACK\", \"path\": \"src/\" } }\n```\nIdentify technical debt markers and prioritize by severity."
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Rewrite Engineering skills batch 2 (8 skills)",
-      "description": "As a skill author, I want remaining Engineering skills rewritten to Automatos quality.",
+      "title": "Add /api/deliverables endpoints",
+      "description": "As a frontend developer, I need REST endpoints to list, get, and delete deliverables.",
       "acceptanceCriteria": [
-        "Rewrite these 8 skills: code-reviewer, software-architect, technical-writer, mobile-app-builder, senior-developer, git-workflow-master, rapid-prototyper, incident-response-commander",
-        "Same quality criteria as US-002: frontmatter with tools:{name,description}, identity, workflow with JSON tool calls, output format, anti-patterns",
-        "Tools selected from ENGINEERING TOOL KIT (see US-002 notes)",
-        "Each file 60-100 lines",
-        "All 8 files written to the skills repo"
+        "Create orchestrator/api/deliverables.py with APIRouter prefix='/api/deliverables', tags=['deliverables']",
+        "GET / — list with query params: artifact_type, source_type, agent_id, date_from, date_to, search, limit (default 24, max 100), offset (default 0)",
+        "GET /stats — returns DeliverableService.get_stats()",
+        "GET /{deliverable_id} — single deliverable with ?include_content=bool query param; 404 if not found",
+        "DELETE /{deliverable_id} — soft delete",
+        "All endpoints use Depends(get_request_context_hybrid) for auth and extract ctx.workspace_id",
+        "Workspace ID validated via existing _user_has_workspace_access pattern (no trusting header without check)",
+        "Register router in orchestrator/main.py (app.include_router(deliverables.router))",
+        "Write integration tests in orchestrator/tests/api/test_deliverables_api.py covering list, get, stats, delete, 404 handling, workspace isolation",
+        "Tests pass: `cd orchestrator && python -m pytest tests/api/test_deliverables_api.py -v`",
+        "Typecheck passes"
       ],
       "priority": 3,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md first as reference.\n\nUse same ENGINEERING TOOL KIT from US-002.\n\nMODEL GUIDANCE:\n- code-reviewer: sonnet-4.6\n- software-architect: opus-4.6 (complex design decisions)\n- technical-writer: sonnet-4.6\n- mobile-app-builder: sonnet-4.6\n- senior-developer: sonnet-4.6\n- git-workflow-master: sonnet-4.6\n- rapid-prototyper: sonnet-4.6\n- incident-response-commander: opus-4.6 (crisis reasoning)\n\nNOTE: incident-response-commander should reference platform_get_logs, platform_get_system_health, platform_query_loki_logs heavily — it's the crisis version of Sentinel.\n\nNOTE: code-reviewer workflow should grep for patterns, read files, then write review report."
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Rewrite Engineering skills batch 3 (5 remaining)",
-      "description": "As a skill author, I want the last Engineering skills rewritten.",
+      "title": "Auto-register deliverables when agents write files",
+      "description": "As a user, when an agent writes a report/image/document via workspace_write_file, it should appear in the gallery without the agent calling an extra tool.",
       "acceptanceCriteria": [
-        "Rewrite these 5 skills: threat-detection-engineer, solidity-smart-contract-engineer, embedded-firmware-engineer, ai-data-remediation-engineer, autonomous-optimization-architect",
-        "Same quality criteria as US-002",
-        "Tools selected from ENGINEERING TOOL KIT",
-        "Each file 60-100 lines",
-        "All 5 files written to the skills repo"
+        "Modify orchestrator/modules/tools/execution/exec_workspace.py (or wherever workspace_write_file is handled) — after a successful write, call DeliverableService.register()",
+        "Only register when artifact_type is in {report, image, document, slide, spreadsheet, code} (include code — agents write scripts users want to find)",
+        "Pass file_size_bytes from write result if available (avoid extra HTTP roundtrip)",
+        "source_type derived from execution context: 'chat', 'task', 'mission', 'heartbeat', 'playbook', 'trigger' — fallback 'chat'",
+        "source_id from execution context (task_id, mission_id, etc.)",
+        "agent_id and agent_name extracted from execution context",
+        "title generated from file path basename via _slugify inverse (human-readable: replace dashes/underscores with spaces, title-case)",
+        "Registration failure must NOT break the file write — wrap in try/except and log with exc_info=True",
+        "Wire orchestrator/services/report_service.py create_report() to also call DeliverableService.register() with artifact_type='report', source_type='heartbeat' or 'task'",
+        "Write unit test in orchestrator/tests/modules/tools/execution/test_exec_workspace_deliverable.py verifying that a write creates a deliverable row",
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 4,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md first as reference.\n\nUse same ENGINEERING TOOL KIT from US-002.\n\nMODEL GUIDANCE: All sonnet-4.6 except threat-detection-engineer which should be opus-4.6 (security analysis).\n\nNOTE: These are more niche engineering roles. solidity-smart-contract-engineer focuses on blockchain — workspace tools for code review/writing. embedded-firmware-engineer is hardware-adjacent — workspace tools. ai-data-remediation-engineer works with data quality — workspace_exec for running data scripts. autonomous-optimization-architect is a meta-role for system optimization."
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Rewrite Marketing skills (16 skills)",
-      "description": "As a skill author, I want all Marketing skills rewritten with proper social media and content tool mappings.",
+      "title": "Backfill existing agent_reports into deliverables",
+      "description": "As a user, I want existing reports to show up in the new gallery without re-running any agents.",
       "acceptanceCriteria": [
-        "Rewrite these 16 skills: growth-hacker, content-creator, seo-specialist, social-media-strategist, linkedin-content-creator, twitter-engager, tiktok-strategist, instagram-curator, podcast-strategist, reddit-community-builder, app-store-optimizer, carousel-growth-engine, short-video-editing-coach, ai-citation-strategist, book-co-author, cross-border-ecommerce",
-        "Each skill has frontmatter with tools:{name,description} from MARKETING TOOL KIT",
-        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
-        "Social media skills reference the matching composio automation tool (e.g. linkedin-content-creator uses composio_execute with LINKEDIN actions)",
-        "Content skills reference workspace_write_file for drafting and platform_publish_blog_post where relevant",
-        "Each file 60-100 lines",
-        "All 16 files written to the skills repo"
+        "Create orchestrator/scripts/backfill_prd129_deliverables.py",
+        "Script iterates all rows in agent_reports table (workspace-scoped loop)",
+        "For each report, calls DeliverableService.register() with artifact_type='report', source_type='heartbeat' (or 'task' if task_id present)",
+        "Idempotent — re-running the script does not create duplicates (relies on unique constraint from US-001)",
+        "Script has --dry-run flag that prints what would be inserted",
+        "Script has --workspace-id flag to limit to one workspace for testing",
+        "Script prints summary: X reports processed, Y inserted, Z skipped",
+        "Dry-run works: `cd orchestrator && python scripts/backfill_prd129_deliverables.py --dry-run`",
+        "Typecheck passes"
       ],
       "priority": 5,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead scout/SKILL.md first as reference (similar outreach/content pattern).\n\nMARKETING TOOL KIT:\n- workspace_write_file: Draft content, strategies, calendars\n- workspace_read_file: Read briefs, guidelines, past content\n- workspace_list_dir: Browse content library\n- platform_publish_blog_post: Publish to Automatos blog\n- platform_list_blog_posts: Check existing published content\n- platform_submit_report: Submit campaign reports, content calendars\n- platform_get_latest_report: Read previous reports for trends\n- platform_search_memory: Search workspace knowledge for brand voice, past campaigns\n- platform_create_task: Create content tasks on the board\n- composio_execute: Execute social media actions — specify the relevant app per skill:\n  - LINKEDIN actions for linkedin-content-creator\n  - TWITTER actions for twitter-engager\n  - GOOGLE_SHEETS for analytics/tracking\n  - GOOGLE_ANALYTICS for SEO/growth\n  - SLACK for team notifications\n\nMODEL GUIDANCE: All sonnet-4.6 except growth-hacker (opus-4.6 for strategic thinking).\n\nNOTE: 16 skills in one batch is large. Focus on quality over quantity — each skill should have a SPECIFIC workflow, not generic 'create content'. E.g. seo-specialist should grep for meta tags, analyze structure, write optimization report. linkedin-content-creator should draft posts, schedule via composio, track engagement."
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Rewrite Sales skills (8 skills)",
-      "description": "As a skill author, I want Sales skills rewritten with CRM and outreach tool mappings.",
+      "title": "Create useDeliverables React Query hooks",
+      "description": "As a frontend developer, I need typed hooks for fetching deliverables lists and single items.",
       "acceptanceCriteria": [
-        "Rewrite these 8 skills: outbound-strategist, discovery-coach, deal-strategist, pipeline-analyst, account-strategist, coach, engineer, proposal-strategist",
-        "Each skill has frontmatter with tools:{name,description} from SALES TOOL KIT",
-        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
-        "CRM-focused skills reference composio_execute with HUBSPOT actions",
-        "Outreach skills reference composio_execute with GMAIL/LINKEDIN actions",
-        "Each file 60-100 lines",
-        "All 8 files written to the skills repo"
+        "Create frontend/hooks/use-deliverables-api.ts",
+        "Export Deliverable TypeScript interface matching backend response (all fields from US-003)",
+        "Export FilterState interface: { artifact_type: string | null, source_type: string | null, agent_id: number | null, date_range: 'all' | 'today' | 'week' | 'month', search: string }",
+        "Export useDeliverables(filters) hook using useInfiniteQuery for pagination (not useQuery — supports Load More)",
+        "Export useDeliverable(id, includeContent) hook",
+        "Export useDeliverableStats() hook",
+        "Export useDeleteDeliverable() mutation hook that invalidates the list query",
+        "All hooks use apiClient from @/lib/api-client",
+        "Query keys scoped by workspaceId from useWorkspaceId()",
+        "Typecheck passes: `cd frontend && npm run typecheck`"
       ],
       "priority": 6,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead scout/SKILL.md CAREFULLY — it's the gold standard for sales skills.\n\nSALES TOOL KIT:\n- composio_execute: CRM operations (HUBSPOT_LIST_CONTACTS, HUBSPOT_UPDATE_CONTACT, HUBSPOT_CREATE_DEAL, GMAIL_SEND_EMAIL, LINKEDIN_SEND_MESSAGE)\n- platform_submit_report: Submit pipeline reports, call summaries\n- platform_get_latest_report: Read previous pipeline state\n- platform_search_memory: Look up account history, past interactions\n- platform_workspace_stats: Check platform usage for trial users\n- platform_create_task: Create follow-up tasks\n- platform_list_tasks: Check pending tasks\n- workspace_write_file: Draft proposals, email sequences, battle cards\n- workspace_read_file: Read prospect research, pricing docs\n\nMODEL GUIDANCE:\n- deal-strategist: opus-4.6 (complex negotiation reasoning)\n- proposal-strategist: opus-4.6 (persuasive writing)\n- All others: sonnet-4.6\n\nNOTE: 'coach' = Sales Coach, 'engineer' = Sales Engineer — these are sales roles, not dev roles. Sales Engineer demos technical products and answers technical objections. Sales Coach reviews calls and provides feedback."
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Rewrite Design skills (8 skills)",
-      "description": "As a skill author, I want Design skills rewritten with workspace file and reporting tools.",
+      "title": "Build DeliverableCard component",
+      "description": "As a user, I want to see each output as a visual card with icon, preview, title, agent, and timestamp.",
       "acceptanceCriteria": [
-        "Rewrite these 8 skills: ui-designer, ux-researcher, ux-architect, brand-guardian, visual-storyteller, image-prompt-engineer, inclusive-visuals-specialist, whimsy-injector",
-        "Each skill has frontmatter with tools:{name,description} from DESIGN TOOL KIT",
-        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
-        "Design skills focus on workspace file operations (reading specs, writing design docs/guidelines) and reporting",
-        "Each file 60-100 lines",
-        "All 8 files written to the skills repo"
+        "Create frontend/components/workspace/gallery-view/deliverable-card.tsx",
+        "Memoized component",
+        "ARTIFACT_ICONS map uses Lucide icons (FileText, Image, FileCode, Presentation, Sheet, Archive, Music, Video, File) — NO emojis",
+        "ARTIFACT_COLORS map with tailwind classes per type (subtle tinted backgrounds)",
+        "SOURCE_ICONS map for source badges",
+        "For artifact_type='image' with preview_url, renders <img> with lazy loading and object-cover",
+        "For non-image types, renders centered icon in colored chip",
+        "Source badge (small icon) shown top-right on preview area",
+        "Below preview: title (line-clamp-2), agent name · time-ago, file size",
+        "formatFileSize handles 0 bytes correctly (returns '0 B' not empty string)",
+        "Uses cursor-pointer and hover states (border-primary/50, shadow-md)",
+        "Uses date-fns formatDistanceToNow",
+        "Typecheck passes"
       ],
       "priority": 7,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference.\n\nDESIGN TOOL KIT:\n- workspace_write_file: Write design specs, guidelines, component docs, prompt libraries\n- workspace_read_file: Read existing designs, brand guidelines, component inventory\n- workspace_list_dir: Browse design assets and component libraries\n- workspace_grep: Search for design tokens, color values, component usage\n- platform_submit_report: Submit design reviews, UX audit reports\n- platform_get_latest_report: Read previous design reports\n- platform_create_task: Create design tasks (component needed, UX issue, brand violation)\n- platform_search_memory: Look up brand guidelines, design decisions\n\nMODEL GUIDANCE: All sonnet-4.6 except ux-architect (opus-4.6 for systems thinking).\n\nNOTE: These are AI agents that assist with design THINKING and documentation, not visual design tools. ui-designer writes component specs and reviews markup. ux-researcher writes research plans and synthesizes findings. brand-guardian audits content for brand consistency. image-prompt-engineer crafts prompts for image generation."
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Rewrite Product + Project Management skills (11 skills)",
-      "description": "As a skill author, I want Product and PM skills rewritten with board task and planning tool mappings.",
+      "title": "Build FilterBar component",
+      "description": "As a user, I want to filter the gallery by type, source, date range, and search text.",
       "acceptanceCriteria": [
-        "Rewrite these 11 skills: sprint-prioritizer, trend-researcher, feedback-synthesizer, behavioral-nudge-engine, manager (Product Manager), project-shepherd, studio-producer, experiment-tracker, jira-workflow-steward, project-manager-senior, studio-operations",
-        "Each skill has frontmatter with tools:{name,description} from PRODUCT/PM TOOL KIT",
-        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
-        "PM skills heavily use board task tools (create, list, summary) and reporting",
-        "Product skills use memory search and reporting for synthesis work",
-        "Each file 60-100 lines",
-        "All 11 files written to the skills repo"
+        "Create frontend/components/workspace/gallery-view/filter-bar.tsx",
+        "Exports FilterBar({ filters, onFiltersChange, total })",
+        "Search input uses useDebounce(300ms)",
+        "Type dropdown: All, Reports, Images, Documents, Code, Slides, Spreadsheets",
+        "Source dropdown: All, Chat, Tasks, Missions, Heartbeats, Playbooks, Uploads",
+        "Date range dropdown: All Time, Today, This Week, This Month",
+        "Clear button appears when any filter is active",
+        "Total count displayed on right ('X outputs')",
+        "useEffect deps array includes [debouncedSearch, filters.search, onFiltersChange] — no stale closure",
+        "Uses lucide icons (Search, Calendar, FileType, Zap) — no emojis",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference.\n\nPRODUCT/PM TOOL KIT:\n- platform_create_task: Create board tasks for work items, milestones\n- platform_list_tasks: Review current backlog and sprint items\n- platform_board_summary: Get overview of board state (counts by status)\n- platform_submit_report: Submit sprint reports, experiment results, trend analysis\n- platform_get_latest_report: Read previous reports for trends\n- platform_search_memory: Search workspace knowledge for user feedback, metrics\n- platform_schedule_task: Schedule recurring reviews\n- workspace_write_file: Write PRDs, experiment plans, roadmaps\n- workspace_read_file: Read existing docs, metrics, feedback\n- composio_execute: JIRA actions for jira-workflow-steward (JIRA_CREATE_ISSUE, JIRA_LIST_ISSUES, JIRA_UPDATE_ISSUE)\n- composio_execute: SLACK for team notifications\n\nMODEL GUIDANCE:\n- manager (Product Manager): opus-4.6 (strategic prioritization)\n- project-manager-senior: opus-4.6 (complex coordination)\n- All others: sonnet-4.6\n\nNOTE: sprint-prioritizer should score and rank tasks. trend-researcher should search memory and write trend reports. feedback-synthesizer should aggregate and analyze. jira-workflow-steward uses JIRA composio actions specifically."
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Rewrite Support + Testing skills (9 skills)",
-      "description": "As a skill author, I want Support and Testing skills rewritten with monitoring and QA tool mappings.",
+      "title": "Build DeliverablePreview slide-over component",
+      "description": "As a user, I want to click a card and see an inline preview with download and Open in Canvas actions.",
       "acceptanceCriteria": [
-        "Rewrite these 9 skills: support-responder, analytics-reporter, finance-tracker, legal-compliance-checker, executive-summary-generator, infrastructure-maintainer, performance-benchmarker, api-tester, accessibility-auditor",
-        "Each skill has frontmatter with tools:{name,description} from SUPPORT/TESTING TOOL KIT",
-        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
-        "Support skills use chat history search and memory for context",
-        "Testing skills use workspace_exec for running test suites",
-        "Each file 60-100 lines",
-        "All 9 files written to the skills repo"
+        "Create frontend/components/workspace/gallery-view/deliverable-preview.tsx",
+        "Uses Sheet component from @/components/ui/sheet",
+        "Fetches single deliverable via useDeliverable(id, includeContent=true)",
+        "Closes on Escape key",
+        "Header: title, agent · time-ago · artifact_type, Download button, Open in Canvas button",
+        "For artifact_type='image': renders <img> with content_url",
+        "For artifact_type='code': uses react-syntax-highlighter with oneDark theme, language detected from file_path extension",
+        "For artifact_type='report' or markdown file_type: renders with react-markdown",
+        "For other text content: renders in <pre> block",
+        "For unsupported types: shows 'Preview not available' with Download link",
+        "Open in Canvas navigates to /workspace?view=explorer&path=...",
+        "Summary (if present) shown in card below content",
+        "getLanguageFromPath helper for syntax highlighting",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference (sentinel is a support/monitoring skill).\n\nSUPPORT/TESTING TOOL KIT:\n- platform_search_chat_history: Search past user conversations\n- platform_search_memory: Look up knowledge base, past solutions\n- platform_get_logs: Retrieve application logs\n- platform_get_system_health: Check service status\n- platform_get_llm_usage: Check LLM costs and usage\n- platform_get_cost_breakdown: Detailed cost analysis\n- platform_workspace_stats: Workspace metrics\n- platform_submit_report: Submit support/test/audit reports\n- platform_get_latest_report: Read previous reports\n- platform_create_task: Create bug tickets, action items\n- workspace_exec: Run test suites, linters, benchmarks\n- workspace_read_file: Read test files, configs, source code\n- workspace_grep: Search for patterns, errors, vulnerabilities\n- workspace_write_file: Write test plans, compliance docs\n\nMODEL GUIDANCE:\n- support-responder: haiku-4.5 (simple, high-volume)\n- analytics-reporter: haiku-4.5 (data formatting)\n- finance-tracker: haiku-4.5 (repetitive cost checks)\n- legal-compliance-checker: opus-4.6 (requires careful reasoning)\n- executive-summary-generator: sonnet-4.6\n- infrastructure-maintainer: sonnet-4.6\n- performance-benchmarker: sonnet-4.6\n- api-tester: sonnet-4.6\n- accessibility-auditor: sonnet-4.6"
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Rewrite Paid Media + Specialized skills (8 skills)",
-      "description": "As a skill author, I want Paid Media and Specialized skills rewritten with advertising and domain-specific tool mappings.",
+      "title": "Build GalleryView container with infinite scroll",
+      "description": "As a user, I want a grid of all my deliverables that loads more as I scroll.",
       "acceptanceCriteria": [
-        "Rewrite these 8 skills: ppc-strategist, creative-strategist, auditor (paid media), document-generator, compliance-auditor, recruitment-specialist, supply-chain-strategist, developer-advocate",
-        "Each skill has frontmatter with tools:{name,description} from appropriate tool kit",
-        "Each skill body has identity, workflow with JSON tool calls, output format, anti-patterns",
-        "Paid media skills reference composio_execute with GOOGLE_ADS and GOOGLE_ANALYTICS",
-        "Specialized skills use domain-appropriate tool combinations",
-        "Each file 60-100 lines",
-        "All 8 files written to the skills repo"
+        "Create frontend/components/workspace/gallery-view/index.tsx",
+        "Exports GalleryView({ workspaceId })",
+        "Uses useDeliverables infinite query from US-006",
+        "Renders FilterBar at top",
+        "Grid: grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6, gap-4",
+        "Each card uses DeliverableCard from US-007",
+        "Loading state: centered Loader2 spinner",
+        "Empty state: icon + 'No outputs yet' + helper text (NO emojis)",
+        "Error state: 'Failed to load outputs' in destructive color",
+        "Load More button at bottom when hasNextPage",
+        "Click card opens DeliverablePreview slide-over",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 10,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\n\nRead sentinel/SKILL.md for structure reference.\n\nPAID MEDIA TOOL KIT:\n- composio_execute: GOOGLE_ADS (campaign management), GOOGLE_ANALYTICS (tracking), GOOGLE_SHEETS (reporting)\n- workspace_write_file: Write ad copy, campaign plans\n- workspace_read_file: Read performance data, creative briefs\n- platform_submit_report: Submit campaign performance reports\n- platform_get_latest_report: Read previous campaign reports\n- platform_create_task: Create optimization tasks\n\nSPECIALIZED TOOL KIT (varies per skill):\n- document-generator: workspace_write_file (primary), workspace_read_file, platform_submit_report\n- compliance-auditor: workspace_grep (scan for violations), workspace_read_file, platform_submit_report, platform_create_task\n- recruitment-specialist: composio_execute (GMAIL, LINKEDIN), platform_create_task, workspace_write_file, platform_submit_report\n- supply-chain-strategist: workspace_write_file, platform_submit_report, platform_create_task, composio_execute (GOOGLE_SHEETS)\n- developer-advocate: workspace_write_file, platform_publish_blog_post, composio_execute (GITHUB), platform_submit_report\n\nMODEL GUIDANCE:\n- compliance-auditor: opus-4.6 (careful legal reasoning)\n- All others: sonnet-4.6"
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "Validate all rewritten skills and commit to skills repo",
-      "description": "As a developer, I want to validate that all 81 skills meet the quality bar and commit them.",
+      "title": "Build WorkspaceViewToggle and wire to workspace page",
+      "description": "As a user, I want to switch between Gallery, Explorer, and Activity views with a toggle in the workspace header.",
       "acceptanceCriteria": [
-        "Run validation script that checks every SKILL.md in /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills/ for: frontmatter has name, description, version, tags, category, tools fields; tools is a list of {name, description} dicts; body contains workflow section with at least one JSON tool call block; body contains output format section; body contains anti-pattern section",
-        "All 81 imported skills pass validation (existing skills like sentinel/scout exempt from this check)",
-        "No skill references external platforms (Cursor, OpenClaw, Qwen, etc.)",
-        "Every tool name referenced in skills exists in the platform (validate against known tool list)",
-        "Run seed script dry-run: python3 scripts/seed_agent_catalog.py --dry-run shows 97+ entries with correct model assignments",
-        "Commit all rewritten skills to the skills repo with descriptive message",
-        "Typecheck passes for seed script changes"
+        "Create frontend/components/workspace/workspace-view-toggle.tsx",
+        "Exports WorkspaceView type = 'gallery' | 'explorer' | 'activity'",
+        "Exports WorkspaceViewToggle({ view, onViewChange }) using ToggleGroup from @/components/ui/toggle-group",
+        "Three toggle items: Outputs (LayoutGrid icon), Explorer (FolderTree icon), Activity (Activity icon) — no emojis",
+        "Update frontend/app/workspace/page.tsx to render header with WorkspaceViewToggle",
+        "Default view is 'gallery' (consumer-friendly default)",
+        "Reads initial view from ?view= URL query param",
+        "If ?path= query param present, forces view='explorer'",
+        "Renders GalleryView when view='gallery', existing WorkspaceExplorer when 'explorer', placeholder div when 'activity' (Activity view is a later PRD)",
+        "Preserves existing Explorer behaviour exactly (do not break Code Canvas)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill — navigate to /workspace, confirm Gallery is default, toggle to Explorer, confirm both work"
       ],
       "priority": 11,
       "passes": false,
-      "notes": "SKILLS REPO: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills\nSEED SCRIPT: /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/scripts/seed_agent_catalog.py\n\nVALID TOOL NAMES (for validation):\nPlatform: platform_get_system_health, platform_get_logs, platform_get_llm_usage, platform_get_cost_breakdown, platform_workspace_stats, platform_submit_report, platform_get_latest_report, platform_create_task, platform_list_tasks, platform_board_summary, platform_search_memory, platform_search_chat_history, platform_query_loki_logs, platform_query_prometheus, platform_publish_blog_post, platform_list_blog_posts, platform_create_agent, platform_list_agents, platform_schedule_task, platform_field_query, platform_field_inject\nWorkspace: workspace_read_file, workspace_write_file, workspace_list_dir, workspace_grep, workspace_exec, workspace_git\nComposio: composio_execute\n\nWrite a quick Python validation script (can be temporary) that reads all SKILL.md files and checks the criteria. Print pass/fail per skill.\n\nFor the commit to the skills repo, use: cd /Users/gkavanagh/Development/Automatos-AI-Platform/automatos-skills && git add -A && git commit -m 'feat: rewrite all 81 imported skills to Automatos quality'"
+      "notes": ""
     }
   ]
 }

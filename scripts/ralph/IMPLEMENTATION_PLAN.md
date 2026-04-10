@@ -1,72 +1,73 @@
-# PRD-122: Tool Routing Promotion & Permission Enforcement — Implementation Plan
+# PRD-129: Workspace Outputs Hub — Implementation Plan
 
 ## Overview
 
-Two problems, one fix:
-1. **Auto can't reliably call platform tools** — they're behind `platform_execute` dispatcher indirection. Promote ~13 high-value actions to first-class OpenAI tool schemas.
-2. **`permission_level` is declared but never enforced** — 6 infrastructure tools expose system internals to every user. Enforce admin gating before promoting.
+Transform the VS Code-style Workspace tab into a consumer-friendly **Gallery** of agent deliverables: reports, images, documents, code, slides. New `deliverables` table + `DeliverableService` + `/api/deliverables` endpoints + Gallery/Explorer/Activity view toggle. Auto-register deliverables when agents write files or submit reports.
 
 ## Architecture
 
 ```
-get_tools_for_agent() [tool_router.py:129]
-  ├── ToolRegistry.get_all() → core tool schemas
-  ├── ActionRegistry.to_dispatcher_schema() → platform_execute (non-promoted only)
-  ├── ActionRegistry.to_first_class_schemas() → promoted schemas [NEW]
-  └── ComposioActionCache enrichment → composio_execute params
-
-Execution: unified_executor.py routes platform_* → PlatformActionExecutor (no changes needed)
+agents write files (exec_workspace) ──┐
+report_service.create_report() ───────┼──► DeliverableService.register() ──► deliverables table
+backfill script (agent_reports) ──────┘                                              │
+                                                                                      ▼
+                                                                /api/deliverables (list/get/stats/delete)
+                                                                                      │
+                                                                                      ▼
+                                                                  frontend GalleryView (cards + preview)
 ```
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `orchestrator/modules/tools/discovery/action_registry.py` | ActionDefinition dataclass (line 27) + ActionRegistry class (line 53) |
-| `orchestrator/modules/tools/discovery/platform_executor.py` | execute() at line 273, permission checks at 286-334 |
-| `orchestrator/modules/tools/tool_router.py` | get_tools_for_agent() at line 129, dispatcher at 242 |
-| `orchestrator/modules/tools/discovery/actions_monitoring.py` | 6 infrastructure tool registrations |
-| `orchestrator/modules/tools/discovery/handlers_search.py` | search_chat_history handler, broken WHERE at line 33 |
-| `orchestrator/consumers/chatbot/smart_tool_router.py` | TOOL_CATEGORIES at 65, INTENT_TO_TOOLS at 77 |
-| `orchestrator/modules/context/sections/platform_actions.py` | PlatformActionsSection._build() at ~50 |
-| `orchestrator/modules/tools/discovery/actions_agents.py` | Agent action registrations |
-| `orchestrator/modules/tools/discovery/actions_marketplace.py` | Marketplace action registrations |
-| `orchestrator/modules/tools/discovery/actions_search.py` | Memory + search action registrations |
-| `orchestrator/modules/tools/unified_executor.py` | execute_tool() routing at ~310 |
+| `orchestrator/alembic/versions/prd129_deliverables.py` | Migration: deliverables table + indices |
+| `orchestrator/services/deliverable_service.py` | DeliverableService with register/list/get/stats/soft_delete |
+| `orchestrator/api/deliverables.py` | REST endpoints for list/get/stats/delete |
+| `orchestrator/modules/tools/execution/exec_workspace.py` | Auto-register on workspace_write_file |
+| `orchestrator/services/report_service.py` | Wire create_report → DeliverableService |
+| `orchestrator/scripts/backfill_prd129_deliverables.py` | Backfill existing agent_reports |
+| `orchestrator/main.py` | Register deliverables router |
+| `frontend/hooks/use-deliverables-api.ts` | React Query hooks |
+| `frontend/components/workspace/gallery-view/*` | Gallery UI (card, filter-bar, preview, index) |
+| `frontend/components/workspace/workspace-view-toggle.tsx` | Gallery/Explorer/Activity toggle |
+| `frontend/app/workspace/page.tsx` | Wire toggle + default to Gallery |
 
 ## Tasks
 
-### Phase 0: Permission Enforcement (P0)
+### Phase 0: Backend Foundation
 
-- [x] **US-001**: Add `admin_only: bool = False` to ActionDefinition + mark 6 infra tools (5 in actions_monitoring.py, 1 in actions_workspace.py)
-- [x] **US-002**: Thread caller_context (user_id, system_role, workspace_role) through unified_executor → platform_executor
-- [x] **US-003**: Add admin gate (before requires_confirmation) + destructive safety check (after rate limit) in platform_executor.py
-- [x] **US-004**: Add is_admin param to get_tools_for_agent() + exclude_admin to to_dispatcher_schema/build_prompt_summary
-- [x] **US-005**: Fix search_chat_history WHERE clause to scope by workspace_id
+- [x] **US-001**: Create deliverables table migration (alembic) — `prd129_deliverables.py`, standalone (down_revision=None), BIGINT size, unique partial index for idempotent register, import-test OK. DB not running locally — actual `alembic upgrade` will run on deploy.
+- [ ] **US-002**: Implement DeliverableService (register/list/get/stats/soft_delete + unit tests)
+- [ ] **US-003**: Add /api/deliverables endpoints + integration tests
+- [ ] **US-004**: Auto-register on workspace_write_file + report_service.create_report
+- [ ] **US-005**: Backfill script for existing agent_reports
 
-### Phase 1: Promote High-Value Actions (P1)
+### Phase 1: Frontend
 
-- [x] **US-006**: Add `promoted: bool = False` to ActionDefinition + get_promoted() + to_first_class_schemas() methods
-- [x] **US-007**: Update build_prompt_summary(exclude_promoted=True) + to_dispatcher_schema(exclude_promoted=True)
-- [x] **US-008**: Mark ~13 actions as promoted=True in actions_agents, actions_marketplace, actions_monitoring, actions_search
-- [x] **US-009**: Append promoted schemas in tool_router.py + remove hardcoded _FIELD_TOOL_SCHEMAS + promote field tools
-- [x] **US-010**: Update SmartToolRouter with ALWAYS_INCLUDE set + promoted tool categories
-- [x] **US-011**: Update PlatformActionsSection._build() to pass exclude_promoted=True
-
-### Phase 2: Dispatcher Enum (P2)
-
-- [x] **US-012**: Add enum of non-promoted action names to to_dispatcher_schema()
+- [ ] **US-006**: Create useDeliverables React Query hooks (infinite query)
+- [ ] **US-007**: Build DeliverableCard component
+- [ ] **US-008**: Build FilterBar component
+- [ ] **US-009**: Build DeliverablePreview slide-over
+- [ ] **US-010**: Build GalleryView container with infinite scroll
+- [ ] **US-011**: Build WorkspaceViewToggle and wire into /workspace page
 
 ## Constraints
 
-- **No execution layer changes** — unified_executor.py already routes `platform_*` directly (line 392). Only adding caller_context passthrough.
-- **No migration needed** — workspace_members.role column already exists with owner|admin|editor|viewer|member values.
-- **Backward compatible** — all new parameters default to None/False. Existing callers unaffected.
-- **Field tool consolidation** — must verify to_openai_schema() output matches old hardcoded _FIELD_TOOL_SCHEMAS exactly.
+- Column is `extra` not `metadata` (SQLAlchemy Base.metadata conflict)
+- `file_size_bytes` is BIGINT (support >2GB)
+- Soft delete via `deleted_at`
+- UNIQUE `(workspace_id, file_path) WHERE deleted_at IS NULL` for idempotent re-registration
+- `register()` does NOT hit WorkspaceClient during registration — size passed in from caller
+- Registration failure MUST NOT break file write (try/except + log)
+- All SQL uses `sqlalchemy.text()` with bound params
+- Frontend uses Lucide icons only (no emojis)
+- Default view is `gallery` (consumer-friendly)
 
 ## Quality Bar
 
-- Every change is additive (new fields with defaults, new optional parameters)
-- Admin gate is fail-closed (no caller_context = denied)
-- Promoted actions are excluded from dispatcher (no dual paths)
-- Log all permission denials at WARNING level
+- All new SQL parameterized (no string interpolation of user input)
+- All method envelopes have `success` key
+- Exceptions logged with `exc_info=True`
+- Typecheck + tests pass for each story
+- Backward compatible: existing Explorer behaviour preserved exactly
