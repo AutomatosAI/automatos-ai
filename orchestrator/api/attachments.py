@@ -87,13 +87,13 @@ async def upload_attachment(
     content = await file.read()
 
     # Get uploader identity
-    uploaded_by = ctx.user_id or ctx.agent_id or "anonymous"
+    uploaded_by = (ctx.user.id if ctx.user else None) or "anonymous"
 
     store = get_attachment_store()
 
     try:
         ref = await store.put(
-            workspace_id=UUID(ctx.workspace_id),
+            workspace_id=ctx.workspace_id,
             uploaded_by=uploaded_by,
             filename=file.filename or "attachment",
             content=content,
@@ -128,7 +128,7 @@ async def get_attachment(
     try:
         ref = await store.get(
             attachment_id=UUID(attachment_id),
-            workspace_id=UUID(ctx.workspace_id),
+            workspace_id=ctx.workspace_id,
         )
     except AttachmentNotFoundError:
         raise HTTPException(status_code=404, detail="Attachment not found or expired")
@@ -157,7 +157,7 @@ async def delete_attachment(
     try:
         await store.delete(
             attachment_id=UUID(attachment_id),
-            workspace_id=UUID(ctx.workspace_id),
+            workspace_id=ctx.workspace_id,
         )
     except AttachmentNotFoundError:
         raise HTTPException(status_code=404, detail="Attachment not found or expired")
@@ -165,5 +165,3 @@ async def delete_attachment(
         raise HTTPException(status_code=400, detail="Invalid attachment ID")
 
     return {"deleted": True, "attachment_id": attachment_id}
-
-print(">>> ATTACHMENTS MODULE LOADED SUCCESSFULLY <<<")  # DEBUG: Remove after fixing 404
