@@ -5,640 +5,220 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/DoctorsNotes.docx](docs/DoctorsNotes.docx)
 - [orchestrator/api/tools.py](orchestrator/api/tools.py)
-- [orchestrator/consumers/chatbot/tool_router.py](orchestrator/consumers/chatbot/tool_router.py)
 - [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
-- [orchestrator/modules/tools/execution/unified_executor.py](orchestrator/modules/tools/execution/unified_executor.py)
-- [orchestrator/modules/tools/registry/tool_registry.py](orchestrator/modules/tools/registry/tool_registry.py)
+- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
 - [orchestrator/modules/tools/services/composio_hint_service.py](orchestrator/modules/tools/services/composio_hint_service.py)
 - [orchestrator/modules/tools/services/composio_tool_service.py](orchestrator/modules/tools/services/composio_tool_service.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
 - [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
 
 </details>
 
 
 
-The Tool Hint Service generates system message hints for LLMs, listing candidate Composio actions that match user intent. This service acts as a pre-filtering layer before tool execution, helping the LLM select the most relevant actions from 880+ apps with 12,000+ actions. For actual tool execution, see [Tool Router & Execution](#6.3). For tool discovery and metadata, see [Tool Discovery & Resolution](#6.2).
+The **Tool Hint Service** (`ComposioHintService`) is a unified system message generator that provides LLMs with curated lists of available Composio actions based on user intent. It replaces multiple divergent code paths with a single, intent-aware resolution strategy that prevents action mismatches (e.g., `SLACK_CREATE_CHANNEL` competing with `SLACK_SEND_MESSAGE` for messaging intents). [orchestrator/modules/tools/services/composio_hint_service.py:1-11]()
+
+For broader tool execution and routing, see [Tool Router & Execution](8.3). For action capability validation at execution time, see [Permission & Validation System](8.5). For Composio integration details, see [Composio Integration](8.1).
 
 ---
 
-## Purpose & Scope
+## Purpose and Scope
 
-The `ComposioHintService` is the single source of truth for generating action hints across all consumers (chatbot, recipe executor, workflow engine). It replaces three divergent implementations that previously existed:
+The Tool Hint Service solves the **action hint generation problem**: given a user's intent and an agent's app assignments, which Composio actions should be injected into the LLM's system prompt?
 
-- `consumers/chatbot/service.py` stream methods (token ILIKE only, no safety filtering)
-- `modules/agents/factory/agent_factory.py` (3-tier with broken scoring)
-- Recipe executor inline logic
+### Problem Statement
+Prior to this service, fragmented logic led to inconsistent tool discovery:
+1. **Chat streaming** used simple token `ILIKE` filtering without safety checks. [orchestrator/modules/tools/services/composio_hint_service.py:8-9]()
+2. **Agent execution** used a 3-tier strategy with broken scoring logic. [orchestrator/modules/tools/services/composio_hint_service.py:10-10]()
+3. **Recipe execution** often lacked specific hints, causing the LLM to guess action names.
 
-The service outputs system message text that lists available Composio action names, which are then injected into LLM context to guide tool selection.
+### Solution
+A centralized service providing:
+- **Three-tier resolution strategy**: Capability-based → Token-filtered → Top-N fallback. [orchestrator/modules/tools/services/composio_hint_service.py:12-15]()
+- **Mandatory capability gate**: In Tier 2, actions MUST match at least one capability term to be included, preventing irrelevant tool suggestions. [orchestrator/modules/tools/services/composio_hint_service.py:17-21]()
+- **Recipe mode**: A specialized path for curated prompts that uses direct token matching, bypassing the taxonomy for speed and scalability. [orchestrator/modules/tools/services/composio_hint_service.py:117-120]()
+- **Parameter hints**: Uses `ParameterHintExtractor` to include schemas for top actions, reducing parameter errors in LLM calls. [orchestrator/modules/tools/services/composio_hint_service.py:37-38]()
 
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:1-22]()
+Sources: [orchestrator/modules/tools/services/composio_hint_service.py:1-40]()
 
 ---
 
-## Architecture Overview
+## System Architecture
+
+### Component Integration
+The `ComposioHintService` bridges the "Natural Language Space" (user prompts) to the "Code Entity Space" (Composio actions in the database).
+
+**Diagram: Tool Hint Service Integration**
 
 ```mermaid
 graph TB
-    subgraph "Input Layer"
-        UserIntent["User Intent<br/>(prompt text)"]
-        AgentConfig["Agent Config<br/>(assigned apps)"]
-        WorkspaceCtx["Workspace Context<br/>(connected apps)"]
+    subgraph "Natural Language Space (User Input)"
+        Prompt["User Message / Task Prompt"]
+        Analysis["PromptAnalysis<br/>(tokens, intent, capabilities)"]
     end
     
-    subgraph "ComposioHintService"
-        BuildHints["build_hints()"]
-        AnalyzePrompt["_analyze_prompt()<br/>Tokenize + Capabilities"]
-        ResolveApps["_resolve_allowed_apps()<br/>Agent → Workspace Filter"]
+    subgraph "ComposioHintService (Orchestrator Logic)"
+        HintService["ComposioHintService.build_hints()"]
+        
+        subgraph "Resolution Tiers"
+            Tier1["Tier 1: _capability_based_hints()"]
+            Tier2["Tier 2: _token_filtered_hints()"]
+            Tier3["Tier 3: _top_n_fallback()"]
+        end
+        
+        RecipeMode["Recipe Mode: _recipe_token_hints()"]
     end
     
-    subgraph "Tier 1: Capability-Based"
-        MetadataDB[("ComposioActionMetadata<br/>capabilities column")]
-        CapabilityMatch["_capability_based_hints()<br/>Taxonomy Overlap"]
+    subgraph "Code Entity Space (Database & Metadata)"
+        ActionCache[("ComposioActionCache<br/>(Table: composio_actions_cache)")]
+        ActionMeta[("ComposioActionMetadata<br/>(Taxonomy Metadata)")]
+        AppAssign[("AgentAppAssignment<br/>(Table: agent_app_assignments)")]
     end
     
-    subgraph "Tier 2: Token-Filtered"
-        ActionCache[("ComposioActionCache<br/>ILIKE on name/desc")]
-        TokenFilter["_token_filtered_hints()<br/>Mandatory Cap Gate"]
-        RecipeMode["_recipe_token_hints()<br/>No Cap Gate"]
-    end
+    Prompt --> Analysis
+    Analysis --> HintService
     
-    subgraph "Tier 3: Fallback"
-        TopN["_top_n_fallback()<br/>Safe Actions"]
-    end
+    HintService --> Tier1
+    HintService --> Tier2
+    HintService --> Tier3
+    HintService --> RecipeMode
     
-    subgraph "Output"
-        HintLines["ComposioHintResult<br/>hint_lines<br/>matched_actions<br/>strategy_used"]
-        LLMContext["System Message<br/>Injected into LLM"]
-    end
-    
-    UserIntent --> BuildHints
-    AgentConfig --> ResolveApps
-    WorkspaceCtx --> ResolveApps
-    
-    BuildHints --> AnalyzePrompt
-    BuildHints --> ResolveApps
-    
-    ResolveApps --> CapabilityMatch
-    AnalyzePrompt --> CapabilityMatch
-    
-    CapabilityMatch --> MetadataDB
-    MetadataDB --> HintLines
-    
-    AnalyzePrompt --> TokenFilter
-    AnalyzePrompt --> RecipeMode
-    ResolveApps --> TokenFilter
-    ResolveApps --> RecipeMode
-    
-    TokenFilter --> ActionCache
+    Tier1 --> ActionMeta
+    Tier1 --> ActionCache
+    Tier2 --> ActionCache
+    Tier3 --> ActionCache
     RecipeMode --> ActionCache
-    ActionCache --> HintLines
     
-    ResolveApps --> TopN
-    TopN --> HintLines
+    HintService --> AppAssign
     
-    HintLines --> LLMContext
-    
-    style BuildHints fill:#fff,stroke:#333,stroke-width:2px
-    style HintLines fill:#fff,stroke:#333,stroke-width:2px
+    Tier1 -.-> Result["ComposioHintResult<br/>(hint_lines)"]
+    Tier2 -.-> Result
+    Tier3 -.-> Result
+    RecipeMode -.-> Result
 ```
 
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:89-212]()
+Sources: [orchestrator/modules/tools/services/composio_hint_service.py:89-160](), [orchestrator/core/models/composio_cache.py:25-35]()
+
+---
+
+## Data Models
+
+### PromptAnalysis
+Parsed prompt metadata used to drive the resolution tiers. [orchestrator/modules/tools/services/composio_hint_service.py:68-74]()
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tokens` | `List[str]` | Cleaned query tokens (stopwords removed). |
+| `is_messaging_intent` | `bool` | Detected via `MESSAGING_INTENT_RE`. |
+| `required_capabilities` | `List[str]` | Capabilities resolved from taxonomy. |
+| `cap_filter_terms` | `Set[str]` | Derived terms for mandatory capability gating. |
+
+### ComposioHintResult
+The structured output returned to the context builder. [orchestrator/modules/tools/services/composio_hint_service.py:77-84]()
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `hint_lines` | `List[str]` | Formatted strings for system message injection. |
+| `allowed_apps` | `List[str]` | List of apps the agent is permitted to use. |
+| `matched_actions` | `List[str]` | List of specific action names found. |
+| `param_hint_count` | `int` | Number of actions with parameter schemas included. |
+| `strategy_used` | `str` | Resolution tier identifier (e.g., `"capability"`). |
+
+Sources: [orchestrator/modules/tools/services/composio_hint_service.py:68-84]()
 
 ---
 
 ## Three-Tier Resolution Strategy
 
-The service uses a hierarchical fallback strategy to match actions to user intent:
+The service uses a waterfall approach to find relevant actions. If a higher tier returns results, lower tiers are typically skipped to save tokens and maintain precision.
 
-| Tier | Strategy | Database Table | Fallback Condition |
-|------|----------|----------------|-------------------|
-| **Tier 1** | Capability-based | `ComposioActionMetadata` | Requires taxonomy match + metadata exists |
-| **Tier 2** | Token-filtered | `ComposioActionCache` | Tier 1 returned 0 results + tokens extracted |
-| **Tier 3** | Top-N fallback | `ComposioActionCache` | Tiers 1 & 2 returned 0 results (chatbot only) |
-
-### Tier 1: Capability-Based Hints
-
-Uses the capability taxonomy to match actions:
-
-```mermaid
-graph LR
-    Intent["User Intent:<br/>'send slack message'"]
-    Taxonomy["Capability Taxonomy<br/>get_capabilities_for_intent()"]
-    Caps["Capabilities:<br/>['message.send']"]
-    Metadata[("ComposioActionMetadata<br/>capabilities && array")]
-    FilterTerms["Filter Terms:<br/>{message, send}"]
-    Actions["Matched Actions:<br/>SLACK_SEND_MESSAGE"]
-    
-    Intent --> Taxonomy
-    Taxonomy --> Caps
-    Caps --> Metadata
-    Caps --> FilterTerms
-    Metadata --> Actions
-    FilterTerms --> Actions
-    
-    style Metadata fill:#fff,stroke:#333,stroke-width:2px
-```
-
-**Key Implementation Details:**
-
-- Queries `ComposioActionMetadata` table with `capabilities.overlap()` operator
-- Filters out destructive actions (`destructive = False`)
-- Scores by: capability matches (40%) + keyword overlap (40%) + confidence (20%)
-- Only activates when taxonomy returns **specific** capabilities (not generic fallback like `data.query`)
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:316-392]()
-
-### Tier 2: Token-Filtered Hints (Chatbot Mode)
-
-When Tier 1 fails, uses prompt tokens with a **mandatory capability gate**:
-
-```mermaid
-graph TB
-    Prompt["Tokenized Prompt:<br/>send, slack, message"]
-    CapTerms["Capability Filter Terms:<br/>{message, send}"]
-    ILIKEQuery["ILIKE Query:<br/>action_name ILIKE %send%<br/>OR description ILIKE %message%"]
-    MandatoryGate["Mandatory Gate:<br/>MUST match cap term"]
-    Cache[("ComposioActionCache<br/>per-app query")]
-    Scoring["Scoring:<br/>name matches + desc matches"]
-    Results["Top 6 per app"]
-    
-    Prompt --> ILIKEQuery
-    CapTerms --> MandatoryGate
-    ILIKEQuery --> Cache
-    Cache --> MandatoryGate
-    MandatoryGate --> Scoring
-    Scoring --> Results
-    
-    style MandatoryGate fill:#fff,stroke:#333,stroke-width:2px
-```
-
-**Critical Fix:** The capability terms act as a **mandatory gate**, not a score boost. This prevents irrelevant actions like `SLACK_CREATE_CHANNEL_BASED_CONVERSATION` from competing with `SLACK_SEND_MESSAGE` for messaging intents.
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:433-550]()
-
-### Tier 2 Alternative: Recipe Mode Token Hints
-
-Recipe mode bypasses the taxonomy entirely, using **pure token matching**:
-
-```mermaid
-graph TB
-    StepPrompt["Recipe Step Prompt:<br/>(curated by user)"]
-    Tokens["Tokens: NO stop words,<br/>NO capability gate"]
-    MultiApp["Per-App ILIKE:<br/>up to 12 apps"]
-    Scoring["Scoring Formula:<br/>name_matches * 2.0<br/>+ desc_matches * 1.0"]
-    Ranked["Top 6 per app"]
-    
-    StepPrompt --> Tokens
-    Tokens --> MultiApp
-    MultiApp --> Scoring
-    Scoring --> Ranked
-    
-    style Tokens fill:#fff,stroke:#333,stroke-width:2px
-```
-
-**Key Differences from Chatbot Mode:**
-
-- **No taxonomy lookup** — scales to any number of tools without manual curation
-- **No capability gate** — relies on the curated prompt being specific
-- **Heavier name weighting** — `JIRA_GET_ISSUE` ranks high even if "get" ≠ "read"
-- Used when `recipe_mode=True` flag is set
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:397-432](), [orchestrator/modules/tools/services/composio_hint_service.py:152-159]()
-
-### Tier 3: Top-N Fallback
-
-**Only used in chatbot mode** when Tiers 1 & 2 both return zero results:
-
-- Returns up to 10 safe actions per app (capped at 6 apps, 60 actions total)
-- Filters destructive actions (`NOT ILIKE` on dangerous tokens: archive, delete, etc.)
-- Orders by `action_name` ASC for consistency
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:554-626]()
-
----
-
-## Core Components
-
-### ComposioHintService Class
-
-```mermaid
-classDiagram
-    class ComposioHintService {
-        +Session db
-        +build_hints(agent_id, prompt, workspace_id, recipe_mode) ComposioHintResult
-        -_resolve_allowed_apps(agent_id, workspace_id) List[str]
-        -_analyze_prompt(prompt) PromptAnalysis
-        -_capability_based_hints(...) bool
-        -_token_filtered_hints(...) void
-        -_recipe_token_hints(...) void
-        -_top_n_fallback(...) void
-        -_extract_param_hints(action_id, output_dict) void
-    }
-    
-    class ComposioHintResult {
-        +List[str] hint_lines
-        +List[str] allowed_apps
-        +List[str] matched_actions
-        +int param_hint_count
-        +str strategy_used
-    }
-    
-    class PromptAnalysis {
-        +List[str] tokens
-        +bool is_messaging_intent
-        +List[str] required_capabilities
-        +Set[str] cap_filter_terms
-    }
-    
-    ComposioHintService --> ComposioHintResult : returns
-    ComposioHintService --> PromptAnalysis : uses internally
-```
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:89-99](), [orchestrator/modules/tools/services/composio_hint_service.py:67-84]()
-
-### Key Method: build_hints()
-
-```python
-def build_hints(
-    self,
-    agent_id: int,
-    prompt: str,
-    workspace_id=None,
-    recipe_mode: bool = False,
-) -> ComposioHintResult
-```
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `agent_id` | `int` | Agent whose app assignments to query |
-| `prompt` | `str` | User prompt / task text to match actions against |
-| `workspace_id` | `UUID` (optional) | Workspace UUID to filter by connected apps |
-| `recipe_mode` | `bool` | When True, skips taxonomy gate and uses direct token matching |
-
-**Returns:** `ComposioHintResult` with:
-- `hint_lines`: List of strings for LLM system message
-- `matched_actions`: Action names that were selected
-- `strategy_used`: One of `"capability"`, `"token_filtered"`, `"recipe_token"`, `"fallback"`, `"none"`
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:103-212]()
-
----
-
-## App Resolution Flow
-
-Before matching actions, the service determines which apps the agent can use:
-
-```mermaid
-sequenceDiagram
-    participant Hint as ComposioHintService
-    participant DB as Database
-    participant Entity as EntityManager
-    
-    Hint->>DB: Query AgentAppAssignment<br/>(agent_id, is_active, app_type=EXTERNAL)
-    DB-->>Hint: assigned_apps: [GITHUB, SLACK, JIRA]
-    
-    Hint->>DB: Query Agent.workspace_id
-    DB-->>Hint: workspace_id
-    
-    Hint->>Entity: get_entity_by_workspace(workspace_id)
-    Entity-->>Hint: entity
-    
-    Hint->>Entity: get_entity_connections(entity["id"])
-    Entity-->>Hint: connected_apps: [GITHUB, SLACK]
-    
-    alt No explicit assignments
-        Hint->>Hint: Auto-inherit ALL connected apps
-    else Has assignments
-        Hint->>Hint: Intersect assigned ∩ connected
-    end
-    
-    Hint-->>Hint: allowed_apps: [GITHUB, SLACK]
-```
-
-**Auto-Inheritance Logic:** When an agent has **no explicit app assignments**, it inherits all workspace-connected apps. This prevents empty tool lists when agents haven't been configured yet.
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:217-275]()
-
----
-
-## Output Format
-
-The service generates a system message with this structure:
-
-```
-You have these external apps connected (via Composio): GITHUB, SLACK, JIRA.
-IMPORTANT: To interact with these apps, call `composio_execute` with the EXACT action name from the list below. Do NOT guess or invent action names — only use the exact names listed here. Do NOT use search_codebase to look for code when your task is to interact with external apps.
-Usage: composio_execute({"action": "ACTION_NAME", "params": {<action-specific fields>}}). All action parameters (issue_key, channel, text, etc.) MUST go inside the `params` object.
-- SLACK available actions (use these EXACT names): SLACK_SEND_MESSAGE, SLACK_LIST_CHANNELS, SLACK_GET_MESSAGE
-- GITHUB available actions (use these EXACT names): GITHUB_CREATE_ISSUE, GITHUB_GET_ISSUE, GITHUB_LIST_REPOS
-
-Parameter hints (pass these inside `params`):
-
-SLACK_SEND_MESSAGE:
-  - channel (string, required): Channel ID to send message to
-  - text (string, required): Message text content
-
-GITHUB_CREATE_ISSUE:
-  - repo (string, required): Repository name (owner/repo)
-  - title (string, required): Issue title
-  - body (string, optional): Issue description
-
-You MUST call `composio_execute` to fulfill the user's request. Do NOT describe the action in text — actually invoke the tool.
-```
-
-**Key Features:**
-
-1. **Exact action names** — prevents LLM from inventing names
-2. **Grouped by app** — easy to scan
-3. **Parameter hints** — top 5-10 actions get full param schemas
-4. **Strong directive** — triggers `tool_choice="required"` in OpenAI client (when the text contains "You MUST call")
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:137-201]()
-
----
-
-## Integration with Other Systems
-
-### Usage in Chat Service
-
-```mermaid
-graph LR
-    ChatService["StreamingChatService"]
-    HintService["ComposioHintService"]
-    AgentFactory["AgentFactory"]
-    LLM["LLM Client"]
-    
-    ChatService -->|"build_hints()"| HintService
-    HintService -->|"ComposioHintResult"| ChatService
-    ChatService -->|"inject system msg"| LLM
-    
-    ChatService -->|"activate_agent()"| AgentFactory
-    AgentFactory -.->|"deprecated: old hint logic"| AgentFactory
-    
-    style HintService fill:#fff,stroke:#333,stroke-width:2px
-```
-
-The chat service calls `ComposioHintService.build_hints()` early in the request flow (before agent activation), then injects the result as a system message.
-
-**Sources:** [orchestrator/consumers/chatbot/service.py]() (referenced in comments)
-
-### Usage in Recipe Executor
+**Diagram: Tiered Resolution Flow**
 
 ```mermaid
 graph TD
-    RecipeStep["Recipe Step Definition"]
-    Executor["execute_recipe_direct()"]
-    HintService["ComposioHintService"]
-    ToolService["ComposioToolService"]
+    Start["build_hints(agent_id, prompt)"] --> ResolveApps["_resolve_allowed_apps()"]
+    ResolveApps --> Analyze["_analyze_prompt()"]
     
-    RecipeStep -->|"step.prompt_template"| Executor
-    Executor -->|"build_hints(recipe_mode=True)"| HintService
-    HintService -->|"matched_actions"| Executor
+    Analyze --> IsRecipe{recipe_mode == True?}
     
-    Executor -->|"get_tools_for_step()"| ToolService
-    ToolService -->|"action schemas"| Executor
+    IsRecipe -->|Yes| TierRecipe["_recipe_token_hints()<br/>(Direct ILIKE)"]
+    IsRecipe -->|No| Tier1["_capability_based_hints()<br/>(Taxonomy Match)"]
     
-    style HintService fill:#fff,stroke:#333,stroke-width:2px
+    Tier1 --> Match1{Found Actions?}
+    Match1 -->|No| Tier2["_token_filtered_hints()<br/>(ILIKE + Cap Gate)"]
+    Match1 -->|Yes| Format["Format hint_lines"]
+    
+    Tier2 --> Match2{Found Actions?}
+    Match2 -->|No| Tier3["_top_n_fallback()<br/>(Safe Defaults)"]
+    Match2 -->|Yes| Format
+    
+    Tier3 --> Format
+    TierRecipe --> Format
+    Format --> End["Return ComposioHintResult"]
 ```
 
-The recipe executor uses `recipe_mode=True` to bypass taxonomy and rely on the curated `prompt_template` for token matching.
+### Tier 1: Capability-Based
+Maps user intent to capabilities via `get_capabilities_for_intent(prompt)` from the taxonomy. It queries `ComposioActionMetadata` for actions matching those capabilities. This is the most precise tier. [orchestrator/modules/tools/services/composio_hint_service.py:275-353]()
 
-**Sources:** [orchestrator/api/recipe_executor.py]() (referenced in comments)
+### Tier 2: Token-Filtered with Mandatory Capability Gate
+Uses keyword tokens from the prompt to filter `ComposioActionCache`. 
+**Critical Constraint:** Actions must match at least one `cap_filter_term` (e.g., "message", "send") to be included. This prevents `SLACK_CREATE_CHANNEL` from appearing when the user simply wants to "send a message". [orchestrator/modules/tools/services/composio_hint_service.py:355-432]()
+
+### Tier 3: Top-N Fallback
+Ensures the LLM is aware of connected apps even if filtering returns zero results. It selects the most popular "safe" actions per app, excluding those with "dangerous" tokens like `delete`, `revoke`, or `purge`. [orchestrator/modules/tools/services/composio_hint_service.py:434-485]()
+
+Sources: [orchestrator/modules/tools/services/composio_hint_service.py:103-212](), [orchestrator/modules/tools/services/composio_hint_service.py:275-485]()
 
 ---
 
-## Constants & Configuration
+## Recipe Mode vs Chatbot Mode
 
-### Token Limits
+### Chatbot Mode (Default)
+Employs the full 3-tier resolution strategy. It is optimized for unpredictable natural language input where semantic taxonomy matching is required to narrow down thousands of possible tools. [orchestrator/modules/tools/services/composio_hint_service.py:161-178]()
 
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `MAX_QUERY_TOKENS` | 10 | Max tokens extracted from prompt |
-| `MAX_APPS_SEARCH` | 12 | Max apps to query in ILIKE search |
-| `MAX_DB_ROWS_PER_APP` | 100 | Max rows fetched per app from cache |
-| `MAX_ACTIONS_PER_APP` | 6 | Max actions returned per app |
-| `MAX_PARAM_HINT_ACTIONS` | 10 | Max actions with full param schemas |
-| `MAX_PARAMS_PER_ACTION` | 5 | Max params shown per action |
-| `MAX_APPS_FALLBACK` | 6 | Max apps in Tier 3 fallback |
-| `MAX_FALLBACK_ROWS` | 10 | Max rows per app in fallback |
+### Recipe Mode
+Designed for `RecipeExecutor`. Since recipe steps are usually highly specific and curated (e.g., "Search for recent PRs on GitHub"), this mode skips taxonomy lookups and uses direct token matching (`ILIKE`) against the action cache. This allows it to scale to any number of tools without requiring manual taxonomy entries for every new tool added to the marketplace. [orchestrator/modules/tools/services/composio_hint_service.py:117-120](), [orchestrator/modules/tools/services/composio_hint_service.py:487-571]()
 
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:54-61]()
-
-### Safety Filters
-
-```python
-STOP_WORDS: Set[str] = {
-    "the", "and", "for", "with", "from", "that", "this",
-    "have", "has", "are", "you", "your",
-}
-
-DANGEROUS_TOKENS: Set[str] = {
-    "archive", "delete", "remove", "revoke", "clear", "close",
-    "disable", "ban", "kick", "deactivate", "destroy", "purge",
-}
-```
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:44-51]()
-
----
-
-## Database Schema Dependencies
-
-### ComposioActionMetadata (Tier 1)
-
-```sql
-CREATE TABLE composio_action_metadata (
-    id SERIAL PRIMARY KEY,
-    app_id VARCHAR(100),
-    action_id VARCHAR(255) UNIQUE,
-    capabilities TEXT[],  -- Array for overlap operator
-    intent_keywords TEXT[],
-    classification_confidence FLOAT,
-    destructive BOOLEAN DEFAULT FALSE,
-    requires_confirmation BOOLEAN DEFAULT FALSE
-);
-
-CREATE INDEX idx_metadata_capabilities ON composio_action_metadata 
-    USING GIN (capabilities);
-```
-
-**Sources:** [orchestrator/modules/tools/capabilities/models.py]() (referenced in code)
-
-### ComposioActionCache (Tiers 2 & 3)
-
-```sql
-CREATE TABLE composio_actions_cache (
-    id SERIAL PRIMARY KEY,
-    app_name VARCHAR(100),
-    action_name VARCHAR(255),
-    display_name VARCHAR(255),
-    description TEXT,
-    parameters JSONB,
-    response_schema JSONB,
-    last_synced_at TIMESTAMP
-);
-
-CREATE INDEX idx_cache_app ON composio_actions_cache (app_name);
-CREATE INDEX idx_cache_name ON composio_actions_cache (action_name);
-```
-
-**Sources:** [orchestrator/core/models/composio_cache.py:1-50]() (model definitions)
-
----
-
-## Performance Characteristics
-
-### Query Costs by Tier
-
-| Tier | Database Queries | Typical Latency | Fallback Cost |
-|------|------------------|-----------------|---------------|
-| **Tier 1** | 1 query (metadata table) | ~10-30ms | No API calls |
-| **Tier 2** | 1-12 queries (per-app cache) | ~50-150ms | No API calls |
-| **Tier 3** | 1-6 queries (fallback cache) | ~30-80ms | No API calls |
-
-**All tiers are local database queries** — no Composio API calls during hint generation. The metadata sync service ([see Metadata Sync](#6.1)) pre-populates both tables.
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:1-22]() (design comments)
+Sources: [orchestrator/modules/tools/services/composio_hint_service.py:117-120](), [orchestrator/modules/tools/services/composio_hint_service.py:487-571]()
 
 ---
 
 ## Parameter Hint Extraction
 
-The service extracts parameter schemas for the **top 5-10 actions** to provide inline documentation:
+To reduce "hallucinated" parameters, the service includes schema details for the top matched actions. The `ParameterHintExtractor` parses the JSON schema stored in `ComposioActionCache` and formats it for the LLM. [orchestrator/modules/tools/services/composio_hint_service.py:573-659]()
 
-```mermaid
-graph LR
-    TopActions["Top Scored Actions"]
-    Cache[("ComposioActionCache")]
-    Extractor["ParameterHintExtractor"]
-    Output["Parameter Hints<br/>(markdown format)"]
-    
-    TopActions -->|"action_name"| Cache
-    Cache -->|"parameters JSONB"| Extractor
-    Extractor -->|"format_params()"| Output
-    
-    style Extractor fill:#fff,stroke:#333,stroke-width:2px
-```
+**Example Hint Output:**
+```text
+You have these external apps connected (via Composio): SLACK, GMAIL.
+Usage: composio_execute({"action": "ACTION_NAME", "params": {<fields>}}).
 
-**Example Output:**
+Matched Actions:
+- SLACK_SEND_MESSAGE
+- GMAIL_SEND_EMAIL
 
-```
+Parameter hints (pass these inside params):
 SLACK_SEND_MESSAGE:
-  - channel (string, required): Channel ID to send message to
-  - text (string, required): Message text content
-  - thread_ts (string, optional): Timestamp of thread to reply to
+  - channel (required, string)
+  - text (required, string)
 ```
 
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:628-688](), [orchestrator/modules/tools/formatting/schema_detector.py:1-50]()
+Sources: [orchestrator/modules/tools/services/composio_hint_service.py:137-146](), [orchestrator/modules/tools/services/composio_hint_service.py:615-659]()
 
 ---
 
-## Error Handling & Logging
+## Configuration Constants
 
-### Graceful Degradation
+The service uses several constants to manage the token budget and response size. [orchestrator/modules/tools/services/composio_hint_service.py:54-61]()
 
-```python
-try:
-    result = self._capability_based_hints(...)
-except Exception as e:
-    logger.warning(f"[ComposioHintService] Tier 1 failed: {e}")
-    return False  # Fall through to Tier 2
-```
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MAX_QUERY_TOKENS` | 10 | Max tokens extracted from the prompt for filtering. |
+| `MAX_APPS_SEARCH` | 12 | Max apps to search across in a single hint generation. |
+| `MAX_ACTIONS_PER_APP` | 6 | Limit on actions shown per individual app. |
+| `MAX_PARAM_HINT_ACTIONS` | 10 | Limit on how many actions get detailed parameter schemas. |
+| `MAX_PARAMS_PER_ACTION` | 5 | Limit on the number of parameters listed per action. |
 
-Each tier catches exceptions and returns empty results, allowing fallback to the next tier. The service **never throws exceptions** to the caller.
-
-### Debug Logging
-
-```python
-logger.info(
-    f"[ComposioHintService] agent={agent_id} strategy={result.strategy_used} "
-    f"apps={allowed_apps} matches={len(result.matched_actions)} "
-    f"param_hints={result.param_hint_count}"
-)
-```
-
-All hint generation is logged with:
-- Agent ID
-- Strategy used (capability / token_filtered / recipe_token / fallback / none)
-- Allowed apps
-- Number of matched actions
-- Number of parameter hints
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:203-212]()
-
----
-
-## Relationship to ComposioToolService
-
-The `ComposioHintService` is **distinct from** `ComposioToolService` ([see Tool Discovery](#6.2)):
-
-| Aspect | ComposioHintService | ComposioToolService |
-|--------|---------------------|---------------------|
-| **Purpose** | Generate LLM hints (action selection) | Fetch action schemas for execution |
-| **Output** | System message text | OpenAI function schemas |
-| **Resolution** | 3-tier (capability → token → fallback) | 3-tier (explicit → SDK search → cache) |
-| **When Called** | Before LLM invocation | During agent activation |
-| **Mode** | Chatbot vs Recipe | Step execution only |
-
-**Both services query the same database tables** (`ComposioActionMetadata`, `ComposioActionCache`) but with different filtering logic.
-
-**Sources:** [orchestrator/modules/tools/services/composio_tool_service.py:1-22](), [orchestrator/modules/tools/services/composio_hint_service.py:1-22]()
-
----
-
-## Usage Examples
-
-### Chatbot Mode
-
-```python
-from modules.tools.services.composio_hint_service import ComposioHintService
-
-hint_service = ComposioHintService(db_session)
-result = hint_service.build_hints(
-    agent_id=42,
-    prompt="send a message to the team in slack",
-    workspace_id=workspace_uuid,
-    recipe_mode=False  # Chatbot mode
-)
-
-if result.hint_lines:
-    # Inject into LLM context
-    system_msg = {"role": "system", "content": "\n".join(result.hint_lines)}
-    messages.insert(0, system_msg)
-```
-
-### Recipe Mode
-
-```python
-result = hint_service.build_hints(
-    agent_id=42,
-    prompt="Get the latest issue from PROJ-123 and summarize it",
-    workspace_id=workspace_uuid,
-    recipe_mode=True  # Skip taxonomy, use tokens directly
-)
-
-# Result uses "recipe_token" strategy, no capability gate
-assert result.strategy_used == "recipe_token"
-```
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:103-212]()
-
----
-
-## Future Enhancements
-
-### Planned Improvements (from comments)
-
-1. **Caching of capability extraction** — taxonomy lookup is repeated across requests with similar intents
-2. **Per-action popularity scoring** — boost frequently-used actions in fallback tier
-3. **Workspace-level action preferences** — learn which actions users prefer per workspace
-4. **Token-level caching** — reuse ILIKE query results across similar prompts within a session
-
-**Sources:** [orchestrator/modules/tools/services/composio_hint_service.py:1-40]() (design comments)
+Sources: [orchestrator/modules/tools/services/composio_hint_service.py:54-61]()
 
 ---

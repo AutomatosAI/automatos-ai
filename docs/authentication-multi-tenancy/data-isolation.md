@@ -5,12 +5,22 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docker-compose.yml](docker-compose.yml)
-- [frontend/.dockerignore](frontend/.dockerignore)
-- [frontend/Dockerfile](frontend/Dockerfile)
-- [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [frontend/app/chat/page.tsx](frontend/app/chat/page.tsx)
+- [frontend/components/documents/document-management.tsx](frontend/components/documents/document-management.tsx)
+- [frontend/components/documents/local-storage-browser.tsx](frontend/components/documents/local-storage-browser.tsx)
+- [frontend/next-env.d.ts](frontend/next-env.d.ts)
+- [orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py](orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py)
+- [orchestrator/api/context.py](orchestrator/api/context.py)
+- [orchestrator/api/documents.py](orchestrator/api/documents.py)
+- [orchestrator/api/widgets/docs.py](orchestrator/api/widgets/docs.py)
+- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
+- [orchestrator/core/llm/clients/openai_embedding.py](orchestrator/core/llm/clients/openai_embedding.py)
+- [orchestrator/core/llm/rerank_manager.py](orchestrator/core/llm/rerank_manager.py)
+- [orchestrator/core/services/__init__.py](orchestrator/core/services/__init__.py)
+- [orchestrator/core/team_access.py](orchestrator/core/team_access.py)
+- [orchestrator/modules/agents/services/agent_platform_tools.py](orchestrator/modules/agents/services/agent_platform_tools.py)
+- [orchestrator/modules/rag/service.py](orchestrator/modules/rag/service.py)
+- [orchestrator/modules/tools/formatting/result_formatter.py](orchestrator/modules/tools/formatting/result_formatter.py)
 
 </details>
 
@@ -18,9 +28,9 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-Data isolation ensures that resources belonging to one workspace cannot be accessed by users from another workspace. Every database record that represents user-created content is scoped to a `workspace_id`, and all API queries automatically filter by the authenticated user's workspace. This prevents workspace spoofing, unauthorized cross-workspace access, and data leaks between tenants.
+Data isolation ensures that resources belonging to one workspace cannot be accessed by users from another workspace. Every database record representing user-created content is scoped to a `workspace_id`, and all API queries automatically filter by the authenticated user's workspace. This prevents workspace spoofing, unauthorized cross-workspace access, and data leaks between tenants.
 
-For information about how workspaces are resolved and assigned to users, see [Workspace Management](#9.2). For details on the authentication flow that establishes the `RequestContext`, see [Authentication Flow](#9.1).
+Automatos AI implements a multi-layered isolation strategy encompassing database foreign keys, request-scoped context injection, standardized memory namespacing, and cache prefixing.
 
 ---
 
@@ -28,527 +38,146 @@ For information about how workspaces are resolved and assigned to users, see [Wo
 
 Every API endpoint receives a `RequestContext` from the `get_request_context_hybrid` authentication dependency. This context contains the resolved `workspace_id` and `UserContext`, which together define the isolation boundary for that request.
 
+### Authentication and Workspace Resolution Flow
+
+The following diagram illustrates how an incoming request is associated with a specific workspace before reaching the business logic.
+
 ```mermaid
 graph TB
-    Request["HTTP Request"]
-    HybridAuth["get_request_context_hybrid"]
-    ClerkJWT["Clerk JWT Verification"]
-    APIKey["API Key Validation"]
-    ResolveWS["Workspace Resolution"]
-    RequestContext["RequestContext<br/>workspace_id: UUID<br/>user: UserContext<br/>auth_type: str"]
-    Endpoint["API Endpoint"]
-    DBQuery["Database Query<br/>WHERE workspace_id = ?"]
-    
-    Request --> HybridAuth
-    HybridAuth --> ClerkJWT
-    HybridAuth --> APIKey
-    ClerkJWT --> ResolveWS
-    APIKey --> ResolveWS
-    ResolveWS --> RequestContext
+    subgraph "Natural_Language_Space"
+        User["User / Agent Request"]
+        WS_Header["'x-workspace-id' Header"]
+    end
+
+    subgraph "Code_Entity_Space"
+        AuthDep["get_request_context_hybrid()"]
+        ClerkAuth["Clerk JWT Verification"]
+        APIKeyAuth["API Key Validation"]
+        WS_Resolver["_get_workspace_id_from_request()"]
+        RequestContext["RequestContext<br/>workspace_id: UUID<br/>user: UserContext"]
+        Endpoint["FastAPI Route Handler"]
+    end
+
+    User --> AuthDep
+    WS_Header --> WS_Resolver
+    AuthDep --> ClerkAuth
+    AuthDep --> APIKeyAuth
+    ClerkAuth --> WS_Resolver
+    APIKeyAuth --> WS_Resolver
+    WS_Resolver --> RequestContext
     RequestContext --> Endpoint
-    Endpoint --> DBQuery
-    
-    style RequestContext fill:#333
-    style DBQuery fill:#333
+
+    style RequestContext stroke-dasharray: 5 5
 ```
+**Sources:** [orchestrator/api/documents.py:35-36](), [orchestrator/api/documents.py:107-108](), [orchestrator/api/workflows.py:29-31]()
 
-**Sources:** [orchestrator/core/auth/hybrid.py:283-399](), [orchestrator/core/auth/dependencies.py]()
-
-The `RequestContext` is constructed by `get_request_context_hybrid` after resolving the workspace through multiple strategies:
-
-1. **Explicit workspace ID** from `x-workspace-id` header or `workspace_id` query parameter
-2. **User's workspace** from Clerk organization or personal workspace
-3. **Auto-provisioned workspace** for first-time Clerk users
-4. **Environment default** from `WORKSPACE_ID` or `DEFAULT_WORKSPACE_ID`
-
-Once resolved, the `workspace_id` is immutable for the duration of the request and serves as the filter for all database operations.
-
-**Sources:** [orchestrator/core/auth/hybrid.py:29-68](), [orchestrator/core/auth/hybrid.py:190-254]()
+The `RequestContext` is constructed after resolving the workspace through multiple strategies:
+1. **Explicit workspace ID** from `x-workspace-id` header or `workspace_id` query parameter.
+2. **User's workspace** from Clerk organization or personal workspace.
+3. **API Key association** where the key is linked to a specific `workspace_id`.
 
 ---
 
 ## Database Query Filtering Patterns
 
-All workspace-scoped resources are filtered by `workspace_id` in their database queries. The pattern is consistent across all API routers.
+All workspace-scoped resources are filtered by `workspace_id` in their database queries. This is enforced at the service and repository layers.
 
-### Standard Query Pattern
+### Standard Model Isolation
+
+The base models in the system include a `workspace_id` field to maintain a strict 1:N relationship between workspaces and their entities.
+
+| Entity | Model Class | Workspace Field | Source |
+| :--- | :--- | :--- | :--- |
+| Documents | `Document` | `workspace_id` | [orchestrator/api/documents.py:158]() |
+| Workflows | `Workflow` | `workspace_id` | [orchestrator/api/workflows.py:21-23]() |
+| RAG Configs | `RAGConfiguration` | `workspace_id` | [orchestrator/api/context.py:19-20]() |
+| Agents | `Agent` | `workspace_id` | [orchestrator/api/workflows.py:22]() |
+
+### Implementation Example: Document Management
+
+When a document is uploaded or queried, the system strictly enforces the `workspace_id` filter. For instance, during upload, the system checks for duplicates *only within that workspace*, ensuring that identical files uploaded by different tenants do not conflict or leak metadata.
+
+```python
+# Check for duplicate within the workspace boundary
+existing = db.query(Document).filter(
+    Document.content_hash == content_hash, 
+    Document.workspace_id == ctx.workspace_id
+).first()
+```
+**Sources:** [orchestrator/api/documents.py:158-159]()
+
+Similarly, when fetching document statistics or RAG performance, the `workspace_id` is passed into the `DocumentManager` or `RAGService` to scope the SQL queries.
+
+**Sources:** [orchestrator/api/documents.py:77-86](), [orchestrator/api/context.py:151-157]()
+
+---
+
+## Memory and Cache Isolation
+
+Data isolation extends beyond the relational database into the memory tiers (Redis, Vector DBs, and S3).
+
+### Memory Tier Isolation (L1-L4)
+
+| Layer | Technology | Isolation Mechanism | Reference |
+| :--- | :--- | :--- | :--- |
+| **L1 (Working)** | Redis | Key prefixing using `workspace_id` | [orchestrator/api/workflows.py:173-176]() |
+| **L2/L3 (Short/Long)** | Postgres | Row-level filtering by `workspace_id` | [orchestrator/api/documents.py:158]() |
+| **L4 (Knowledge)** | Vector DB / S3 | Path prefixing: `s3://{bucket}/{workspace_id}/` | [orchestrator/api/documents.py:79-86]() |
+
+### RAG and Vector Search Isolation
+
+The `RAGService` and `DocumentManager` are instantiated with a mandatory `workspace_id`. This ID is used to filter vector similarity searches so that an agent in Workspace A never retrieves chunks from Workspace B.
 
 ```mermaid
 graph LR
-    Endpoint["API Endpoint<br/>def list_agents(...)"]
-    Context["ctx: RequestContext<br/>from Depends"]
-    Query["db.query(Agent)<br/>.filter(Agent.workspace_id == ctx.workspace_id)"]
-    Results["Filtered Results"]
-    
-    Endpoint --> Context
-    Context --> Query
-    Query --> Results
-    
-    style Context fill:#333
-    style Query fill:#333
+    subgraph "Retrieval_Request"
+        Query["User Query"]
+        WS_ID["ctx.workspace_id"]
+    end
+
+    subgraph "RAG_Service_Logic"
+        RAG["RAGService"]
+        Filter["SQL/Vector Filter: workspace_id = WS_ID"]
+    end
+
+    subgraph "Storage_Engines"
+        PGV["Postgres pgvector"]
+        S3V["S3 Vectors"]
+    end
+
+    Query --> RAG
+    WS_ID --> RAG
+    RAG --> Filter
+    Filter --> PGV
+    Filter --> S3V
 ```
-
-**Sources:** [orchestrator/api/agents.py:437-476](), [orchestrator/api/skills.py:418-501](), [orchestrator/api/patterns.py:15-41]()
-
-### Agent Queries Example
-
-The agents API demonstrates the filtering pattern in all CRUD operations:
-
-| Operation | Query Filter | Line Reference |
-|-----------|--------------|----------------|
-| `list_agents` | `.filter(Agent.workspace_id == ctx.workspace_id)` | [orchestrator/api/agents.py:451]() |
-| `get_agent` | `.filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id)` | [orchestrator/api/agents.py:541]() |
-| `create_agent` | `agent = Agent(..., workspace_id=ctx.workspace_id)` | [orchestrator/api/agents.py:374-381]() |
-| `update_agent` | `.filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id)` | [orchestrator/api/agents.py:609]() |
-| `delete_agent` | `.filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id)` | [orchestrator/api/agents.py:701]() |
-| `get_agent_stats` | `.filter(Agent.workspace_id == ctx.workspace_id)` | [orchestrator/api/agents.py:271-272]() |
-
-**Sources:** [orchestrator/api/agents.py:437-741]()
-
-### Create Operations with Workspace Assignment
-
-When creating new resources, the `workspace_id` is explicitly assigned from the `RequestContext`:
-
-```mermaid
-graph TB
-    Client["Client Request<br/>POST /api/agents"]
-    Endpoint["create_agent endpoint"]
-    Context["ctx.workspace_id<br/>(from auth)"]
-    Model["Agent model<br/>workspace_id=ctx.workspace_id"]
-    DB["Database INSERT"]
-    
-    Client --> Endpoint
-    Endpoint --> Context
-    Context --> Model
-    Model --> DB
-    
-    style Context fill:#333
-    style Model fill:#333
-```
-
-**Sources:** [orchestrator/api/agents.py:359-428](), [orchestrator/api/patterns.py:44-86]()
-
-Example from agent creation:
-
-```python
-agent = Agent(
-    name=agent_data.name,
-    description=agent_data.description,
-    agent_type=agent_data.agent_type,
-    configuration=agent_data.configuration or {},
-    workspace_id=ctx.workspace_id,  # Isolation boundary
-    created_by="api"
-)
-```
-
-**Sources:** [orchestrator/api/agents.py:374-383]()
+**Sources:** [orchestrator/api/documents.py:77-86](), [orchestrator/modules/rag/service.py:151-157]()
 
 ---
 
-## Workspace Access Verification
+## Team-Based Access Control (Sub-Isolation)
 
-The hybrid authentication system includes access verification to prevent workspace spoofing. When a client sends an explicit `x-workspace-id` header, the system verifies the authenticated user actually has access to that workspace.
+Within a single workspace, further isolation is provided via `team_access`. This allows large organizations to partition data so that only specific teams (e.g., "Engineering" vs "HR") can see certain documents.
 
-```mermaid
-graph TB
-    Request["Request with<br/>x-workspace-id header"]
-    ParseWS["_get_workspace_id_from_request"]
-    ClerkAuth["Clerk JWT verification"]
-    CheckExists["_workspace_exists<br/>Verify workspace UUID exists"]
-    CheckAccess["_user_has_workspace_access<br/>Verify membership"]
-    Granted["Access Granted<br/>Use requested workspace_id"]
-    Denied["Access Denied<br/>Resolve user's default workspace"]
-    
-    Request --> ParseWS
-    ParseWS --> ClerkAuth
-    ClerkAuth --> CheckExists
-    CheckExists -->|exists| CheckAccess
-    CheckExists -->|not found| Denied
-    CheckAccess -->|has access| Granted
-    CheckAccess -->|no access| Denied
-    
-    style CheckAccess fill:#333
-    style Granted fill:#333
-```
+*   **Column Filtering:** The `documents` table contains a `team_access` column (array of strings).
+*   **Query Enforcement:** The `TEAM_FILTER_CLAUSE` is appended to SQL queries to ensure users only see documents tagged for their specific team or public workspace documents.
+*   **Widget Isolation:** External widgets use a `WidgetAuthContext` to enforce these team boundaries.
 
-**Sources:** [orchestrator/core/auth/hybrid.py:71-82](), [orchestrator/core/auth/hybrid.py:84-107](), [orchestrator/core/auth/hybrid.py:283-350]()
-
-### Access Check Implementation
-
-The `_user_has_workspace_access` function queries both workspace ownership and workspace membership:
-
-```sql
-SELECT 1 FROM users u 
-LEFT JOIN workspaces w ON w.owner_id = u.id AND w.id = :ws_id 
-LEFT JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = :ws_id AND wm.is_active = true 
-WHERE u.clerk_user_id = :cid AND (w.id IS NOT NULL OR wm.id IS NOT NULL)
-```
-
-A user has access to a workspace if:
-- They own the workspace (`workspaces.owner_id = users.id`), OR
-- They are an active member (`workspace_members.is_active = true`)
-
-**Sources:** [orchestrator/core/auth/hybrid.py:84-107]()
-
-### Spoofing Prevention
-
-If a user attempts to access a workspace they don't belong to by manipulating the `x-workspace-id` header, the system falls back to resolving their default workspace instead of blocking the request entirely. This prevents breaking the UI while maintaining security:
-
-```python
-if workspace_id:
-    if not _workspace_exists(workspace_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-    if not _user_has_workspace_access(clerk_uid, workspace_id):
-        logger.warning("Access denied: user %s tried to access workspace %s", clerk_uid, workspace_id)
-        # Fall through to resolver instead of blocking
-        workspace_id = None
-```
-
-**Sources:** [orchestrator/core/auth/hybrid.py:316-323]()
+**Sources:** [orchestrator/api/widgets/docs.py:72-80](), [orchestrator/api/widgets/docs.py:103-114]()
 
 ---
 
-## Workspace-Scoped Database Models
-
-The following database models include a `workspace_id` foreign key and are filtered by workspace in all queries:
-
-| Model | Table | Workspace Field | Primary API Router |
-|-------|-------|----------------|-------------------|
-| `Agent` | `agents` | `workspace_id` | `/api/agents` |
-| `Skill` | `skills` | (not workspace-scoped) | `/api/v1/skills` |
-| `Pattern` | `patterns` | `workspace_id` | `/api/patterns` |
-| `Workflow` | `workflows` | `workspace_id` | `/api/workflows` |
-| `WorkflowRecipe` | `workflow_recipes` | `workspace_id` | `/api/workflow-recipes` |
-| `MarketplacePlugin` | `marketplace_plugins` | `owner_type` + `owner_id` | `/api/marketplace` |
-| `WorkspaceEnabledPlugin` | `workspace_enabled_plugins` | `workspace_id` | `/api/workspaces/{id}/plugins` |
-| `AgentAssignedPlugin` | `agent_assigned_plugins` | (via agent) | `/api/agents/{id}/plugins` |
-
-**Note:** Skills are currently global resources shared across all workspaces, as they are loaded from Git repositories. Workspace-specific skill customization is planned for future releases.
-
-**Sources:** [orchestrator/core/models/agents.py](), [orchestrator/core/models/workflows.py](), [orchestrator/core/models/marketplace_plugins.py]()
-
----
-
-## Frontend Workspace Context
-
-The frontend maintains workspace context through the `WorkspaceProvider` React context, which fetches the current workspace from `/api/workspaces/current` and provides it to all child components.
-
-```mermaid
-graph TB
-    Providers["Providers component<br/>app layout"]
-    ClerkProvider["ClerkProvider<br/>User authentication"]
-    WorkspaceProvider["WorkspaceProvider<br/>Fetches current workspace"]
-    WorkspaceAPI["GET /api/workspaces/current"]
-    Context["React Context<br/>workspace object"]
-    Components["Child Components<br/>useWorkspace() hook"]
-    APIClient["apiClient<br/>Adds x-workspace-id header"]
-    
-    Providers --> ClerkProvider
-    ClerkProvider --> WorkspaceProvider
-    WorkspaceProvider --> WorkspaceAPI
-    WorkspaceAPI --> Context
-    Context --> Components
-    Components --> APIClient
-    
-    style WorkspaceProvider fill:#333
-    style Context fill:#333
-```
-
-**Sources:** [frontend/components/providers.tsx:1-86](), [frontend/components/workspace-provider.tsx](), [orchestrator/api/workspaces.py:24-54]()
-
-### Workspace API Response
-
-The `/api/workspaces/current` endpoint returns the authenticated user's workspace, including a flag for first-time users:
-
-```json
-{
-  "id": "uuid",
-  "name": "User's Workspace",
-  "slug": "user-workspace",
-  "plan": "starter",
-  "role": "owner",
-  "plan_limits": {
-    "max_agents": 10,
-    "max_workflows": 10,
-    "max_documents": 100,
-    "max_members": 5
-  },
-  "is_new_workspace": true
-}
-```
-
-The `is_new_workspace` flag is `true` when the workspace has no agents yet, triggering the onboarding flow via `FirstLoginGuard`.
-
-**Sources:** [orchestrator/api/workspaces.py:24-54](), [frontend/components/onboarding/first-login-guard.tsx:1-35]()
-
-### API Client Workspace Headers
-
-The frontend API client automatically includes the workspace ID in request headers:
-
-```typescript
-// Implicit in all API calls via apiClient
-headers: {
-  'x-workspace-id': workspace.id
-}
-```
-
-**Sources:** [frontend/lib/api-client.ts]()
-
----
-
-## Isolation Boundaries and Guarantees
-
-### What Is Isolated
-
-The following resources are strictly isolated by workspace:
-
-- **Agents:** Each workspace has its own set of agents with unique configurations
-- **Workflows and Recipes:** Workflow definitions and execution history are workspace-scoped
-- **Patterns:** Custom patterns are private to each workspace
-- **Plugin Enablement:** Workspaces must explicitly enable marketplace plugins before assignment
-- **Tool Connections:** Composio app connections are workspace-specific
-- **Execution History:** Workflow execution records are isolated per workspace
-
-### What Is Not Isolated
-
-The following resources are shared across workspaces:
-
-- **Skills:** Loaded from Git repositories, skills are global and read-only
-- **Marketplace Plugins:** The marketplace catalog is visible to all users
-- **Marketplace Agents:** Shared agent templates are visible to all workspaces
-- **LLM Models:** Model configurations are system-wide
-- **Composio App Definitions:** The catalog of available apps is global
-
-**Sources:** [orchestrator/api/agents.py](), [orchestrator/api/skills.py](), [orchestrator/api/marketplace.py]()
-
----
-
-## Testing Data Isolation
-
-To verify data isolation works correctly, follow this testing procedure:
-
-### 1. Create Two Test Workspaces
-
-```bash
-# User A creates account via Clerk
-# Auto-provisioned workspace A
-
-# User B creates account via Clerk  
-# Auto-provisioned workspace B
-```
-
-**Sources:** [orchestrator/core/auth/hybrid.py:110-187]()
-
-### 2. Create Resources in Workspace A
-
-```bash
-curl -X POST http://localhost:8000/api/agents \
-  -H "Authorization: Bearer $USER_A_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Agent A", "description": "Test agent"}'
-```
-
-**Sources:** [orchestrator/api/agents.py:359-428]()
-
-### 3. Attempt Cross-Workspace Access
-
-```bash
-# User B tries to access User A's agent by ID
-curl http://localhost:8000/api/agents/1 \
-  -H "Authorization: Bearer $USER_B_TOKEN"
-
-# Expected: 404 Not Found (filtered by workspace_id)
-```
-
-**Sources:** [orchestrator/api/agents.py:534-552]()
-
-### 4. Attempt Header Spoofing
-
-```bash
-# User B tries to spoof workspace ID via header
-curl http://localhost:8000/api/agents \
-  -H "Authorization: Bearer $USER_B_TOKEN" \
-  -H "x-workspace-id: $WORKSPACE_A_ID"
-
-# Expected: Empty list (access denied, falls back to User B's workspace)
-```
-
-**Sources:** [orchestrator/core/auth/hybrid.py:316-323]()
-
-### 5. Verify Workspace Member Access
-
-```bash
-# Add User B as member of Workspace A
-INSERT INTO workspace_members (workspace_id, user_id, role, is_active)
-VALUES ($WORKSPACE_A_ID, $USER_B_ID, 'member', true);
-
-# User B can now access Workspace A's agents
-curl http://localhost:8000/api/agents \
-  -H "Authorization: Bearer $USER_B_TOKEN" \
-  -H "x-workspace-id: $WORKSPACE_A_ID"
-
-# Expected: List of Workspace A's agents
-```
-
-**Sources:** [orchestrator/core/auth/hybrid.py:84-107]()
-
----
-
-## Common Isolation Patterns
-
-### Pattern 1: List Resources
-
-```python
-@router.get("/")
-async def list_resources(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    resources = db.query(Resource).filter(
-        Resource.workspace_id == ctx.workspace_id
-    ).all()
-    return {"data": resources}
-```
-
-**Sources:** [orchestrator/api/agents.py:437-476](), [orchestrator/api/patterns.py:15-41]()
-
-### Pattern 2: Get Single Resource
-
-```python
-@router.get("/{resource_id}")
-async def get_resource(
-    resource_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    resource = db.query(Resource).filter(
-        Resource.id == resource_id,
-        Resource.workspace_id == ctx.workspace_id  # Isolation check
-    ).first()
-    
-    if not resource:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    
-    return {"data": resource}
-```
-
-**Sources:** [orchestrator/api/agents.py:534-552](), [orchestrator/api/patterns.py:88-117]()
-
-### Pattern 3: Create Resource
-
-```python
-@router.post("/")
-async def create_resource(
-    data: ResourceCreate,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    resource = Resource(
-        name=data.name,
-        workspace_id=ctx.workspace_id  # Assign to user's workspace
-    )
-    db.add(resource)
-    db.commit()
-    return {"data": resource}
-```
-
-**Sources:** [orchestrator/api/agents.py:359-428](), [orchestrator/api/patterns.py:43-86]()
-
-### Pattern 4: Update Resource
-
-```python
-@router.put("/{resource_id}")
-async def update_resource(
-    resource_id: int,
-    data: ResourceUpdate,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    resource = db.query(Resource).filter(
-        Resource.id == resource_id,
-        Resource.workspace_id == ctx.workspace_id  # Verify ownership
-    ).first()
-    
-    if not resource:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    
-    # Update fields
-    db.commit()
-    return {"data": resource}
-```
-
-**Sources:** [orchestrator/api/agents.py:605-695]()
-
-### Pattern 5: Delete Resource
-
-```python
-@router.delete("/{resource_id}")
-async def delete_resource(
-    resource_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    resource = db.query(Resource).filter(
-        Resource.id == resource_id,
-        Resource.workspace_id == ctx.workspace_id  # Verify ownership
-    ).first()
-    
-    if not resource:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    
-    db.delete(resource)
-    db.commit()
-    return {"message": "Resource deleted"}
-```
-
-**Sources:** [orchestrator/api/agents.py:697-740](), [orchestrator/api/patterns.py:119-141]()
-
----
-
-## Isolation in Statistics and Aggregations
-
-Statistics endpoints must also filter by workspace to prevent information leakage:
-
-```python
-@router.get("/stats")
-async def get_agent_stats(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    total_agents = db.query(func.count(Agent.id)).filter(
-        Agent.workspace_id == ctx.workspace_id
-    ).scalar() or 0
-    
-    active_agents = db.query(func.count(Agent.id)).filter(
-        Agent.workspace_id == ctx.workspace_id,
-        Agent.status == "active"
-    ).scalar() or 0
-    
-    return {
-        "total_agents": total_agents,
-        "active_agents": active_agents
-    }
-```
-
-**Sources:** [orchestrator/api/agents.py:266-294]()
-
-Even aggregate queries that don't return specific records must be scoped to prevent counting resources from other workspaces.
-
----
-
-## Summary
-
-Data isolation in Automatos AI is enforced through:
-
-1. **Authentication Layer:** `get_request_context_hybrid` resolves and validates workspace access
-2. **Request Context:** Every endpoint receives a `RequestContext` with immutable `workspace_id`
-3. **Query Filtering:** All database queries include `WHERE workspace_id = ?` filters
-4. **Access Verification:** Workspace membership is verified to prevent header spoofing
-5. **Model Design:** All user-created resources have a `workspace_id` foreign key
-6. **Frontend Integration:** React context and API client automatically include workspace headers
-
-This multi-layered approach ensures complete data isolation between workspaces while maintaining a simple, consistent API pattern across all endpoints.
-
-**Sources:** [orchestrator/core/auth/hybrid.py:283-399](), [orchestrator/api/agents.py](), [orchestrator/api/patterns.py](), [frontend/components/workspace-provider.tsx]()
+## Summary of Isolation Implementation
+
+| Component | Isolation Technique | Primary Code Reference |
+| :--- | :--- | :--- |
+| **API Layer** | `RequestContext` Dependency | [orchestrator/api/documents.py:108]() |
+| **Database** | Foreign Key (`workspace_id`) | [orchestrator/api/documents.py:158]() |
+| **Knowledge Base** | `DocumentManager` Scoping | [orchestrator/api/documents.py:77-86]() |
+| **RAG Retrieval** | `RAGService` Initialization | [orchestrator/modules/rag/service.py:151-157]() |
+| **External Widgets** | `WidgetAuthContext` & `team_access` | [orchestrator/api/widgets/docs.py:88-95]() |
+| **Workflows** | `WorkflowStageTracker` Execution ID | [orchestrator/api/workflows.py:70-73]() |
+
+**Sources:** [orchestrator/api/documents.py](), [orchestrator/api/workflows.py](), [orchestrator/modules/rag/service.py](), [orchestrator/api/widgets/docs.py]()
 
 ---

@@ -5,766 +5,188 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/chatbot/chat-widget.tsx](frontend/components/chatbot/chat-widget.tsx)
+- [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
+- [frontend/components/chatbot/chat-mode-bar.tsx](frontend/components/chatbot/chat-mode-bar.tsx)
 - [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
+- [frontend/components/chatbot/message-actions.tsx](frontend/components/chatbot/message-actions.tsx)
+- [frontend/components/chatbot/message.tsx](frontend/components/chatbot/message.tsx)
+- [frontend/components/chatbot/mission-suggestion-card.tsx](frontend/components/chatbot/mission-suggestion-card.tsx)
 - [frontend/components/chatbot/multimodal-input.tsx](frontend/components/chatbot/multimodal-input.tsx)
-- [frontend/public/brand/jira-logo.svg](frontend/public/brand/jira-logo.svg)
-- [orchestrator/modules/documents/generation_service.py](orchestrator/modules/documents/generation_service.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
+- [frontend/components/missions/create-mission-modal.tsx](frontend/components/missions/create-mission-modal.tsx)
+- [frontend/components/voice/VoiceCallPanel.tsx](frontend/components/voice/VoiceCallPanel.tsx)
+- [frontend/components/voice/VoiceMessage.tsx](frontend/components/voice/VoiceMessage.tsx)
+- [frontend/components/voice/VoiceMicButton.tsx](frontend/components/voice/VoiceMicButton.tsx)
+- [frontend/components/voice/VoicePlayer.tsx](frontend/components/voice/VoicePlayer.tsx)
+- [frontend/components/voice/VoiceRecordingIndicator.tsx](frontend/components/voice/VoiceRecordingIndicator.tsx)
+- [frontend/hooks/use-voice-playback.ts](frontend/hooks/use-voice-playback.ts)
+- [frontend/hooks/use-voice-recorder.ts](frontend/hooks/use-voice-recorder.ts)
+- [frontend/hooks/use-voice-stream.ts](frontend/hooks/use-voice-stream.ts)
+- [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
+- [frontend/lib/voice-client.ts](frontend/lib/voice-client.ts)
+- [frontend/stores/mission-store.ts](frontend/stores/mission-store.ts)
+- [frontend/types/chat.ts](frontend/types/chat.ts)
 
 </details>
 
 
 
-This page covers the frontend components that implement the real-time streaming chat interface, including message rendering, multimodal input, widget integration, tool suggestions, and layout management. 
-
-For backend chat orchestration, see [7.1 Chat API & Streaming](#7.1). For the widget system architecture and widget types, see [7.7 Widget System](#7.7). For agent routing displayed in chat messages, see [8 Universal Router](#8).
+This page covers the frontend components that implement the real-time streaming chat interface, including the `useChat` hook, message rendering, multimodal input, widget integration, and mission/plan mode selection.
 
 ---
 
 ## Component Architecture Overview
 
-The chat interface is composed of three primary components working together:
+The chat interface is a sophisticated React application built with Next.js, leveraging the AI SDK for streaming and Framer Motion for animations. It is composed of several high-level components:
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `Chat` | `frontend/components/chatbot/chat.tsx` | Main chat container, message list, widget integration, SSE event handling |
-| `MultimodalInput` | `frontend/components/chatbot/multimodal-input.tsx` | Text input, file attachments, agent selector, model selector, tool icons |
-| `PilotHelperWidget` | `frontend/components/chatbot/chat-widget.tsx` | Contextual help and bug reporting overlay |
+| `Chat` | [frontend/components/chatbot/chat.tsx:56-64]() | Main container managing messages, streaming state, and layout transitions. |
+| `Message` | [frontend/components/chatbot/message.tsx:41-53]() | Individual message renderer supporting Markdown, code blocks, and tool results. |
+| `MultimodalInput` | [frontend/components/chatbot/multimodal-input.tsx:37-49]() | Input area for text, files, voice, and selector controls. |
+| `ChatModeBar` | [frontend/components/chatbot/chat-mode-bar.tsx:34-45]() | Navigation for switching between Code, Plan, and Mission modes. |
 
-The `Chat` component manages three distinct layout modes based on content type:
-
-1. **Normal mode** — Chat messages only, no side panels
-2. **Widget mode** (PRD-38.1) — Split view with chat on left (35%), widget canvas on right (65%)
-3. **Artifact viewer mode** (legacy) — Split view with chat on left, single artifact on right
-
-**Sources:** [frontend/components/chatbot/chat.tsx:1-50](), [frontend/components/chatbot/multimodal-input.tsx:1-30]()
-
----
-
-## Chat Component Structure
-
-### Component Hierarchy
+### Component Hierarchy and Data Flow
 
 ```mermaid
-graph TB
-    Chat["Chat Component<br/>(chat.tsx)"]
-    Input["MultimodalInput<br/>(multimodal-input.tsx)"]
-    MessageList["Message List<br/>messages.map(Message)"]
-    Message["Message Component<br/>(message.tsx)"]
-    ToolSuggestions["ToolSuggestionBar<br/>(PRD-40)"]
-    AgentSelector["AgentSelector<br/>(agent-selector.tsx)"]
-    Canvas["Canvas<br/>(workspace/Canvas)"]
-    ArtifactViewer["ArtifactViewer<br/>(artifact-viewer.tsx)"]
-    
-    Chat --> MessageList
+graph TD
+    subgraph "Frontend Components"
+        Chat["Chat (chat.tsx)"]
+        Input["MultimodalInput (multimodal-input.tsx)"]
+        MsgList["Message List"]
+        Msg["Message (message.tsx)"]
+        ModeBar["ChatModeBar (chat-mode-bar.tsx)"]
+        Canvas["Canvas (Widget System)"]
+    end
+
+    subgraph "State & Hooks"
+        useChat["useChat (lib/chat/hooks.ts)"]
+        useWS["useWorkspaceStore"]
+        useMission["useMissionStore"]
+    end
+
+    Chat --> ModeBar
+    Chat --> MsgList
+    MsgList --> Msg
     Chat --> Input
     Chat --> Canvas
-    Chat --> ArtifactViewer
+
+    useChat -- "Messages / Status / RoutingInfo" --> Chat
+    useWS -- "Widget IDs" --> Chat
+    useMission -- "Mission Mode State" --> Chat
     
-    MessageList --> Message
-    
-    Input --> ToolSuggestions
-    Input --> AgentSelector
-    
-    Chat -.uses.-> useChat["useChat hook<br/>(lib/chat/hooks)"]
-    Chat -.uses.-> useWorkspaceStore["useWorkspaceStore<br/>(stores/workspace-store)"]
-    
-    style Chat fill:#fff,stroke:#333,stroke-width:3px
-    style Input fill:#fff,stroke:#333,stroke-width:2px
-    style Canvas fill:#fff,stroke:#333,stroke-width:2px
+    Input -- "sendMessage" --> useChat
+    Chat -- "tool-data" --> useWS
 ```
-
-**Sources:** [frontend/components/chatbot/chat.tsx:43-105]()
-
-### Key Props and State
-
-The `Chat` component accepts the following props:
-
-```typescript
-interface ChatProps {
-  id: string                          // Conversation ID
-  initialMessages?: ChatMessage[]     // Pre-loaded message history
-  initialChatModel?: string           // Default model (e.g. 'gpt-4')
-  initialVisibilityType?: VisibilityType  // 'private' | 'public'
-  isReadonly?: boolean                // Disable input for shared chats
-  autoResume?: boolean                // Continue streaming on mount
-  initialLastContext?: AppUsage       // Token usage data
-}
-```
-
-**State variables:**
-
-| State | Type | Purpose |
-|-------|------|---------|
-| `widgetIds` | `string[]` | Active widget IDs from workspace store (PRD-38.1) |
-| `selectedArtifact` | `Artifact \| null` | Legacy artifact for artifact viewer mode |
-| `activeTool` | `string \| null` | Currently active tool for suggestions (PRD-40) |
-| `toolSuggestions` | `string[]` | Suggested prompts for active tool |
-| `selectedAgentId` | `number \| null` | User-selected agent (overrides auto-routing) |
-| `lastRoutingDecision` | `ref` | Stores agent ID from most recent routing for corrections (PRD-50) |
-
-**Sources:** [frontend/components/chatbot/chat.tsx:33-125]()
+Sources: [frontend/components/chatbot/chat.tsx:56-162](), [frontend/lib/chat/hooks.ts:8-28](), [frontend/components/chatbot/chat-mode-bar.tsx:34-45]()
 
 ---
 
-## Widget Integration (PRD-38.1)
+## The `useChat` Hook and Streaming
 
-The chat component automatically creates widgets when tool execution results arrive via SSE `tool-data` events. This replaces the legacy artifact viewer with a composable multi-widget canvas.
+The `useChat` hook is the primary interface between the UI and the backend Chat API. It manages the message list, loading states, and the server-sent events (SSE) stream.
 
-### Auto-Widget Creation Flow
+### Request Flow
+When `sendMessage` is called, the hook:
+1.  Appends the user message to the local state [frontend/lib/chat/hooks.ts:62-71]().
+2.  Initiates a POST request to `/api/chat` [frontend/lib/chat/hooks.ts:98-124]().
+3.  Includes headers for `X-Workspace-ID` and authentication tokens [frontend/lib/chat/hooks.ts:100-108]().
+4.  Sends `agentId` (if pinned) or `selectedChatModel` along with mode flags like `missionMode` or `planMode` [frontend/lib/chat/hooks.ts:115-122]().
 
-```mermaid
-sequenceDiagram
-    participant SSE as SSE Stream
-    participant Chat as Chat Component
-    participant Store as useWorkspaceStore
-    participant Canvas as Canvas Component
-    
-    SSE->>Chat: tool-data event
-    Chat->>Chat: Parse data type<br/>(database_results, documents, etc)
-    
-    alt Database Results
-        Chat->>Chat: Extract columns, rows, charts
-        Chat->>Store: addWidget(type='data')
-    else Documents
-        Chat->>Chat: Extract filename, chunks, similarity
-        Chat->>Store: addWidget(type='document')
-    else Code Snippets
-        Chat->>Chat: Extract code, language, filePath
-        Chat->>Store: addWidget(type='code')
-    else Emails
-        Chat->>Chat: Parse email list
-        Chat->>Store: addWidget(type='email')
-    else Generated Documents (PRD-63)
-        Chat->>Chat: Extract content, downloadUrl
-        Chat->>Store: addWidget(type='document')
-    else Terminal Output
-        Chat->>Chat: Extract command, output, exitCode
-        Chat->>Store: addWidget(type='terminal')
-    end
-    
-    Store->>Canvas: Widget state updated
-    Canvas->>Canvas: Render new widget
-```
+### Routing Metadata (PRD-50)
+The hook extracts routing information from response headers (set by the `UniversalRouter` on the backend) and attaches it to the assistant message [frontend/lib/chat/hooks.ts:142-164]().
+*   `x-routing-agent-id`: The ID of the agent selected to handle the query.
+*   `x-routing-confidence`: The confidence score of the routing decision.
+*   `x-routing-type`: The tier used (e.g., `user_override`, `llm_classifier`).
 
-**Sources:** [frontend/components/chatbot/chat.tsx:145-380]()
-
-### Widget Type Transformations
-
-The chat component transforms backend tool results into widget data structures:
-
-| Backend Structure | Widget Type | Transformation Logic |
-|-------------------|-------------|----------------------|
-| `database_results[]` | `data` | Extract `columns`, `rows`, `sql`, `charts` from PandasAI [chat.tsx:156-192]() |
-| `documents[]` | `document` | Map `chunks[]` to widget format with similarity scores [chat.tsx:196-230]() |
-| `code_snippets[]` | `code` | Extract `code`, `language`, `filePath`, `symbolName` [chat.tsx:233-255]() |
-| `emails[]` | `email` | Parse email addresses (handles "Name \<email\>" format) [chat.tsx:260-317]() |
-| `generated_document` | `document` | Attach `content`, `downloadUrl`, mark `hasFullContent: true` [chat.tsx:320-341]() |
-| `terminal_output` | `terminal` | Extract `command`, `stdout`, `stderr`, `exitCode` [chat.tsx:344-366]() |
-
-**Email Address Parsing Example:**
-
-The chat component includes a helper to normalize email formats from Composio integrations:
-
-```typescript
-// "John Doe <john@example.com>" → { name: "John Doe", email: "john@example.com" }
-const parseEmailAddress = (addr: any): { email: string; name?: string } => {
-  const match = addr.match(/^(.+?)\s*<([^>]+)>$/)
-  if (match) return { name: match[1].trim(), email: match[2].trim() }
-  return { email: addr.trim() }
-}
-```
-
-**Sources:** [frontend/components/chatbot/chat.tsx:263-283]()
-
-### Document Widget Lazy Loading
-
-When a document widget is created without full content (`has_full_content: false`), the chat component fetches the full text asynchronously:
-
-```typescript
-// Fetch full content if needed
-if (doc.id && !doc.has_full_content) {
-  apiClient.request(`/api/documents/${doc.id}/content`)
-    .then((data: any) => {
-      const fullContent = Array.isArray(data?.chunks)
-        ? data.chunks.map((chunk: any) => chunk?.content ?? '').join('\n\n')
-        : initialContent
-      
-      // Update widget with full content
-      useWorkspaceStore.getState().updateWidget(widgetId, {
-        data: { ...widgetData.data, content: fullContent, hasFullContent: true },
-        state: 'ready',
-      })
-    })
-}
-```
-
-This prevents blocking the UI while large documents are retrieved from S3.
-
-**Sources:** [frontend/components/chatbot/chat.tsx:653-679]()
+Sources: [frontend/lib/chat/hooks.ts:54-164](), [frontend/app/api/chat/route.ts:80-84]()
 
 ---
 
-## Tool Suggestion System (PRD-40/41)
+## Message Rendering System
 
-The chat interface displays dynamic tool suggestions when users click tool icons in the input bar. This feature has two phases:
+The `Message` component transforms raw AI SDK parts or standard content strings into rich UI elements.
 
-### Phase 1: Basic Suggestions (PRD-40)
+### Content Processing
+Messages are processed in two formats:
+1.  **AI SDK Format**: Uses the `content` field for standard text [frontend/components/chatbot/message.tsx:174-176]().
+2.  **Custom Parts Format**: Uses a `parts` array for multimodal content (text, files, tool-calls, tool-results, voice) [frontend/components/chatbot/message.tsx:179-185]().
 
-Tool icons are displayed for the active agent's connected apps. Clicking an icon fetches pre-configured suggestions from the backend:
+### Markdown & Media Support
+The system uses `react-markdown` with `remark-gfm` to render text [frontend/components/chatbot/message.tsx:158-166]().
+*   **Images**: Extracted from markdown via regex and rendered in an `ImageGallery` [frontend/components/chatbot/message.tsx:30-39]().
+*   **Code**: Handled by a custom `CodeBlock` component with syntax highlighting [frontend/components/chatbot/message.tsx:89-102]().
+*   **Tool Results**: Specific renderers exist for `DocumentReference` (RAG results), `DatabaseResult` (SQL tables), and `CodeSnippet` [frontend/components/chatbot/message.tsx:23-25]().
+*   **Voice**: Supports voice message playback and transcription display [frontend/components/chatbot/message.tsx:13]().
+
+Sources: [frontend/components/chatbot/message.tsx:41-185](), [frontend/types/chat.ts:163-169]()
+
+---
+
+## Mode Selection & Mission Integration
+
+The UI supports specialized interaction modes via the `ChatModeBar` and dedicated components like `MissionSuggestionCard`.
+
+### Chat Modes
+*   **Code Mode**: Activates the `coding_canvas` widget for side-by-side code editing [frontend/components/chatbot/chat.tsx:98-126]().
+*   **Plan Mode**: Focuses the agent on research and strategy without immediate execution [frontend/stores/mission-store.ts:47-52]().
+*   **Mission Mode**: Transitions the chat into a goal-oriented planning phase [frontend/stores/mission-store.ts:53-57]().
+
+### Mission Creation & Suggestions
+1.  **Complexity Detection**: The UI can display a `MissionSuggestionCard` when AutoBrain detects a task is "Multi-step" or "Complex multi-agent" [frontend/components/chatbot/mission-suggestion-card.tsx:19-25]().
+2.  **Templates**: The `CreateMissionModal` offers predefined templates like "Business Plan" or "Research Report" [frontend/components/missions/create-mission-modal.tsx:67-110]().
+3.  **Conversion**: `handleLaunchPlanAsMission` extracts goals and descriptions from the chat history to prepopulate the mission form [frontend/components/chatbot/chat.tsx:146-152]().
+
+Sources: [frontend/components/chatbot/chat-mode-bar.tsx:54-84](), [frontend/components/missions/create-mission-modal.tsx:119-225](), [frontend/components/chatbot/mission-suggestion-card.tsx:35-38]()
+
+---
+
+## Layout and Widget System (PRD-38.1)
+
+The `Chat` component manages the split between conversation and the `Canvas` (widget area).
+
+### Layout Logic
+*   **Dynamic Resizing**: The UI adjusts based on whether widgets are active. If `widgetIds.length > 0`, the `Canvas` is rendered in a resizable panel [frontend/components/chatbot/chat.tsx:70-73]().
+*   **Artifact/Code Integration**: Clicking an artifact or code snippet in a message can trigger the `ArtifactViewer` or open the `Code Canvas` [frontend/components/chatbot/chat.tsx:98-126]().
+
+### SSE Widget Events (US-015)
+The chat interface listens for Server-Sent Events to update workspace state:
+*   `dispatchMemoryInjected`: Updates UI when memories are retrieved [frontend/components/chatbot/chat.tsx:76]().
+*   `dispatchMemoryStored`: Notifies when new conversation facts are persisted [frontend/components/chatbot/chat.tsx:77]().
+*   `dispatchWorkflowUpdate`: Refreshes workflow status in the sidebar/widgets [frontend/components/chatbot/chat.tsx:78]().
 
 ```mermaid
 graph LR
-    ToolIcon["Tool Icon Click<br/>(e.g. Gmail)"]
-    API["GET /api/tools/{appName}/suggestions"]
-    Suggestions["ToolSuggestionBar<br/>renders 3-5 prompts"]
-    Input["User clicks suggestion"]
-    
-    ToolIcon --> API
-    API --> Suggestions
-    Suggestions --> Input
-    
-    Input --> Send["sendMessage(suggestion)"]
+    subgraph "Frontend UI Space"
+        ChatUI["Chat Component (chat.tsx)"]
+        InputUI["MultimodalInput (multimodal-input.tsx)"]
+        MsgUI["Message (message.tsx)"]
+    end
+
+    subgraph "Code Entity Space"
+        UseChatHook["useChat (hooks.ts)"]
+        ChatProxy["POST /api/chat (route.ts)"]
+        MissionStore["useMissionStore (mission-store.ts)"]
+        WSStore["useWorkspaceStore (workspace-store.ts)"]
+    end
+
+    ChatUI -- "manages" --> UseChatHook
+    InputUI -- "calls sendMessage" --> UseChatHook
+    UseChatHook -- "fetches" --> ChatProxy
+    ChatUI -- "syncs mode" --> MissionStore
+    ChatUI -- "dispatches SSE" --> WSStore
 ```
-
-**State Management:**
-
-| State Variable | Purpose |
-|----------------|---------|
-| `activeTool` | Name of tool with open suggestions (e.g. "gmail") |
-| `toolSuggestions` | Array of prompt strings fetched from API |
-| `isLoadingSuggestions` | Loading indicator during API call |
-
-**Sources:** [frontend/components/chatbot/chat.tsx:489-556]()
-
-### Phase 2: Context-Aware Suggestions (PRD-41)
-
-When `user_id` and `session_id` are available, the backend personalizes suggestions based on conversation history:
-
-```typescript
-const handleToolIconClick = async (appName: string) => {
-  setActiveTool(appName)
-  setIsLoadingSuggestions(true)
-  
-  const userId = user?.id
-  const sessionId = activeChatId || id
-  
-  // Build URL with context params
-  let url = `/api/tools/${appName}/suggestions`
-  if (userId && sessionId) {
-    const params = new URLSearchParams({ user_id: userId, session_id: sessionId })
-    url = `${url}?${params.toString()}`
-  }
-  
-  const data = await apiClient.request<SuggestionResponse>(url)
-  setToolSuggestions(data.suggestions || [])
-  setHasContextSuggestions(data.has_context || false)  // Indicates personalized results
-}
-```
-
-The `ToolSuggestionBar` displays a context indicator when `hasContext: true`.
-
-**Sources:** [frontend/components/chatbot/chat.tsx:506-540](), [frontend/components/chatbot/multimodal-input.tsx:232-261]()
+Sources: [frontend/components/chatbot/chat.tsx:68-132](), [frontend/lib/chat/hooks.ts:98-124](), [frontend/stores/mission-store.ts:45-57]()
 
 ---
 
-## Layout System
+## Voice Interaction (PRD-Voice)
 
-The chat component supports three layout modes using `ResizablePanelGroup`:
+The `MultimodalInput` integrates a voice pipeline for hands-free interaction.
 
-### Layout Modes Diagram
+*   **Recording**: Uses `useVoiceRecorder` to capture audio blobs [frontend/components/chatbot/multimodal-input.tsx:94-97]().
+*   **Transcription**: Audio is sent to `/api/chat/voice` via `sendVoiceMessage` [frontend/lib/voice-client.ts:53-63]().
+*   **Integration**: The resulting transcript is automatically fed back into the standard `sendMessage` flow [frontend/components/chatbot/multimodal-input.tsx:82-86]().
 
-```mermaid
-stateDiagram-v2
-    [*] --> Normal: No widgets or artifacts
-    Normal --> WidgetMode: widgetIds.length > 0
-    Normal --> ArtifactMode: isArtifactViewerVisible
-    
-    WidgetMode --> Normal: clearWidgets()
-    ArtifactMode --> Normal: setIsArtifactViewerVisible(false)
-    
-    WidgetMode: Split Layout (Chat | Canvas)
-    WidgetMode: Left: 35% (min 20%, max 60%)
-    WidgetMode: Right: 65% (min 30%)
-    
-    ArtifactMode: Split Layout (Chat | Artifact)
-    ArtifactMode: Left: 35% (min 20%, max 60%)
-    ArtifactMode: Right: 65% (min 30%)
-    
-    Normal: Full-width chat
-    Normal: Welcome card when empty
-```
-
-**Sources:** [frontend/components/chatbot/chat.tsx:737-900]()
-
-### Normal Mode (Welcome State)
-
-When `messages.length === 0` and not streaming, displays a welcome card with personalized greeting:
-
-```tsx
-<h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground/90">
-  Hey{user?.firstName ? <> <span className="gradient-text">{user.firstName}</span></> : ''}, 
-  what can I do for you today?
-</h1>
-```
-
-The card includes quick links to agents, workflows, documents, and tools pages.
-
-**Sources:** [frontend/components/chatbot/chat.tsx:905-940]()
-
-### Widget Mode (PRD-38.1)
-
-When `hasWidgets` is true (i.e., `widgetIds.length > 0`), the component renders a full-screen overlay with resizable panels:
-
-```tsx
-{hasWidgets && (
-  <div className="fixed top-0 left-0 z-50 h-screen w-screen bg-background">
-    <ResizablePanelGroup direction="horizontal" className="h-full">
-      {/* Chat Column - LEFT (resizable, default 35%, min 20%) */}
-      <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
-        {/* Messages + Input */}
-      </ResizablePanel>
-
-      <ResizableHandle withHandle />
-
-      {/* Widget Canvas - RIGHT (resizable) */}
-      <ResizablePanel defaultSize={65} minSize={30}>
-        <Canvas width={canvasWidth} onClose={handleCloseCanvas} />
-      </ResizablePanel>
-    </ResizablePanelGroup>
-  </div>
-)}
-```
-
-The `Canvas` component (from `@/components/workspace`) renders all active widgets as floating panels with tabs.
-
-**Sources:** [frontend/components/chatbot/chat.tsx:737-817]()
-
-### Artifact Viewer Mode (Legacy)
-
-For backward compatibility, the component still supports viewing single artifacts (code, markdown, HTML). This mode is deprecated in favor of widgets but maintained for existing links:
-
-```tsx
-{isArtifactViewerVisible && selectedArtifact && !hasWidgets && (
-  <motion.div className="fixed top-0 left-0 z-50 h-screen w-screen bg-background">
-    <ResizablePanelGroup direction="horizontal" className="h-full">
-      <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
-        {/* Messages */}
-      </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={65} minSize={30}>
-        <ArtifactViewer artifact={selectedArtifact} onClose={...} />
-      </ResizablePanel>
-    </ResizablePanelGroup>
-  </motion.div>
-)}
-```
-
-**Sources:** [frontend/components/chatbot/chat.tsx:820-899]()
-
----
-
-## MultimodalInput Component
-
-The input component handles text input, file attachments, agent selection, model selection, and tool icon displays.
-
-### Component Structure
-
-```mermaid
-graph TB
-    Container["Large rounded input box<br/>(rounded-3xl border)"]
-    Textarea["Textarea<br/>Auto-resizing (60px-200px)"]
-    Toolbar["Bottom toolbar<br/>(inside input border)"]
-    
-    AttachBtn["Paperclip button<br/>(file upload)"]
-    AgentSel["AgentSelector<br/>(if onAgentChange provided)"]
-    ModelSel["ModelSelector<br/>(fallback if no agent)"]
-    ToolIcons["Tool logo icons<br/>(active agent's tools)"]
-    SendBtn["Send button<br/>(gradient orange-red)"]
-    
-    Container --> Textarea
-    Container --> Toolbar
-    
-    Toolbar --> AttachBtn
-    Toolbar --> AgentSel
-    Toolbar --> ModelSel
-    Toolbar --> ToolIcons
-    Toolbar --> SendBtn
-    
-    style Container fill:#fff,stroke:#333,stroke-width:2px
-    style Toolbar fill:#fff,stroke:#333,stroke-width:1px
-```
-
-**Sources:** [frontend/components/chatbot/multimodal-input.tsx:1-295]()
-
-### File Upload Flow
-
-The input component supports drag-and-drop and paste-to-upload for documents:
-
-```typescript
-// Hidden file input
-<input
-  ref={fileInputRef}
-  type="file"
-  className="hidden"
-  multiple
-  onChange={async (event) => {
-    const files = Array.from(event.target.files || [])
-    setUploadQueue(files.map(f => f.name))  // Show "uploading..." badges
-    
-    const results = await Promise.all(
-      files.map(file => apiClient.uploadDocument(file))
-    )
-    
-    setUploadedDocs(results.map(r => ({
-      document_id: String(r.document_id ?? r.id),
-      filename: String(r.filename),
-      status: String(r.status ?? 'uploaded'),
-    })))
-  }}
-/>
-```
-
-Uploaded documents are sent as `file` parts in the message:
-
-```typescript
-const parts: any[] = [
-  ...uploadedDocs.map(doc => ({
-    type: 'file',
-    filename: doc.filename,
-    mediaType: 'application/octet-stream',
-    url: `document://${doc.document_id}`,  // Special URI scheme for backend
-  })),
-  { type: 'text', text: trimmedInput },
-]
-```
-
-**Sources:** [frontend/components/chatbot/multimodal-input.tsx:114-149](), [frontend/components/chatbot/multimodal-input.tsx:75-90]()
-
-### Agent-Based Tool Icons (PRD-40)
-
-When an agent is selected via `AgentSelector`, the component displays tool logos for the agent's connected apps:
-
-```tsx
-{activeAgent?.tools && activeAgent.tools.length > 0 && (
-  <div className="flex gap-2 items-center animate-in fade-in zoom-in-50 duration-300">
-    {activeAgent.tools.slice(0, 4).map(tool => (
-      <button
-        key={tool.id}
-        onClick={() => onToolIconClick?.(tool.name)}
-        className="hover:scale-110 transition-all duration-200"
-        title={`Click for ${tool.name} suggestions`}
-      >
-        <ToolLogo
-          name={tool.name}
-          logo={tool.icon}
-          size={28}
-          showBackground={true}
-          className="ring-1 ring-orange-500/30 border border-orange-500/20"
-        />
-      </button>
-    ))}
-    {activeAgent.tools.length > 4 && (
-      <div className="w-7 h-7 rounded-lg bg-secondary/80">
-        +{activeAgent.tools.length - 4}
-      </div>
-    )}
-  </div>
-)}
-```
-
-Clicking a tool icon triggers `onToolIconClick(appName)`, which opens the `ToolSuggestionBar` in the parent `Chat` component.
-
-**Sources:** [frontend/components/chatbot/multimodal-input.tsx:232-261]()
-
----
-
-## Message Flow and Event Handling
-
-The `Chat` component integrates with the `useChat` hook to handle SSE streaming:
-
-### Event Handling Flow
-
-```mermaid
-graph TB
-    SSE["SSE Stream<br/>/api/chat"]
-    Hook["useChat hook<br/>(lib/chat/hooks)"]
-    OnData["onData callback"]
-    
-    DataUsage["data-usage event"]
-    ToolData["tool-data event"]
-    MemoryInjected["memory-injected event"]
-    MemoryStored["memory-stored event"]
-    WorkflowUpdate["workflow-update event"]
-    RoutingDecision["routing-decision (implicit)"]
-    
-    SSE --> Hook
-    Hook --> OnData
-    
-    OnData --> DataUsage
-    OnData --> ToolData
-    OnData --> MemoryInjected
-    OnData --> MemoryStored
-    OnData --> WorkflowUpdate
-    
-    Hook --> RoutingDecision
-    
-    DataUsage --> SetUsage["setUsage(dataPart.data)"]
-    ToolData --> CreateWidgets["Auto-create widgets<br/>(see Widget Integration)"]
-    MemoryInjected --> DispatchMemory["dispatchMemoryInjected(data)"]
-    MemoryStored --> DispatchMemory2["dispatchMemoryStored(data)"]
-    WorkflowUpdate --> DispatchWorkflow["dispatchWorkflowUpdate(data)"]
-    RoutingDecision --> OnRoutingDecision["onRoutingDecision callback<br/>(resolve agent name)"]
-    
-    style OnData fill:#fff,stroke:#333,stroke-width:2px
-```
-
-**Sources:** [frontend/components/chatbot/chat.tsx:140-416]()
-
-### Routing Decision Display (PRD-50)
-
-When a message is auto-routed to an agent, the `onRoutingDecision` callback resolves the agent name:
-
-```typescript
-onRoutingDecision: (info: RoutingInfo) => {
-  // Store for correction API (if user manually changes agent)
-  lastRoutingDecision.current = { agentId: info.agentId }
-  
-  // Resolve agent name asynchronously if not cached
-  if (!info.agentName && info.agentId && !agentNameCache.current[info.agentId]) {
-    apiClient.request(`/api/agents/${info.agentId}`)
-      .then((agent: any) => {
-        const name = agent?.name || `Agent #${info.agentId}`
-        agentNameCache.current[info.agentId] = name
-        
-        // Update all messages with this agent's routing info to include name
-        setMessages(prev =>
-          prev.map(m =>
-            m.routingInfo?.agentId === info.agentId && !m.routingInfo.agentName
-              ? { ...m, routingInfo: { ...m.routingInfo, agentName: name } }
-              : m
-          )
-        )
-      })
-  }
-}
-```
-
-If the user manually changes the agent after auto-routing, a correction is sent to `/api/routing/corrections`:
-
-```typescript
-const handleAgentChange = (newAgentId: number | null) => {
-  setSelectedAgentId(newAgentId)
-  
-  // If user selects a specific agent after an auto-route, record the correction
-  if (newAgentId && prev?.agentId && newAgentId !== prev.agentId) {
-    const routedMessage = [...messages].reverse().find(m => m.routingInfo?.requestId)
-    const requestId = routedMessage?.routingInfo?.requestId
-    if (requestId) {
-      apiClient.post('/api/routing/corrections', {
-        request_id: requestId,
-        correct_agent_id: newAgentId,
-      })
-    }
-  }
-}
-```
-
-This feedback loop improves routing accuracy over time (see [8.7 Routing Corrections & Learning](#8.7)).
-
-**Sources:** [frontend/components/chatbot/chat.tsx:383-439]()
-
----
-
-## PilotHelperWidget (Jira Integration)
-
-The `PilotHelperWidget` provides contextual help and bug reporting. It's rendered as a floating Jira-branded button in the bottom-right corner.
-
-### Widget Features
-
-| Tab | Purpose |
-|-----|---------|
-| **Help** | Context-aware help items based on current page (dashboard, agents, workflows, etc.) |
-| **Report Bug** | Bug report form with title, description, severity, category, screenshot paste |
-
-### Bug Report Submission
-
-The widget captures console errors and page context, submitting to `/api/bug-report`:
-
-```typescript
-const payload: BugReportRequest = {
-  title: title.trim(),
-  description: description.trim(),
-  severity,  // 'Critical' | 'Major' | 'Minor'
-  category,  // 'UI Bug' | 'Data Issue' | 'Performance' | 'Other'
-  screenshot_base64: screenshot || undefined,
-  context: {
-    url: window.location.href,
-    page: context.currentPage,
-    user_agent: navigator.userAgent,
-    viewport: `${window.innerWidth}x${window.innerHeight}`,
-    user_email: user?.primaryEmailAddress?.emailAddress,
-    user_name: user?.fullName || undefined,
-    console_errors: consoleErrorsRef.current.slice(-20),  // Last 20 errors
-    timestamp: new Date().toISOString(),
-  },
-}
-```
-
-The backend creates a Jira issue and returns `jira_key` (e.g., `"AUTO-123"`) and `jira_url` for linking to the created ticket.
-
-**Sources:** [frontend/components/chatbot/chat-widget.tsx:192-233]()
-
-### Contextual Help Content
-
-Help items are defined per page in `PAGE_HELP_CONTENT`:
-
-```typescript
-const PAGE_HELP_CONTENT: Record<string, HelpItem[]> = {
-  agents: [
-    { title: 'Create an Agent', description: 'Click "New Agent" to configure...' },
-    { title: 'Assign Tools', description: 'Connect Composio integrations...', link: '/tools' },
-    { title: 'Monitor Performance', description: 'Track each agent\'s success rate...' },
-  ],
-  workflows: [
-    { title: 'Build a Workflow', description: 'Use the visual editor to chain agents...' },
-    { title: 'Templates', description: 'Start from a pre-built template...' },
-  ],
-  // ... other pages
-}
-```
-
-The widget selects the appropriate help items based on `context.currentPage`.
-
-**Sources:** [frontend/components/chatbot/chat-widget.tsx:40-86]()
-
----
-
-## State Management Integration
-
-The chat component integrates with two primary state stores:
-
-### useChat Hook Integration
-
-The `useChat` hook (from `lib/chat/hooks`) manages message state and SSE streaming:
-
-```typescript
-const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
-  id: activeChatId,
-  initialMessages,
-  selectedModelId: currentModelId,
-  selectedAgentId,
-  onData: (dataPart) => { /* Handle SSE events */ },
-  onChatIdUpdate: (newChatId) => { setActiveChatId(newChatId) },
-  onRoutingDecision: (info: RoutingInfo) => { /* Resolve agent name */ },
-})
-```
-
-**Sources:** [frontend/components/chatbot/chat.tsx:140-416]()
-
-### Workspace Store Integration (PRD-38.1)
-
-The chat component uses `useWorkspaceStore` for widget state:
-
-```typescript
-const widgetIds = useWorkspaceStore((s) => s.widgetIds)
-const addWidget = useWorkspaceStore((s) => s.addWidget)
-const clearWidgets = useWorkspaceStore((s) => s.clearWidgets)
-
-// US-015: SSE event dispatchers for memory & workflow widgets
-const dispatchMemoryInjected = useWorkspaceStore((s) => s.dispatchMemoryInjected)
-const dispatchMemoryStored = useWorkspaceStore((s) => s.dispatchMemoryStored)
-const dispatchWorkflowUpdate = useWorkspaceStore((s) => s.dispatchWorkflowUpdate)
-```
-
-These dispatchers allow memory and workflow widgets (if implemented) to react to SSE events.
-
-**Sources:** [frontend/components/chatbot/chat.tsx:56-66]()
-
----
-
-## Auto-Scroll and Scroll Detection
-
-The chat component tracks scroll position to show/hide a "scroll to bottom" button:
-
-```typescript
-const checkScroll = () => {
-  const { scrollTop, scrollHeight, clientHeight } = container
-  setIsAtBottom(scrollHeight - scrollTop - clientHeight < 50)
-}
-
-// Re-attach when artifact viewer visibility toggles (DOM node changes)
-useEffect(() => {
-  const container = messagesContainerRef.current
-  if (!container) return
-  
-  container.addEventListener('scroll', checkScroll)
-  checkScroll()  // Initialize
-  
-  return () => container.removeEventListener('scroll', checkScroll)
-}, [isArtifactViewerVisible])
-```
-
-During streaming, the component auto-scrolls to the bottom:
-
-```typescript
-useEffect(() => {
-  if (status === 'streaming') {
-    requestAnimationFrame(() => {
-      messagesContainerRef.current?.scrollTo({
-        top: messagesContainerRef.current.scrollHeight,
-        behavior: 'smooth',
-      })
-    })
-  }
-}, [status])
-```
-
-**Sources:** [frontend/components/chatbot/chat.tsx:442-471]()
-
----
-
-## Title Generation
-
-The chat component auto-generates a title after the first user-assistant exchange:
-
-```typescript
-useEffect(() => {
-  if (!hasGeneratedTitle && messages.length >= 2 && activeChatId) {
-    const firstUserMessage = messages.find(m => m.role === 'user')
-    if (firstUserMessage && firstUserMessage.parts) {
-      const textPart = firstUserMessage.parts.find(p => p.type === 'text')
-      if (textPart && 'text' in textPart) {
-        const title = generateTitle(textPart.text)  // Truncates to 50 chars
-        updateChatTitle(activeChatId, title).catch(console.error)
-        setHasGeneratedTitle(true)
-      }
-    }
-  }
-}, [messages, activeChatId, hasGeneratedTitle])
-```
-
-The `generateTitle` utility function (from `lib/utils`) truncates the first message to 50 characters for use as the conversation title in the sidebar.
-
-**Sources:** [frontend/components/chatbot/chat.tsx:474-486]()
-
----
-
-## Summary
-
-The chat UI components form a sophisticated interface layer that:
-
-1. **Renders streaming messages** with routing indicators, tool calls, and artifacts
-2. **Auto-creates widgets** from tool execution results (database queries, documents, code, emails, terminal output)
-3. **Provides contextual tool suggestions** with Phase 1 (basic) and Phase 2 (context-aware) support
-4. **Manages three layout modes** (normal, widget canvas, artifact viewer) using resizable panels
-5. **Handles multimodal input** with text, file attachments, agent selection, and tool icon shortcuts
-6. **Integrates with help and bug reporting** via the Jira-branded PilotHelperWidget
-7. **Dispatches SSE events** to workspace store for memory and workflow widgets
-8. **Records routing corrections** when users manually override agent selection
-
-For the backend chat orchestration that powers these components, see [7.1 Chat API & Streaming](#7.1). For widget rendering details, see [7.7 Widget System](#7.7).
+Sources: [frontend/components/chatbot/multimodal-input.tsx:62-97](), [frontend/lib/voice-client.ts:53-102]()
 
 ---

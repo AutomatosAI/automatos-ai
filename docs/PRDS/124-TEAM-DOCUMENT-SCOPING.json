@@ -1,0 +1,141 @@
+{
+  "project": "Automatos AI Platform",
+  "prdNumber": 124,
+  "branchName": "ralph/prd-124-team-document-scoping",
+  "description": "Team-Based Document Scoping — Add team_access array to documents so agents on a given team only see documents tagged for that team. Enables public docs widgets and support chatbots without leaking business/personal documents. Uses existing Agent.team field as the scoping key.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Document team_access column and migration",
+      "description": "As a platform developer, I need a team_access TEXT[] column on the documents table so documents can be scoped to specific agent teams.",
+      "acceptanceCriteria": [
+        "Create migration 043_team_based_document_scoping.sql in orchestrator/core/database/migrations/",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS team_access TEXT[] DEFAULT '{}'",
+        "CREATE INDEX IF NOT EXISTS idx_documents_team_access ON documents USING GIN (team_access)",
+        "ALTER TABLE sdk_api_keys ADD COLUMN IF NOT EXISTS team VARCHAR(100)",
+        "CREATE INDEX IF NOT EXISTS idx_agents_team ON agents (team) WHERE team IS NOT NULL",
+        "Add team_access = Column(PG_ARRAY(String), default=list) to Document model in orchestrator/core/models/core.py ~line 549",
+        "Add team = Column(String(100), nullable=True) to SdkApiKey model in orchestrator/core/models/sdk_api_keys.py",
+        "All existing documents have team_access = {} (visible to all) — backward compatible",
+        "Migration is idempotent (IF NOT EXISTS on all statements)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Zero-risk additive migration. No data changes. Filtering rule everywhere: WHERE (team_access = '{}' OR :team IS NULL OR :team = ANY(team_access))"
+    },
+    {
+      "id": "US-002",
+      "title": "Upload with team_access",
+      "description": "As a user uploading a document, I can specify which teams should have access via a team_access parameter.",
+      "acceptanceCriteria": [
+        "Add team_access: Optional[str] = Form(None) to upload endpoint in orchestrator/api/documents.py ~line 107",
+        "Parse comma-separated string to List[str], store on document record",
+        "Pass team_access to DocumentManager in orchestrator/modules/rag/ingestion/manager.py",
+        "Include team_access in S3 Vectors chunk metadata during ingestion",
+        "Omitting team_access defaults to [] (all teams see it)",
+        "Also update orchestrator/api/knowledge_multimodal.py upload endpoint"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Both /api/documents/upload and /api/knowledge-multimodal/upload need the parameter"
+    },
+    {
+      "id": "US-003",
+      "title": "RAG filters by agent team",
+      "description": "As an agent on the Support team, my RAG retrieval only returns chunks from documents with team_access containing 'Support' or empty team_access.",
+      "acceptanceCriteria": [
+        "Add team: Optional[str] = None parameter to RAGService.retrieve() in orchestrator/modules/rag/service.py ~line 210",
+        "Add team parameter to _get_candidates() ~line 697",
+        "Over-fetch candidates by 2-3x when team filtering is active",
+        "Post-retrieval: query PostgreSQL for document IDs matching team filter using GIN index",
+        "Filter candidates to only include allowed document_ids",
+        "Empty team_access documents always included (backward compatible)",
+        "Agent with team=NULL sees all documents (no filtering)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Post-retrieval filter via PostgreSQL lookup (not vector metadata) so team_access changes take effect immediately without re-indexing"
+    },
+    {
+      "id": "US-004",
+      "title": "Widget docs API with team scope",
+      "description": "As a docs widget, I can search documents filtered by team so I only show support articles to end users.",
+      "acceptanceCriteria": [
+        "Create new file orchestrator/api/widgets/docs.py",
+        "POST /api/widget/docs/search — accepts query, limit, team; filters by team_access; returns id, title, snippet, tags",
+        "GET /api/widget/docs/{document_id} — team-scoped detail with full content",
+        "GET /api/widget/docs/categories — distinct tags from team-scoped documents",
+        "All endpoints require widget auth with documents:read permission",
+        "Team resolution: auth.team (API key) > body.team (request) > None (all)",
+        "Returns 200 with empty results for no matches (not 404)",
+        "Register router in orchestrator/api/widgets/router.py"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Separate from existing /api/widget/documents which is a general workspace-wide search"
+    },
+    {
+      "id": "US-005",
+      "title": "Widget chat RAG uses agent team",
+      "description": "As a widget chat user, the chatbot only retrieves context from documents accessible to the active agent's team.",
+      "acceptanceCriteria": [
+        "In orchestrator/api/widgets/chat.py ~line 171, after resolving effective_agent_id, query agents.team",
+        "Pass agent_team to StreamingChatService in orchestrator/consumers/chatbot/service.py",
+        "Add team parameter to StreamingChatService constructor/method",
+        "In orchestrator/modules/agents/services/agent_platform_tools.py ~line 263, pass agent team when executing search_knowledge tool",
+        "search_knowledge calls RAGService.retrieve() with team parameter",
+        "Backward compatible: agent with no team sees all documents"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Requires US-003 (RAG filtering) to be implemented first"
+    },
+    {
+      "id": "US-006",
+      "title": "SDK API key team locking",
+      "description": "As a workspace admin, I can lock an API key to a specific team so all widget requests through that key are team-scoped.",
+      "acceptanceCriteria": [
+        "Add team: Optional[str] = None to WidgetAuthContext in orchestrator/api/widgets/auth.py ~line 47",
+        "Populate from API key record (api_key.team) in widget_auth() API key path",
+        "Populate from JWT payload in widget_auth() JWT path",
+        "Include team in JWT payload during token exchange in orchestrator/api/widgets/session.py",
+        "Add team field to ApiKeyCreateRequest and ApiKeyListItem schemas in orchestrator/api/api_keys.py",
+        "API key team overrides request-level team parameter"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "API key team takes priority: effective_team = auth.team or body.team or None"
+    },
+    {
+      "id": "US-007",
+      "title": "Frontend team_access selector",
+      "description": "As a user in the document upload UI, I can select which teams should access the document.",
+      "acceptanceCriteria": [
+        "Add multi-select team picker to document upload form in frontend/components/documents/document-upload.tsx",
+        "Fetch available teams from workspace agents: GET /api/agents?fields=team&distinct=true",
+        "Show team badges on document list in frontend/components/documents/document-management.tsx",
+        "Add Edit Team Access option in document details modal",
+        "Team filter dropdown in document list view"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Frontend work can follow backend independently. P2 priority."
+    },
+    {
+      "id": "US-008",
+      "title": "Bulk team_access update",
+      "description": "As a workspace admin, I can bulk-assign team_access to multiple existing documents.",
+      "acceptanceCriteria": [
+        "PATCH /api/documents/{id}/team-access endpoint in orchestrator/api/documents.py",
+        "POST /api/documents/bulk-team-access endpoint for batch updates",
+        "Validates team names",
+        "Returns updated document records",
+        "Workspace-scoped (only update docs in own workspace)"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Useful for migrating existing documents to team-scoped access. P2 priority."
+    }
+  ]
+}

@@ -5,13 +5,30 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
-- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
+- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
+- [orchestrator/api/chat.py](orchestrator/api/chat.py)
+- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
+- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
+- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
+- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
+- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
+- [orchestrator/consumers/chatbot/streaming.py](orchestrator/consumers/chatbot/streaming.py)
 - [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
-- [orchestrator/modules/orchestrator/pipeline.py](orchestrator/modules/orchestrator/pipeline.py)
+- [orchestrator/core/models/stream_events.py](orchestrator/core/models/stream_events.py)
+- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
 - [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
+- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
+- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
+- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
+- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
+- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
+- [orchestrator/modules/tools/execution/exec_composio.py](orchestrator/modules/tools/execution/exec_composio.py)
+- [orchestrator/modules/tools/execution/exec_document.py](orchestrator/modules/tools/execution/exec_document.py)
+- [orchestrator/modules/tools/execution/exec_file_ops.py](orchestrator/modules/tools/execution/exec_file_ops.py)
+- [orchestrator/modules/tools/execution/exec_multimodal.py](orchestrator/modules/tools/execution/exec_multimodal.py)
+- [orchestrator/modules/tools/execution/exec_planning.py](orchestrator/modules/tools/execution/exec_planning.py)
+- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
 
 </details>
 
@@ -19,897 +36,167 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The Streaming Chat Service provides real-time, token-by-token chat responses using Server-Sent Events (SSE) in the AI SDK Data Stream format. It orchestrates the flow between user input, LLM generation, tool execution, and memory management to deliver intelligent, context-aware responses with function calling capabilities.
+The Streaming Chat Service provides real-time, token-by-token chat responses using Server-Sent Events (SSE) in the AI SDK Data Stream format. It orchestrates the flow between user input, LLM generation, tool execution, and memory management. The service leverages the `SmartChatOrchestrator` to handle intent classification and the `ContextService` to assemble unified prompts including identity, skills, and memory tiers. It also includes specialized logic for bridging high-complexity requests to the workflow engine via the **AutoBrain** complexity assessor.
 
-For information about the chatbot frontend components, see [Chat Components](#8.4). For details on tool execution mechanics, see [Tool Router & Execution](#6.3). For memory retrieval logic, see [Memory Integration](#8.3).
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:1-14]()
+**Sources:** [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/consumers/chatbot/auto.py:1-22](), [orchestrator/api/chat.py:67-88]()
 
 ---
 
 ## Architecture Overview
 
-The streaming chat service orchestrates real-time responses by activating specialized agents, integrating memory context, and executing tools through a composable pipeline. The service delegates LLM configuration and tool execution to agent-specific runtimes, enabling per-agent model selection and credential management.
+The streaming architecture bridges high-level user intent with low-level code execution. The `StreamingChatService` delegates prompt construction to the `ContextService` and execution to the `AgentFactory`.
+
+### System Entity Map: Natural Language to Code Space
+
+This diagram maps conceptual chat requirements to the specific classes and functions responsible for them.
 
 ```mermaid
-graph TB
-    subgraph "Client Layer"
-        Browser["Browser/Client"]
+graph TD
+    subgraph "Natural Language Space"
+        UserIntent["User Intent & Query"]
+        Context["Context & Memory"]
+        Tools["Tool Capabilities"]
+        Complexity["Complexity Assessment"]
     end
-    
-    subgraph "StreamingChatService"
-        SCS["StreamingChatService<br/>stream_response_with_agent()"]
-        ChatService["ChatService<br/>(DB operations)"]
-        PromptAnalyzer["get_prompt_analyzer()"]
-        StreamHandler["get_streaming_handler()"]
+
+    subgraph "Code Entity Space"
+        SCS["StreamingChatService<br/>(service.py)"]
+        SCO["SmartChatOrchestrator<br/>(smart_orchestrator.py)"]
+        CS["ContextService<br/>(modules/context)"]
+        AF["AgentFactory<br/>(agent_factory.py)"]
+        UTE["UnifiedToolExecutor<br/>(modules/tools/execution)"]
+        TET["ToolExecutionTracker<br/>(service.py)"]
+        AB["AutoBrain<br/>(auto.py)"]
     end
-    
-    subgraph "Agent Runtime"
-        AgentFactory["AgentFactory<br/>activate_agent()"]
-        AgentRuntime["AgentRuntime<br/>(metadata + llm_manager + tools)"]
-        LLMManager["LLMManager<br/>(provider + credentials)"]
-    end
-    
-    subgraph "Orchestration Layer"
-        SmartChat["SmartChatIntegration<br/>(memory + persona + tool filtering)"]
-        ContextGuard["ContextGuard<br/>(auto-compact messages)"]
-    end
-    
-    subgraph "Tool Execution"
-        ToolRouter["ToolRouter"]
-        ComposioToolService["ComposioToolService<br/>(per-action tools)"]
-        ComposioHintService["ComposioHintService<br/>(fallback hints)"]
-        UnifiedToolExecutor["UnifiedToolExecutor<br/>(platform tools)"]
-    end
-    
-    subgraph "Prevention Systems"
-        ToolTracker["ToolExecutionTracker<br/>(deduplication)"]
-    end
-    
-    subgraph "Data Layer"
-        DB["PostgreSQL<br/>(Chat, Message, Agent)"]
-        Mem0["Mem0<br/>(memory storage)"]
-        S3["S3<br/>(image storage)"]
-    end
-    
-    Browser -->|"POST /api/chat"| SCS
-    SCS --> ChatService
-    SCS --> PromptAnalyzer
-    SCS --> StreamHandler
-    SCS --> AgentFactory
-    
-    AgentFactory --> DB
-    AgentFactory --> AgentRuntime
-    AgentRuntime --> LLMManager
-    
-    SCS --> SmartChat
-    SmartChat --> Mem0
-    SmartChat --> DB
-    
-    SCS --> ContextGuard
-    ContextGuard --> LLMManager
-    
-    SCS --> ComposioToolService
-    ComposioToolService --> DB
-    ComposioToolService -.fallback.-> ComposioHintService
-    
-    SCS --> ToolRouter
-    ToolRouter --> UnifiedToolExecutor
-    ToolRouter --> ComposioToolService
-    
-    SCS --> ToolTracker
-    
-    ChatService --> DB
-    SCS --> S3
-    
-    LLMManager -->|"OpenAI/Anthropic/etc"| External["External LLM APIs"]
+
+    UserIntent -->|"classify()"| SCO
+    SCO -->|"prepare_request()"| SCS
+    Context -->|"build_context()"| CS
+    CS -->|"ContextMode.CHATBOT"| SCS
+    Tools -->|"get_tools_for_agent()"| AF
+    AF -->|"execute_with_prompt()"| SCS
+    SCS -->|"execute_tool()"| UTE
+    UTE -->|"should_skip_execution()"| TET
+    Complexity -->|"assess_complexity()"| AB
+    AB -->|"_stream_workflow_bridge()"| AB_API["api/chat.py"]
 ```
 
-**Key Components:**
-
-| Component | Purpose | Location |
-|-----------|---------|----------|
-| `StreamingChatService` | Main orchestrator for streaming responses | [orchestrator/consumers/chatbot/service.py:456-475]() |
-| `stream_response_with_agent()` | Core streaming method with agent activation | [orchestrator/consumers/chatbot/service.py:493-896]() |
-| `ChatService` | Database operations for chats/messages | [orchestrator/consumers/chatbot/service.py:191-416]() |
-| `ToolExecutionTracker` | Prevents infinite tool loops via deduplication | [orchestrator/consumers/chatbot/service.py:88-186]() |
-| `SmartChatIntegration` | Orchestrates memory, persona, and tool filtering | [orchestrator/consumers/chatbot/integration.py]() |
-| `AgentFactory` | Creates agent runtimes with LLM configuration | [orchestrator/modules/agents/factory/agent_factory.py:503-820]() |
-| `ContextGuard` | Auto-compacts messages approaching context limit | [orchestrator/core/context_guard.py]() |
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:1-40](), [orchestrator/consumers/chatbot/service.py:456-896](), [orchestrator/modules/agents/factory/agent_factory.py:503-675]()
+**Sources:** [orchestrator/consumers/chatbot/service.py:12-40](), [orchestrator/consumers/chatbot/auto.py:60-83](), [orchestrator/api/chat.py:70-85](), [orchestrator/modules/tools/tool_router.py:27-29]()
 
 ---
 
-## AI SDK Data Stream Format
+## SmartChatOrchestrator
 
-The service outputs responses in Vercel's AI SDK Data Stream format, which uses newline-delimited structured messages. This format enables streaming text content, structured data events, and error handling in a unified protocol.
+The `SmartChatOrchestrator` is the central coordinator for intelligent chat processing. It manages the transition from raw user messages to an `OrchestratedRequest` ready for the LLM.
 
-### Format Specification
+### Key Functions
 
-| Prefix | Type | Example | Purpose |
-|--------|------|---------|---------|
-| `0:` | Text chunk | `0:"Hello"\n` | Incremental text streaming |
-| `d:` | Data event | `d:{"type":"tool_call"}\n` | Structured events (tool calls, metadata) |
-| `e:` | Error | `e:{"message":"Failed"}\n` | Error propagation to client |
-| `8:` | Chat ID | `8:"chat-uuid"\n` | Session identifier |
+*   **`prepare_request`**: Primary entry point. It extracts the latest query, performs intent classification, and calls the `ContextService` to build the full prompt. It handles the injection of `tool_hints` from the complexity assessment. [orchestrator/consumers/chatbot/smart_orchestrator.py:126-149]()
+*   **Intent Classification**: Uses `SmartIntentClassifier` to determine if the user needs tools (e.g., `Intent.DATA_QUERY`, `Intent.SEARCH`) or memory. This influences `tool_choice` ("auto" vs "none"). [orchestrator/consumers/chatbot/intent_classifier.py:23-46]()
+*   **Memory Decision**: Implements logic to skip memory fetching for simple queries (e.g., `Intent.GREETING`) or when the complexity is assessed as `ATOM`. [orchestrator/consumers/chatbot/smart_orchestrator.py:166-180]()
 
-### Example Stream Sequence
+### Data Flow: Request Preparation
 
+```mermaid
+sequenceDiagram
+    participant SCS as StreamingChatService
+    participant SCO as SmartChatOrchestrator
+    participant IC as SmartIntentClassifier
+    participant CS as ContextService
+    participant AF as AgentFactory
+
+    SCS->>SCO: prepare_request(messages, tools, assessment)
+    SCO->>IC: classify(latest_query)
+    IC-->>SCO: IntentResult (requires_tools, requires_memory)
+    SCO->>AF: _load_agent()
+    AF-->>SCO: Agent Object
+    SCO->>CS: build_context(mode=CHATBOT, agent, messages)
+    Note over CS: Assembles Identity, Skills,<br/>Memory, and Tools sections.
+    CS-->>SCO: Assembled Context (System Prompt + Tools)
+    SCO-->>SCS: OrchestratedRequest
 ```
-8:"550e8400-e29b-41d4-a716-446655440000"
-0:"I'll help"
-0:" you with"
-0:" that."
-d:{"type":"tool_start","tool":"search_knowledge","params":{"query":"API docs"}}
-d:{"type":"tool_complete","tool":"search_knowledge","result":"..."}
-0:"\n\nBased on"
-0:" the documentation..."
-```
 
-**Implementation:** The `streaming_handler.format_aisdk_*` methods generate these prefixed lines. The service calls `yield` to send each chunk to the client over SSE.
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:500-503](), [orchestrator/api/workflows.py:36-136]()
+**Sources:** [orchestrator/consumers/chatbot/smart_orchestrator.py:150-210](), [orchestrator/consumers/chatbot/intent_classifier.py:48-56]()
 
 ---
 
 ## StreamingChatService Class
 
-The `StreamingChatService` class is the main entry point for streaming chat operations. It initializes dependencies and provides the `stream_response_with_agent()` method for generating streamed responses with agent-specific configuration.
+The `StreamingChatService` manages the lifecycle of a chat turn, including the tool execution loop and SSE streaming via the `StreamingHandler`.
 
-### Initialization
+### `stream_response_with_agent`
 
-```python
-class StreamingChatService:
-    def __init__(self, db: Session, workspace_id: Optional[str] = None, widget_mode: bool = False):
-        self.db = db
-        self.chat_service = ChatService(db)
-        self.prompt_analyzer = get_prompt_analyzer()
-        self.memory_injector = get_memory_injector()
-        self.tool_router = get_tool_router()
-        self.streaming_handler = get_streaming_handler()
-        self.workspace_id = workspace_id
-        self.widget_mode = widget_mode
-        
-        # PRD: Unified Agent-Chat System - Initialize AgentFactory
-        from modules.agents.factory.agent_factory import AgentFactory
-        self.agent_factory = AgentFactory(db_session=db)
-```
+This async generator handles the iterative process of LLM generation and tool execution.
 
-**Lazy Module Loading:** Dependencies are retrieved via factory functions (`get_*()`) to avoid circular imports and enable clean module boundaries.
+1.  **Agent Activation**: Uses `AgentFactory.activate_agent` to initialize the `AgentRuntime` with specific LLM configurations and resolved API keys. [orchestrator/consumers/chatbot/service.py:510-520]()
+2.  **Orchestration**: Calls `SmartChatOrchestrator.prepare_request` to get the system prompt and filtered toolset. [orchestrator/consumers/chatbot/service.py:530-550]()
+3.  **The Tool Loop**: A `while` loop that continues as long as the LLM generates `tool_calls` (capped at 10 iterations to prevent infinite loops). [orchestrator/consumers/chatbot/service.py:750-810]()
 
-**Widget Mode:** When `widget_mode=True`, the service skips workspace-scoped memory to ensure embedded widgets don't leak context across users.
+### Tool Execution Logic
 
-**Sources:** [orchestrator/consumers/chatbot/service.py:456-475]()
+Tools are executed via the `UnifiedToolExecutor`, which routes requests to specialized modules.
 
-### Main Streaming Method
+| Executor Module | Responsibility | File Reference |
+| :--- | :--- | :--- |
+| `PlatformActionExecutor` | Platform management (agents, recipes, usage) | [orchestrator/modules/tools/discovery/platform_executor.py:164-168]() |
+| `exec_file_ops` | read_file, write_file, list_directory | [orchestrator/modules/tools/tool_router.py:28]() |
+| `exec_composio` | External App Actions (GitHub, Slack, etc.) | [orchestrator/modules/tools/tool_router.py:28]() |
+| `exec_planning` | Multi-step task planning | [orchestrator/modules/tools/tool_router.py:28]() |
 
-The `stream_response_with_agent()` method is an async generator that yields AI SDK formatted chunks:
-
-```python
-async def stream_response_with_agent(
-    self,
-    chat_id: str,
-    messages: List[Dict[str, Any]],
-    agent_id: int,
-    user_id: int,
-    use_system_llm: bool = False,
-    skip_composio: bool = False,
-    complexity_assessment: Optional[Any] = None,
-) -> AsyncGenerator[str, None]:
-```
-
-**Parameters:**
-
-| Parameter | Type | Purpose |
-|-----------|------|---------|
-| `chat_id` | `str` | UUID of the chat session |
-| `messages` | `List[Dict]` | Conversation history in OpenAI format |
-| `agent_id` | `int` | Agent ID to activate (determines model, tools, persona) |
-| `user_id` | `int` | User ID for memory scoping |
-| `use_system_llm` | `bool` | Use orchestrator LLM settings instead of agent's model |
-| `skip_composio` | `bool` | Disable Composio tool injection (for testing) |
-| `complexity_assessment` | `Any` | PRD-68: AutoBrain complexity assessment with tool hints |
-
-**Unified Agent-Chat System:** The method activates the agent via `AgentFactory`, which loads the agent's LLM configuration, skills, and tool permissions. This enables per-agent model selection (e.g., Agent A uses GPT-4, Agent B uses Claude 3.5).
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:493-522]()
+**Sources:** [orchestrator/modules/tools/discovery/platform_executor.py:173-220](), [orchestrator/modules/tools/tool_router.py:129-138]()
 
 ---
 
 ## Tool Loop Prevention
 
-The `ToolExecutionTracker` class prevents infinite loops where the LLM repeatedly calls the same tool with identical or similar parameters. This is critical for preventing runaway token costs and ensuring stable execution.
-
-### ToolExecutionTracker Architecture
-
-```mermaid
-graph TB
-    subgraph "Deduplication Strategies"
-        ExactMatch["Exact Match<br/>(tool_name, args_hash)"]
-        SemanticMatch["Semantic Match<br/>(query similarity >= 75%)"]
-        RetryLimit["Per-Tool Retry Limits<br/>(2-3 attempts)"]
-    end
-    
-    subgraph "Tracked Data"
-        ExactExecs["exact_executions<br/>Set[(tool_name, hash)]"]
-        SearchQueries["search_queries<br/>Dict[tool_name, List[query]]"]
-        ToolCounts["tool_counts<br/>Dict[tool_name, count]"]
-    end
-    
-    LLMToolCall["LLM generates tool_call"] --> CheckSkip["should_skip_execution()"]
-    
-    CheckSkip --> RetryLimit
-    RetryLimit -->|"count >= limit"| Skip["Return skip=True"]
-    RetryLimit -->|"count < limit"| ExactMatch
-    
-    ExactMatch -->|"(name, hash) in set"| Skip
-    ExactMatch -->|"not in set"| SemanticMatch
-    
-    SemanticMatch -->|"search tool + similar query"| Skip
-    SemanticMatch -->|"unique query"| Execute["Execute tool"]
-    
-    Execute --> Record["record_execution()"]
-    Record --> ExactExecs
-    Record --> SearchQueries
-    Record --> ToolCounts
-```
-
-### Search Tools Semantic Deduplication
-
-For search-related tools, the tracker performs fuzzy matching on query parameters to detect semantically similar requests:
-
-**Search Tools Set:**
-```python
-SEARCH_TOOLS = {
-    'search_knowledge', 'semantic_search', 'search_codebase',
-    'search_tables', 'search_images', 'search_formulas',
-    'search_multimodal', 'smart_query_database', 'query_database'
-}
-```
-
-**Similarity Algorithm:**
-1. Normalize queries (lowercase, remove punctuation)
-2. Use `SequenceMatcher.ratio()` for fuzzy matching
-3. Threshold: 75% similarity triggers skip
-
-**Example:** `"search for API docs"` and `"search api documentation"` are detected as duplicates.
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:88-186]()
-
-### Retry Limits
-
-Different tools have different retry limits based on their characteristics:
-
-| Tool Type | Limit | Rationale |
-|-----------|-------|-----------|
-| `composio_execute` | 2 | External APIs may be flaky, but repeated calls are expensive |
-| `search_knowledge` | 2 | First attempt + one refinement usually sufficient |
-| `read_file` | 3 | File reads are cheap, may need multiple attempts |
-| `write_file` | 2 | Writing twice to same file likely indicates loop |
-| Default | 3 | Conservative fallback for unknown tools |
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:104-116]()
-
----
-
-## Request Flow
-
-The streaming response follows a multi-stage pipeline with agent activation, memory orchestration, and tool loop prevention:
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant SCS as StreamingChatService
-    participant PA as PromptAnalyzer
-    participant AF as AgentFactory
-    participant AR as AgentRuntime
-    participant SC as SmartChatIntegration
-    participant LLM as LLMManager
-    participant TR as ToolRouter
-    participant TET as ToolExecutionTracker
-    participant CG as ContextGuard
-    
-    Client->>SCS: stream_response_with_agent(messages, agent_id)
-    SCS->>SCS: yield chat_id event (8:)
-    
-    SCS->>PA: extract_latest_user_text(messages)
-    PA-->>SCS: latest_text
-    
-    SCS->>PA: is_fresh_start_request(text)
-    alt Fresh start detected
-        SCS->>SCS: Filter to last user message only
-    end
-    
-    SCS->>AF: activate_agent(agent_id, use_system_llm)
-    AF->>AF: Load agent from DB
-    AF->>AF: Build LLMConfig (model + credentials)
-    AF->>AF: Load skill tools from skills.tools_schema
-    AF-->>SCS: agent_runtime
-    
-    SCS->>SCS: yield agent-info event (d:)
-    
-    alt PRD-68: complexity == ATOM
-        SCS->>SCS: Build minimal system prompt
-        SCS->>SCS: Skip tools, memory, orchestration
-    else complexity >= MOLECULE
-        SCS->>SC: prepare(messages, tools, chat_id, complexity)
-        SC->>SC: Retrieve memories via Mem0
-        SC->>SC: Inject persona + description
-        SC->>SC: Filter tools by intent capability
-        SC-->>SCS: orchestrated (system_prompt + tools + memory)
-        
-        SCS->>SCS: apply_orchestration_to_messages()
-        
-        alt Memory retrieved
-            SCS->>SCS: yield memory-injected event (d:)
-        end
-        
-        SCS->>SCS: Inject agent identity into messages
-        SCS->>SCS: Insert execution policy message
-        
-        SCS->>SCS: Get Composio tools via ComposioToolService
-        alt Composio tools found
-            SCS->>SCS: Replace composio_execute with per-action tools
-            SCS->>SCS: Insert Composio scope message
-        else Fallback to hints
-            SCS->>SCS: Build hints via ComposioHintService
-            SCS->>SCS: Insert hint message
-        end
-        
-        SCS->>SCS: Insert platform tool scope message
-    end
-    
-    SCS->>CG: check_and_compact(messages, model_name)
-    alt Context near limit
-        CG->>CG: Compact messages via LLM summarization
-        CG-->>SCS: compacted_messages
-    else Within limit
-        CG-->>SCS: original_messages
-    end
-    
-    SCS->>LLM: generate_response(messages, tools)
-    
-    loop Tool Loop (max 10 iterations)
-        LLM-->>SCS: response with tool_calls
-        
-        loop For each tool_call
-            SCS->>TET: should_skip_execution(name, args)
-            
-            alt Should skip
-                TET-->>SCS: (true, reason)
-                SCS->>SCS: Add cached/skip message
-            else Execute
-                TET-->>SCS: (false, "")
-                SCS->>SCS: yield tool-call-delta event (9:)
-                SCS->>TR: execute_tool(name, args)
-                TR-->>SCS: result
-                SCS->>TET: record_execution(name, args)
-                SCS->>SCS: yield tool-result event (a:)
-            end
-            
-            SCS->>SCS: Append tool result to messages
-        end
-        
-        alt No more tool calls
-            LLM-->>SCS: final text response
-        else More tool calls
-            SCS->>LLM: generate_response(messages + tool results)
-        end
-    end
-    
-    SCS->>SCS: Upload inline images to S3
-    SCS->>SCS: Save user + assistant messages to DB
-    SCS->>SC: store_interaction_memory(chat_id, messages)
-    
-    SCS-->>Client: Stream complete
-```
-
-**Key Decision Points:**
-
-1. **Agent Activation:** `AgentFactory.activate_agent()` loads agent-specific model, credentials, and skills
-2. **PRD-68 ATOM Path:** Simple queries skip tools/memory/orchestration for fastest response (~200ms saved)
-3. **Fresh Start Detection:** Keywords like "start over", "forget", "new" trigger context reset
-4. **SmartChatIntegration:** Orchestrates memory retrieval, persona injection, and tool filtering based on intent
-5. **Composio Tool Resolution:** Per-action tools (primary) or hint-based mega-tool (fallback)
-6. **Context Guard:** Auto-compacts messages if approaching model's context window limit
-7. **Tool Loop:** Max 10 iterations prevents runaway execution
-8. **Image Upload:** Base64 inline images replaced with S3 URLs before DB storage
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:493-896](), [orchestrator/modules/agents/factory/agent_factory.py:676-820]()
-
----
-
-## Message Format and Conversion
-
-The service converts between multiple message formats to integrate with various LLM providers and the frontend chat UI.
-
-### OpenAI Format (Internal)
-
-```json
-{
-  "role": "user|assistant|system|tool",
-  "content": "text content",
-  "tool_calls": [
-    {
-      "id": "call_abc123",
-      "type": "function",
-      "function": {
-        "name": "search_knowledge",
-        "arguments": "{\"query\":\"docs\"}"
-      }
-    }
-  ]
-}
-```
-
-### Chat UI Format (Database)
-
-Messages stored in the `Message` table use a parts-based format:
-
-```json
-{
-  "role": "user",
-  "parts": [
-    {"type": "text", "text": "Hello"},
-    {"type": "image", "url": "/api/generated-images/xyz"}
-  ],
-  "attachments": [
-    {"type": "file", "name": "doc.pdf", "url": "..."}
-  ]
-}
-```
-
-### Conversion Logic
-
-The `prompt_analyzer.convert_to_llm_messages()` method handles conversion:
-
-1. **User messages:** Concatenate `parts[].text`, preserve attachments as context
-2. **Assistant messages:** Extract text content, serialize tool calls
-3. **Tool messages:** Format tool results for LLM context
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:590-594]()
-
----
-
-## Memory Integration
-
-The service integrates with the Mem0 memory system via `SmartChatIntegration`, which orchestrates memory retrieval, persona injection, and tool filtering in a single preparation step. This replaces the legacy `MemoryInjector` with a more sophisticated orchestration layer.
-
-### SmartChatIntegration Architecture
-
-```mermaid
-graph TB
-    SCS["StreamingChatService"] --> SC["SmartChatIntegration"]
-    
-    SC --> Orchestrator["ChatOrchestrator"]
-    
-    Orchestrator --> IntentClassifier["IntentClassifier<br/>(classify user intent)"]
-    Orchestrator --> MemoryRetrieval["MemoryRetrieval<br/>(Mem0 3-tier search)"]
-    Orchestrator --> PersonaBuilder["PersonaBuilder<br/>(inject agent identity)"]
-    Orchestrator --> ToolFilter["ToolFilter<br/>(capability matching)"]
-    
-    IntentClassifier --> Intent["Intent<br/>(QUESTION, ACTION, etc)"]
-    
-    MemoryRetrieval --> Mem0["Mem0<br/>(memory storage)"]
-    Mem0 --> GlobalMem["Global memories<br/>(across workspace)"]
-    Mem0 --> SessionMem["Session memories<br/>(per chat_id)"]
-    Mem0 --> ImmediateMem["Immediate memories<br/>(last 5 messages)"]
-    
-    PersonaBuilder --> Agent["Agent DB<br/>(persona, description)"]
-    
-    ToolFilter --> CapabilityCheck["ActionCapabilityFilter<br/>(intent → allowed actions)"]
-    
-    Orchestrator --> Result["OrchestrationResult<br/>(system_prompt + tools + memory)"]
-```
-
-**3-Tier Memory Retrieval:**
-
-| Tier | Scope | Query Strategy | Purpose |
-|------|-------|----------------|---------|
-| **Global** | Workspace-wide | Semantic search across all conversations | Long-term facts, preferences, patterns |
-| **Session** | Current chat_id | Semantic search within chat | Chat-specific context, multi-turn reasoning |
-| **Immediate** | Last 5 messages | Exact retrieval | Recent context for continuity |
-
-**Memory Injection Format:**
-
-Memories are injected into the system prompt, not as separate messages:
-
-```python
-system_prompt = f"""
-{base_system_prompt}
-
-## Relevant Context from Memory
-{memory_context}
-
-## Your Identity
-{agent_persona}
-{agent_description}
-"""
-```
-
-This ensures the LLM sees all context as part of its core instructions rather than fragmented across multiple system messages.
-
-**Skip Conditions:**
-- Query is too short (< 10 characters)
-- Query is a greeting ("hello", "hi")
-- Query is a simple command ("clear", "reset")
-- Widget mode is enabled (prevents cross-user context leakage)
-
-### Memory Injection Event (US-015)
-
-When memories are retrieved, the service emits a structured SSE event to the frontend:
-
-```python
-yield self.streaming_handler.format_aisdk_memory_injected(
-    memories=_mem_summaries,  # List of {id, memory, tier}
-    total_matched=_total_matched,
-)
-```
-
-This enables the frontend to display which memories were used to generate the response, improving transparency and debuggability.
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:583-709](), [orchestrator/consumers/chatbot/integration.py]()
-
----
-
-## Tool Execution Flow
-
-Tool execution follows a three-tier resolution strategy: per-action Composio tools (primary), hint-based Composio mega-tool (fallback), and built-in platform/workspace tools (always available).
-
-### Tool Resolution Strategy
-
-```mermaid
-graph TB
-    Start["LLM generates tool_call"] --> CheckAction["Is Composio action?<br/>(matches pattern: APP_ACTION_NAME)"]
-    
-    CheckAction -->|"Yes"| CheckDedup["ToolExecutionTracker<br/>should_skip_execution()"]
-    CheckAction -->|"No"| CheckPlatform["Is platform tool?<br/>(prefix: platform_*)"]
-    
-    CheckDedup -->|"Skip (duplicate)"| ReturnCached["Return cached result<br/>(avoid redundant API call)"]
-    CheckDedup -->|"Execute"| ComposioExec["ComposioToolService<br/>execute_action()"]
-    
-    ComposioExec --> ComposioSDK["Composio SDK<br/>(OAuth + API call)"]
-    ComposioSDK --> RecordExec["record_execution()<br/>(cache for dedup)"]
-    RecordExec --> FormatResult["Format for LLM context"]
-    
-    CheckPlatform -->|"Yes"| PlatformExec["PlatformActionExecutor<br/>(workspace introspection)"]
-    CheckPlatform -->|"No"| CheckWorkspace["Is workspace tool?<br/>(prefix: workspace_*)"]
-    
-    PlatformExec --> DB["PostgreSQL<br/>(agents, recipes, documents)"]
-    DB --> FormatResult
-    
-    CheckWorkspace -->|"Yes"| WorkspaceExec["WorkspaceClient<br/>(file ops, commands)"]
-    CheckWorkspace -->|"No"| CheckRAG["Is RAG tool?<br/>(search_knowledge, semantic_search)"]
-    
-    WorkspaceExec --> WorkspaceWorker["Workspace Worker<br/>(sandboxed execution)"]
-    WorkspaceWorker --> FormatResult
-    
-    CheckRAG -->|"Yes"| RAGExec["RAGService<br/>(vector search + context optimization)"]
-    CheckRAG -->|"No"| UnknownTool["Unknown tool<br/>(return error)"]
-    
-    RAGExec --> S3["S3 Vectors<br/>(embeddings + metadata)"]
-    S3 --> FormatResult
-    
-    FormatResult --> Return["Return to LLM<br/>(as tool message)"]
-    ReturnCached --> Return
-    UnknownTool --> Return
-```
-
-### Composio Tool Modes
-
-The service uses `ComposioToolService.get_tools_for_step()` with a three-tier resolution strategy:
-
-**1. Per-Action Tools (Primary - PRD-64):**
-```python
-composio_result = composio_tool_service.get_tools_for_step(
-    agent_id=agent_id,
-    workspace_id=workspace_id,
-    task_prompt=latest_text,
-    tool_hints=_tool_hints  # PRD-68: From AutoBrain complexity assessment
-)
-```
-
-**Resolution Strategies (in order):**
-
-| Strategy | Condition | Example | Benefit |
-|----------|-----------|---------|---------|
-| **Exact action name** | `tool_hints` contains exact action | `["GITHUB_GET_ISSUE"]` | 0ms overhead, 100% accuracy |
-| **SDK semantic search** | Composio SDK available | Search for "github issues" | ~50ms, 95% accuracy |
-| **Cache fallback** | SDK unavailable | Query `ComposioActionCache` table | ~5ms, 90% accuracy |
-
-**2. Hint-Based Fallback:**
-```python
-hint_result = hint_service.build_hints(
-    agent_id=agent_id,
-    prompt=latest_text,
-    workspace_id=workspace_id,
-)
-```
-
-Provides the `composio_execute` mega-tool + LLM hints for action selection. Used when SDK search returns empty results.
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:743-800](), [orchestrator/modules/tools/services/composio_tool_service.py:56-360]()
-
-### Tool Result Formatting
-
-Tool results are routed through `ToolRouter.execute_tool()`:
-
-```python
-result = await self.tool_router.execute_tool(
-    tool_name=tool_name,
-    tool_args=tool_args,
-    agent_id=agent_id,
-    workspace_id=workspace_id
-)
-```
-
-The router delegates to the appropriate executor:
-
-| Tool Pattern | Executor | Example Tools |
-|--------------|----------|---------------|
-| `APP_ACTION_*` | `ComposioToolService` | `GITHUB_GET_ISSUE`, `SLACK_SEND_MESSAGE` |
-| `platform_*` | `PlatformActionExecutor` | `platform_list_agents`, `platform_get_workspace_info` |
-| `workspace_*` | `WorkspaceClient` | `workspace_read_file`, `workspace_execute_command` |
-| `search_*` | `RAGService` | `search_knowledge`, `semantic_search` |
-
-**Sources:** [orchestrator/modules/tools/tool_router.py:1-575](), [orchestrator/api/recipe_executor.py:314-332]()
-
----
-
-## Frontend Integration
-
-The frontend consumes the AI SDK Data Stream using the `useChat` hook from `ai/react`, which automatically handles streaming text and structured data events.
-
-### React Hook Usage
-
-```typescript
-const { messages, append, isLoading } = useChat({
-  api: '/api/chat',
-  body: {
-    agentId: selectedAgent?.id,
-    chatId: chat?.id,
-  },
-  onFinish: (message) => {
-    // Handle completion
-  },
-  onError: (error) => {
-    // Handle errors
-  }
-})
-```
-
-### Event Handling
-
-The `ai` library automatically parses the stream format:
-
-| Stream Event | Hook Behavior |
-|--------------|---------------|
-| `0:"text"` | Appends to `messages[].content` incrementally |
-| `8:"chat-id"` | Sets chat session ID |
-| `d:{...}` | Fires `onToolCall` callback with structured data |
-| `e:{...}` | Fires `onError` callback |
-
-### Recipe Execution Streaming
-
-For recipe executions, the frontend uses a similar pattern with stage tracking:
-
-```typescript
-const response = await fetch(`/api/workflow-recipes/${id}/execute`, {
-  method: 'POST',
-  body: JSON.stringify(input),
-})
-
-const reader = response.body?.getReader()
-const decoder = new TextDecoder()
-
-while (true) {
-  const { done, value } = await reader.read()
-  if (done) break
-  
-  const text = decoder.decode(value)
-  const lines = text.split('\n')
-  
-  for (const line of lines) {
-    if (line.startsWith('d:')) {
-      const event = JSON.parse(line.slice(2))
-      handleStageUpdate(event)
-    }
-  }
-}
-```
-
-**Sources:** [frontend/components/workflows/execution-kitchen.tsx:47-56](), [frontend/components/workflows/execution-kitchen.tsx:420-510]()
-
----
-
-## Image Upload Handling
-
-The service automatically detects base64-encoded inline images in markdown format and replaces them with S3 URLs before storing messages in the database.
-
-### Detection and Upload Flow
+The `ToolExecutionTracker` implements multi-tier deduplication to prevent redundant or circular tool calls within a single conversation turn.
+
+*   **Exact Match**: Hashes tool arguments to detect identical calls. [orchestrator/consumers/chatbot/service.py:111-112]()
+*   **Semantic Match**: Uses `SequenceMatcher` to compare search queries. If a query is >75% similar to a previous one in the same turn, it is skipped. [orchestrator/consumers/chatbot/service.py:57-67]()
+*   **Retry Limits**: Enforces strict limits (e.g., 2 for search, 3 for file reads) to stop agents from "getting stuck." [orchestrator/consumers/chatbot/service.py:93-104]()
 
 ```mermaid
 graph LR
-    Detect["Detect base64 images<br/>![alt](data:image/png;base64,...)"] --> Parse["Extract MIME type + data"]
-    Parse --> Upload["Upload to S3<br/>get_image_store().save_image()"]
-    Upload --> Replace["Replace with URL<br/>![alt](/api/generated-images/id)"]
-    Replace --> Save["Save to Message table"]
+    subgraph "ToolExecutionTracker (service.py)"
+        T1["Exact Deduplication<br/>(MD5 hash)"]
+        T2["Semantic Deduplication<br/>(SequenceMatcher)"]
+        T3["Per-Tool Limits<br/>(TOOL_RETRY_LIMITS)"]
+    end
+
+    Call["New Tool Call"] --> T3
+    T3 -->|"Below Limit"| T1
+    T1 -->|"New Args"| T2
+    T2 -->|"Unique Query"| Exec["Execute Tool"]
+    T2 -->|"Similar Query"| Skip["Skip Execution"]
 ```
 
-### Implementation
-
-```python
-_BASE64_IMG_RE = re.compile(
-    r'!\[([^\]]*)\]\((data:image/(jpeg|jpg|png|gif|webp);base64,([A-Za-z0-9+/=\s]+))\)'
-)
-
-async def _upload_inline_images(text: str, workspace_id: str = None) -> str:
-    matches = list(_BASE64_IMG_RE.finditer(text))
-    if not matches:
-        return text
-    
-    store = get_image_store()
-    result = text
-    for match in reversed(matches):  # Reverse to preserve offsets
-        alt = match.group(1)
-        mime_type = f"image/{match.group(3)}"
-        b64_data = match.group(4).replace("\n", "").replace(" ", "")
-        
-        image_id = await store.save_image(b64_data, mime_type, workspace_id)
-        url = f"/api/generated-images/{image_id}"
-        replacement = f"![{alt}]({url})"
-        result = result[:match.start()] + replacement + result[match.end():]
-    
-    return result
-```
-
-**Storage Path:** `workspaces/{workspace_id}/generated-images/{image_id}.{ext}`
-
-**Access Pattern:** Images are served via `/api/generated-images/{image_id}` endpoint with workspace validation.
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:424-449](), [orchestrator/consumers/chatbot/service.py:831-835]()
+**Sources:** [orchestrator/consumers/chatbot/service.py:78-156]()
 
 ---
 
-## Error Handling and Recovery
+## Workflow Bridge (PRD-68)
 
-The service implements defensive error handling to ensure partial failures don't break the streaming flow:
+For high-complexity tasks (categorized as `ORGAN` or `ORGANISM` by **AutoBrain**), the chat API can bypass standard streaming and trigger a transient workflow.
 
-### Error Categories
+*   **Complexity Assessment**: `AutoBrain` uses a 3-tier assessment (Redis cache, regex fast-paths, and LLM classification) to determine task complexity. [orchestrator/consumers/chatbot/auto.py:14-22]()
+*   **`_stream_workflow_bridge`**: Creates a temporary `Workflow` and `WorkflowExecution` from the user message. [orchestrator/api/chat.py:70-120]()
+*   **Execution**: Kicks off the full PRD-59 pipeline (PLAN → PREPARE → EXECUTE → EVALUATE → LEARN) via `execute_workflow_with_progress`. [orchestrator/api/chat.py:153-159]()
+*   **Event Streaming**: Stage events (e.g., "workflow-update") are streamed back to the chat interface using `StreamingHandler.format_aisdk_data`. [orchestrator/api/chat.py:143-149]()
 
-| Error Type | Handling Strategy | User Impact |
-|------------|-------------------|-------------|
-| LLM API failure | Log warning, return cached response if available | Graceful degradation |
-| Tool execution error | Return error message to LLM, allow retry | LLM can adjust approach |
-| Memory retrieval failure | Log warning, continue without memory | Slight context loss |
-| Image upload failure | Log warning, preserve base64 in message | Image not optimized |
-| Database save failure | Log error, continue streaming | Response visible but not persisted |
-
-### Tool Error Format
-
-When a tool fails, the error is returned to the LLM as a tool message:
-
-```python
-messages.append({
-    "role": "tool",
-    "tool_call_id": tool_id,
-    "content": f"Error executing {tool_name}: {error_message}"
-})
-```
-
-This allows the LLM to:
-1. Understand what went wrong
-2. Reformulate the request with corrected parameters
-3. Try an alternative approach
-4. Inform the user about the limitation
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:790-855]()
+**Sources:** [orchestrator/api/chat.py:67-189](), [orchestrator/consumers/chatbot/auto.py:42-49]()
 
 ---
 
-## Performance Optimizations
+## Data Stream Format
 
-### PRD-68 ATOM Path
+The service outputs newline-delimited JSON prefixed by type identifiers, following the AI SDK protocol.
 
-For simple queries (greetings, basic questions), the service bypasses tools, memory, and orchestration:
+| Prefix | Type | Description |
+| :--- | :--- | :--- |
+| `0:` | Text | Incremental text content for the assistant's message. [orchestrator/consumers/chatbot/streaming.py:105-108]() |
+| `d:` | Data | Complex data events (e.g., `chat-id`, `tool-data`, `workflow-update`). [orchestrator/consumers/chatbot/streaming.py:110-115]() |
+| `e:` | Error | JSON-formatted error messages. [orchestrator/consumers/chatbot/streaming.py:174-176]() |
 
-```python
-if _complexity == Complexity.ATOM:
-    _atom_prompt = (
-        f"You are {agent_runtime.metadata.name}, a friendly AI assistant. "
-        "Respond naturally and conversationally. Keep it brief."
-    )
-    llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-        messages, system_prompt=_atom_prompt, available_tools=None
-    )
-    use_tools = None
-    orchestrated = None
-```
-
-**Performance Impact:**
-- **Skip SmartChatIntegration:** Saves ~200ms (memory retrieval + tool filtering)
-- **Skip Composio resolution:** Saves ~50ms (SDK search)
-- **Minimal system prompt:** Reduces input tokens by ~80%
-
-**Triggers:** AutoBrain complexity assessment detects ATOM-level queries (greetings, acknowledgments, simple questions).
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:604-617]()
-
-### Context Window Guard
-
-The `ContextGuard` auto-compacts messages if they approach the model's context window limit:
-
-```python
-from core.context_guard import ContextGuard
-_guard = ContextGuard()
-llm_messages, _was_compacted = await _guard.check_and_compact(
-    messages=llm_messages,
-    model_name=_model_name,
-    llm_manager=agent_runtime.llm_manager,
-    workspace_id=str(self.workspace_id),
-    agent_id=agent_id,
-    db_session=self.db,
-)
-```
-
-**Strategy:** If messages exceed 85% of context window, the guard uses an LLM to summarize older messages, preserving recent context and system prompts intact.
-
-**Average savings:** Prevents context overflow errors, enables longer conversations without manual intervention.
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:821-835]()
-
-### Tool Execution Deduplication
-
-The `ToolExecutionTracker` maintains per-turn caches to prevent redundant tool calls:
-
-**Strategies:**
-
-| Strategy | Mechanism | Savings |
-|----------|-----------|---------|
-| **Exact dedup** | Hash of `(tool_name, args)` | ~500ms + API cost |
-| **Semantic dedup** | Query similarity >= 75% for search tools | ~500ms + API cost |
-| **Retry limits** | Max 2-3 executions per tool type | Prevents infinite loops |
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:88-186]()
-
-### Composio Action Caching
-
-The service maintains a per-execution cache for Composio action results:
-
-```python
-_composio_call_cache: Dict[str, str] = {}  # "ACTION|args_hash" → result
-```
-
-When the LLM calls the same Composio action twice (e.g., retrying after error), the cached result is returned instead of making another API call.
-
-**Average savings:** 500ms + Composio API cost per duplicate call.
-
-**Sources:** [orchestrator/api/recipe_executor.py:209](), [orchestrator/api/recipe_executor.py:269-273]()
-
----
-
-## Usage Tracking
-
-All LLM calls made by the streaming service are automatically tracked via the `LLMManager`'s usage tracking context:
-
-```python
-llm = agent_runtime.llm_manager
-if hasattr(llm, '_tracking_ctx'):
-    llm._tracking_ctx["request_type"] = "chat"
-```
-
-This populates the `LLMUsage` table with:
-- Workspace ID
-- Agent ID
-- Input/output token counts
-- Model provider and name
-- Cost calculation (based on `LLMModel.pricing`)
-- Latency
-- BYOK flag (user-provided vs platform API key)
-
-For detailed usage tracking mechanics, see [LLM Usage Tracking](#10.1).
-
-**Sources:** [orchestrator/api/recipe_executor.py:202-205](), [orchestrator/core/llm/manager.py:1-68]()
+**Sources:** [orchestrator/consumers/chatbot/streaming.py:102-177]()
 
 ---

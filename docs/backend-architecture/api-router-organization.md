@@ -5,17 +5,26 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/admin/plugins/page.tsx](frontend/app/admin/plugins/page.tsx)
-- [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
-- [orchestrator/.env.example](orchestrator/.env.example)
-- [orchestrator/api/agent_plugins.py](orchestrator/api/agent_plugins.py)
-- [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/database/load_seed_data.py](orchestrator/core/database/load_seed_data.py)
-- [orchestrator/core/seeds/seed_personas.py](orchestrator/core/seeds/seed_personas.py)
-- [orchestrator/core/seeds/seed_plugin_categories.py](orchestrator/core/seeds/seed_plugin_categories.py)
-- [orchestrator/core/services/plugin_cache.py](orchestrator/core/services/plugin_cache.py)
-- [orchestrator/main.py](orchestrator/main.py)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
+- [frontend/app/chat/page.tsx](frontend/app/chat/page.tsx)
+- [frontend/components/widgets/CodingCanvasWidget/RepoSelector.tsx](frontend/components/widgets/CodingCanvasWidget/RepoSelector.tsx)
+- [frontend/next-env.d.ts](frontend/next-env.d.ts)
+- [orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py](orchestrator/alembic/versions/20260202_add_workspace_id_to_skills_patterns_models.py)
+- [orchestrator/api/context.py](orchestrator/api/context.py)
+- [orchestrator/api/main.py](orchestrator/api/main.py)
+- [orchestrator/api/tasks.py](orchestrator/api/tasks.py)
+- [orchestrator/api/widgets/cors.py](orchestrator/api/widgets/cors.py)
+- [orchestrator/api/widgets/rate_limit.py](orchestrator/api/widgets/rate_limit.py)
+- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
+- [orchestrator/api/workspace_files.py](orchestrator/api/workspace_files.py)
+- [orchestrator/api/workspace_github.py](orchestrator/api/workspace_github.py)
+- [orchestrator/core/llm/clients/openai_embedding.py](orchestrator/core/llm/clients/openai_embedding.py)
+- [orchestrator/core/llm/rerank_manager.py](orchestrator/core/llm/rerank_manager.py)
+- [orchestrator/core/services/__init__.py](orchestrator/core/services/__init__.py)
+- [orchestrator/core/workspace_client.py](orchestrator/core/workspace_client.py)
+- [orchestrator/modules/tools/discovery/workspace_actions.py](orchestrator/modules/tools/discovery/workspace_actions.py)
+- [services/workspace-worker/executor.py](services/workspace-worker/executor.py)
+- [services/workspace-worker/main.py](services/workspace-worker/main.py)
+- [services/workspace-worker/workspace_manager.py](services/workspace-worker/workspace_manager.py)
 
 </details>
 
@@ -23,9 +32,9 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the organization and structure of FastAPI routers in the backend orchestrator application. It covers router registration, URL prefix patterns, authentication dependencies, endpoint conventions, and response models.
+This document describes the organization and structure of FastAPI routers in the backend orchestrator application. It covers router registration, URL prefix patterns, authentication dependencies, endpoint conventions, and the coordination between the API layer and the core service execution paths.
 
-For authentication and workspace isolation mechanisms, see [Authentication Flow](#9.1). For database models referenced by routers, see [Database Models](#10.4). For the main FastAPI application setup, see [FastAPI Application](#10.1).
+For authentication and workspace isolation mechanisms, see [Authentication Flow](17.1). For database models referenced by routers, see [Database Models](18.3). For the main FastAPI application setup, see [FastAPI Application](18.1).
 
 ---
 
@@ -37,684 +46,138 @@ The Automatos AI backend organizes API endpoints into **domain-based routers**, 
 
 | Category | Routers | Primary Purpose |
 |----------|---------|-----------------|
-| **Core Agents** | `agents.py`, `agent_plugins.py`, `templates.py`, `personas.py` | Agent lifecycle, configuration, plugins, and personalities |
-| **Workflows** | `workflows.py`, `workflow_recipes.py`, `workflow_templates.py` | Workflow orchestration and recipe management |
-| **Tools & Skills** | `tools.py`, `skills.py`, `composio.py` | External integrations, skill sources, Composio apps |
-| **Marketplace** | `marketplace.py`, `marketplace_plugins.py`, `admin_plugins.py`, `workspace_plugins.py` | Plugin discovery, approval, and enablement |
-| **Context & Memory** | `context.py`, `memory.py`, `context_engineering.py`, `documents.py` | Context assembly, memory management, RAG systems |
-| **System Admin** | `system.py`, `statistics.py`, `credentials.py`, `permissions.py` | System configuration, metrics, credential management |
-| **Workspaces** | `workspaces.py`, `team.py` | Multi-tenancy, workspace management, team collaboration |
-| **Routing** | `routing.py`, `chatbot_llm.py`, `chat.py` | Universal routing, chat interfaces, streaming responses |
+| **Core Agents** | `agents.py`, `agent_endpoints.py` | Agent lifecycle, configuration, and execution [orchestrator/api/main.py:33-77]() |
+| **Workflows & Recipes** | `workflows.py`, `workflow_templates.py` | Multi-agent orchestration, sequential recipes, and live stage tracking [orchestrator/api/main.py:34-35]() |
+| **Tools & Skills** | `tools.py`, `skills.py` | External integrations (500+ apps), skill sources, and tool discovery [orchestrator/api/main.py:54-57]() |
+| **Marketplace** | `marketplace.py` | Plugin discovery and community item installation [orchestrator/api/main.py:59]() |
+| **Context & Memory** | `context.py`, `memory.py`, `documents.py` | Context assembly, memory layers (L0-L4), and document management [orchestrator/api/main.py:36-51]() |
+| **Knowledge** | `knowledge.py`, `knowledge_graph.py`, `codegraph.py` | Knowledge base, graph retrieval, and code analysis [orchestrator/api/main.py:47-68]() |
+| **Analytics** | `analytics.py`, `statistics.py` | Usage tracking, cost analysis, and system metrics [orchestrator/api/main.py:40-55]() |
+| **System Admin** | `system.py`, `system_settings.py`, `credentials.py` | System configuration, BYOK keys, and global settings [orchestrator/api/main.py:37-53]() |
+| **Workspaces** | `workspaces.py`, `workspace_files.py`, `workspace_github.py`, `tasks.py` | Multi-tenancy, file browser, GitHub integration, and task queues [orchestrator/api/main.py:85-95]() |
+| **Routing & Chat** | `chatbot_llm.py`, `chat_voice.py` | Universal routing, streaming chat (AI SDK), and voice profiles [orchestrator/api/main.py:76-107]() |
 
-Sources: [orchestrator/main.py:36-119]()
+Sources: [orchestrator/api/main.py:33-109]()
 
 ---
 
 ## Router Architecture
 
+The system follows a tiered request flow: the `main.py` entry point mounts routers, which then use `RequestContext` to enforce workspace isolation before calling specialized services or proxying to workers.
+
+### API Registration and Request Flow
+"Code Entity Space"
 ```mermaid
 graph TB
     subgraph "main.py - FastAPI Application"
-        App["FastAPI(title='Automatos AI API')"]
-        Lifespan["lifespan context manager"]
+        App["FastAPI Instance"]
+        Lifespan["@asynccontextmanager lifespan"]
         CORS["CORSMiddleware"]
-        ReqID["Request ID Middleware"]
         
         App --> Lifespan
         App --> CORS
-        App --> ReqID
     end
     
-    subgraph "Router Registration"
-        App --> AgentsRouter["agents_router<br/>(prefix: /api/agents)"]
-        App --> WorkflowsRouter["workflows_router<br/>(prefix: /api/workflows)"]
-        App --> RecipesRouter["workflow_recipes_router<br/>(prefix: /api/workflow-recipes)"]
-        App --> MarketRouter["marketplace_router<br/>(prefix: /api/marketplace)"]
-        App --> ToolsRouter["tools_router<br/>(prefix: /api/tools)"]
-        App --> SkillsRouter["skills_router<br/>(prefix: /api/v1/skills)"]
-        App --> PersonasRouter["personas_router<br/>(prefix: /api)"]
-        App --> PluginsRouter["agent_plugins_router<br/>(prefix: /api/agents)"]
+    subgraph "Router Registration Examples"
+        App --> AgentsRouter["agents_router<br/>(/api/agents)"]
+        App --> WorkflowsRouter["workflows_router<br/>(/api/workflows)"]
+        App --> WorkspaceRouter["workspace_files_router<br/>(/api/workspaces/{id})"]
     end
     
-    subgraph "Router Implementation Pattern"
-        RouterFile["api/agents.py"]
-        RouterDef["router = APIRouter(prefix='/api/agents', tags=['agents'])"]
-        Endpoints["@router.get('/')<br/>@router.post('/')<br/>@router.get('/{id}')"]
-        Dependencies["Depends(get_request_context_hybrid)"]
+    subgraph "Implementation Pattern"
+        WorkflowsAPI["api/workflows.py"]
+        WorkflowDef["router = APIRouter(prefix='/api/workflows')"]
+        WorkflowHandler["@router.get('/{id}/stream')"]
         
-        RouterFile --> RouterDef
-        RouterDef --> Endpoints
-        Endpoints --> Dependencies
+        WorkflowsAPI --> WorkflowDef
+        WorkflowDef --> WorkflowHandler
     end
     
-    AgentsRouter -.->|"implements"| RouterFile
+    WorkflowsRouter -.->|"points to"| WorkflowsAPI
     
-    subgraph "Request Flow"
-        Client["HTTP Client"]
-        Auth["Hybrid Auth<br/>get_request_context_hybrid"]
-        RequestContext["RequestContext<br/>(workspace_id, user)"]
-        Handler["Endpoint Handler"]
-        DB["get_db() Session"]
+    subgraph "Execution Layer"
+        Tracker["orchestrator/api/workflows.py<br/>WorkflowStageTracker"]
+        TaskRunner["core/task_runner.py<br/>get_task_runner()"]
+        DB["PostgreSQL<br/>WorkflowExecution table"]
         
-        Client --> Auth
-        Auth --> RequestContext
-        RequestContext --> Handler
-        Handler --> DB
+        WorkflowHandler --> Tracker
+        WorkflowHandler --> TaskRunner
+        Tracker --> DB
     end
-    
-    Endpoints -.->|"request"| Client
 ```
-
-Sources: [orchestrator/main.py:188-492](), [orchestrator/api/agents.py:31](), [orchestrator/api/agent_plugins.py:27]()
+Sources: [orchestrator/api/main.py:147-168](), [orchestrator/api/workflows.py:34-73](), [orchestrator/api/workflows.py:183-186]()
 
 ---
 
-## Router Registration in main.py
+## Workflow and Stage Tracking
 
-Routers are imported and registered in `orchestrator/main.py` following a specific order and pattern:
+The `workflows.py` router implements a sophisticated tracking system for multi-agent executions, supporting both legacy and dynamic phase models.
 
-### Import Pattern
+### WorkflowStageTracker
+The `WorkflowStageTracker` class manages real-time telemetry for executions [orchestrator/api/workflows.py:37-70]().
+- **Legacy Stages**: 9 fixed stages including Task Decomposition, Agent Selection, and Memory Storage [orchestrator/api/workflows.py:41-51]().
+- **Dynamic Phases (PRD-59)**: Maps execution into high-level phases: `PLAN`, `PREPARE`, `EXECUTE`, `EVALUATE`, and `LEARN` [orchestrator/api/workflows.py:62-68]().
+- **Event Emission**: Uses `_emit` to broadcast events to both Redis Pub/Sub and SSE stream managers [orchestrator/api/workflows.py:161-179]().
 
-```python
-# Core routers (always loaded)
-from api.agents import router as agents_router
-from api.workflows import router as workflows_router
-from api.workflow_recipes import router as workflow_recipes_router
-from api.marketplace import router as marketplace_router
+Sources: [orchestrator/api/workflows.py:37-179]()
 
-# Optional routers (conditional import)
-try:
-    from api.composio import router as composio_router
-except ImportError:
-    composio_router = None
-```
+---
 
-### Registration Pattern
+## Workspace Subsystem Routing
 
-```python
-# Include all routers
-app.include_router(agents_router)          # /api/agents
-app.include_router(workflows_router)       # /api/workflows
-app.include_router(workflow_recipes_router) # /api/workflow-recipes
-app.include_router(marketplace_router)     # /api/marketplace
+The workspace subsystem utilizes a proxy pattern where the API router forwards requests to a specialized `workspace-worker` service or manages GitHub integration via Composio.
 
-# Conditional registration
-if composio_router is not None:
-    app.include_router(composio_router)    # /api/composio
-```
-
-### Router Groups
-
+### Workspace Interaction
+"Natural Language Space" to "Code Entity Space"
 ```mermaid
 graph LR
-    subgraph "Core Routers (Always Loaded)"
-        A1["agents_router"]
-        A2["workflows_router"]
-        A3["workflow_recipes_router"]
-        A4["marketplace_router"]
-        A5["skills_router"]
-        A6["tools_router"]
+    subgraph "Natural Language Space"
+        User["'List the files in my workspace'"]
     end
-    
-    subgraph "Optional Routers (Conditional)"
-        B1["composio_router<br/>(PRD-36)"]
-        B2["cloud_documents_router<br/>(PRD-42)"]
-        B3["workspaces_router<br/>(PRD-37)"]
-        B4["bug_reports_router<br/>(Pilot Widget)"]
+
+    subgraph "Code Entity Space"
+        Router["api/workspace_files.py<br/>@router.get('/files')"]
+        Client["core/workspace_client.py<br/>WorkspaceClient.list_dir()"]
+        Worker["services/workspace-worker/main.py<br/>WorkspaceWorker (HTTP)"]
+        FS["Persistent Volume<br/>/workspaces/{workspace_id}"]
     end
-    
-    subgraph "Admin Routers (Protected)"
-        C1["admin_plugins_router<br/>(/api/admin/plugins)"]
-        C2["system_settings_router<br/>(/api/system-settings)"]
-    end
-    
-    Main["main.py<br/>app.include_router()"] --> A1
-    Main --> A2
-    Main --> A3
-    Main --> A4
-    Main --> A5
-    Main --> A6
-    Main -.->|"if not None"| B1
-    Main -.->|"if not None"| B2
-    Main -.->|"if not None"| B3
-    Main -.->|"if not None"| B4
-    Main --> C1
-    Main --> C2
+
+    User --> Router
+    Router --> Client
+    Client --> Worker
+    Worker --> FS
 ```
+Sources: [orchestrator/api/workspace_files.py:34-51](), [orchestrator/core/workspace_client.py:96-108](), [services/workspace-worker/main.py:58-86]()
 
-Sources: [orchestrator/main.py:36-89](), [orchestrator/main.py:411-479]()
+### Key Workspace Endpoints
 
----
+| Method | Path | Implementation | Purpose |
+|--------|------|----------------|---------|
+| GET | `/api/workspaces/{id}/files` | `workspace_files.py` | Directory listing via `WorkspaceClient` [orchestrator/api/workspace_files.py:34]() |
+| POST | `/api/workspaces/{id}/exec` | `workspace_files.py` | Shell command execution in sandbox [orchestrator/api/workspace_files.py:86]() |
+| GET | `/api/workspaces/{id}/github/repos` | `workspace_github.py` | Lists repos via `Composio` entity [orchestrator/api/workspace_github.py:97]() |
+| POST | `/api/workspaces/{id}/github/clone` | `workspace_github.py` | Clones repo into workspace volume [orchestrator/api/workspace_github.py:167]() |
 
-## Endpoint Pattern Conventions
+### Security & Sandboxing
+Command execution through the `/exec` endpoint is heavily restricted by the `WorkspaceToolExecutor` [services/workspace-worker/executor.py:108-114]():
+- **Binary Whitelist**: Only approved tools like `git`, `python`, `ls`, and `npm` are allowed [services/workspace-worker/executor.py:35-73]().
+- **Pattern Blocking**: Prevents dangerous patterns like `rm -rf /` or `sudo` via regex filters [services/workspace-worker/executor.py:76-98]().
+- **Path Containment**: All operations are resolved against a safe root using `resolve_safe_path` [services/workspace-worker/executor.py:147]().
 
-### Standard CRUD Pattern
-
-Most routers follow a consistent RESTful CRUD pattern:
-
-| Operation | Method | Path | Function Name | Purpose |
-|-----------|--------|------|---------------|---------|
-| List | GET | `/` | `list_agents()` | Retrieve collection with filters |
-| Create | POST | `/` | `create_agent()` | Create new resource |
-| Get | GET | `/{id}` | `get_agent()` | Retrieve single resource |
-| Update | PUT | `/{id}` | `update_agent()` | Update existing resource |
-| Delete | DELETE | `/{id}` | `delete_agent()` | Delete resource |
-
-### Nested Resource Pattern
-
-For related resources, routers use nested paths:
-
-| Pattern | Example | Router File |
-|---------|---------|-------------|
-| Resource → Sub-resource | `/api/agents/{agent_id}/skills` | `agents.py` |
-| Resource → Action | `/api/agents/{agent_id}/execute` | `agents.py` |
-| Resource → Relationship | `/api/agents/{agent_id}/plugins` | `agent_plugins.py` |
-| Resource → Computed | `/api/agents/{agent_id}/assembled-context` | `agent_plugins.py` |
-
-```mermaid
-graph TB
-    subgraph "agents.py - Main Resource"
-        Root["/api/agents"]
-        List["/api/agents/<br/>GET list_agents()"]
-        Create["/api/agents/<br/>POST create_agent()"]
-        Get["/api/agents/{id}<br/>GET get_agent()"]
-        Update["/api/agents/{id}<br/>PUT update_agent()"]
-        Delete["/api/agents/{id}<br/>DELETE (not implemented)"]
-        
-        Root --> List
-        Root --> Create
-        Root --> Get
-        Root --> Update
-        Root --> Delete
-    end
-    
-    subgraph "Nested Sub-resources"
-        Skills["/api/agents/{id}/skills<br/>GET get_agent_skills()"]
-        SkillsAdd["/api/agents/{id}/skills<br/>POST add_agent_skills()"]
-        Status["/api/agents/{id}/status<br/>GET get_agent_status()"]
-        Execute["/api/agents/{id}/execute<br/>POST execute_agent()"]
-    end
-    
-    subgraph "agent_plugins.py - Related Resource"
-        Plugins["/api/agents/{id}/plugins<br/>GET list_agent_plugins()"]
-        PluginsUpdate["/api/agents/{id}/plugins<br/>PUT update_agent_plugins()"]
-        Context["/api/agents/{id}/assembled-context<br/>GET get_assembled_context()"]
-    end
-    
-    Get -.->|"extends"| Skills
-    Get -.->|"extends"| SkillsAdd
-    Get -.->|"extends"| Status
-    Get -.->|"extends"| Execute
-    Get -.->|"extends"| Plugins
-    Get -.->|"extends"| PluginsUpdate
-    Get -.->|"extends"| Context
-```
-
-Sources: [orchestrator/api/agents.py:437-553](), [orchestrator/api/agent_plugins.py:69-337]()
-
----
-
-## Authentication Dependencies
-
-All routers use the **hybrid authentication dependency** `get_request_context_hybrid` to obtain authenticated request context.
-
-### Dependency Injection Pattern
-
-```python
-from core.auth.hybrid import get_request_context_hybrid
-from core.auth.dependencies import RequestContext
-
-@router.get("/")
-async def list_agents(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    # ctx.workspace_id - authenticated workspace UUID
-    # ctx.user.id - authenticated user ID
-    # ctx.user.email - user email
-    query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id)
-    ...
-```
-
-### Authentication Flow
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Middleware
-    participant get_request_context_hybrid
-    participant Clerk
-    participant Endpoint
-    participant Database
-    
-    Client->>Middleware: HTTP Request<br/>(Bearer token or X-API-Key)
-    Middleware->>get_request_context_hybrid: Extract auth headers
-    
-    alt Clerk JWT Token
-        get_request_context_hybrid->>Clerk: Verify JWT
-        Clerk-->>get_request_context_hybrid: User claims
-        get_request_context_hybrid->>Database: Get/create user record
-    else API Key
-        get_request_context_hybrid->>get_request_context_hybrid: Validate ORCHESTRATOR_API_KEY
-    else Anonymous (REQUIRE_AUTH=false)
-        get_request_context_hybrid->>get_request_context_hybrid: Use default tenant
-    end
-    
-    get_request_context_hybrid->>get_request_context_hybrid: Resolve workspace_id<br/>(header > query > env > default)
-    get_request_context_hybrid->>Database: Verify workspace access
-    get_request_context_hybrid-->>Endpoint: RequestContext(workspace_id, user)
-    
-    Endpoint->>Database: Query with workspace_id filter
-    Database-->>Endpoint: Workspace-scoped results
-    Endpoint-->>Client: JSON Response
-```
-
-### RequestContext Structure
-
-```python
-@dataclass
-class RequestContext:
-    workspace_id: UUID          # Current workspace (tenant isolation)
-    user: UserContext           # Authenticated user info
-    
-@dataclass  
-class UserContext:
-    id: str                     # User ID (Clerk user_id or API key identifier)
-    email: Optional[str]        # User email
-    role: Optional[str]         # Workspace role (owner, member, viewer)
-    system_role: Optional[str]  # System-wide role (admin, user)
-```
-
-Sources: [orchestrator/api/agents.py:26-27](), [orchestrator/api/agent_plugins.py:21-22]()
+Sources: [orchestrator/api/workspace_files.py:1-108](), [orchestrator/api/workspace_github.py:1-182](), [services/workspace-worker/executor.py:31-158]()
 
 ---
 
 ## Response Model Patterns
 
-### Response Wrapping
+### Request Validation
+Routers use Pydantic models to validate incoming payloads. For example, `CloneRequest` validates that Git URLs use HTTPS and point to allowed hosts like GitHub or GitLab [orchestrator/api/workspace_github.py:65-79]().
 
-Most endpoints wrap responses in a consistent structure:
+### Common Response Structures
+- **Context Stats**: Returns real-time RAG metrics including `retrievalSuccess`, `vectorEmbeddings`, and `avgResponseTime` [orchestrator/api/context.py:84-101]().
+- **SSE Streams**: Used by `workflows.py` to broadcast `phase_start`, `stage_start`, and `stage_complete` events with millisecond durations [orchestrator/api/workflows.py:108-159]().
+- **Worker Proxy**: Responses from `WorkspaceClient` include a `success` flag and standardized error parsing [orchestrator/core/workspace_client.py:47-53]().
 
-| Pattern | When Used | Example |
-|---------|-----------|---------|
-| `{"data": [...]}` | List endpoints | `{"data": [agent1, agent2, ...]}` |
-| `{"data": {...}}` | Single resource | `{"data": {"id": 1, "name": "..."}}` |
-| Direct model | Explicit response_model | `AgentResponse(id=1, name=...)` |
-| `{"items": [...], "total": N}` | Paginated lists | Used by marketplace routers |
-
-### Pydantic Response Models
-
-```mermaid
-graph TB
-    subgraph "Request Models (Pydantic)"
-        AgentCreate["AgentCreate<br/>- name: str<br/>- description: str<br/>- agent_type: AgentType<br/>- skill_ids: List[int]<br/>- tool_ids: List[int]"]
-        AgentUpdate["AgentUpdate<br/>- name: Optional[str]<br/>- description: Optional[str]<br/>- status: Optional[AgentStatus]<br/>- tags: Optional[List[str]]"]
-    end
-    
-    subgraph "Response Models (Pydantic)"
-        AgentResponse["AgentResponse<br/>- id: int<br/>- name: str<br/>- agent_type: str<br/>- status: str<br/>- skills: List[SkillResponse]<br/>- tools: List[Dict]<br/>- plugins: List[Dict]<br/>- created_at: datetime"]
-        SkillResponse["SkillResponse<br/>- id: int<br/>- name: str<br/>- description: str<br/>- skill_type: str<br/>- category: str<br/>- is_active: bool"]
-    end
-    
-    subgraph "Database Models (SQLAlchemy)"
-        Agent["Agent (ORM)<br/>- id: Integer<br/>- name: String<br/>- workspace_id: UUID<br/>- skills: relationship<br/>- assigned_plugins: relationship"]
-        Skill["Skill (ORM)<br/>- id: Integer<br/>- name: String<br/>- skill_type: String"]
-    end
-    
-    subgraph "Endpoint Handlers"
-        CreateEndpoint["POST /api/agents<br/>create_agent(agent_data: AgentCreate)"]
-        GetEndpoint["GET /api/agents/{id}<br/>get_agent(agent_id: int)"]
-        UpdateEndpoint["PUT /api/agents/{id}<br/>update_agent(agent_id, update: AgentUpdate)"]
-    end
-    
-    AgentCreate --> CreateEndpoint
-    CreateEndpoint --> Agent
-    Agent --> GetEndpoint
-    GetEndpoint --> AgentResponse
-    AgentUpdate --> UpdateEndpoint
-    UpdateEndpoint --> Agent
-    
-    Agent -.->|"includes"| Skill
-    AgentResponse -.->|"contains"| SkillResponse
-```
-
-### Builder Functions
-
-Routers use builder functions to convert ORM models to Pydantic responses:
-
-```python
-def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
-    """Build agent response with skills, tools, and plugins"""
-    # Build tools list from agent_app_assignments
-    tools: List[Dict[str, Any]] = []
-    assignments = db.query(AgentAppAssignment).filter(
-        AgentAppAssignment.agent_id == agent.id,
-        AgentAppAssignment.is_active == True
-    ).all()
-    # ... build tools list
-    
-    # Build plugins list from assigned_plugins
-    plugins: List[Dict[str, Any]] = []
-    for ap in agent.assigned_plugins:
-        plugins.append({
-            "plugin_id": str(ap.plugin.id),
-            "slug": ap.plugin.slug,
-            "name": ap.plugin.name,
-            # ...
-        })
-    
-    return AgentResponse(
-        id=agent.id,
-        name=agent.name,
-        skills=[...],
-        tools=tools,
-        plugins=plugins,
-        # ...
-    )
-```
-
-Sources: [orchestrator/api/agents.py:138-237](), [orchestrator/core/models/__init__.py:19-23]()
-
----
-
-## Common Query Patterns
-
-### Filtering and Pagination
-
-```python
-@router.get("/", response_model=List[AgentResponse])
-async def list_agents(
-    skip: int = Query(0, ge=0),                        # Offset
-    limit: int = Query(100, ge=1, le=1000),           # Page size
-    status: Optional[AgentStatus] = None,              # Enum filter
-    agent_type: Optional[AgentType] = None,            # Enum filter
-    search: Optional[str] = None,                      # Text search
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    # Base query with workspace filter (CRITICAL for multi-tenancy)
-    query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id)
-    
-    # Apply filters
-    if status:
-        query = query.filter(Agent.status == status.value)
-    if agent_type:
-        query = query.filter(Agent.agent_type == agent_type.value)
-    if search:
-        query = query.filter(or_(
-            Agent.name.ilike(f"%{search}%"),
-            Agent.description.ilike(f"%{search}%")
-        ))
-    
-    # Pagination
-    agents = query.offset(skip).limit(limit).all()
-    return [_build_agent_response(agent, db) for agent in agents]
-```
-
-### Eager Loading
-
-To avoid N+1 queries, routers use SQLAlchemy's eager loading:
-
-```python
-from sqlalchemy.orm import joinedload, subqueryload
-
-# Load agent with related skills and plugins in single query
-agent = (
-    db.query(Agent)
-    .options(
-        joinedload(Agent.skills),              # One-to-many
-        subqueryload(Agent.assigned_plugins)   # Many-to-many
-    )
-    .filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id)
-    .first()
-)
-```
-
-Sources: [orchestrator/api/agents.py:437-476](), [orchestrator/api/agents.py:534-552]()
-
----
-
-## Router Prefix Map
-
-Complete mapping of router prefixes to their implementation files:
-
-```mermaid
-graph LR
-    subgraph "URL Namespace"
-        Root["/api"]
-    end
-    
-    subgraph "Core Resources"
-        Root --> A1["/api/agents<br/>(agents.py)"]
-        Root --> A2["/api/workflows<br/>(workflows.py)"]
-        Root --> A3["/api/workflow-recipes<br/>(workflow_recipes.py)"]
-        Root --> A4["/api/marketplace<br/>(marketplace.py)"]
-        Root --> A5["/api/tools<br/>(tools.py)"]
-    end
-    
-    subgraph "Nested Under /api/agents"
-        A1 --> N1["/api/agents/{id}/skills<br/>(agents.py)"]
-        A1 --> N2["/api/agents/{id}/plugins<br/>(agent_plugins.py)"]
-        A1 --> N3["/api/agents/{id}/assembled-context<br/>(agent_plugins.py)"]
-    end
-    
-    subgraph "Admin Routes"
-        Root --> Admin1["/api/admin/plugins<br/>(admin_plugins.py)"]
-        Root --> Admin2["/api/system-settings<br/>(system_settings.py)"]
-    end
-    
-    subgraph "Versioned Routes"
-        Root --> V1["/api/v1/skills<br/>(skills.py)"]
-    end
-    
-    subgraph "Top-Level Routes"
-        Root --> TL1["/api/personas<br/>(personas.py)"]
-        Root --> TL2["/api/templates<br/>(templates.py)"]
-        Root --> TL3["/api/patterns<br/>(patterns.py)"]
-        Root --> TL4["/api/credentials<br/>(credentials.py)"]
-    end
-```
-
-### Complete Router List
-
-| Prefix | Router File | Tags | Auth Required |
-|--------|-------------|------|---------------|
-| `/api/agents` | `agents.py` | `agents` | Yes |
-| `/api/agents` | `agent_plugins.py` | `Agent Plugins` | Yes |
-| `/api/workflows` | `workflows.py` | `workflows` | Yes |
-| `/api/workflow-recipes` | `workflow_recipes.py` | `workflow-recipes` | Yes |
-| `/api/marketplace` | `marketplace.py` | `marketplace` | Yes |
-| `/api/marketplace` | `marketplace_plugins.py` | `Marketplace Plugins` | Yes |
-| `/api/tools` | `tools.py` | `tools` | Yes |
-| `/api/v1/skills` | `skills.py` | `skills-prd22` | Yes |
-| `/api/personas` | `personas.py` | `Personas` | Yes |
-| `/api/templates` | `templates.py` | `templates` | Yes |
-| `/api/patterns` | `patterns.py` | `patterns` | Yes |
-| `/api/credentials` | `credentials.py` | `credentials` | Yes |
-| `/api/admin/plugins` | `admin_plugins.py` | `Admin Plugin Marketplace` | Yes (Admin) |
-| `/api/workspaces` | `workspaces.py` | `workspaces` | Yes |
-| `/api/system` | `system.py` | `system`, `statistics` | Yes |
-
-Sources: [orchestrator/main.py:411-479](), [orchestrator/api/agents.py:31](), [orchestrator/api/agent_plugins.py:27](), [orchestrator/api/skills.py:117](), [orchestrator/api/personas.py:30]()
-
----
-
-## Special Endpoint Patterns
-
-### Bulk Operations
-
-Some routers provide bulk endpoints for batch operations:
-
-```python
-@router.post("/bulk", response_model=List[AgentResponse])
-async def create_agents_bulk(
-    agents: List[AgentCreate],
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    created_agents = []
-    for agent_data in agents:
-        # Validate and create each agent
-        agent = Agent(
-            name=agent_data.name,
-            workspace_id=ctx.workspace_id,
-            # ...
-        )
-        db.add(agent)
-        created_agents.append(agent)
-    
-    db.commit()
-    return [_build_agent_response(a, db) for a in created_agents]
-```
-
-### Background Tasks
-
-Long-running operations use FastAPI's `BackgroundTasks`:
-
-```python
-from fastapi import BackgroundTasks
-
-@router.post("/sources/git", response_model=Dict[str, Any])
-async def import_git_repository(
-    source_data: GitSkillSourceCreate,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    # Clone and index repository in background
-    skill_loader = get_skill_loader(db)
-    result = skill_loader.add_git_repository(
-        git_url=source_data.git_url,
-        # ...
-    )
-    return result
-```
-
-### File Upload Endpoints
-
-File upload endpoints use `UploadFile`:
-
-```python
-from fastapi import UploadFile, File
-
-@router.post("/upload")
-async def upload_plugin(
-    file: UploadFile = File(...),
-    source_type: str = Form("upload"),
-    ctx: RequestContext = Depends(get_request_context_hybrid)
-):
-    # Process uploaded zip file
-    # Run security scans
-    # Store in S3
-    # ...
-```
-
-Sources: [orchestrator/api/agents.py:296-357](), [orchestrator/api/skills.py:181-232]()
-
----
-
-## Error Handling
-
-Routers use consistent error handling patterns:
-
-```python
-from fastapi import HTTPException
-
-@router.get("/{agent_id}")
-async def get_agent(agent_id: int, ctx: RequestContext = ...):
-    try:
-        agent = db.query(Agent).filter(
-            Agent.id == agent_id,
-            Agent.workspace_id == ctx.workspace_id  # Critical: workspace check
-        ).first()
-        
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        
-        return _build_agent_response(agent, db)
-        
-    except HTTPException:
-        raise  # Re-raise HTTP exceptions
-    except Exception as e:
-        logger.error(f"Error getting agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-```
-
-### Common HTTP Status Codes
-
-| Code | When Used | Example |
-|------|-----------|---------|
-| 200 | Successful GET/PUT | Resource retrieved or updated |
-| 201 | Successful POST | Resource created |
-| 400 | Validation error | Invalid input data |
-| 401 | Authentication failed | Missing or invalid token |
-| 403 | Authorization failed | User lacks workspace access |
-| 404 | Resource not found | Agent/workflow doesn't exist |
-| 500 | Server error | Database connection failed |
-
-Sources: [orchestrator/api/agents.py:534-552](), [orchestrator/api/agent_plugins.py:69-124]()
-
----
-
-## Tags and OpenAPI Documentation
-
-Each router declares tags for OpenAPI documentation grouping:
-
-```python
-router = APIRouter(
-    prefix="/api/agents",
-    tags=["agents"]  # Appears in Swagger UI sidebar
-)
-```
-
-The main application configures enhanced Swagger UI parameters:
-
-```python
-app = FastAPI(
-    title="🤖 Automatos AI API",
-    docs_url="/docs",
-    swagger_ui_parameters={
-        "operationsSorter": "alpha",       # Sort endpoints alphabetically
-        "tagsSorter": "alpha",             # Sort tags alphabetically
-        "filter": True,                     # Enable search filter
-        "displayRequestDuration": True,    # Show response times
-        "syntaxHighlight.theme": "arta",   # Code highlighting theme
-    }
-)
-```
-
-### Tag Hierarchy in Swagger UI
-
-```mermaid
-graph TB
-    Swagger["Swagger UI /docs"]
-    
-    subgraph "Core Features"
-        Swagger --> T1["agents"]
-        Swagger --> T2["workflows"]
-        Swagger --> T3["workflow-recipes"]
-        Swagger --> T4["tools"]
-    end
-    
-    subgraph "Marketplace"
-        Swagger --> T5["marketplace"]
-        Swagger --> T6["Marketplace Plugins"]
-        Swagger --> T7["Admin Plugin Marketplace"]
-    end
-    
-    subgraph "Extended Features"
-        Swagger --> T8["Agent Plugins"]
-        Swagger --> T9["Personas"]
-        Swagger --> T10["skills-prd22"]
-        Swagger --> T11["templates"]
-    end
-    
-    subgraph "System"
-        Swagger --> T12["system"]
-        Swagger --> T13["statistics"]
-        Swagger --> T14["credentials"]
-    end
-```
-
-Sources: [orchestrator/main.py:188-333](), [orchestrator/api/agents.py:31](), [orchestrator/api/agent_plugins.py:27]()
+Sources: [orchestrator/api/workspace_github.py:65-79](), [orchestrator/api/context.py:84-101](), [orchestrator/api/workflows.py:108-159](), [orchestrator/core/workspace_client.py:47-53]()
 
 ---

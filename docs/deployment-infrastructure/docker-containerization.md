@@ -5,541 +5,192 @@
 
 The following files were used as context for generating this wiki page:
 
+- [README.md](README.md)
 - [docker-compose.yml](docker-compose.yml)
+- [docs/README.md](docs/README.md)
 - [frontend/.dockerignore](frontend/.dockerignore)
 - [frontend/Dockerfile](frontend/Dockerfile)
+- [frontend/components/settings/SystemPromptsTab.tsx](frontend/components/settings/SystemPromptsTab.tsx)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
+- [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
+- [orchestrator/core/services/futureagi_service.py](orchestrator/core/services/futureagi_service.py)
+- [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
 - [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [services/agent-opt-worker/Dockerfile](services/agent-opt-worker/Dockerfile)
+- [services/agent-opt-worker/automatos_logging.py](services/agent-opt-worker/automatos_logging.py)
+- [services/agent-opt-worker/automatos_metrics.py](services/agent-opt-worker/automatos_metrics.py)
+- [services/agent-opt-worker/main.py](services/agent-opt-worker/main.py)
+- [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
+- [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
+- [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
+- [services/workspace-worker/Dockerfile](services/workspace-worker/Dockerfile)
+- [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)
+- [services/workspace-worker/automatos_metrics.py](services/workspace-worker/automatos_metrics.py)
+- [services/workspace-worker/entrypoint.sh](services/workspace-worker/entrypoint.sh)
+- [services/workspace-worker/requirements.txt](services/workspace-worker/requirements.txt)
 
 </details>
 
 
 
-This document describes the Docker containerization strategy for Automatos AI, including multi-stage build architecture, image optimization, and security considerations for both frontend and backend services. For information about service orchestration and networking, see [Docker Compose Setup](#12.2). For configuration of environment variables, see [Environment Variables](#12.3).
+This document describes the Docker containerization strategy for Automatos AI, covering the multi-stage build architecture for the orchestrator, frontend, and specialized worker services (`workspace-worker`, `agent-opt-worker`). It details image optimization, security hardening, and dependency management.
 
 ## Overview
 
-Automatos AI uses multi-stage Docker builds to create optimized images for development and production environments. Both the frontend (Next.js) and backend (FastAPI) services are containerized with distinct stages for dependency installation, development hot-reloading, production building, and minimal production deployment.
+Automatos AI utilizes a distributed container architecture to isolate core platform logic from resource-intensive or specialized tasks like code execution and prompt optimization.
 
 **Key Design Principles:**
-- **Multi-stage builds** to minimize final image size
-- **Separate development and production targets** for different use cases
-- **Layer caching optimization** to speed up builds
-- **Non-root user execution** for security
-- **Health checks** for container orchestration
-- **Hot-reload support** in development mode
+- **Multi-stage builds** to minimize final image size by separating build tools from runtimes [orchestrator/Dockerfile:4-8]().
+- **Service Isolation**: Distinct containers for the Next.js frontend, FastAPI orchestrator, and specialized workers [docker-compose.yml:18-200]().
+- **Non-root execution**: All production images switch to low-privilege users (`automatos`, `nextjs`, or `worker`) [orchestrator/Dockerfile:111-115](), [frontend/Dockerfile:93-101](), [services/workspace-worker/Dockerfile:33-35](), [services/agent-opt-worker/Dockerfile:10-11]().
+- **Health Monitoring**: Integrated Docker health checks for automated service recovery [orchestrator/Dockerfile:121-122](), [services/workspace-worker/Dockerfile:49-50](), [frontend/Dockerfile:107-108]().
 
-Sources: [README.md:55-78](), [docker-compose.yml:1-15]()
+Sources: [README.md:112-120](), [docker-compose.yml:1-16]()
 
-## Build Architecture
+## System Container Map
 
-Both frontend and backend use a consistent multi-stage approach with the following progression:
+The following diagram maps the logical system components to their respective Docker entities and entrypoint configurations.
 
+**Container to Code Entity Mapping**
+```mermaid
+graph TD
+    subgraph "Public_Network"
+        FE["frontend (Next.js)"]
+    end
+
+    subgraph "Application_Network"
+        ORC["backend (FastAPI main:app)"]
+        W_WORKER["workspace-worker (ARQ Consumer)"]
+        OPT_WORKER["agent-opt-worker (FutureAGI)"]
+    end
+
+    subgraph "Data_Network"
+        PG["postgres (pgvector/pg16)"]
+        RD["redis (Cache/Queue)"]
+    end
+
+    FE -- "apiClient.request()" --> ORC
+    ORC -- "SQLAlchemy / pgvector" --> PG
+    ORC -- "Redis Pub/Sub" --> RD
+    ORC -- "FutureAGIService._call_worker()" --> OPT_WORKER
+    
+    W_WORKER -- "Redis Queue" --> RD
+    W_WORKER -- "Workspace Files" --> VOL["/workspaces_volume"]
+
+    OPT_WORKER -- "POST /assess" --> OPT_WORKER_CODE["main.py:AssessRequest"]
+```
+Sources: [docker-compose.yml:18-200](), [orchestrator/core/services/futureagi_service.py:79-85](), [services/agent-opt-worker/main.py:166-171]()
+
+## 1. Orchestrator (Backend) Container
+
+The orchestrator uses a Python 3.11-slim base with specialized system dependencies for document processing and OCR.
+
+### Build Stages
+- **base**: Installs `gcc`, `tesseract-ocr`, `ghostscript`, and `libpango` (for WeasyPrint) [orchestrator/Dockerfile:13-33]().
+- **development**: Configured for hot-reload using `uvicorn --reload` [orchestrator/Dockerfile:57-85]().
+- **production**: Optimized image that removes dev tools (`pytest`, `black`) and cleans `__pycache__` [orchestrator/Dockerfile:90-109]().
+
+### Key Implementation Details
+- **NLTK Pre-loading**: Downloads `punkt` and `stopwords` to `/usr/local/nltk_data` during build to avoid runtime latency in memory operations [orchestrator/Dockerfile:49-52]().
+- **Dependency Handling**: `futureagi` is installed with `--no-deps` to prevent version conflicts with the core stack [orchestrator/Dockerfile:42-43](). Core FastAPI dependencies are managed via `requirements.txt` [orchestrator/requirements.txt:1-4]().
+- **User**: Runs as user `automatos` (UID 1000) [orchestrator/Dockerfile:112-113]().
+
+Sources: [orchestrator/Dockerfile:1-130](), [orchestrator/requirements.txt:1-110]()
+
+## 2. Frontend Container
+
+The frontend utilizes a 4-stage build process to handle Next.js static generation and standalone optimization.
+
+| Stage | Description | Key Files |
+| :--- | :--- | :--- |
+| **base** | Node 20-alpine foundation | `package.json` [frontend/Dockerfile:14-26]() |
+| **development** | Hot-reload dev server | `npm run dev` [frontend/Dockerfile:31-48]() |
+| **builder** | Static site generation (SSG) | `.next/standalone` [frontend/Dockerfile:53-81]() |
+| **production** | Minimal standalone runner | `server.js` [frontend/Dockerfile:85-114]() |
+
+### Build-time Environment Variables
+Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:55-71]().
+
+Sources: [frontend/Dockerfile:1-116]()
+
+## 3. Workspace Worker Container
+
+The `workspace-worker` provides the execution environment for agents. Unlike the orchestrator, it contains a full DevOps toolchain.
+
+### Environment Composition
+- **System Tools**: `git`, `jq`, `tree`, `build-essential` [services/workspace-worker/Dockerfile:6-10]().
+- **Runtimes**: Node.js 20, Python 3.12, and `pnpm` [services/workspace-worker/Dockerfile:12-16]().
+- **Agent Tooling**: Pre-installed `pytest`, `ruff`, `black`, and `uv` to allow agents to run tests and format code immediately [services/workspace-worker/Dockerfile:18-23]().
+
+### Volume Management
+The container mounts `/workspaces` to persist agent files across restarts. The `entrypoint.sh` script ensures correct ownership of these volumes for the `worker` user [services/workspace-worker/Dockerfile:33-40]().
+
+Sources: [services/workspace-worker/Dockerfile:1-56](), [services/workspace-worker/requirements.txt:1-20]()
+
+## 4. Agent Optimization Worker (FutureAGI)
+
+The `agent-opt-worker` is a specialized microservice for prompt assessment, safety scoring, and live traffic evaluation.
+
+### Service Architecture
+- **Isolation**: It runs the `agent-opt` and `ai-evaluation` SDKs in a separate environment to avoid dependency conflicts in the main orchestrator [services/agent-opt-worker/Dockerfile:1-16]().
+- **API Surface**: Exposes `/assess`, `/safety`, `/score`, and `/optimize` endpoints [services/agent-opt-worker/main.py:10-15]().
+- **Connectivity**: The orchestrator communicates with this worker via `FutureAGIService` using the `WORKER_URL` derived from `config.AGENT_OPT_WORKER_URL` [orchestrator/core/services/futureagi_service.py:25-27], [orchestrator/core/services/futureagi_service.py:79-85]().
+- **Authentication**: Requires `FUTUREAGI_API_KEY` and `FUTUREAGI_SECRET_KEY` (also accepted as `FI_API_KEY`/`FI_SECRET_KEY`) to be set in the worker environment [services/agent-opt-worker/main.py:46-56]().
+
+**Worker Internal Logic Flow**
 ```mermaid
 graph LR
-    base["base<br/>(Dependencies)"]
-    dev["development<br/>(Hot Reload)"]
-    builder["builder<br/>(Build Artifacts)"]
-    prod["production<br/>(Optimized)"]
+    subgraph "agent-opt-worker"
+        REQ["AssessRequest"] --> TEMPLATE["_run_single_template"]
+        TEMPLATE --> SDK["fi.evals.Evaluator"]
+        SDK --> PARSE["_build_inputs"]
+        PARSE --> RESP["Score/Passed Output"]
+    end
     
-    base --> dev
-    base --> builder
-    builder --> prod
+    subgraph "Orchestrator"
+        FAS["FutureAGIService"] -- "POST /assess" --> REQ
+    end
 ```
 
-Sources: [frontend/Dockerfile:1-9](), [orchestrator/Dockerfile:1-8]()
+Sources: [services/agent-opt-worker/main.py:1-141](), [services/agent-opt-worker/requirements.txt:1-8](), [orchestrator/core/services/futureagi_service.py:118-145]()
 
-## Frontend Container Architecture
+## Multi-Service Coordination
 
-The frontend container is defined in `frontend/Dockerfile` and implements a 4-stage build process tailored for Next.js applications.
+The `docker-compose.yml` file orchestrates these containers, defining dependencies and networking.
 
-### Stage Breakdown
-
-| Stage | Purpose | Base Image | Key Operations |
-|-------|---------|------------|----------------|
-| `base` | Install dependencies | `node:20-alpine` | Package file copying, system dependencies |
-| `development` | Hot-reload dev server | Extends `base` | Full source mount, `npm run dev` |
-| `builder` | Production build | Extends `base` | Next.js build with embedded env vars |
-| `production` | Optimized runtime | `node:20-alpine` | Minimal files, non-root user, `npm start` |
-
-Sources: [frontend/Dockerfile:14-119]()
-
-### Base Stage
-
-The base stage establishes the foundation for all subsequent stages:
-
-[frontend/Dockerfile:14-26]()
-
-**Key Features:**
-- Uses Alpine Linux for minimal footprint
-- Installs `python3`, `make`, `g++` for native module compilation (node-gyp)
-- Copies only `package*.json` to enable Docker layer caching
-- No source code copied yet to maximize cache hits
-
-Sources: [frontend/Dockerfile:14-26]()
-
-### Development Stage
-
-The development stage extends `base` to support hot-reloading:
-
-[frontend/Dockerfile:31-48]()
-
-**Configuration:**
-- Uses `npm install --legacy-peer-deps` for flexibility with lock files
-- Copies entire source directory (`.dockerignore` filters unnecessary files)
-- Exposes port `3000`
-- Health check pings `http://localhost:3000` every 30s
-- Runs `npm run dev` for Next.js development server with hot-reload
-
-**Usage in docker-compose:**
-```yaml
-frontend:
-  build:
-    context: ./frontend
-    target: development
-```
-
-Sources: [frontend/Dockerfile:31-48](), [docker-compose.yml:131-135]()
-
-### Builder Stage
-
-The builder stage creates production-optimized assets with build-time configuration:
-
-[frontend/Dockerfile:53-80]()
-
-**Build Arguments:**
-The following `ARG` declarations accept build-time values that are embedded into the JavaScript bundle:
-
-| Argument | Purpose | Security Level |
-|----------|---------|----------------|
-| `NEXT_PUBLIC_API_URL` | Backend API endpoint | Public (safe) |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk authentication public key | Public (safe) |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | Sign-in route | Public (safe) |
-| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Sign-up route | Public (safe) |
-| `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | Post-login redirect | Public (safe) |
-| `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | Post-registration redirect | Public (safe) |
-
-**Security Note:** The comment at [frontend/Dockerfile:56-57]() explicitly warns that `NEXT_PUBLIC_*` variables are embedded in the client bundle and must NOT contain secrets. API keys should be handled server-side only.
-
-**Build Process:**
-1. Install ALL dependencies (including `devDependencies` for build tools)
-2. Copy source code
-3. Run `npm run build` - this compiles TypeScript, optimizes assets, and generates static pages
-4. Output stored in `.next` directory
-
-Sources: [frontend/Dockerfile:53-80]()
-
-### Production Stage
-
-The production stage creates a minimal runtime image:
-
-[frontend/Dockerfile:85-119]()
-
-**Optimizations:**
-- Fresh Alpine base (no build tools)
-- Only production dependencies: `npm ci --only=production`
-- Copies built artifacts from `builder` stage:
-  - `.next` directory (compiled application)
-  - `public` directory (static assets)
-  - `next.config.js` (runtime configuration)
-  - `package.json` (for `npm start`)
-- Creates non-root user `nextjs` (UID 1001) for security
-- Sets `NODE_ENV=production`
-- Runs `npm start` which starts Next.js production server
-
-**Security Hardening:**
-- No source code in final image
-- No build tools or development dependencies
-- Runs as non-root user
-- Health check uses `curl` instead of `wget`
-
-Sources: [frontend/Dockerfile:85-119]()
-
-## Backend Container Architecture
-
-The backend container is defined in `orchestrator/Dockerfile` and implements a 3-stage build process for the FastAPI application.
-
-### Backend Build Flow
-
+**Service Dependency Graph**
 ```mermaid
-graph TB
-    subgraph "Stage: base"
-        base_deps["System Dependencies<br/>(gcc, postgresql-client, tesseract)"]
-        base_python["Python Dependencies<br/>(requirements.txt)"]
-        base_nltk["NLTK Data<br/>(punkt, stopwords)"]
-        
-        base_deps --> base_python
-        base_python --> base_nltk
+graph TD
+    subgraph "Core_Services"
+        PG["postgres (pg16)"]
+        RD["redis (7-alpine)"]
     end
-    
-    subgraph "Stage: development"
-        dev_entrypoint["Minimal Entrypoint<br/>(docker-entrypoint.sh)"]
-        dev_code["Source Code<br/>(hot-reload mount)"]
-        dev_cmd["uvicorn --reload"]
-        
-        dev_entrypoint --> dev_code
-        dev_code --> dev_cmd
+
+    subgraph "Backend_Services"
+        BACK["backend (FastAPI)"]
+        WSW["workspace-worker"]
+        AOW["agent-opt-worker"]
     end
-    
-    subgraph "Stage: production"
-        prod_code["Source Code<br/>(copied, no mount)"]
-        prod_cleanup["Cleanup<br/>(remove dev deps, __pycache__)"]
-        prod_user["Non-root User<br/>(automatos:1000)"]
-        prod_cmd["uvicorn --workers 4"]
-        
-        prod_code --> prod_cleanup
-        prod_cleanup --> prod_user
-        prod_user --> prod_cmd
+
+    subgraph "UI_Layer"
+        FRONT["frontend (Next.js)"]
     end
+
+    BACK -- "depends_on: healthy" --> PG
+    BACK -- "depends_on: healthy" --> RD
+    WSW -- "depends_on: healthy" --> RD
+    FRONT -- "depends_on: healthy" --> BACK
     
-    base_nltk -.->|"FROM base"| dev_entrypoint
-    base_nltk -.->|"FROM base"| prod_code
+    AOW -- "profile: workers" --> RD
 ```
 
-Sources: [orchestrator/Dockerfile:1-116]()
-
-### Base Stage
-
-The base stage installs system and Python dependencies:
-
-[orchestrator/Dockerfile:13-42]()
-
-**System Dependencies:**
-- `gcc`, `g++`: C/C++ compilers for native Python extensions
-- `postgresql-client`: Database connectivity tools
-- `libmagic1`: File type detection
-- `tesseract-ocr`: OCR capabilities for document processing
-- `ghostscript`: PDF rendering support
-
-**Python Dependencies:**
-- Installed from `requirements.txt` using `pip install --no-cache-dir`
-- Cache purged after installation to reduce layer size
-
-**NLTK Data:**
-The Natural Language Toolkit (NLTK) requires specific data files for text processing. These are downloaded at build time:
-
-[orchestrator/Dockerfile:37-42]()
-
-- **Data Location:** `/usr/local/nltk_data` (system-wide, accessible to all users)
-- **Datasets:** `punkt` (sentence tokenizer), `stopwords` (language-specific stop words)
-- **Permissions:** Set to `755` for read access by non-root users
-
-Sources: [orchestrator/Dockerfile:13-42]()
-
-### Development Stage
-
-The development stage extends `base` for local development:
-
-[orchestrator/Dockerfile:45-71]()
-
-**Key Features:**
-- Creates minimal entrypoint script (Railway deployment doesn't need full entrypoint since database is ready)
-- Copies entire source code (for docker-compose, this will be overridden by volume mount)
-- Creates necessary directories: `logs`, `vector_stores`, `projects`, `exports`
-- Exposes port `8000`
-- Health check pings `/health` endpoint
-- Runs `uvicorn main:app --reload` for auto-reload on code changes
-
-**docker-compose Integration:**
-The development target is used with volume mounting for hot-reload:
-
-[docker-compose.yml:69-73]()
-
-The source directory `./orchestrator` is mounted at `/app`, and a full entrypoint script is mounted at `/usr/local/bin/docker-entrypoint.sh` for database initialization checks.
-
-Sources: [orchestrator/Dockerfile:45-71](), [docker-compose.yml:68-123]()
-
-### Production Stage
-
-The production stage creates an optimized, secure runtime image:
-
-[orchestrator/Dockerfile:74-116]()
-
-**Optimization Steps:**
-1. Copy source code (no volume mount)
-2. Create minimal entrypoint script
-3. Create application directories
-4. Remove development dependencies: `pytest`, `black`, `isort`
-5. Clean caches: pip cache, pytest cache, `__pycache__`, `.pyc` files
-6. Create non-root user `automatos` (UID 1000)
-7. Set ownership of `/app` to `automatos:automatos`
-8. Switch to non-root user
-
-**Production Command:**
-[orchestrator/Dockerfile:115]()
-
-The command uses:
-- Shell expansion to read `PORT` from environment (Railway provides this)
-- Defaults to `8000` if `PORT` not set
-- `--workers 4` for multi-process concurrency (4 worker processes)
-
-**Security Hardening:**
-- No development tools in final image
-- No cache files or bytecode (smaller image)
-- Runs as non-root user
-- Health check uses dynamic port from environment
-
-Sources: [orchestrator/Dockerfile:74-116]()
-
-## Build Arguments vs Environment Variables
-
-Understanding the distinction between build arguments and runtime environment variables is critical for secure containerization.
-
-### Build Arguments (ARG)
-
-Build arguments are available **only during image build** and are embedded into the image layers:
-
-```mermaid
-graph LR
-    dockerfile["Dockerfile<br/>ARG NEXT_PUBLIC_API_URL"]
-    buildcmd["docker build<br/>--build-arg NEXT_PUBLIC_API_URL=..."]
-    layer["Image Layer<br/>(value baked in)"]
-    
-    dockerfile --> buildcmd
-    buildcmd --> layer
-```
-
-**Frontend Build Args:**
-[frontend/Dockerfile:58-71]()
-
-These values are embedded into the Next.js JavaScript bundle during `npm run build`. They cannot be changed after the image is built without rebuilding.
-
-**Backend Build Args:**
-The backend Dockerfile does not use `ARG` declarations because the FastAPI application reads configuration at runtime via environment variables.
-
-Sources: [frontend/Dockerfile:58-71]()
-
-### Runtime Environment Variables (ENV)
-
-Runtime environment variables are provided when the container **starts** and can be changed without rebuilding:
-
-| Service | Configuration Method | Source |
-|---------|---------------------|--------|
-| Frontend Development | `docker-compose.yml` environment section | [docker-compose.yml:141-145]() |
-| Backend Development | `docker-compose.yml` environment section | [docker-compose.yml:80-108]() |
-| Production (Railway) | Platform environment variables | Runtime injection |
-
-**Example - Backend Environment Variables:**
-[docker-compose.yml:80-108]()
-
-These variables are read by the FastAPI application at startup via the centralized configuration system.
-
-Sources: [docker-compose.yml:80-145]()
-
-## Health Checks
-
-Both containers implement Docker health checks for orchestration readiness signaling.
-
-### Health Check Configuration
-
-| Parameter | Frontend | Backend | Purpose |
-|-----------|----------|---------|---------|
-| `interval` | 30s | 30s | Time between checks |
-| `timeout` | 10s | 10s | Max time for check to complete |
-| `start-period` | 60s | 40s | Grace period before checks start |
-| `retries` | 3 | 3 | Consecutive failures before unhealthy |
-
-**Frontend Health Check:**
-[frontend/Dockerfile:113-114]()
-
-Uses `curl` to ping the root endpoint. Development stage uses `wget` instead ([frontend/Dockerfile:44-45]()).
-
-**Backend Health Check:**
-[orchestrator/Dockerfile:106-108]()
-
-Pings the `/health` endpoint. Uses dynamic `PORT` environment variable for Railway compatibility.
-
-**Health Endpoint Implementation:**
-The `/health` endpoint is implemented in the FastAPI application to return service status:
-
-```python
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "service": "automatos-backend"}
-```
-
-Sources: [frontend/Dockerfile:44-45,113-114](), [orchestrator/Dockerfile:64-65,106-108]()
-
-## Security Considerations
-
-### Non-Root User Execution
-
-Both containers run as non-root users in production to limit privilege escalation risks:
-
-**Frontend:**
-[frontend/Dockerfile:102-107]()
-
-- Group: `nodejs` (GID 1001)
-- User: `nextjs` (UID 1001)
-- Ownership: All `/app` files owned by `nextjs:nodejs`
-
-**Backend:**
-[orchestrator/Dockerfile:98-101]()
-
-- User: `automatos` (UID 1000)
-- Ownership: All `/app` files owned by `automatos:automatos`
-
-### Secret Management
-
-**Build-Time Secrets:**
-Build arguments are **NOT suitable for secrets** because they are stored in image layers and can be extracted:
-
-[frontend/Dockerfile:56-57]()
-
-This comment emphasizes that API keys must be handled server-side via the route handler pattern (see `frontend/app/api/chat/route.ts`).
-
-**Runtime Secrets:**
-Secrets are provided as environment variables at container start:
-- Development: `docker-compose.yml` environment section
-- Production: Platform environment variables (Railway, AWS, etc.)
-
-For credential storage and encryption, see [Credentials Management](#9.4).
-
-Sources: [frontend/Dockerfile:56-57,102-107](), [orchestrator/Dockerfile:98-101]()
-
-## Image Optimization Strategies
-
-### Layer Caching
-
-The Dockerfiles are structured to maximize Docker layer caching:
-
-1. **Copy package files first** - Changes to source code don't invalidate dependency layers
-2. **Install dependencies before copying source** - Most builds reuse dependency layers
-3. **Separate build and runtime stages** - Final image doesn't contain build tools
-
-**Frontend Example:**
-```dockerfile
-COPY package*.json ./          # Layer 1: Package files
-RUN npm install                # Layer 2: Dependencies (cached)
-COPY . .                       # Layer 3: Source code (changes often)
-RUN npm run build              # Layer 4: Build artifacts
-```
-
-Sources: [frontend/Dockerfile:26,35,38,77,80]()
-
-### Multi-Stage Size Reduction
-
-Comparing stage sizes:
-
-| Stage | Base Image | Includes | Approximate Size |
-|-------|------------|----------|------------------|
-| Frontend `base` | `node:20-alpine` | Package files, dependencies | ~500 MB |
-| Frontend `builder` | Extends `base` | Source code, build tools | ~800 MB |
-| Frontend `production` | `node:20-alpine` | Built assets, prod deps only | ~300 MB |
-| Backend `base` | `python:3.11-slim` | System deps, Python packages | ~600 MB |
-| Backend `production` | Extends `base` | Source code, no dev deps | ~550 MB |
-
-**Production Cleanup:**
-[orchestrator/Dockerfile:91-95]()
-
-This removes:
-- Development packages (`pytest`, `black`, `isort`)
-- Pip cache
-- Pytest cache
-- Python bytecode (`__pycache__`, `.pyc` files)
-
-Sources: [frontend/Dockerfile:85-94](), [orchestrator/Dockerfile:91-95]()
-
-### .dockerignore Files
-
-Both services use `.dockerignore` files to exclude unnecessary files from the build context, reducing build time and final image size:
-
-**Typical Exclusions:**
-- `node_modules/` (frontend)
-- `__pycache__/`, `*.pyc` (backend)
-- `.git/`
-- `.env`, `.env.*`
-- `*.log`
-- Documentation files
-- Test files
-
-## Development vs Production Targets
-
-The multi-stage design enables different container behaviors for different environments:
-
-### Target Selection
-
-**Development (docker-compose):**
-```yaml
-frontend:
-  build:
-    target: development
-backend:
-  build:
-    target: development
-```
-
-**Production (Railway):**
-```bash
-docker build --target production -t automatos-frontend ./frontend
-docker build --target production -t automatos-backend ./orchestrator
-```
-
-### Comparison
-
-| Aspect | Development Target | Production Target |
-|--------|-------------------|-------------------|
-| **Hot Reload** | Yes (volume mount + `--reload`) | No |
-| **Dependencies** | All (including dev) | Production only |
-| **User** | Root (for file system access) | Non-root (security) |
-| **Optimization** | Debug-friendly | Size and performance optimized |
-| **Build Tools** | Included | Excluded |
-| **Source Code** | Volume-mounted (external) | Copied (internal) |
-
-Sources: [frontend/Dockerfile:31-48,85-119](), [orchestrator/Dockerfile:45-71,74-116](), [docker-compose.yml:132-135,69-72]()
-
-## Container Entrypoint Strategy
-
-### Frontend
-
-The frontend uses the default Node.js entrypoint with different commands per stage:
-- Development: `CMD ["npm", "run", "dev"]`
-- Production: `CMD ["npm", "start"]`
-
-No custom entrypoint script is required since Next.js handles initialization.
-
-Sources: [frontend/Dockerfile:48,118]()
-
-### Backend
-
-The backend uses a custom entrypoint script for orchestration:
-
-**Minimal Entrypoint (built into image):**
-[orchestrator/Dockerfile:51-52]()
-
-This creates a pass-through entrypoint that simply executes the provided command. It's minimal because Railway deployments don't need database initialization logic (the database is already running).
-
-**Full Entrypoint (docker-compose override):**
-[docker-compose.yml:114]()
-
-For local development with docker-compose, a full entrypoint script is mounted that:
-1. Waits for PostgreSQL to be ready
-2. Runs database migrations
-3. Seeds initial data
-4. Starts the application
-
-See [Database Setup](#12.4) for details on the initialization process.
-
-Sources: [orchestrator/Dockerfile:51-52,68,84-85,111](), [docker-compose.yml:114]()
-
-## Port Configuration
-
-Both containers expose standard ports that can be remapped by the orchestration layer:
-
-| Service | Internal Port | Default External Port | Configurable Via |
-|---------|--------------|----------------------|------------------|
-| Frontend | 3000 | 3000 | `FRONTEND_PORT` in docker-compose |
-| Backend | 8000 | 8000 | `API_PORT` in docker-compose |
-| Backend (Railway) | `$PORT` | Platform-assigned | Railway environment |
-
-**Railway Port Handling:**
-The production backend command uses shell expansion to support Railway's dynamic port assignment:
-
-[orchestrator/Dockerfile:115]()
-
-This reads the `PORT` environment variable provided by Railway and defaults to `8000` for local development.
-
-Sources: [frontend/Dockerfile:41,110](), [orchestrator/Dockerfile:61,104,115](), [docker-compose.yml:31,53,110,147]()
+### Security Configuration
+- **Redis Hardening**: The Redis container renames dangerous commands like `FLUSHALL`, `FLUSHDB`, and `DEBUG` to empty strings to prevent accidental data loss [docker-compose.yml:52-61]().
+- **Network Isolation**: All services reside on the `automatos` bridge network [docker-compose.yml:42-43]().
+- **Resource Limits**: Redis is constrained to `256mb` with an `allkeys-lru` policy [docker-compose.yml:57-58]().
+- **Data Persistence**: Named volumes `postgres_data`, `redis_data`, and `workspace_data` are used for state persistence [docker-compose.yml:33-34], [docker-compose.yml:64-65], [docker-compose.yml:130]().
+
+Sources: [docker-compose.yml:18-200]()
 
 ---

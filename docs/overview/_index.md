@@ -5,524 +5,216 @@
 
 The following files were used as context for generating this wiki page:
 
+- [README.md](README.md)
 - [docker-compose.yml](docker-compose.yml)
+- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+- [docs/README.md](docs/README.md)
 - [frontend/.dockerignore](frontend/.dockerignore)
 - [frontend/Dockerfile](frontend/Dockerfile)
-- [frontend/app/admin/plugins/page.tsx](frontend/app/admin/plugins/page.tsx)
-- [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
-- [orchestrator/.env.example](orchestrator/.env.example)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/api/agent_plugins.py](orchestrator/api/agent_plugins.py)
-- [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/database/load_seed_data.py](orchestrator/core/database/load_seed_data.py)
+- [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/core/seeds/seed_personas.py](orchestrator/core/seeds/seed_personas.py)
-- [orchestrator/core/seeds/seed_plugin_categories.py](orchestrator/core/seeds/seed_plugin_categories.py)
-- [orchestrator/core/services/plugin_cache.py](orchestrator/core/services/plugin_cache.py)
-- [orchestrator/main.py](orchestrator/main.py)
+- [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
 - [orchestrator/requirements.txt](orchestrator/requirements.txt)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
 
 </details>
 
 
 
-Automatos AI is a multi-agent orchestration platform that enables users to create, configure, and deploy specialized AI agents that work together to execute complex workflows. The platform provides a comprehensive system for agent lifecycle management, plugin-based capability extension, workflow automation, and marketplace-based content sharing.
+## Purpose and Scope
 
-This page provides a high-level overview of the platform's architecture, core concepts, and capabilities. For detailed information about specific subsystems, see:
-- Agent management and configuration: [Agents](#3)
-- Workflow and recipe execution: [Workflows & Recipes](#4)
-- Plugin marketplace and installation: [Plugins & Marketplace](#5)
-- Tool integrations and Composio: [Tools & Integrations](#6)
-- Authentication and workspace isolation: [Authentication & Multi-Tenancy](#9)
+This page provides a high-level introduction to **Automatos AI**, explaining its architecture as an operating system for AI agents. It covers the platform's core purpose, major subsystems, and how they orchestrate to deliver autonomous multi-agent capabilities.
+
+For detailed definitions of fundamental concepts like agents, workflows, and memory tiers, see [Key Concepts](#1.1). For technical architecture diagrams and deployment patterns, see [System Architecture](#1.2).
 
 ---
 
-## Core Concepts
+## What is Automatos AI?
 
-Automatos AI is built around several key abstractions that work together to provide flexible agent orchestration:
+Automatos AI is a **multi-agent orchestration platform** that functions as an operating system for AI agents. Unlike traditional chatbot frameworks, it provides:
 
-### Agents
+- **Intelligent routing** that automatically selects the right agent or workflow for each user request using a multi-tier strategy (cache, rules, semantic, LLM) [README.md:87]().
+- **5-layer memory architecture** (L0–L4) spanning focus, session, short-term, long-term, and organizational knowledge [orchestrator/modules/memory/unified_memory_service.py:8-13]().
+- **Autonomous execution** through recipes (multi-agent workflows), heartbeats (proactive checks), and sandboxed workspace environments [README.md:83-92]().
+- **Unified context assembly** that builds prompts from 10 priority sections with token budget management [orchestrator/requirements.txt:72]().
+- **500+ tool integrations** via Composio, plus custom platform actions for self-management [README.md:43-46](), [orchestrator/requirements.txt:101-103]().
 
-**Agents** are AI-powered workers configured with specific capabilities, personalities, and tools. Each agent has:
-- **Category/Type**: Classification like `code_architect`, `security_expert`, `data_analyst`, or `custom`
-- **Persona**: Personality and communication style (predefined or custom)
-- **Model Configuration**: LLM provider, model ID, and generation parameters
-- **Skills**: Git-based capability packages loaded from repositories
-- **Plugins**: Marketplace-distributed content packages (skills + commands + agents)
-- **Tools**: Composio-integrated app connections (Slack, GitHub, Jira, etc.)
+The platform is built on **FastAPI** (backend) and **Next.js** (frontend), with PostgreSQL + pgvector for data, Redis for caching/pub-sub, and S3 for vectors/logs [orchestrator/Dockerfile:13-33](), [frontend/Dockerfile:14-23](), [docker-compose.yml:18-170]().
 
-Agents are created via a 5-step wizard and stored in the `agents` table with configuration in `agent_model_config`.
-
-### Workflows & Recipes
-
-**Recipes** (also called Workflow Templates) are multi-step automated processes where different agents collaborate:
-- Each step has a `prompt_template` (task description) and `agent_id` (which agent executes it)
-- Steps execute sequentially, passing results to subsequent steps via `step_outputs` dictionary
-- Execution tracked in `recipe_executions` table with real-time updates via Redis pub/sub
-- Quality assessment (5 dimensions) and learning analysis run post-execution
-
-Traditional **Workflows** use a 9-stage execution pipeline, while recipes use a simplified direct executor.
-
-### Plugins
-
-**Plugins** are versioned packages distributed via the marketplace that contain:
-- **Skills**: Markdown documentation added to agent prompts
-- **Commands**: Executable tool schemas with parameters
-- **Agents**: Pre-configured agent definitions
-- **Hooks**: Event listeners for system integration
-
-Plugins undergo security scanning (static + LLM-based) before approval. They're enabled at workspace level, then assigned to individual agents.
-
-### Tools
-
-**Tools** are Composio-integrated app connections that agents can invoke:
-- Discovered via `ComposioAppCache` and `ComposioActionCache` tables
-- Connected per-workspace via OAuth flows managed by `ComposioEntityManager`
-- Executed via `UnifiedToolExecutor` which routes to Composio or built-in tools
-- Tool hints generated by `ComposioHintService` based on task context
-
-### Workspaces
-
-**Workspaces** provide multi-tenant data isolation:
-- All agents, recipes, and executions are scoped to a `workspace_id` (UUID)
-- Users authenticated via Clerk JWT with workspace resolved from headers/environment
-- Workspace-level plugin enablement tracked in `workspace_enabled_plugins` table
+**Sources:** [README.md:5-20](), [orchestrator/Dockerfile:1-45](), [docker-compose.yml:1-16]()
 
 ---
 
-## System Architecture
+## Core Architecture
 
-The platform follows a three-tier architecture with clear separation between presentation, orchestration, and execution layers.
+The following diagram maps the major subsystems to their code entry points:
 
-### Architecture Overview
+### System Topology with Code Entities
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
-        Browser["Web Browser<br/>(User)"]
+    subgraph "Entry Points"
+        Browser["Next.js Frontend<br/>frontend/app/<br/>Port 3000"]
+        API["FastAPI Application<br/>orchestrator/main.py<br/>Port 8000"]
     end
     
-    subgraph "Frontend Application"
-        NextJS["Next.js App Router<br/>Port 3000"]
-        UI_Agents["AgentManagement<br/>frontend/components/agents/"]
-        UI_Recipes["RecipesTab<br/>frontend/components/workflows/"]
-        UI_Market["MarketplaceHomepage<br/>frontend/components/marketplace/"]
-        UI_Chat["Chat Component<br/>frontend/components/chat/"]
-        
-        APIClient["apiClient<br/>frontend/lib/api-client.ts"]
-        ClerkAuth["ClerkProvider<br/>@clerk/nextjs"]
-        
-        NextJS --> UI_Agents
-        NextJS --> UI_Recipes
-        NextJS --> UI_Market
-        NextJS --> UI_Chat
-        NextJS --> APIClient
-        NextJS --> ClerkAuth
-    end
-    
-    subgraph "Backend Orchestrator"
-        FastAPI["FastAPI Application<br/>orchestrator/main.py<br/>Port 8000"]
-        
-        API_Agents["agents_router<br/>/api/agents"]
-        API_Recipes["workflow_recipes_router<br/>/api/workflow-recipes"]
-        API_Market["marketplace_router<br/>/api/marketplace"]
-        API_Tools["tools_router<br/>/api/tools"]
-        API_Plugins["agent_plugins_router<br/>/api/agents/{id}/plugins"]
-        
-        FastAPI --> API_Agents
-        FastAPI --> API_Recipes
-        FastAPI --> API_Market
-        FastAPI --> API_Tools
-        FastAPI --> API_Plugins
-        
-        HybridAuth["get_request_context_hybrid()<br/>core/auth/hybrid.py"]
-        FastAPI --> HybridAuth
+    subgraph "Intelligence Layer"
+        Router["UniversalRouter<br/>api/routing.py<br/>RoutingDecision"]
+        AutoBrain["AutoBrain<br/>api/chat.py<br/>ComplexityAssessment"]
+        ContextSvc["ContextService<br/>api/context.py<br/>build_context()"]
     end
     
     subgraph "Execution Layer"
-        AgentFactory["AgentFactory<br/>modules/agents/factory/agent_factory.py"]
-        RecipeExecutor["execute_recipe_direct()<br/>api/recipe_executor.py"]
-        ToolRouter["UnifiedToolExecutor<br/>modules/tools/tool_router.py"]
-        PluginService["PluginContextService<br/>core/services/plugin_context_service.py"]
+        AgentFactory["AgentFactory<br/>api/agents.py<br/>execute_with_prompt()"]
+        RecipeExec["RecipeExecutor<br/>api/workflow_recipes.py<br/>execute_recipe_direct()"]
+        WorkspaceWorker["WorkspaceWorker<br/>services/workspace-worker/<br/>isolated_exec"]
+    end
+    
+    subgraph "Memory Stack"
+        L1["L1: SessionMemory<br/>Redis 24hr TTL<br/>SessionMemory class"]
+        L2["L2: memory_short_term<br/>PostgreSQL<br/>Short-term table"]
+        L3["L3: Mem0<br/>Long-term facts<br/>Mem0Client"]
+        UMS["UnifiedMemoryService<br/>modules/memory/<br/>unified_memory_service.py"]
         
-        API_Agents --> AgentFactory
-        API_Recipes --> RecipeExecutor
-        RecipeExecutor --> AgentFactory
-        AgentFactory --> ToolRouter
-        API_Plugins --> PluginService
+        UMS --> L1
+        UMS --> L2
+        UMS --> L3
     end
     
     subgraph "Data Layer"
-        Postgres["PostgreSQL + pgvector<br/>agents, workflow_recipes,<br/>marketplace_plugins"]
-        Redis["Redis<br/>Cache + Pub/Sub"]
-        S3["AWS S3<br/>Plugin Storage"]
-        
-        API_Agents --> Postgres
-        API_Recipes --> Postgres
-        API_Market --> Postgres
-        PluginService --> S3
-        PluginService --> Redis
-        RecipeExecutor --> Redis
+        Postgres[("PostgreSQL + pgvector<br/>automatos_postgres<br/>pgvector/pgvector:pg16")]
+        Redis[("Redis<br/>automatos_redis<br/>redis:7-alpine")]
     end
     
-    subgraph "External Services"
-        LLM["LLM Providers<br/>OpenAI API, Anthropic API"]
-        Composio["Composio API<br/>App Integrations"]
-        ClerkSvc["Clerk Auth Service"]
-        
-        AgentFactory --> LLM
-        ToolRouter --> Composio
-        ClerkAuth --> ClerkSvc
-        HybridAuth --> ClerkSvc
-    end
+    Browser --> API
+    API --> Router
+    API --> AutoBrain
+    Router --> AgentFactory
+    AutoBrain --> ContextSvc
+    ContextSvc --> UMS
+    AgentFactory --> ContextSvc
+    RecipeExec --> AgentFactory
     
-    Browser --> NextJS
-    APIClient --> FastAPI
+    API --> Postgres
+    API --> Redis
+    UMS --> Postgres
+    UMS --> Redis
 ```
 
-**Sources:** [orchestrator/main.py:1-808](), [frontend/lib/api-client.ts:1-1455](), [orchestrator/modules/agents/factory/agent_factory.py:1-1083](), [orchestrator/api/recipe_executor.py:1-419]()
+**Sources:** [docker-compose.yml:22-73](), [orchestrator/core/redis/client.py:14-31](), [orchestrator/modules/memory/unified_memory_service.py:1-13]()
 
-### Request Flow: Agent Creation
+---
+
+## Major Subsystems
+
+The platform is composed of several interconnected subsystems:
+
+| Subsystem | Primary Module | Purpose | Details Page |
+|-----------|---------------|---------|--------------|
+| **Universal Router** | `api/routing.py` | 7-tier intelligent message routing (cache → rules → semantic → LLM) | [Universal Router](#10) |
+| **Memory System** | `modules/memory/` | 5-layer stack (L0–L4) managed by `UnifiedMemoryService` | [Memory System](#3) |
+| **Context Service** | `api/context.py` | Unified prompt assembly from 10 priority sections with budget logic | [Context Service](#4) |
+| **Agent Factory** | `api/agents.py` | Agent lifecycle: create, activate, and execute tool loops | [Agents](#5) |
+| **Workflow Engine** | `api/workflows.py` | 5-phase execution (PLAN, PREPARE, EXECUTE, EVALUATE, LEARN) | [Workflows & Recipes](#6) |
+| **Workspace Worker** | `services/workspace-worker/` | Sandboxed file and command execution for agent tasks | [Workspace Execution](#21) |
+| **Cloud Sync** | `api/cloud_documents.py` | RAG-powered access to external cloud storage (Dropbox, GDrive) | [Knowledge Base & RAG](#7) |
+
+**Sources:** [README.md:83-92](), [orchestrator/api/cloud_documents.py:185-200](), [orchestrator/modules/memory/unified_memory_service.py:1-21]()
+
+---
+
+## Request Flow: Chat Message
+
+The following sequence shows how a typical chat request flows through the system using the AI SDK Data Stream protocol:
+
+### Chat Request Pipeline
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant CreateAgentModal as "CreateAgentModal<br/>create-agent-modal.tsx:63-353"
-    participant apiClient as "apiClient<br/>api-client.ts:798-917"
-    participant agents_router as "agents_router<br/>api/agents.py"
-    participant AgentFactory as "AgentFactory<br/>agent_factory.py:656-741"
-    participant DB as "PostgreSQL<br/>agents table"
+    participant API as "FastAPI<br/>/api/chat"
+    participant Router as "UniversalRouter<br/>route()"
+    participant Context as "ContextService<br/>build_context()"
+    participant Memory as "UnifiedMemoryService<br/>retrieve()"
+    participant Factory as "AgentFactory<br/>execute()"
+    participant LLM as "LLM Provider<br/>(OpenAI/Anthropic)"
     
-    User->>CreateAgentModal: Fill 5-step wizard<br/>(category, persona, model, tools, plugins)
-    CreateAgentModal->>CreateAgentModal: Validate form data
-    CreateAgentModal->>apiClient: mutateAsync(agentPayload)
-    apiClient->>apiClient: Add Clerk JWT + X-Workspace-ID headers
-    apiClient->>agents_router: POST /api/agents
-    agents_router->>agents_router: get_request_context_hybrid()
-    agents_router->>DB: INSERT INTO agents
-    DB-->>agents_router: agent record with id
-    agents_router->>DB: INSERT INTO agent_model_config
-    agents_router->>DB: INSERT INTO agent_assigned_plugins
-    agents_router-->>apiClient: {"id": 123, "name": "...", ...}
-    apiClient-->>CreateAgentModal: agent object
-    CreateAgentModal->>CreateAgentModal: Show success toast
-    CreateAgentModal->>User: Close modal, refresh list
+    User->>API: POST /api/chat<br/>{messages, workspace_id}
+    
+    API->>Router: route(RequestEnvelope)
+    Router-->>API: RoutingDecision(agent_id)
+    
+    API->>Context: build_context(mode=CHATBOT)
+    Context->>Memory: get_session(conversation_id)
+    Memory-->>Context: SessionMemory (L1)
+    Context-->>API: Assembled Context
+    
+    API->>Factory: execute_with_prompt(agent_id)
+    Factory->>LLM: streaming request
+    LLM-->>Factory: tokens / tool_calls
+    Factory-->>API: SSE Stream
+    API-->>User: AI SDK Data Stream
+    
+    API->>Memory: store_long_term(workspace_id, exchange)
 ```
 
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:184-353](), [frontend/lib/api-client.ts:798-917](), [orchestrator/api/agents.py:1-500]()
+**Sources:** [orchestrator/core/redis/client.py:48-64](), [orchestrator/modules/memory/unified_memory_service.py:8-25](), [frontend/Dockerfile:57-60]()
 
 ---
 
-## Technology Stack
+## Memory System: 5-Layer Hierarchy
 
-### Frontend Stack
+The `UnifiedMemoryService` provides a single entry point for all memory operations, replacing fragmented clients [orchestrator/modules/memory/unified_memory_service.py:1-13]():
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Framework** | Next.js 14 (App Router) | React-based SSR/SSG framework |
-| **UI Library** | Radix UI + shadcn/ui | Accessible component primitives |
-| **Styling** | Tailwind CSS | Utility-first CSS framework |
-| **Authentication** | Clerk (@clerk/nextjs) | User authentication and session management |
-| **State Management** | React Query + Zustand | Server state (TanStack Query) + client state |
-| **API Client** | Custom typed client | Type-safe HTTP wrapper with Clerk integration |
-| **Charts** | Recharts | Data visualization |
-| **Forms** | React Hook Form | Form validation and submission |
+| Layer | Storage | Lifecycle | Purpose |
+|-------|---------|-----------|---------|
+| **L0** | Context Window | Per-request | Immediate focus. |
+| **L1** | Redis | 24hr TTL | **Working Memory**: Active session state [docker-compose.yml:57-58](). |
+| **L2** | PostgreSQL | Ebbinghaus Decay | **Short-term**: Recent exchanges with importance scoring. |
+| **L3** | Mem0 | Permanent | **Long-term**: Extracted facts and entities. |
+| **L4** | RAG / S3 | On-demand | **Org Knowledge**: Large document sets and vector stores [orchestrator/api/cloud_documents.py:108-115](). |
 
-**Primary Entry Points:**
-- [frontend/app/layout.tsx]() - Root layout with provider hierarchy
-- [frontend/components/agents/agent-management.tsx]() - Agent management page
-- [frontend/components/workflows/workflow-management.tsx]() - Workflow/recipe management
-- [frontend/components/marketplace/marketplace-homepage.tsx]() - Marketplace UI
-
-### Backend Stack
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Framework** | FastAPI | Async Python web framework |
-| **ORM** | SQLAlchemy 2.0 | Database abstraction and migrations |
-| **Database** | PostgreSQL 15 + pgvector | Relational storage with vector search |
-| **Caching** | Redis 7 | Cache and pub/sub for real-time updates |
-| **Storage** | AWS S3 | Plugin package storage |
-| **LLM Integration** | OpenAI SDK, Anthropic SDK | Multi-provider LLM support |
-| **Tool Integration** | Composio SDK | 500+ app integrations |
-| **Authentication** | Clerk + API Keys | JWT verification + programmatic access |
-
-**Primary Entry Points:**
-- [orchestrator/main.py:1-808]() - FastAPI application with all routers
-- [orchestrator/api/agents.py]() - Agent CRUD endpoints
-- [orchestrator/api/workflow_recipes.py]() - Recipe CRUD endpoints
-- [orchestrator/api/recipe_executor.py]() - Recipe execution logic
-- [orchestrator/modules/agents/factory/agent_factory.py]() - Agent runtime instantiation
-
----
-
-## Key Features
-
-### Agent Lifecycle Management
-
-Agents follow a complete lifecycle from creation to retirement:
+### Memory Namespace Mapping
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Creating: POST /api/agents
-    Creating --> Configuring: Agent record created
-    Configuring --> Active: Configuration complete
-    Active --> Busy: Executing task
-    Busy --> Active: Task complete
-    Active --> Hibernating: Pause agent
-    Hibernating --> Active: Resume agent
-    Active --> Archived: Archive agent
-    Archived --> [*]: Delete agent
+graph TD
+    subgraph "MemoryNamespace (unified_memory_service.py)"
+        WS["workspace()<br/>mem:workspace_id"]
+        AG["agent(agent_id)<br/>mem:workspace_id:agent:id"]
+        REC["recipe(recipe_id)<br/>mem:workspace_id:recipe:id"]
+        SESS["session(conv_id)<br/>mem:session:ws_id:conv_id"]
+    end
     
-    note right of Creating
-        CreateAgentModal submits:
-        - category, name, description
-        - persona (predefined or custom)
-        - model config (provider, model_id, params)
-        - tool assignments
-        - plugin assignments
-    end note
-    
-    note right of Active
-        AgentFactory.activate_agent():
-        - Loads agent from DB
-        - Resolves persona prompt
-        - Loads plugin content from S3
-        - Builds system prompt
-        - Creates LLM manager instance
-    end note
-    
-    note right of Busy
-        RecipeExecutor or AgentFactory.execute_with_prompt():
-        - Generates with LLM
-        - Executes tool calls via UnifiedToolExecutor
-        - Handles retries and errors
-        - Returns structured response
-    end note
+    WS --> L3[L3: Mem0 Long-term]
+    AG --> L3
+    REC --> L3
+    SESS --> L1[L1: Redis Session]
 ```
 
-**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:656-741](), [frontend/components/agents/create-agent-modal.tsx:184-353]()
-
-### Plugin Marketplace System
-
-The plugin marketplace provides a secure distribution channel for capability packages:
-
-**Upload Pipeline:**
-1. Admin uploads plugin package (ZIP) via [frontend/app/admin/plugins/upload/page.tsx]()
-2. Backend extracts manifest.json via [orchestrator/api/admin_plugins.py]()
-3. Static security scan checks file types, sizes, paths
-4. LLM security scan reviews content for malicious code
-5. Scan results stored in `plugin_security_scans` table
-6. Plugin marked as `pending` if passed scans, else `rejected`
-
-**Approval Flow:**
-1. Admins review pending plugins at [frontend/app/admin/plugins/page.tsx]()
-2. Approve/reject/deactivate actions via [orchestrator/api/admin_plugins.py]()
-3. Approved plugins appear in public marketplace
-
-**Installation:**
-1. Users browse marketplace at `MarketplacePluginsTab`
-2. Enable plugin for workspace via `POST /api/workspaces/{id}/plugins`
-3. Assign plugin to agent via `PUT /api/agents/{id}/plugins`
-4. Runtime loads plugin content via `PluginContextService.get_assigned_plugins()`
-
-```mermaid
-graph LR
-    Upload["Admin Upload<br/>admin/plugins/upload"] --> StaticScan["Static Scan<br/>admin_plugins.py:191-244"]
-    StaticScan --> LLMScan["LLM Scan<br/>admin_plugins.py:245-301"]
-    LLMScan --> S3Store["Store in S3<br/>marketplace_s3_service.py"]
-    S3Store --> DBRecord["marketplace_plugins table"]
-    
-    DBRecord --> ApprovalQueue["Admin Approval<br/>admin/plugins/page"]
-    ApprovalQueue --> Marketplace["Public Marketplace<br/>marketplace-plugins-tab"]
-    
-    Marketplace --> WorkspaceEnable["Enable for Workspace<br/>POST /api/workspaces/{id}/plugins"]
-    WorkspaceEnable --> AgentAssign["Assign to Agent<br/>PUT /api/agents/{id}/plugins"]
-    AgentAssign --> Runtime["Load at Runtime<br/>PluginContextService"]
-    
-    Runtime --> AgentPrompt["Inject in System Prompt<br/>AgentFactory._build_agent_system_prompt()"]
-```
-
-**Sources:** [orchestrator/api/admin_plugins.py:1-500](), [orchestrator/core/services/plugin_context_service.py:1-300](), [frontend/components/marketplace/marketplace-plugins-tab.tsx:1-400]()
-
-### Recipe Execution Pipeline
-
-Recipes execute multi-step workflows with agent collaboration:
-
-**Execution Flow:**
-1. User clicks "Cook" button in `RecipesTab`
-2. Frontend calls `POST /api/workflow-recipes/{id}/execute`
-3. Backend calls `execute_recipe_direct()` in [orchestrator/api/recipe_executor.py:107-290]()
-4. For each step:
-   - Load agent from DB with skills/plugins
-   - Resolve prompt template with previous step outputs
-   - Execute via `_execute_step()` using chatbot components
-   - Store result in `step_outputs` dictionary keyed by `output_key`
-   - Publish progress to Redis channel `workflow:{workspace_id}:execution:{execution_id}`
-5. Update `recipe_executions` table with final status
-6. Optional: Run quality assessment and learning analysis
-
-**Real-time Updates:**
-- Frontend subscribes to Redis channel via SSE endpoint
-- `ExecutionKitchen` component displays live progress with `RecipeStepProgress`
-- Shows current step, agent name, token usage, duration
-
-```mermaid
-graph TB
-    RecipesTab["RecipesTab<br/>Click 'Cook' button"] --> ExecuteAPI["POST /api/workflow-recipes/{id}/execute<br/>workflow_recipes.py:400"]
-    ExecuteAPI --> DirectExec["execute_recipe_direct()<br/>recipe_executor.py:107-290"]
-    
-    DirectExec --> CreateExec["Create RecipeExecution record<br/>status='running'"]
-    CreateExec --> StepLoop["For each step in recipe.steps"]
-    
-    StepLoop --> LoadAgent["Load Agent from DB<br/>with skills + plugins"]
-    LoadAgent --> ResolvePrompt["_resolve_prompt()<br/>Inject previous step outputs"]
-    ResolvePrompt --> ExecuteStep["_execute_step()<br/>recipe_executor.py:44-182"]
-    
-    ExecuteStep --> BuildPrompt["Build system prompt<br/>persona + plugins"]
-    BuildPrompt --> Hints["ComposioHintService.build_hints()<br/>Get tool hints"]
-    Hints --> LLMGenerate["agent_runtime.llm_manager.generate_response()<br/>With tools"]
-    LLMGenerate --> ToolLoop["For each tool_call"]
-    ToolLoop --> ToolExec["tool_router.execute_and_format()<br/>Execute tool"]
-    ToolExec --> ToolLoop
-    
-    ToolLoop --> StoreResult["Store in step_outputs dict<br/>keyed by output_key"]
-    StoreResult --> PublishEvent["Publish to Redis<br/>workflow:*:execution:*"]
-    PublishEvent --> StepLoop
-    
-    StepLoop --> UpdateDB["Update RecipeExecution<br/>status='completed'"]
-    UpdateDB --> QualityCheck["Optional: POST /assess-quality<br/>RecipeQualityService"]
-    UpdateDB --> Learning["Optional: POST /learn<br/>RecipeLearningService"]
-    
-    PublishEvent --> SSE["SSE Stream to Frontend"]
-    SSE --> ExecKitchen["ExecutionKitchen<br/>Live progress display"]
-```
-
-**Sources:** [orchestrator/api/recipe_executor.py:107-290](), [orchestrator/api/workflow_recipes.py:400-500](), [frontend/components/workflows/execution-kitchen.tsx:1-800]()
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:1-25](), [docker-compose.yml:54-61]()
 
 ---
 
-## Authentication & Authorization
+## Key Technologies & Deployment
 
-### Hybrid Authentication System
+Automatos AI is designed for containerized deployment with a focus on security and scalability [orchestrator/Dockerfile:1-130]().
 
-The platform supports three authentication methods with workspace-scoped data isolation:
+| Component | Technology | Role |
+|-----------|------------|------|
+| **Backend** | Python 3.11 + FastAPI | Core API and Orchestration [orchestrator/Dockerfile:13](). |
+| **Frontend** | Node 20 + Next.js | Admin Dashboard and Chat UI [frontend/Dockerfile:14](). |
+| **Database** | PostgreSQL 16 + pgvector | Structured data and vector embeddings [docker-compose.yml:23](). |
+| **Cache/Queue** | Redis 7 | L1 Memory, Pub/Sub, and Task Queues [docker-compose.yml:49](). |
+| **Sandbox** | Docker/Isolated Filesystem | `workspace-worker` service for safe code execution [docker-compose.yml:178](). |
 
-```mermaid
-graph TB
-    Request["HTTP Request"] --> HybridAuth["get_request_context_hybrid()<br/>core/auth/hybrid.py:150-250"]
-    
-    HybridAuth --> CheckBearer["Check Authorization header"]
-    CheckBearer -->|"Bearer {jwt}"| ClerkVerify["Clerk JWT Verification<br/>verify_token()"]
-    CheckBearer -->|"None"| CheckAPIKey["Check X-API-Key header"]
-    
-    ClerkVerify -->|Valid| AutoProvision["Auto-provision user<br/>if first login"]
-    ClerkVerify -->|Invalid| Reject401["HTTP 401 Unauthorized"]
-    
-    CheckAPIKey -->|Matches ORCHESTRATOR_API_KEY| ResolveWS["Resolve Workspace"]
-    CheckAPIKey -->|Invalid| CheckEnv["Check REQUIRE_AUTH env"]
-    
-    CheckEnv -->|false| AnonymousWS["Use DEFAULT_TENANT_ID"]
-    CheckEnv -->|true| Reject401
-    
-    AutoProvision --> ResolveWSClerk["Resolve Workspace<br/>1. X-Workspace-ID header<br/>2. workspace_id param<br/>3. WORKSPACE_ID env<br/>4. User's personal workspace"]
-    
-    ResolveWS --> BuildCtx["Build RequestContext<br/>workspace_id + UserContext"]
-    ResolveWSClerk --> BuildCtx
-    AnonymousWS --> BuildCtx
-    
-    BuildCtx --> Router["API Router<br/>Filter queries by workspace_id"]
-```
+**Production Hardening:** The system renames dangerous Redis commands (`FLUSHALL`, `FLUSHDB`, `DEBUG`) to prevent data loss if exposed [docker-compose.yml:52-61]() and uses multi-stage Docker builds to minimize production image size [orchestrator/Dockerfile:90-115]().
 
-**Workspace Resolution Priority:**
-1. `X-Workspace-ID` HTTP header (highest priority)
-2. `workspace_id` query parameter
-3. `WORKSPACE_ID` environment variable
-4. User's personal workspace (Clerk users)
-5. `DEFAULT_TENANT_ID` (fallback: `00000000-0000-0000-0000-000000000000`)
-
-**Data Isolation:**
-All queries scoped by workspace: `SELECT * FROM agents WHERE workspace_id = ?`
-
-**Sources:** [orchestrator/core/auth/hybrid.py:150-250](), [frontend/lib/api-client.ts:143-148](), [frontend/lib/api-client.ts:833-849]()
+**Sources:** [orchestrator/Dockerfile:1-130](), [frontend/Dockerfile:1-115](), [docker-compose.yml:1-210](), [orchestrator/requirements.txt:1-20]()
 
 ---
 
-## Configuration & Deployment
-
-### Environment Configuration
-
-The platform uses environment variables for all configuration. Key variables:
-
-**Database:**
-- `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
-- `DATABASE_URL` (connection string, auto-generated if not set)
-
-**Redis:**
-- `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`
-
-**Authentication:**
-- `CLERK_SECRET_KEY` - Clerk backend API key for JWT verification
-- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` - Clerk frontend public key
-- `ORCHESTRATOR_API_KEY` - API key for programmatic access
-- `REQUIRE_AUTH` - Boolean to enforce authentication (default: true)
-
-**LLM Providers:**
-- `OPENAI_API_KEY` - OpenAI API key
-- `ANTHROPIC_API_KEY` - Anthropic API key
-- `DEFAULT_LLM_PROVIDER` - Default provider (openai/anthropic)
-- `DEFAULT_LLM_MODEL` - Default model ID
-
-**Composio:**
-- `COMPOSIO_API_KEY` - Composio API key for tool integrations
-
-**AWS S3:**
-- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
-- `AWS_S3_BUCKET` - Bucket for plugin storage
-- `AWS_REGION` - AWS region
-
-**Application:**
-- `NEXT_PUBLIC_API_URL` - Backend URL for frontend API calls
-- `CORS_ALLOW_ORIGINS` - Comma-separated list of allowed origins
-- `WORKSPACE_ID` - Default workspace UUID for single-tenant mode
-
-**Sources:** [orchestrator/config.py](), [frontend/lib/api-client.ts:88-138]()
-
-### Docker Compose Architecture
-
-The platform deploys as a multi-container application:
-
-| Service | Image | Purpose | Ports |
-|---------|-------|---------|-------|
-| **frontend** | Next.js build | React UI | 3000 |
-| **backend** | Python FastAPI | API orchestrator | 8000 |
-| **postgres** | PostgreSQL 15 + pgvector | Primary database | 5432 |
-| **redis** | Redis 7 | Cache + pub/sub | 6379 |
-
-**Initialization:**
-1. PostgreSQL starts with init scripts in `orchestrator/core/database/init.sql`
-2. Backend runs migrations via `alembic upgrade head`
-3. Seed data loaded via `load_seed_data.py` (credential types, personas, plugin categories)
-4. Frontend connects to backend via `NEXT_PUBLIC_API_URL`
-
-**Sources:** [docker-compose.yml](), [orchestrator/core/database/init_database.py](), [orchestrator/core/database/load_seed_data.py:1-150]()
-
----
-
-## Summary
-
-Automatos AI provides a complete platform for building, deploying, and managing AI agent systems. The architecture separates concerns clearly:
-
-- **Frontend (Next.js)** handles user interactions with rich wizards, real-time displays, and marketplace browsing
-- **Backend (FastAPI)** orchestrates agent execution, workflow management, and marketplace operations
-- **Execution Layer** provides the runtime for agent instantiation, tool execution, and plugin content loading
-- **Data Layer** ensures persistence, caching, and real-time updates across distributed components
-
-The plugin marketplace enables community-driven capability distribution with security scanning and approval workflows. Multi-tenant workspace isolation ensures data privacy. Hybrid authentication supports both interactive and programmatic access.
-
-For deep dives into specific subsystems, refer to the specialized wiki pages linked at the top of this document.
-
-**Primary Sources:** [orchestrator/main.py:1-808](), [frontend/lib/api-client.ts:1-1455](), [orchestrator/modules/agents/factory/agent_factory.py:1-1083](), [orchestrator/api/recipe_executor.py:1-419](), [frontend/components/agents/agent-management.tsx:1-279](), [frontend/components/workflows/execution-kitchen.tsx:1-800]()
+This overview establishes the foundational understanding of Automatos AI's architecture. For detailed implementation guides, see the child pages:
+- [Key Concepts](#1.1)
+- [System Architecture](#1.2)
 
 ---

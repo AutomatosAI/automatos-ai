@@ -5,26 +5,18 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/admin/plugins/page.tsx](frontend/app/admin/plugins/page.tsx)
-- [frontend/app/tools/page.tsx](frontend/app/tools/page.tsx)
-- [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
-- [frontend/components/documents/document-management.tsx](frontend/components/documents/document-management.tsx)
-- [frontend/components/layout/main-layout.tsx](frontend/components/layout/main-layout.tsx)
-- [frontend/components/layout/sidebar.tsx](frontend/components/layout/sidebar.tsx)
-- [frontend/components/settings/SettingsPanel.tsx](frontend/components/settings/SettingsPanel.tsx)
-- [frontend/components/tools/my-tools-dashboard.tsx](frontend/components/tools/my-tools-dashboard.tsx)
-- [frontend/components/tools/tools-dashboard.tsx](frontend/components/tools/tools-dashboard.tsx)
-- [frontend/components/workflows/workflow-management.tsx](frontend/components/workflows/workflow-management.tsx)
+- [.env.example](.env.example)
+- [frontend/components/knowledge/BusinessGraphPanel.tsx](frontend/components/knowledge/BusinessGraphPanel.tsx)
+- [frontend/components/knowledge/BusinessGraphVisualization.tsx](frontend/components/knowledge/BusinessGraphVisualization.tsx)
+- [frontend/components/knowledge/GraphDiffBanner.tsx](frontend/components/knowledge/GraphDiffBanner.tsx)
 - [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
-- [orchestrator/.env.example](orchestrator/.env.example)
-- [orchestrator/api/agent_plugins.py](orchestrator/api/agent_plugins.py)
-- [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/database/load_seed_data.py](orchestrator/core/database/load_seed_data.py)
-- [orchestrator/core/seeds/seed_personas.py](orchestrator/core/seeds/seed_personas.py)
-- [orchestrator/core/seeds/seed_plugin_categories.py](orchestrator/core/seeds/seed_plugin_categories.py)
-- [orchestrator/core/services/plugin_cache.py](orchestrator/core/services/plugin_cache.py)
-- [orchestrator/main.py](orchestrator/main.py)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
+- [orchestrator/api/knowledge_graph.py](orchestrator/api/knowledge_graph.py)
+- [orchestrator/modules/context/sections/graph_context.py](orchestrator/modules/context/sections/graph_context.py)
+- [orchestrator/modules/knowledge/__init__.py](orchestrator/modules/knowledge/__init__.py)
+- [orchestrator/modules/knowledge/graph_extraction.py](orchestrator/modules/knowledge/graph_extraction.py)
+- [orchestrator/modules/knowledge/graph_service.py](orchestrator/modules/knowledge/graph_service.py)
+- [orchestrator/modules/tools/discovery/actions_graph.py](orchestrator/modules/tools/discovery/actions_graph.py)
+- [orchestrator/modules/tools/discovery/handlers_graph.py](orchestrator/modules/tools/discovery/handlers_graph.py)
 
 </details>
 
@@ -32,20 +24,21 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The API Client is a centralized TypeScript client class that handles all HTTP communication between the Next.js frontend and the FastAPI backend. It provides authentication injection, workspace context management, request/response logging, and a development mock system.
+The API Client is a centralized TypeScript client class that handles all HTTP communication between the Next.js frontend and the FastAPI backend. It provides authentication injection via Clerk JWT, workspace context management through custom headers, request/response logging, and a robust development mock system with automatic fallback capabilities. It serves as the single source of truth for frontend-to-backend data flow, ensuring that multi-tenancy constraints are respected at the network layer.
 
-For information about backend authentication and multi-tenancy, see [Authentication & Multi-Tenancy](#12). For frontend state management patterns, see [State Management](#14.2).
-
-**Sources:** [frontend/lib/api-client.ts:1-100]()
+**Sources:** [frontend/lib/api-client.ts:1-11]()
 
 ---
 
 ## Architecture Overview
 
-The API Client is implemented as a singleton class (`ApiClient`) that wraps the browser's native `fetch` API with workspace-aware authentication, standardized error handling, and a development-time mock system.
+The API Client is implemented as a singleton class (`ApiClient`) that wraps the browser's native `fetch` API. It is designed to be workspace-aware, injecting the necessary multi-tenancy headers into every outgoing request.
 
 ### Class Structure
 
+The `ApiClient` maintains internal state for base URL resolution, default headers, and mock configuration. It supports an admin override mechanism to allow administrators to "impersonate" or view other workspace contexts without changing their primary session.
+
+**ApiClient Class Diagram**
 ```mermaid
 classDiagram
     class ApiClient {
@@ -60,6 +53,8 @@ classDiagram
         +setCurrentPage(pageName): void
         +getBaseUrl(): string
         +getAuthHeaders(): Promise~Record~
+        +buildBusinessGraph(): Promise~any~
+        +getWorkspaceFileContent(wsId, path): Promise~any~
         -shouldUseMock(endpoint): boolean
         -getMockDataForEndpoint(endpoint): any
     }
@@ -75,559 +70,165 @@ classDiagram
         +dashboard: false
         +agents: false
         +workflows: false
-        +admin: false
+        +memory: false
+        +orchestrator: false
+        +test: true
     }
     
     ApiClient --> MockConfig
     ApiClient --> PAGE_MOCK_CONFIG
 ```
 
-**Sources:** [frontend/lib/api-client.ts:93-154]()
+**Sources:** [frontend/lib/api-client.ts:94-155](), [frontend/lib/api-client.ts:55-79](), [frontend/lib/api-client.ts:84-92](), [frontend/lib/api-client.ts:174-186]()
 
 ---
 
 ## Authentication System
 
-The API Client uses Clerk JWT tokens for authentication, which are injected into every request via the `Authorization` header. Workspace context is passed via the `X-Workspace-ID` header.
+The system utilizes a hybrid authentication model. The frontend fetches a JWT from Clerk, which the `ApiClient` injects into the `Authorization` header.
 
 ### Authentication Flow
 
+The backend uses `get_request_context_hybrid` to validate these tokens and extract the workspace context.
+
+**Frontend-to-Backend Auth Flow**
 ```mermaid
 sequenceDiagram
-    participant Component
-    participant ApiClient
-    participant ClerkAuth
-    participant Backend
-    participant HybridAuth as "get_request_context_hybrid"
+    participant Component as "React Component"
+    participant ApiClient as "apiClient (api-client.ts)"
+    participant ClerkAuth as "@clerk/nextjs"
+    participant Backend as "FastAPI (main.py)"
+    participant HybridAuth as "get_request_context_hybrid (hybrid.py)"
     
     Component->>ApiClient: request("/api/agents")
-    ApiClient->>ClerkAuth: getClerkToken()
-    ClerkAuth-->>ApiClient: JWT token (or null)
+    ApiClient->>ClerkAuth: getToken()
+    ClerkAuth-->>ApiClient: JWT token (2s timeout)
     
-    alt Token Available
-        ApiClient->>ApiClient: Add "Authorization: Bearer {token}"
-    else No Token
-        ApiClient->>ApiClient: Warn - request may fail
+    alt Token Success
+        ApiClient->>ApiClient: Set "Authorization: Bearer {token}"
+    else Timeout/Fail
+        ApiClient->>ApiClient: Proceed without Auth header
     end
     
-    ApiClient->>ApiClient: Get workspace_id from localStorage<br/>or _adminWorkspaceOverride
-    ApiClient->>ApiClient: Add "X-Workspace-ID: {workspace_id}"
+    ApiClient->>ApiClient: Resolve workspace_id from localStorage<br/>or Admin Override
+    ApiClient->>ApiClient: Set "X-Workspace-ID: {ws_id}"
     
     ApiClient->>Backend: fetch(url, headers)
-    Backend->>HybridAuth: Validate JWT via Clerk JWKS
-    HybridAuth->>HybridAuth: Extract workspace_id from header
-    HybridAuth->>HybridAuth: Build RequestContext
-    HybridAuth-->>Backend: RequestContext
+    Backend->>HybridAuth: Validate JWT & Workspace Access
+    HybridAuth-->>Backend: RequestContext (User/Workspace)
     Backend-->>ApiClient: JSON response
-    ApiClient-->>Component: Typed data
+    ApiClient-->>Component: Typed Data <T>
 ```
 
-**Sources:** [frontend/lib/api-client.ts:819-903](), [orchestrator/core/auth/hybrid.py]() (referenced)
+**Sources:** [frontend/lib/api-client.ts:819-841](), [frontend/lib/api-client.ts:156-164](), [orchestrator/api/knowledge_graph.py:17-18]()
 
-### Token Injection
+### Token Injection Implementation
 
-The API Client requires a Clerk token getter function to be registered at app initialization:
+The client requires a token getter to be registered, typically from a top-level provider or hook that has access to Clerk's `useAuth()`.
 
-```typescript
-// From a React component with useAuth() access
-const { getToken } = useAuth()
-apiClient.setClerkTokenGetter(async () => {
-  return await getToken()
-})
-```
+- **Timeout Protection:** The token fetch is wrapped in a 2-second timeout to prevent UI hangs if the auth provider is slow [frontend/lib/api-client.ts:829-840]().
+- **Header Composition:** Headers include `Content-Type: application/json` by default [frontend/lib/api-client.ts:121-123]().
+- **Hybrid Support:** If no Clerk token is available, the client still proceeds, allowing the backend to fall back to API Key authentication if applicable [frontend/lib/api-client.ts:841-842]().
 
-**Implementation Details:**
-
-- Token fetch has a **2-second timeout** to prevent hanging ([frontend/lib/api-client.ts:829-840]())
-- Falls back to `null` on timeout, logs warning
-- Request proceeds without auth (backend will return 401 if required)
-
-**Sources:** [frontend/lib/api-client.ts:156-163](), [frontend/lib/api-client.ts:827-841]()
+**Sources:** [frontend/lib/api-client.ts:156-164](), [frontend/lib/api-client.ts:819-853]()
 
 ---
 
 ## Request Lifecycle
 
-Every API call flows through the single `request<T>()` method, which handles authentication, serialization, error handling, and optional mock fallback.
+The `request<T>` method is the primary entry point for all data fetching.
 
-### Request Flow Diagram
+### Lifecycle Logic
 
-```mermaid
-flowchart TD
-    Start["Component calls<br/>apiClient.request()"]
-    Start --> GetToken["Fetch Clerk JWT<br/>(2s timeout)"]
-    GetToken --> ResolveWS["Resolve workspace_id<br/>(_adminWorkspaceOverride || localStorage)"]
-    ResolveWS --> BuildHeaders["Build headers:<br/>- Authorization: Bearer {token}<br/>- X-Workspace-ID: {workspace_id}<br/>- Content-Type: application/json"]
-    BuildHeaders --> SerializeBody["Stringify body<br/>(if object && !FormData)"]
-    SerializeBody --> Fetch["fetch(baseUrl + endpoint, config)"]
-    
-    Fetch --> CheckStatus{response.ok?}
-    CheckStatus -->|Yes| ParseJSON["response.json()"]
-    ParseJSON --> LogSuccess["Log success<br/>(dev only)"]
-    LogSuccess --> Return["Return typed data"]
-    
-    CheckStatus -->|No| ExtractError["Extract error detail<br/>from response body"]
-    ExtractError --> CheckMock{"shouldUseMock()?"}
-    
-    CheckMock -->|Yes| GetMock["getMockDataForEndpoint()"]
-    GetMock --> DispatchEvent["Dispatch 'mock-used' event"]
-    DispatchEvent --> Return
-    
-    CheckMock -->|No| ThrowError["Throw error"]
-    ThrowError --> End["Error propagates to caller"]
-    
-    Return --> End
-```
+1.  **Token Retrieval:** Calls the registered `getClerkToken` [frontend/lib/api-client.ts:827-828]().
+2.  **Header Assembly:** Merges default headers, auth headers, and workspace ID [frontend/lib/api-client.ts:849-863]().
+3.  **Body Serialization:** Automatically stringifies objects unless the body is an instance of `FormData` (used for file uploads or graph imports) [frontend/lib/api-client.ts:844-847]().
+4.  **Execution:** Performs the native `fetch` call.
+5.  **Error Handling:** If the response is not `ok`, it attempts to parse the backend's `detail` error message [frontend/lib/api-client.ts:884-895]().
+6.  **Mock Fallback:** If the network call fails and mocks are enabled for that context, it returns mock data instead of throwing [frontend/lib/api-client.ts:909-927]().
 
 **Sources:** [frontend/lib/api-client.ts:819-927]()
 
-### Request Method Signature
+---
 
-```typescript
-async request<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T>
-```
+## Workspace Context & Multi-Tenancy
 
-**Key Behaviors:**
+The `ApiClient` ensures data isolation by attaching the active workspace ID to every request. This is critical for the backend's `RequestContext` to filter database queries by `workspace_id`.
 
-- **Automatic Body Serialization:** Objects are JSON.stringify'd unless they are `FormData` ([frontend/lib/api-client.ts:844-847]())
-- **Workspace Injection:** Admin override takes priority over localStorage ([frontend/lib/api-client.ts:855-862]())
-- **Error Detail Extraction:** Attempts to parse `detail` field from error response body ([frontend/lib/api-client.ts:887-895]())
-- **HTTP 401 Handling:** Throws user-friendly message about missing Clerk token ([frontend/lib/api-client.ts:896-901]())
+### Workspace Resolution Hierarchy
 
-**Sources:** [frontend/lib/api-client.ts:819-927]()
+The client resolves the workspace ID using the following priority:
+1.  **Admin Override:** A module-level variable `_adminWorkspaceOverride` set via `setAdminWorkspaceOverride()` [frontend/lib/api-client.ts:84-92]().
+2.  **Local Storage:** Checks `last_active_workspace` or `last_active_org` keys [frontend/lib/api-client.ts:858-861]().
+
+**Sources:** [frontend/lib/api-client.ts:80-92](), [frontend/lib/api-client.ts:855-862]()
 
 ---
 
 ## Mock System
 
-The API Client includes a comprehensive mock system for development that allows page-level or endpoint-level mock control with automatic fallback when the backend is unavailable.
+The client features a tiered mock system that allows developers to work offline or against unimplemented endpoints.
 
-### Mock Configuration Hierarchy
+### Mock Control Hierarchy
 
+Mocks are evaluated in the following order:
+1.  **Production Check:** Mocks are strictly disabled in production environments [frontend/lib/api-client.ts:241-243]().
+2.  **Page-Level Override:** `PAGE_MOCK_CONFIG` defines which pages should use mocks (e.g., `test` or `demo` pages) [frontend/lib/api-client.ts:55-79]().
+3.  **Global Toggle:** A global `enabled` flag in `mockConfig` [frontend/lib/api-client.ts:251-253]().
+4.  **Endpoint Toggle:** Specific endpoint overrides within `mockConfig.endpoints` [frontend/lib/api-client.ts:256-259]().
+
+**Sources:** [frontend/lib/api-client.ts:238-264](), [frontend/lib/api-client.ts:753-796](), [frontend/lib/api-client.ts:909-927]()
+
+---
+
+## Specialized Implementation: Knowledge Graph
+
+The `ApiClient` includes specific methods for interacting with the Knowledge Graph system, which involves file-based storage in the workspace filesystem.
+
+### Graph Data Flow
+The client retrieves graph data (`graph.json`) and metadata (`meta.json`) from the workspace storage via the `getWorkspaceFileContent` method.
+
+**Knowledge Graph Entity Mapping**
 ```mermaid
-flowchart TD
-    Check["shouldUseMock(endpoint)"]
-    Check --> InProd{NODE_ENV === production?}
-    InProd -->|Yes| ReturnFalse["Return false<br/>(Never use mocks in prod)"]
-    
-    InProd -->|No| CheckPage{currentPage in<br/>PAGE_MOCK_CONFIG?}
-    CheckPage -->|Yes| PageConfig["Return PAGE_MOCK_CONFIG[currentPage]<br/>(Highest priority)"]
-    
-    CheckPage -->|No| CheckGlobal{mockConfig.enabled?}
-    CheckGlobal -->|No| ReturnFalse2["Return false"]
-    
-    CheckGlobal -->|Yes| CheckEndpoint{endpoint in<br/>mockConfig.endpoints?}
-    CheckEndpoint -->|Yes| EndpointConfig["Return mockConfig.endpoints[endpoint]"]
-    CheckEndpoint -->|No| ReturnTrue["Return true<br/>(Global default)"]
-    
-    PageConfig --> Done["Used by error handler<br/>to decide mock fallback"]
-    EndpointConfig --> Done
-    ReturnTrue --> Done
-    ReturnFalse --> Done
-    ReturnFalse2 --> Done
+graph LR
+    subgraph "Frontend (Next.js)"
+        BGP["BusinessGraphPanel.tsx"]
+        AC["api-client.ts"]
+    end
+
+    subgraph "Backend (FastAPI)"
+        KGA["knowledge_graph.py (API)"]
+        GS["graph_service.py (Service)"]
+        WC["WorkspaceClient (Core)"]
+    end
+
+    subgraph "Storage"
+        FILES["/graph/graph.json"]
+    end
+
+    BGP -- "apiClient.getWorkspaceFileContent()" --> AC
+    AC -- "GET /api/workspace/{id}/files" --> KGA
+    KGA -- "load_graph()" --> GS
+    GS -- "read()" --> WC
+    WC -- "I/O" --> FILES
 ```
 
-**Sources:** [frontend/lib/api-client.ts:238-264]()
+- **`buildBusinessGraph()`**: Triggers the backend pipeline to collect sources and build the NetworkX graph [frontend/lib/api-client.ts:174-186]().
+- **`getWorkspaceFileContent()`**: Fetches raw or parsed JSON files (like `graph.json`) from the `/graph/` directory of a specific workspace [frontend/lib/api-client.ts:197-200]().
 
-### Page-Level Mock Configuration
-
-The `PAGE_MOCK_CONFIG` constant provides simple on/off switches per page:
-
-```typescript
-const PAGE_MOCK_CONFIG: Record<string, boolean> = {
-  'dashboard': false,        // Use real APIs
-  'agents': false,           // Use real APIs
-  'workflows': false,        // Use real APIs
-  'admin': false,            // Use real APIs
-  'test': true,              // Always use mocks for testing
-  'demo': true,              // Always use mocks for demos
-}
-```
-
-**Usage Pattern:**
-
-```typescript
-// In a page component
-useEffect(() => {
-  apiClient.setCurrentPage('dashboard')
-  return () => apiClient.setCurrentPage('') // Clear on unmount
-}, [])
-```
-
-**Sources:** [frontend/lib/api-client.ts:55-78](), [frontend/lib/api-client.ts:277-283]()
-
-### Mock Data Storage
-
-Mock data is stored in the `mockData` object, keyed by endpoint path:
-
-```typescript
-private initializeMockData(): Record<string, () => any> {
-  return {
-    '/api/system/health': () => ({
-      status: 'healthy',
-      version: '2.0.0',
-      // ...
-    }),
-    '/api/agents/': () => [
-      { id: 1, name: 'MOCK: Data Analyst', ... },
-      // ...
-    ],
-    // Pattern matching for dynamic endpoints
-    'default': () => ({})
-  }
-}
-```
-
-**Dynamic Endpoint Matching:**
-
-The `getMockDataForEndpoint()` method supports pattern matching for dynamic paths like `/api/agents/123/logs` ([frontend/lib/api-client.ts:769-796]()).
-
-**Sources:** [frontend/lib/api-client.ts:302-750](), [frontend/lib/api-client.ts:753-796]()
+**Sources:** [frontend/lib/api-client.ts:174-200](), [frontend/components/knowledge/BusinessGraphPanel.tsx:190-217](), [orchestrator/modules/knowledge/graph_service.py:145-152]()
 
 ---
 
-## Workspace Management
+## Configuration & Environment
 
-The API Client implements workspace context management through the `X-Workspace-ID` header, with special handling for admin workspace override.
+The client's behavior is dictated by environment variables and build-time settings.
 
-### Workspace Resolution Flow
+| Variable | Source | Usage |
+| :--- | :--- | :--- |
+| `NEXT_PUBLIC_API_URL` | `.env` / Docker | Primary backend URL [frontend/lib/api-client.ts:107-111]() |
+| `NODE_ENV` | Build System | Toggles developer logging and mock availability [frontend/lib/api-client.ts:126-126]() |
 
-```mermaid
-flowchart TD
-    Start["Build request headers"]
-    Start --> CheckOverride{_adminWorkspaceOverride<br/>exists?}
-    
-    CheckOverride -->|Yes| UseOverride["workspace_id = _adminWorkspaceOverride<br/>(e.g., '__all__' for admin)"]
-    CheckOverride -->|No| CheckStorage{"localStorage has<br/>'last_active_workspace'?"}
-    
-    CheckStorage -->|Yes| UseStorage["workspace_id = localStorage<br/>.getItem('last_active_workspace')"]
-    CheckStorage -->|No| CheckOrgStorage{"localStorage has<br/>'last_active_org'?"}
-    
-    CheckOrgStorage -->|Yes| UseOrgStorage["workspace_id = localStorage<br/>.getItem('last_active_org')"]
-    CheckOrgStorage -->|No| NoWorkspace["workspace_id = undefined<br/>(Backend will reject)"]
-    
-    UseOverride --> Inject["headers['X-Workspace-ID'] = workspace_id"]
-    UseStorage --> Inject
-    UseOrgStorage --> Inject
-    NoWorkspace --> Inject
-    
-    Inject --> Send["Send request to backend"]
-    Send --> Backend["get_request_context_hybrid<br/>validates workspace access"]
-```
-
-**Sources:** [frontend/lib/api-client.ts:855-862]()
-
-### Admin Workspace Override
-
-The admin workspace override is a module-level variable that takes priority over localStorage. It's used by the `AdminWorkspaceSwitcher` component to switch between workspaces or view platform-wide data:
-
-```typescript
-// Module-level variable (not class instance)
-let _adminWorkspaceOverride: string | null = null
-
-export function setAdminWorkspaceOverride(wsId: string | null) {
-  _adminWorkspaceOverride = wsId
-}
-
-export function getAdminWorkspaceOverride(): string | null {
-  return _adminWorkspaceOverride
-}
-```
-
-**Usage Example:**
-
-```typescript
-// In AdminWorkspaceSwitcher component
-setAdminWorkspaceOverride('__all__')  // View all workspaces
-// or
-setAdminWorkspaceOverride(null)       // Reset to localStorage
-```
-
-**Backend Behavior:**
-
-When `X-Workspace-ID: __all__` is sent, `get_request_context_hybrid` in the backend sets `admin_all_workspaces=True` and removes workspace filters from queries (see [Data Isolation](#12.3)).
-
-**Sources:** [frontend/lib/api-client.ts:80-91](), [orchestrator/main.py:855-862]()
-
----
-
-## Configuration
-
-The API Client is configured at instantiation through environment variables and runtime settings.
-
-### Environment Variables
-
-| Variable | Purpose | Default | Set By |
-|----------|---------|---------|--------|
-| `NEXT_PUBLIC_API_URL` | Backend API base URL | `''` | Build-time or runtime injection |
-| `NODE_ENV` | Environment mode | `'development'` | Next.js |
-
-**Base URL Resolution:**
-
-The base URL is resolved with multiple fallbacks to support different deployment scenarios:
-
-```typescript
-this.baseUrl =
-  (typeof window !== 'undefined' && (window as any).__NEXT_PUBLIC_API_URL__) || // Runtime injection
-  process.env.NEXT_PUBLIC_API_URL || // Build-time env var
-  (typeof window !== 'undefined' && (window as any).NEXT_PUBLIC_API_URL) || // Runtime fallback
-  ''
-```
-
-**Critical:** If `NEXT_PUBLIC_API_URL` is not set, API calls will fail with 404 errors ([frontend/lib/api-client.ts:106-117]()).
-
-**Sources:** [frontend/lib/api-client.ts:101-123]()
-
-### Default Headers
-
-```typescript
-this.defaultHeaders = {
-  'Content-Type': 'application/json',
-}
-```
-
-These are merged with request-specific headers and auth headers before each request ([frontend/lib/api-client.ts:849-852]()).
-
-**Sources:** [frontend/lib/api-client.ts:120-122]()
-
----
-
-## Usage Patterns
-
-### Basic Request
-
-```typescript
-// GET request
-const agents = await apiClient.request<Agent[]>('/api/agents')
-
-// POST request with body
-const newAgent = await apiClient.request<Agent>('/api/agents', {
-  method: 'POST',
-  body: { name: 'My Agent', type: 'analysis' }
-})
-```
-
-**Note:** The body is automatically JSON.stringify'd if it's an object ([frontend/lib/api-client.ts:844-847]()).
-
-### With Custom Headers
-
-```typescript
-const data = await apiClient.request('/api/custom', {
-  method: 'GET',
-  headers: {
-    'X-Custom-Header': 'value'
-  }
-})
-```
-
-### File Upload (FormData)
-
-```typescript
-const formData = new FormData()
-formData.append('file', file)
-
-const result = await apiClient.request('/api/upload', {
-  method: 'POST',
-  body: formData  // NOT stringified
-})
-```
-
-**Sources:** [frontend/lib/api-client.ts:844-847]()
-
-### Page-Scoped Mock Control
-
-```typescript
-// In a page component
-export default function DashboardPage() {
-  useEffect(() => {
-    apiClient.setCurrentPage('dashboard')
-    return () => apiClient.setCurrentPage('')
-  }, [])
-  
-  // All API calls from this page now use dashboard's mock config
-  const data = await apiClient.request('/api/agents')
-}
-```
-
-**Sources:** [frontend/lib/api-client.ts:277-283]()
-
-### Raw Fetch with Auth Headers
-
-For APIs that don't use the standard `request()` method (e.g., skills API with raw fetch):
-
-```typescript
-const baseUrl = apiClient.getBaseUrl()
-const authHeaders = await apiClient.getAuthHeaders()
-
-const response = await fetch(`${baseUrl}/api/skills`, {
-  method: 'GET',
-  headers: {
-    'Content-Type': 'application/json',
-    ...authHeaders
-  }
-})
-```
-
-**Sources:** [frontend/lib/api-client.ts:798-817]()
-
----
-
-## Error Handling
-
-### HTTP Error Extraction
-
-When a request fails, the client attempts to extract detailed error messages from the response body:
-
-```typescript
-if (!response.ok) {
-  let detail = response.statusText
-  try {
-    const errorBody = await response.json()
-    if (errorBody?.detail) {
-      detail = typeof errorBody.detail === 'string' 
-        ? errorBody.detail 
-        : JSON.stringify(errorBody.detail)
-    }
-  } catch {
-    // Response body not JSON, use statusText
-  }
-  
-  if (response.status === 401) {
-    throw new Error('HTTP 401: Unauthorized (missing/invalid Clerk token)...')
-  }
-  throw new Error(detail || `HTTP ${response.status}`)
-}
-```
-
-**Sources:** [frontend/lib/api-client.ts:884-903]()
-
-### Mock Fallback
-
-If an API call fails and mocks are enabled for that endpoint/page, the client automatically falls back to mock data:
-
-```typescript
-catch (error: any) {
-  if (this.shouldUseMock(endpoint)) {
-    if (this.mockConfig.logMockUsage) {
-      console.warn(`⚠️ API failed for ${endpoint}, falling back to mock data`, error.message)
-    }
-    
-    const mockData = this.getMockDataForEndpoint(endpoint)
-    
-    // Emit event for UI to show mock indicator
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('mock-used', {
-        detail: { endpoint, data: mockData }
-      }))
-    }
-    
-    return mockData
-  }
-  
-  throw error
-}
-```
-
-**Mock Usage Events:**
-
-The `mock-used` event allows UI components to display indicators when mock data is being used ([frontend/lib/api-client.ts:923-926]()).
-
-**Sources:** [frontend/lib/api-client.ts:909-927]()
-
----
-
-## Integration Points
-
-### Backend API Routes
-
-The API Client communicates with FastAPI routes registered in `main.py`. Key router groups include:
-
-| Router | Prefix | Purpose |
-|--------|--------|---------|
-| `agents_router` | `/api/agents` | Agent CRUD and lifecycle |
-| `workflows_router` | `/api/workflows` | Workflow execution |
-| `workflow_recipes_router` | `/api/workflow-recipes` | Recipe management |
-| `composio_router` | `/api/composio` | Tool integration |
-| `admin_plugins_router` | `/api/admin/plugins` | Plugin marketplace admin |
-| `llm_analytics_router` | `/api/analytics/llm` | Usage analytics |
-
-**CORS Configuration:**
-
-The backend CORS middleware is configured to accept requests from origins listed in `CORS_ALLOW_ORIGINS` ([orchestrator/config.py:78-79](), [orchestrator/main.py:433-445]()).
-
-**Sources:** [orchestrator/main.py:538-636](), [orchestrator/config.py:71-79]()
-
-### Middleware Stack
-
-All requests pass through the backend middleware stack:
-
-```mermaid
-flowchart TD
-    Request["Incoming Request"]
-    Request --> RateLimit["slowapi Rate Limiter<br/>(60 req/min per IP)"]
-    RateLimit --> Security["Security Headers Middleware<br/>(X-Content-Type-Options, X-Frame-Options, CSP)"]
-    Security --> RequestID["Request ID Middleware<br/>(X-Request-ID injection)"]
-    RequestID --> Tracking["API Tracking Middleware<br/>(response time logging)"]
-    Tracking --> CORS["CORS Middleware<br/>(origin validation)"]
-    CORS --> Route["Route Handler<br/>(with get_request_context_hybrid)"]
-```
-
-**Sources:** [orchestrator/main.py:448-535]()
-
----
-
-## Development Tools
-
-### Console API (Development Only)
-
-In development, the API Client exposes mock control via `window.automatos.mocks`:
-
-```javascript
-// In browser console
-window.automatos.mocks.enable()          // Enable all mocks
-window.automatos.mocks.disable()         // Disable all mocks
-window.automatos.mocks.toggle('/api/agents')  // Toggle specific endpoint
-window.automatos.mocks.status()          // View current config
-window.automatos.mocks.config()          // View full config object
-```
-
-**Sources:** [frontend/lib/api-client.ts:130-141]()
-
-### Logging
-
-Development mode logs are emitted for all requests:
-
-```typescript
-// Request start
-console.log('🔍 API Call:', { url, method: options.method || 'GET' })
-
-// Auth token status
-console.log('🔐 Added Clerk JWT to request')
-// or
-console.warn('⚠️ No Clerk token available - request may fail')
-
-// Success
-console.log('✅ API Success:', endpoint, 'Data type:', ...)
-
-// Mock fallback
-console.warn(`⚠️ API failed for ${endpoint}, falling back to mock data`)
-console.log('🎭 Using mock data for:', endpoint, mockData)
-```
-
-**Sources:** [frontend/lib/api-client.ts:825-926]()
-
----
-
-## Related Components
-
-- **Authentication Flow:** See [Authentication & Multi-Tenancy](#12) for backend JWT validation
-- **Request Context:** See [Workspace Management](#12.2) for workspace resolution logic
-- **State Management:** See [State Management](#14.2) for React Query integration with the API Client
-- **Credentials System:** See [Credentials Management](#12.4) for credential resolution cascade
-
-**Sources:** [frontend/lib/api-client.ts:1-927](), [orchestrator/main.py:1-869]()
+**Sources:** [frontend/lib/api-client.ts:101-155](), [.env.example:34-34]()
 
 ---

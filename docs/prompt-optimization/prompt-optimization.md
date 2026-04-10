@@ -8,472 +8,336 @@ The following files were used as context for generating this wiki page:
 - [frontend/components/settings/SystemPromptsTab.tsx](frontend/components/settings/SystemPromptsTab.tsx)
 - [orchestrator/core/services/futureagi_service.py](orchestrator/core/services/futureagi_service.py)
 - [services/agent-opt-worker/Dockerfile](services/agent-opt-worker/Dockerfile)
+- [services/agent-opt-worker/automatos_logging.py](services/agent-opt-worker/automatos_logging.py)
+- [services/agent-opt-worker/automatos_metrics.py](services/agent-opt-worker/automatos_metrics.py)
 - [services/agent-opt-worker/main.py](services/agent-opt-worker/main.py)
 - [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
+- [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
+- [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
+- [services/workspace-worker/Dockerfile](services/workspace-worker/Dockerfile)
+- [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)
+- [services/workspace-worker/automatos_metrics.py](services/workspace-worker/automatos_metrics.py)
+- [services/workspace-worker/entrypoint.sh](services/workspace-worker/entrypoint.sh)
+- [services/workspace-worker/requirements.txt](services/workspace-worker/requirements.txt)
 
 </details>
 
 
 
-This document describes the prompt optimization system, which automatically improves system prompts using FutureAGI's optimization algorithms. The system collects real chat interactions as training data, runs iterative optimization in an isolated worker service, and presents improved prompts for review before activation.
+The prompt optimization system provides FutureAGI-powered assessment, safety checking, and optimization for system prompts. This system evaluates prompt quality using structured metric templates, runs safety scans to detect harmful content, and optimizes prompts using algorithms like meta-prompt learning and Bayesian search. The architecture isolates the FutureAGI SDK in a dedicated worker service to avoid dependency conflicts with the main orchestrator.
 
-For information about system prompt management and versioning, see [System Prompt Management](#11.1). For evaluation and scoring, see [Prompt Evaluation](#11.2). For live traffic scoring used to build datasets, see [Live Traffic Scoring](#11.3). For worker service architecture details, see [Worker Service Architecture](#11.5).
-
----
-
-## Overview
-
-The optimization system follows a three-phase workflow:
-
-1. **Dataset Collection**: Gather recent user-assistant message pairs from live chat traffic
-2. **Async Optimization**: Run iterative prompt improvement using FutureAGI's `agent-opt` SDK in an isolated worker
-3. **Result Application**: Present the optimized prompt as a draft version for admin review
-
-The process is fully asynchronous with polling-based status checks, supporting optimization runs that may take 10-25 minutes to complete.
-
-**Sources:** [orchestrator/core/services/futureagi_service.py:1-432]()
+For agent-specific prompt assembly and context building, see [Context Service](#4). For general system configuration, see [Authentication & Multi-Tenancy](#17).
 
 ---
 
-## Optimization Algorithm Selection
+## Architecture Overview
 
-The worker service supports four optimization algorithms from the `fi.opt.optimizers` package:
-
-| Algorithm | Description | Best For | Parameters |
-|-----------|-------------|----------|------------|
-| `meta_prompt` | Meta-learning approach that generates improved prompts iteratively | General-purpose optimization | `teacher_generator` |
-| `bayesian` | Bayesian search over prompt space | Exploration of diverse variations | `min_examples`, `max_examples` |
-| `protegi` | Prompt generation with gradient-based improvements | Fine-grained optimization | `num_gradients`, `beam_size` |
-| `random` | Random search baseline | Quick baseline comparison | `generator` |
-
-The default algorithm is `meta_prompt` with GPT-4o-mini as the teacher model.
-
-**Algorithm Factory Pattern:**
+The prompt optimization system uses a two-service architecture to isolate FutureAGI SDK dependencies from the main orchestrator.
 
 ```mermaid
 graph TB
-    subgraph "Algorithm Selection"
-        Request[OptimizeRequest<br/>algorithm field]
-        Factory[_create_optimizer]
-        
-        Request --> Factory
-        
-        Factory -->|"meta_prompt"| MetaPrompt["MetaPromptOptimizer<br/>teacher_generator"]
-        Factory -->|"bayesian"| Bayesian["BayesianSearchOptimizer<br/>inference_model_name<br/>min_examples=2<br/>max_examples=5"]
-        Factory -->|"protegi"| ProTeGi["ProTeGi<br/>teacher_generator<br/>num_gradients=4<br/>beam_size=4"]
-        Factory -->|"random"| Random["RandomSearchOptimizer<br/>generator"]
+    subgraph "Orchestrator [FastAPI]"
+        API["Admin API<br/>/api/admin/prompts"]
+        FutureAGIService["FutureAGIService<br/>orchestrator/core/services/futureagi_service.py"]
+        DB[("PostgreSQL<br/>SystemPrompt<br/>SystemPromptVersion<br/>SystemPromptEvalRun")]
+        ChatPipeline["Chat Pipeline<br/>eval_live_traffic()"]
     end
     
-    subgraph "Common Components"
-        Evaluator["Evaluator<br/>eval_template<br/>eval_model_name=turing_flash<br/>fi_api_key + fi_secret_key"]
-        DataMapper["BasicDataMapper<br/>key_map={'input':'input','output':'output'}"]
-        Teacher["LiteLLMGenerator<br/>model=gpt-4o-mini<br/>prompt_template='{prompt}'"]
+    subgraph "Agent-Opt Worker [FastAPI]<br/>Port 8080"
+        WorkerAPI["main.py<br/>/assess /safety<br/>/optimize /score"]
+        FutureAGISDK["FutureAGI SDK<br/>agent-opt + ai-evaluation"]
+        JobStore["In-memory Job Store<br/>_optimize_jobs dict"]
     end
     
-    MetaPrompt --> Optimizer[optimizer.optimize]
-    Bayesian --> Optimizer
-    ProTeGi --> Optimizer
-    Random --> Optimizer
+    subgraph "Frontend [Next.js]"
+        SystemPromptsTab["SystemPromptsTab.tsx<br/>Prompt editor + controls"]
+    end
     
-    Optimizer --> Evaluator
-    Optimizer --> DataMapper
-    Optimizer --> Teacher
+    SystemPromptsTab -->|"POST /api/admin/prompts/{id}/assess"| API
+    API -->|"create SystemPromptEvalRun"| DB
+    API -->|"run_assessment(run_id)"| FutureAGIService
+    FutureAGIService -->|"POST /assess<br/>POST /safety<br/>POST /optimize"| WorkerAPI
+    WorkerAPI -->|"Evaluator.evaluate()<br/>Optimizer.optimize()"| FutureAGISDK
+    FutureAGIService -->|"update run.status<br/>run.scores"| DB
+    
+    ChatPipeline -.->|"fire-and-forget<br/>eval_live_traffic()"| FutureAGIService
+    FutureAGIService -.->|"POST /score"| WorkerAPI
+    WorkerAPI -.->|"concurrent scoring"| FutureAGISDK
+    FutureAGIService -.->|"store live run"| DB
+    
+    WorkerAPI -->|"async job"| JobStore
 ```
 
-**Sources:** [services/agent-opt-worker/main.py:525-544](), [services/agent-opt-worker/main.py:375-432]()
+Sources: [orchestrator/core/services/futureagi_service.py:45-112](), [services/agent-opt-worker/main.py:1-16]()
 
 ---
 
-## Template Variable Escaping
+## System Prompt Management
 
-System prompts contain template variables like `{agent_name}` that must be preserved during optimization. The FutureAGI SDK internally uses `.format()` on prompts, which would crash if these placeholders remain. The solution is a two-phase escaping mechanism:
+System prompts are versioned content templates stored in the `system_prompts` table. Each prompt has multiple versions, with one marked as `active`. The system tracks evaluation scores per version and supports rollback to previous versions.
 
-### Escaping Logic
+### Database Schema
 
-```mermaid
-graph LR
-    subgraph "Before Optimization"
-        Original["Original Prompt<br/>You are {agent_name}<br/>Tools: {tools_list}"]
-        Escape[_escape_template_vars]
-        Escaped["Escaped Prompt<br/>You are __TMPL_AGENT_NAME__<br/>Tools: __TMPL_TOOLS_LIST__"]
-        
-        Original --> Escape
-        Escape --> Escaped
-        Escape -->|returns| Replacements["Replacements List<br/>[('__TMPL_AGENT_NAME__', '{agent_name}'),<br/> ('__TMPL_TOOLS_LIST__', '{tools_list}')]"]
-    end
-    
-    subgraph "Optimization"
-        Escaped --> SDK["FutureAGI SDK<br/>optimizer.optimize()"]
-        SDK --> OptimizedEscaped["Optimized (Escaped)<br/>You are __TMPL_AGENT_NAME__,<br/>an expert assistant.<br/>Tools: __TMPL_TOOLS_LIST__"]
-    end
-    
-    subgraph "After Optimization"
-        OptimizedEscaped --> Restore[_restore_template_vars]
-        Replacements --> Restore
-        Restore --> Final["Final Prompt<br/>You are {agent_name},<br/>an expert assistant.<br/>Tools: {tools_list}"]
-    end
-```
+| Table | Purpose | Key Fields |
+|-------|---------|------------|
+| `SystemPrompt` | Prompt metadata | `slug`, `display_name`, `category`, `futureagi_eval_enabled` |
+| `SystemPromptVersion` | Versioned content | `prompt_id`, `version_number`, `content`, `status`, `eval_scores` |
+| `SystemPromptEvalRun` | Assessment jobs | `prompt_id`, `version_id`, `run_type`, `status`, `scores` |
 
-### Implementation Details
-
-**Regex Pattern:** `(?<!\{)\{(\w+)\}(?!\})` - matches single-brace variables but not double-braces
-
-**Escape Format:** `__TMPL_{VARIABLE_NAME_UPPER}__` - ensures no collision with natural language
-
-**Example:**
-- Input: `You are {agent_name}, a helpful assistant. Tools: {tools_list}.`
-- Escaped: `You are __TMPL_AGENT_NAME__, a helpful assistant. Tools: __TMPL_TOOLS_LIST__.`
-- After SDK optimization: Content improved but placeholders intact
-- Restored: `You are {agent_name}, a highly effective assistant specialized in... Tools: {tools_list}.`
-
-**Sources:** [services/agent-opt-worker/main.py:351-372](), [services/agent-opt-worker/main.py:393-396](), [services/agent-opt-worker/main.py:435]()
-
----
-
-## Dataset Collection
-
-Optimization requires real input-output examples. The system collects recent chat interactions from the `messages` table.
-
-### Collection Query
-
-```mermaid
-graph TB
-    subgraph "Database Query"
-        Messages[(messages table<br/>role: user | assistant<br/>parts: JSONB<br/>chat_id<br/>created_at)]
-        
-        Query["SQL JOIN<br/>m1.role = 'user'<br/>m2.role = 'assistant'<br/>m2.created_at = MIN(created_at) > m1.created_at<br/>ORDER BY m1.created_at DESC<br/>LIMIT :limit"]
-        
-        Messages --> Query
-    end
-    
-    subgraph "Text Extraction"
-        Query --> Pairs["Message Pairs<br/>(user_parts, assistant_parts)"]
-        Pairs --> Extract[_extract_text]
-        Extract --> Dataset["Dataset<br/>[{'input': 'user text',<br/>  'output': 'assistant text'}]"]
-    end
-    
-    subgraph "Usage"
-        Dataset --> Optimizer["FutureAGI Optimizer<br/>evaluates prompt variants<br/>against this dataset"]
-    end
-```
-
-### Key Characteristics
-
-- **Limit**: Default 10 examples for assessment, configurable for optimization
-- **Pair Matching**: Joins each user message with its immediate assistant response
-- **Text Extraction**: Handles both string and structured JSONB `parts` field
-- **Recency Bias**: Orders by `created_at DESC` to prefer recent conversations
-
-**Code Flow:**
-
-1. `FutureAGIService.optimize_prompt()` calls `_collect_optimization_dataset(limit=10)`
-2. Raw SQL query joins user→assistant message pairs
-3. `_extract_text()` parses JSONB parts or returns string directly
-4. Returns `List[Dict[str, str]]` with `input` and `output` keys
-
-**Sources:** [orchestrator/core/services/futureagi_service.py:307-343](), [orchestrator/core/services/futureagi_service.py:29-41](), [orchestrator/core/services/futureagi_service.py:170-172]()
-
----
-
-## Async Job Lifecycle
-
-Optimization runs asynchronously due to long execution times (10-25 minutes). The worker maintains an in-memory job store with a polling-based status API.
-
-### Job State Machine
+### Version Lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> starting: POST /optimize
-    starting --> running: _run_optimize_job thread starts
-    running --> completed: optimization succeeds
-    running --> failed: exception or error
-    completed --> [*]: result retrieved
-    failed --> [*]: error logged
+    [*] --> draft: "Create version<br/>activate=false"
+    draft --> active: "Activate version"
+    draft --> [*]: "Delete draft"
+    active --> archived: "New version activated"
+    archived --> active: "Rollback"
     
-    note right of starting
-        Job created in _optimize_jobs
-        Background thread spawned
-        job_id returned to orchestrator
-    end note
-    
-    note right of running
-        SDK optimization in progress
-        Multiple rounds of evaluation
-        History tracked per iteration
-    end note
-    
-    note right of completed
-        Result stored with:
-        - optimized_prompt
-        - final_score, initial_score
-        - rounds_completed
-        - algorithm, history
-        - duration_seconds
-    end note
+    active --> assessed: "Run assessment"
+    assessed --> active: "Store eval_scores"
 ```
 
-### Job Store Structure
+The frontend component `SystemPromptsTab` provides version management UI with tabs for content editing, version history, and assessment runs.
 
-```python
-_optimize_jobs: Dict[str, Dict[str, Any]] = {
-    "job_id_uuid": {
-        "status": "starting" | "running" | "completed" | "failed",
-        "created_at": 1234567890.0,
-        "result": {
-            "optimized_prompt": str,
-            "final_score": float,
-            "initial_score": float,
-            "rounds_completed": int,
-            "algorithm": str,
-            "history": List[Dict],
-            "duration_seconds": float,
-            "status": "completed"
-        },
-        "error": Optional[str],
-        "duration_seconds": Optional[float]
-    }
-}
-```
+Sources: [frontend/components/settings/SystemPromptsTab.tsx:33-72](), [frontend/components/settings/SystemPromptsTab.tsx:202-212]()
 
-### Cleanup Logic
+### Version Management API
 
-- **TTL**: 3600 seconds (1 hour)
-- **Trigger**: Called at start of each new optimization
-- **Criteria**: Removes jobs with `status` in `("completed", "failed")` older than TTL
-- **Prevents**: Memory leaks from abandoned jobs
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `POST /api/admin/prompts/{id}/versions` | Create new version (with `?activate=true/false`) |
+| `POST /api/admin/prompts/{id}/versions/{vid}/activate` | Activate specific version |
+| `POST /api/admin/prompts/{id}/rollback` | Rollback to previous version |
+| `DELETE /api/admin/prompts/{id}/versions/{vid}` | Delete draft version |
+| `PATCH /api/admin/prompts/{id}/futureagi-toggle` | Toggle live scoring on/off |
 
-**Sources:** [services/agent-opt-worker/main.py:333-348](), [services/agent-opt-worker/main.py:468-494](), [services/agent-opt-worker/main.py:497-522]()
+Sources: [frontend/components/settings/SystemPromptsTab.tsx:202-210](), [frontend/components/settings/SystemPromptsTab.tsx:219-227]()
 
 ---
 
-## End-to-End Optimization Workflow
+## Prompt Evaluation
 
-### Orchestrator → Worker Flow
+Prompt evaluation assesses quality using structured metric templates. The orchestrator collects a dataset of real chat exchanges and sends them to the worker for concurrent scoring across multiple metrics.
+
+### Assessment Flow
 
 ```mermaid
 sequenceDiagram
-    participant Admin as Admin UI
-    participant API as admin_prompts.py<br/>trigger_assessment
-    participant Service as FutureAGIService<br/>optimize_prompt
-    participant DB as SystemPromptEvalRun
-    participant Worker as agent-opt-worker<br/>/optimize
+    participant UI as SystemPromptsTab
+    participant API as Admin API
+    participant DB as PostgreSQL
+    participant FutureAGI as FutureAGIService
+    participant Worker as Agent-Opt Worker
+    participant SDK as FutureAGI SDK
     
-    Admin->>API: POST /api/admin/prompts/{id}/assess<br/>run_type='optimize'
-    API->>DB: Create EvalRun<br/>status='pending'
-    API->>Service: futureagi_service.run_assessment(run_id)
+    UI->>API: POST /api/admin/prompts/{id}/assess<br/>{run_type: "assess"}
+    API->>DB: INSERT SystemPromptEvalRun<br/>status="pending"
+    API->>FutureAGI: run_assessment(run_id)
     
-    Service->>DB: Load EvalRun + Version
-    Service->>DB: Update status='running'
-    Service->>Service: _collect_optimization_dataset(limit=10)
-    Service->>Worker: POST /optimize<br/>{prompt_content, dataset, algorithm, num_rounds}
+    FutureAGI->>DB: UPDATE status="running"
+    FutureAGI->>DB: SELECT messages table<br/>collect I/O pairs
     
-    Worker->>Worker: Generate job_id<br/>Create _optimize_jobs entry<br/>status='starting'
-    Worker-->>Service: {"job_id": "uuid"}
+    FutureAGI->>Worker: POST /assess<br/>{prompt_content, test_input, test_output, metrics}
     
-    Worker->>Worker: spawn _run_optimize_job thread
-    Worker->>Worker: _escape_template_vars
-    Worker->>Worker: optimizer.optimize()<br/>(blocks in thread)
-    Worker->>Worker: _restore_template_vars
-    Worker->>Worker: Update _optimize_jobs<br/>status='completed'
-    
-    loop Poll every 10s (max 1500s)
-        Service->>Worker: GET /optimize/{job_id}
-        alt Job still running
-            Worker-->>Service: {"status": "running"}
-        else Job completed
-            Worker-->>Service: {"status": "completed", result: {...}}
-            Service->>DB: Update EvalRun<br/>status='completed'<br/>scores={result}
-        else Job failed
-            Worker-->>Service: {"status": "failed", error: "..."}
-            Service->>DB: Update EvalRun<br/>status='failed'
-        end
+    Worker->>Worker: ThreadPoolExecutor<br/>concurrent scoring
+    loop Each metric
+        Worker->>SDK: Evaluator.evaluate(template, inputs)
+        SDK-->>Worker: {output, reason, score}
     end
     
-    Service-->>API: Complete
-    API-->>Admin: EvalRun response
+    Worker-->>FutureAGI: {scores: {completeness: {...}, is_helpful: {...}}}
+    FutureAGI->>DB: UPDATE status="completed"<br/>scores={...}
+    FutureAGI->>DB: UPDATE version.eval_scores
+    
+    UI->>API: Poll assessment runs (3s interval)
+    API-->>UI: {status: "completed", scores: {...}}
 ```
 
-### Key Parameters
+Sources: [orchestrator/core/services/futureagi_service.py:118-145](), [services/agent-opt-worker/main.py:223-245]()
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `prompt_content` | string | - | Current active prompt text |
-| `dataset` | array | - | 10+ input/output pairs from live traffic |
-| `scoring_template` | string | `"is_helpful"` | FutureAGI metric to optimize for |
-| `algorithm` | string | `"meta_prompt"` | Optimization algorithm name |
-| `num_rounds` | int | 2 | Number of optimization iterations |
-| `teacher_model` | string | `"gpt-4o-mini"` | LLM used to generate variations |
-| `task_description` | string | auto-generated | Context about the optimization goal |
+### Quality Metric Templates
 
-**Sources:** [orchestrator/core/services/futureagi_service.py:160-226](), [orchestrator/api/admin_prompts.py:395-465](), [services/agent-opt-worker/main.py:375-465]()
+The system provides pre-configured metric templates optimized for specific evaluation tasks:
+
+| Template | Required Inputs | Model | Purpose |
+|----------|----------------|-------|---------|
+| `completeness` | input, output | turing_large | Checks if output fully addresses input |
+| `is_helpful` | input, output | turing_large | Evaluates response helpfulness |
+| `is_concise` | output | turing_large | Checks output conciseness |
+| `prompt_adherence` | input, output | turing_large | Verifies output follows prompt instructions |
+| `groundedness` | input, output, context | turing_large | Checks factual grounding in context |
+| `factual_accuracy` | input, output | turing_large | Verifies factual correctness |
+| `summary_quality` | input, output | turing_large | Assesses summary quality |
+
+Each template returns:
+- `score` (0.0-1.0 float)
+- `passed` (boolean, true if score ≥ 0.5)
+- `reason` (text explanation)
+
+Sources: [services/agent-opt-worker/main.py:129-141](), [services/agent-opt-worker/main.py:59-122]()
+
+### Dataset Collection
+
+The `_collect_optimization_dataset()` method queries the `messages` table to extract recent user-assistant chat pairs. It extracts plain text from the `parts` JSONB field using `_extract_text()`, handling both string and structured message formats.
+
+Sources: [orchestrator/core/services/futureagi_service.py:30-42](), [orchestrator/core/services/futureagi_service.py:137-143]()
 
 ---
 
-## Polling Mechanism
+## Live Traffic Scoring
 
-The orchestrator polls the worker using exponential backoff to check job status.
+Live traffic scoring automatically evaluates every chat response using enabled prompts. This provides continuous quality monitoring without manual intervention.
 
-### Polling Configuration
-
-| Parameter | Value | Purpose |
-|-----------|-------|---------|
-| `max_wait` | 1500s (25 min) | Maximum total polling duration |
-| `poll_interval` | 10s | Time between status checks |
-| `consecutive_errors` threshold | 5 | Fast-fail if worker loses job |
-| `progress_log_interval` | 60s | Log status every minute |
-
-### Poll Response Handling
-
-```mermaid
-graph TD
-    Poll["GET /optimize/{job_id}"]
-    Poll --> Status{Status?}
-    
-    Status -->|"completed"| Normalize["Normalize Response<br/>best_score = pop('final_score')<br/>rounds = pop('rounds_completed')<br/>duration = pop('duration_seconds')"]
-    Status -->|"failed"| Error["Return error dict<br/>status='failed'"]
-    Status -->|"running"| Continue["Continue polling<br/>Log progress every 60s"]
-    Status -->|error in response| ErrorCount["consecutive_errors++"]
-    
-    ErrorCount --> Threshold{errors >= 5?}
-    Threshold -->|Yes| Abort["Abort: Worker lost job"]
-    Threshold -->|No| ResetCount["Reset counter on success<br/>Continue polling"]
-    
-    Normalize --> Return["Return result to orchestrator"]
-    Error --> Return
-    Abort --> Return
-```
-
-### Error Scenarios
-
-1. **Worker Timeout**: No response after 15s → log error, continue polling
-2. **Worker Restart**: Job not found (404) after 5 consecutive polls → fail fast
-3. **Optimization Timeout**: No completion after 1500s → return timeout error
-4. **SDK Exception**: Worker returns `status='failed'` with error message → propagate to EvalRun
-
-**Sources:** [orchestrator/core/services/futureagi_service.py:192-226]()
-
----
-
-## Results and Application
-
-### Result Structure
-
-When optimization completes, the worker returns:
-
-```json
-{
-  "optimized_prompt": "You are {agent_name}, a highly effective assistant...",
-  "final_score": 0.89,
-  "initial_score": 0.72,
-  "rounds_completed": 3,
-  "algorithm": "meta_prompt",
-  "history": [
-    {
-      "round": 1,
-      "score": 0.75,
-      "prompt_preview": "You are {agent_name}, a helpful..."
-    },
-    {
-      "round": 2,
-      "score": 0.83,
-      "prompt_preview": "You are {agent_name}, an expert..."
-    },
-    {
-      "round": 3,
-      "score": 0.89,
-      "prompt_preview": "You are {agent_name}, a highly effective..."
-    }
-  ],
-  "duration_seconds": 487.3,
-  "status": "completed"
-}
-```
-
-### Application Workflow
+### Live Scoring Pipeline
 
 ```mermaid
 graph TB
-    subgraph "Frontend Display"
-        AssessmentTab[SystemPromptsTab<br/>Assessments Tab]
-        RunsList["Assessment Runs List<br/>Status: completed<br/>Type: optimize"]
-        OptimizedPreview["Optimized Prompt Preview<br/>Score comparison<br/>Algorithm + duration info"]
-        ApplyButton["Apply as Draft Button"]
+    ChatResponse["Chat Response<br/>StreamingChatService"]
+    
+    ChatResponse -->|"fire-and-forget<br/>no await"| eval_live_traffic
+    
+    subgraph "FutureAGIService"
+        eval_live_traffic["eval_live_traffic()<br/>input, output, context"]
+        QueryDB["Query enabled prompts<br/>futureagi_eval_enabled=true"]
+        CallWorker["POST /score<br/>concurrent metrics"]
+        StoreRuns["Store SystemPromptEvalRun<br/>run_type='live'"]
     end
     
-    subgraph "Draft Creation"
-        ApplyButton --> CreateVersion["POST /api/admin/prompts/{id}/versions<br/>activate=false"]
-        CreateVersion --> NewVersion["New SystemPromptVersion<br/>status='draft'<br/>change_note='Auto-generated by FutureAGI optimizer'"]
+    subgraph "Agent-Opt Worker"
+        ScoreEndpoint["POST /score"]
+        ConcurrentScore["ThreadPoolExecutor<br/>score each metric"]
     end
     
-    subgraph "Review Workflow"
-        NewVersion --> VersionsTab[Switch to Versions Tab]
-        VersionsTab --> Compare["Compare draft vs active"]
-        Compare --> Activate["Activate Draft Button<br/>→ becomes active version"]
-        Compare --> Delete["Delete Draft Button<br/>→ discard optimization"]
-    end
+    eval_live_traffic --> QueryDB
+    QueryDB --> CallWorker
+    CallWorker --> ScoreEndpoint
+    ScoreEndpoint --> ConcurrentScore
+    ConcurrentScore -->|"scores dict"| CallWorker
+    CallWorker --> StoreRuns
 ```
 
-### Admin UI Actions
+Sources: [orchestrator/core/services/futureagi_service.py:232-302]()
 
-1. **Trigger Optimization**: Click "Optimize" button in Assessments tab
-2. **Monitor Progress**: Real-time polling updates status from `pending` → `running` → `completed`
-3. **Review Result**: View optimized prompt, score improvement, and execution details
-4. **Apply as Draft**: Click "Apply as Draft" to create a new version (doesn't activate immediately)
-5. **Compare & Activate**: Switch to Versions tab, compare draft vs active, then activate if satisfied
+### Implementation Details
 
-**Sources:** [frontend/components/settings/SystemPromptsTab.tsx:261-279](), [frontend/components/settings/SystemPromptsTab.tsx:579-587](), [frontend/components/settings/SystemPromptsTab.tsx:665-717]()
+The live scoring flow is fire-and-forget to avoid blocking chat responses:
+
+1. **Chat pipeline** calls `eval_live_traffic()` after sending response (no await).
+2. **FutureAGIService** queries all prompts with `futureagi_eval_enabled=True`.
+3. For each enabled prompt, calls worker `/score` endpoint with default metrics: `["completeness", "is_helpful", "is_concise"]`.
+4. Worker scores concurrently across all metrics using `ThreadPoolExecutor`.
+5. Service stores a `SystemPromptEvalRun` with `run_type="live"` for each prompt.
+
+Sources: [orchestrator/core/services/futureagi_service.py:233-302](), [services/agent-opt-worker/main.py:303-331]()
 
 ---
 
-## Configuration and Requirements
+## Prompt Optimization
 
-### Environment Variables
+Prompt optimization uses FutureAGI's agent-opt library to iteratively improve prompt content. The process runs asynchronously in the worker service, allowing long-running optimization jobs without blocking the orchestrator.
 
-| Variable | Required | Used By | Purpose |
-|----------|----------|---------|---------|
-| `AGENT_OPT_WORKER_URL` | Yes | Orchestrator | Worker service URL (default: `http://agent-opt-worker.railway.internal:8080`) |
-| `FUTUREAGI_API_KEY` | Yes | Worker | FutureAGI authentication |
-| `FUTUREAGI_SECRET_KEY` | Yes | Worker | FutureAGI authentication |
-| `OPENAI_API_KEY` | Yes | Worker | Teacher model (GPT-4o-mini) access |
-| `FI_API_KEY` | Auto-set | Worker SDK | Forwarded from `FUTUREAGI_API_KEY` |
-| `FI_SECRET_KEY` | Auto-set | Worker SDK | Forwarded from `FUTUREAGI_SECRET_KEY` |
+### Async Job Pattern
 
-### Worker Dependencies
+Optimization is handled as an async job because it can take several minutes to complete. The `FutureAGIService` starts the job by calling `POST /optimize` on the worker, which returns a `job_id`. The orchestrator then polls `GET /optimize/{job_id}` until completion.
 
-The worker requires specialized SDK packages not installed in the orchestrator:
+Sources: [orchestrator/core/services/futureagi_service.py:161-197](), [services/agent-opt-worker/main.py:443-467]()
 
-```
-agent-opt==0.0.1       # Prompt optimization algorithms
-ai-evaluation>=0.1.9   # FutureAGI evaluation SDK
-litellm>=1.61.0        # Multi-provider LLM client
-```
+### Polling with Backoff
 
-This isolation prevents version conflicts with the orchestrator's dependencies.
+The frontend component `SystemPromptsTab` implements the polling logic. When an assessment run is in `pending` or `running` status, it triggers an interval that polls the backend every 3 seconds to update the UI with the latest status and scores.
 
-**Sources:** [services/agent-opt-worker/requirements.txt:1-7](), [services/agent-opt-worker/main.py:41-51](), [orchestrator/core/services/futureagi_service.py:24-26]()
+Sources: [frontend/components/settings/SystemPromptsTab.tsx:166-173]()
+
+### Template Variable Escaping
+
+System prompts often contain placeholders like `{agent_name}` or `{datetime}`. The optimization SDK's `.format()` method would crash on these. The worker escapes them by doubling the braces (e.g., `{{agent_name}}`) before optimization and restores them to single braces after. This is performed using regex `(?<!\{)\{(\w+)\}(?!\})` to safely identify variables.
+
+Sources: [services/agent-opt-worker/main.py:356-377](), [services/agent-opt-worker/main.py:398-440]()
+
+### Optimization Algorithms
+
+| Algorithm | Strategy | Best For |
+|-----------|----------|----------|
+| `meta_prompt` | Uses a teacher LLM to generate improved prompts via meta-learning | General-purpose optimization |
+| `bayesian` | Bayesian search over prompt variations with inference model | Few examples, exploration |
+| `protegi` | Gradient-based optimization with beam search | High accuracy requirements |
+
+Sources: [orchestrator/core/services/futureagi_service.py:164-165](), [services/agent-opt-worker/main.py:530-549]()
 
 ---
 
-## Error Handling
+## Safety Checks
 
-### Common Errors
+Safety scans detect harmful content in system prompts using specialized templates. The system adds context-aware preambles to reduce false positives on instructional text.
 
-| Error | Cause | Resolution |
-|-------|-------|------------|
-| "No live traffic data yet" | Empty dataset collection | Enable FutureAGI scoring and chat first |
-| "Worker not available" | `httpx.ConnectError` | Check `AGENT_OPT_WORKER_URL` configuration |
-| "Worker timed out after 300s" | Optimization exceeds timeout | Normal for large `num_rounds` values |
-| "Lost connection to optimization job" | Worker restart during execution | Increase worker memory/stability |
-| "OpenAI API key not configured" | Missing `OPENAI_API_KEY` | Set env var in worker service |
-| "Template variables interfered" | Escaping/restoration failed | Check for nested braces or unusual syntax |
+### Safety Templates
 
-### Retry Strategy
+| Template | Model | Detects |
+|----------|-------|---------|
+| `toxicity` | protect | Toxic/harmful language |
+| `prompt_injection` | protect | Injection attack patterns |
+| `content_moderation` | protect | Policy-violating content |
+| `bias_detection` | protect_flash | Biased language |
 
-- **Network errors**: Logged but polling continues
-- **Worker restart**: Fast-fail after 5 consecutive 404 responses
-- **Optimization timeout**: Fail after 25 minutes total elapsed time
-- **SDK exceptions**: Captured and stored in `EvalRun.error_message`
+Sources: [services/agent-opt-worker/main.py:129-141]()
 
-**Sources:** [orchestrator/core/services/futureagi_service.py:78-97](), [orchestrator/core/services/futureagi_service.py:170-172](), [orchestrator/core/services/futureagi_service.py:216-226](), [services/agent-opt-worker/main.py:384-386](), [services/agent-opt-worker/main.py:460-465]()
+### Safety Scan Flow
+
+The `SAFETY_PREAMBLE` prefixes the prompt to clarify it's instructional content, not user input. This reduces false positives when prompts discuss how to handle sensitive topics safely.
+
+Sources: [services/agent-opt-worker/main.py:252-296]()
+
+---
+
+## Agent-Opt Worker Service
+
+The `agent-opt-worker` is an isolated FastAPI service running in its own container. It holds all FutureAGI SDK dependencies, which conflict with the orchestrator's libraries.
+
+### Service Architecture
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| Runtime | Python 3.11 | SDK compatibility |
+| Framework | FastAPI + uvicorn | HTTP API |
+| SDK | agent-opt==0.0.1 | Prompt optimization |
+| SDK | ai-evaluation>=0.1.9 | Metric templates |
+| Observability | prometheus_client | Metrics export at `/metrics` |
+| Logging | automatos_logging | Structured logs to log-relay |
+
+Sources: [services/agent-opt-worker/requirements.txt:1-8](), [services/agent-opt-worker/Dockerfile:1-16]()
+
+### Worker Endpoints
+
+| Endpoint | Method | Purpose | Timeout |
+|----------|--------|---------|---------|
+| `/assess` | POST | Score prompt with quality metrics | 120s |
+| `/safety` | POST | Run safety templates | 120s |
+| `/score` | POST | Score live chat exchange | 120s |
+| `/optimize` | POST | Start async optimization job | 300s |
+| `/optimize/{job_id}` | GET | Poll job status/result | 15s |
+
+Sources: [orchestrator/core/services/futureagi_service.py:26-27](), [services/agent-opt-worker/main.py:16-28](), [services/agent-opt-worker/main.py:198-528]()
+
+---
+
+## UI Components
+
+The `SystemPromptsTab` component provides a three-tab interface for prompt management:
+
+### Content Tab
+- Display active prompt content and edit mode with `Textarea`.
+- Actions: "Save as Draft", "Save & Activate", "Rollback".
+
+### Versions Tab
+- List all versions with status badges (active, draft, archived).
+- Shows version numbers, change notes, and associated evaluation scores.
+
+### Assessments Tab
+- Toggle for "FutureAGI Live Scoring".
+- Action buttons: "Score Quality", "Optimize", "Safety Scan".
+- Historical list of `AssessmentRun` entries with status and detailed score breakdown.
+
+Sources: [frontend/components/settings/SystemPromptsTab.tsx:100-727]()
 
 ---

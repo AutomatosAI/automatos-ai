@@ -1,627 +1,275 @@
-# Agent Lifecycle & Status
+# Agent Factory & Runtime
 
 <details>
 <summary>Relevant source files</summary>
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
-- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
-- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [frontend/components/workflows/execution-theater/orchestrator-control.tsx](frontend/components/workflows/execution-theater/orchestrator-control.tsx)
+- [frontend/hooks/use-workflow-websocket.ts](frontend/hooks/use-workflow-websocket.ts)
+- [orchestrator/api/agent_endpoints.py](orchestrator/api/agent_endpoints.py)
+- [orchestrator/api/tools.py](orchestrator/api/tools.py)
+- [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
+- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
 - [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
-- [orchestrator/modules/orchestrator/pipeline.py](orchestrator/modules/orchestrator/pipeline.py)
-- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
+- [orchestrator/modules/tools/services/composio_hint_service.py](orchestrator/modules/tools/services/composio_hint_service.py)
+- [orchestrator/modules/tools/services/composio_tool_service.py](orchestrator/modules/tools/services/composio_tool_service.py)
+- [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
 
 </details>
 
 
 
-This document describes the lifecycle stages of agents in Automatos AI, the possible status states, status transitions, and the impact analysis system for status changes. For information about agent configuration and capabilities, see [Agent Configuration](#3.2). For agent creation and templates, see [Creating Agents](#3.1).
+This document covers the **AgentFactory** system, which manages the complete lifecycle of agent instances from creation to execution. It handles LLM provider configuration, tool loading, and the execution loop that processes user prompts with tool calling support.
+
+**Related pages:**
+- For agent creation UI flows, see [Creating Agents](5.1)
+- For agent configuration options, see [Agent Configuration](5.2)
+- For LLM provider and credential management details, see [LLM Provider Management](5.6)
+- For tool discovery and routing, see [Tools API Reference](8.7)
 
 ---
 
-## Purpose and Scope
+## Overview
 
-Agents in Automatos AI follow a defined lifecycle from creation through execution to eventual deletion. Each agent has a `status` field that controls its availability and behavior. This document covers:
+**AgentFactory** is the core runtime execution engine for agents. It provides a pure execution layer where users define their own agent types while the orchestrator handles prompt engineering using Context Engineering [orchestrator/modules/agents/factory/agent_factory.py:1-11]().
 
-- Status state definitions and valid transitions
-- Lifecycle stages (creation → execution → deletion)
-- Status control mechanisms (immediate, graceful, scheduled shutdown)
-- Impact analysis for status changes
-- Database cleanup procedures during deletion
-- API endpoints for status management
+| Capability | Description |
+|------------|-------------|
+| **Lifecycle Management** | Create, activate, hibernate, and retire agent instances [orchestrator/modules/agents/factory/agent_factory.py:51-58]() |
+| **LLM Configuration** | 3-tier API key resolution (BYOK → credential store → env vars) [orchestrator/modules/agents/factory/agent_factory.py:317-392]() |
+| **Tool Integration** | Unified tool execution via `UnifiedToolExecutor` with single-source tool schemas [orchestrator/modules/agents/factory/agent_factory.py:42-45]() |
+| **Prompt Assembly** | System prompt building from persona + plugins + skills [orchestrator/modules/agents/factory/agent_factory.py:103-115]() |
+| **Execution Loop** | Multi-iteration tool loop (max 10) with deduplication and loop prevention [orchestrator/modules/agents/factory/agent_factory.py:714-720]() |
+| **Metrics Tracking** | Token usage, execution counts, success rates, and avg execution time [orchestrator/modules/agents/factory/agent_factory.py:173-190]() |
 
----
+The factory maintains a registry of **active agents** (`Dict[int, AgentRuntime]`) in memory for fast execution without repeated database queries [orchestrator/modules/agents/factory/agent_factory.py:155-171]().
 
-## Status States
-
-Agents can exist in the following status states:
-
-| Status | Description | Icon | Behavior |
-|--------|-------------|------|----------|
-| `active` | Agent is operational and can accept tasks | `CheckCircle` | Can execute workflows, process chat messages, run in recipes |
-| `inactive` | Agent is stopped and unavailable | `Clock` | Cannot be used in new workflows or executions |
-| `idle` | Agent is running but not currently processing | `Clock` | Available but not actively working on tasks |
-| `maintenance` | Agent is undergoing maintenance | `Settings` | Unavailable for new work; existing tasks may complete |
-| `paused` | Agent is temporarily suspended | `Pause` | Existing tasks frozen; can be resumed |
-| `training` | Agent is being trained or updated | `Brain` | Not available for execution |
-| `error` | Agent encountered a critical error | `AlertTriangle` | Unavailable until error is resolved |
-
-**Status Field Location**: The status is stored in `Agent.status` (VARCHAR) in the `agents` table.
-
-**Default Status**: New agents are created with `status='inactive'` by default and must be explicitly activated.
-
-Sources: [orchestrator/api/agents.py:213-241](), [frontend/components/agents/agent-roster.tsx:156-160](), [frontend/components/agents/agent-status-control-modal.tsx:79-84]()
+**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:1-50](), [orchestrator/modules/agents/factory/agent_factory.py:155-192]()
 
 ---
 
-## Status State Diagram
+## Agent Lifecycle States
 
+Agents transition through well-defined lifecycle states managed by the `AgentLifecycle` enum:
+
+Title: Agent Lifecycle State Machine
 ```mermaid
 stateDiagram-v2
-    [*] --> inactive: Agent Created
-    inactive --> active: Start Agent
-    active --> paused: Pause
-    paused --> active: Resume
-    active --> maintenance: Enter Maintenance
-    maintenance --> active: Exit Maintenance
-    active --> inactive: Stop (Graceful)
-    active --> error: Critical Error
-    error --> maintenance: Begin Recovery
-    maintenance --> inactive: Abort Recovery
-    error --> inactive: Mark Inactive
-    inactive --> training: Begin Training
-    training --> inactive: Training Complete
-    active --> [*]: Delete (with cleanup)
-    inactive --> [*]: Delete (immediate)
+    [*] --> INITIALIZING: create_agent()
+    INITIALIZING --> ACTIVE: Verification success
+    INITIALIZING --> [*]: Verification failure
+    ACTIVE --> BUSY: execute_with_prompt()
+    BUSY --> ACTIVE: Execution complete
+    ACTIVE --> LEARNING: update_agent_learning()
+    LEARNING --> ACTIVE: Learning complete
+    ACTIVE --> HIBERNATING: Inactivity timeout
+    HIBERNATING --> ACTIVE: Re-activation
+    ACTIVE --> RETIRED: Manual retirement
+    RETIRED --> [*]
 ```
 
-Sources: [frontend/components/agents/agent-status-control-modal.tsx:79-84](), [orchestrator/api/agents.py:608-698]()
+### Lifecycle State Definitions
+
+| State | Description | Triggers |
+|-------|-------------|----------|
+| `INITIALIZING` | Agent being created, LLM verification in progress | `create_agent()` called [orchestrator/modules/agents/factory/agent_factory.py:52]() |
+| `ACTIVE` | Ready to accept tasks | Verification passed, `activate_agent()` completed [orchestrator/modules/agents/factory/agent_factory.py:53]() |
+| `BUSY` | Currently executing a task | `execute_with_prompt()` running [orchestrator/modules/agents/factory/agent_factory.py:54]() |
+| `LEARNING` | Undergoing training or optimization | `update_agent_learning()` feedback loop [orchestrator/api/agent_endpoints.py:161]() |
+| `HIBERNATING` | Inactive but preserved in memory | Configurable inactivity timeout [orchestrator/modules/agents/factory/agent_factory.py:56]() |
+| `RETIRED` | Permanently deactivated | User action or system cleanup [orchestrator/modules/agents/factory/agent_factory.py:57]() |
+
+**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:51-59](), [orchestrator/api/agent_endpoints.py:40-113](), [orchestrator/api/agent_endpoints.py:116-186]()
 
 ---
 
-## Lifecycle Stages
+## Core Data Structures
 
-### Stage 1: Creation
+### ModelConfiguration
 
-Agents are created via `POST /api/agents` with required fields:
-- `name` (string, unique per workspace)
-- `agent_type` (enum: code_architect, security_expert, performance_optimizer, data_analyst, infrastructure_manager, custom, system, specialized)
-- `description` (optional)
-- `configuration` (JSONB, optional)
-
-**Initial State**: All agents start with `status='inactive'`.
-
-**Creation Flow**:
-```mermaid
-sequenceDiagram
-    participant User
-    participant Frontend
-    participant AgentsAPI as "/api/agents"
-    participant Database
-    
-    User->>Frontend: Fill agent form
-    Frontend->>AgentsAPI: POST /api/agents
-    AgentsAPI->>Database: INSERT INTO agents<br/>(status='inactive')
-    Database-->>AgentsAPI: agent_id
-    AgentsAPI->>Database: INSERT agent_app_assignments<br/>(tool assignments)
-    AgentsAPI->>Database: INSERT agent_skills<br/>(skill assignments)
-    AgentsAPI-->>Frontend: AgentResponse
-    Frontend-->>User: Success notification
-```
-
-Sources: [orchestrator/api/agents.py:362-438](), [frontend/components/agents/create-agent-modal.tsx:184-338]()
-
----
-
-### Stage 2: Configuration
-
-After creation, agents can be configured through multiple endpoints:
-
-**Configuration Endpoints**:
-- `PUT /api/agents/{agent_id}` - Update basic settings, status, tags
-- `PUT /api/agents/{agent_id}/model-config` - Set model configuration (PRD-15)
-- `PUT /api/agents/{agent_id}/persona` - Set persona (US-021)
-- `PUT /api/agents/{agent_id}/plugins` - Assign plugins (PRD-42)
-- `PUT /api/agents/{agent_id}/config` - Update heartbeat and resource limits (PRD-55)
-
-**Configuration State**: Agents remain `inactive` during configuration unless explicitly activated.
-
-Sources: [orchestrator/api/agents.py:608-698](), [frontend/components/agents/agent-configuration-modal.tsx:482-568]()
-
----
-
-### Stage 3: Activation
-
-Agents must be explicitly activated to become operational.
-
-**Activation Methods**:
-
-1. **Direct Status Update**:
-   ```
-   PUT /api/agents/{agent_id}
-   {
-     "status": "active"
-   }
-   ```
-
-2. **Start Agent Action**:
-   ```
-   POST /api/agents/{agent_id}/execute
-   ```
-   
-   Note: The execute endpoint checks `agent.status != "active"` and returns HTTP 400 if not active.
-
-**Activation Requirements**:
-- Agent must have valid configuration
-- Agent must not be in `error` state
-- Agent must pass pre-activation validation
-
-Sources: [orchestrator/api/agents.py:507-536](), [frontend/hooks/use-agent-api.ts:342-358]()
-
----
-
-### Stage 4: Execution
-
-Active agents can participate in:
-- **Chat Sessions**: Real-time conversational interactions
-- **Workflow Recipes**: Multi-step orchestrated executions
-- **Universal Router**: Automatic agent selection for requests
-- **Agent Coordination**: Collaborative multi-agent tasks
-
-**Execution Constraints**:
-- Only agents with `status='active'` are eligible for execution
-- Agents in maintenance can complete existing tasks but accept no new ones
-- Paused agents freeze mid-execution
-
-**Execution Filtering**: The Universal Router queries agents with:
-```sql
-SELECT * FROM agents 
-WHERE workspace_id = :workspace_id 
-  AND status = 'active' 
-  AND is_active = true
-```
-
-Sources: [orchestrator/api/agents.py:507-536](), [modules/agents/services/agent_factory.py:220-280]()
-
----
-
-### Stage 5: Maintenance Mode
-
-Agents can enter maintenance mode for updates, debugging, or reconfiguration.
-
-**Entering Maintenance**:
-```
-PUT /api/agents/{agent_id}
-{
-  "status": "maintenance"
-}
-```
-
-**Maintenance Behavior**:
-- Agent removed from Universal Router selection pool
-- Existing tasks may complete (graceful mode)
-- New task assignments rejected
-- Agent visible in UI with maintenance badge
-
-**Impact During Maintenance**:
-```mermaid
-graph LR
-    MaintenanceAgent["Agent<br/>(status=maintenance)"]
-    UniversalRouter["Universal Router"]
-    ActiveWorkflows["Active Workflows"]
-    NewRequests["New Requests"]
-    
-    UniversalRouter -.->|"Skipped"| MaintenanceAgent
-    NewRequests -.->|"Rejected"| MaintenanceAgent
-    MaintenanceAgent -->|"May complete"| ActiveWorkflows
-    
-    style MaintenanceAgent fill:#f9f9f9
-```
-
-Sources: [frontend/components/agents/agent-status-control-modal.tsx:79-84](), [orchestrator/api/agents.py:608-698]()
-
----
-
-### Stage 6: Deactivation
-
-Agents can be stopped using three strategies:
-
-#### Immediate Shutdown
-- Status changes to `inactive` immediately
-- Active tasks are interrupted
-- No graceful completion
-
-#### Graceful Shutdown
-- Completes current tasks before transitioning to `inactive`
-- Rejects new task assignments during wind-down
-- Default recommended approach
-
-#### Scheduled Shutdown
-- Waits for all workflows to complete
-- Monitors `workflow_executions` table for completion
-- Changes to `inactive` when workflow count reaches zero
-
-**Shutdown Type Selection**: Configured in `AgentStatusControlModal`:
-
-Sources: [frontend/components/agents/agent-status-control-modal.tsx:86-90](), [frontend/hooks/use-agent-api.ts:360-376]()
-
----
-
-### Stage 7: Deletion
-
-Agent deletion involves a multi-step cleanup process with savepoints to handle foreign key constraints.
-
-**Deletion Endpoint**: `DELETE /api/agents/{agent_id}`
-
-**Cleanup Sequence**:
-
-```mermaid
-graph TD
-    Start["DELETE /api/agents/{id}"]
-    CheckExists["Verify agent exists<br/>in workspace"]
-    DeleteSkills["DELETE FROM agent_skills<br/>WHERE agent_id = :id<br/>(required)"]
-    DeleteWorkflowAgents["DELETE FROM workflow_agents<br/>WHERE agent_id = :id<br/>(required)"]
-    DeleteMemory["DELETE FROM memory_items<br/>WHERE agent_id = :id<br/>(required)"]
-    DeleteTasks["DELETE FROM tasks<br/>WHERE agent_id = :id<br/>(optional)"]
-    DeleteExecutions["DELETE FROM workflow_executions<br/>WHERE agent_id = :id<br/>(optional)"]
-    DeleteAgent["DELETE agent<br/>(CASCADE for other relations)"]
-    Commit["COMMIT"]
-    
-    Start --> CheckExists
-    CheckExists --> DeleteSkills
-    DeleteSkills --> DeleteWorkflowAgents
-    DeleteWorkflowAgents --> DeleteMemory
-    DeleteMemory --> DeleteTasks
-    DeleteTasks --> DeleteExecutions
-    DeleteExecutions --> DeleteAgent
-    DeleteAgent --> Commit
-```
-
-**Savepoint Pattern**: Each deletion step uses a nested savepoint to handle failures gracefully:
+Complete LLM configuration for an agent, supporting per-agent model overrides (PRD-15) [orchestrator/modules/agents/factory/agent_factory.py:61-62]():
 
 ```python
-savepoint = db.begin_nested()
-try:
-    db.execute(text(sql_stmt), {"agent_id": agent_id})
-    savepoint.commit()
-except Exception as e:
-    savepoint.rollback()
-    if required:
-        raise HTTPException(status_code=500, ...)
-    else:
-        logger.warning(f"Optional deletion failed: {e}")
+@dataclass
+class ModelConfiguration:
+    provider: str              # "openai", "anthropic", "google", etc.
+    model_id: str             # e.g., "gpt-4", "claude-3-opus-20240229"
+    temperature: float = 0.7
+    max_tokens: int = 2000
+    top_p: float = 1.0
+    frequency_penalty: float = 0.0
+    presence_penalty: float = 0.0
+    fallback_model_id: Optional[str] = None  # Automatic fallback on failure
 ```
 
-**CASCADE Relationships**: The following relationships are automatically cleaned up by database CASCADE rules:
-- `agent_app_assignments` (tool assignments)
-- `agent_assigned_plugins` (plugin assignments)
-- `llm_usage` records (via `on_delete='SET NULL'` on agent_id)
-- `system_prompt_eval_run` records
-
-**Required vs. Optional Deletions**:
-- **Required** (raise error on failure): agent_skills, workflow_agents, memory_items
-- **Optional** (log warning on failure): tasks, workflow_executions
-
-Sources: [orchestrator/api/agents.py:700-744]()
+**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:61-101]()
 
 ---
 
-## Status Management API
+### AgentRuntime
 
-### Get Agent Status
+Runtime representation of an active agent, cached in memory [orchestrator/modules/agents/factory/agent_factory.py:155-156]():
 
-```
-GET /api/agents/{agent_id}/status
-```
-
-**Response**:
-```json
-{
-  "agent_id": 123,
-  "name": "Code Architect",
-  "status": "active",
-  "agent_type": "code_architect",
-  "priority_level": "high",
-  "max_concurrent_tasks": 5,
-  "auto_start": false,
-  "created_at": "2025-01-01T00:00:00Z",
-  "updated_at": "2025-01-01T12:00:00Z",
-  "configuration": {}
-}
-```
-
-Sources: [orchestrator/api/agents.py:481-506]()
-
----
-
-### Update Agent Status
-
-```
-PUT /api/agents/{agent_id}
-```
-
-**Request Body**:
-```json
-{
-  "status": "inactive"
-}
-```
-
-**Response**: Full `AgentResponse` object with updated status.
-
-**Status Validation**: The backend accepts any string value for status (VARCHAR field), but the frontend enforces the enum values through UI constraints.
-
-Sources: [orchestrator/api/agents.py:608-698]()
-
----
-
-### Start Agent (Hook)
-
-Frontend provides a dedicated hook for starting agents:
-
-```typescript
-const startAgentMutation = useStartAgent()
-await startAgentMutation.mutateAsync(agentId.toString())
-```
-
-This calls `apiClient.startAgent(agentId)` which internally updates status to `'active'`.
-
-Sources: [frontend/hooks/use-agent-api.ts:342-358]()
-
----
-
-### Stop Agent (Hook)
-
-```typescript
-const stopAgentMutation = useStopAgent()
-await stopAgentMutation.mutateAsync(agentId.toString())
-```
-
-This calls `apiClient.stopAgent(agentId)` which internally updates status to `'inactive'`.
-
-Sources: [frontend/hooks/use-agent-api.ts:360-376]()
-
----
-
-## Impact Analysis System
-
-Before changing agent status, the system can perform impact analysis to assess the consequences.
-
-### Impact Analysis Components
-
-**AgentStatusControlModal**: Provides a UI for impact-aware status changes.
-
-**Analyzed Factors**:
-1. **Active Workflows**: Workflows currently using the agent
-2. **Queued Tasks**: Tasks waiting for the agent
-3. **Dependent Agents**: Other agents that depend on this agent
-4. **System Impact**: Performance degradation, availability impact
-5. **Recovery Time**: Estimated time to restore service
-
-### Impact Analysis Structure
-
-```typescript
-interface AgentImpactAnalysis {
-  agent_id: number
-  agent_name: string
-  current_status: string
-  proposed_status: string
-  impact_analysis: {
-    active_workflows: Array<{
-      id: number
-      name: string
-      priority: string
-      estimated_completion: string
-      status: string
-    }>
-    queued_tasks: number
-    dependent_agents: Array<{
-      id: number
-      name: string
-      dependency_type: string
-    }>
-    system_impact: {
-      performance_degradation: number
-      availability_impact: string
-      recovery_time_estimate: string
-    }
-    recommendations: Array<{
-      type: 'warning' | 'info' | 'critical'
-      message: string
-    }>
-  }
-}
-```
-
-### Impact Analysis Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Modal as AgentStatusControlModal
-    participant API as "/api/agents/{id}"
-    participant Database
-    
-    User->>Modal: Request status change
-    Modal->>Modal: Generate impact analysis<br/>(client-side)
-    Modal->>Modal: Check active workflows
-    Modal->>Modal: Check queued tasks
-    Modal->>Modal: Generate recommendations
-    Modal->>User: Display impact summary
-    User->>Modal: Confirm change
-    Modal->>API: PUT /api/agents/{id}
-    API->>Database: UPDATE agents<br/>SET status = :new_status
-    Database-->>API: Success
-    API-->>Modal: Updated agent
-    Modal->>User: Show confirmation
-```
-
-**Note**: The current implementation generates impact analysis on the client side. The `generateRecommendations` function analyzes status transitions and produces warnings/info messages.
-
-Sources: [frontend/components/agents/agent-status-control-modal.tsx:41-268]()
-
----
-
-## Status Change Confirmations
-
-### Required Confirmations
-
-When changing status to `inactive` or `maintenance`, the UI requires users to confirm understanding of:
-
-1. **Active Workflows Will Stop**: Current executions will be interrupted
-2. **Queued Tasks Will Be Cancelled**: Pending work will not execute
-3. **Dependent Agents May Fail**: Agents depending on this one may encounter errors
-
-**Confirmation Checkboxes**: Implemented using `Checkbox` components with state tracking in `confirmations` array.
-
-```typescript
-const [confirmations, setConfirmations] = useState<string[]>([])
-const allConfirmed = confirmations.length === 3
-```
-
-**Submit Disabled**: The status change button is disabled until all confirmations are checked.
-
-Sources: [frontend/components/agents/agent-status-control-modal.tsx:100-102]()
-
----
-
-## Status Filtering in UI
-
-### Agent Roster Filtering
-
-The `AgentRoster` component supports filtering by status:
-
-```typescript
-const matchesStatus = statusFilter === 'all' || agent.status === statusFilter
-```
-
-**Available Filters**:
-- All
-- Active
-- Idle
-
-**Filter UI**: Button group in the search/filter bar.
-
-Sources: [frontend/components/agents/agent-roster.tsx:251-259](), [frontend/components/agents/agent-management.tsx:71-76]()
-
----
-
-### List API Filtering
-
-The list agents endpoint supports status filtering:
-
-```
-GET /api/agents?status=active&skip=0&limit=100
-```
-
-**Query Parameter**: `status` (optional, type: `AgentStatus` enum)
-
-**Implementation**:
 ```python
-if status:
-    query = query.filter(Agent.status == status.value)
+@dataclass
+class AgentRuntime:
+    agent_id: int
+    metadata: AgentMetadata
+    llm_manager: LLMManager                    # Pre-configured LLM client
+    lifecycle_state: AgentLifecycle
+    execution_count: int = 0
+    total_tokens_used: int = 0
+    last_execution: Optional[datetime] = None
+    performance_metrics: Dict[str, Any] = {}   # avg_execution_time, success_rate
+    tools: List[Dict[str, Any]] = []           # Composio app assignments
+    tool_executor: Any = None                  # UnifiedToolExecutor instance
+    is_byok: bool = False                      # Using workspace's own API key
+    resolved_provider: str = ""
+    workspace_id: Optional[Any] = None
 ```
 
-Sources: [orchestrator/api/agents.py:440-479]()
+**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:155-192]()
 
 ---
 
-## Agent Polling and Real-Time Updates
+## Agent Creation & Activation
 
-### Auto-Refresh with React Query
+### create_agent() flow
 
-Agents are automatically polled for status updates using React Query:
-
-```typescript
-export function useAgent(agentId: string | null) {
-  return useQuery({
-    queryKey: agentQueryKeys.agent(agentId!),
-    queryFn: () => agentApiClient.getAgent(agentId!),
-    enabled: !!agentId,
-    refetchInterval: 10000,  // Poll every 10 seconds
-  })
-}
+Title: Agent Creation Process
+```mermaid
+flowchart TD
+    Start["AgentFactory.create_agent(metadata)"] --> Parse["Parse AgentMetadata"]
+    Parse --> DBInsert["Insert Agent row<br/>(status=INITIALIZING)"]
+    DBInsert --> ResolveKey["_resolve_api_key()<br/>3-tier resolution"]
+    ResolveKey --> CreateLLM["_create_llm_manager()"]
+    CreateLLM --> Verify{"auto_verify?"}
+    Verify -->|Yes| TestCall["_verify_llm_connection()"]
+    Verify -->|No| LoadTools["_load_agent_tools()"]
+    TestCall --> VerifyResult{"Success?"}
+    VerifyResult -->|No, has fallback| Fallback["Try fallback_model_id"]
+    VerifyResult -->|No, no fallback| Delete["Delete DB row"]
+    VerifyResult -->|Yes| LoadTools
+    LoadTools --> CacheRuntime["active_agents[id] = runtime"]
+    CacheRuntime --> UpdateStatus["Set status=ACTIVE"]
 ```
 
-**Polling Intervals**:
-- Individual agent: 10 seconds
-- Agent list: Disabled (manual refresh only)
-- Agent stats: 30 seconds
+### LLM Configuration Resolution
 
-**Cache Invalidation**: Status changes trigger immediate cache invalidation via `queryClient.invalidateQueries()`.
+The factory follows this priority order for LLM configuration:
+1. **Agent's `model_config`**: If the agent has an explicit model defined [orchestrator/modules/agents/factory/agent_factory.py:118-132]().
+2. **System settings**: Fetched via `get_provider_and_model_from_settings` from the `SystemSetting` table.
+3. **Config defaults**: Fallback to `config.py`.
 
-Sources: [frontend/hooks/use-agent-api.ts:98-105](), [frontend/hooks/use-agent-api.ts:87-95]()
+When no credential is found for the selected provider, the factory **automatically falls back to OpenRouter** as a marketplace aggregator [orchestrator/modules/agents/factory/agent_factory.py:610-615]().
+
+**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:467-568]()
 
 ---
 
-## Status Display Components
+## API Key Resolution
 
-### Status Badges
+### 3-Tier Resolution Strategy
 
-Status is displayed using `StatusBadge` components with icons and colors:
-
-```tsx
-<StatusBadge size="sm" status={
-  agent.status === 'idle' ? 'warning' :
-  agent.status === 'maintenance' ? 'error' : 'success'
-}>
-  <StatusIcon className="w-2.5 h-2.5 mr-0.5" />
-  {agent.status}
-</StatusBadge>
+Title: 3-Tier API Key Resolution
+```mermaid
+flowchart TD
+    Start["_resolve_api_key(provider, workspace_id)"] --> Tier1["Tier 1: BYOK Check"]
+    Tier1 --> BYOKEnabled{"workspace.settings<br/>byok_overrides[provider]?"}
+    BYOKEnabled -->|Yes| QueryKey["Query UserApiKey table"]
+    QueryKey --> ReturnBYOK["Return ResolvedKey<br/>(source='byok')"]
+    
+    BYOKEnabled -->|No| Tier2["Tier 2: Credential Store"]
+    Tier2 --> Resolve["get_credential_data()"]
+    Resolve --> CredFound{"Found in DB?"}
+    CredFound -->|Yes| ReturnPlatform["Return ResolvedKey<br/>(source='platform')"]
+    
+    CredFound -->|No| Tier3["Tier 3: Environment Variables"]
+    Tier3 --> EnvFound{"Env var set?"}
+    EnvFound -->|Yes| ReturnEnv["Return ResolvedKey<br/>(source='env')"]
+    EnvFound -->|No| ReturnNone["Return None"]
 ```
 
-**Status Icon Mapping**:
-- `active` → CheckCircle (green)
-- `idle` → Clock (yellow)
-- `maintenance` → AlertCircle (orange)
-- `error` → AlertTriangle (red)
-
-Sources: [frontend/components/agents/agent-roster.tsx:156-160](), [frontend/components/agents/agent-roster.tsx:304-310]()
+**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:317-392]()
 
 ---
 
-## Agent Auto-Start Configuration
+## Agent Execution & Tool Loop
 
-Agents can be configured to automatically start when the system boots.
+### execute_with_prompt()
 
-**Configuration Field**: `Agent.auto_start` (boolean, default: false)
+Executes a task with a multi-iteration tool loop. It utilizes `get_tools_for_agent` as the single source of truth for tool schemas [orchestrator/modules/agents/factory/agent_factory.py:9-11]().
 
-**Auto-Start Behavior**: When `auto_start=true`:
-- Agent status transitions to `active` on system startup
-- Agent participates in Universal Router immediately
-- Agent begins processing heartbeat checks (if configured)
+Title: Execution Loop with Tool Deduplication
+```mermaid
+flowchart TD
+    Start["execute_with_prompt()"] --> BuildMsgs["Build messages array"]
+    BuildMsgs --> LoopStart["Loop (max 10 iterations)"]
+    LoopStart --> LLMCall["llm_manager.generate_response()"]
+    LLMCall --> CheckTools{"tool_calls?"}
+    
+    CheckTools -->|No| Final["Extract final content"]
+    CheckTools -->|Yes| Tracker["ToolExecutionTracker.should_skip_execution()"]
+    
+    Tracker -->|Skip| SkipMsg["Add 'Already executed' error"]
+    Tracker -->|Execute| ExecTool["UnifiedToolExecutor.execute_tool()"]
+    
+    ExecTool --> Record["tracker.record_execution()"]
+    SkipMsg --> Record
+    Record --> NextIter["Next iteration"]
+    NextIter --> LoopStart
+```
 
-**Configuration UI**: Toggle switch in `AgentConfiguration` component.
+### Tool Loop Prevention
 
-Sources: [orchestrator/api/agents.py:232](), [frontend/components/agents/agent-configuration.tsx:29]()
+The `ToolExecutionTracker` prevents infinite loops by implementing:
+1. **Exact deduplication**: Checks if the same tool was called with identical arguments using MD5 hashing [orchestrator/modules/agents/factory/agent_factory.py:780-795]().
+2. **Semantic deduplication**: Uses `SequenceMatcher` (75% threshold) to detect similar queries for search tools [orchestrator/core/composio/tool_executor.py:20-21]().
+3. **Per-tool iteration limits**: The factory enforces a hard limit of 10 iterations per request [orchestrator/modules/agents/factory/agent_factory.py:714-720]().
+
+**Sources:** [orchestrator/modules/agents/factory/agent_factory.py:714-844](), [orchestrator/core/composio/tool_executor.py:20-21]()
 
 ---
 
-## Related Documentation
+## Tool Integration Architecture
 
-- [Agent Configuration](#3.2) - Detailed configuration options for agents
-- [Creating Agents](#3.1) - Agent creation wizard and templates
-- [Agent Context Assembly](#3.5) - How agent capabilities are assembled at runtime
-- [Universal Router](#9) - How active agents are selected for requests
-- [Workflow Recipes](#4) - Using agents in multi-step workflows
+### UnifiedToolExecutor
+
+Title: Unified Tool Execution Routing
+```mermaid
+flowchart LR
+    AF["AgentFactory"] --> UTE["UnifiedToolExecutor"]
+    UTE --> PAE["AgentPlatformTools<br/>(Research/RAG)"]
+    UTE --> AE["ActionExecutor<br/>(File/Shell Ops)"]
+    UTE --> CTE["ComposioToolExecutor<br/>(External Apps)"]
+    UTE --> WC["WorkspaceClient<br/>(Isolated Worker)"]
+```
+
+The `UnifiedToolExecutor` routes calls based on tool name patterns:
+- **Composio**: `composio_execute` or dynamic prefixes like `GITHUB_*` [orchestrator/core/composio/tool_executor.py:176-202]().
+- **Access Validation**: The `ComposioToolExecutor` validates feature access before execution, checking if an agent has permission for a specific app action [orchestrator/core/composio/tool_executor.py:66-125]().
+- **Entity Resolution**: Resolves the workspace ID to a Composio entity for authenticated tool usage [orchestrator/core/composio/tool_executor.py:126-140]().
+
+### Tool Hinting Service
+To assist the LLM in selecting the correct tools, the `ComposioHintService` generates system message hints based on the prompt intent [orchestrator/modules/tools/services/composio_hint_service.py:5-21](). It uses a 3-tier strategy:
+1. **Capability-based**: Matches taxonomy overlap [orchestrator/modules/tools/services/composio_hint_service.py:162-166]().
+2. **Token-filtered**: Uses `ILIKE` matching with a mandatory capability gate [orchestrator/modules/tools/services/composio_hint_service.py:17-18]().
+3. **Top-N fallback**: Provides safe default actions per app [orchestrator/modules/tools/services/composio_hint_service.py:15]().
+
+**Sources:** [orchestrator/core/composio/tool_executor.py:30-162](), [orchestrator/core/composio/client.py:54-126](), [orchestrator/modules/tools/services/composio_hint_service.py:89-124]()
 
 ---
 
-## Summary
+## Metadata & Cache Sync
 
-The agent lifecycle in Automatos AI follows a well-defined path from creation through execution to deletion. Key points:
+The `MetadataSyncService` ensures that the local cache stays in sync with external tool providers (like Composio). It populates:
+- `composio_apps_cache`
+- `composio_actions_cache`
+- `composio_stats_cache` [orchestrator/services/metadata_sync_service.py:1-7]().
 
-- **Status States**: 7 distinct status values control agent behavior and availability
-- **Lifecycle Stages**: Creation → Configuration → Activation → Execution → Maintenance → Deactivation → Deletion
-- **Status Transitions**: Controlled through PUT /api/agents/{id} with impact analysis
-- **Graceful Shutdown**: Three shutdown strategies (immediate, graceful, scheduled)
-- **Impact Analysis**: Client-side analysis of status change consequences
-- **Database Cleanup**: Savepoint-based deletion with CASCADE handling
-- **Real-Time Updates**: 10-second polling interval for status changes
-- **Workspace Isolation**: All status operations scoped to workspace_id
+This service performs bulk fetches to avoid the N+1 API call problem, grouping actions by app for efficient upserts [orchestrator/services/metadata_sync_service.py:42-47]().
 
-Sources: [orchestrator/api/agents.py:1-744](), [frontend/components/agents/agent-status-control-modal.tsx:1-268](), [frontend/hooks/use-agent-api.ts:1-400]()
+**Sources:** [orchestrator/services/metadata_sync_service.py:37-150](), [orchestrator/api/tools.py:79-173]()
 
 ---

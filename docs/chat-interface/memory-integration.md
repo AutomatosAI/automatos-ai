@@ -5,361 +5,169 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
+- [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
+- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
+- [frontend/components/auth/sign-up-form.tsx](frontend/components/auth/sign-up-form.tsx)
+- [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
+- [orchestrator/api/channels.py](orchestrator/api/channels.py)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/routing.py](orchestrator/api/routing.py)
-- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
+- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
+- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
+- [orchestrator/channels/base.py](orchestrator/channels/base.py)
+- [orchestrator/channels/discord_adapter.py](orchestrator/channels/discord_adapter.py)
+- [orchestrator/channels/google_chat_adapter.py](orchestrator/channels/google_chat_adapter.py)
+- [orchestrator/channels/line_adapter.py](orchestrator/channels/line_adapter.py)
+- [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
+- [orchestrator/channels/slack_adapter.py](orchestrator/channels/slack_adapter.py)
 - [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
 - [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
 - [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
 - [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
-- [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
+- [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
 - [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
 - [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
-- [orchestrator/core/models/system_settings.py](orchestrator/core/models/system_settings.py)
+- [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
 - [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
-- [orchestrator/modules/orchestrator/pipeline.py](orchestrator/modules/orchestrator/pipeline.py)
+- [orchestrator/core/services/plugin_security_scanner.py](orchestrator/core/services/plugin_security_scanner.py)
+- [orchestrator/modules/agents/__init__.py](orchestrator/modules/agents/__init__.py)
+- [orchestrator/modules/agents/factory/__init__.py](orchestrator/modules/agents/factory/__init__.py)
+- [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
 - [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
-- [orchestrator/modules/tools/discovery/__init__.py](orchestrator/modules/tools/discovery/__init__.py)
-- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
+- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
+- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
+- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
+- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
+- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
+- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
 
 </details>
 
 
 
-## Purpose and Scope
+This page documents how the chat interface integrates with the 5-layer memory system during message processing. It covers memory retrieval (pre-LLM context assembly), storage (post-response persistence), and the flow of data between `StreamingChatService`, `ContextService`, and `UnifiedMemoryService`.
 
-This document covers the integration of Mem0 memory retrieval and storage within the chat and recipe execution systems. Memory integration enables agents to access relevant context from previous interactions, improving coherence and task continuity across conversations and workflow executions.
-
-For information about the broader chat streaming system, see [Streaming Chat Service](#8.1). For recipe execution details, see [Recipe Execution](#4.2).
+For the broader memory architecture and L0-L4 layer definitions, see **3. Memory System**. For context assembly mechanics and token budgets, see **4. Context Service**.
 
 ---
 
-## Architecture Overview
+## Overview
 
-Memory integration operates at two primary touch points: the streaming chat service and the recipe executor. Both systems use a shared memory injector to retrieve and format context from Mem0.
+Memory integration in the chat interface operates in two phases:
 
+1.  **Retrieval Phase** — Before the LLM call, relevant memories are fetched and injected into the system prompt via `MemorySection`. The `AutoBrain` complexity assessor determines if memory is needed based on the task type (e.g., `ATOM` tasks skip memory, while `CELL` and above require it) [orchestrator/consumers/chatbot/auto.py:7-22]().
+2.  **Storage Phase** — After the LLM response completes, the user-assistant exchange is stored across multiple layers: L1 Redis session, L2 Postgres short-term, and L3 Mem0 long-term. Platform actions like `platform_store_memory` allow agents to explicitly persist facts during execution [orchestrator/modules/tools/discovery/platform_executor.py:53-54]().
+
+**Sources:** [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/consumers/chatbot/auto.py:1-22](), [orchestrator/modules/memory/integrations/mem0_client.py:1-11]()
+
+---
+
+## Memory Retrieval Architecture
+
+### Complexity-Aware Retrieval
+
+The chat system uses `AutoBrain` to assess message complexity. This assessment includes a `needs_memory` flag which informs the `StreamingChatService` whether to invoke the memory retrieval pipeline [orchestrator/consumers/chatbot/auto.py:69-72]().
+
+**Diagram: Memory Retrieval Data Flow**
 ```mermaid
 graph TB
-    subgraph "Chat Flow"
-        ChatRequest["StreamingChatService<br/>stream_response_aisdk"]
-        ShouldRetrieve["should_retrieve_memories<br/>(gate function)"]
-        RetrieveChat["retrieve_relevant_memories<br/>(chat_id, query)"]
-        BuildMessage["build_memory_injection_message"]
-        InjectChat["Insert into llm_messages<br/>at position 1"]
-    end
+    ChatAPI["api/chat.py"]
+    StreamingChatService["StreamingChatService"]
+    AutoBrain["AutoBrain.assess()"]
     
-    subgraph "Recipe Flow"
-        RecipeStart["execute_recipe_direct<br/>(recipe_executor.py)"]
-        LoadMemories["RecipeMemoryService<br/>retrieve_relevant_memories"]
-        InjectStep1["Inject into Step 1<br/>system message"]
-        RecipeComplete["Post-execution"]
-        StoreMemories["store_recipe_memory<br/>(learning data)"]
-    end
+    ContextService["ContextService.build_context()"]
+    MemorySection["MemorySection.render()"]
     
-    subgraph "Shared Components"
-        MemoryInjector["MemoryInjector<br/>(modules.memory.operations)"]
-        Mem0Client["Mem0 Client<br/>(external service)"]
-    end
+    UnifiedMemoryService["UnifiedMemoryService"]
+    Mem0Client["Mem0Client.search()"]
+    PostgresL2["Postgres (L2 Short-term)"]
     
-    ChatRequest --> ShouldRetrieve
-    ShouldRetrieve -->|"true"| RetrieveChat
-    ShouldRetrieve -->|"false (optimization)"| InjectChat
-    RetrieveChat --> MemoryInjector
-    RetrieveChat --> BuildMessage
-    BuildMessage --> InjectChat
+    ChatAPI --> StreamingChatService
+    StreamingChatService --> AutoBrain
+    AutoBrain -->|ComplexityAssessment| StreamingChatService
     
-    RecipeStart --> LoadMemories
-    LoadMemories --> InjectStep1
-    RecipeComplete --> StoreMemories
+    StreamingChatService -->|needs_memory=True| ContextService
+    ContextService --> MemorySection
+    MemorySection --> UnifiedMemoryService
     
-    MemoryInjector --> Mem0Client
-    LoadMemories --> Mem0Client
-    StoreMemories --> Mem0Client
+    UnifiedMemoryService --> Mem0Client
+    UnifiedMemoryService --> PostgresL2
+    
+    Mem0Client -->|Vector Results| MemorySection
+    PostgresL2 -->|Recent History| MemorySection
+    
+    MemorySection -->|Formatted Context| FinalPrompt["Final System Prompt"]
 ```
 
-**Sources:** [orchestrator/consumers/chatbot/service.py:601-614](), [orchestrator/api/recipe_executor.py:637-652]()
+**Sources:** [orchestrator/api/chat.py:18-20](), [orchestrator/consumers/chatbot/auto.py:59-84](), [orchestrator/modules/memory/integrations/mem0_client.py:143-154]()
 
 ---
 
-## The Memory Retrieval Gate
+## ContextService Integration
 
-To avoid unnecessary token overhead and API calls, memory retrieval is gated by the `should_retrieve_memories` function. This optimization determines whether the current user query warrants memory context injection.
+When `ContextService` is invoked, memory retrieval is encapsulated in the `MemorySection` class. It manages the token budget and formatting for the LLM.
 
-### Gate Logic
+### MemorySection Render Flow
 
-The gate evaluates the query against heuristics to detect when memories are likely irrelevant:
+The `MemorySection` handles the complexity of coordinating with the `UnifiedMemoryService`.
 
-| Query Pattern | Example | Should Retrieve? |
-|---------------|---------|------------------|
-| Simple greetings | "hello", "hi there" | No |
-| Meta questions | "what can you do?" | No |
-| Continuation queries | "continue", "go on" | No |
-| Complex task queries | "summarize last week's PRs" | Yes |
-| Referential queries | "what did I ask about earlier?" | Yes |
+**Key Behaviors:**
+*   **Intent-Based Filtering**: The `SmartToolRouter` can influence memory usage by mapping intents like `MEMORY_RECALL` to specific memory tool categories [orchestrator/consumers/chatbot/smart_tool_router.py:121]().
+*   **Platform Integration**: Agents can search or browse memories using `platform_search_memory` and `platform_browse_memories` handlers, which interface directly with the memory storage layer [orchestrator/modules/tools/discovery/platform_executor.py:65-66]().
+*   **Stashing**: Stashed memory context is often used to provide transparency to the user in the chat UI regarding what "facts" the AI is currently recalling.
 
-### Implementation
-
-```
-orchestrator/consumers/chatbot/service.py:603
-    should_retrieve = await self.memory_injector.should_retrieve_memories(latest_text, chat_id)
-```
-
-The gate is checked before retrieval. If it returns `False`, memory injection is skipped entirely, saving tokens and reducing latency.
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:602-604]()
+**Sources:** [orchestrator/consumers/chatbot/smart_tool_router.py:111-125](), [orchestrator/modules/tools/discovery/platform_executor.py:198-200]()
 
 ---
 
-## Chat Memory Integration
+## Memory Storage Flow
 
-Memory injection in the streaming chat service occurs during the prompt assembly phase, before the LLM generate call.
+After a successful LLM response, the system initiates a multi-layered persistence pipeline. This is handled both automatically by the chat orchestrator and explicitly via platform tools.
 
-### Injection Flow
+### Storage Pipeline Implementation
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant StreamingChatService
-    participant MemoryInjector
-    participant Mem0
-    participant LLMManager
-    
-    User->>StreamingChatService: "summarize last week's tickets"
-    StreamingChatService->>StreamingChatService: extract_latest_user_text
-    StreamingChatService->>MemoryInjector: should_retrieve_memories(query, chat_id)
-    MemoryInjector-->>StreamingChatService: true
-    
-    StreamingChatService->>MemoryInjector: retrieve_relevant_memories(chat_id, query)
-    MemoryInjector->>Mem0: search(query, filters)
-    Mem0-->>MemoryInjector: memory_chunks[]
-    MemoryInjector-->>StreamingChatService: formatted_context
-    
-    StreamingChatService->>StreamingChatService: build_memory_injection_message(context)
-    StreamingChatService->>StreamingChatService: llm_messages.insert(1, memory_msg)
-    StreamingChatService->>LLMManager: generate_response(messages, tools)
-    LLMManager-->>User: Stream response with memory context
-```
+1.  **L3 Long-Term (Mem0)**: The `Mem0Client` performs fact extraction and vector storage. It accepts a list of messages, converts them to a text string, and sends them to the Mem0 server [orchestrator/modules/memory/integrations/mem0_client.py:143-165]().
+2.  **L2 Short-Term (Postgres)**: Messages are persisted to the database via `ChatService.save_message` [orchestrator/consumers/chatbot/service.py:184-188]().
+3.  **Explicit Storage**: Agents can use the `platform_store_memory` tool to save specific information. This routes through `PlatformActionExecutor` to the `store_memory` handler [orchestrator/modules/tools/discovery/platform_executor.py:53-54]().
 
-### Code Path
-
-The memory injection occurs in `stream_response_aisdk`:
-
-```
-orchestrator/consumers/chatbot/service.py:605-614
-
-if not fresh_start and should_retrieve:
-    memory_context = await self.memory_injector.retrieve_relevant_memories(
-        chat_id,
-        latest_text,
-        workspace_id=str(self.workspace_id) if self.workspace_id else None,
-        agent_id=agent_id
-    )
-    if memory_context:
-        logger.info(f"[Memory] Injecting {len(memory_context)} chars")
-        llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
-```
-
-The memory message is inserted at **position 1** (after the system message, before user context). This placement ensures memories inform the agent's response without overriding core instructions.
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:492-615]()
-
----
-
-## Recipe Memory Integration
-
-Recipe execution integrates memories at two stages: **pre-execution** (loading) and **post-execution** (storage).
-
-### Pre-Execution: Memory Loading
-
-Memories are retrieved before recipe execution begins and injected into **Step 1 only**. This prevents redundant memory context from accumulating across all steps.
-
+**Diagram: Memory Storage Implementation**
 ```mermaid
 graph LR
-    subgraph "Recipe Execution Start"
-        LoadRecipe["Load WorkflowRecipe"]
-        RetrieveMemories["RecipeMemoryService<br/>retrieve_relevant_memories"]
-        CheckMemories{"memories found?"}
-        InjectStep1["Inject into Step 1<br/>system message"]
-        ExecuteSteps["Execute Steps 1-N"]
+    subgraph "Agent Tools"
+        StoreTool["platform_store_memory"]
     end
     
-    LoadRecipe --> RetrieveMemories
-    RetrieveMemories --> CheckMemories
-    CheckMemories -->|"Yes"| InjectStep1
-    CheckMemories -->|"No"| ExecuteSteps
-    InjectStep1 --> ExecuteSteps
-```
-
-### Code Path
-
-Memory retrieval occurs in `execute_recipe_direct`:
-
-```
-orchestrator/api/recipe_executor.py:637-652
-
-recipe_memories = None
-try:
-    from core.services.recipe_memory_service import RecipeMemoryService
-    memory_svc = RecipeMemoryService(db=db)
-    recipe_memories = memory_svc.retrieve_relevant_memories(
-        recipe_id=recipe.id,
-        context={"workspace_id": str(workspace_id), "input_data": input_data}
-    )
-    if recipe_memories and recipe_memories.get("total_memories", 0) > 0:
-        logger.info(
-            "[recipe_direct] Loaded %d Mem0 memories for recipe %d",
-            recipe_memories["total_memories"], recipe.id,
-        )
-except Exception as exc:
-    logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
-```
-
-Injection into Step 1:
-
-```
-orchestrator/api/recipe_executor.py:151-162
-
-if recipe_memories and step_order == 1:
-    summary = recipe_memories.get("summary", "")
-    if summary and summary != "No relevant memories found":
-        messages.append({
-            "role": "system",
-            "content": (
-                "## Learnings from Previous Runs\n"
-                f"{summary}"
-            ),
-        })
-        logger.info("[recipe_step] Injected %d Mem0 memories into step 1", recipe_memories.get("total_memories", 0))
-```
-
-**Sources:** [orchestrator/api/recipe_executor.py:151-162](), [orchestrator/api/recipe_executor.py:637-652]()
-
-### Post-Execution: Memory Storage
-
-After recipe execution completes, learning data is stored back to Mem0 for future runs. This enables continuous improvement through self-learning.
-
-```
-orchestrator/api/recipe_executor.py:762-774
-
-# Post-execution: store memories for learning
-try:
-    from core.services.recipe_memory_service import RecipeMemoryService
-    memory_svc = RecipeMemoryService(db=db)
+    subgraph "Chat Service"
+        SaveMsg["ChatService.save_message()"]
+    end
     
-    learning_data = {
-        "recipe_id": recipe.id,
-        "execution_id": recipe_execution_id,
-        "success": execution.status == 'completed',
-        "step_results": compact_results,
-        "duration_ms": total_duration_ms,
-        "total_tokens": total_tokens,
-    }
+    subgraph "Memory Handlers"
+        Handler["handlers_workspace.store_memory()"]
+    end
     
-    memory_svc.store_recipe_memory(learning_data)
-    logger.info("[recipe_direct] Stored execution memory for recipe %d", recipe.id)
-except Exception as exc:
-    logger.warning("[recipe_direct] Memory storage failed: %s", exc)
+    subgraph "Storage Layers"
+        Postgres["Postgres (Messages)"]
+        Mem0["Mem0 (L3 Long-term)"]
+    end
+    
+    SaveMsg --> Postgres
+    StoreTool --> Handler
+    Handler --> Mem0
+    SaveMsg -.->|Async Extraction| Mem0
 ```
 
-**Sources:** [orchestrator/api/recipe_executor.py:762-774]()
+**Sources:** [orchestrator/modules/memory/integrations/mem0_client.py:143-176](), [orchestrator/consumers/chatbot/service.py:161-186](), [orchestrator/modules/tools/discovery/platform_executor.py:193-194]()
 
 ---
 
-## Memory Context Formatting
+## Error Handling & Circuit Breaking
 
-Memory context is formatted into a structured system message that the LLM can parse naturally. The format varies slightly between chat and recipe contexts.
+Memory operations, particularly those involving the external `Mem0` service, are protected by a **Circuit Breaker** to prevent latency in the memory tier from degrading the overall chat experience [orchestrator/modules/memory/integrations/mem0_client.py:27-63]().
 
-### Chat Memory Format
+*   **Failure Threshold**: 5 consecutive failures will "open" the circuit [orchestrator/modules/memory/integrations/mem0_client.py:21]().
+*   **Cooldown**: The circuit stays open for 60 seconds before allowing a "probe" request [orchestrator/modules/memory/integrations/mem0_client.py:22]().
+*   **Retries**: The client implements a single retry with exponential backoff (1.5s) for connection errors and timeouts [orchestrator/modules/memory/integrations/mem0_client.py:24-127]().
+*   **Timeout**: Requests to Mem0 are capped at 15 seconds [orchestrator/modules/memory/integrations/mem0_client.py:23]().
 
-For chat interactions, the memory injector builds a context summary:
-
-```
-orchestrator/consumers/chatbot/service.py:614
-
-llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
-```
-
-The `build_memory_injection_message` method (from `modules.memory.operations`) typically produces:
-
-```
-## Context from Previous Interactions
-
-<memory_summary>
-
-Relevant details:
-- Key point 1
-- Key point 2
-- Key point 3
-```
-
-### Recipe Memory Format
-
-For recipe execution, memories are formatted as learnings:
-
-```
-## Learnings from Previous Runs
-
-<summary>
-```
-
-This simpler format reflects that recipe memories are typically higher-level patterns (e.g., "JIRA_GET_ISSUE requires `issue_id_or_key` param") rather than conversational context.
-
-**Sources:** [orchestrator/api/recipe_executor.py:151-162](), [orchestrator/consumers/chatbot/service.py:614]()
-
----
-
-## Component Reference
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `MemoryInjector` | `modules.memory.operations` | Core memory retrieval/formatting logic |
-| `RecipeMemoryService` | `core.services.recipe_memory_service` | Recipe-specific memory operations |
-| `should_retrieve_memories` | `MemoryInjector` method | Gate function to optimize retrieval |
-| `retrieve_relevant_memories` | `MemoryInjector` method | Fetch memories from Mem0 |
-| `build_memory_injection_message` | `MemoryInjector` method | Format memories for LLM context |
-| `store_recipe_memory` | `RecipeMemoryService` method | Persist learning data post-execution |
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:37](), [orchestrator/consumers/chatbot/service.py:466](), [orchestrator/api/recipe_executor.py:640]()
-
----
-
-## Memory Injection Points Summary
-
-```mermaid
-graph TB
-    subgraph "Chat System"
-        ChatEntry["stream_response_aisdk"]
-        ChatGate["should_retrieve_memories"]
-        ChatRetrieve["retrieve_relevant_memories"]
-        ChatInject["Insert at messages[1]"]
-        
-        ChatEntry --> ChatGate
-        ChatGate -->|"true"| ChatRetrieve
-        ChatRetrieve --> ChatInject
-    end
-    
-    subgraph "Recipe System"
-        RecipeEntry["execute_recipe_direct"]
-        RecipeRetrieve["retrieve_relevant_memories<br/>(pre-execution)"]
-        RecipeInject["Inject into Step 1 only"]
-        RecipeStore["store_recipe_memory<br/>(post-execution)"]
-        
-        RecipeEntry --> RecipeRetrieve
-        RecipeRetrieve --> RecipeInject
-        RecipeEntry --> RecipeStore
-    end
-    
-    subgraph "Memory Backend"
-        Mem0["Mem0 Client"]
-    end
-    
-    ChatRetrieve --> Mem0
-    RecipeRetrieve --> Mem0
-    RecipeStore --> Mem0
-```
-
-**Sources:** [orchestrator/consumers/chatbot/service.py:492-615](), [orchestrator/api/recipe_executor.py:637-774]()
+**Sources:** [orchestrator/modules/memory/integrations/mem0_client.py:20-63](), [orchestrator/modules/memory/integrations/mem0_client.py:111-140]()
 
 ---

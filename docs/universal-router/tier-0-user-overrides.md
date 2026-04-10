@@ -5,17 +5,23 @@
 
 The following files were used as context for generating this wiki page:
 
+- [docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md](docs/reviews/COMPOSIO-TOOL-REGRESSION-REVIEW.md)
 - [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/routing.py](orchestrator/api/routing.py)
+- [orchestrator/api/chat_voice.py](orchestrator/api/chat_voice.py)
 - [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
 - [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
 - [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
+- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
 - [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
-- [orchestrator/core/models/system_settings.py](orchestrator/core/models/system_settings.py)
+- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
 - [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/tools/discovery/__init__.py](orchestrator/modules/tools/discovery/__init__.py)
-- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
+- [orchestrator/modules/orchestrator/service.py](orchestrator/modules/orchestrator/service.py)
+- [orchestrator/modules/tools/discovery/actions_analytics_enhanced.py](orchestrator/modules/tools/discovery/actions_analytics_enhanced.py)
+- [orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py](orchestrator/modules/tools/discovery/handlers_analytics_enhanced.py)
+- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
+- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
+- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
+- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
 
 </details>
 
@@ -23,91 +29,69 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-Tier 0 is the highest-priority routing mechanism in the Universal Router, allowing explicit specification of which agent or workflow should handle a request. When an override is provided, the router bypasses all intelligent routing logic (cache lookup, rule matching, and LLM classification) and immediately routes to the specified target with 100% confidence.
+Tier 0 is the highest-priority routing mechanism in the **Universal Router**, allowing explicit specification of which agent or workflow should handle a request. When an override is provided (typically via the UI or a specific API parameter), the router bypasses all intelligent routing logic—including cache lookups, rule matching, semantic similarity, and LLM classification—and immediately routes to the specified target with a confidence of 1.0.
 
-This page documents the override mechanism, its parameters, and integration points. For the broader routing system architecture, see [Routing Architecture](#9.1). For rule-based routing (Tier 2), see [Tier 2: Rule-Based Routing](#9.4).
+This tier ensures that user intent (e.g., selecting a specific agent from a dropdown or clicking a "Run Workflow" button) is respected without interference from the autonomous routing logic or complexity assessment.
 
-**Sources**: [orchestrator/core/routing/engine.py:1-586](), [orchestrator/config.py:1-304]()
+**Sources**: [orchestrator/core/routing/engine.py:1-16](), [orchestrator/core/routing/engine.py:58-74](), [orchestrator/core/routing/engine.py:95-101]()
 
 ---
 
 ## Routing Priority Hierarchy
 
-The Universal Router evaluates routing decisions in strict priority order. Tier 0 is checked first and short-circuits all subsequent tiers when present:
+The `UniversalRouter` evaluates routing decisions in a strict 7-tier hierarchy. Tier 0 is the first check performed in the `route()` method and short-circuits the entire chain.
+
+### Logic Flow Diagram
+This diagram shows how `UniversalRouter.route` processes the `RequestEnvelope` and hits the Tier 0 override check first.
 
 ```mermaid
 graph TD
-    Start["RequestEnvelope"]
-    T0["Tier 0: User Override<br/>Check override_agent_id or override_workflow_id"]
-    T1["Tier 1: Cache Lookup<br/>Redis RoutingCache"]
-    T2a["Tier 2a: Routing Rules<br/>routing_rules table"]
-    T2b["Tier 2b: Trigger Subscription<br/>TriggerSubscription table"]
-    T2c["Tier 2c: Intent Classifier<br/>Keyword matching"]
-    T3["Tier 3: LLM Classification<br/>Workspace-configured LLM"]
+    Start["RequestEnvelope (core/models/routing.py)"]
+    T0["Tier 0: _tier0_override<br/>(Check override_agent_id)"]
+    T1["Tier 1: _tier1_cache<br/>(RoutingCache hit)"]
+    T2a["Tier 2a: _tier2a_rules<br/>(Source Pattern)"]
+    T2b["Tier 2b: _tier2b_trigger_subscription<br/>(Jira/Webhooks)"]
+    T2_5["Tier 2.5: _tier2_5_semantic<br/>(Cosine Similarity)"]
+    T2c["Tier 2c: _tier2c_intent_classifier<br/>(Keywords)"]
+    T3["Tier 3: _classify_with_llm<br/>(Fallback LLM)"]
     Decision["RoutingDecision"]
-    NoRoute["Unrouted Event<br/>Store for analysis"]
+    NoRoute["UnroutedEvent<br/>(Logged to DB)"]
     
     Start --> T0
-    T0 -->|"Override present"| Decision
-    T0 -->|"No override"| T1
-    T1 -->|"Cache hit"| Decision
-    T1 -->|"Cache miss"| T2a
-    T2a -->|"Rule match"| Decision
-    T2a -->|"No match"| T2b
-    T2b -->|"Trigger match"| Decision
-    T2b -->|"No match"| T2c
-    T2c -->|"Intent match"| Decision
-    T2c -->|"No match"| T3
-    T3 -->|"LLM classification"| Decision
-    T3 -->|"All tiers exhausted"| NoRoute
+    T0 -->|"Override Found"| Decision
+    T0 -->|"No Override"| T1
+    T1 -->|"Cache Hit"| Decision
+    T1 -->|"Cache Miss"| T2a
+    T2a -->|"Match"| Decision
+    T2a -->|"No Match"| T2b
+    T2b -->|"Match"| Decision
+    T2b -->|"No Match"| T2_5
+    T2_5 -->|"High Conf Match"| Decision
+    T2_5 -->|"Low Conf/No Match"| T2c
+    T2c -->|"Match"| Decision
+    T2c -->|"No Match"| T3
+    T3 -->|"Classification"| Decision
+    T3 -->|"Fail"| NoRoute
 ```
 
-**Sources**: [orchestrator/core/routing/engine.py:78-144]()
+**Sources**: [orchestrator/core/routing/engine.py:79-163]()
 
 ---
 
 ## Core Implementation
 
-### RequestEnvelope Structure
+### RequestEnvelope and Overrides
+The routing process begins when an external consumer constructs a `RequestEnvelope`. This object contains the optional fields `override_agent_id` and `override_workflow_id`. These fields are populated during the ingestion phase (e.g., via `ChatbotIngestor`).
 
-The routing engine receives a `RequestEnvelope` containing the request payload and optional override parameters:
+| Field | Type | Description |
+|-------|------|-------------|
+| `override_agent_id` | `Optional[int]` | Explicit ID of the agent to handle the request. |
+| `override_workflow_id` | `Optional[int]` | Explicit ID of the workflow/recipe to trigger. |
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `id` | UUID | Yes | Unique request identifier |
-| `workspace_id` | UUID | Yes | Workspace context for multi-tenancy |
-| `content` | str | Yes | Request content (user message, event payload, etc.) |
-| `source` | ChannelSource | Yes | Origin channel (chat, jira_trigger, slack, etc.) |
-| `override_agent_id` | int | Optional | **Explicit agent ID to route to** |
-| `override_workflow_id` | int | Optional | **Explicit workflow/recipe ID to route to** |
-| `metadata` | dict | Optional | Additional context (trigger_name, etc.) |
-| `raw_payload` | dict | Optional | Original webhook/event payload |
+**Sources**: [orchestrator/core/routing/engine.py:170-184](), [orchestrator/core/routing/engine.py:35-42](), [orchestrator/core/routing/ingestors/chatbot.py:1-30]()
 
-**Sources**: [orchestrator/core/routing/engine.py:17-41]()
-
----
-
-### Tier 0 Logic
-
-The `_tier0_override()` method performs a simple null check on the override parameters and returns an immediate routing decision if either is present:
-
-```mermaid
-graph LR
-    Input["RequestEnvelope"]
-    CheckAgent{"override_agent_id<br/>is not None?"}
-    CheckWorkflow{"override_workflow_id<br/>is not None?"}
-    ReturnAgent["Return RoutingDecision<br/>route_type='agent'<br/>confidence=1.0"]
-    ReturnWorkflow["Return RoutingDecision<br/>route_type='workflow'<br/>confidence=1.0"]
-    ReturnNone["Return None<br/>Continue to Tier 1"]
-    
-    Input --> CheckAgent
-    CheckAgent -->|"Yes"| ReturnAgent
-    CheckAgent -->|"No"| CheckWorkflow
-    CheckWorkflow -->|"Yes"| ReturnWorkflow
-    CheckWorkflow -->|"No"| ReturnNone
-```
-
-Implementation at [orchestrator/core/routing/engine.py:150-165]():
+### The `_tier0_override` Function
+The implementation is a lightweight check within the `UniversalRouter` class. It returns a `RoutingDecision` immediately if either override is present, setting `confidence` to `1.0`.
 
 ```python
 def _tier0_override(self, envelope: RequestEnvelope) -> Optional[RoutingDecision]:
@@ -128,491 +112,85 @@ def _tier0_override(self, envelope: RequestEnvelope) -> Optional[RoutingDecision
     return None
 ```
 
-**Key characteristics:**
-- **Mutually exclusive**: Only one override parameter is checked (agent takes priority)
-- **Confidence**: Always 1.0 (maximum confidence, no uncertainty)
-- **Reasoning**: Simple "User override" string for observability
-- **No validation**: Does not verify that the agent/workflow ID exists or is active
-
-**Sources**: [orchestrator/core/routing/engine.py:150-165]()
+**Sources**: [orchestrator/core/routing/engine.py:169-184]()
 
 ---
 
-### RoutingDecision Output
+## Data Flow: From UI to Routing Decision
 
-When Tier 0 activates, it returns a `RoutingDecision` object with the following structure:
-
-| Field | Type | Value for Tier 0 | Description |
-|-------|------|------------------|-------------|
-| `route_type` | str | "agent" or "workflow" | Type of target to route to |
-| `agent_id` | int | User-provided ID | Agent ID (if route_type="agent") |
-| `workflow_id` | int | User-provided ID | Workflow/recipe ID (if route_type="workflow") |
-| `confidence` | float | 1.0 | Always maximum confidence |
-| `reasoning` | str | "User override" | Static explanation string |
-| `intent_category` | str | None | Not applicable for Tier 0 |
-| `cached` | bool | False | Never cached (bypass cache) |
-
-The decision is logged to the `routing_decisions` table for observability via the `_log_decision()` method at [orchestrator/core/routing/engine.py:561-585]().
-
-**Sources**: [orchestrator/core/routing/engine.py:150-165](), [orchestrator/core/routing/engine.py:561-585]()
-
----
-
-## Integration Points
-
-### Main Router Invocation
-
-The `route()` method checks Tier 0 first, before any other routing logic:
+This diagram bridges the "Natural Language Space" (User interaction) to the "Code Entity Space" (API and Router).
 
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant UniversalRouter
-    participant Tier0 as _tier0_override()
-    participant DecisionLog as _log_decision()
-    participant DB as routing_decisions table
-    
-    Client->>UniversalRouter: route(envelope)
-    UniversalRouter->>UniversalRouter: _envelope_hash(envelope)
-    UniversalRouter->>Tier0: Check override_agent_id<br/>and override_workflow_id
-    
-    alt Override Present
-        Tier0-->>UniversalRouter: RoutingDecision<br/>(confidence=1.0)
-        UniversalRouter->>DecisionLog: Log decision
-        DecisionLog->>DB: INSERT routing_decisions
-        UniversalRouter-->>Client: Return decision<br/>(bypass Tiers 1-3)
-    else No Override
-        Tier0-->>UniversalRouter: None
-        UniversalRouter->>UniversalRouter: Continue to Tier 1<br/>(Cache Lookup)
-    end
+    participant User as "User (UI)"
+    participant Hook as "useChat (frontend/lib/chat/hooks.ts)"
+    participant API as "Chat API (orchestrator/api/chat.py)"
+    participant Ingestor as "ChatbotIngestor (core/routing/ingestors/chatbot.py)"
+    participant Router as "UniversalRouter (core/routing/engine.py)"
+
+    User->>User: Selects Agent from Dropdown
+    User->>Hook: sendMessage("Hello")
+    Note over Hook: Includes agentId in request body
+    Hook->>API: POST /api/chat
+    API->>Ingestor: ingest(message, agent_id=selectedId)
+    Ingestor-->>API: RequestEnvelope(override_agent_id=selectedId)
+    API->>Router: route(envelope)
+    Router->>Router: _tier0_override(envelope)
+    Router-->>API: RoutingDecision(confidence=1.0, reasoning="User override")
+    API-->>Hook: StreamingResponse with x-routing-agent-id header
+    Hook->>User: Display "Routed to [Agent Name]"
 ```
 
-**Sources**: [orchestrator/core/routing/engine.py:78-99](), [orchestrator/core/routing/engine.py:561-585]()
+**Sources**: [orchestrator/core/routing/engine.py:95-101](), [orchestrator/core/routing/engine.py:170-184](), [orchestrator/api/chat.py:63-120]()
 
 ---
 
-### Workspace Isolation
+## Use Cases and Triggers
 
-Override parameters respect workspace boundaries through the `RequestEnvelope.workspace_id` field. The router does not perform cross-workspace validation at Tier 0, but downstream execution enforces workspace isolation:
+### 1. Manual Agent Selection
+In the chat interface, if a user specifically selects an agent from the model/agent picker, the `agentId` is passed in the request body. The `ChatbotIngestor` maps this to `override_agent_id` in the `RequestEnvelope`.
 
-```mermaid
-graph TB
-    subgraph "Request Context Resolution"
-        Headers["HTTP Headers<br/>X-Workspace-ID<br/>Authorization"]
-        ClerkJWT["Clerk JWT Validation<br/>Extract workspace_id"]
-        APIKey["API Key Validation<br/>Admin-level access"]
-        Context["RequestContext<br/>workspace_id + user"]
-    end
-    
-    subgraph "Routing Envelope"
-        EnvelopeBuilder["Build RequestEnvelope<br/>workspace_id from context<br/>override_agent_id from params"]
-        Router["UniversalRouter.route()"]
-    end
-    
-    subgraph "Execution"
-        AgentFactory["AgentFactory<br/>Validate agent.workspace_id"]
-        RecipeExecutor["RecipeExecutor<br/>Validate recipe.workspace_id"]
-    end
-    
-    Headers --> ClerkJWT
-    Headers --> APIKey
-    ClerkJWT --> Context
-    APIKey --> Context
-    Context --> EnvelopeBuilder
-    EnvelopeBuilder --> Router
-    Router -->|"route_type='agent'"| AgentFactory
-    Router -->|"route_type='workflow'"| RecipeExecutor
-```
+### 2. Workflow Bridge
+When a message is identified as requiring an `ORGAN` or `ORGANISM` complexity level, the system may trigger a `_stream_workflow_bridge`. If the user manually triggers a specific workflow ID, Tier 0 ensures that the `WorkflowExecution` is tied to the correct `Workflow` model.
 
-This ensures that even with explicit overrides, agents and workflows are only accessible within their assigned workspace.
+### 3. Voice Chat Overrides
+In the `voice_chat` endpoint (`POST /api/chat/voice`), an `agent_id` can be provided as a form parameter. If present, the `_collect_streaming_response` logic respects this `effective_agent_id`, bypassing the `AutoBrain` assessment for routing purposes.
 
-**Sources**: [orchestrator/core/auth/hybrid.py]() (referenced), [frontend/lib/api-client.ts:854-862]()
+**Sources**: [orchestrator/core/routing/engine.py:170-184](), [orchestrator/api/chat.py:70-140](), [orchestrator/api/chat_voice.py:150-180]()
 
 ---
 
-## Use Cases
+## Observability and Logging
 
-### 1. Direct Agent Invocation
+Every Tier 0 decision is logged to the `routing_decisions` table via the `_log_decision` helper. This allows admins to audit how often users are manually overriding the autonomous routing logic through the `RoutingDecisionRecord` model.
 
-**Scenario**: User selects a specific agent from a dropdown in the chat interface.
+| Field | Tier 0 Value | Code Reference |
+|-------|--------------|----------------|
+| `route_type` | `"agent"` or `"workflow"` | [orchestrator/core/routing/engine.py:172-179]() |
+| `confidence` | `1.0` | [orchestrator/core/routing/engine.py:174-181]() |
+| `reasoning` | `"User override"` | [orchestrator/core/routing/engine.py:175-182]() |
 
-**Implementation**:
-```python
-envelope = RequestEnvelope(
-    workspace_id=user_workspace_id,
-    content="Analyze this sales data",
-    source=ChannelSource.CHAT,
-    override_agent_id=42  # User-selected agent
-)
-decision = await router.route(envelope)
-# decision.agent_id == 42, confidence == 1.0
-```
-
-This bypasses intelligent agent selection and routes directly to the chosen agent.
+**Sources**: [orchestrator/core/routing/engine.py:95-101](), [orchestrator/core/models/routing.py:35-45]()
 
 ---
 
-### 2. Workflow Execution from UI
+## Comparison with Complexity Assessment (AutoBrain)
 
-**Scenario**: User clicks "Run Workflow" button on the workflow detail page.
+While Tier 0 overrides the *routing* (which agent/workflow is picked), the system still performs a complexity assessment via `AutoBrain` (PRD-68) if the override is not present or if the orchestrator needs to decide on the execution mode (e.g., `ATOM` vs `ORGANISM`). 
 
-**Implementation**:
-```python
-envelope = RequestEnvelope(
-    workspace_id=workspace_id,
-    content=f"Execute workflow: {workflow_name}",
-    source=ChannelSource.CHAT,
-    override_workflow_id=123  # Workflow ID from button context
-)
-decision = await router.route(envelope)
-# decision.workflow_id == 123, route_type == "workflow"
-```
-
-The override ensures the specific workflow runs, even if rules or LLM classification would route elsewhere.
-
----
-
-### 3. Testing and Debugging
-
-**Scenario**: Developer testing a new agent before adding routing rules.
-
-**Implementation**:
-```bash
-curl -X POST http://localhost:8000/api/orchestrator/route \
-  -H "X-Workspace-ID: $WORKSPACE_ID" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "content": "Test message for new agent",
-    "source": "chat",
-    "override_agent_id": 999
-  }'
-```
-
-Forces routing to agent 999 regardless of its description, tags, or readiness for production routing.
-
----
-
-### 4. Emergency Routing Override
-
-**Scenario**: LLM-based routing is misconfiguring requests; administrator manually routes traffic to a fallback agent.
-
-**Implementation**:
-- Set override in routing API call
-- Confidence = 1.0 ensures no orchestration fallback (see Tier 3 confidence threshold)
-- Bypasses broken routing rules or stale cache entries
-
----
-
-## Configuration
-
-No configuration variables control Tier 0 behavior. The mechanism is always active and cannot be disabled. However, related configuration affects the broader routing system:
-
-| Variable | Default | Description | Relevance to Tier 0 |
-|----------|---------|-------------|---------------------|
-| `ROUTING_LLM_CONFIDENCE_THRESHOLD` | 0.5 | Min confidence for direct routing (Tier 3) | N/A - Tier 0 always returns 1.0 |
-| `ROUTING_CACHE_TTL_HOURS` | 24 | Cache entry lifetime (Tier 1) | N/A - Tier 0 bypasses cache |
-
-**Sources**: [orchestrator/config.py:141-144]()
-
----
-
-## Observability
-
-### Logging
-
-When Tier 0 activates, the router logs at INFO level:
-
-```
-[router] Tier 0 hit (override): User override
-```
-
-This appears at [orchestrator/core/routing/engine.py:97]() in the `route()` method.
-
----
-
-### Decision Record
-
-Every Tier 0 decision is persisted to the `routing_decisions` table via `_log_decision()`:
-
-| Column | Value for Tier 0 |
-|--------|------------------|
-| `request_id` | envelope.id |
-| `envelope_hash` | SHA256 hash of content + source |
-| `workspace_id` | envelope.workspace_id |
-| `source` | envelope.source.value |
-| `content` | envelope.content (truncated to 2000 chars) |
-| `route_type` | "agent" or "workflow" |
-| `agent_id` | override_agent_id (if route_type="agent") |
-| `workflow_id` | override_workflow_id (if route_type="workflow") |
-| `confidence` | 1.0 |
-| `cached` | False |
-| `created_at` | Current timestamp |
-
-This enables analytics on override usage patterns and debugging of explicit routing paths.
-
-**Sources**: [orchestrator/core/routing/engine.py:561-585]()
-
----
-
-### Response Headers
-
-The routing decision is exposed to clients via HTTP response headers (configured in [orchestrator/main.py:444]()):
-
-```
-X-Routing-Type: agent
-X-Routing-Agent-ID: 42
-X-Routing-Confidence: 1.0
-X-Routing-Reasoning: User override
-X-Routing-Request-ID: abc123def456
-```
-
-Frontend clients can inspect these headers to verify that the override was respected.
-
-**Sources**: [orchestrator/main.py:444]()
-
----
-
-## Comparison with Other Tiers
-
-| Aspect | Tier 0: Override | Tier 1: Cache | Tier 2: Rules | Tier 3: LLM |
-|--------|------------------|---------------|---------------|-------------|
-| **Priority** | Highest (checked first) | 2nd | 3rd-5th (multiple sub-tiers) | Lowest (fallback) |
-| **Confidence** | Always 1.0 | Inherited from original decision | 0.9-0.95 | Variable (0.0-1.0) |
-| **Latency** | ~0ms (null check) | ~1-5ms (Redis GET) | ~10-50ms (DB query) | ~500-2000ms (LLM API call) |
-| **Cost** | None | Redis storage cost | Database query cost | LLM API cost |
-| **Input** | `override_agent_id` or `override_workflow_id` | Request content hash | Routing rules, trigger subscriptions, keywords | Agent descriptions, app assignments |
-| **Validation** | None (trusts caller) | None (returns cached decision) | DB constraints (active rules only) | LLM parsing + agent ID validation |
-| **Use Case** | Explicit user choice, testing | Frequent repeated requests | Pattern-based automation | Complex ambiguous requests |
-
-**Sources**: [orchestrator/core/routing/engine.py:78-433]()
-
----
-
-## Error Handling
-
-### Invalid Override IDs
-
-Tier 0 does **not validate** that the provided agent or workflow ID exists or is active. Validation occurs downstream:
+In `api/chat_voice.py`, if an `agent_id` is provided, `AutoBrain` is bypassed for the selection of the `effective_agent_id`, but the `complexity_assessment` may still be used to determine if certain tool loops or memory strategies are required.
 
 ```mermaid
 graph LR
-    Tier0["Tier 0: Return decision<br/>with override_agent_id=999"]
-    AgentFactory["AgentFactory.activate()"]
-    DBQuery["Query agents table<br/>WHERE id=999 AND workspace_id=..."]
-    NotFound["Agent not found<br/>Raise HTTPException 404"]
+    UserOverride["Tier 0: User Override<br/>(agent_id=42)"]
+    AutoBrain["AutoBrain Assessment<br/>(complexity=ORGANISM)"]
+    Executor["StreamingChatService<br/>(consumers/chatbot/service.py)"]
     
-    Tier0 --> AgentFactory
-    AgentFactory --> DBQuery
-    DBQuery -->|"No rows"| NotFound
+    UserOverride --> Executor
+    AutoBrain --> Executor
+    Executor --> Workflow["PRD-59 Neural Swarm Pipeline"]
 ```
 
-This design keeps Tier 0 lightweight (no database queries) and defers validation to execution time.
-
-**Sources**: [orchestrator/core/routing/engine.py:150-165]()
-
----
-
-### Workspace Mismatch
-
-If the override references an agent/workflow from a different workspace, the execution layer will raise a 403 Forbidden error:
-
-```python
-# In AgentFactory or RecipeExecutor
-agent = db.query(Agent).filter(Agent.id == decision.agent_id).first()
-if agent.workspace_id != ctx.workspace_id:
-    raise HTTPException(status_code=403, detail="Access denied: workspace mismatch")
-```
-
-This enforces multi-tenant isolation even when explicit overrides bypass routing logic.
-
-**Sources**: [orchestrator/api/agent_plugins.py:84-89]()
-
----
-
-### Both Overrides Provided
-
-If both `override_agent_id` and `override_workflow_id` are non-null, the agent override takes priority (checked first in the conditional at [orchestrator/core/routing/engine.py:151]()):
-
-```python
-if envelope.override_agent_id is not None:
-    return RoutingDecision(route_type="agent", ...)
-if envelope.override_workflow_id is not None:
-    return RoutingDecision(route_type="workflow", ...)
-```
-
-**Best practice**: Clients should only set one override parameter per request to avoid ambiguity.
-
-**Sources**: [orchestrator/core/routing/engine.py:150-165]()
-
----
-
-## API Integration
-
-### Chat API Example
-
-The chat streaming API (see [Chat Interface](#8)) accepts override parameters via the request body:
-
-```json
-POST /api/chat/stream
-{
-  "message": "Analyze this data",
-  "agent_id": 42,
-  "workspace_id": "abc-123-def-456"
-}
-```
-
-The backend constructs a `RequestEnvelope` with `override_agent_id=42`, triggering Tier 0 routing.
-
----
-
-### Orchestrator API Example
-
-The universal orchestrator API exposes explicit routing via query parameters or request body:
-
-```bash
-POST /api/orchestrator/route
-X-Workspace-ID: abc-123-def-456
-Content-Type: application/json
-
-{
-  "content": "Process this task",
-  "source": "chat",
-  "override_agent_id": 42
-}
-```
-
-Response includes routing decision headers confirming the override was applied.
-
-**Sources**: [orchestrator/main.py:444]() (response headers configuration)
-
----
-
-## Testing Strategies
-
-### Unit Testing Tier 0
-
-Test the `_tier0_override()` method in isolation:
-
-```python
-def test_tier0_agent_override():
-    router = UniversalRouter(db, cache=None)
-    envelope = RequestEnvelope(
-        workspace_id=UUID("..."),
-        content="test message",
-        source=ChannelSource.CHAT,
-        override_agent_id=42
-    )
-    decision = router._tier0_override(envelope)
-    
-    assert decision is not None
-    assert decision.route_type == "agent"
-    assert decision.agent_id == 42
-    assert decision.confidence == 1.0
-    assert decision.reasoning == "User override"
-```
-
----
-
-### Integration Testing
-
-Test end-to-end routing with overrides:
-
-```python
-async def test_route_with_agent_override():
-    envelope = RequestEnvelope(
-        workspace_id=test_workspace_id,
-        content="test message",
-        source=ChannelSource.CHAT,
-        override_agent_id=test_agent_id
-    )
-    decision = await router.route(envelope)
-    
-    # Verify Tier 0 was used
-    assert decision.agent_id == test_agent_id
-    assert decision.confidence == 1.0
-    
-    # Verify decision was logged
-    record = db.query(RoutingDecisionRecord).filter_by(
-        request_id=envelope.id
-    ).first()
-    assert record.agent_id == test_agent_id
-    assert record.cached is False
-```
-
-**Sources**: [orchestrator/core/routing/engine.py:78-144]()
-
----
-
-## Best Practices
-
-### When to Use Tier 0
-
-✅ **Recommended**:
-- Direct agent selection from UI (user-initiated)
-- Workflow execution buttons (explicit workflow invocation)
-- Testing/debugging new agents before adding routing rules
-- Emergency manual routing (bypass broken LLM classification)
-
-❌ **Not Recommended**:
-- Automated systems (use Tier 2 routing rules instead)
-- High-volume programmatic routing (adds no intelligence, defeats caching)
-- Production traffic where intelligent routing would work (wastes routing capabilities)
-
----
-
-### Override Validation
-
-Always validate override parameters at the API boundary before constructing the `RequestEnvelope`:
-
-```python
-# Example: Chat API endpoint
-if request.agent_id is not None:
-    # Verify agent exists and belongs to workspace
-    agent = db.query(Agent).filter(
-        Agent.id == request.agent_id,
-        Agent.workspace_id == ctx.workspace_id
-    ).first()
-    if not agent:
-        raise HTTPException(404, "Agent not found")
-    
-    # Safe to use override
-    envelope.override_agent_id = request.agent_id
-```
-
-This prevents 404 errors during execution and improves error messaging.
-
----
-
-### Monitoring Override Usage
-
-Track override usage to detect anti-patterns:
-
-```sql
--- Percentage of requests using Tier 0 overrides
-SELECT 
-  COUNT(CASE WHEN confidence = 1.0 AND reasoning = 'User override' THEN 1 END) * 100.0 / COUNT(*) AS override_pct
-FROM routing_decisions
-WHERE created_at >= NOW() - INTERVAL '7 days';
-```
-
-High override percentages (>50%) may indicate:
-- Insufficient routing rules (Tier 2)
-- Poor LLM classification performance (Tier 3)
-- Over-reliance on manual agent selection
-
-**Sources**: [orchestrator/core/routing/engine.py:561-585]()
-
----
-
-## Related Systems
-
-- **[Routing Architecture](#9.1)**: Overview of the four-tier routing system
-- **[Tier 1: Cache Lookup](#9.3)**: Redis-backed routing cache (bypassed by Tier 0)
-- **[Tier 2: Rule-Based Routing](#9.4)**: Pattern matching and trigger subscriptions (bypassed by Tier 0)
-- **[Tier 3: LLM Classification](#9.5)**: Intelligent agent selection (bypassed by Tier 0)
-- **[Agent Lifecycle & Status](#3.6)**: Agent validation during execution
-- **[Workflow Execution](#4.2)**: Recipe execution pipeline (uses Tier 0 decisions)
-
-**Sources**: [orchestrator/core/routing/engine.py:1-586]()
+**Sources**: [orchestrator/consumers/chatbot/auto.py:1-22](), [orchestrator/core/routing/engine.py:169-184](), [orchestrator/api/chat_voice.py:76-121]()
 
 ---

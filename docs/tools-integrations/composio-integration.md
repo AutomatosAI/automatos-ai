@@ -5,587 +5,213 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/DoctorsNotes.docx](docs/DoctorsNotes.docx)
+- [docs/PRDS/58-PROMPT-MANAGEMENT-FUTUREAGI-INTEGRATION.md](docs/PRDS/58-PROMPT-MANAGEMENT-FUTUREAGI-INTEGRATION.md)
+- [docs/PRDS/59-WORKFLOW-ENGINE-V2-NEURAL-SWARM-BRIDGE.md](docs/PRDS/59-WORKFLOW-ENGINE-V2-NEURAL-SWARM-BRIDGE.md)
+- [docs/PRDS/60-RAG-V3-TOP10-COMPETITIVE-UPGRADE.md](docs/PRDS/60-RAG-V3-TOP10-COMPETITIVE-UPGRADE.md)
+- [docs/PRDS/61-NL2SQL-V2-COMPETITIVE-UPGRADE.md](docs/PRDS/61-NL2SQL-V2-COMPETITIVE-UPGRADE.md)
+- [docs/PRDS/62-CODEGRAPH-V2-COMPETITIVE-UPGRADE.md](docs/PRDS/62-CODEGRAPH-V2-COMPETITIVE-UPGRADE.md)
+- [frontend/app/tools/callback/page.tsx](frontend/app/tools/callback/page.tsx)
+- [frontend/components/composio/app-connection-button.tsx](frontend/components/composio/app-connection-button.tsx)
+- [frontend/components/tools/composio-apps-section.tsx](frontend/components/tools/composio-apps-section.tsx)
+- [frontend/components/tools/tool-config-modal.tsx](frontend/components/tools/tool-config-modal.tsx)
+- [orchestrator/api/composio.py](orchestrator/api/composio.py)
+- [orchestrator/api/routing.py](orchestrator/api/routing.py)
 - [orchestrator/api/tools.py](orchestrator/api/tools.py)
-- [orchestrator/consumers/chatbot/tool_router.py](orchestrator/consumers/chatbot/tool_router.py)
 - [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
-- [orchestrator/modules/tools/execution/unified_executor.py](orchestrator/modules/tools/execution/unified_executor.py)
-- [orchestrator/modules/tools/registry/tool_registry.py](orchestrator/modules/tools/registry/tool_registry.py)
+- [orchestrator/core/composio/entity_manager.py](orchestrator/core/composio/entity_manager.py)
+- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
 - [orchestrator/modules/tools/services/composio_hint_service.py](orchestrator/modules/tools/services/composio_hint_service.py)
 - [orchestrator/modules/tools/services/composio_tool_service.py](orchestrator/modules/tools/services/composio_tool_service.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
 - [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
 
 </details>
 
 
 
-**Purpose**: This document describes how Automatos AI integrates with Composio to provide 500+ external app integrations (Slack, Jira, GitHub, etc.) for agents. It covers entity management, OAuth connection flows, agent tool assignment, tool resolution strategies, and action execution patterns.
+**Purpose**: This document describes how Automatos AI integrates with the Composio SDK to provide 500+ external app integrations (Slack, Jira, GitHub, etc.) for agents. It covers metadata synchronization, app/action caching, OAuth flow, entity management, and the unified tool execution pipeline.
 
-**Scope**: This page focuses on the Composio integration layer only. For broader tool management including builtin tools and skill-based tools, see [Tools API Reference](#6.6). For agent context assembly that consumes Composio tools, see [Agent Context Assembly](#3.5).
+**Scope**: This page focuses on the Composio integration layer, including the SDK wrapper and the caching services that enable low-latency tool discovery and execution.
 
 ---
 
 ## Overview
 
-Composio integration enables agents to interact with external applications through:
-- **Entity-based isolation**: Each workspace has a dedicated Composio entity
-- **OAuth connection management**: Workspace-level app connections with status tracking
-- **Agent tool assignment**: Granular control over which apps each agent can access
-- **Dual resolution strategy**: SDK semantic search (primary) and hint-based fallback
-- **Direct action execution**: Per-action function-calling tools with exact parameter schemas
+Composio integration enables agents to interact with external applications through a robust infrastructure:
+- **Entity-based isolation**: Each workspace maps to a dedicated Composio entity (`user_id`) for credential isolation [orchestrator/core/composio/client.py:128-146]().
+- **Metadata Sync**: A background service that mirrors the Composio marketplace into local PostgreSQL tables to eliminate API latency during tool discovery [orchestrator/services/metadata_sync_service.py:1-7]().
+- **Hosted OAuth**: Manages authentication flows for third-party services using Composio's hosted auth infrastructure [orchestrator/core/composio/client.py:54-79]().
+- **Unified Execution**: A single entry point for agents to call any external tool with validation and error handling [orchestrator/core/composio/tool_executor.py:141-162]().
 
-The system maintains a three-tier authorization model:
-1. **Workspace connection**: OAuth completed for an app (stored in `composio_connections` table)
-2. **Agent assignment**: Specific agent granted access to an app (stored in `agent_app_assignments` table)
-3. **Action resolution**: Relevant actions identified for the task at hand
-
-Sources: [orchestrator/modules/tools/services/composio_hint_service.py:1-89](), [orchestrator/modules/tools/services/composio_tool_service.py:1-55]()
+Sources: [orchestrator/core/composio/client.py:1-12](), [orchestrator/services/metadata_sync_service.py:1-13](), [orchestrator/core/composio/tool_executor.py:30-46]()
 
 ---
 
-## Architecture Overview
+## System Architecture
 
-### Entity-Connection-Assignment Model
+The integration bridges the gap between Natural Language (LLM tool calls) and the Code Entity Space (Composio SDK and local Cache).
 
+### Tool Discovery and Execution Flow
+
+Title: Tool Discovery and Execution Architecture
 ```mermaid
 graph TB
-    Workspace["Workspace<br/>(workspace_id UUID)"]
-    ComposioEntity["ComposioEntity<br/>(entity_id, composio_entity_id)"]
-    ComposioConnection["ComposioConnection<br/>(entity_id, app_name, status, connection_id)"]
-    Agent["Agent<br/>(agent_id, workspace_id)"]
-    AgentAppAssignment["AgentAppAssignment<br/>(agent_id, app_name, is_active, app_type)"]
-    
-    Workspace -->|"1:1"| ComposioEntity
-    ComposioEntity -->|"1:N"| ComposioConnection
-    Agent -->|"1:N"| AgentAppAssignment
-    
-    AgentAppAssignment -.->|"references"| ComposioConnection
-    
-    ComposioConnection -->|"status: active/pending/error"| Status["Connection Status"]
-    ComposioConnection -->|"stores"| OAuthData["OAuth connection_id<br/>from Composio SDK"]
-```
-
-**Entity Management**: The `EntityManager` class creates a 1:1 mapping between workspaces and Composio entities. The `composio_entity_id` is simply the workspace UUID string, providing deterministic mapping without external API calls.
-
-**Connection Lifecycle**: Connections start as `pending` when OAuth is initiated, transition to `active` when the callback completes, or `error` if the flow fails. The `connection_id` from Composio SDK is stored for action execution.
-
-**Assignment Filtering**: When resolving tools for an agent, the system intersects agent assignments with workspace connections to determine the allowed app set.
-
-Sources: [orchestrator/core/composio/entity_manager.py:19-69](), [orchestrator/core/models/composio_cache.py]() (AgentAppAssignment model), [orchestrator/modules/tools/services/composio_hint_service.py:217-268]()
-
----
-
-## Entity Management
-
-### EntityManager Class
-
-The `EntityManager` handles workspace-to-entity mapping and connection persistence:
-
-```mermaid
-sequenceDiagram
-    participant API as "/api/composio/*"
-    participant EM as "EntityManager"
-    participant DB as "PostgreSQL"
-    participant SDK as "Composio SDK"
-    
-    API->>EM: "get_or_create_entity(workspace_id)"
-    EM->>DB: "SELECT * FROM composio_entities<br/>WHERE workspace_id = ?"
-    
-    alt "Entity exists"
-        DB-->>EM: "entity record"
-        EM-->>API: "{id, composio_entity_id}"
-    else "Entity not found"
-        EM->>EM: "composio_entity_id = str(workspace_id)"
-        EM->>DB: "INSERT INTO composio_entities"
-        DB-->>EM: "new entity record"
-        EM-->>API: "{id, composio_entity_id}"
+    subgraph "Natural Language Space"
+        UserPrompt["User Prompt / Agent Task"]
+        LLM["LLM (LLMManager)"]
     end
-```
 
-**Key Methods**:
-- `get_entity_by_workspace(workspace_id)`: Retrieve entity for a workspace
-- `get_or_create_entity(workspace_id)`: Idempotent entity creation
-- `get_entity_connections(entity_id)`: List all app connections for an entity
-- `get_connected_apps(workspace_id)`: Return active app names for a workspace
-
-The entity creation strategy [orchestrator/core/composio/entity_manager.py:41-69]() uses the workspace UUID directly as the Composio entity ID, avoiding external API dependencies and ensuring idempotency.
-
-Sources: [orchestrator/core/composio/entity_manager.py:19-125]()
-
----
-
-## Connection Management
-
-### OAuth Connection Flow
-
-```mermaid
-sequenceDiagram
-    participant UI as "Frontend UI"
-    participant API as "/api/composio/connect"
-    participant EM as "EntityManager"
-    participant SDK as "Composio SDK"
-    participant OAuth as "External App OAuth"
-    participant Callback as "/api/composio/callback"
-    
-    UI->>API: "POST /connect {app_name}"
-    API->>EM: "get_or_create_entity(workspace_id)"
-    EM-->>API: "entity"
-    API->>EM: "add_connection(entity_id, app_name, status='pending')"
-    EM->>EM: "INSERT/UPDATE composio_connections"
-    API->>SDK: "initiate_connection(entity_id, app_name)"
-    SDK-->>API: "{redirectUrl, connectionParams}"
-    API-->>UI: "{redirectUrl}"
-    
-    UI->>OAuth: "Redirect to OAuth page"
-    OAuth->>OAuth: "User authorizes"
-    OAuth->>Callback: "GET /callback?connection_id=..."
-    Callback->>EM: "update_connection_status(entity_id, app_name, 'active', connection_id)"
-    EM->>EM: "UPDATE composio_connections SET status='active'"
-    Callback-->>OAuth: "Redirect to success page"
-```
-
-### Connection Status Tracking
-
-The system tracks connection state in the `composio_connections` table:
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `entity_id` | INT (FK) | References `composio_entities.id` |
-| `app_name` | VARCHAR | Uppercase app name (e.g., "SLACK", "JIRA") |
-| `status` | VARCHAR | `pending`, `active`, or `error` |
-| `connection_id` | VARCHAR | Composio SDK connection identifier |
-| `connected_at` | TIMESTAMP | When status transitioned to `active` |
-| `last_synced_at` | TIMESTAMP | Last status check or update |
-
-**Lazy Status Upgrade**: The `get_connected_apps()` method [orchestrator/core/composio/entity_manager.py:101-124]() implements lazy connection promotion: if a connection is `pending` but has a `connection_id`, it's treated as `active` and the status is upgraded automatically. This handles cases where OAuth completes but the callback is missed.
-
-Sources: [orchestrator/core/composio/entity_manager.py:72-204](), [orchestrator/api/composio.py]() (OAuth endpoints)
-
----
-
-## Agent Tool Assignment
-
-### AgentAppAssignment Model
-
-Agents are granted access to specific apps through the `agent_app_assignments` table:
-
-```mermaid
-erDiagram
-    AGENT ||--o{ AGENT_APP_ASSIGNMENT : "has"
-    AGENT_APP_ASSIGNMENT ||--|| APP : "references"
-    
-    AGENT {
-        int id PK
-        uuid workspace_id FK
-        string name
-        string agent_type
-    }
-    
-    AGENT_APP_ASSIGNMENT {
-        int id PK
-        int agent_id FK
-        string app_name
-        string app_type
-        boolean is_active
-        timestamp created_at
-    }
-    
-    APP {
-        string name PK
-        string type
-    }
-```
-
-**Assignment Fields**:
-- `agent_id`: Foreign key to `agents.id`
-- `app_name`: Uppercase app identifier (e.g., "GITHUB", "SLACK")
-- `app_type`: `"EXTERNAL"` for Composio apps, `"BUILTIN"` for internal tools
-- `is_active`: Boolean flag to enable/disable without deletion
-
-### Assignment Resolution
-
-When resolving tools for an agent, the system filters assignments by:
-
-1. **Agent ID match**: `AgentAppAssignment.agent_id == agent_id`
-2. **Active status**: `AgentAppAssignment.is_active == True`
-3. **External type**: `AgentAppAssignment.app_type == "EXTERNAL"` (Composio apps only)
-4. **Connection intersection**: Assigned apps must have active connections in workspace
-
-This multi-gate approach [orchestrator/modules/tools/services/composio_hint_service.py:217-268]() ensures agents only access apps they're authorized for AND that the workspace has connected.
-
-Sources: [orchestrator/modules/tools/services/composio_hint_service.py:217-268](), [orchestrator/modules/tools/services/composio_tool_service.py:254-293]()
-
----
-
-## Tool Resolution Strategies
-
-Composio tools are resolved using a dual-path strategy: SDK semantic search (primary) and hint-based fallback (secondary).
-
-### Strategy 1: SDK Semantic Search (Primary)
-
-```mermaid
-graph TB
-    Start["ComposioToolService<br/>.get_tools_for_step()"]
-    ExtractActions["Extract explicit actions<br/>from prompt using regex<br/>_ACTION_NAME_RE"]
-    CheckExplicit{"Explicit actions<br/>found in prompt?"}
-    DirectLookup["get_action_schemas_by_name()<br/>Fetch exact schemas from<br/>per-app cache"]
-    SDKSearch["search_actions_for_step()<br/>Composio SDK semantic search<br/>using full prompt"]
-    BuildTools["Build OpenAI function schemas<br/>with parameter definitions"]
-    Result["ComposioToolResult<br/>(tools, action_set, strategy)"]
-    
-    Start --> ExtractActions
-    ExtractActions --> CheckExplicit
-    CheckExplicit -->|"Yes<br/>(e.g. GITHUB_CREATE_A_REFERENCE)"| DirectLookup
-    CheckExplicit -->|"No"| SDKSearch
-    DirectLookup --> BuildTools
-    SDKSearch --> BuildTools
-    BuildTools --> Result
-```
-
-**Explicit Action Extraction**: The service uses a regex pattern [orchestrator/modules/tools/services/composio_tool_service.py:67]() to find uppercase action names in prompts:
-```
-_ACTION_NAME_RE = re.compile(r"\b([A-Z][A-Z0-9]+(?:_[A-Z0-9]+){2,})\b")
-```
-
-This matches patterns like `JIRA_GET_ISSUE`, `GITHUB_CREATE_A_REFERENCE`, etc.
-
-**Direct Schema Lookup**: When explicit actions are found, the system bypasses semantic search and directly fetches their schemas via `get_action_schemas_by_name()` [orchestrator/modules/tools/services/composio_tool_service.py:116-133](). This avoids the SDK's alphabetical bias and provides exact parameter schemas.
-
-**SDK Search Fallback**: When no explicit actions are detected, the system calls `search_actions_for_step()` [orchestrator/modules/tools/services/composio_tool_service.py:153-170]() with the task prompt, limit, and allowed app names. The SDK performs semantic matching to find relevant actions.
-
-Sources: [orchestrator/modules/tools/services/composio_tool_service.py:55-193]()
-
----
-
-### Strategy 2: Hint-Based Fallback
-
-When SDK search returns no tools, the system falls back to hint-based resolution via `ComposioHintService`:
-
-```mermaid
-graph TB
-    Start["ComposioHintService<br/>.build_hints()"]
-    AnalyzePrompt["_analyze_prompt()<br/>Extract tokens, intent,<br/>capabilities, filter terms"]
-    RecipeMode{"recipe_mode<br/>enabled?"}
-    
-    RecipeTokens["Recipe Mode:<br/>_recipe_token_hints()<br/>Direct token ILIKE matching<br/>No taxonomy gate"]
-    
-    ChatbotTier1["Chatbot Tier 1:<br/>_capability_based_hints()<br/>Query ComposioActionMetadata<br/>using taxonomy overlap"]
-    Tier1Match{"Tier 1<br/>matched?"}
-    
-    ChatbotTier2["Chatbot Tier 2:<br/>_token_filtered_hints()<br/>ComposioActionCache ILIKE<br/>+ mandatory capability gate"]
-    Tier2Match{"Tier 2<br/>matched?"}
-    
-    ChatbotTier3["Chatbot Tier 3:<br/>_top_n_fallback()<br/>Safe top actions per app<br/>No filtering"]
-    
-    FormatHints["Format hint lines:<br/>- App list<br/>- Available actions<br/>- Parameter hints"]
-    Result["ComposioHintResult<br/>(hint_lines, strategy)"]
-    
-    Start --> AnalyzePrompt
-    AnalyzePrompt --> RecipeMode
-    
-    RecipeMode -->|"Yes"| RecipeTokens
-    RecipeTokens --> FormatHints
-    
-    RecipeMode -->|"No"| ChatbotTier1
-    ChatbotTier1 --> Tier1Match
-    Tier1Match -->|"Yes"| FormatHints
-    Tier1Match -->|"No"| ChatbotTier2
-    ChatbotTier2 --> Tier2Match
-    Tier2Match -->|"Yes"| FormatHints
-    Tier2Match -->|"No"| ChatbotTier3
-    ChatbotTier3 --> FormatHints
-    
-    FormatHints --> Result
-```
-
-**Recipe Mode** [orchestrator/modules/tools/services/composio_hint_service.py:153-160](): Skips taxonomy/capability gates and uses prompt tokens directly for ILIKE matching. Designed for curated recipe step prompts that are specific and actionable.
-
-**Chatbot Tier 1** [orchestrator/modules/tools/services/composio_hint_service.py:308-386](): Queries `ComposioActionMetadata` table using capability overlap from the taxonomy. Scores actions by capability matches, keyword overlap, and classification confidence.
-
-**Chatbot Tier 2** [orchestrator/modules/tools/services/composio_hint_service.py:392-488](): Falls back to `ComposioActionCache` with token-based ILIKE search. **Critical**: Capability terms are a mandatory gate [orchestrator/modules/tools/services/composio_hint_service.py:20-21]() — actions MUST match at least one capability term to be included. This prevents `SLACK_CREATE_CHANNEL_BASED_CONVERSATION` from competing with `SLACK_SEND_MESSAGE` for messaging intents.
-
-**Chatbot Tier 3** [orchestrator/modules/tools/services/composio_hint_service.py:492-552](): Returns top N safe actions per app with no filtering. Used when no confident matches are found.
-
-Sources: [orchestrator/modules/tools/services/composio_hint_service.py:89-213]()
-
----
-
-## Action Execution
-
-Composio actions can be executed in two ways: direct per-action calls or through the `composio_execute` mega-tool.
-
-### Direct Action Execution (SDK Search Path)
-
-When `ComposioToolService` returns per-action tools, they're executed directly:
-
-```mermaid
-sequenceDiagram
-    participant LLM as "LLM"
-    participant Recipe as "Recipe Executor"
-    participant ToolService as "ComposioToolService"
-    participant SDK as "Composio SDK"
-    participant API as "External API<br/>(Jira, Slack, etc.)"
-    
-    Recipe->>LLM: "generate_response(messages, tools)"
-    LLM-->>Recipe: "tool_calls: [JIRA_GET_ISSUE]"
-    
-    Recipe->>Recipe: "Check if action in action_set"
-    Recipe->>Recipe: "Deduplication check<br/>(action|args_hash)"
-    
-    alt "Cache hit"
-        Recipe-->>Recipe: "Return cached result"
-    else "Cache miss"
-        Recipe->>ToolService: "execute_action(action_name, params, entity_id)"
-        ToolService->>SDK: "execute_action(action, params, entity_id)"
-        SDK->>API: "HTTP request with OAuth token"
-        API-->>SDK: "API response"
-        SDK-->>ToolService: "{success, data, error}"
-        ToolService-->>Recipe: "Execution result"
-        Recipe->>Recipe: "Cache result by dedup key"
+    subgraph "Code Entity Space (Automatos AI)"
+        ToolRegistry["ToolRegistry"]
+        MetadataSync["MetadataSyncService"]
+        ActionCache[("ComposioActionCache")]
+        UnifiedExec["UnifiedToolExecutor"]
+        CompExec["ComposioToolExecutor"]
+        CompClient["ComposioClient"]
+        HintService["ComposioHintService"]
     end
-    
-    Recipe->>LLM: "Append tool result to messages"
+
+    subgraph "External"
+        ComposioSDK["Composio SDK Core"]
+        ExternalApp["External App (GitHub/Slack)"]
+    end
+
+    UserPrompt --> LLM
+    MetadataSync -->|Bulk Fetch| ComposioSDK
+    MetadataSync -->|Upsert| ActionCache
+    LLM -->|Tool Call| UnifiedExec
+    UnifiedExec -->|Route| CompExec
+    CompExec -->|Validate| ActionCache
+    CompExec -->|Execute| CompClient
+    CompClient -->|SDK Call| ComposioSDK
+    ComposioSDK -->|OAuth Request| ExternalApp
+    LLM -.->|Get Hints| HintService
+    HintService -->|Lookup| ActionCache
 ```
 
-**Deduplication**: The recipe executor [orchestrator/api/recipe_executor.py:260-298]() maintains a cache keyed by `"{action_name}|{args_json_sorted}"`. If the LLM calls the same action with identical parameters again, the cached result is returned without hitting the API.
+**Key Entities**:
+- `ComposioClient`: A lazy-loaded wrapper around the `composio-core` SDK [orchestrator/core/composio/client.py:54-126]().
+- `ComposioActionCache`: Stores tool schemas (parameters, descriptions) locally to avoid fetching them from the SDK during the chat loop [orchestrator/api/tools.py:25]().
+- `UnifiedToolExecutor`: Routes generic tool calls to specific executors based on tool prefixes or registry lookups [orchestrator/modules/agents/factory/agent_factory.py:42-44]().
+- `ComposioHintService`: Generates system message hints for LLMs to ensure they use correct tool names and parameters [orchestrator/modules/tools/services/composio_hint_service.py:89-98]().
 
-**Direct Execution Logic**: Actions are executed directly if:
-1. The tool name is in the resolved `action_set` from SDK search, OR
-2. The tool name starts with a connected app prefix (e.g., `JIRA_*`, `SLACK_*`)
-
-This allows the LLM to infer related actions beyond the search results, as long as they're in the connected app namespace.
-
-Sources: [orchestrator/api/recipe_executor.py:256-312](), [orchestrator/modules/tools/services/composio_tool_service.py:194-212]()
+Sources: [orchestrator/core/composio/client.py:54-126](), [orchestrator/api/tools.py:25](), [orchestrator/services/metadata_sync_service.py:37-47](), [orchestrator/modules/tools/services/composio_hint_service.py:89-110]()
 
 ---
 
-### composio_execute Mega-Tool (Hint Fallback Path)
+## Metadata Synchronization
 
-When SDK search returns no tools, the system injects the `composio_execute` mega-tool along with action hints:
+To ensure high performance, Automatos AI does not query the Composio SDK for tool schemas during an active agent run. Instead, it uses a `MetadataSyncService` to maintain a local mirror.
 
+### Sync Logic
+The service performs a bulk fetch of all available apps and actions:
+1. **Fetch Apps**: Retrieves all supported toolkits [orchestrator/services/metadata_sync_service.py:60-71]().
+2. **Bulk Fetch Actions**: Uses `get_all_actions_bulk` to download 800+ tool definitions in a paged manner [orchestrator/services/metadata_sync_service.py:73-86]().
+3. **Upsert Cache**: Updates `ComposioAppCache` and `ComposioActionCache` tables, removing orphaned actions that no longer exist in the SDK [orchestrator/services/metadata_sync_service.py:108-149]().
+
+### Cache Tables
+
+| Table | Role |
+| :--- | :--- |
+| `ComposioAppCache` | Stores app metadata, logos, categories, and connection status [orchestrator/api/tools.py:43-56](). |
+| `ComposioActionCache` | Stores the JSON schema for every individual tool (e.g., `GITHUB_CREATE_ISSUE`) [orchestrator/api/tools.py:25](). |
+| `ComposioStatsCache` | Aggregated counts of total tools and categories for the UI [orchestrator/api/tools.py:66-72](). |
+
+Sources: [orchestrator/services/metadata_sync_service.py:42-150](), [orchestrator/api/tools.py:106-133]()
+
+---
+
+## OAuth and Connection Flow
+
+Automatos AI uses Composio's **Hosted Auth** to manage user credentials securely without handling sensitive tokens directly.
+
+### OAuth Sequence
+
+Title: Composio OAuth and Connection Lifecycle
 ```mermaid
 sequenceDiagram
-    participant LLM as "LLM"
-    participant Chat as "StreamingChatService"
-    participant HintService as "ComposioHintService"
-    participant ToolRouter as "ToolRouter"
-    participant Validator as "composio_execute handler"
-    participant SDK as "Composio SDK"
-    
-    Chat->>HintService: "build_hints(agent_id, prompt, workspace_id)"
-    HintService-->>Chat: "ComposioHintResult<br/>(hint_lines, matched_actions)"
-    
-    Chat->>Chat: "Insert hint_lines as system message"
-    Chat->>Chat: "Add composio_execute to tools"
-    
-    Chat->>LLM: "generate_response(messages, tools)"
-    LLM-->>Chat: "tool_calls: [composio_execute]"
-    
-    Chat->>ToolRouter: "execute_and_format(composio_execute, args)"
-    ToolRouter->>Validator: "composio_execute(action, params)"
-    
-    Validator->>Validator: "Validate action in allowed_actions"
-    Validator->>Validator: "Auto-map common param names"
-    Validator->>Validator: "Check for destructive keywords"
-    
-    Validator->>SDK: "execute_action(action, params, entity_id)"
-    SDK-->>Validator: "{success, data, error}"
-    Validator-->>ToolRouter: "Formatted result"
-    ToolRouter-->>Chat: "{llm_context, display_data}"
-    
-    Chat->>LLM: "Append tool result to messages"
+    participant User as User (Frontend)
+    participant API as api/composio.py
+    participant Client as ComposioClient
+    participant SDK as Composio SDK (Hosted Auth)
+    participant Callback as callback/page.tsx
+
+    User->>API: Initiate Connection (App: GITHUB)
+    API->>Client: initiate_connection(entity_id, app)
+    Client->>SDK: Generate Redirect URL
+    SDK-->>User: Redirect to OAuth Provider
+    User->>User: Authorize in External App
+    User->>Callback: Redirect with status=success
+    Callback->>API: POST /connect/GITHUB/callback
+    API->>API: Mark connection as ACTIVE in DB (EntityManager)
 ```
 
-**Hint Injection**: The hint lines [orchestrator/modules/tools/services/composio_hint_service.py:137-148]() include:
-- Connected app list
-- Exact action names to use (e.g., "SLACK_SEND_MESSAGE, SLACK_GET_CHANNELS")
-- Parameter hints for top actions (extracted from action schemas)
-- Directive: "You MUST call `composio_execute` to fulfill the user's request"
+**Implementation Details**:
+- **Initiation**: The `initiate_connection` method [orchestrator/core/composio/client.py:199-234]() requests a redirect URL from Composio for a specific entity.
+- **Entity Management**: Every workspace is mapped to a `composio_entity_id` (stringified workspace UUID) to isolate credentials [orchestrator/core/composio/entity_manager.py:55-60]().
+- **Callback Handling**: The frontend `ComposioCallbackPage` [frontend/app/tools/callback/page.tsx:8-40]() captures the redirect parameters and notifies the backend to update the `ComposioConnection` status to `ACTIVE` [orchestrator/core/composio/entity_manager.py:163-185]().
 
-**Validation**: The `composio_execute` handler validates:
-- Action is in the allowed set for the workspace/agent
-- No destructive keywords in params (delete, remove, etc.) for safety
-- Auto-maps common parameter name variations (e.g., `issue_key` → `issue_id_or_key`)
-
-Sources: [orchestrator/modules/tools/services/composio_hint_service.py:137-212](), [orchestrator/consumers/chatbot/service.py:640-693]()
+Sources: [orchestrator/core/composio/client.py:199-234](), [frontend/app/tools/callback/page.tsx:8-40](), [orchestrator/api/composio.py:208-220](), [orchestrator/core/composio/entity_manager.py:19-69]()
 
 ---
 
-## Frontend Components
+## Tool Discovery & Resolution
 
-### App Connection UI
+To handle the vast scale of Composio tools (800+), the system employs a multi-tier resolution strategy via `ComposioToolService` and `ComposioHintService`.
 
-The frontend provides React components for managing Composio connections:
+### Tool Hinting (System Prompt Injection)
+`ComposioHintService` injects candidate actions into the LLM system message based on three tiers:
+1. **Capability-based**: Uses `ComposioActionMetadata` and taxonomy overlap to find tools matching the user intent [orchestrator/modules/tools/services/composio_hint_service.py:162-166]().
+2. **Token-filtered**: Matches prompt tokens against action names in `ComposioActionCache` with a mandatory capability gate [orchestrator/modules/tools/services/composio_hint_service.py:168-172]().
+3. **Top-N Fallback**: Provides a safe set of default actions for connected apps [orchestrator/modules/tools/services/composio_hint_service.py:15-16]().
 
-```mermaid
-graph TB
-    ManageAppsModal["ManageAppsModal<br/>Dialog with tabs"]
-    ConnectedTab["Connected Apps Tab<br/>ConnectedAppCard[]"]
-    AvailableTab["Available Apps Tab<br/>AvailableAppCard[]"]
-    
-    ConnectedAppCard["ConnectedAppCard<br/>- App icon/name<br/>- Connection status<br/>- Disconnect button"]
-    AvailableAppCard["AvailableAppCard<br/>- App icon/name<br/>- Description<br/>- Connect button"]
-    
-    AppConnectionButton["AppConnectionButton<br/>- Initiates OAuth flow<br/>- Shows connection status"]
-    
-    FeatureGrid["FeatureGrid<br/>- Shows available actions<br/>- Feature cards per app"]
-    
-    ManageAppsModal --> ConnectedTab
-    ManageAppsModal --> AvailableTab
-    ConnectedTab --> ConnectedAppCard
-    AvailableTab --> AvailableAppCard
-    AvailableTab --> AppConnectionButton
-    ManageAppsModal --> FeatureGrid
-```
+### Action Resolution for Execution
+`ComposioToolService` resolves tool schemas for specific execution steps:
+- **Explicit Lookup**: Extracts action names directly from the prompt using regex (e.g., `GITHUB_CREATE_ISSUE`) [orchestrator/modules/tools/services/composio_tool_service.py:75-76]().
+- **Semantic Search**: Uses the Composio SDK's semantic search if no explicit name is found [orchestrator/modules/tools/services/composio_tool_service.py:111]().
+- **Hint-scoped Search**: Limits SDK search to specific apps based on domain keywords (e.g., "email" -> `["gmail"]`) [orchestrator/modules/tools/services/composio_tool_service.py:78-95]().
 
-**Component Hierarchy**:
-
-1. **ManageAppsModal** [frontend/components/composio/manage-apps-modal.tsx](): Top-level dialog with tabbed interface
-2. **ConnectedAppCard** [frontend/components/composio/connected-app-card.tsx](): Displays connected apps with disconnect action
-3. **AvailableAppCard** [frontend/components/composio/available-app-card.tsx](): Lists apps available for connection
-4. **AppConnectionButton** [frontend/components/composio/app-connection-button.tsx](): Triggers OAuth flow and handles redirects
-5. **FeatureGrid** [frontend/components/composio/feature-grid.tsx](): Shows available actions/features per app
-
-### API Client Integration
-
-The frontend uses `useComposioApi` hook [frontend/hooks/use-composio-api.ts]() for data fetching:
-
-```typescript
-const {
-  connectedApps,
-  availableApps,
-  isLoading,
-  connect,
-  disconnect,
-  refreshConnections
-} = useComposioApi(workspaceId)
-```
-
-**Key Methods**:
-- `connect(appName)`: Initiates OAuth flow, opens popup window
-- `disconnect(appName)`: Removes connection
-- `refreshConnections()`: Re-fetches connection status from backend
-
-Sources: [frontend/components/composio/manage-apps-modal.tsx](), [frontend/components/composio/app-connection-button.tsx](), [frontend/hooks/use-composio-api.ts]()
+Sources: [orchestrator/modules/tools/services/composio_hint_service.py:12-21](), [orchestrator/modules/tools/services/composio_tool_service.py:63-113]()
 
 ---
 
-## Caching Layer
+## Tool Execution Pipeline
 
-### ComposioActionCache Table
+When an agent decides to use a tool, the `ComposioToolExecutor` manages the lifecycle and validation.
 
-The system maintains a cache of action metadata for fast lookups:
+### Execution Routing and Validation
+1. **Identification**: Actions are typically formatted as `APP_ACTION_NAME` (e.g., `GITHUB_LIST_REPOS`) [orchestrator/core/composio/tool_executor.py:166-174]().
+2. **Access Control**: `validate_feature_access` checks the `AgentAppFeature` table to see if the specific agent is allowed to use that action [orchestrator/core/composio/tool_executor.py:66-125]().
+3. **Entity Resolution**: The executor resolves the Composio entity associated with the workspace [orchestrator/core/composio/tool_executor.py:126-140]().
+4. **SDK Execution**: The `execute` method invokes the SDK. It uses `ComposioActionCache` to verify the app name for multi-word tools [orchestrator/core/composio/tool_executor.py:182-192]().
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `app_name` | VARCHAR | Uppercase app identifier |
-| `action_name` | VARCHAR | Full action name (e.g., `JIRA_GET_ISSUE`) |
-| `display_name` | VARCHAR | Human-readable name |
-| `description` | TEXT | Action description for LLM context |
-| `parameters` | JSONB | Parameter schema |
-| `last_synced_at` | TIMESTAMP | Cache freshness timestamp |
+### Loop Prevention and Performance
+- **Caching**: Auth configurations and action schemas are cached in-memory with a TTL to avoid redundant API calls [orchestrator/core/composio/client.py:96-103]().
+- **Execution Metadata**: Results include `execution_time_ms` and standard success/error structures for consumption by the agent loop [orchestrator/core/composio/tool_executor.py:163-174]().
 
-**Token Matching**: Tier 2 hint resolution [orchestrator/modules/tools/services/composio_hint_service.py:392-488]() queries this table with token-based ILIKE filters:
-
-```sql
-WHERE app_name IN ('SLACK', 'JIRA')
-AND (
-  action_name ILIKE '%send%' OR
-  action_name ILIKE '%message%' OR
-  description ILIKE '%send%' OR
-  description ILIKE '%message%'
-)
-```
-
-### ComposioActionMetadata Table
-
-Enhanced metadata for capability-based routing:
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `app_id` | VARCHAR | Lowercase app identifier |
-| `action_id` | VARCHAR | Full action name |
-| `capabilities` | TEXT[] | Array of capability tags (e.g., `["message.send"]`) |
-| `intent_keywords` | TEXT[] | Keywords for intent matching |
-| `destructive` | BOOLEAN | Safety flag for dangerous actions |
-| `classification_confidence` | FLOAT | ML confidence score (0-1) |
-
-**Capability Overlap**: Tier 1 hint resolution [orchestrator/modules/tools/services/composio_hint_service.py:308-386]() queries with:
-
-```sql
-WHERE app_id IN ('slack', 'jira')
-AND capabilities && ARRAY['message.send', 'message.create']
-AND destructive = false
-```
-
-Sources: [orchestrator/modules/tools/services/composio_hint_service.py:308-488](), [orchestrator/modules/tools/capabilities/models.py]() (ComposioActionMetadata model)
+Sources: [orchestrator/core/composio/tool_executor.py:66-210](), [orchestrator/core/composio/client.py:96-103]()
 
 ---
 
-## Integration Points
+## API Reference
 
-### Recipe Executor Integration
+### Backend Endpoints
+- `GET /api/tools/marketplace`: Lists apps from the local cache with connection status [orchestrator/api/tools.py:79-133]().
+- `POST /api/tools/sync`: Triggers the `MetadataSyncService` to refresh the local cache [orchestrator/api/tools.py:26]().
+- `GET /api/composio/apps/{app_name}/actions`: Lists specific actions for a toolkit [orchestrator/api/composio.py:173-183]().
+- `POST /api/composio/connect/{app_name}/callback`: Finalizes an OAuth connection [orchestrator/api/composio.py:255-257]().
 
-Recipes use `ComposioToolService` for per-action tools:
+### Core Classes
 
-1. **Tool Resolution**: [orchestrator/api/recipe_executor.py:113-150]() calls `get_tools_for_step()` with the step's task prompt
-2. **SDK Result Handling**: If tools are returned, they're added to the LLM's tool list
-3. **Hint Fallback**: If no tools are returned, the system falls back to `ComposioHintService.build_hints()` with `recipe_mode=True`
-4. **Direct Execution**: Tool calls matching the action set are executed directly via `execute_action()`
-5. **Deduplication**: Results are cached to prevent redundant API calls
+| Class | File | Responsibility |
+| :--- | :--- | :--- |
+| `ComposioClient` | `orchestrator/core/composio/client.py` | Low-level SDK wrapper and OAuth redirect logic [orchestrator/core/composio/client.py:54]() |
+| `ComposioToolExecutor` | `orchestrator/core/composio/tool_executor.py` | Permission validation and action execution [orchestrator/core/composio/tool_executor.py:30]() |
+| `MetadataSyncService` | `orchestrator/services/metadata_sync_service.py` | Syncing marketplace data to local PostgreSQL [orchestrator/services/metadata_sync_service.py:37]() |
+| `EntityManager` | `orchestrator/core/composio/entity_manager.py` | Managing workspace-to-entity mappings and connections [orchestrator/core/composio/entity_manager.py:19]() |
+| `ComposioHintService` | `orchestrator/modules/tools/services/composio_hint_service.py` | Generating LLM system hints for tool discovery [orchestrator/modules/tools/services/composio_hint_service.py:89]() |
 
-Sources: [orchestrator/api/recipe_executor.py:43-363]()
-
----
-
-### Chat Service Integration
-
-The streaming chat service uses both strategies:
-
-1. **SDK Search First**: [orchestrator/consumers/chatbot/service.py:640-672]() attempts `ComposioToolService.get_tools_for_step()`
-2. **Tool Injection**: Per-action tools are added to the LLM's tool list, replacing `composio_execute`
-3. **Scope Message**: A system message explains which apps are connected and to use the provided tools directly
-4. **Hint Fallback**: If no SDK tools are found, falls back to `ComposioHintService.build_hints()` with `recipe_mode=False`
-5. **Mega-Tool Execution**: Tool calls to `composio_execute` are routed through the validation/auto-mapping pipeline
-
-Sources: [orchestrator/consumers/chatbot/service.py:640-807]()
-
----
-
-## Best Practices
-
-### Agent Setup
-
-1. **Connect Apps First**: Use the frontend UI to complete OAuth for required apps
-2. **Assign Apps to Agent**: Explicitly assign apps via `AgentAppAssignment` records
-3. **Test Explicit Actions**: Include action names in prompts during testing to trigger direct lookup
-4. **Monitor Strategy Usage**: Check logs for `strategy=sdk_search` vs `strategy=hint_fallback` to optimize prompts
-
-### Prompt Design
-
-**For Recipe Steps**:
-- Include explicit action names when possible: "Use JIRA_GET_ISSUE to fetch ticket details"
-- Be specific about parameters: "Get issue with key PROJECT-123"
-- Enable `recipe_mode=True` for direct token matching without taxonomy overhead
-
-**For Chat Interactions**:
-- Use intent-rich language that matches capability taxonomy
-- Let the system suggest tools via Tier 1 capability matching
-- Avoid generic prompts that trigger Tier 3 fallback (low precision)
-
-### Error Handling
-
-**Connection Failures**:
-- Check `composio_connections.status` for `error` state
-- Re-trigger OAuth flow via frontend UI
-- Validate entity_id mapping in `composio_entities` table
-
-**Action Execution Failures**:
-- Check SDK error messages in tool result
-- Verify parameter names match action schema
-- Enable auto-mapping for common parameter variations
-
-Sources: [orchestrator/modules/tools/services/composio_hint_service.py:88-213](), [orchestrator/api/recipe_executor.py:113-199]()
+Sources: [orchestrator/core/composio/client.py:54-80](), [orchestrator/core/composio/tool_executor.py:30-46](), [orchestrator/services/metadata_sync_service.py:37-42](), [orchestrator/core/composio/entity_manager.py:19-22](), [orchestrator/modules/tools/services/composio_hint_service.py:89-98]()
 
 ---

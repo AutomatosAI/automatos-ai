@@ -5,713 +5,426 @@
 
 The following files were used as context for generating this wiki page:
 
+- [.gitignore](.gitignore)
+- [README.md](README.md)
 - [docker-compose.yml](docker-compose.yml)
+- [docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md](docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md)
+- [docs/README.md](docs/README.md)
 - [frontend/.dockerignore](frontend/.dockerignore)
 - [frontend/Dockerfile](frontend/Dockerfile)
+- [orchestrator/.env.example](orchestrator/.env.example)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
+- [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
+- [orchestrator/core/credentials/service.py](orchestrator/core/credentials/service.py)
+- [orchestrator/core/models/credentials.py](orchestrator/core/models/credentials.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
+- [orchestrator/core/services/plugin_cache.py](orchestrator/core/services/plugin_cache.py)
+- [orchestrator/modules/tools/services/__init__.py](orchestrator/modules/tools/services/__init__.py)
 - [orchestrator/requirements.txt](orchestrator/requirements.txt)
 
 </details>
 
 
 
-This page covers the installation and initial configuration of Automatos AI for local development. It provides step-by-step instructions for running the platform using Docker Compose, including database initialization, environment configuration, and service verification.
-
-**Related documentation:**
-- For detailed configuration options and feature flags, see [Configuration Guide](#2.2)
-- For the first-time user onboarding experience, see [First-Time User Experience](#2.3)
-- For production deployment strategies, see [Deployment & Infrastructure](#12)
-- For advanced Docker configuration, see [Docker Compose Setup](#12.2)
+This page guides you through installing and running Automatos AI using Docker Compose. It covers cloning the repository, configuring environment variables, starting services, and verifying the installation. For detailed configuration of individual services (LLM providers, Redis, PostgreSQL, S3, Mem0), see [Configuration Guide](2.2).
 
 ---
 
 ## Prerequisites
 
-Before installing Automatos AI, ensure you have the following installed on your system:
+Before installing Automatos AI, ensure your system has:
 
-| Requirement | Version | Purpose |
-|-------------|---------|---------|
-| Docker | 20.10+ | Container runtime |
-| Docker Compose | 2.0+ | Multi-container orchestration |
-| Git | 2.30+ | Repository cloning |
+- **Docker** (20.10+) and **Docker Compose** (2.0+)
+- **Git** for repository cloning
+- **Minimum 8GB RAM** (16GB recommended for production)
+- **10GB disk space** for Docker images and volumes
+- **Port availability**: 3000 (frontend), 8000 (backend), 5432 (PostgreSQL), 6379 (Redis)
 
-**Optional but recommended:**
-- **OpenAI API Key** or **Anthropic API Key** - Required for agent LLM functionality. Without these, agents cannot generate responses, though the platform will still run.
-- **Clerk Account** - Required for user authentication in production. Development mode supports anonymous access when `REQUIRE_AUTH=false`.
-- **AWS Account** - Required only if using marketplace plugins or S3-based features.
-
-Sources: [docker-compose.yml:1-197](), [README.md:57-60]()
+**Sources:** [README.md:98-103](), [README.md:114-121]()
 
 ---
 
 ## Quick Start
 
-The fastest path to running Automatos AI locally:
+### 1. Clone Repository
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
+```
 
-# 2. Start all services (uses secure defaults)
+### 2. Configure Environment Variables
+
+Copy the example environment file and configure required secrets:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set the following **required** variables:
+
+```bash
+# Required - Database credentials
+POSTGRES_PASSWORD=your_secure_postgres_password
+
+# Required - Redis credentials  
+REDIS_PASSWORD=your_secure_redis_password
+
+# Required - API authentication
+API_KEY=your_secure_api_key
+
+# Optional - LLM provider keys (can be set via UI later)
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**Note:** The system will not start without `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and `API_KEY`. LLM provider credentials can be configured later through the Settings UI at [http://localhost:3000/settings](http://localhost:3000/settings).
+
+**Sources:** [docker-compose.yml:5-11](), [docker-compose.yml:29](), [docker-compose.yml:56](), [docker-compose.yml:116]()
+
+### 3. Start Services
+
+```bash
+# Start core services (postgres, redis, backend, frontend)
 docker-compose up --build
 
-# 3. Access the platform
-# Frontend: http://localhost:3000
-# API Docs: http://localhost:8000/docs
-# Health Check: http://localhost:8000/health
+# Or run in detached mode
+docker-compose up --build -d
+
+# Include admin tools (Adminer, Gotenberg)
+docker-compose --profile all up --build
+
+# Include workspace worker for sandboxed execution
+docker-compose --profile workers up --build
 ```
 
-**That's it!** No `.env` file is required for local development. The system uses secure defaults for infrastructure services (PostgreSQL, Redis) and manages API keys through the Settings UI.
+The `--build` flag ensures images are rebuilt with the latest code changes. Omit it for faster startup after the initial build.
 
-**Note:** On first launch, database initialization takes 10-40 seconds. Watch the logs for `✅ Database connection test successful` from the backend service.
+**Sources:** [docker-compose.yml:14-16](), [docker-compose.yml:184-185]()
 
-Sources: [docker-compose.yml:1-15](), [README.md:53-78]()
+### 4. Access the Platform
+
+Once all services are healthy (typically 30-60 seconds):
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| **Frontend** | http://localhost:3000 | Main user interface |
+| **API Docs** | http://localhost:8000/docs | Interactive API documentation (Swagger) |
+| **Health Check** | http://localhost:8000/health | Backend health status |
+| **Adminer** (if `--profile all`) | http://localhost:8080 | PostgreSQL database browser |
+
+**Sources:** [README.md:105-106](), [docker-compose.yml:162](), [docker-compose.yml:123](), [orchestrator/Dockerfile:78-79]()
 
 ---
 
-## Docker Compose Architecture
+## Docker Compose Service Architecture
 
-The following diagram shows the complete Docker Compose service topology, including exact service names, ports, and dependencies:
+The following diagram shows the services defined in `docker-compose.yml` and their dependencies:
+
+### System Component Map
 
 ```mermaid
 graph TB
-    subgraph "External Access"
-        Browser["Browser"]
-        APIClient["API Client / curl"]
+    subgraph "Core_Services_(default_profile)"
+        postgres["postgres<br/>(pgvector/pgvector:pg16)"]
+        redis["redis<br/>(redis:7-alpine)"]
+        backend["backend<br/>(automatos_backend)"]
+        frontend["frontend<br/>(automatos_frontend)"]
     end
     
-    subgraph "Docker Network: automatos_network"
-        Frontend["frontend<br/>automatos_frontend<br/>:3000"]
-        Backend["backend<br/>automatos_backend<br/>:8000"]
-        Postgres["postgres<br/>automatos_postgres<br/>:5432<br/>pgvector/pgvector:pg16"]
-        Redis["redis<br/>automatos_redis<br/>:6379<br/>redis:7-alpine"]
-        Adminer["adminer<br/>automatos_adminer<br/>:8080<br/>profile: all"]
+    subgraph "Worker_Services_(--profile_workers)"
+        workspace_worker["workspace-worker<br/>(automatos_workspace_worker)"]
     end
     
-    subgraph "Volumes"
-        PGData["postgres_data<br/>/var/lib/postgresql/data"]
-        RedisData["redis_data<br/>/data"]
-        BackendLogs["backend_logs<br/>/app/logs"]
+    subgraph "Admin_Tools_(--profile_all)"
+        adminer["adminer<br/>(adminer:latest)"]
+        gotenberg["gotenberg<br/>(gotenberg/gotenberg:8)"]
     end
     
-    Browser -->|"http://localhost:3000"| Frontend
-    APIClient -->|"http://localhost:8000"| Backend
+    subgraph "Persistent_Volumes"
+        postgres_data["postgres_data"]
+        redis_data["redis_data"]
+        backend_logs["backend_logs"]
+        workspace_data["workspace_data"]
+    end
     
-    Frontend -->|"NEXT_PUBLIC_API_URL"| Backend
-    Backend -->|"DATABASE_URL"| Postgres
-    Backend -->|"REDIS_URL"| Redis
+    frontend -->|"depends_on: service_healthy"| backend
+    backend -->|"depends_on: service_healthy"| postgres
+    backend -->|"depends_on: service_healthy"| redis
+    workspace_worker -->|"depends_on: service_healthy"| postgres
+    workspace_worker -->|"depends_on: service_healthy"| redis
+    adminer -->|"depends_on"| postgres
     
-    Postgres --> PGData
-    Redis --> RedisData
-    Backend --> BackendLogs
-    
-    Backend -.->|"depends_on: service_healthy"| Postgres
-    Backend -.->|"depends_on: service_healthy"| Redis
-    Frontend -.->|"depends_on: service_healthy"| Backend
-    
-    Adminer -.->|"optional admin tool"| Postgres
+    postgres -.->|"mounts"| postgres_data
+    redis -.->|"mounts"| redis_data
+    backend -.->|"mounts"| backend_logs
+    backend -.->|"mounts (ro)"| workspace_data
+    workspace_worker -.->|"mounts (rw)"| workspace_data
 ```
 
-**Health Check Details:**
+**Service Details:**
 
-| Service | Health Check Command | Interval | Start Period |
-|---------|---------------------|----------|--------------|
-| `postgres` | `pg_isready -U postgres` | 10s | 10s |
-| `redis` | `redis-cli ping` | 10s | 5s |
-| `backend` | `curl -f http://localhost:8000/health` | 30s | 40s |
-| `frontend` | `wget --spider http://localhost:3000` | 30s | 60s |
+| Service | Container Name | Image | Ports | Health Check |
+|---------|---------------|-------|-------|--------------|
+| **postgres** | `automatos_postgres` | `pgvector/pgvector:pg16` | 5432 | `pg_isready -U postgres` |
+| **redis** | `automatos_redis` | `redis:7-alpine` | 6379 | `redis-cli ping` |
+| **backend** | `automatos_backend` | Built from `orchestrator/Dockerfile` | 8000 | `curl -f http://localhost:8000/health` |
+| **frontend** | `automatos_frontend` | Built from `frontend/Dockerfile` | 3000 | `wget http://localhost:3000` |
+| **workspace-worker** | `automatos_workspace_worker` | Built from `services/workspace-worker/Dockerfile` | 8081 | `curl -f http://localhost:8081/health` |
 
-**Key architectural features:**
-- **Dependency chain**: Frontend waits for Backend, Backend waits for Postgres + Redis
-- **Named volumes**: Data persists across container restarts (`postgres_data`, `redis_data`)
-- **Hot-reload**: Source code mounted for development (`./orchestrator:/app`, `./frontend:/app`)
-- **Isolated network**: All services communicate via `automatos_network` bridge
-
-Sources: [docker-compose.yml:17-197]()
+**Sources:** [docker-compose.yml:18-170](), [docker-compose.yml:178-193](), [orchestrator/Dockerfile:88-130](), [frontend/Dockerfile:85-114]()
 
 ---
 
-## Service Configuration Details
+## Environment Variables Reference
 
-### PostgreSQL Database
+The Docker Compose stack requires specific environment variables. Below are the most critical ones; for comprehensive configuration, see [Configuration Guide](2.2).
 
-```yaml
-Service Name: postgres
-Image: pgvector/pgvector:pg16
-Container: automatos_postgres
-Port: 5432 (host) → 5432 (container)
-```
+### Required Variables
 
-**Configuration:**
-- **pgvector extension** enabled for vector similarity search
-- **Max connections**: 200 concurrent connections
-- **Shared buffers**: 256MB allocated for query caching
-- **Schema initialization**: Automatic on first run via `init_complete_schema.sql`
+| Variable | Description | Example | Used By |
+|----------|-------------|---------|---------|
+| `POSTGRES_PASSWORD` | PostgreSQL root password | `SecurePass123!` | postgres, backend, workspace-worker |
+| `REDIS_PASSWORD` | Redis authentication password | `RedisSecure456!` | redis, backend, workspace-worker |
+| `API_KEY` | Backend API authentication key | `automatos_api_key_xyz` | backend |
 
-**Default credentials** (overridable via environment):
-- Database: `orchestrator_db`
-- User: `postgres`
-- Password: `automatos_dev_pass`
+**Sources:** [docker-compose.yml:29](), [docker-compose.yml:56](), [docker-compose.yml:116]()
 
-The database schema is automatically initialized on first container startup using the SQL file mounted at `/docker-entrypoint-initdb.d/01-schema.sql`.
+### Database Configuration
 
-Sources: [docker-compose.yml:21-42](), [orchestrator/config.py:36-42]()
-
-### Redis Cache & Pub/Sub
-
-```yaml
-Service Name: redis
-Image: redis:7-alpine
-Container: automatos_redis
-Port: 6379 (host) → 6379 (container)
-```
-
-**Configuration:**
-- **Max memory**: 256MB with LRU eviction policy (`allkeys-lru`)
-- **Authentication**: Password-protected (default: `automatos_redis_dev`)
-- **Persistence**: RDB snapshots saved to `redis_data` volume
-
-**Used for:**
-- Workflow execution event streaming (Pub/Sub channels)
-- Plugin content caching (TTL: 3600s by default)
-- Tool metadata caching (Composio app/action schemas)
-
-Sources: [docker-compose.yml:47-63](), [orchestrator/core/redis/client.py:1-199]()
-
-### Backend API (FastAPI)
-
-```yaml
-Service Name: backend
-Build: ./orchestrator (Dockerfile, target: development)
-Container: automatos_backend
-Port: 8000 (host) → 8000 (container)
-```
-
-**Development mode features:**
-- **Hot-reload enabled**: Code changes trigger automatic restart via `--reload` flag
-- **Source mounting**: `./orchestrator:/app` for live editing
-- **Entrypoint script**: `docker-entrypoint.sh` for database readiness checks
-- **Uvicorn workers**: Single worker in dev mode
-
-**Runtime dependencies:**
-- Python 3.11-slim base image
-- System packages: `gcc`, `g++`, `postgresql-client`, `tesseract-ocr`
-- NLTK data: `punkt`, `stopwords` (pre-downloaded to `/usr/local/nltk_data`)
-
-Sources: [docker-compose.yml:68-123](), [orchestrator/Dockerfile:1-116]()
-
-### Frontend (Next.js)
-
-```yaml
-Service Name: frontend
-Build: ./frontend (Dockerfile, target: development)
-Container: automatos_frontend
-Port: 3000 (host) → 3000 (container)
-```
-
-**Development mode features:**
-- **Fast Refresh**: Hot module replacement for React components
-- **Source mounting**: `./frontend:/app` with excluded `node_modules` and `.next`
-- **Node 20 Alpine**: Lightweight container with `python3`, `make`, `g++` for native modules
-
-**Build-time environment variables:**
-- `NEXT_PUBLIC_API_URL`: Backend API endpoint (default: `http://localhost:8000`)
-- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`: Clerk authentication (optional for dev)
-
-Sources: [docker-compose.yml:131-155](), [frontend/Dockerfile:1-120]()
-
----
-
-## Environment Variables
-
-Automatos AI uses a hybrid configuration approach: **infrastructure defaults** (no `.env` needed) with **credentials managed via UI**.
-
-### Configuration Loading Flow
-
-```mermaid
-graph TB
-    AppStart["Application Start"]
-    LoadEnv["load_dotenv()<br/>orchestrator/config.py:24-26"]
-    
-    subgraph "Config Resolution (config.py:28-285)"
-        EnvVar["os.getenv(key)"]
-        DefaultVal["Default Value"]
-        DBSetting["Database system_settings<br/>via get_system_setting()"]
-    end
-    
-    subgraph "Priority Waterfall"
-        P1["1. Environment Variable"]
-        P2["2. Database Setting<br/>(LLM_PROVIDER, LLM_MODEL)"]
-        P3["3. Hardcoded Default"]
-    end
-    
-    ValidateConfig["config.validate()<br/>Check required fields"]
-    
-    subgraph "Validation Checks"
-        CheckDB["Postgres connection params"]
-        CheckAPI["API_KEY if REQUIRE_API_KEY=true"]
-    end
-    
-    InitApp["Initialize FastAPI app<br/>main.py"]
-    
-    AppStart --> LoadEnv
-    LoadEnv --> EnvVar
-    EnvVar --> P1
-    P1 -.->|"if not set"| P2
-    P2 -.->|"if not set"| P3
-    
-    P1 --> ValidateConfig
-    P2 --> ValidateConfig
-    P3 --> ValidateConfig
-    
-    ValidateConfig --> CheckDB
-    ValidateConfig --> CheckAPI
-    
-    CheckDB --> InitApp
-    CheckAPI --> InitApp
-```
-
-Sources: [orchestrator/config.py:24-285]()
-
-### Required Variables (Infrastructure)
-
-These are set automatically by `docker-compose.yml` with secure defaults:
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `POSTGRES_DB` | `orchestrator_db` | Database name |
 | `POSTGRES_USER` | `postgres` | Database user |
-| `POSTGRES_PASSWORD` | `automatos_dev_pass` | Database password |
-| `POSTGRES_HOST` | `postgres` | Database hostname (service name) |
-| `POSTGRES_PORT` | `5432` | Database port |
-| `REDIS_HOST` | `redis` | Redis hostname (service name) |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `DATABASE_URL` | Auto-generated | Full connection string (postgresql://user:pass@host:port/db) |
+
+**Sources:** [docker-compose.yml:27-28](), [docker-compose.yml:92-97]()
+
+### Redis Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REDIS_HOST` | `redis` | Redis hostname (docker-compose service name) |
 | `REDIS_PORT` | `6379` | Redis port |
-| `REDIS_PASSWORD` | `automatos_redis_dev` | Redis password |
+| `REDIS_PASSWORD` | **Required** | Redis auth password |
 
-Sources: [docker-compose.yml:80-92]()
+Redis is configured with security hardening — dangerous commands like `FLUSHDB`, `FLUSHALL`, and `DEBUG` are disabled via `--rename-command` in [docker-compose.yml:59-61]().
 
-### Optional Variables (Features)
+**Sources:** [docker-compose.yml:54-61](), [docker-compose.yml:100-102]()
 
-Add these to a `.env` file or configure via **Settings UI** after first login:
+### Authentication (Clerk)
 
-**LLM Providers:**
-```bash
-OPENAI_API_KEY=sk-...                    # OpenAI models (GPT-4, etc.)
-ANTHROPIC_API_KEY=sk-ant-...            # Anthropic models (Claude, etc.)
-LLM_PROVIDER=openai                      # Default provider (can change in UI)
-LLM_MODEL=gpt-4                          # Default model (can change in UI)
+| Variable | Description | Optional |
+|----------|-------------|----------|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk frontend key | Yes (for local dev without auth) |
+| `CLERK_SECRET_KEY` | Clerk backend secret | Yes |
+| `CLERK_JWKS_URL` | Clerk JWKS endpoint | Yes |
+
+**Sources:** [docker-compose.yml:119-121](), [docker-compose.yml:159]()
+
+---
+
+## Service Initialization Sequence
+
+The following diagram shows the startup and health check flow for core services:
+
+### Startup Flow & Code Entities
+
+```mermaid
+sequenceDiagram
+    participant DC as "docker-compose up"
+    participant PG as "postgres<br/>(pgvector/pgvector:pg16)"
+    participant RD as "redis<br/>(redis:7-alpine)"
+    participant BE as "backend<br/>(automatos_backend)"
+    participant FE as "frontend<br/>(automatos_frontend)"
+    
+    DC->>PG: "Start container"
+    activate PG
+    Note over PG: "Run init SQL:<br/>01-schema.sql"
+    PG->>PG: "Health check:<br/>pg_isready -U postgres"
+    PG-->>DC: "healthy"
+    deactivate PG
+    
+    DC->>RD: "Start container"
+    activate RD
+    Note over RD: "Apply config:<br/>--requirepass $REDIS_PASSWORD"
+    RD->>RD: "Health check:<br/>redis-cli ping"
+    RD-->>DC: "healthy"
+    deactivate RD
+    
+    DC->>BE: "Start container<br/>(depends_on: postgres, redis healthy)"
+    activate BE
+    Note over BE: "Run entrypoint:<br/>docker-entrypoint.sh"
+    BE->>PG: "Connect via DATABASE_URL"
+    BE->>BE: "init_redis_client()<br/>(core/redis/client.py)"
+    BE->>BE: "Health check:<br/>/health"
+    BE-->>DC: "healthy"
+    deactivate BE
+    
+    DC->>FE: "Start container<br/>(depends_on: backend healthy)"
+    activate FE
+    Note over FE: "Next.js dev server:<br/>npm run dev"
+    FE->>BE: "Proxy API requests to<br/>http://backend:8000"
+    FE->>FE: "Health check:<br/>wget http://localhost:3000"
+    FE-->>DC: "healthy"
+    deactivate FE
 ```
 
-**Authentication (Production):**
-```bash
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_... # Clerk public key
-CLERK_SECRET_KEY=sk_...                  # Clerk secret key
-CLERK_JWKS_URL=https://...               # Clerk JWKS endpoint
-```
+**Key Initialization Steps:**
 
-**Marketplace & Plugins (Optional):**
-```bash
-AWS_ACCESS_KEY_ID=AKIA...               # S3 access for plugin storage
-AWS_SECRET_ACCESS_KEY=...               # S3 secret key
-AWS_REGION=us-east-1                     # S3 region
-MARKETPLACE_S3_BUCKET=automatos-marketplace
-PLUGIN_CACHE_TTL_SECONDS=3600           # Redis cache TTL
-```
+1. **PostgreSQL** ([docker-compose.yml:22-43]()):
+   - Runs schema initialization from `orchestrator/database/init_complete_schema.sql` via mount [docker-compose.yml:35]().
+   - Health check validates via `pg_isready` [docker-compose.yml:37]().
 
-**Feature Flags:**
-```bash
-ENVIRONMENT=development                  # development | production
-LOG_LEVEL=INFO                           # DEBUG | INFO | WARNING | ERROR
-REQUIRE_API_KEY=false                    # Disable API key requirement for dev
-```
+2. **Redis** ([docker-compose.yml:48-73]()):
+   - Applies security config (disabled commands, password auth) [docker-compose.yml:54-61]().
+   - Health check validates via `redis-cli ping` [docker-compose.yml:67]().
 
-**Location to create `.env`:**
-- **Backend**: `orchestrator/.env` (loaded by `config.py:24-26`)
-- **Frontend**: `frontend/.env.local` (loaded by Next.js)
+3. **Backend** ([docker-compose.yml:78-138]()):
+   - Executes `docker-entrypoint.sh` [orchestrator/Dockerfile:82]().
+   - Initializes `RedisClient` via `init_redis_client` [orchestrator/core/redis/client.py:141-146]().
+   - Exposes health endpoint at `/health` [orchestrator/Dockerfile:78-79]().
 
-Sources: [orchestrator/.env.example:1-64](), [orchestrator/config.py:28-285]()
+4. **Frontend** ([docker-compose.yml:146-170]()):
+   - Starts Next.js dev server [frontend/Dockerfile:48]().
+   - Proxies API calls to `backend` service [docker-compose.yml:157]().
+   - Health check validates page load [frontend/Dockerfile:44-45]().
+
+**Sources:** [docker-compose.yml:35-41](), [docker-compose.yml:66-71](), [orchestrator/core/redis/client.py:141-146](), [orchestrator/Dockerfile:78-82](), [frontend/Dockerfile:44-48]()
 
 ---
 
 ## Database Initialization
 
-The PostgreSQL database is automatically initialized on first container startup using a volume-mounted SQL script.
+PostgreSQL is initialized with the complete schema on first startup. The schema includes:
 
-### Initialization Flow
+### Schema Initialization Process
 
 ```mermaid
-graph TB
-    ContainerStart["Postgres Container Start<br/>pgvector/pgvector:pg16"]
-    CheckData["Check /var/lib/postgresql/data<br/>empty?"]
-    
-    subgraph "Docker Entrypoint Init"
-        RunInit["Execute scripts in<br/>/docker-entrypoint-initdb.d/"]
-        LoadSchema["01-schema.sql<br/>init_complete_schema.sql"]
-    end
-    
-    subgraph "Schema Creation (init_complete_schema.sql)"
-        Extensions["CREATE EXTENSION<br/>pgvector, uuid-ossp"]
-        Tables["CREATE TABLE<br/>50+ tables"]
-        Indexes["CREATE INDEX<br/>Performance indexes"]
-        Triggers["CREATE TRIGGER<br/>updated_at triggers"]
-        Seed["INSERT seed data<br/>credential_types, personas, etc."]
-    end
-    
-    Ready["Database Ready<br/>Accepts connections"]
-    HealthCheck["Health check passes<br/>pg_isready"]
-    BackendConnects["Backend connects<br/>DATABASE_URL"]
-    
-    ContainerStart --> CheckData
-    CheckData -->|"Yes - First Run"| RunInit
-    CheckData -->|"No - Data exists"| Ready
-    
-    RunInit --> LoadSchema
-    LoadSchema --> Extensions
-    Extensions --> Tables
-    Tables --> Indexes
-    Indexes --> Triggers
-    Triggers --> Seed
-    
-    Seed --> Ready
-    Ready --> HealthCheck
-    HealthCheck --> BackendConnects
+graph LR
+    A["docker-compose up<br/>(postgres service)"] --> B["Mount SQL file:<br/>01-schema.sql"]
+    B --> C["PostgreSQL Entrypoint"]
+    C --> D{"Schema exists?"}
+    D -->|"No"| E["Execute init_complete_schema.sql"]
+    D -->|"Yes"| F["Skip (idempotent)"]
+    E --> G["Create tables:<br/>workspaces, agents,<br/>cloud_documents, etc."]
+    G --> H["Create indexes"]
+    H --> I["Enable pgvector extension"]
+    I --> J["Database ready"]
+    F --> J
 ```
 
-**Key tables created:**
-- **Core**: `workspaces`, `users`, `workspace_members`
-- **Agents**: `agents`, `agent_skills`, `personas`, `agent_templates`
-- **Workflows**: `workflows`, `workflow_recipes`, `recipe_executions`
-- **Marketplace**: `marketplace_plugins`, `workspace_enabled_plugins`, `agent_assigned_plugins`
-- **Tools**: `agent_tool_assignments`, `composio_app_cache`, `composio_action_cache`
-- **Credentials**: `credential_types`, `credentials`, `credential_audit_logs`
-- **System**: `system_settings`, `skill_sources`, `skills`
+**Key Database Objects Created:**
 
-**pgvector extension** is enabled for vector similarity search used by:
-- Skill recommendations (lexical scoring)
-- Document embeddings (S3 vectors feature)
+| Object Type | Examples | Purpose |
+|-------------|----------|---------|
+| **Tables** | `workspaces`, `agents`, `cloud_documents` | Core data models [orchestrator/api/cloud_documents.py:20-21]() |
+| **Extensions** | `pgvector` | Vector similarity search for embeddings [docker-compose.yml:23]() |
 
-Sources: [docker-compose.yml:33-34](), [orchestrator/database/init_complete_schema.sql]() (file referenced in docker-compose.yml)
+**Schema Migration Notes:**
+- Initial schema is applied automatically on first run via [docker-compose.yml:35]().
+- For schema updates, the backend uses `alembic` [orchestrator/requirements.txt:8]().
+
+**Sources:** [docker-compose.yml:23-35](), [orchestrator/requirements.txt:8]()
 
 ---
 
-## Local Development Setup (Without Docker)
+## Volume Mounts and Data Persistence
 
-For active development where you need direct access to Python/Node processes:
+Docker volumes ensure data persists across container restarts:
 
-### Backend Setup
+| Volume Name | Mount Point | Service(s) | Purpose |
+|-------------|-------------|------------|---------|
+| `postgres_data` | `/var/lib/postgresql/data` | postgres | Database files [docker-compose.yml:34]() |
+| `redis_data` | `/data` | redis | Redis persistence [docker-compose.yml:65]() |
+| `backend_logs` | `/app/logs` | backend | Application logs [docker-compose.yml:128]() |
+| `workspace_data` | `/workspaces` | backend (ro) | Agent workspace directories [docker-compose.yml:130]() |
 
-```bash
-# 1. Navigate to orchestrator directory
-cd orchestrator
-
-# 2. Create Python virtual environment
-python3.11 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Install PostgreSQL and Redis (Ubuntu/Debian)
-sudo apt update
-sudo apt install -y postgresql postgresql-contrib redis-server
-
-# 5. Start services
-sudo service postgresql start
-sudo service redis-server start
-
-# 6. Create database
-sudo -u postgres psql -c "CREATE DATABASE orchestrator_db;"
-sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'your_password';"
-
-# 7. Initialize schema
-sudo -u postgres psql -d orchestrator_db -f database/init_complete_schema.sql
-
-# 8. Create .env file (copy from .env.example)
-cp .env.example .env
-# Edit .env with your configuration
-
-# 9. Start backend server
-python main.py
-# Server runs on http://localhost:8000
-```
-
-### Frontend Setup
-
-```bash
-# 1. Navigate to frontend directory
-cd frontend
-
-# 2. Install Node.js dependencies
-npm install --legacy-peer-deps
-
-# 3. Create .env.local file
-cat > .env.local << EOF
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=your_local_secret_key_here
-EOF
-
-# 4. Start development server
-npm run dev
-# Server runs on http://localhost:3000
-```
-
-**Important flags:**
-- `--legacy-peer-deps`: Required for npm due to peer dependency conflicts in React 18/19 packages
-- Hot-reload is automatic in both Python (via Uvicorn `--reload`) and Next.js (Fast Refresh)
-
-Sources: [docs/LOCAL_SETUP_GUIDE.md:1-214]()
+**Sources:** [docker-compose.yml:33-35](), [docker-compose.yml:64-65](), [docker-compose.yml:124-130]()
 
 ---
 
-## Verification & Testing
+## Verification Steps
 
-After starting the system, verify each service is running correctly:
+After starting services, verify the installation:
 
-### Health Check Endpoints
+### 1. Check Service Health
 
 ```bash
-# Backend API health
+docker-compose ps
+```
+
+### 2. Test Backend Health Endpoint
+
+```bash
 curl http://localhost:8000/health
-# Expected: {"status": "healthy", "database": "connected", "redis": "connected"}
-
-# Backend API documentation
-curl http://localhost:8000/docs
-# Expected: HTML response with Swagger UI
-
-# Frontend (browser only)
-open http://localhost:3000
-# Expected: Login/dashboard page loads
 ```
 
-### Database Connection Test
+### 3. Test Redis Connection
 
 ```bash
-# Inside backend container
-docker exec -it automatos_backend psql -h postgres -U postgres -d orchestrator_db
-# Expected: PostgreSQL prompt appears
-
-# Check tables exist
-\dt
-# Expected: List of 50+ tables
-
-# Check pgvector extension
-SELECT * FROM pg_extension WHERE extname = 'vector';
-# Expected: Row showing pgvector installed
+docker exec automatos_backend python -c "
+from core.redis.client import get_redis_client
+client = get_redis_client()
+print('Redis connected:', client.test_connection())
+"
 ```
 
-### Redis Connection Test
-
-```bash
-# Inside backend container
-docker exec -it automatos_backend redis-cli -h redis -a automatos_redis_dev ping
-# Expected: PONG
-
-# Check memory usage
-docker exec -it automatos_redis redis-cli INFO memory
-# Expected: Memory usage statistics
-```
-
-### Configuration Validation
-
-The backend performs automatic configuration validation on startup. Check logs:
-
-```bash
-docker logs automatos_backend | grep "Configuration"
-# Expected output:
-# ============================================================
-# AUTOMATOS AI CONFIGURATION
-# ============================================================
-# Environment: development
-# Database: orchestrator_db@postgres:5432
-# Redis: redis:6379
-# LLM Provider: openai (gpt-4)
-# OpenAI Key: ✅ Set
-# Anthropic Key: ✅ Set
-# API Key: ✅ Set
-# API Key Required: True
-# ============================================================
-```
-
-Sources: [orchestrator/config.py:249-272]()
+**Sources:** [orchestrator/core/redis/client.py:121-134](), [orchestrator/Dockerfile:78-79]()
 
 ---
 
-## Troubleshooting
+## Python Dependencies (Backend)
 
-### Port Already in Use
+The backend service installs Python packages from `orchestrator/requirements.txt`. Key dependency categories:
 
-**Symptom:** `Error starting userland proxy: listen tcp4 0.0.0.0:3000: bind: address already in use`
+### Core Framework
 
-**Solution:**
-```bash
-# Check what's using the port
-lsof -i :3000  # or :8000, :5432, :6379
-sudo netstat -tlnp | grep 3000
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `fastapi` | >=0.115.0 | Web framework [orchestrator/requirements.txt:2]() |
+| `sqlalchemy` | ==2.0.23 | ORM for database access [orchestrator/requirements.txt:7]() |
+| `pydantic` | >=2.7.4 | Data validation [orchestrator/requirements.txt:16]() |
 
-# Kill the process or change docker-compose port mapping
-# In docker-compose.yml, change ports section:
-ports:
-  - "3001:3000"  # Map host port 3001 to container port 3000
-```
+### AI & LLM Providers
 
-### Database Connection Failed
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `openai` | >=1.10.0 | OpenAI API client [orchestrator/requirements.txt:73]() |
+| `anthropic` | >=0.40.0 | Anthropic API client [orchestrator/requirements.txt:74]() |
+| `tiktoken` | >=0.5.0 | Token counting [orchestrator/requirements.txt:72]() |
+| `composio-openai` | ==0.11.1 | Composio tool integration [orchestrator/requirements.txt:103]() |
 
-**Symptom:** Backend logs show `❌ Database connection test failed`
+### Special Installation: FutureAGI
 
-**Solutions:**
+The `futureagi` package is installed with `--no-deps` to avoid version conflicts with the core stack. This is necessary because it pins exact versions of common packages like `requests` and `pandas` that conflict with the platform's newer requirements.
 
-1. **Check Postgres is running:**
-```bash
-docker ps | grep postgres
-# Should show: automatos_postgres (healthy)
-```
+**Sources:** [orchestrator/requirements.txt:1-113](), [orchestrator/Dockerfile:39-43]()
 
-2. **Check health check logs:**
-```bash
-docker logs automatos_postgres | tail -n 20
-# Look for: "database system is ready to accept connections"
-```
+---
 
-3. **Verify credentials match:**
-```bash
-# In docker-compose.yml, ensure:
-POSTGRES_PASSWORD=automatos_dev_pass
+## Credential Encryption & Store
 
-# Matches in .env or environment
-```
+Automatos AI uses symmetric encryption for sensitive credentials managed via the `CredentialStore`. On first run, it attempts to load a key from `CREDENTIAL_ENCRYPTION_KEY` or generates a new one in `.credential_key`.
 
-4. **Manual connection test:**
-```bash
-docker exec -it automatos_postgres psql -U postgres -d orchestrator_db
-# If this works, backend should also connect
-```
+| Feature | Implementation |
+|---------|----------------|
+| **Encryption Service** | `get_encryption_service()` [orchestrator/core/credentials/encryption.py:145]() |
+| **Algorithm** | Fernet (AES-128-CBC + HMAC-SHA256) |
+| **Store Logic** | `create_credential()` encrypts data before SQL insertion [orchestrator/core/credentials/service.py:147]() |
+| **Tenant Isolation** | `workspace_id` enforced in all CRUD operations [orchestrator/core/credentials/service.py:153]() |
 
-### Redis Connection Failed
-
-**Symptom:** Backend logs show `Redis connection test failed` or `Redis unavailable for plugin cache`
-
-**Solutions:**
-
-1. **Check Redis is running:**
-```bash
-docker ps | grep redis
-# Should show: automatos_redis (healthy)
-```
-
-2. **Test authentication:**
-```bash
-docker exec -it automatos_redis redis-cli -a automatos_redis_dev ping
-# Expected: PONG
-```
-
-3. **Check password matches:**
-```bash
-# In docker-compose.yml:
-REDIS_PASSWORD=automatos_redis_dev
-```
-
-**Note:** Redis is **optional** for core functionality. If Redis is unavailable:
-- Plugin content fetches directly from S3 (slower)
-- Workflow execution events not streamed (polling fallback)
-- Tool metadata not cached (slower tool loading)
-
-Sources: [orchestrator/core/redis/client.py:149-198](), [orchestrator/core/services/plugin_cache.py:54-74]()
-
-### Frontend Build Errors
-
-**Symptom:** `npm ERR! code ERESOLVE` or `Cannot find module 'next'`
-
-**Solutions:**
-
-1. **Clear cache and reinstall:**
-```bash
-cd frontend
-rm -rf node_modules package-lock.json .next
-npm install --legacy-peer-deps
-```
-
-2. **Node version mismatch:**
-```bash
-# Check Node version
-node --version  # Should be 20+
-
-# If wrong version, use nvm:
-nvm install 20
-nvm use 20
-```
-
-3. **Docker volume conflicts:**
-```bash
-# Remove volumes and rebuild
-docker-compose down -v
-docker-compose up --build
-```
-
-### Missing LLM API Keys
-
-**Symptom:** Agent execution fails with "No LLM provider configured"
-
-**Solution:**
-
-1. **Add keys via Settings UI** (recommended):
-   - Navigate to Settings → Credentials in the web interface
-   - Add OpenAI or Anthropic credentials
-   - Test connection
-
-2. **Or add to .env file:**
-```bash
-# orchestrator/.env
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-3. **Restart backend to load new keys:**
-```bash
-docker-compose restart backend
-```
-
-Sources: [orchestrator/config.py:84-110](), [orchestrator/core/credentials/service.py:1-852]()
-
-### Permission Denied Errors
-
-**Symptom:** `PermissionError: [Errno 13] Permission denied: '/app/logs'`
-
-**Solutions:**
-
-1. **Fix Docker volume permissions:**
-```bash
-# For backend logs
-sudo chown -R $(id -u):$(id -g) orchestrator/logs
-
-# Or create with correct permissions
-mkdir -p orchestrator/logs
-chmod 755 orchestrator/logs
-```
-
-2. **For production images (non-root user):**
-```bash
-# Production Dockerfile creates 'automatos' user (UID 1000)
-# Ensure host directories match:
-sudo chown -R 1000:1000 orchestrator/logs
-```
-
-Sources: [orchestrator/Dockerfile:98-99]()
+**Sources:** [orchestrator/core/credentials/service.py:42-185](), [orchestrator/core/models/credentials.py:60-104]()
 
 ---
 
 ## Next Steps
 
-After successful installation:
+1. **Configure LLM Providers** - Set up API keys via the Settings UI.
+2. **Create Your First Agent** - Follow [Quick Start Tutorial](2.3).
+3. **Enable Workspace Execution** - Start the `workers` profile for sandboxed code execution [docker-compose.yml:184]().
 
-1. **Configure API keys and credentials** via Settings UI → Credentials section
-2. **Follow the onboarding flow** - see [First-Time User Experience](#2.3)
-3. **Create your first agent** - see [Creating Agents](#3.1)
-4. **Review configuration options** - see [Configuration Guide](#2.2)
-
-For production deployment, see [Production Deployment](#12.6) for scaling considerations, security hardening, and Railway-specific configuration.
+**Sources:** [docker-compose.yml:184-185]()
 
 ---
