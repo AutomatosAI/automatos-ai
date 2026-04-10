@@ -40,12 +40,25 @@ _ORCHESTRATOR_ROOT = _REPO_ROOT / "orchestrator"
 if str(_ORCHESTRATOR_ROOT) not in sys.path:
     sys.path.insert(0, str(_ORCHESTRATOR_ROOT))
 
+import importlib.util  # noqa: E402
+
 import pytest  # noqa: E402
 
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.services.notification_dispatcher import NotificationDispatcher  # noqa: E402
 
-import api.notifications as notifications_api  # noqa: E402
+# `tests/api/` exists as a sibling package and shadows `orchestrator/api/` on
+# sys.path during pytest collection — so `import api.notifications` finds the
+# wrong package. Load the module directly by file path to bypass the collision.
+_notifications_path = _ORCHESTRATOR_ROOT / "api" / "notifications.py"
+_spec = importlib.util.spec_from_file_location(
+    "orchestrator_api_notifications", _notifications_path
+)
+assert _spec and _spec.loader, f"cannot load {_notifications_path}"
+notifications_api = importlib.util.module_from_spec(_spec)
+# Pydantic v2 resolves forward refs via sys.modules — register before exec.
+sys.modules["orchestrator_api_notifications"] = notifications_api
+_spec.loader.exec_module(notifications_api)
 
 
 # ---------------------------------------------------------------- FakeDB
