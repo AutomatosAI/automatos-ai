@@ -1,7 +1,7 @@
 {
   "project": "Automatos AI Platform",
   "branchName": "ralph/prd-128-unified-notifications",
-  "description": "PRD-128: Unified Notification System — Capture completion events from all sources (heartbeats, tasks, missions, playbooks, triggers, reports), route via per-workspace preferences (in-app, Telegram, Slack, webhook), and surface them in a real bell-icon notification center. Reuses notification_service.py and channel_connections.",
+  "description": "PRD-128: Unified Notification System \u2014 Capture completion events from all sources (heartbeats, tasks, missions, playbooks, triggers, reports), route via per-workspace preferences (in-app, Telegram, Slack, webhook), and surface them in a real bell-icon notification center. Reuses notification_service.py and channel_connections.",
   "userStories": [
     {
       "id": "US-001",
@@ -10,7 +10,7 @@
       "acceptanceCriteria": [
         "New Alembic migration in orchestrator/alembic/versions/ with correct down_revision pointing at current head (not None)",
         "Creates notification_preferences table: id (uuid pk), workspace_id (uuid fk->workspaces, cascade), user_id (int fk->users nullable cascade), event_type varchar(50), destination varchar(30) default 'in_app', channel_connection_id (uuid fk->channel_connections nullable set null), enabled bool default true, created_at/updated_at timestamptz",
-        "NO UNIQUE constraint on (workspace_id, user_id, event_type) — multiple rows per event allowed so a single event can fan out to in_app AND telegram",
+        "NO UNIQUE constraint on (workspace_id, user_id, event_type) \u2014 multiple rows per event allowed so a single event can fan out to in_app AND telegram",
         "Creates notifications table: id, workspace_id, user_id (nullable), event_type, title varchar(255), message text, link_type varchar(30), link_id text (NOT varchar), agent_id (int fk->agents set null), agent_name varchar(100), status varchar(20) default 'ok', read_at, dismissed_at, created_at",
         "Indexes: ix_notif_prefs_workspace, ix_notif_prefs_user (partial where user_id not null), ix_notifications_workspace, ix_notifications_user (partial), ix_notifications_unread_ws on (workspace_id, created_at DESC) where read_at IS NULL AND dismissed_at IS NULL",
         "Migration runs cleanly up and down against a local postgres",
@@ -32,8 +32,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Seed helper extracted as _seed_default_notification_preferences + DEFAULT_NOTIFICATION_PREFERENCES constant in core/auth/hybrid.py; called from _provision_new_user_workspace before db.commit; idempotent via INSERT ... WHERE NOT EXISTS guard; 4 unit tests in tests/test_prd128_default_prefs.py all passing."
     },
     {
       "id": "US-003",
@@ -43,7 +43,7 @@
         "New file orchestrator/core/services/notification_dispatcher.py with class NotificationDispatcher(db, workspace_id)",
         "async dispatch(event_type, title, message=None, link_type=None, link_id=None, agent_id=None, agent_name=None, status='ok', user_id=None) returns dict with dispatched_to list",
         "_get_preferences returns a LIST of all matching preference rows (no LIMIT 1), prefers user-specific rows over workspace-default (user_id IS NULL) when both exist for the same destination",
-        "For each enabled pref: if destination=='silent' skip; if 'in_app' insert row into notifications table WITHOUT calling self.db.commit() — caller owns the transaction; if 'telegram'/'slack'/'webhook' call notification_service.send_workspace_notification(workspace_id, formatted_msg, channel=destination); if 'channel' look up channel_connection row and send to that specific connection (extend helper as needed)",
+        "For each enabled pref: if destination=='silent' skip; if 'in_app' insert row into notifications table WITHOUT calling self.db.commit() \u2014 caller owns the transaction; if 'telegram'/'slack'/'webhook' call notification_service.send_workspace_notification(workspace_id, formatted_msg, channel=destination); if 'channel' look up channel_connection row and send to that specific connection (extend helper as needed)",
         "_format_external_message returns a concise multi-line string with status icon, title, agent_name (if set), truncated message (200 chars), and (TODO placeholder) deep link",
         "If NO preferences exist for an event_type, defaults to a single in_app dispatch",
         "Unit tests cover: silent skip, in_app insert (no commit), multi-destination fanout (in_app + telegram from two rows), user-specific overrides workspace default, no-preferences default",
@@ -60,11 +60,11 @@
       "description": "As a frontend developer, I need REST endpoints so the bell dropdown can fetch and mutate notifications.",
       "acceptanceCriteria": [
         "New file orchestrator/api/notifications.py with APIRouter prefix='/api/notifications' tags=['notifications']",
-        "GET /api/notifications — paginated list (limit default 20 max 100, offset), optional unread_only=true filter, workspace-scoped via RequestContext, excludes dismissed rows, orders by created_at DESC, returns {success, notifications[], total, limit, offset}",
-        "GET /api/notifications/unread-count — returns {success, count}",
-        "POST /api/notifications/{id}/read — sets read_at=NOW() if unread, returns {success}",
-        "POST /api/notifications/read-all — marks all unread for user/workspace as read, returns {success, marked_count}",
-        "POST /api/notifications/{id}/dismiss — sets dismissed_at=NOW(), returns {success}",
+        "GET /api/notifications \u2014 paginated list (limit default 20 max 100, offset), optional unread_only=true filter, workspace-scoped via RequestContext, excludes dismissed rows, orders by created_at DESC, returns {success, notifications[], total, limit, offset}",
+        "GET /api/notifications/unread-count \u2014 returns {success, count}",
+        "POST /api/notifications/{id}/read \u2014 sets read_at=NOW() if unread, returns {success}",
+        "POST /api/notifications/read-all \u2014 marks all unread for user/workspace as read, returns {success, marked_count}",
+        "POST /api/notifications/{id}/dismiss \u2014 sets dismissed_at=NOW(), returns {success}",
         "All queries enforce workspace_id = ctx.workspace_id AND (user_id = ctx.user_id OR user_id IS NULL)",
         "Router included in orchestrator/main.py",
         "Typecheck passes",
@@ -80,10 +80,10 @@
       "description": "As a frontend developer, I need endpoints to read and bulk-update notification preferences so the settings page can function.",
       "acceptanceCriteria": [
         "In orchestrator/api/notifications.py (or new file) add router prefix='/api/notification-preferences'",
-        "GET /api/notification-preferences — returns all preference rows for current workspace (merging user-specific with workspace defaults), shape: {success, preferences: [{event_type, destination, enabled, channel_connection_id}]}",
-        "PUT /api/notification-preferences — accepts {preferences: [...]} and upserts each row for the current user_id + workspace_id (delete existing user-scoped rows for that event_type then insert), returns {success, updated_count}",
+        "GET /api/notification-preferences \u2014 returns all preference rows for current workspace (merging user-specific with workspace defaults), shape: {success, preferences: [{event_type, destination, enabled, channel_connection_id}]}",
+        "PUT /api/notification-preferences \u2014 accepts {preferences: [...]} and upserts each row for the current user_id + workspace_id (delete existing user-scoped rows for that event_type then insert), returns {success, updated_count}",
         "Rejects unknown event_type values (validation against the 9 defined types)",
-        "Workspace-scoped — user cannot modify another workspace's prefs",
+        "Workspace-scoped \u2014 user cannot modify another workspace's prefs",
         "Router included in orchestrator/main.py",
         "Typecheck passes",
         "Tests pass"
@@ -99,8 +99,8 @@
       "acceptanceCriteria": [
         "In orchestrator/services/heartbeat_service.py replace calls to _deliver_notification() with NotificationDispatcher(db, workspace_id).dispatch(event_type='heartbeat_complete', title=..., message=..., link_type='heartbeat', link_id=<heartbeat_result_id>, agent_id=..., agent_name=..., status=...)",
         "Delete the old _deliver_notification() method AFTER verifying via grep that no other callers exist (report any stragglers in commit body)",
-        "Heartbeat → in_app notification row appears in notifications table (manual or scripted smoke test)",
-        "Heartbeat → Telegram still works when workspace has destination=telegram preference",
+        "Heartbeat \u2192 in_app notification row appears in notifications table (manual or scripted smoke test)",
+        "Heartbeat \u2192 Telegram still works when workspace has destination=telegram preference",
         "Typecheck passes",
         "Tests pass"
       ],
@@ -132,7 +132,7 @@
       "description": "As a user, I want a real bell icon that shows my unread notification count and lets me open a dropdown of recent notifications so I can jump to my outputs.",
       "acceptanceCriteria": [
         "New file frontend/components/notifications/notification-bell.tsx implementing the popover dropdown from the PRD",
-        "Uses @tanstack/react-query v4 hooks (useQuery, useMutation, useQueryClient) — isLoading not isPending",
+        "Uses @tanstack/react-query v4 hooks (useQuery, useMutation, useQueryClient) \u2014 isLoading not isPending",
         "Polls /api/notifications/unread-count every 30s; fetches /api/notifications?limit=20 when popover opens",
         "Badge shows unread count (9+ if >9), hidden if 0",
         "Clicking a notification marks it read and navigates using next/navigation useRouter().push() (NOT window.location.href) to the right route based on link_type",

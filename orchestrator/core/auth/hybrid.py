@@ -135,6 +135,63 @@ def _user_has_workspace_access(db, clerk_user_id: Optional[str], workspace_id: U
     return bool(row)
 
 
+# PRD-128: Default notification routing seeded on workspace provisioning.
+# Kept as a module-level constant so tests can import and assert against it
+# without duplicating the list.
+DEFAULT_NOTIFICATION_PREFERENCES: tuple[tuple[str, str], ...] = (
+    ("heartbeat_complete", "in_app"),
+    ("task_complete", "in_app"),
+    ("mission_step_complete", "silent"),
+    ("mission_complete", "in_app"),
+    ("playbook_step_complete", "silent"),
+    ("playbook_complete", "in_app"),
+    ("trigger_fired", "in_app"),
+    ("report_submitted", "in_app"),
+    ("agent_error", "in_app"),
+)
+
+
+def _seed_default_notification_preferences(db, workspace_id: UUID) -> int:
+    """Seed the 9 default notification preference rows for a new workspace.
+
+    Idempotent: each row is inserted only when an identical
+    ``(workspace_id, user_id IS NULL, event_type, destination)`` row does
+    not already exist. There is no unique constraint on that tuple
+    (fan-out to multiple destinations is allowed), so we guard with
+    ``WHERE NOT EXISTS`` instead of ``ON CONFLICT``.
+
+    Does **not** commit — the caller owns the transaction so preference
+    inserts roll back with the workspace on failure.
+
+    Returns the number of rows actually inserted (useful for logging /
+    tests).
+    """
+    inserted = 0
+    for event_type, destination in DEFAULT_NOTIFICATION_PREFERENCES:
+        result = db.execute(
+            text(
+                "INSERT INTO notification_preferences "
+                "(workspace_id, user_id, event_type, destination, enabled) "
+                "SELECT :ws_id, NULL, :event_type, :destination, TRUE "
+                "WHERE NOT EXISTS ("
+                "  SELECT 1 FROM notification_preferences "
+                "  WHERE workspace_id = :ws_id "
+                "    AND user_id IS NULL "
+                "    AND event_type = :event_type "
+                "    AND destination = :destination"
+                ")"
+            ),
+            {
+                "ws_id": str(workspace_id),
+                "event_type": event_type,
+                "destination": destination,
+            },
+        )
+        rowcount = getattr(result, "rowcount", 0) or 0
+        inserted += rowcount
+    return inserted
+
+
 def _provision_new_user_workspace(
     db, clerk_user_id: str, email: Optional[str] = None, name: Optional[str] = None,
 ) -> UUID:
@@ -209,6 +266,11 @@ def _provision_new_user_workspace(
         ),
         {"ws_id": str(ws_id), "uid": uid},
     )
+
+    # PRD-128: Seed default notification preferences so the bell icon
+    # starts working immediately without manual setup.
+    seeded = _seed_default_notification_preferences(db, ws_id)
+    logger.info("Seeded %d default notification preferences for workspace %s", seeded, ws_id)
 
     db.commit()
     logger.info(
