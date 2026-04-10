@@ -38,6 +38,14 @@ from modules.context.sections import SECTION_REGISTRY, SectionContext
 from modules.context.sections.conversation import ConversationSection
 from modules.context.sections.tools import ToolLoadingStrategy, ToolsSection
 
+# PRD-127: Ephemeral attachments
+from modules.attachments.resolver import (
+    AttachmentResolver,
+    VisionNotSupportedError,
+    inject_parts_into_last_user_message,
+)
+from uuid import UUID
+
 logger = logging.getLogger(__name__)
 
 _estimator = TokenEstimator()
@@ -65,6 +73,8 @@ class ContextService:
         complexity_assessment: Any = None,
         tool_hints: Optional[list[str]] = None,
         widget_mode: bool = False,
+        attachment_ids: Optional[list[str]] = None,  # PRD-127
+        model_id: Optional[str] = None,  # PRD-127: for vision capability check
         **kwargs: Any,
     ) -> ContextResult:
         """Build a complete LLM context for the given *mode*.
@@ -131,12 +141,43 @@ class ContextService:
             + sum(_estimator.estimate(m.get("content", "")) for m in formatted_messages)
         )
 
+        # --- 10. PRD-127: Inject attachment parts into messages ---
+        if attachment_ids:
+            try:
+                resolved_model_id = model_id
+                if not resolved_model_id and agent:
+                    llm_config = getattr(agent, "llm_config", {}) or {}
+                    resolved_model_id = llm_config.get("model")
+
+                resolver = AttachmentResolver(db_session=self._db_session)
+                attachment_parts = await resolver.resolve(
+                    attachment_ids=[UUID(aid) for aid in attachment_ids],
+                    workspace_id=UUID(workspace_id),
+                    model_id=resolved_model_id or "",
+                )
+                if attachment_parts:
+                    formatted_messages = inject_parts_into_last_user_message(
+                        formatted_messages, attachment_parts
+                    )
+                    logger.info(
+                        "[ContextService] Injected %d attachment parts into messages",
+                        len(attachment_parts),
+                    )
+            except VisionNotSupportedError:
+                # Re-raise vision errors — caller should handle
+                raise
+            except Exception as e:
+                logger.error(
+                    "[ContextService] Attachment resolution failed: %s", e, exc_info=True
+                )
+                # Continue without attachments rather than failing the entire request
+
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         agent_id = getattr(agent, "id", "?") if agent else "?"
         logger.info(
             "[ContextService] mode=%s agent=%s sections=%s trimmed=%s "
-            "token_estimate=%d/%d tools=%d prep_time=%.1fms",
+            "token_estimate=%d/%d tools=%d attachments=%d prep_time=%.1fms",
             mode.value if isinstance(mode, ContextMode) else mode,
             agent_id,
             sections_included,
@@ -144,6 +185,7 @@ class ContextService:
             total_token_estimate,
             budget.available_for_sections,
             len(tools),
+            len(attachment_ids) if attachment_ids else 0,
             elapsed_ms,
         )
 

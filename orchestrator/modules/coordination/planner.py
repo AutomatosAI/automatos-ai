@@ -37,175 +37,75 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Attachment helpers
+# Attachment helpers (PRD-127)
 # ---------------------------------------------------------------------------
 
 
-def _extract_office_text(raw: bytes, filename_lower: str) -> str:
-    """Extract text from Office documents (.docx, .xlsx)."""
-    import io
-    if filename_lower.endswith(".docx"):
-        from docx import Document as DocxDocument
-        doc = DocxDocument(io.BytesIO(raw))
-        return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
-    elif filename_lower.endswith(".xlsx") or filename_lower.endswith(".xls"):
-        from openpyxl import load_workbook
-        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-        lines = []
-        for ws in wb.worksheets:
-            lines.append(f"## Sheet: {ws.title}")
-            for row in ws.iter_rows(values_only=True):
-                cells = [str(c) if c is not None else "" for c in row]
-                if any(cells):
-                    lines.append(" | ".join(cells))
-        wb.close()
-        return "\n".join(lines)
-    else:
-        return f"[Office file: unsupported format]"
-
-
-async def _fetch_attachment_contents(
-    attachments: List[Dict[str, Any]],
+async def _resolve_attachments_for_planning(
+    attachment_ids: List[str],
+    workspace_id: UUID,
 ) -> List[Dict[str, str]]:
-    """Fetch text content from S3 attachment keys.
-
-    Returns a list of {filename, content} dicts. Binary files are skipped
-    with a placeholder note.
     """
-    if not attachments:
+    Resolve attachment_ids to text content for the planner prompt.
+
+    PRD-127: Uses AttachmentStore + extract_text for documents.
+    Images return a placeholder (planner can't see them, but executing agents can).
+
+    Returns a list of {filename, content, is_image} dicts.
+    """
+    if not attachment_ids:
         return []
 
-    try:
-        import boto3
-        from botocore.config import Config as BotoConfig
-        from config import Config
+    from modules.attachments.store import (
+        AttachmentNotFoundError,
+        MediaType,
+        get_attachment_store,
+    )
+    from modules.attachments.extract import extract_text
 
-        boto_cfg = BotoConfig(region_name=Config.AWS_REGION)
-        s3 = boto3.client(
-            "s3",
-            aws_access_key_id=Config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=Config.AWS_SECRET_ACCESS_KEY,
-            config=boto_cfg,
-        )
-    except Exception:
-        logger.warning("Cannot initialize S3 client for attachments — skipping", exc_info=True)
-        return []
-
-    loop = asyncio.get_running_loop()
+    store = get_attachment_store()
     results: List[Dict[str, str]] = []
 
-    for att in attachments:
-        # New format: document_id (from DocumentManager pipeline)
-        doc_id = att.get("document_id")
-        if doc_id:
-            try:
-                from core.database.database import SessionLocal
-                from core.models.core import Document
-                db = SessionLocal()
-                try:
-                    doc = db.query(Document).filter(Document.id == doc_id).first()
-                    if doc and doc.file_path:
-                        s3_path = doc.file_path
-                        if s3_path.startswith("s3://"):
-                            parts = s3_path[5:].split("/", 1)
-                            bucket, key = parts[0], parts[1] if len(parts) > 1 else ""
-                        else:
-                            bucket, key = Config.S3_DOCUMENTS_BUCKET, s3_path
-                        response = await loop.run_in_executor(
-                            None,
-                            lambda b=bucket, k=key: s3.get_object(Bucket=b, Key=k),
-                        )
-                        raw = response["Body"].read()
-                        fname = doc.filename or att.get("filename", f"doc_{doc_id}")
-                        if fname.lower().endswith(".pdf"):
-                            try:
-                                import fitz
-                                pdf_doc = fitz.open(stream=raw, filetype="pdf")
-                                content = "\n\n".join(p.get_text() for p in pdf_doc)
-                                pdf_doc.close()
-                            except ImportError:
-                                content = raw.decode("utf-8", errors="replace")
-                        else:
-                            content = raw.decode("utf-8", errors="replace")
-                        results.append({"filename": fname, "content": content})
-                        logger.info("Fetched attachment doc_id=%s: %s (%d chars)", doc_id, fname, len(content))
-                    else:
-                        logger.warning("Attachment doc_id=%s not found or no file_path", doc_id)
-                finally:
-                    db.close()
-            except Exception as exc:
-                logger.warning("Failed to fetch attachment doc_id=%s: %s", doc_id, exc)
-            continue
-
-        # Legacy format: S3 key directly
-        s3_key = att.get("key", "")
-        filename = att.get("filename", "unknown")
-        content_type = att.get("content_type", "")
-
-        # Validate S3 key — must be under workspaces/ prefix
-        if s3_key and not s3_key.startswith("workspaces/"):
-            logger.warning("Skipping attachment with disallowed S3 key prefix: %s", s3_key[:100])
-            results.append({
-                "filename": filename,
-                "content": f"[Attachment skipped — invalid storage path]",
-            })
-            continue
-
-        # Determine extractable file types
-        text_types = {
-            "text/", "application/json", "application/pdf",
-            "text/csv", "text/markdown", "text/plain",
-        }
-        office_extensions = {".docx", ".xlsx", ".doc", ".xls"}
-        is_text = any(content_type.startswith(t) for t in text_types)
-        fname_lower = filename.lower()
-        is_office = any(fname_lower.endswith(ext) for ext in office_extensions)
-        is_pdf = "pdf" in fname_lower or content_type == "application/pdf"
-
-        if not is_text and not is_pdf and not is_office:
-            results.append({
-                "filename": filename,
-                "content": f"[Binary file: {filename} ({content_type}) — content not extracted]",
-            })
-            continue
-
+    for aid_str in attachment_ids:
         try:
-            response = await loop.run_in_executor(
-                None,
-                lambda k=s3_key: s3.get_object(
-                    Bucket=Config.S3_DOCUMENTS_BUCKET, Key=k,
-                ),
-            )
-            raw = response["Body"].read()
+            aid = UUID(aid_str)
+            ref = await store.get(aid, workspace_id)
 
-            # PDF extraction
-            if is_pdf:
-                try:
-                    import fitz  # PyMuPDF
-                    doc = fitz.open(stream=raw, filetype="pdf")
-                    text_parts = [page.get_text() for page in doc]
-                    doc.close()
-                    content = "\n\n".join(text_parts)
-                except ImportError:
-                    content = "[PDF file — PyMuPDF not available for text extraction]"
-            # Office document extraction
-            elif is_office:
-                try:
-                    content = _extract_office_text(raw, fname_lower)
-                except Exception as exc:
-                    logger.warning("Office extraction failed for %s: %s", filename, exc)
-                    content = f"[Office file: {filename} — text extraction failed]"
+            if ref.media_type == MediaType.IMAGE:
+                # Planner can't see images — note for context, agents will see them
+                results.append({
+                    "filename": ref.filename,
+                    "content": f"[Image: {ref.filename} ({ref.mime}) — visual content will be available to executing agents]",
+                    "is_image": True,
+                })
             else:
-                content = raw.decode("utf-8", errors="replace")
+                # Document — extract text
+                content_bytes = await store.open(aid, workspace_id)
+                text = extract_text(content_bytes, ref.mime, ref.filename, max_chars=30_000)
+                results.append({
+                    "filename": ref.filename,
+                    "content": text,
+                    "is_image": False,
+                })
+                logger.info(
+                    "Planner attachment resolved: %s (%d chars)",
+                    ref.filename,
+                    len(text),
+                )
 
-            results.append({"filename": filename, "content": content})
-            logger.info("Fetched attachment: %s (%d chars)", filename, len(content))
-
-        except Exception as exc:
-            logger.warning("Failed to fetch attachment %s: %s", s3_key, exc)
+        except AttachmentNotFoundError:
+            logger.warning("Attachment %s not found or expired — skipping", aid_str)
             results.append({
-                "filename": filename,
-                "content": f"[Failed to fetch: {exc}]",
+                "filename": f"attachment_{aid_str[:8]}",
+                "content": "[Attachment expired or not found]",
+                "is_image": False,
+            })
+        except Exception as exc:
+            logger.warning("Failed to resolve attachment %s: %s", aid_str, exc)
+            results.append({
+                "filename": f"attachment_{aid_str[:8]}",
+                "content": f"[Failed to resolve: {exc}]",
+                "is_image": False,
             })
 
     return results
@@ -353,6 +253,7 @@ class PlannedTask:
     dependencies: List[str]  # temp_ids of upstream tasks
     complexity: str = "moderate"
     parallel_group: Optional[str] = None
+    attachment_ids: List[str] = field(default_factory=list)  # PRD-127: per-task attachments
 
 
 @dataclass(frozen=True)
@@ -549,8 +450,8 @@ class MissionPlanner:
             PlanValidationError: if all retry attempts fail structural validation.
         """
         # --- Complexity detection (82C US-004) ---
-        raw_attachments_list = (config or {}).get("attachments")
-        complexity = _detect_complexity(goal, raw_attachments_list)
+        attachment_ids_for_complexity = (config or {}).get("attachment_ids", [])
+        complexity = _detect_complexity(goal, attachment_ids_for_complexity)
         max_concurrent = _complexity_to_max_concurrent(complexity)
         logger.info(
             "MissionPlanner: complexity=%s max_concurrent=%d for goal='%s'",
@@ -629,13 +530,15 @@ class MissionPlanner:
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 
-        # Fetch attachment contents if present in config
+        # PRD-127: Resolve attachment_ids for planner context
         attachment_contents: Optional[List[Dict[str, str]]] = None
-        raw_attachments = (config or {}).get("attachments")
-        if raw_attachments and isinstance(raw_attachments, list):
-            attachment_contents = await _fetch_attachment_contents(raw_attachments)
+        mission_attachment_ids: List[str] = (config or {}).get("attachment_ids", [])
+        if mission_attachment_ids:
+            attachment_contents = await _resolve_attachments_for_planning(
+                mission_attachment_ids, workspace_id
+            )
             logger.info(
-                "MissionPlanner: fetched %d attachment(s) for context",
+                "MissionPlanner: resolved %d attachment(s) for context",
                 len(attachment_contents),
             )
 
@@ -1105,6 +1008,11 @@ def _parse_plan(
         raw_pg = rt.get("parallel_group")
         parallel_group = str(raw_pg).strip() if raw_pg else None
 
+        # PRD-127: per-task attachment_ids (empty = inherit from mission)
+        task_attachment_ids = rt.get("attachment_ids", [])
+        if not isinstance(task_attachment_ids, list):
+            task_attachment_ids = []
+
         tasks.append(
             PlannedTask(
                 temp_id=temp_id,
@@ -1118,6 +1026,7 @@ def _parse_plan(
                 dependencies=[str(d) for d in task_deps],
                 complexity=complexity,
                 parallel_group=parallel_group,
+                attachment_ids=[str(a) for a in task_attachment_ids],
             )
         )
 

@@ -795,13 +795,15 @@ class MissionDispatcher:
     @staticmethod
     def build_task_prompt(
         task: OrchestrationTask,
-        attachment_contents: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """
         Build the user prompt for execute_with_prompt() from task data.
 
         Includes task title, description, any input context from
-        upstream task outputs or retry feedback, and mission attachments.
+        upstream task outputs or retry feedback.
+
+        PRD-127: Attachments are no longer injected here — they're passed
+        as attachment_ids to execute_with_prompt() → build_context().
         """
         parts = [f"# Task: {task.title}"]
 
@@ -884,20 +886,8 @@ class MissionDispatcher:
                     "findings surface first. Stale information fades naturally."
                 )
 
-        # Inject mission attachment contents so agents can read uploaded docs
-        if attachment_contents:
-            parts.append("\n## Mission Reference Documents")
-            budget = 60_000  # char budget across all attachments
-            used = 0
-            for att in attachment_contents:
-                fname = att.get("filename", "document")
-                content = att.get("content", "")
-                if used + len(content) > budget:
-                    content = content[: budget - used]
-                    parts.append(f"\n### {fname} (truncated)\n{content}")
-                    break
-                parts.append(f"\n### {fname}\n{content}")
-                used += len(content)
+        # PRD-127: Attachments are now handled via attachment_ids → build_context()
+        # Not injected directly into prompt anymore.
 
         # Inject required output format from verification_criteria
         vc = task.verification_criteria if hasattr(task, 'verification_criteria') else None

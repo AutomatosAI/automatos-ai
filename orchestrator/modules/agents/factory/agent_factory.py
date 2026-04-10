@@ -694,6 +694,7 @@ class AgentFactory:
         max_tool_iterations: int = 10,
         composio_action_names: Optional[set] = None,
         context_mode: Optional[str] = None,  # ContextMode enum value — overrides default TASK_EXECUTION
+        attachment_ids: Optional[List[str]] = None,  # PRD-127: ephemeral attachments
         # Legacy params — accepted but ignored (callers may still pass them)
         enable_actions: bool = True,
         action_executor: Optional[Any] = None,
@@ -750,6 +751,7 @@ class AgentFactory:
                         agent=db_agent,
                         workspace_id=agent_runtime.workspace_id,
                         task_description=prompt,
+                        attachment_ids=attachment_ids,  # PRD-127
                     )
                     messages.append({"role": "system", "content": context_result.system_prompt})
                 else:

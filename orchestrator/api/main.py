@@ -102,6 +102,7 @@ from api.rag_feedback import router as rag_feedback_router
 from api.activity import router as activity_router
 from api.reports import router as reports_router  # PRD-76
 from api.blog import router as blog_router  # Blog Widget
+from api.attachments import router as attachments_router  # PRD-127: Ephemeral attachments
 
 # PRD-74: Voice Chat
 from api.chat_voice import router as chat_voice_router
@@ -393,6 +394,7 @@ app.include_router(models_router)  # PRD-15: Model management
 app.include_router(workflows_router)
 app.include_router(workflow_templates_router)
 app.include_router(documents_router)
+app.include_router(attachments_router)  # PRD-127: Ephemeral attachments
 app.include_router(system_router)
 app.include_router(context_engineering_router)
 app.include_router(memory_router)
