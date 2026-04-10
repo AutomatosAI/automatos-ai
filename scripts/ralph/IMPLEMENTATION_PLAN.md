@@ -66,7 +66,7 @@ Settings:
 
 ### Phase 1: Schema & Seed
 
-- [x] **US-001**: Alembic migration — `notification_preferences` + `notifications` tables + all indexes
+- [x] **US-001**: Alembic migration — `notification_preferences` + `notifications` tables + all indexes (file: `orchestrator/alembic/versions/prd128_notifications.py`, down_revision=`prd127_attachment_ids`)
 - [ ] **US-002**: Seed 9 default prefs on workspace provisioning (idempotent)
 
 ### Phase 2: Dispatcher & API
