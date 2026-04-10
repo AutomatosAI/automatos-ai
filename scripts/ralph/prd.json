@@ -51,8 +51,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "NotificationDispatcher(db, workspace_id) in orchestrator/core/services/notification_dispatcher.py. _get_preferences returns full list with user-row override per destination; silent skipped, in_app inserts without commit, telegram/slack/webhook delegate to send_workspace_notification, channel resolves channel_connections.platform. No-prefs falls back to single in_app. 6 unit tests in tests/test_prd128_notification_dispatcher.py all passing."
     },
     {
       "id": "US-004",
