@@ -437,25 +437,13 @@ async def _ingest_scrape_results_to_rag(
         return 0
 
     try:
-        from modules.rag.ingestion import DocumentManager
+        from api.documents import get_document_manager
     except Exception as exc:  # noqa: BLE001
-        logger.error("wizard ingest: cannot import DocumentManager: %s", exc, exc_info=True)
+        logger.error("wizard ingest: cannot import get_document_manager: %s", exc, exc_info=True)
         return 0
 
-    db_config = {
-        "host": config.POSTGRES_HOST,
-        "port": config.POSTGRES_PORT,
-        "database": config.POSTGRES_DB,
-        "user": config.POSTGRES_USER,
-        "password": config.POSTGRES_PASSWORD,
-    }
-
     try:
-        doc_manager = DocumentManager(
-            db_config=db_config,
-            workspace_id=workspace_id,
-            use_s3_vectors=config.S3_VECTORS_ENABLED,
-        )
+        doc_manager = get_document_manager(workspace_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("wizard ingest: DocumentManager init failed: %s", exc, exc_info=True)
         return 0
