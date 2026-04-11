@@ -54,7 +54,7 @@ from graphify.serve import (
 )
 
 from config import config
-from core.workspace_client import WorkspaceClient
+from core.graph_storage import DbWorkspaceClient
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +161,7 @@ class GraphifyService:
     async def _build_graph_unlocked(self, workspace_id: str) -> Dict[str, Any]:
         """Full graph build (caller must hold the workspace lock)."""
         logger.info("build_graph: starting for workspace %s", workspace_id)
-        ws = WorkspaceClient(str(workspace_id))
+        ws = DbWorkspaceClient(str(workspace_id))
 
         # 1. Collect sources from the extraction module
         sources = await self._collect_sources(workspace_id)
@@ -236,7 +236,7 @@ class GraphifyService:
             return cached
 
         # Try loading from workspace files
-        ws = WorkspaceClient(str(workspace_id))
+        ws = DbWorkspaceClient(str(workspace_id))
         result = await ws.read_file(_GRAPH_JSON_PATH)
         if not result.get("success"):
             logger.debug("load_graph: no graph file for workspace %s", workspace_id)
@@ -300,7 +300,7 @@ class GraphifyService:
             "import_graph: importing for workspace %s (merge=%s, nodes=%d)",
             workspace_id, merge, len(graph_data.get("nodes", [])),
         )
-        ws = WorkspaceClient(str(workspace_id))
+        ws = DbWorkspaceClient(str(workspace_id))
         loop = asyncio.get_event_loop()
 
         # Parse the imported graph
@@ -400,7 +400,7 @@ class GraphifyService:
 
     async def get_meta(self, workspace_id: str) -> Optional[Dict[str, Any]]:
         """Read ``/graph/meta.json`` without loading the full graph."""
-        ws = WorkspaceClient(str(workspace_id))
+        ws = DbWorkspaceClient(str(workspace_id))
         result = await ws.read_file(_META_JSON_PATH)
         if not result.get("success"):
             return None
@@ -689,7 +689,7 @@ class GraphifyService:
 
     async def _export_graph(
         self,
-        ws: WorkspaceClient,
+        ws: DbWorkspaceClient,
         graph: nx.Graph,
         communities: Dict[int, List[str]],
         god_node_list: List[Any],
@@ -750,7 +750,7 @@ class GraphifyService:
 
     async def _snapshot_and_diff(
         self,
-        ws: WorkspaceClient,
+        ws: DbWorkspaceClient,
         graph: nx.Graph,
         graph_data: Any,
         loop: asyncio.AbstractEventLoop,
@@ -791,7 +791,7 @@ class GraphifyService:
         return diff
 
     async def _load_previous_snapshot(
-        self, ws: WorkspaceClient, exclude_date: str
+        self, ws: DbWorkspaceClient, exclude_date: str
     ) -> Optional[Dict[str, Any]]:
         """Find and load the most recent history snapshot before *exclude_date*."""
         dir_result = await ws.list_dir(_HISTORY_DIR)
@@ -835,7 +835,7 @@ class GraphifyService:
 
     async def _write_build_report(
         self,
-        ws: WorkspaceClient,
+        ws: DbWorkspaceClient,
         today: str,
         meta: Dict[str, Any],
         diff: Optional[Dict[str, Any]],
@@ -875,7 +875,7 @@ class GraphifyService:
 
         await ws.write_file(report_path, "\n".join(lines))
 
-    async def _prune_history(self, ws: WorkspaceClient) -> None:
+    async def _prune_history(self, ws: DbWorkspaceClient) -> None:
         """Keep at most ``_MAX_HISTORY_SNAPSHOTS`` in /graph/history/.
 
         Deletes oldest snapshots first.  If WorkspaceClient lacks a
@@ -958,7 +958,7 @@ class GraphifyService:
             len(pending),
             workspace_id,
         )
-        ws = WorkspaceClient(str(workspace_id))
+        ws = DbWorkspaceClient(str(workspace_id))
 
         # Collect only the changed document IDs
         changed_doc_ids = {
@@ -1042,7 +1042,7 @@ class GraphifyService:
 
     @staticmethod
     async def _write_json(
-        ws: WorkspaceClient, path: str, data: Any
+        ws: DbWorkspaceClient, path: str, data: Any
     ) -> None:
         """Serialize data to JSON and write to workspace.
 

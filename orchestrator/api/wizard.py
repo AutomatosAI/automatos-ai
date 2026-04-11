@@ -2,21 +2,24 @@
 PRD-130: Business Intake Wizard API
 ====================================
 
-5 endpoints driving the wizard flow:
+6 endpoints driving the wizard flow:
 
   POST   /api/wizard/start              → create business_profiles row
   POST   /api/wizard/scan/{profile_id}  → Firecrawl map + archetype detect
-  POST   /api/wizard/scrape/{profile_id}→ Firecrawl scrape → DocumentManager → graphify
+  POST   /api/wizard/scrape/{profile_id}→ 202 + background pipeline
+  GET    /api/wizard/progress/{profile_id} → SSE live progress feed
   PATCH  /api/wizard/profile/{profile_id}→ user edits to the profile
   POST   /api/wizard/plan/{profile_id}  → generate Mission Zero draft plan
 
-Phase 1 = blocking endpoints (no background queue). Good enough for <60s scrapes.
-The /api/wizard/approve endpoint is intentionally NOT included — Mission 1 team
-provisioning is parked as Phase 2 / TODO per PRD-130 review.
+The scrape endpoint returns 202 immediately and runs the pipeline in the
+background so Railway's edge proxy cannot kill long-running intake jobs
+(~15min on a medium site). Clients open an EventSource against
+``/progress/{profile_id}`` to watch every stage in real time.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -25,13 +28,14 @@ from uuid import UUID
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
-from core.database.database import get_db
+from core.database.database import get_db, get_db_session
 from core.models.business_profiles import BusinessProfile
 
 from modules.intake.archetypes import (
@@ -42,6 +46,19 @@ from modules.intake.archetypes import (
 from modules.intake.firecrawl_client import FirecrawlClient, FirecrawlError
 from modules.intake.plan_generator import generate_draft_plan
 from modules.intake.profile_builder import build_profile
+from modules.intake.progress import (
+    STAGE_COMPLETE,
+    STAGE_FAILED,
+    STAGE_GRAPHIFY,
+    STAGE_INGEST,
+    STAGE_PLAN,
+    STAGE_PROFILE,
+    STAGE_SCAN,
+    STAGE_SCRAPE,
+    clear as progress_clear,
+    emit as progress_emit,
+    stream as progress_stream,
+)
 from modules.intake.schemas import pick_schema_for_url
 
 logger = logging.getLogger(__name__)
@@ -80,12 +97,10 @@ class ScrapeBody(BaseModel):
     selected_urls: list[str] = Field(..., min_length=1)
 
 
-class ScrapeResponse(BaseModel):
+class ScrapeAcceptedResponse(BaseModel):
     profile_id: str
-    pages_scraped: int
-    pages_failed: int
-    documents_ingested: int
-    profile: dict[str, Any]
+    status: str
+    message: str
 
 
 class ProfilePatch(BaseModel):
@@ -217,6 +232,11 @@ async def scan_domain(
     profile.status = "scanning"
     db.commit()
 
+    await progress_clear(profile_id)
+    await progress_emit(
+        profile_id, STAGE_SCAN, f"Mapping {profile.domain} via Firecrawl…"
+    )
+
     client = _firecrawl_client()
     try:
         urls = await client.map(profile.domain)
@@ -225,6 +245,9 @@ async def scan_domain(
         profile.status = "failed"
         profile.quality_findings = {"errors": [f"Firecrawl map failed: {exc}"]}
         db.commit()
+        await progress_emit(
+            profile_id, STAGE_FAILED, f"Firecrawl map failed: {exc}", level="error"
+        )
         raise HTTPException(status_code=502, detail=f"Firecrawl map failed: {exc}")
 
     detection = detect_archetype(urls)
@@ -241,6 +264,17 @@ async def scan_domain(
     profile.archetype = archetype_slug
     profile.status = "scanned"
     db.commit()
+
+    await progress_emit(
+        profile_id,
+        STAGE_SCAN,
+        f"Scan complete — found {len(urls)} URLs, archetype={archetype_slug or 'unknown'}",
+        meta={
+            "total_urls": len(urls),
+            "archetype": archetype_slug,
+            "confidence": detection.confidence,
+        },
+    )
 
     logger.info(
         "wizard.scan profile=%s urls=%d archetype=%s confidence=%.2f",
@@ -259,14 +293,24 @@ async def scan_domain(
     )
 
 
-@router.post("/scrape/{profile_id}", response_model=ScrapeResponse)
+@router.post(
+    "/scrape/{profile_id}",
+    response_model=ScrapeAcceptedResponse,
+    status_code=202,
+)
 async def scrape_selected(
     profile_id: str,
     body: ScrapeBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
-) -> ScrapeResponse:
-    """Scrape selected URLs, push to RAG, trigger graphify, build profile."""
+) -> ScrapeAcceptedResponse:
+    """Kick off the scrape→ingest→graphify→profile pipeline in the background.
+
+    Returns 202 immediately so the HTTP connection doesn't have to stay
+    open for the 10-20min graphify phase. The frontend watches
+    ``GET /progress/{profile_id}`` for live updates and the final
+    ``stage=complete`` event.
+    """
     profile = _get_profile_or_404(db, profile_id, ctx.workspace_id)
 
     selected = body.selected_urls[: config.FIRECRAWL_MAX_PAGES_PER_SCAN]
@@ -274,82 +318,68 @@ async def scrape_selected(
     profile.status = "scraping"
     db.commit()
 
-    client = _firecrawl_client()
+    # Snapshot values needed by the background task so we don't carry the
+    # request-scoped DB session into it.
+    workspace_id = str(ctx.workspace_id)
+    domain = profile.domain
+    archetype = profile.archetype
+    user_goals = list(profile.goals or [])
 
-    scrape_results: list[dict[str, Any]] = []
-    failures: list[dict[str, str]] = []
-
-    for url in selected:
-        schema, page_type = pick_schema_for_url(url)
-        try:
-            result = await client.scrape(url, schema=schema)
-        except FirecrawlError as exc:
-            logger.warning("wizard.scrape url=%s failed: %s", url, exc)
-            failures.append({"url": url, "error": str(exc)})
-            continue
-        result["page_type"] = page_type
-        scrape_results.append(result)
-
-    # Push to RAG via DocumentManager
-    documents_ingested = await _ingest_scrape_results_to_rag(
-        scrape_results, workspace_id=str(ctx.workspace_id), domain=profile.domain
+    await progress_clear(profile_id)
+    await progress_emit(
+        profile_id,
+        STAGE_SCRAPE,
+        f"Starting intake — {len(selected)} pages selected",
+        meta={"total": len(selected)},
     )
 
-    # Trigger graphify build (best-effort, non-blocking on failure)
-    try:
-        from modules.knowledge.graph_service import GraphifyService
-
-        graphify = GraphifyService()
-        await graphify.build_graph(str(ctx.workspace_id))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("wizard.scrape graphify build failed: %s", exc, exc_info=True)
-
-    # Build the profile dict
-    profile_dict = build_profile(
-        domain=profile.domain,
-        archetype_slug=profile.archetype or "unknown",
-        scrape_results=scrape_results,
-        user_goals=profile.goals or [],
-    )
-
-    # Persist enriched fields
-    profile.company_name = profile_dict.get("company_name") or profile.company_name
-    profile.sectors = profile_dict.get("sectors")
-    profile.brands = profile_dict.get("brands")
-    profile.standards = profile_dict.get("standards")
-    profile.voice_notes = profile_dict.get("voice_notes")
-
-    quality = profile_dict.get("quality_findings") or {"errors": [], "notes": []}
-    if failures:
-        quality.setdefault("errors", []).extend(
-            f"{f['url']}: {f['error']}" for f in failures
+    # Fire-and-forget; the task handles all its own errors and progress emits
+    asyncio.create_task(
+        _run_scrape_pipeline(
+            profile_id=profile_id,
+            workspace_id=workspace_id,
+            domain=domain,
+            archetype_slug=archetype,
+            selected_urls=selected,
+            user_goals=user_goals,
         )
-    profile.quality_findings = quality
-    profile.status = "profiled"
-    db.commit()
-    db.refresh(profile)
+    )
 
     logger.info(
-        "wizard.scrape profile=%s scraped=%d failed=%d ingested=%d",
-        profile.id, len(scrape_results), len(failures), documents_ingested,
+        "wizard.scrape.accepted profile=%s workspace=%s urls=%d",
+        profile_id, workspace_id, len(selected),
     )
 
-    return ScrapeResponse(
-        profile_id=str(profile.id),
-        pages_scraped=len(scrape_results),
-        pages_failed=len(failures),
-        documents_ingested=documents_ingested,
-        profile={
-            "domain": profile.domain,
-            "archetype": profile.archetype,
-            "company_name": profile.company_name,
-            "sectors": profile.sectors,
-            "brands": profile.brands,
-            "standards": profile.standards,
-            "voice_notes": profile.voice_notes,
-            "goals": profile.goals,
-            "quality_findings": profile.quality_findings,
-        },
+    return ScrapeAcceptedResponse(
+        profile_id=profile_id,
+        status="scraping",
+        message=f"Intake pipeline started for {len(selected)} pages",
+    )
+
+
+@router.get("/progress/{profile_id}")
+async def progress_feed(
+    profile_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+) -> StreamingResponse:
+    """Server-Sent Events stream of wizard pipeline progress.
+
+    Replays buffered events then subscribes live. Returns when the
+    pipeline emits a terminal stage (``complete`` or ``failed``).
+    """
+    # Verify the profile belongs to the caller's workspace before streaming
+    with get_db_session() as db:
+        _get_profile_or_404(db, profile_id, ctx.workspace_id)
+
+    headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",  # disable nginx/Railway edge buffering
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(
+        progress_stream(profile_id),
+        media_type="text/event-stream",
+        headers=headers,
     )
 
 
@@ -376,6 +406,31 @@ async def patch_profile(
     }
 
 
+@router.get("/profile/{profile_id}")
+async def get_profile(
+    profile_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Fetch the current profile — used by the frontend after the SSE
+    ``stage=complete`` event lands to pull the finished profile state."""
+    profile = _get_profile_or_404(db, profile_id, ctx.workspace_id)
+    return {
+        "profile_id": str(profile.id),
+        "domain": profile.domain,
+        "archetype": profile.archetype,
+        "company_name": profile.company_name,
+        "sectors": profile.sectors,
+        "brands": profile.brands,
+        "standards": profile.standards,
+        "voice_notes": profile.voice_notes,
+        "goals": profile.goals,
+        "quality_findings": profile.quality_findings,
+        "status": profile.status,
+        "draft_plan": profile.draft_plan,
+    }
+
+
 @router.post("/plan/{profile_id}", response_model=PlanResponse)
 async def generate_plan(
     profile_id: str,
@@ -384,6 +439,10 @@ async def generate_plan(
 ) -> PlanResponse:
     """Generate Mission Zero draft plan with graph-cited evidence."""
     profile = _get_profile_or_404(db, profile_id, ctx.workspace_id)
+
+    await progress_emit(
+        profile_id, STAGE_PLAN, "Generating Mission Zero draft plan…"
+    )
 
     archetype = ARCHETYPES.get(profile.archetype or "")
     default_team = list(archetype.default_team) if archetype else []
@@ -406,18 +465,243 @@ async def generate_plan(
     except Exception as exc:  # noqa: BLE001
         logger.warning("wizard.plan graphify import failed: %s", exc)
 
-    draft_plan = await generate_draft_plan(
-        profile=profile_dict,
-        archetype_default_team=default_team,
-        workspace_id=str(ctx.workspace_id),
-        graphify_service=graphify_service,
-    )
+    try:
+        draft_plan = await generate_draft_plan(
+            profile=profile_dict,
+            archetype_default_team=default_team,
+            workspace_id=str(ctx.workspace_id),
+            graphify_service=graphify_service,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("wizard.plan generation failed: %s", exc)
+        await progress_emit(
+            profile_id, STAGE_FAILED,
+            f"Plan generation failed: {exc}", level="error",
+        )
+        raise HTTPException(status_code=500, detail=f"Plan generation failed: {exc}")
 
     profile.draft_plan = draft_plan
     profile.status = "planned"
     db.commit()
 
+    await progress_emit(
+        profile_id, STAGE_PLAN, "Draft plan ready",
+        meta={
+            "mission_count": len(draft_plan.get("missions") or []),
+            "team_size": len(draft_plan.get("team") or []),
+        },
+    )
+
     return PlanResponse(profile_id=str(profile.id), draft_plan=draft_plan)
+
+
+# ===========================================================================
+# Background pipeline
+# ===========================================================================
+
+async def _run_scrape_pipeline(
+    *,
+    profile_id: str,
+    workspace_id: str,
+    domain: str,
+    archetype_slug: str | None,
+    selected_urls: list[str],
+    user_goals: list[str],
+) -> None:
+    """Full scrape → ingest → graphify → profile pipeline.
+
+    Runs in an asyncio task spawned from ``scrape_selected``. Owns its
+    own DB session and emits a progress event at every meaningful step.
+    Any exception is caught and turned into a ``stage=failed`` event so
+    the frontend always gets a terminal signal.
+    """
+    try:
+        client = _firecrawl_client()
+
+        scrape_results: list[dict[str, Any]] = []
+        failures: list[dict[str, str]] = []
+        total = len(selected_urls)
+
+        # --- Scrape loop ------------------------------------------------
+        for i, url in enumerate(selected_urls, start=1):
+            await progress_emit(
+                profile_id,
+                STAGE_SCRAPE,
+                f"[{i}/{total}] Scraping {url}",
+                meta={"index": i, "total": total, "url": url},
+            )
+            schema, page_type = pick_schema_for_url(url)
+            try:
+                result = await client.scrape(url, schema=schema)
+            except FirecrawlError as exc:
+                logger.warning("wizard.scrape url=%s failed: %s", url, exc)
+                failures.append({"url": url, "error": str(exc)})
+                await progress_emit(
+                    profile_id, STAGE_SCRAPE,
+                    f"[{i}/{total}] FAILED {url}: {exc}",
+                    level="warn",
+                    meta={"index": i, "total": total, "url": url, "error": str(exc)},
+                )
+                continue
+            result["page_type"] = page_type
+            scrape_results.append(result)
+            await progress_emit(
+                profile_id,
+                STAGE_SCRAPE,
+                f"[{i}/{total}] OK {url} ({page_type})",
+                meta={
+                    "index": i, "total": total, "url": url,
+                    "page_type": page_type,
+                    "chars": len((result.get("markdown") or "")),
+                },
+            )
+
+        await progress_emit(
+            profile_id,
+            STAGE_SCRAPE,
+            f"Scrape complete — {len(scrape_results)} ok, {len(failures)} failed",
+            meta={"scraped": len(scrape_results), "failed": len(failures)},
+        )
+
+        # --- Ingest into RAG --------------------------------------------
+        await progress_emit(
+            profile_id, STAGE_INGEST,
+            f"Ingesting {len(scrape_results)} pages into RAG pipeline…",
+            meta={"total": len(scrape_results)},
+        )
+        documents_ingested = await _ingest_scrape_results_to_rag(
+            scrape_results,
+            workspace_id=workspace_id,
+            domain=domain,
+            profile_id=profile_id,
+        )
+        await progress_emit(
+            profile_id, STAGE_INGEST,
+            f"Ingest complete — {documents_ingested} documents persisted",
+            meta={"ingested": documents_ingested},
+        )
+
+        # --- Graphify ---------------------------------------------------
+        await progress_emit(
+            profile_id, STAGE_GRAPHIFY,
+            "Building knowledge graph (entity extraction)…",
+        )
+        try:
+            from modules.knowledge.graph_service import GraphifyService
+            graphify = GraphifyService()
+            meta = await graphify.build_graph(workspace_id)
+            await progress_emit(
+                profile_id, STAGE_GRAPHIFY,
+                f"Graph built — {meta.get('node_count', 0)} nodes, "
+                f"{meta.get('edge_count', 0)} edges, "
+                f"{meta.get('community_count', 0)} communities",
+                meta=meta,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "wizard pipeline graphify failed: %s", exc, exc_info=True
+            )
+            await progress_emit(
+                profile_id, STAGE_GRAPHIFY,
+                f"Graph build failed (non-fatal): {exc}",
+                level="warn",
+            )
+
+        # --- Profile build ----------------------------------------------
+        await progress_emit(
+            profile_id, STAGE_PROFILE,
+            "Synthesising business profile from scraped content…",
+        )
+        profile_dict = build_profile(
+            domain=domain,
+            archetype_slug=archetype_slug or "unknown",
+            scrape_results=scrape_results,
+            user_goals=user_goals,
+        )
+
+        quality = profile_dict.get("quality_findings") or {"errors": [], "notes": []}
+        if failures:
+            quality.setdefault("errors", []).extend(
+                f"{f['url']}: {f['error']}" for f in failures
+            )
+
+        # Persist profile fields in a fresh DB session
+        with get_db_session() as db:
+            profile = (
+                db.query(BusinessProfile)
+                .filter(BusinessProfile.id == UUID(profile_id))
+                .first()
+            )
+            if profile is None:
+                logger.error(
+                    "wizard pipeline: profile %s vanished mid-run", profile_id
+                )
+                await progress_emit(
+                    profile_id, STAGE_FAILED,
+                    "Profile row disappeared mid-run",
+                    level="error",
+                )
+                return
+
+            profile.company_name = (
+                profile_dict.get("company_name") or profile.company_name
+            )
+            profile.sectors = profile_dict.get("sectors")
+            profile.brands = profile_dict.get("brands")
+            profile.standards = profile_dict.get("standards")
+            profile.voice_notes = profile_dict.get("voice_notes")
+            profile.quality_findings = quality
+            profile.status = "profiled"
+
+        await progress_emit(
+            profile_id, STAGE_PROFILE,
+            f"Profile ready — {profile_dict.get('company_name') or domain} "
+            f"({len(profile_dict.get('sectors') or [])} sectors, "
+            f"{len(profile_dict.get('brands') or [])} brands)",
+            meta={
+                "company_name": profile_dict.get("company_name"),
+                "sectors": len(profile_dict.get("sectors") or []),
+                "brands": len(profile_dict.get("brands") or []),
+            },
+        )
+
+        # --- Done -------------------------------------------------------
+        await progress_emit(
+            profile_id, STAGE_COMPLETE,
+            "Intake complete — ready for review",
+            meta={
+                "scraped": len(scrape_results),
+                "failed": len(failures),
+                "ingested": documents_ingested,
+            },
+        )
+        logger.info(
+            "wizard.pipeline.complete profile=%s scraped=%d failed=%d ingested=%d",
+            profile_id, len(scrape_results), len(failures), documents_ingested,
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("wizard pipeline failed profile=%s: %s", profile_id, exc)
+        # Mark the profile row failed so the UI can reflect it on reload
+        try:
+            with get_db_session() as db:
+                profile = (
+                    db.query(BusinessProfile)
+                    .filter(BusinessProfile.id == UUID(profile_id))
+                    .first()
+                )
+                if profile is not None:
+                    profile.status = "failed"
+                    profile.quality_findings = {
+                        "errors": [f"Pipeline failed: {exc}"]
+                    }
+        except Exception:  # noqa: BLE001
+            logger.exception("wizard pipeline: failed to mark profile failed")
+
+        await progress_emit(
+            profile_id, STAGE_FAILED,
+            f"Pipeline failed: {exc}", level="error",
+        )
 
 
 # ===========================================================================
@@ -428,10 +712,12 @@ async def _ingest_scrape_results_to_rag(
     scrape_results: list[dict[str, Any]],
     workspace_id: str,
     domain: str,
+    profile_id: str,
 ) -> int:
     """Write each scraped page to a temp .md file and upload via DocumentManager.
 
-    Returns the count of successfully ingested documents.
+    Emits per-document progress events so the feed stays live through
+    the ingest phase. Returns the count of successfully ingested documents.
     """
     if not scrape_results:
         return 0
@@ -449,18 +735,24 @@ async def _ingest_scrape_results_to_rag(
         return 0
 
     ingested = 0
+    total = len(scrape_results)
     with tempfile.TemporaryDirectory(prefix="wizard_intake_") as tmpdir:
-        for result in scrape_results:
+        for i, result in enumerate(scrape_results, start=1):
             url = result.get("url", "")
             markdown = result.get("markdown") or ""
             if not markdown.strip():
+                await progress_emit(
+                    profile_id, STAGE_INGEST,
+                    f"[{i}/{total}] SKIP empty page {url}",
+                    level="warn",
+                    meta={"index": i, "total": total, "url": url},
+                )
                 continue
 
             slug = _slug_from_url(url)
             filename = f"{slug}.md"
             file_path = os.path.join(tmpdir, filename)
 
-            # Prepend a small front-matter so RAG retrieval has provenance
             header = (
                 f"# Source: {url}\n"
                 f"# Domain: {domain}\n"
@@ -469,6 +761,14 @@ async def _ingest_scrape_results_to_rag(
             with open(file_path, "w", encoding="utf-8") as fh:
                 fh.write(header + markdown)
 
+            await progress_emit(
+                profile_id, STAGE_INGEST,
+                f"[{i}/{total}] Embedding {filename}",
+                meta={
+                    "index": i, "total": total,
+                    "filename": filename, "url": url,
+                },
+            )
             try:
                 await doc_manager.upload_document(
                     file_path=file_path,
@@ -478,7 +778,24 @@ async def _ingest_scrape_results_to_rag(
                     created_by="wizard",
                 )
                 ingested += 1
+                await progress_emit(
+                    profile_id, STAGE_INGEST,
+                    f"[{i}/{total}] INGESTED {filename}",
+                    meta={
+                        "index": i, "total": total,
+                        "filename": filename, "url": url,
+                    },
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("wizard ingest: failed for %s: %s", url, exc, exc_info=True)
+                await progress_emit(
+                    profile_id, STAGE_INGEST,
+                    f"[{i}/{total}] FAILED {filename}: {exc}",
+                    level="warn",
+                    meta={
+                        "index": i, "total": total,
+                        "filename": filename, "url": url, "error": str(exc),
+                    },
+                )
 
     return ingested
