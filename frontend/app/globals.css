@@ -135,6 +135,71 @@
     --chart-4: 271 91% 65%;
     --chart-5: 43 96% 56%;
   }
+
+  /*
+   * Matte theme — mirrors the public landing page (automatos.app).
+   * Cool-grey palette (hue 220, 15% sat), flat surfaces, no neon glow.
+   * Extends .dark semantics so existing dark: Tailwind classes still apply.
+   */
+  .matte {
+    /* Landing-page palette (extracted from automatos.app/assets/index-*.css) */
+    --background: 0 0% 6%;
+    --foreground: 0 0% 95%;
+    --card: 220 15% 12%;
+    --card-foreground: 0 0% 95%;
+    --popover: 220 15% 10%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 16 100% 60%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 220 15% 18%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 220 15% 16%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 18 50% 18%;
+    --accent-foreground: 18 90% 70%;
+    --destructive: 0 65% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 15% 18%;
+    --input: 220 15% 18%;
+    --ring: 16 100% 60%;
+
+    /* Flat background — no gradient sheen */
+    --background-gradient-from: 0 0% 6%;
+    --background-gradient-to: 0 0% 6%;
+
+    /* Kill the glow: zero out all glass/card glow alphas */
+    --glass-card-alpha: 1;
+    --glass-panel-alpha: 1;
+    --glass-border-alpha: 0.5;
+    --glass-border-alpha-hover: 0.7;
+    --glass-glow-alpha: 0;
+    --glass-shadow-alpha: 0;
+    --glass-shadow-alpha-hover: 0;
+    --glass-border: var(--border);
+    --glass-border-hover: var(--border);
+
+    --card-shadow-alpha: 0;
+    --card-shadow-alpha-hover: 0;
+    --card-accent-alpha: 0;
+    --card-accent-alpha-hover: 0;
+    --card-highlight-alpha: 0;
+
+    /* Semantic status colors (same as dark) */
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 98%;
+    --warning: 43 96% 56%;
+    --warning-foreground: 0 0% 10%;
+    --info: 217 91% 60%;
+    --info-foreground: 0 0% 98%;
+    --agent: 271 91% 65%;
+    --agent-foreground: 0 0% 98%;
+
+    --chart-1: 16 100% 60%;
+    --chart-2: 217 91% 60%;
+    --chart-3: 160 84% 39%;
+    --chart-4: 271 91% 65%;
+    --chart-5: 43 96% 56%;
+  }
 }
 
 @layer base {
@@ -368,6 +433,65 @@
   .font-mono-logs {
     font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, monospace;
     font-feature-settings: 'liga' 1, 'calt' 1;
+  }
+
+  /*
+   * Matte overrides — flatten everything that can't be tuned via CSS vars.
+   * Targets: backdrop blur, direct box-shadow glows, pulsing animations.
+   */
+  /*
+   * Landing uses subtle Tailwind shadow-sm/shadow-xl rather than pure flat.
+   * We kill backdrop-blur and neon glow but keep a tiny shadow for depth.
+   */
+  .matte .glass-card,
+  .matte .glass-panel,
+  .matte .glass-panel-light {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 1px 2px 0 hsla(0 0% 0% / 0.25);
+  }
+
+  .matte .glass-card:hover {
+    border-color: hsl(var(--border));
+    box-shadow: 0 2px 4px 0 hsla(0 0% 0% / 0.30);
+  }
+
+  .matte .card-glow,
+  .matte .card-glow:hover {
+    box-shadow: 0 0 0 1px hsl(var(--border));
+  }
+
+  .matte .stage-completed,
+  .matte .stage-active {
+    box-shadow: none;
+    animation: none;
+  }
+
+  .matte .stage-active {
+    background: hsl(var(--secondary));
+    border-color: hsl(var(--primary) / 0.5);
+  }
+
+  .matte .glow-orange,
+  .matte .glow-primary,
+  .matte .glow-green,
+  .matte .glow-blue {
+    box-shadow: none;
+  }
+
+  .matte .stage-active-badge,
+  .matte .agent-avatar-active {
+    animation: none;
+  }
+
+  .matte .progress-shimmer {
+    background: none;
+    animation: none;
+  }
+
+  .matte .agent-avatar {
+    background: hsl(var(--secondary));
+    border-color: hsl(var(--border));
   }
 }
 

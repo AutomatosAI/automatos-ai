@@ -58,6 +58,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
             attribute="class"
             defaultTheme="system"
             enableSystem
+            themes={['light', 'dark', 'matte']}
+            // matte = dark + matte class so Tailwind `dark:` prefixes still apply
+            value={{ light: 'light', dark: 'dark', matte: 'dark matte' }}
             storageKey="automatos-theme"
             disableTransitionOnChange
           >
