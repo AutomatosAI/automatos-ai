@@ -183,21 +183,6 @@ async def start_wizard(
             detail="Domain verification failed: your email domain does not match",
         )
 
-    # Concurrency cap
-    active = (
-        db.query(BusinessProfile)
-        .filter(
-            BusinessProfile.workspace_id == ctx.workspace_id,
-            BusinessProfile.status.notin_(["planned", "failed"]),
-        )
-        .count()
-    )
-    if active >= config.WIZARD_MAX_ACTIVE_PER_WS:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Already {active} active wizard run(s) for this workspace",
-        )
-
     profile = BusinessProfile(
         workspace_id=ctx.workspace_id,
         domain=domain,

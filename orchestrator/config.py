@@ -311,7 +311,6 @@ class Config:
     FIRECRAWL_MAX_PAGES_PER_SCAN: int = int(os.getenv("FIRECRAWL_MAX_PAGES_PER_SCAN", "20"))
 
     WIZARD_ENABLED: bool = os.getenv("WIZARD_ENABLED", "true").lower() == "true"
-    WIZARD_MAX_ACTIVE_PER_WS: int = int(os.getenv("WIZARD_MAX_ACTIVE_PER_WS", "1"))
     WIZARD_REQUIRE_DOMAIN_VERIFY: bool = os.getenv("WIZARD_REQUIRE_DOMAIN_VERIFY", "false").lower() == "true"
 
     # =============================================================================
