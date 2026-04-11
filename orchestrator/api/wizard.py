@@ -44,7 +44,7 @@ from modules.intake.archetypes import (
     select_target_urls,
 )
 from modules.intake.firecrawl_client import FirecrawlClient, FirecrawlError
-from modules.intake.plan_generator import generate_draft_plan
+from modules.intake.plan_generator import build_mission_goal
 from modules.intake.profile_builder import build_profile
 from modules.intake.progress import (
     STAGE_COMPLETE,
@@ -114,7 +114,8 @@ class ProfilePatch(BaseModel):
 
 class PlanResponse(BaseModel):
     profile_id: str
-    draft_plan: dict[str, Any]
+    mission_id: str
+    goal: str
 
 
 # ===========================================================================
@@ -437,11 +438,21 @@ async def generate_plan(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> PlanResponse:
-    """Generate Mission Zero draft plan with graph-cited evidence."""
+    """Launch Mission Zero as a real mission in the Coordinator.
+
+    Converts the scraped business profile into a rich natural-language
+    goal and hands it to ``CoordinatorService.create_mission()``. The
+    coordinator owns planning, task decomposition, agent dispatch and
+    output summarization — this endpoint just kicks it off and returns
+    the ``mission_id`` so the wizard can redirect to the mission page.
+    """
+    from services.coordinator_service import get_coordinator_service
+    from modules.coordination.planner import PlanValidationError
+
     profile = _get_profile_or_404(db, profile_id, ctx.workspace_id)
 
     await progress_emit(
-        profile_id, STAGE_PLAN, "Generating Mission Zero draft plan…"
+        profile_id, STAGE_PLAN, "Launching Mission Zero…"
     )
 
     archetype = ARCHETYPES.get(profile.archetype or "")
@@ -458,41 +469,64 @@ async def generate_plan(
         "goals": profile.goals or [],
     }
 
-    graphify_service = None
-    try:
-        from modules.knowledge.graph_service import GraphifyService
-        graphify_service = GraphifyService()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("wizard.plan graphify import failed: %s", exc)
+    goal = build_mission_goal(profile_dict, archetype_default_team=default_team)
+
+    mission_config = {
+        "source": "mission_zero",
+        "profile_id": str(profile.id),
+        "domain": profile.domain,
+        "archetype": profile.archetype,
+        "default_team": default_team,
+    }
+
+    coordinator = get_coordinator_service()
 
     try:
-        draft_plan = await generate_draft_plan(
-            profile=profile_dict,
-            archetype_default_team=default_team,
-            workspace_id=str(ctx.workspace_id),
-            graphify_service=graphify_service,
+        run = await coordinator.create_mission(
+            db=db,
+            workspace_id=ctx.workspace_id,
+            goal=goal,
+            created_by=ctx.user.id or "unknown",
+            config=mission_config,
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("wizard.plan generation failed: %s", exc)
+        profile.draft_plan = {
+            "mission_run_id": str(run.id),
+            "goal": goal,
+        }
+        profile.status = "planned"
+        db.commit()
+    except PlanValidationError as exc:
+        db.rollback()
+        logger.exception("wizard.plan coordinator rejected plan: %s", exc)
         await progress_emit(
             profile_id, STAGE_FAILED,
-            f"Plan generation failed: {exc}", level="error",
+            f"Mission planning failed: {exc}", level="error",
         )
-        raise HTTPException(status_code=500, detail=f"Plan generation failed: {exc}")
-
-    profile.draft_plan = draft_plan
-    profile.status = "planned"
-    db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=f"Mission planning failed: {exc}",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.exception("wizard.plan mission creation failed: %s", exc)
+        await progress_emit(
+            profile_id, STAGE_FAILED,
+            f"Mission launch failed: {exc}", level="error",
+        )
+        raise HTTPException(status_code=500, detail=f"Mission launch failed: {exc}")
 
     await progress_emit(
-        profile_id, STAGE_PLAN, "Draft plan ready",
-        meta={
-            "mission_count": len(draft_plan.get("missions") or []),
-            "team_size": len(draft_plan.get("team") or []),
-        },
+        profile_id, STAGE_PLAN, "Mission Zero launched",
+        meta={"mission_id": str(run.id)},
     )
 
-    return PlanResponse(profile_id=str(profile.id), draft_plan=draft_plan)
+    return PlanResponse(
+        profile_id=str(profile.id),
+        mission_id=str(run.id),
+        goal=goal,
+    )
 
 
 # ===========================================================================

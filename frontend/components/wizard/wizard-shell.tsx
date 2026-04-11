@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Sparkles } from 'lucide-react'
 import { toast } from 'react-hot-toast'
@@ -33,7 +34,6 @@ import {
   useGenerateDraftPlan,
   useFetchProfile,
   type ScanResponse,
-  type PlanResponse,
   type BusinessProfilePayload,
 } from '@/hooks/use-wizard-api'
 import { useWizardProgress } from '@/hooks/use-wizard-progress'
@@ -44,7 +44,6 @@ import { Step3Scanning } from './step-3-scanning'
 import { Step4PageChecklist } from './step-4-page-checklist'
 import { Step5Intake } from './step-5-intake'
 import { Step6ProfileEditor } from './step-6-profile-editor'
-import { Step7DraftPlan } from './step-7-draft-plan'
 
 interface WizardShellProps {
   open: boolean
@@ -59,7 +58,6 @@ interface WizardState {
   scan: ScanResponse | null
   selectedUrls: string[]
   profile: BusinessProfilePayload | null
-  plan: PlanResponse | null
 }
 
 const INITIAL: WizardState = {
@@ -69,10 +67,10 @@ const INITIAL: WizardState = {
   scan: null,
   selectedUrls: [],
   profile: null,
-  plan: null,
 }
 
 export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
+  const router = useRouter()
   const [step, setStep] = useState(1)
   const [state, setState] = useState<WizardState>(INITIAL)
   const [progressActive, setProgressActive] = useState(false)
@@ -200,17 +198,13 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
     if (!state.profileId) return
     try {
       const plan = await planMutation.mutateAsync(state.profileId)
-      setState(s => ({ ...s, plan }))
-      setStep(7)
+      toast.success('Mission Zero launched — review the plan and hit Approve.')
+      onComplete?.()
+      handleClose()
+      router.push(`/missions/${plan.mission_id}`)
     } catch (err: any) {
-      toast.error(`Plan generation failed: ${err?.message || 'unknown error'}`)
+      toast.error(`Mission launch failed: ${err?.message || 'unknown error'}`)
     }
-  }
-
-  const handleFinish = () => {
-    toast.success('Draft plan saved. Try chatting with Auto about your business!')
-    onComplete?.()
-    handleClose()
   }
 
   return (
@@ -261,7 +255,6 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
                     <TabsTrigger value="step-4" disabled={step < 4}>4. Pages</TabsTrigger>
                     <TabsTrigger value="step-5" disabled={step < 5}>5. Intake</TabsTrigger>
                     <TabsTrigger value="step-6" disabled={step < 6}>6. Profile</TabsTrigger>
-                    <TabsTrigger value="step-7" disabled={step < 7}>7. Draft Plan</TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="step-1" className="space-y-4 max-h-[55vh] overflow-y-auto">
@@ -320,14 +313,6 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
                     )}
                   </TabsContent>
 
-                  <TabsContent value="step-7" className="space-y-4 max-h-[55vh] overflow-y-auto">
-                    {state.plan && (
-                      <Step7DraftPlan
-                        plan={state.plan}
-                        onFinish={handleFinish}
-                      />
-                    )}
-                  </TabsContent>
                 </Tabs>
               </CardContent>
             </Card>

@@ -60,7 +60,7 @@ export interface ScrapeAcceptedResponse {
 export interface ProfileFetchResponse extends BusinessProfilePayload {
   profile_id: string
   status: string
-  draft_plan: PlanResponse['draft_plan'] | null
+  draft_plan: Record<string, unknown> | null
 }
 
 export interface BusinessProfilePayload {
@@ -75,29 +75,10 @@ export interface BusinessProfilePayload {
   quality_findings: { errors?: string[]; notes?: string[] } | null
 }
 
-export interface PlanResponseAgent {
-  slug: string
-  name: string
-  team: string
-  job_title: string
-  persona: string
-  skills: string[]
-  tools: string[]
-  llm: string
-  rationale: string
-  citations: Array<{ id: string; label: string; type?: string; snippet?: string | null }>
-}
-
 export interface PlanResponse {
   profile_id: string
-  draft_plan: {
-    proposed_agents: PlanResponseAgent[]
-    org_chart: Array<{ agent: string; reports_to: string | null }>
-    integrations_needed: string[]
-    open_questions: string[]
-    graph_available: boolean
-    graph_node_count: number
-  }
+  mission_id: string
+  goal: string
 }
 
 // ---------------------------------------------------------------------------
