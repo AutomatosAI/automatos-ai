@@ -64,9 +64,14 @@ BEGIN
     END IF;
     
     -- Add model_config if missing
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+    -- NOTE: No DEFAULT — agents must get their model_config from either
+    -- their creator (e.g. AgentFactory, wizard seeds) or resolve at runtime
+    -- via _get_default_llm_config_from_settings. A sticky DEFAULT here
+    -- silently shackled Mission Zero agents to gpt-4 (8K ctx). See
+    -- drop_agents_model_config_default alembic migration (2026-04-11).
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                    WHERE table_name='agents' AND column_name='model_config') THEN
-        ALTER TABLE agents ADD COLUMN model_config JSONB DEFAULT '{"provider": "openai", "model_id": "gpt-4", "temperature": 0.7}'::jsonb;
+        ALTER TABLE agents ADD COLUMN model_config JSONB;
     END IF;
     
     -- Add model_usage_stats if missing
