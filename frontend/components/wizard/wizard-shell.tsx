@@ -9,9 +9,15 @@
  *
  * Phase 1 = 7 steps, ending at the Mission Zero Draft Plan review.
  * Mission 1 (team provisioning) is parked as Phase 2.
+ *
+ * Step 5 is now driven by Server-Sent Events — the scrape endpoint
+ * returns 202 immediately, the background pipeline emits progress to
+ * Redis, and `useWizardProgress` streams those events into the terminal
+ * feed. When the pipeline emits `stage=complete` we pull the fresh
+ * profile and advance to Step 6.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Sparkles } from 'lucide-react'
 import { toast } from 'react-hot-toast'
@@ -25,11 +31,12 @@ import {
   useScrapeSelected,
   usePatchProfile,
   useGenerateDraftPlan,
+  useFetchProfile,
   type ScanResponse,
-  type ScrapeResponse,
   type PlanResponse,
   type BusinessProfilePayload,
 } from '@/hooks/use-wizard-api'
+import { useWizardProgress } from '@/hooks/use-wizard-progress'
 
 import { Step1Goals } from './step-1-goals'
 import { Step2Domain } from './step-2-domain'
@@ -51,7 +58,6 @@ interface WizardState {
   profileId: string | null
   scan: ScanResponse | null
   selectedUrls: string[]
-  scrape: ScrapeResponse | null
   profile: BusinessProfilePayload | null
   plan: PlanResponse | null
 }
@@ -62,7 +68,6 @@ const INITIAL: WizardState = {
   profileId: null,
   scan: null,
   selectedUrls: [],
-  scrape: null,
   profile: null,
   plan: null,
 }
@@ -70,19 +75,29 @@ const INITIAL: WizardState = {
 export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
   const [step, setStep] = useState(1)
   const [state, setState] = useState<WizardState>(INITIAL)
+  const [progressActive, setProgressActive] = useState(false)
 
   const startMutation = useStartWizard()
   const scanMutation = useScanDomain()
   const scrapeMutation = useScrapeSelected()
   const patchMutation = usePatchProfile()
   const planMutation = useGenerateDraftPlan()
+  const fetchProfileMutation = useFetchProfile()
+
+  const progress = useWizardProgress({
+    profileId: state.profileId,
+    active: progressActive,
+  })
 
   const reset = () => {
     setState(INITIAL)
     setStep(1)
+    setProgressActive(false)
+    progress.reset()
   }
 
   const handleClose = () => {
+    setProgressActive(false)
     onClose()
     setTimeout(reset, 200)
   }
@@ -111,19 +126,61 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
 
   const handleStartScrape = async () => {
     if (!state.profileId) return
+    // Advance to step 5 and open the SSE stream BEFORE we fire the
+    // scrape POST so we don't miss the first events.
     setStep(5)
+    progress.reset()
+    setProgressActive(true)
     try {
-      const scrape = await scrapeMutation.mutateAsync({
+      await scrapeMutation.mutateAsync({
         profileId: state.profileId,
         selectedUrls: state.selectedUrls,
       })
-      setState(s => ({ ...s, scrape, profile: scrape.profile }))
-      setStep(6)
+      // 202 accepted — the background pipeline is running. Events will
+      // stream in via the progress hook; completion is handled in the
+      // effect below.
     } catch (err: any) {
-      toast.error(`Intake failed: ${err?.message || 'unknown error'}`)
-      setStep(4)
+      // Only the initial POST can land here — the actual pipeline
+      // failure comes through SSE. Stay on step 5 and show the error
+      // inline so the user doesn't lose their page selection.
+      toast.error(`Could not start intake: ${err?.message || 'unknown error'}`)
+      setProgressActive(false)
     }
   }
+
+  // ---- SSE completion handler --------------------------------------------
+
+  useEffect(() => {
+    if (!progressActive) return
+    if (progress.state !== 'complete') return
+    if (!state.profileId) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const profile = await fetchProfileMutation.mutateAsync(state.profileId!)
+        if (cancelled) return
+        setState(s => ({ ...s, profile }))
+        setProgressActive(false)
+        setStep(6)
+      } catch (err: any) {
+        toast.error(
+          `Could not load profile after intake: ${err?.message || 'unknown error'}`
+        )
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progress.state, progressActive, state.profileId])
+
+  useEffect(() => {
+    if (progress.state === 'failed') {
+      toast.error('Intake pipeline failed — see the log for details')
+    }
+  }, [progress.state])
 
   const handleSaveProfile = async (patch: Partial<BusinessProfilePayload>) => {
     if (!state.profileId) return
@@ -244,7 +301,8 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
                   <TabsContent value="step-5" className="space-y-4 max-h-[55vh] overflow-y-auto">
                     <Step5Intake
                       pageCount={state.selectedUrls.length}
-                      isLoading={scrapeMutation.isPending}
+                      events={progress.events}
+                      state={progress.state}
                     />
                   </TabsContent>
 
@@ -252,7 +310,7 @@ export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
                     {state.profile && (
                       <Step6ProfileEditor
                         profile={state.profile}
-                        scrape={state.scrape}
+                        scrape={null}
                         onSave={handleSaveProfile}
                         isSaving={patchMutation.isPending}
                         onBack={() => setStep(4)}

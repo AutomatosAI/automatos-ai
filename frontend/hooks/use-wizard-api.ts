@@ -50,12 +50,17 @@ export interface ScanResponse {
   sample_urls: string[]
 }
 
-export interface ScrapeResponse {
+export interface ScrapeAcceptedResponse {
   profile_id: string
-  pages_scraped: number
-  pages_failed: number
-  documents_ingested: number
-  profile: BusinessProfilePayload
+  status: string
+  message: string
+}
+
+/** Profile payload returned by GET /api/wizard/profile/{profileId}. */
+export interface ProfileFetchResponse extends BusinessProfilePayload {
+  profile_id: string
+  status: string
+  draft_plan: PlanResponse['draft_plan'] | null
 }
 
 export interface BusinessProfilePayload {
@@ -112,9 +117,21 @@ export function useScanDomain() {
 }
 
 export function useScrapeSelected() {
-  return useMutation<ScrapeResponse, Error, { profileId: string; selectedUrls: string[] }>({
+  return useMutation<
+    ScrapeAcceptedResponse,
+    Error,
+    { profileId: string; selectedUrls: string[] }
+  >({
     mutationFn: ({ profileId, selectedUrls }) =>
       apiClient.post(`/api/wizard/scrape/${profileId}`, { selected_urls: selectedUrls }),
+  })
+}
+
+/** Pull the finished profile after the SSE stream emits `stage=complete`. */
+export function useFetchProfile() {
+  return useMutation<ProfileFetchResponse, Error, string>({
+    mutationFn: (profileId) =>
+      apiClient.request(`/api/wizard/profile/${profileId}`, { method: 'GET' }),
   })
 }
 
