@@ -19,7 +19,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.execute("""
-        CREATE TABLE IF NOT EXISTS deliverables (
+        CREATE TABLE deliverables (
             id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             workspace_id      UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
 
@@ -56,19 +56,19 @@ def upgrade() -> None:
         );
 
         -- Indices
-        CREATE INDEX IF NOT EXISTS ix_deliverables_workspace
+        CREATE INDEX ix_deliverables_workspace
             ON deliverables(workspace_id);
-        CREATE INDEX IF NOT EXISTS ix_deliverables_agent
+        CREATE INDEX ix_deliverables_agent
             ON deliverables(agent_id);
-        CREATE INDEX IF NOT EXISTS ix_deliverables_type
+        CREATE INDEX ix_deliverables_type
             ON deliverables(workspace_id, artifact_type);
-        CREATE INDEX IF NOT EXISTS ix_deliverables_source
+        CREATE INDEX ix_deliverables_source
             ON deliverables(workspace_id, source_type);
-        CREATE INDEX IF NOT EXISTS ix_deliverables_created
+        CREATE INDEX ix_deliverables_created
             ON deliverables(workspace_id, created_at DESC);
 
         -- Idempotent re-registration: one live row per (workspace_id, file_path)
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_deliverables_workspace_path
+        CREATE UNIQUE INDEX uq_deliverables_workspace_path
             ON deliverables(workspace_id, file_path)
             WHERE deleted_at IS NULL;
     """)

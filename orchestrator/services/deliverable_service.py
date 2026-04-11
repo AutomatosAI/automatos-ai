@@ -27,6 +27,7 @@ import logging
 import os
 import re
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 from uuid import UUID
 
 from sqlalchemy import text
@@ -35,6 +36,21 @@ from sqlalchemy.orm import Session
 from core.workspace_client import WorkspaceClient
 
 logger = logging.getLogger(__name__)
+
+# Maximum bytes of inline content returned by get_deliverable(include_content=True).
+# Larger files are truncated with a content_truncated=True flag so callers can
+# offer a download instead. Prevents OOM on huge files.
+MAX_INLINE_CONTENT_BYTES = 1_000_000  # 1 MB
+
+
+def _workspace_file_url(workspace_id: str | UUID, file_path: str) -> str:
+    """Build a URL to the workspace file-content endpoint.
+
+    This endpoint (`/api/workspaces/{id}/files/content?path=...`) is the canonical
+    way to stream workspace files to the browser — it handles auth, workspace
+    scoping, and MIME types. Used for both image previews and text downloads.
+    """
+    return f"/api/workspaces/{workspace_id}/files/content?path={quote(file_path)}"
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +159,11 @@ class DeliverableService:
         Uses ON CONFLICT on ``uq_deliverables_workspace_path`` so that a
         re-register (agent overwrites a file) updates metadata in place
         instead of creating a duplicate row.
+
+        Idempotency key is ``(workspace_id, file_path)``. If you need history
+        (e.g. daily heartbeat reports), include a timestamp or UUID in the
+        ``file_path`` — otherwise the same path will overwrite. Reports
+        service already does this via ``reports/{agent}/{ts}_{uuid}_{slug}.md``.
         """
         if not file_path:
             return {"success": False, "error": "file_path is required"}
@@ -153,6 +174,14 @@ class DeliverableService:
         if file_type is None:
             _, ext = os.path.splitext(file_path)
             file_type = ext.lstrip(".") or None
+
+        # Auto-wire preview_url for workspace-stored artifacts so the frontend
+        # can render images via <img src> and offer real Download links for
+        # everything else. Callers may override by passing preview_url explicitly.
+        if preview_url is None and storage_type == "workspace":
+            preview_url = _workspace_file_url(self.workspace_id, file_path)
+            if preview_type is None:
+                preview_type = "image" if inferred_type == "image" else "file"
 
         try:
             result = self.db.execute(
@@ -370,15 +399,33 @@ class DeliverableService:
             data = self._row_to_dict(row)
 
             if include_content and data["storage_type"] == "workspace":
+                # Every workspace file has a streamable content URL (used for
+                # <img src> on images and Download links on everything else).
+                # Fall back to building it from file_path if register() didn't
+                # set preview_url (legacy rows before C2 fix).
+                data["content_url"] = data.get("preview_url") or _workspace_file_url(
+                    self.workspace_id, data["file_path"]
+                )
+
                 if data["artifact_type"] == "image":
-                    # Images stream via URL, not inline text.
+                    # Images stream via URL, never inline.
                     data["content"] = None
-                    data["content_url"] = data.get("preview_url") or data["file_path"]
                 else:
                     ws_client = WorkspaceClient(str(self.workspace_id))
                     file_result = await ws_client.read_file(data["file_path"])
                     if file_result.get("success"):
-                        data["content"] = file_result.get("content", "")
+                        content = file_result.get("content", "") or ""
+                        # Cap inline content to prevent OOM on huge files —
+                        # caller can hit content_url for the full stream.
+                        if len(content.encode("utf-8", errors="ignore")) > MAX_INLINE_CONTENT_BYTES:
+                            truncated = content.encode("utf-8", errors="ignore")[
+                                :MAX_INLINE_CONTENT_BYTES
+                            ].decode("utf-8", errors="ignore")
+                            data["content"] = truncated
+                            data["content_truncated"] = True
+                        else:
+                            data["content"] = content
+                            data["content_truncated"] = False
                     else:
                         data["content"] = None
                         data["content_error"] = file_result.get("error", "Could not read file")
@@ -505,15 +552,6 @@ class DeliverableService:
     @staticmethod
     def _row_to_dict(row: Any) -> Dict[str, Any]:
         """Convert a SQLAlchemy row to a JSON-serialisable dict."""
-        extra = row.extra
-        if isinstance(extra, str):
-            try:
-                extra = json.loads(extra)
-            except (ValueError, TypeError):
-                extra = {}
-        elif extra is None:
-            extra = {}
-
         return {
             "id": str(row.id),
             "workspace_id": str(row.workspace_id),
@@ -531,7 +569,7 @@ class DeliverableService:
             "file_size_bytes": row.file_size_bytes,
             "preview_url": row.preview_url,
             "preview_type": row.preview_type,
-            "extra": extra,
+            "extra": row.extra or {},
             "status": row.status,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
