@@ -476,7 +476,7 @@ export default function SystemLLMSettingsTab({
                         ))
                       ) : (
                         !modelsLoading && selectedProvider && (
-                          <SelectItem value="" disabled>No models available for {selectedProvider}</SelectItem>
+                          <SelectItem value="__no_models__" disabled>No models available for {selectedProvider}</SelectItem>
                         )
                       )}
                     </SelectContent>
