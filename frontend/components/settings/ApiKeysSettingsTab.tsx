@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  Key, Plus, Trash2, TestTube, Loader2, CheckCircle, XCircle, Shield, Building2, Settings,
+  Key, Plus, Trash2, TestTube, Loader2, XCircle, Shield,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -89,12 +89,6 @@ export function ApiKeysSettingsTab() {
   // Track which key is currently being tested
   const [testingKeyId, setTestingKeyId] = useState<number | null>(null)
 
-  // Platform key configuration state
-  const [platformDialogOpen, setPlatformDialogOpen] = useState(false)
-  const [platformProvider, setPlatformProvider] = useState('')
-  const [platformApiKey, setPlatformApiKey] = useState('')
-  const [removePlatformTarget, setRemovePlatformTarget] = useState<string | null>(null)
-
   // ---- Queries & Mutations ------------------------------------------------
 
   const {
@@ -172,34 +166,6 @@ export function ApiKeysSettingsTab() {
     },
   })
 
-  const setPlatformKeyMutation = useMutation({
-    mutationFn: (payload: { provider: string; api_key: string }) =>
-      apiClient.put('/api/keys/platform', payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['platform-key-status'] })
-      toast.success('Platform key saved')
-      setPlatformDialogOpen(false)
-      setPlatformProvider('')
-      setPlatformApiKey('')
-    },
-    onError: (err: Error) => {
-      toast.error(`Failed to save platform key: ${err.message}`)
-    },
-  })
-
-  const removePlatformKeyMutation = useMutation({
-    mutationFn: (provider: string) =>
-      apiClient.delete(`/api/keys/platform/${provider}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['platform-key-status'] })
-      toast.success('Platform key removed')
-      setRemovePlatformTarget(null)
-    },
-    onError: (err: Error) => {
-      toast.error(`Failed to remove platform key: ${err.message}`)
-    },
-  })
-
   // ---- Helpers ------------------------------------------------------------
 
   const byokOverrides = byokPrefs?.byok_overrides ?? {}
@@ -220,31 +186,12 @@ export function ApiKeysSettingsTab() {
     addKeyMutation.mutate({ provider, api_key: apiKey, display_name: displayName })
   }
 
-  function providerLabel(value: string) {
-    return PROVIDERS.find((p) => p.value === value)?.label ?? value
-  }
-
   function getProviderKeys(prov: string) {
     return keys.filter((k) => k.provider === prov)
   }
 
   function toggleByok(prov: string, enabled: boolean) {
     saveByokMutation.mutate({ ...byokOverrides, [prov]: enabled })
-  }
-
-  function openPlatformConfigure(providerValue: string) {
-    setPlatformProvider(providerValue)
-    setPlatformApiKey('')
-    setPlatformDialogOpen(true)
-  }
-
-  function handlePlatformSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!platformProvider || !platformApiKey) {
-      toast.error('API key is required')
-      return
-    }
-    setPlatformKeyMutation.mutate({ provider: platformProvider, api_key: platformApiKey })
   }
 
   function getActiveSource(prov: string): 'byok' | 'platform' | 'none' {
@@ -272,7 +219,7 @@ export function ApiKeysSettingsTab() {
               <div>
                 <CardTitle className="text-xl">API Keys</CardTitle>
                 <CardDescription className="mt-1">
-                  Manage platform and personal (BYOK) API keys. Toggle per-provider
+                  Manage your personal (BYOK) API keys. Toggle per-provider
                   to control which key is used for chat and agent execution.
                 </CardDescription>
               </div>
@@ -371,71 +318,7 @@ export function ApiKeysSettingsTab() {
         </CardHeader>
       </Card>
 
-      {/* Section 1: Platform API Keys */}
-      <Card className="glass-card border-border/40">
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-base">Platform API Keys</CardTitle>
-          </div>
-          <CardDescription className="text-xs">
-            Shared keys configured by the admin. Available to all workspaces.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="grid gap-2">
-            {PROVIDERS.map((p) => {
-              const configured = platformKeys[p.value]?.configured ?? false
-              return (
-                <div
-                  key={p.value}
-                  className="flex items-center justify-between rounded-md border border-border/30 px-3 py-2"
-                >
-                  <span className="text-sm font-medium">{p.label}</span>
-                  <div className="flex items-center gap-2">
-                    {configured ? (
-                      <>
-                        <Badge className="bg-green-500/15 text-green-400 border-green-500/30 text-xs">
-                          <CheckCircle className="h-3 w-3 mr-1" />
-                          Configured
-                        </Badge>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => openPlatformConfigure(p.value)}
-                        >
-                          <Settings className="h-3 w-3 mr-1" />
-                          Update
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                          onClick={() => setRemovePlatformTarget(p.value)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-3 text-xs"
-                        onClick={() => openPlatformConfigure(p.value)}
-                      >
-                        Configure
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Section 2: Your API Keys (BYOK management) */}
+      {/* Your API Keys (BYOK management) */}
       <Card className="glass-card border-border/40">
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
@@ -580,93 +463,6 @@ export function ApiKeysSettingsTab() {
         </DialogContent>
       </Dialog>
 
-      {/* Platform Key Configure Dialog */}
-      <Dialog
-        open={platformDialogOpen}
-        onOpenChange={(open) => {
-          setPlatformDialogOpen(open)
-          if (!open) { setPlatformProvider(''); setPlatformApiKey('') }
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <form onSubmit={handlePlatformSubmit}>
-            <DialogHeader>
-              <DialogTitle>
-                {platformKeys[platformProvider]?.configured ? 'Update' : 'Configure'} Platform Key
-              </DialogTitle>
-              <DialogDescription>
-                Set the platform-level API key for{' '}
-                <span className="font-medium text-foreground">{providerLabel(platformProvider)}</span>.
-                This key is shared across all workspaces.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="platform-api-key">API Key</Label>
-                <Input
-                  id="platform-api-key"
-                  type="password"
-                  placeholder="sk-..."
-                  value={platformApiKey}
-                  onChange={(e) => setPlatformApiKey(e.target.value)}
-                  autoComplete="off"
-                />
-                <p className="text-xs text-muted-foreground">
-                  The key will be encrypted before storage.
-                </p>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setPlatformDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={setPlatformKeyMutation.isPending || !platformApiKey}>
-                {setPlatformKeyMutation.isPending && (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                )}
-                Save Platform Key
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Remove Platform Key Confirmation Dialog */}
-      <Dialog open={!!removePlatformTarget} onOpenChange={(open) => !open && setRemovePlatformTarget(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Remove Platform Key</DialogTitle>
-            <DialogDescription>
-              Remove the platform-level API key for{' '}
-              <span className="font-medium text-foreground">
-                {providerLabel(removePlatformTarget || '')}
-              </span>
-              ? Workspaces without their own BYOK key will lose access to this provider.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRemovePlatformTarget(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={removePlatformKeyMutation.isPending}
-              onClick={() => removePlatformTarget && removePlatformKeyMutation.mutate(removePlatformTarget)}
-            >
-              {removePlatformKeyMutation.isPending && (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              )}
-              Remove
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

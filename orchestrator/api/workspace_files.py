@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.graph_storage import DbWorkspaceClient
 from core.workspace_client import WorkspaceClient
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,22 @@ router = APIRouter(
     prefix="/api/workspaces/{workspace_id}",
     tags=["workspace-files"],
 )
+
+
+# Paths under these prefixes are stored in Postgres via DbWorkspaceClient
+# (see PRD-130: graph artefacts persist to workspace_graphs instead of the
+# workspace-worker filesystem because wizard-created workspaces do not have
+# a worker container provisioned). Everything else still proxies to the
+# worker over HTTP as before.
+_DB_BACKED_PREFIXES = ("graph/", "graph")
+
+
+def _select_client(workspace_id: str, path: str):
+    """Route a (workspace, path) pair to the right storage backend."""
+    normalised = (path or "").lstrip("/")
+    if normalised == "graph" or normalised.startswith("graph/"):
+        return DbWorkspaceClient(workspace_id)
+    return WorkspaceClient(workspace_id)
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +58,7 @@ async def list_files(
     if str(ctx.workspace_id) != workspace_id:
         raise HTTPException(status_code=403, detail="Workspace access denied")
 
-    client = WorkspaceClient(workspace_id)
+    client = _select_client(workspace_id, path)
     result = await client.list_dir(path)
 
     if result.get("success") is False:
@@ -64,7 +81,7 @@ async def get_file_content(
     if str(ctx.workspace_id) != workspace_id:
         raise HTTPException(status_code=403, detail="Workspace access denied")
 
-    client = WorkspaceClient(workspace_id)
+    client = _select_client(workspace_id, path)
     result = await client.read_file(path)
 
     if result.get("success") is False:
