@@ -91,12 +91,17 @@ class FirecrawlClient:
         if limit is not None:
             payload["limit"] = limit
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(
-                f"{self._base_url}/map",
-                headers=self._headers(),
-                json=payload,
-            )
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.post(
+                    f"{self._base_url}/map",
+                    headers=self._headers(),
+                    json=payload,
+                )
+        except httpx.TimeoutException as exc:
+            raise FirecrawlError(f"Firecrawl /map timed out: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise FirecrawlError(f"Firecrawl /map transport error: {exc}") from exc
 
         if resp.status_code >= 400:
             raise FirecrawlError(
@@ -162,12 +167,21 @@ class FirecrawlClient:
             payload["formats"] = list(set(formats) | {"extract"})
             payload["extract"] = {"schema": schema}
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(
-                f"{self._base_url}/scrape",
-                headers=self._headers(),
-                json=payload,
-            )
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.post(
+                    f"{self._base_url}/scrape",
+                    headers=self._headers(),
+                    json=payload,
+                )
+        except httpx.TimeoutException as exc:
+            raise FirecrawlError(
+                f"Firecrawl /scrape timed out for {url}: {exc}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise FirecrawlError(
+                f"Firecrawl /scrape transport error for {url}: {exc}"
+            ) from exc
 
         if resp.status_code >= 400:
             raise FirecrawlError(

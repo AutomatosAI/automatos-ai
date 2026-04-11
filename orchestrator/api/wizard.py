@@ -577,6 +577,16 @@ async def _run_scrape_pipeline(
                     meta={"index": i, "total": total, "url": url, "error": str(exc)},
                 )
                 continue
+            except Exception as exc:  # noqa: BLE001 — last-resort, one bad URL must not kill the pipeline
+                logger.exception("wizard.scrape url=%s unexpected error", url)
+                failures.append({"url": url, "error": f"{type(exc).__name__}: {exc}"})
+                await progress_emit(
+                    profile_id, STAGE_SCRAPE,
+                    f"[{i}/{total}] ERROR {url}: {type(exc).__name__}",
+                    level="warn",
+                    meta={"index": i, "total": total, "url": url, "error": str(exc)},
+                )
+                continue
             result["page_type"] = page_type
             scrape_results.append(result)
             await progress_emit(
