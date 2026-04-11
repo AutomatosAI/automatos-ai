@@ -81,11 +81,16 @@ export function useWizardProgress({
     }
 
     let cancelled = false
+    let terminal = false
     const controller = new AbortController()
     abortRef.current = controller
     setState('streaming')
 
-    const run = async () => {
+    // One fetch+parse pass over the SSE stream. Returns:
+    //   'terminal' — saw a complete/failed event, do not reconnect
+    //   'ended'    — reader closed without a terminal event, reconnect
+    //   'error'    — fetch threw or response !ok, reconnect with backoff
+    const runOnce = async (): Promise<'terminal' | 'ended' | 'error'> => {
       try {
         const baseUrl = apiClient.getBaseUrl()
         const headers = await apiClient.getAuthHeaders()
@@ -102,8 +107,7 @@ export function useWizardProgress({
         })
 
         if (!response.ok || !response.body) {
-          if (!cancelled) setState('error')
-          return
+          return 'error'
         }
 
         const reader = response.body.getReader()
@@ -116,14 +120,12 @@ export function useWizardProgress({
 
           buffer += decoder.decode(value, { stream: true })
 
-          // SSE frames are separated by blank lines (`\n\n`)
           let sepIdx = buffer.indexOf('\n\n')
           while (sepIdx !== -1) {
             const frame = buffer.slice(0, sepIdx)
             buffer = buffer.slice(sepIdx + 2)
             sepIdx = buffer.indexOf('\n\n')
 
-            // Each frame may have multiple `data:` lines + comment lines (`:`)
             const dataLines = frame
               .split('\n')
               .filter((line) => line.startsWith('data:'))
@@ -134,29 +136,67 @@ export function useWizardProgress({
 
             try {
               const parsed = JSON.parse(raw) as WizardProgressEvent
-              if (cancelled) return
+              if (cancelled) return 'terminal'
 
-              setEvents((prev) => [...prev, parsed])
+              // Dedupe by timestamp+stage+message so reconnects that
+              // replay the LIST do not double-insert rows the UI has
+              // already rendered.
+              setEvents((prev) => {
+                if (
+                  prev.length > 0 &&
+                  prev.some(
+                    (e) =>
+                      e.ts === parsed.ts &&
+                      e.stage === parsed.stage &&
+                      e.message === parsed.message
+                  )
+                ) {
+                  return prev
+                }
+                return [...prev, parsed]
+              })
 
               if (parsed.stage === 'complete') {
                 setState('complete')
-              } else if (parsed.stage === 'failed') {
+                terminal = true
+                return 'terminal'
+              }
+              if (parsed.stage === 'failed') {
                 setState('failed')
+                terminal = true
+                return 'terminal'
               }
             } catch {
-              // Ignore malformed frames — keep the stream alive
               continue
             }
           }
         }
+
+        return cancelled ? 'terminal' : 'ended'
       } catch (err: any) {
-        if (cancelled || err?.name === 'AbortError') return
+        if (cancelled || err?.name === 'AbortError') return 'terminal'
         console.error('[wizard-progress] stream error:', err)
-        setState('error')
+        return 'error'
       }
     }
 
-    run()
+    // Drive the stream with auto-reconnect. The backend's Redis LIST
+    // replay means a reconnect catches up any events we missed during
+    // the blip, so the UI stays seamless.
+    const drive = async () => {
+      let attempt = 0
+      while (!cancelled && !terminal) {
+        const outcome = await runOnce()
+        if (outcome === 'terminal' || cancelled) return
+        attempt = outcome === 'error' ? attempt + 1 : 0
+        const backoffMs = Math.min(1000 * 2 ** Math.max(0, attempt - 1), 8000)
+        if (!cancelled) {
+          await new Promise((resolve) => setTimeout(resolve, backoffMs))
+        }
+      }
+    }
+
+    drive()
 
     return () => {
       cancelled = true

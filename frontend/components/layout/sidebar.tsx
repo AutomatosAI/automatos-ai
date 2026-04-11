@@ -271,40 +271,41 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         })}
       </nav>
 
-      {/* Settings at bottom - Admin only */}
-      {isAdmin && (
-        <div className="absolute bottom-4 left-3 right-3">
-          <Link
-            href="/settings"
-            data-tour="nav-settings"
-            className={cn(
-              'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
-              pathname === '/settings'
-                ? 'bg-primary/10 border border-primary/20'
-                : 'hover:bg-secondary/40'
-            )}
-          >
-            {iconMappings['nav_settings'] ? (
-              <PremiumIcon name={iconMappings['nav_settings']} size={18} className="shrink-0" />
-            ) : (
-              <Settings className="w-[18px] h-[18px] shrink-0 text-muted-foreground group-hover:text-foreground" />
-            )}
+      {/* Settings at bottom - visible to all users.
+          Every user needs access to add their own provider API keys.
+          Admin-only sections (Platform API Keys, System Settings) are
+          gated inside the Settings page itself, not at the nav level. */}
+      <div className="absolute bottom-4 left-3 right-3">
+        <Link
+          href="/settings"
+          data-tour="nav-settings"
+          className={cn(
+            'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
+            pathname === '/settings'
+              ? 'bg-primary/10 border border-primary/20'
+              : 'hover:bg-secondary/40'
+          )}
+        >
+          {iconMappings['nav_settings'] ? (
+            <PremiumIcon name={iconMappings['nav_settings']} size={18} className="shrink-0" />
+          ) : (
+            <Settings className="w-[18px] h-[18px] shrink-0 text-muted-foreground group-hover:text-foreground" />
+          )}
 
-            {!collapsed && (
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-muted-foreground group-hover:text-foreground truncate">Settings</p>
-                <p className="text-xs text-muted-foreground truncate">System configuration</p>
-              </div>
-            )}
+          {!collapsed && (
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-muted-foreground group-hover:text-foreground truncate">Settings</p>
+              <p className="text-xs text-muted-foreground truncate">Profile, API keys, preferences</p>
+            </div>
+          )}
 
-            {collapsed && (
-              <div className="absolute left-full ml-2 px-2 py-1 bg-popover/90 border border-border/50 rounded-xl backdrop-blur-lg text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                Settings
-              </div>
-            )}
-          </Link>
-        </div>
-      )}
+          {collapsed && (
+            <div className="absolute left-full ml-2 px-2 py-1 bg-popover/90 border border-border/50 rounded-xl backdrop-blur-lg text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+              Settings
+            </div>
+          )}
+        </Link>
+      </div>
     </motion.div>
   )
 }
