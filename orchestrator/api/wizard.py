@@ -603,6 +603,10 @@ def _ensure_mission_zero_team(
     for role in _MISSION_ZERO_ROLES:
         if role["name"].lower() in existing:
             continue
+        # Explicit model_config — do NOT inherit the DB column default
+        # (historically "gpt-4" with 8K context, which blows up on mission
+        # prompts). Pull from system settings / env so one place controls
+        # the default across all seeded teams.
         agent = Agent(
             name=role["name"],
             description=role["description"],
@@ -611,6 +615,16 @@ def _ensure_mission_zero_team(
             configuration={
                 "source": "mission_zero",
                 "job_title": role["job_title"],
+            },
+            model_config={
+                "provider": config.LLM_PROVIDER,
+                "model_id": config.LLM_MODEL,
+                "temperature": 0.7,
+                "max_tokens": 2000,
+                "top_p": 1.0,
+                "presence_penalty": 0.0,
+                "frequency_penalty": 0.0,
+                "fallback_model_id": None,
             },
             tags=[role["name"], "mission_zero", "onboarding"],
             workspace_id=workspace_id,
