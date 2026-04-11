@@ -37,6 +37,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
 from core.models.business_profiles import BusinessProfile
+from core.models.core import Agent
 
 from modules.intake.archetypes import (
     ARCHETYPES,
@@ -458,6 +459,12 @@ async def generate_plan(
     archetype = ARCHETYPES.get(profile.archetype or "")
     default_team = list(archetype.default_team) if archetype else []
 
+    # Mission Zero chicken-and-egg: the planner validates task agent_roles
+    # against active workspace agents, but a fresh workspace has none. Seed
+    # a minimal generic onboarding team so validation passes on the first
+    # decomposition attempt. Idempotent — skipped if already present.
+    _ensure_mission_zero_team(db, ctx.workspace_id, ctx.user.id)
+
     profile_dict = {
         "domain": profile.domain,
         "archetype": profile.archetype,
@@ -527,6 +534,101 @@ async def generate_plan(
         mission_id=str(run.id),
         goal=goal,
     )
+
+
+# ===========================================================================
+# Mission Zero onboarding team
+# ===========================================================================
+
+# Generic roles the Mission Zero planner reliably emits for a fresh bootstrap
+# mission. The role name doubles as the agent name so the planner's fuzzy
+# validator matches on equality.
+_MISSION_ZERO_ROLES: list[dict[str, str]] = [
+    {
+        "name": "researcher",
+        "job_title": "Mission Zero Researcher",
+        "description": (
+            "Extracts evidence from the workspace corpus and knowledge graph. "
+            "Cites document chunks and graph nodes — does not invent facts."
+        ),
+    },
+    {
+        "name": "writer",
+        "job_title": "Mission Zero Writer",
+        "description": (
+            "Synthesises researcher findings into concise, well-structured "
+            "briefs written in the company's brand voice."
+        ),
+    },
+    {
+        "name": "analyst",
+        "job_title": "Mission Zero Analyst",
+        "description": (
+            "Prioritises findings into highest-impact next actions and "
+            "surfaces open questions the corpus could not answer."
+        ),
+    },
+    {
+        "name": "strategist",
+        "job_title": "Mission Zero Strategist",
+        "description": (
+            "Designs the proposed onboarding team, responsibilities and "
+            "tool assignments based on the business profile."
+        ),
+    },
+]
+
+
+def _ensure_mission_zero_team(
+    db: Session,
+    workspace_id: str,
+    created_by: str | None,
+) -> None:
+    """Seed the minimal generic team Mission Zero decomposes into.
+
+    Idempotent: any role already present in the workspace is left alone.
+    Only creates what's missing so re-running the wizard doesn't duplicate.
+    """
+    existing = {
+        (a.name or "").lower()
+        for a in (
+            db.query(Agent)
+            .filter(Agent.workspace_id == workspace_id)
+            .filter(Agent.status == "active")
+            .all()
+        )
+    }
+
+    created: list[str] = []
+    for role in _MISSION_ZERO_ROLES:
+        if role["name"].lower() in existing:
+            continue
+        agent = Agent(
+            name=role["name"],
+            description=role["description"],
+            agent_type="custom",
+            status="active",
+            configuration={
+                "source": "mission_zero",
+                "job_title": role["job_title"],
+            },
+            tags=[role["name"], "mission_zero", "onboarding"],
+            workspace_id=workspace_id,
+            owner_type="workspace",
+            owner_id=str(workspace_id),
+            created_by=str(created_by) if created_by else None,
+            team="Mission Zero",
+            job_title=role["job_title"],
+        )
+        db.add(agent)
+        created.append(role["name"])
+
+    if created:
+        db.flush()
+        logger.info(
+            "wizard.plan seeded mission_zero team workspace=%s roles=%s",
+            workspace_id, created,
+        )
 
 
 # ===========================================================================
