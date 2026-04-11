@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Save, RotateCcw, Key, Shield, Settings } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
+import { PlatformApiKeysCard } from './PlatformApiKeysCard'
 
 interface BackendAPIKeysSettingsTabProps {
   settings: SystemSetting[]
@@ -61,6 +62,9 @@ export default function BackendAPIKeysSettingsTab({
 
   return (
     <div className="space-y-6">
+      {/* Platform LLM Provider Keys (moved from Settings > API Keys) */}
+      <PlatformApiKeysCard />
+
       {/* API Authentication */}
       <Card>
         <CardHeader>
