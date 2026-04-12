@@ -2,16 +2,16 @@
  * DeliverablePreview (PRD-129: Workspace Outputs Hub)
  * =====================================================
  *
- * Slide-over sheet that shows a single deliverable's content with Download
- * and "Open in Canvas" actions. Fetches full content via useDeliverable with
- * include_content=true. Renders images, code (Prism), markdown/reports
+ * Slide-over sheet that shows a single deliverable's content with Download,
+ * Delete, and "Open in Canvas" actions. Fetches full content via useDeliverable
+ * with include_content=true. Renders images, code (Prism), markdown/reports
  * (react-markdown), and plain text. Unsupported types show a friendly
  * fallback with a Download link.
  */
 
 'use client'
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
@@ -34,6 +34,7 @@ import {
   ExternalLink,
   FileWarning,
   Loader2,
+  Trash2,
 } from 'lucide-react'
 
 import {
@@ -43,7 +44,12 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
-import { useDeliverable, type Deliverable } from '@/hooks/use-deliverables-api'
+import {
+  useDeliverable,
+  useDeleteDeliverable,
+  type Deliverable,
+} from '@/hooks/use-deliverables-api'
+import { apiClient } from '@/lib/api-client'
 
 interface DeliverablePreviewProps {
   deliverableId: string | null
@@ -75,10 +81,6 @@ const EXT_TO_LANG: Record<string, string> = {
   dockerfile: 'docker',
 }
 
-/**
- * Detect a Prism language from a file path. Returns '' if unknown — Prism
- * will render without syntax highlighting in that case.
- */
 export function getLanguageFromPath(filePath: string | null | undefined): string {
   if (!filePath) return ''
   const base = filePath.split('/').pop() || ''
@@ -95,6 +97,26 @@ function isMarkdownDeliverable(d: Deliverable): boolean {
   if (ft === 'md' || ft === 'markdown') return true
   const lang = getLanguageFromPath(d.file_path)
   return lang === 'markdown'
+}
+
+/**
+ * Download a file through the API client (with auth headers) by fetching as
+ * blob and triggering a browser download via object URL.
+ */
+async function downloadViaApi(url: string, filename: string): Promise<void> {
+  const headers = await apiClient.getAuthHeaders()
+  const fullUrl = `${apiClient.getBaseUrl()}${url}`
+  const res = await fetch(fullUrl, { headers })
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(objectUrl)
 }
 
 // ============= CONTENT RENDERERS =============
@@ -152,20 +174,39 @@ function PlainTextContent({ content }: { content: string }) {
 function UnavailableContent({
   message,
   downloadUrl,
+  filename,
 }: {
   message: string
   downloadUrl: string | null
+  filename: string
 }) {
+  const [downloading, setDownloading] = useState(false)
+
+  const handleDownload = async () => {
+    if (!downloadUrl) return
+    setDownloading(true)
+    try {
+      await downloadViaApi(downloadUrl, filename)
+    } catch {
+      // fallback: open in new tab
+      window.open(`${apiClient.getBaseUrl()}${downloadUrl}`, '_blank')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border/50 bg-muted/10 p-10 text-center">
       <FileWarning className="h-10 w-10 text-muted-foreground" />
       <p className="text-sm text-muted-foreground">{message}</p>
       {downloadUrl && (
-        <Button asChild variant="outline" size="sm">
-          <a href={downloadUrl} target="_blank" rel="noopener noreferrer">
+        <Button variant="outline" size="sm" onClick={handleDownload} disabled={downloading}>
+          {downloading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
             <Download className="mr-2 h-4 w-4" />
-            Download
-          </a>
+          )}
+          Download
         </Button>
       )}
     </div>
@@ -184,6 +225,8 @@ export function DeliverablePreview({
     open ? deliverableId : null,
     true,
   )
+  const deleteMutation = useDeleteDeliverable()
+  const [downloading, setDownloading] = useState(false)
 
   const deliverable = data?.deliverable ?? null
 
@@ -202,7 +245,28 @@ export function DeliverablePreview({
     [deliverable],
   )
 
-  const downloadUrl = deliverable?.preview_url || deliverable?.content_url || null
+  const downloadUrl = deliverable?.content_url || deliverable?.preview_url || null
+  const filename = deliverable?.file_name || deliverable?.file_path?.split('/').pop() || 'download'
+
+  const handleDownload = useCallback(async () => {
+    if (!downloadUrl) return
+    setDownloading(true)
+    try {
+      await downloadViaApi(downloadUrl, filename)
+    } catch {
+      // fallback: open in new tab
+      window.open(`${apiClient.getBaseUrl()}${downloadUrl}`, '_blank')
+    } finally {
+      setDownloading(false)
+    }
+  }, [downloadUrl, filename])
+
+  const handleDelete = useCallback(() => {
+    if (!deliverable) return
+    deleteMutation.mutate(deliverable.id, {
+      onSuccess: () => onOpenChange(false),
+    })
+  }, [deliverable, deleteMutation, onOpenChange])
 
   const handleOpenInCanvas = () => {
     if (!deliverable) return
@@ -252,21 +316,37 @@ export function DeliverablePreview({
               </div>
               <div className="flex flex-wrap gap-2 pt-1">
                 {downloadUrl && (
-                  <Button asChild variant="outline" size="sm">
-                    <a
-                      href={downloadUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      download={deliverable.file_name ?? undefined}
-                    >
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownload}
+                    disabled={downloading}
+                  >
+                    {downloading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
                       <Download className="mr-2 h-4 w-4" />
-                      Download
-                    </a>
+                    )}
+                    Download
                   </Button>
                 )}
                 <Button variant="outline" size="sm" onClick={handleOpenInCanvas}>
                   <ExternalLink className="mr-2 h-4 w-4" />
                   Open in Canvas
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDelete}
+                  disabled={deleteMutation.isLoading}
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                >
+                  {deleteMutation.isLoading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                  )}
+                  Delete
                 </Button>
               </div>
             </SheetHeader>
@@ -299,6 +379,8 @@ function PreviewBody({
   deliverable: Deliverable
   language: string
 }) {
+  const filename = deliverable.file_name || deliverable.file_path?.split('/').pop() || 'download'
+
   // 1. Image — render <img> via content_url (backend provides this for images)
   if (deliverable.artifact_type === 'image') {
     const url = deliverable.content_url || deliverable.preview_url
@@ -307,6 +389,7 @@ function PreviewBody({
         <UnavailableContent
           message="Image preview unavailable"
           downloadUrl={null}
+          filename={filename}
         />
       )
     }
@@ -318,7 +401,8 @@ function PreviewBody({
     return (
       <UnavailableContent
         message={`Unable to load content: ${deliverable.content_error}`}
-        downloadUrl={deliverable.preview_url ?? null}
+        downloadUrl={deliverable.content_url ?? deliverable.preview_url ?? null}
+        filename={filename}
       />
     )
   }
@@ -329,7 +413,8 @@ function PreviewBody({
       return (
         <UnavailableContent
           message="Code content unavailable"
-          downloadUrl={deliverable.preview_url ?? null}
+          downloadUrl={deliverable.content_url ?? deliverable.preview_url ?? null}
+          filename={filename}
         />
       )
     }
@@ -342,7 +427,8 @@ function PreviewBody({
       return (
         <UnavailableContent
           message="Report content unavailable"
-          downloadUrl={deliverable.preview_url ?? null}
+          downloadUrl={deliverable.content_url ?? deliverable.preview_url ?? null}
+          filename={filename}
         />
       )
     }
@@ -358,7 +444,8 @@ function PreviewBody({
   return (
     <UnavailableContent
       message="Preview not available for this file type"
-      downloadUrl={deliverable.preview_url ?? null}
+      downloadUrl={deliverable.content_url ?? deliverable.preview_url ?? null}
+      filename={filename}
     />
   )
 }
