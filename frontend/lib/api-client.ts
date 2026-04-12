@@ -2571,6 +2571,13 @@ class ApiClient {
     return this.request(`/api/workspaces/${workspaceId}/files/content?path=${encodeURIComponent(path)}`)
   }
 
+  async saveWorkspaceFile(workspaceId: string, path: string, content: string) {
+    return this.request(`/api/workspaces/${workspaceId}/files/content`, {
+      method: 'PUT',
+      body: JSON.stringify({ path, content }),
+    })
+  }
+
   async listGithubRepos(workspaceId: string, page = 1, perPage = 30) {
     return this.request(`/api/workspaces/${workspaceId}/github/repos?page=${page}&per_page=${perPage}`)
   }

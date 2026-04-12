@@ -3,7 +3,7 @@
  * =====================================================
  *
  * Slide-over sheet that shows a single deliverable's content with Download,
- * Delete, and "Open in Canvas" actions. Fetches full content via useDeliverable
+ * Delete, and "Open in Explorer" actions. Fetches full content via useDeliverable
  * with include_content=true. Renders images, code (Prism), markdown/reports
  * (react-markdown), and plain text. Unsupported types show a friendly
  * fallback with a Download link.
@@ -332,7 +332,7 @@ export function DeliverablePreview({
                 )}
                 <Button variant="outline" size="sm" onClick={handleOpenInCanvas}>
                   <ExternalLink className="mr-2 h-4 w-4" />
-                  Open in Canvas
+                  Open in Explorer
                 </Button>
                 <Button
                   variant="outline"
