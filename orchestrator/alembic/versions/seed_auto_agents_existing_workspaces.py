@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "seed_auto_agents_existing_workspaces"
-down_revision = "agent_public_id_and_slug_fix"
+down_revision = None  # Standalone — safe to run anytime
 branch_labels = None
 depends_on = None
 

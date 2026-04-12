@@ -17,42 +17,55 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "agent_public_id_and_slug_fix"
-down_revision = "drop_agents_model_config_default"
+down_revision = None  # Standalone — safe to run anytime
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
-    # 1. Add public_id column as nullable first
-    op.add_column("agents", sa.Column("public_id", UUID(as_uuid=True), nullable=True))
+    conn = op.get_bind()
+
+    # 1. Add public_id column if not exists
+    conn.execute(sa.text(
+        "ALTER TABLE agents ADD COLUMN IF NOT EXISTS public_id UUID"
+    ))
 
     # 2. Backfill existing rows with random UUIDs
-    op.execute("UPDATE agents SET public_id = gen_random_uuid() WHERE public_id IS NULL")
+    conn.execute(sa.text(
+        "UPDATE agents SET public_id = gen_random_uuid() WHERE public_id IS NULL"
+    ))
 
-    # 3. Make non-nullable now that all rows have values
-    op.alter_column("agents", "public_id", nullable=False)
+    # 3. Add unique index on public_id (if not exists)
+    conn.execute(sa.text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_agents_public_id ON agents (public_id)"
+    ))
 
-    # 4. Add unique index on public_id
-    op.create_index("ix_agents_public_id", "agents", ["public_id"], unique=True)
-
-    # 5. Drop old global unique constraint on slug
-    # The column may have a unique constraint created inline or via index
-    # Try dropping the index first (SQLAlchemy creates ix_agents_slug for unique=True)
+    # 4. Drop old global unique constraint on slug (try both naming patterns)
+    conn.execute(sa.text(
+        "DROP INDEX IF EXISTS ix_agents_slug"
+    ))
     try:
-        op.drop_index("ix_agents_slug", table_name="agents")
+        conn.execute(sa.text(
+            "ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_slug_key"
+        ))
     except Exception:
         pass
-    # Also try the constraint name pattern
-    try:
-        op.drop_constraint("agents_slug_key", "agents", type_="unique")
-    except Exception:
-        pass
 
-    # 6. Widen slug column from 100 to 255
-    op.alter_column("agents", "slug", type_=sa.String(255), existing_type=sa.String(100))
+    # 5. Widen slug column to 255
+    conn.execute(sa.text(
+        "ALTER TABLE agents ALTER COLUMN slug TYPE VARCHAR(255)"
+    ))
 
-    # 7. Add per-workspace unique constraint on (workspace_id, slug)
-    op.create_unique_constraint("uq_agent_workspace_slug", "agents", ["workspace_id", "slug"])
+    # 6. Add per-workspace unique constraint on (workspace_id, slug) if not exists
+    conn.execute(sa.text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_agent_workspace_slug') THEN
+                ALTER TABLE agents ADD CONSTRAINT uq_agent_workspace_slug UNIQUE (workspace_id, slug);
+            END IF;
+        END $$;
+    """))
+
+    print("agent_public_id_and_slug_fix: migration complete")
 
 
 def downgrade() -> None:
