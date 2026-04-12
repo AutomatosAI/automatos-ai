@@ -293,6 +293,18 @@ async def _boot_phase_1_core():
         logger.warning(f"PRD-63 template seed init: {e}")
 
 
+def _load_cto_soul() -> str:
+    """Load the CTO soul document for Auto agent persona."""
+    import os
+    soul_path = os.path.join(os.path.dirname(__file__), "core", "seeds", "auto-cto-custom-soul.txt")
+    try:
+        with open(soul_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        logger.warning("CTO soul document not found at %s", soul_path)
+        return ""
+
+
 async def _schema_migration():
     """Phase 1 continued: DDL migrations that must complete before seeds."""
     # Direct DDL for Auto agent schema (idempotent SQL, no alembic dependency)
@@ -372,19 +384,20 @@ async def _schema_migration():
                     "tags": '["auto", "system", "orchestrator"]',
                 })
 
-            # Backfill personality_mode for Auto agents that don't have one yet.
-            # Only touches agents with NO personality_mode — never overwrites custom.
+            # Restore CTO soul persona to all Auto agents and set personality_mode=custom.
+            # The CTO soul (docs/auto-cto-custom-soul.txt) is the real Auto persona.
+            # A previous buggy backfill overwrote it with the generic friendly preset.
             conn.execute(_t2("""
                 UPDATE agents
-                SET configuration = CAST(
-                    COALESCE(CAST(configuration AS JSONB), CAST('{}' AS JSONB))
-                    || CAST('{"personality_mode": "friendly"}' AS JSONB)
-                AS JSON)
+                SET custom_persona_prompt = :soul,
+                    configuration = CAST(
+                        COALESCE(CAST(configuration AS JSONB), CAST('{}' AS JSONB))
+                        || CAST('{"personality_mode": "custom"}' AS JSONB)
+                    AS JSON)
                 WHERE is_system_agent = true
                   AND slug LIKE 'auto-%'
-                  AND (configuration IS NULL
-                       OR CAST(configuration AS JSONB) ->> 'personality_mode' IS NULL)
-            """))
+                  AND workspace_id IS NOT NULL
+            """), {"soul": _load_cto_soul()})
 
             conn.commit()
             if workspace_ids:
