@@ -336,7 +336,7 @@ async def _schema_migration():
                     SELECT 1 FROM agents a
                     WHERE a.workspace_id = w.id
                       AND a.is_system_agent = true
-                      AND a.slug = 'auto-' || w.id::text
+                      AND a.slug = CONCAT('auto-', CAST(w.id AS TEXT))
                 )
             """))
             workspace_ids = [row[0] for row in result]
@@ -351,12 +351,12 @@ async def _schema_migration():
                         model_config, configuration, tags,
                         created_at, updated_at
                     ) VALUES (
-                        gen_random_uuid(), 'Auto', 'auto-' || :ws_id,
+                        gen_random_uuid(), 'Auto', CONCAT('auto-', :ws_id),
                         'Your workspace AI orchestrator — the default agent for chat and settings.',
-                        'system', 'active', true, NULL, :ws_id,
+                        'system', 'active', true, NULL, CAST(:ws_id AS UUID),
                         'workspace', :ws_id_str,
                         true, :persona,
-                        :model_config::jsonb, :config::jsonb, :tags::jsonb,
+                        CAST(:model_config AS JSONB), CAST(:config AS JSONB), CAST(:tags AS JSONB),
                         NOW(), NOW()
                     ) ON CONFLICT DO NOTHING
                 """), {
