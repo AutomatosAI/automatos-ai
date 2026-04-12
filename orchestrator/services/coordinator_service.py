@@ -1034,6 +1034,20 @@ class CoordinatorService:
             .all()
         )
 
+        # Mission Zero: include global onboarding agents (VOYAGER, BLUEPRINT,
+        # SCRIBE, FORGE) so the planner/dispatcher can assign them tasks.
+        if mission_config and mission_config.get("source") == "mission_zero":
+            onboarding_agents: List[Agent] = (
+                db.query(Agent)
+                .filter(
+                    Agent.is_system_agent.is_(True),
+                    Agent.required_role == "onboarding",
+                    Agent.status == "active",
+                )
+                .all()
+            )
+            agents.extend(onboarding_agents)
+
         # Decompose goal into task DAG
         try:
             decomposition = await MissionPlanner.decompose(

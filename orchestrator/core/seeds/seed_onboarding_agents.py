@@ -18,7 +18,7 @@ Run: python -m core.seeds.seed_onboarding_agents
 import logging
 from sqlalchemy.orm import Session
 
-from core.models.core import Agent
+from core.models.core import Agent, Skill, agent_skills
 
 logger = logging.getLogger(__name__)
 
@@ -282,9 +282,69 @@ def seed_onboarding_agents(db: Session) -> list:
             db.add(agent)
             seeded.append(agent)
 
+    db.flush()  # Ensure all agents have IDs before skill assignment
+
+    # Assign skills — platform-management for all, web-research for VOYAGER
+    _assign_onboarding_skills(db, seeded)
+
     db.commit()
     logger.info("Seeded %d onboarding agents", len(seeded))
     return seeded
+
+
+# Skills each onboarding agent should have.
+# Key = slug suffix (e.g. "voyager"), value = list of skill name patterns to match.
+_AGENT_SKILL_MAP: dict[str, list[str]] = {
+    "voyager":   ["platform-management", "web-research"],
+    "blueprint": ["platform-management"],
+    "scribe":    ["platform-management"],
+    "forge":     ["platform-management"],
+}
+
+
+def _assign_onboarding_skills(db: Session, agents: list) -> None:
+    """Wire skills to onboarding agents via the agent_skills junction table.
+
+    Idempotent — skips rows that already exist.
+    """
+    # Gather skill names we need
+    all_skill_names = {n for names in _AGENT_SKILL_MAP.values() for n in names}
+    skills_by_name: dict[str, int] = {
+        s.name: s.id
+        for s in db.query(Skill.id, Skill.name)
+        .filter(Skill.name.in_(all_skill_names), Skill.is_active.is_(True))
+        .all()
+    }
+    if not skills_by_name:
+        logger.info("No matching skills found for onboarding agents — skipping assignment")
+        return
+
+    # Existing assignments (avoid duplicates)
+    agent_ids = [a.id for a in agents]
+    existing = set(
+        db.execute(
+            agent_skills.select().where(agent_skills.c.agent_id.in_(agent_ids))
+        ).fetchall()
+    )
+    existing_pairs = {(row.agent_id, row.skill_id) for row in existing}
+
+    inserted = 0
+    for agent in agents:
+        suffix = agent.slug.replace("onboarding-", "")
+        wanted = _AGENT_SKILL_MAP.get(suffix, [])
+        for skill_name in wanted:
+            skill_id = skills_by_name.get(skill_name)
+            if not skill_id:
+                continue
+            if (agent.id, skill_id) in existing_pairs:
+                continue
+            db.execute(
+                agent_skills.insert().values(agent_id=agent.id, skill_id=skill_id)
+            )
+            inserted += 1
+
+    if inserted:
+        logger.info("Assigned %d skill(s) to onboarding agents", inserted)
 
 
 def run():
