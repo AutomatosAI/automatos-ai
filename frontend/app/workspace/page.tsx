@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Activity, HardDrive, Loader2 } from 'lucide-react'
+import { HardDrive, Loader2 } from 'lucide-react'
 
 import { MainLayout } from '@/components/layout/main-layout'
+import { ActivityFeed } from '@/components/activity/activity-feed'
 import { GalleryView } from '@/components/workspace/gallery-view'
 import { WorkspaceExplorer } from '@/components/workspace/WorkspaceExplorer'
 import {
@@ -77,15 +78,8 @@ export default function WorkspacePage() {
               />
             )}
             {view === 'activity' && (
-              <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
-                <Activity className="h-12 w-12" strokeWidth={1.5} />
-                <div className="text-base font-medium text-foreground">
-                  Activity view coming soon
-                </div>
-                <div className="max-w-sm text-sm">
-                  A live timeline of agent actions in this workspace will land
-                  in a later release.
-                </div>
+              <div className="h-full overflow-y-auto">
+                <ActivityFeed />
               </div>
             )}
           </div>
