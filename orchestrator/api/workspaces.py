@@ -326,29 +326,39 @@ async def get_orchestrator_settings(
                 "presence_penalty": mc.get("presence_penalty", 0.0),
                 "fallback_model_id": mc.get("fallback_model_id"),
             }
-            # Persona / Soul — Auto agent is the source of truth
-            if auto_agent.custom_persona_prompt:
-                # Detect which preset matches, or it's custom
+            # Persona / Soul — read from Auto agent configuration
+            agent_cfg = auto_agent.configuration or {}
+
+            # personality_mode is stored directly in configuration JSONB
+            stored_mode = agent_cfg.get("personality_mode")
+            if stored_mode:
+                result["personality_mode"] = stored_mode
+                if stored_mode == "custom":
+                    result["custom_soul"] = auto_agent.custom_persona_prompt or ""
+                else:
+                    result["custom_soul"] = ""
+            elif auto_agent.custom_persona_prompt:
+                # Legacy: detect preset by text comparison (agents seeded before mode was stored)
                 matched_preset = None
                 for mode, text in _PERSONALITY_PRESETS.items():
                     if auto_agent.custom_persona_prompt.strip() == text.strip():
                         matched_preset = mode
                         break
-                if matched_preset:
-                    result["personality_mode"] = matched_preset
-                    result["custom_soul"] = ""
-                else:
-                    result["personality_mode"] = "custom"
-                    result["custom_soul"] = auto_agent.custom_persona_prompt
+                result["personality_mode"] = matched_preset or "custom"
+                result["custom_soul"] = "" if matched_preset else auto_agent.custom_persona_prompt
 
             # Configuration (thinking, proactive, communication style)
-            agent_cfg = auto_agent.configuration or {}
             if agent_cfg.get("communication_style"):
                 result["communication_style"] = agent_cfg["communication_style"]
             if agent_cfg.get("proactive_level"):
                 result["proactive_level"] = agent_cfg["proactive_level"]
             if agent_cfg.get("thinking_level"):
                 result["thinking_level"] = agent_cfg["thinking_level"]
+
+            logger.debug(
+                "Orchestrator GET for ws=%s: personality_mode=%s, llm_model=%s, auto_agent_id=%s",
+                ctx.workspace_id, result.get("personality_mode"), result.get("llm", {}).get("model_id"), auto_agent.id,
+            )
         else:
             result["llm"] = {
                 "provider": config.LLM_PROVIDER or "openrouter",
@@ -490,6 +500,10 @@ async def save_orchestrator_settings(
 
         # Configuration fields → Auto agent configuration JSONB
         config_fields = {}
+        # Store personality_mode in configuration so GET can read it back
+        # without fragile text comparison
+        if personality_mode:
+            config_fields["personality_mode"] = personality_mode
         if "communication_style" in payload:
             config_fields["communication_style"] = payload["communication_style"]
         if "proactive_level" in payload:

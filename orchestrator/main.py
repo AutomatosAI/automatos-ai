@@ -368,9 +368,18 @@ async def _schema_migration():
                     "ws_id_str": str(ws_id),
                     "persona": "**My personality:**\n- I'm warm and approachable - think of me as a knowledgeable friend\n- I remember you and our past conversations\n- I prefer action over explanation - if you ask me to do something, I'll do it\n- I'm honest about what I can and can't do\n- I get excited when we solve problems together!",
                     "model_config": '{"provider": "openrouter", "model_id": "openai/gpt-4o", "temperature": 0.7, "max_tokens": 4000, "top_p": 1.0, "frequency_penalty": 0.0, "presence_penalty": 0.0, "fallback_model_id": null}',
-                    "config": '{"thinking_level": "medium", "proactive_level": "notify", "communication_style": "balanced"}',
+                    "config": '{"thinking_level": "medium", "proactive_level": "notify", "communication_style": "balanced", "personality_mode": "friendly"}',
                     "tags": '["auto", "system", "orchestrator"]',
                 })
+
+            # Backfill personality_mode into existing Auto agents' configuration
+            conn.execute(_t2("""
+                UPDATE agents
+                SET configuration = COALESCE(configuration, CAST('{}' AS JSONB)) || CAST('{"personality_mode": "friendly"}' AS JSONB)
+                WHERE is_system_agent = true
+                  AND slug LIKE 'auto-%'
+                  AND (configuration IS NULL OR NOT jsonb_exists(configuration, 'personality_mode'))
+            """))
 
             conn.commit()
             if workspace_ids:
