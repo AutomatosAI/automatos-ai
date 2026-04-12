@@ -355,9 +355,12 @@ async def get_orchestrator_settings(
             if agent_cfg.get("thinking_level"):
                 result["thinking_level"] = agent_cfg["thinking_level"]
 
-            logger.debug(
-                "Orchestrator GET for ws=%s: personality_mode=%s, llm_model=%s, auto_agent_id=%s",
+            logger.info(
+                "Orchestrator GET for ws=%s: personality_mode=%s, llm_model=%s, auto_agent_id=%s, "
+                "stored_config_keys=%s, persona_len=%s",
                 ctx.workspace_id, result.get("personality_mode"), result.get("llm", {}).get("model_id"), auto_agent.id,
+                list((auto_agent.configuration or {}).keys()),
+                len(auto_agent.custom_persona_prompt or ""),
             )
         else:
             result["llm"] = {
