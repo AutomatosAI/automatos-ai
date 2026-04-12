@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from core.auth.hybrid import get_request_context, RequestContext
+from core.auth.hybrid import get_request_context_hybrid, RequestContext
 from core.database.database import get_db
 from core.models.core import Agent
 
@@ -75,7 +75,7 @@ class OnboardingAgentResponse(BaseModel):
 @router.get("")
 async def list_onboarding_agents(
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """List all onboarding agents for the Settings tab."""
     _require_admin(ctx)
@@ -109,7 +109,7 @@ async def update_onboarding_agent(
     slug: str,
     payload: OnboardingAgentUpdate,
     db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """Update an onboarding agent's model, persona, or status."""
     _require_admin(ctx)
