@@ -1,88 +1,89 @@
-# PRD-129: Workspace Outputs Hub — Progress Log
+# Unified Notification System (PRD-128) Progress Log
 
-2026-04-10 — Rebuilt IMPLEMENTATION_PLAN.md for PRD-129 (was stale PRD-122).
-2026-04-10 — US-001 complete: created alembic/versions/prd129_deliverables.py
-  - Standalone migration (down_revision=None) following prd127/prd76 pattern
-  - deliverables table: UUID PK, workspace FK, source/artifact/storage/preview cols
-  - `extra` JSONB (not `metadata` — avoids SQLAlchemy Base.metadata conflict)
-  - file_size_bytes BIGINT
-  - Soft delete via deleted_at
-  - 5 indices + UNIQUE partial index uq_deliverables_workspace_path WHERE deleted_at IS NULL
-  - Import-tested OK; DB not running locally so `alembic upgrade` deferred to deploy.
-2026-04-10 — US-002 complete: services/deliverable_service.py + tests/services/test_deliverable_service.py
-  - DeliverableService class with register/list_deliverables/get_deliverable/get_stats/soft_delete
-  - Module-level EXTENSION_TO_ARTIFACT (~45 extensions across 9 categories), _slugify, _infer_artifact_type, _humanize_basename
-  - register() is idempotent via ON CONFLICT (workspace_id, file_path) WHERE deleted_at IS NULL
-    - DO UPDATE uses COALESCE to preserve old values when caller omits them
-    - `extra` JSONB merged via `||` operator (preserves prior keys)
-    - Returns {success, deliverable_id, created, artifact_type, title} — `created` tells insert vs update
-    - NEVER calls WorkspaceClient (confirmed by test_register_does_not_call_workspace_client)
-  - list_deliverables() supports artifact_type/source_type/agent_id/date_from/date_to/search filters
-    - LEFT JOINs agents for fallback agent_name
-    - Clamps limit to [1, 100], excludes deleted_at IS NOT NULL
-  - get_deliverable(include_content=True): reads file via WorkspaceClient for text; for images returns content_url
-  - get_stats(): total, by_type (count), by_agent (list of {agent_id, agent_name, count})
-  - All SQL uses sqlalchemy.text() with bound params. All exceptions logged with exc_info=True.
-  - 26 unit tests, all passing (0.75s).
-2026-04-10 — US-003 complete: api/deliverables.py + tests/api/test_deliverables_api.py
-  - Routes: GET / (list + filters), GET /stats, GET /{id}?include_content=, DELETE /{id}
-  - /stats declared BEFORE /{deliverable_id} to avoid FastAPI capturing 'stats' as an id
-  - All endpoints use Depends(get_request_context_hybrid); svc scoped to ctx.workspace_id
-  - Registered in main.py inside try/except ImportError (mirrors reports router)
-  - 12 integration tests pass in 0.48s — covers list default, filter forwarding, limit>100 → 422,
-    stats, stats vs id path shadowing, get (found, 404, include_content), delete (success, 404),
-    and workspace isolation: X-Workspace-ID header is ignored, svc always gets ctx.workspace_id
-  - Test uses FastAPI dependency_overrides + patch('api.deliverables.DeliverableService')
-    with sys.modules stubs for jwt/clerk/core.database/core.auth — no DB or env needed.
-2026-04-10 — US-004 complete: auto-register deliverables on workspace_write_file + report_service
-  - Added AGENT_REGISTERABLE_ARTIFACT_TYPES (report/image/document/slide/spreadsheet/code) to deliverable_service.py
-  - exec_workspace.py: new _auto_register_deliverable() helper + _derive_source() that extracts
-    source_type/source_id from caller_context (heartbeat_id → 'heartbeat', mission_id → 'mission',
-    task_id → 'task', playbook_id → 'playbook', trigger_id → 'trigger', else 'chat').
-  - execute_workspace_action() now accepts agent_id + caller_context, calls auto-register on
-    successful workspace_write_file. Skips non-registerable extensions (archive/audio/video).
-    ALL failures caught via try/except with exc_info=True — never break the write.
-  - File size extracted from worker response (size/bytes_written/file_size_bytes/bytes keys).
-  - Agent name resolved via cheap DB lookup (SessionLocal + Agent.query).
-  - unified_executor.py: plumbed agent_id + caller_context into both workspace action paths
-    (platform_execute dispatcher branch + direct workspace_* branch).
-  - report_service.create_report(): mirrors reports into deliverables after DB insert with
-    artifact_type='report', source_type='heartbeat' (or 'task' if no heartbeat_result_id and
-    report_type != 'standup'), source_id from heartbeat_result_id or report_id.
-  - 11 unit tests in tests/modules/tools/execution/test_exec_workspace_deliverable.py — all pass.
-    Tests use sys.modules stubs for core.workspace_client, core.database.database, core.models.core,
-    and services.deliverable_service to avoid pulling pgvector + DB config into test import.
-    Covered: _derive_source precedence, successful register, skip non-registerable (.zip),
-    register failure does not break write, read_file does not register, default source=chat.
+Project: Automatos AI Platform
+Feature: ralph/prd-128-unified-notifications
+Started: 2026-04-10
 
-2026-04-10 — US-005 complete: scripts/backfill_prd129_deliverables.py
-  - Iterates agent_reports via SQL (LEFT JOIN agents for name fallback)
-  - Calls DeliverableService.register() per row (artifact_type='report')
-  - source_type='heartbeat' if heartbeat_result_id set or report_type='standup', else 'task'
-  - Flags: --dry-run, --workspace-id <uuid>, --verbose
-  - Idempotent via US-001 unique partial index
-  - Summary printed: Processed/Inserted/Updated/Skipped/Errors; exit 1 on errors
-  - Local --help verified; full dry-run needs DB (runs on deploy)
-  - Import fix: `from config import config` (NOT core.config)
+---
 
-2026-04-10 US-006 — Create useDeliverables React Query hooks
-- New: frontend/hooks/use-deliverables-api.ts
-- Types: Deliverable, FilterState, DEFAULT_FILTERS, DeliverableListResponse, DeliverableDetailResponse, DeliverableStats
-- Hooks: useDeliverables (useInfiniteQuery), useDeliverable, useDeliverableStats, useDeleteDeliverable
-- PAGE_SIZE=24; offset-based pagination via getNextPageParam
-- date_range ('today'|'week'|'month'|'all') translated to ISO date_from client-side
-- Query keys scoped by workspaceId via existing useWorkspace() hook
-- Delete mutation invalidates all ['deliverables', workspaceId] queries
-- React Query v4 API (pageParam default via destructuring, no initialPageParam)
-2026-04-10 21:20 US-007: DeliverableCard component created
-2026-04-10 — US-008 complete: frontend/components/workspace/gallery-view/filter-bar.tsx
-  - Debounced search (local useDebounce hook, 300ms) — no shared hook in repo
-  - Type/Source/Date Selects using shadcn Select (with 'all' sentinel — Radix rejects empty string values)
-  - Clear button only when hasActiveFilters; right-aligned total with pluralization
-  - Lucide icons only (Search, Calendar, FileType, Zap, X) — no emojis
-  - Effect deps [debouncedSearch, filters.search, onFiltersChange] — no stale closure, no-op guarded
-  - External-reset sync via second effect on filters.search
-  - Typecheck not runnable locally (no node_modules in frontend/); imports verified against ui/* and use-deliverables-api
-US-009 DeliverablePreview slide-over built (2026-04-10)
-2026-04-10 21:26 US-010 GalleryView container (infinite scroll + preview slide-over)
-2026-04-10 US-011 WorkspaceViewToggle + workspace page wiring (gallery default, preserves explorer deep-links)
+## Story Status
+
+- 2026-04-10: archived stale PRD-122 IMPLEMENTATION_PLAN; rebuilt plan for PRD-128 (10 stories).
+- 2026-04-10: **US-001 done** — alembic migration `prd128_notifications` creates `notification_preferences` and `notifications` tables with all PRD-specified columns, FKs, and partial/composite indexes. Chained off `prd127_attachment_ids` so `down_revision` is not None. No unique constraint on `(workspace_id, user_id, event_type)` so events can fan out to multiple destinations.
+- 2026-04-10: **US-002 done** — `_provision_new_user_workspace()` in `orchestrator/core/auth/hybrid.py` now seeds 9 default `notification_preferences` rows (heartbeat/task/mission_complete/playbook_complete/trigger_fired/report_submitted/agent_error=in_app, mission_step_complete/playbook_step_complete=silent) with `user_id=NULL, enabled=true`. Extracted `_seed_default_notification_preferences()` helper and `DEFAULT_NOTIFICATION_PREFERENCES` tuple as single source of truth. Idempotent via `INSERT ... WHERE NOT EXISTS` (table has no unique constraint because multi-destination fan-out is allowed). Helper does not commit — caller owns the transaction. New unit tests in `orchestrator/tests/test_prd128_default_prefs.py` (4 tests, all passing) verify: constant matches spec, fresh workspace inserts exactly 9 rows with correct params, re-run yields 0 inserts, generated SQL retains `WHERE NOT EXISTS` + `user_id IS NULL` guard. Gotcha: `core.auth.hybrid` imports `SessionLocal` at module load which requires Postgres env vars — test file sets dummy POSTGRES_* with `os.environ.setdefault` before the import to make the DB-free unit test collectable.
+- 2026-04-10: **US-003 done** — New `orchestrator/core/services/notification_dispatcher.py` implements `NotificationDispatcher(db, workspace_id)` with `async dispatch(event_type, title, message, link_type, link_id, agent_id, agent_name, status, user_id)`. `_get_preferences` returns a LIST of matching rows (no LIMIT) and applies user-override semantics per destination: user-specific rows shadow workspace defaults on the same destination while default-only destinations survive. Destinations: `silent` skipped; `in_app` inserts a `notifications` row via `db.execute` without committing; `telegram`/`slack`/`webhook` delegate to existing `send_workspace_notification(..., channel=destination)`; `channel` looks up the `channel_connections` row by id and dispatches via its platform. `_format_external_message` builds a concise status-icon + title + agent line + 200-char truncated message (ends with `…`) + TODO deep-link placeholder. No-preferences case falls back to a single in_app dispatch. Every destination branch is wrapped in try/except with `exc_info=True` so a delivery failure never raises out of the dispatcher. New unit tests in `orchestrator/tests/test_prd128_notification_dispatcher.py` (6 tests, all passing) cover: silent skip, in_app insert with no commit, in_app + telegram multi-destination fan-out, user override shadows workspace default on shared destination while unique default destinations survive, no-preferences in_app fallback, and `_format_external_message` truncation/icon behaviour. Tests stub `send_workspace_notification` with `AsyncMock` so no real network IO. Files touched: `orchestrator/core/services/notification_dispatcher.py` (new), `orchestrator/tests/test_prd128_notification_dispatcher.py` (new), `scripts/ralph/IMPLEMENTATION_PLAN.md`, `scripts/ralph/progress.txt`, `scripts/ralph/prd.json`.
+
+2026-04-10 — US-004: Notifications API
+  - NEW: orchestrator/api/notifications.py (list, unread-count, read, read-all, dismiss)
+  - All queries workspace+user scoped via parameterized text() SQL
+  - 404 on visible-but-already-mutated rows avoided (distinguishes "not found" from "no-op")
+  - Router registered in orchestrator/main.py
+  - Syntax check: OK
+
+2026-04-10 — US-005 Notification preferences API
+  - NEW preferences_router in orchestrator/api/notifications.py at prefix /api/notification-preferences
+  - GET / — merged view (workspace defaults shadowed by user-specific rows per (event_type, destination)); backfills missing event_types from DEFAULT_NOTIFICATION_PREFERENCES so settings UI sees all 9 events
+  - PUT / — bulk upsert: deletes user-scoped rows for affected event_types then re-inserts. Validates event_type against VALID_EVENT_TYPES (dispatcher), destination against {in_app, telegram, slack, webhook, channel, silent}, channel_connection_id existence + workspace ownership
+  - Workspace-scoped via RequestContext; rejects requests without resolvable user_id (403)
+  - Router registered in orchestrator/main.py (preferences_router import + include_router)
+  - Syntax check: OK
+
+2026-04-10 US-006: Migrated HeartbeatService to NotificationDispatcher.
+  - orchestrator/services/heartbeat_service.py: new _dispatch_heartbeat_notification helper replaces 4 call sites of _deliver_notification in _orchestrator_tick (success+error) and _agent_tick (success+error)
+  - Deleted: _deliver_notification, _format_heartbeat_message, _send_via_integration, _send_via_webhook, _resolve_telegram_chat_id
+  - External telegram/slack/webhook now flow through core.services.notification_service.send_workspace_notification via the dispatcher
+  - Agent ticks resolve agent.name via Agent model; orchestrator ticks use "Orchestrator"
+  - Message body extracted from llm_analysis finding (fallback: concatenated details)
+  - link_type='heartbeat', link_id=_heartbeat_result_id
+  - Dedicated SessionLocal per dispatch; commits locally; try/except wraps whole helper (non-blocking)
+  - Tests: tests/test_prd128_notification_dispatcher.py still passes (6/6)
+  - Grep confirms no other callers of removed helpers
+
+2026-04-10 US-007: Wired tasks/missions/playbooks/reports to NotificationDispatcher.
+  - orchestrator/api/board_tasks.py: new _dispatch_task_complete helper; dispatch task_complete on:
+      * update_task (PATCH) when body.status == "done"
+      * approve_task (POST /approve) — always
+      * update_task_status (PATCH /{id}/status) when new_status == "done"
+      * _launch_task_execution background when task reaches "done" (not "review")
+    All dispatches use request's db and happen before existing db.commit() (no extra commits).
+    Resolves agent_name from assigned_agent_id.
+  - orchestrator/services/coordinator_service.py: new module-level _dispatch_mission_event helper.
+      * mission_step_complete fired in _execute_task right after MissionDispatcher.record_task_completion (before the outer tick commit)
+      * mission_complete fired in _build_and_advance_to_awaiting_human after transition_run(COMPLETED)
+    Both default to silent/in_app per US-002 seed (step=silent, complete=in_app).
+  - orchestrator/api/recipe_executor.py: new _dispatch_playbook_event helper at module top (fixed duplicate logger definition while editing).
+      * playbook_step_complete fired per successful step right after appending compact result, before _persist_step_results (so notification insert joins the same commit)
+      * playbook_complete fired in _execute_recipe_inner before the final db.commit() once execution.status == 'completed'
+  - orchestrator/services/report_service.py: dispatch report_submitted inside create_report between the INSERT RETURNING and self.db.commit() — joins the same transaction.
+  - All new dispatches wrapped in try/except with exc_info=True logging; dispatcher failures never block primary completion flow.
+  - Gotcha: PRD AC said orchestrator/api/tasks.py but that file is PRD-56 task_executions queue with no completion endpoint. The real user-facing task completion lives in board_tasks.py; wired there.
+  - Validation: ast.parse clean on all 4 edited files; tests/test_prd128_notification_dispatcher.py still passes (6/6).
+
+
+2026-04-10 — US-008 NotificationBell component + navbar mount
+  - New frontend/hooks/use-notifications-api.ts: react-query v4 hooks for list, unread-count (30s poll), mark-read, mark-all-read, dismiss, preferences (GET + bulk PUT).
+  - New frontend/components/notifications/notification-bell.tsx: Popover dropdown, unread badge (9+ cap, hidden at 0), per-row click (mark read + router.push via linkFor), dismiss button, mark-all-read, empty state, footer link to /settings/notifications. linkFor routes heartbeat/task/mission/playbook/report/trigger/agent link_types to Activity tabs.
+  - frontend/components/layout/header.tsx: replaced the static <Bell/> + hardcoded "3" badge with <NotificationBell/>. Removed unused Bell import.
+  - React Query v4 compliance: isLoading (not isPending), useRouter().push() from next/navigation (not window.location).
+  - Uses apiClient.request with JSON.stringify on body to match existing hook patterns.
+  - Validation: tsc not runnable locally (node_modules not installed in this worktree); relied on type-safe imports against existing hooks/ and components/ui/popover.tsx which matches the expected Radix Popover shape. Will typecheck on next CI run.
+
+
+2026-04-10 — US-009 /settings/notifications page + settings tab link
+  - New frontend/components/settings/NotificationsSettingsTab.tsx: lists all 9 event types with label+description, each row has a destination Select (in_app/telegram/slack/webhook/silent) + enabled Switch; auto-saves on change via useUpdateNotificationPreferences (PUT bulk upsert). Loading/error/saving states shown via Loader2 and a Badge. Falls back to in_app+enabled for any event type missing from the API response so the UI always shows all 9 rows even before seeding.
+  - New frontend/app/settings/notifications/page.tsx: standalone route wrapping NotificationsSettingsTab inside MainLayout. usePageAPI('settings') preserves existing page-api registration. This route is what the NotificationBell footer "Settings" link already points to (wired in US-008).
+  - frontend/components/settings/SettingsPanel.tsx: added Notifications tab (Bell icon) between Channels and Voices so /settings lands users directly on the prefs tab. Matches "Accessible from the settings sidebar navigation" AC — the app uses tabs, not a sidebar, but this IS the settings navigation entry point.
+  - Optimistic UI: useUpdateNotificationPreferences already invalidates both notificationQueryKeys.preferences and notificationQueryKeys.all onSuccess (defined in US-008 hook), so the bell + settings refetch together.
+  - Switch is Radix-based; accepts checked + onCheckedChange. Select is Radix-based; accepts value + onValueChange. Both confirmed against frontend/components/ui/{switch,select}.tsx.
+  - Validation: tsc not runnable in this worktree (no node_modules). Type-safe against PreferenceRow from hooks/use-notifications-api.ts; no new imports from non-existent modules. Will typecheck on next CI run.
+  - Gotcha: AC says "sidebar" but settings is tab-based in this codebase. Added a Notifications tab to SettingsPanel so the entry point is discoverable from the existing navigation, and kept the standalone /settings/notifications route for the bell deep-link.
+
+2026-04-10 US-010 — End-to-end smoke test of notification pipeline
+  Added tests/integration/__init__.py + tests/integration/test_notification_pipeline.py.
+  Stateful FakeDB replays the SQL patterns emitted by NotificationDispatcher and
+  api.notifications (INSERT notifications, SELECT list/count, UPDATE read_at/dismissed_at,
+  existence probe). Test drives dispatch("heartbeat_complete") → unread-count → list →
+  mark_read → dismiss in one pytest function and asserts every transition.
+  Run: python3 -m pytest tests/integration/test_notification_pipeline.py (1 passed).
+  Gotcha: pytest must run from the worktree root, not from orchestrator/, so the sys.path
+  insert in the test file picks up orchestrator/ before `import api.notifications`.

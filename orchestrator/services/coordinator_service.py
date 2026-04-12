@@ -71,6 +71,49 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# PRD-128: Unified notification dispatch helpers
+# ---------------------------------------------------------------------------
+
+async def _dispatch_mission_event(
+    db: Session,
+    run: OrchestrationRun,
+    event_type: str,
+    title: str,
+    message: Optional[str],
+    agent_id: Optional[int] = None,
+    agent_name: Optional[str] = None,
+    status: str = "ok",
+) -> None:
+    """Fire a mission-related event through NotificationDispatcher.
+
+    Uses the current coordinator DB session so the notification row joins
+    the outer tick transaction (the tick commits once per run). Failures
+    are logged but never block the coordinator.
+    """
+    try:
+        from core.services.notification_dispatcher import NotificationDispatcher
+
+        dispatcher = NotificationDispatcher(db, str(run.workspace_id))
+        await dispatcher.dispatch(
+            event_type=event_type,
+            title=title,
+            message=message,
+            link_type="mission",
+            link_id=str(run.id),
+            agent_id=agent_id,
+            agent_name=agent_name,
+            status=status,
+        )
+    except Exception:
+        logger.error(
+            "[Coordinator] %s dispatch failed for run %s",
+            event_type,
+            getattr(run, "id", "?"),
+            exc_info=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # CoordinatorService
 # ---------------------------------------------------------------------------
 
@@ -922,6 +965,25 @@ class CoordinatorService:
 
         # Record completion/failure
         MissionDispatcher.record_task_completion(db, task, result)
+
+        # PRD-128: dispatch mission_step_complete (default pref is 'silent'
+        # so this is opt-in per workspace/user)
+        try:
+            step_agent = db.query(Agent).filter(Agent.id == agent_id).first()
+            step_agent_name = step_agent.name if step_agent else f"agent-{agent_id}"
+        except Exception:
+            step_agent_name = f"agent-{agent_id}"
+        step_output = result.get("output") or result.get("result") or ""
+        await _dispatch_mission_event(
+            db=db,
+            run=run,
+            event_type="mission_step_complete",
+            title=f"Mission step: {task.title or task.id}",
+            message=str(step_output)[:500] if step_output else None,
+            agent_id=agent_id,
+            agent_name=step_agent_name,
+            status="ok" if result.get("status") == "success" else "error",
+        )
 
         # PRD-108: Inject completed task output into shared field
         if result.get("status") == "success":
@@ -2266,6 +2328,19 @@ class CoordinatorService:
                     "total_duration_seconds": summary["total_duration_seconds"],
                     "consistency": summary.get("consistency"),
                 },
+            )
+
+            # PRD-128: dispatch mission_complete on terminal transition
+            await _dispatch_mission_event(
+                db=db,
+                run=run,
+                event_type="mission_complete",
+                title=f"Mission complete: {(run.goal or 'Mission')[:120]}",
+                message=(
+                    f"{summary['tasks_completed']} tasks verified in "
+                    f"{summary['total_duration_seconds']}s"
+                ),
+                status="ok",
             )
 
             # Clean up verification cache

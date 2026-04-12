@@ -1,7 +1,7 @@
 'use client'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Volume2 } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Volume2, Bell } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -10,6 +10,7 @@ import { ApiKeysSettingsTab } from './ApiKeysSettingsTab'
 import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 import { ApiKeyManager } from './ApiKeyManager'
 import { VoiceProfilesSettingsTab } from './VoiceProfilesSettingsTab'
+import { NotificationsSettingsTab } from './NotificationsSettingsTab'
 
 export function SettingsPanel() {
 
@@ -47,6 +48,10 @@ export function SettingsPanel() {
           <TabsTrigger value="channels">
             <Radio className="w-4 h-4 mr-1 shrink-0" />
             Channels
+          </TabsTrigger>
+          <TabsTrigger value="notifications" data-tour="settings-notifications-tab">
+            <Bell className="w-4 h-4 mr-1 shrink-0" />
+            Notifications
           </TabsTrigger>
           <TabsTrigger value="voice-profiles">
             <Volume2 className="w-4 h-4 mr-1 shrink-0" />
@@ -86,6 +91,11 @@ export function SettingsPanel() {
         {/* PRD-55: Channels Tab */}
         <TabsContent value="channels">
           <ChannelsSettingsTab />
+        </TabsContent>
+
+        {/* PRD-128: Notification Preferences */}
+        <TabsContent value="notifications">
+          <NotificationsSettingsTab />
         </TabsContent>
 
         {/* PRD-74: Voice Profiles */}
