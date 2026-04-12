@@ -751,6 +751,25 @@ class ActivityService:
                     last_run = row.created_at.isoformat() if row.created_at else None
                     execution_id = str(row.id)
 
+                # Fetch the latest deliverable file_path for this agent
+                latest_file_path = None
+                try:
+                    fp_row = self.db.execute(
+                        text("""
+                            SELECT file_path FROM deliverables
+                            WHERE workspace_id = :ws_id
+                              AND agent_id = :agent_id
+                              AND deleted_at IS NULL
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                        """),
+                        {"ws_id": self._ws_str, "agent_id": aid},
+                    ).fetchone()
+                    if fp_row:
+                        latest_file_path = fp_row.file_path
+                except Exception:
+                    pass  # Non-critical — card still works without it
+
                 reports.append({
                     "agent_id": aid,
                     "agent_name": agent.name,
@@ -759,6 +778,7 @@ class ActivityService:
                     "summary": summary[:300],
                     "last_run": last_run,
                     "execution_id": execution_id,
+                    "latest_file_path": latest_file_path,
                 })
             except Exception as e:
                 logger.error("Failed to fetch report for agent %d: %s", aid, e, exc_info=True)
