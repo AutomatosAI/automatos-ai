@@ -420,6 +420,11 @@ class AgentFactory:
             temperature=model_config.temperature,
             max_tokens=model_config.max_tokens,
             api_key=resolved.api_key,
+            top_p=getattr(model_config, 'top_p', None),
+            frequency_penalty=getattr(model_config, 'frequency_penalty', None),
+            presence_penalty=getattr(model_config, 'presence_penalty', None),
+            stop=getattr(model_config, 'stop', None),
+            timeout=getattr(model_config, 'timeout', None),
         )
 
         # Bedrock uses IAM auth
@@ -634,6 +639,11 @@ class AgentFactory:
                 temperature=llm_config_dict.get("temperature", 0.7),
                 max_tokens=llm_config_dict.get("max_tokens", 2000),
                 api_key=resolved.api_key if resolved else None,
+                top_p=llm_config_dict.get("top_p"),
+                frequency_penalty=llm_config_dict.get("frequency_penalty"),
+                presence_penalty=llm_config_dict.get("presence_penalty"),
+                stop=llm_config_dict.get("stop"),
+                timeout=llm_config_dict.get("timeout"),
             )
             llm_manager = LLMManager(
                 config=llm_config,

@@ -68,6 +68,11 @@ class LLMConfig:
     base_url: Optional[str] = None  # For custom endpoints
     organization_id: Optional[str] = None  # For OpenAI
     secret_key: Optional[str] = None  # For AWS Bedrock IAM auth
+    top_p: Optional[float] = None  # Nucleus sampling (0.0-1.0)
+    frequency_penalty: Optional[float] = None  # Reduce repetition (0.0-2.0)
+    presence_penalty: Optional[float] = None  # Encourage new topics (0.0-2.0)
+    stop: Optional[list] = None  # Stop sequences
+    timeout: Optional[int] = None  # Request timeout in seconds
 
 
 @dataclass

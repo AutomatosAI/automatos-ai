@@ -49,6 +49,8 @@ interface LLMConfig {
   top_p: number
   frequency_penalty: number
   presence_penalty: number
+  stop: string[] | null
+  timeout: number | null
   fallback_model_id: string | null
 }
 
@@ -216,6 +218,8 @@ export default function SystemLLMSettingsTab({
             top_p: 1.0,
             frequency_penalty: 0.0,
             presence_penalty: 0.0,
+            stop: null,
+            timeout: null,
             fallback_model_id: null,
           },
           harness: {
@@ -281,7 +285,7 @@ export default function SystemLLMSettingsTab({
 
   const handleLLMChange = (key: string, value: string | number | null) => {
     if (!orchConfig) return
-    const current = orchConfig.llm || { provider: '', model_id: '', temperature: 0.7, max_tokens: 4000, top_p: 1.0, frequency_penalty: 0.0, presence_penalty: 0.0, fallback_model_id: null }
+    const current = orchConfig.llm || { provider: '', model_id: '', temperature: 0.7, max_tokens: 4000, top_p: 1.0, frequency_penalty: 0.0, presence_penalty: 0.0, stop: null, timeout: null, fallback_model_id: null }
     setOrchConfig({ ...orchConfig, llm: { ...current, [key]: value } })
   }
 
@@ -372,7 +376,7 @@ export default function SystemLLMSettingsTab({
       setSelfSaving(true)
       await apiClient.request('/api/workspaces/current/orchestrator', {
         method: 'PUT',
-        body: JSON.stringify({ llm: { provider: 'openrouter', model_id: 'openai/gpt-4o', temperature: 0.7, max_tokens: 4000, top_p: 1.0, frequency_penalty: 0.0, presence_penalty: 0.0, fallback_model_id: null } }),
+        body: JSON.stringify({ llm: { provider: 'openrouter', model_id: 'openai/gpt-4o', temperature: 0.7, max_tokens: 4000, top_p: 1.0, frequency_penalty: 0.0, presence_penalty: 0.0, stop: null, timeout: null, fallback_model_id: null } }),
       })
       // Reload orchestrator config to get fresh values
       const data = await apiClient.request<OrchestratorConfig>('/api/workspaces/current/orchestrator')
@@ -557,8 +561,8 @@ export default function SystemLLMSettingsTab({
                       <Label className="flex items-center gap-1">Request Timeout (seconds) <InlineHelp id="settings.llm.timeout" size="sm" /></Label>
                       <Input
                         type="number" min="5" max="300"
-                        value={formData.llm_timeout || '30'}
-                        onChange={(e) => handleInputChange('llm_timeout', e.target.value)}
+                        value={orchConfig?.llm?.timeout ?? 180}
+                        onChange={(e) => handleLLMChange('timeout', parseInt(e.target.value) || null)}
                       />
                     </div>
                     <div className="space-y-2">
@@ -612,8 +616,12 @@ export default function SystemLLMSettingsTab({
                     <div className="space-y-2">
                       <Label className="flex items-center gap-1">Stop Sequences <InlineHelp id="settings.llm.stop_sequences" size="sm" /></Label>
                       <Input
-                        value={formData.llm_stop_sequences || ''}
-                        onChange={(e) => handleInputChange('llm_stop_sequences', e.target.value)}
+                        value={(orchConfig?.llm?.stop || []).join(', ')}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          const sequences = val ? val.split(',').map((s: string) => s.trim()).filter(Boolean) : null
+                          handleLLMChange('stop', sequences)
+                        }}
                         placeholder="\n\n, ###, END"
                       />
                     </div>
