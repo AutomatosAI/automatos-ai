@@ -295,21 +295,88 @@ async def _boot_phase_1_core():
 
 async def _schema_migration():
     """Phase 1 continued: DDL migrations that must complete before seeds."""
-    # Run Alembic migrations to head (idempotent — skips already-applied)
+    # Direct DDL for Auto agent schema (idempotent SQL, no alembic dependency)
     try:
-        from alembic.config import Config as AlembicConfig
-        from alembic import command as alembic_command
-        import os
+        from sqlalchemy import text as _t
+        from core.database.database import engine as _engine
+        with _engine.connect() as conn:
+            # 1. public_id UUID column
+            conn.execute(_t("ALTER TABLE agents ADD COLUMN IF NOT EXISTS public_id UUID"))
+            conn.execute(_t("UPDATE agents SET public_id = gen_random_uuid() WHERE public_id IS NULL"))
+            conn.execute(_t("CREATE UNIQUE INDEX IF NOT EXISTS ix_agents_public_id ON agents (public_id)"))
 
-        alembic_ini = os.path.join(os.path.dirname(__file__), "alembic.ini")
-        if os.path.exists(alembic_ini):
-            alembic_cfg = AlembicConfig(alembic_ini)
-            alembic_command.upgrade(alembic_cfg, "head")
-            logger.info("Alembic migrations applied to head")
-        else:
-            logger.warning("alembic.ini not found at %s — skipping migrations", alembic_ini)
-    except Exception as mig_err:
-        logger.error("Alembic migration failed: %s", mig_err, exc_info=True)
+            # 2. Widen slug to 255
+            conn.execute(_t("ALTER TABLE agents ALTER COLUMN slug TYPE VARCHAR(255)"))
+
+            # 3. Drop old global slug unique constraint
+            conn.execute(_t("DROP INDEX IF EXISTS ix_agents_slug"))
+            try:
+                conn.execute(_t("ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_slug_key"))
+            except Exception:
+                pass
+
+            # 4. Per-workspace unique constraint on (workspace_id, slug)
+            conn.execute(_t("""
+                DO $$ BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_agent_workspace_slug') THEN
+                        ALTER TABLE agents ADD CONSTRAINT uq_agent_workspace_slug UNIQUE (workspace_id, slug);
+                    END IF;
+                END $$;
+            """))
+
+            conn.commit()
+            logger.info("Auto agent schema migration completed (public_id + slug fix)")
+    except Exception as e:
+        logger.error("Auto agent schema migration failed: %s", e, exc_info=True)
+
+    # Seed Auto agents for existing workspaces
+    try:
+        from sqlalchemy import text as _t2
+        from core.database.database import engine as _engine2
+        with _engine2.connect() as conn:
+            result = conn.execute(_t2("""
+                SELECT w.id FROM workspaces w
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM agents a
+                    WHERE a.workspace_id = w.id
+                      AND a.is_system_agent = true
+                      AND a.slug = 'auto-' || w.id::text
+                )
+            """))
+            workspace_ids = [row[0] for row in result]
+
+            for ws_id in workspace_ids:
+                conn.execute(_t2("""
+                    INSERT INTO agents (
+                        public_id, name, slug, description, agent_type, status,
+                        is_system_agent, required_role, workspace_id,
+                        owner_type, owner_id,
+                        use_custom_persona, custom_persona_prompt,
+                        model_config, configuration, tags,
+                        created_at, updated_at
+                    ) VALUES (
+                        gen_random_uuid(), 'Auto', 'auto-' || :ws_id,
+                        'Your workspace AI orchestrator — the default agent for chat and settings.',
+                        'system', 'active', true, NULL, :ws_id,
+                        'workspace', :ws_id_str,
+                        true, :persona,
+                        :model_config::jsonb, :config::jsonb, :tags::jsonb,
+                        NOW(), NOW()
+                    ) ON CONFLICT DO NOTHING
+                """), {
+                    "ws_id": str(ws_id),
+                    "ws_id_str": str(ws_id),
+                    "persona": "**My personality:**\n- I'm warm and approachable - think of me as a knowledgeable friend\n- I remember you and our past conversations\n- I prefer action over explanation - if you ask me to do something, I'll do it\n- I'm honest about what I can and can't do\n- I get excited when we solve problems together!",
+                    "model_config": '{"provider": "openrouter", "model_id": "openai/gpt-4o", "temperature": 0.7, "max_tokens": 4000, "top_p": 1.0, "frequency_penalty": 0.0, "presence_penalty": 0.0, "fallback_model_id": null}',
+                    "config": '{"thinking_level": "medium", "proactive_level": "notify", "communication_style": "balanced"}',
+                    "tags": '["auto", "system", "orchestrator"]',
+                })
+
+            conn.commit()
+            if workspace_ids:
+                logger.info("Seeded Auto agents for %d existing workspaces", len(workspace_ids))
+    except Exception as e:
+        logger.error("Auto agent seeding failed: %s", e, exc_info=True)
 
     # PRD-64: Ensure semantic routing columns exist on agents table
     try:
