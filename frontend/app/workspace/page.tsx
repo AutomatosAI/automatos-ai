@@ -72,6 +72,7 @@ export default function WorkspacePage() {
             {view === 'explorer' && (
               <WorkspaceExplorer
                 workspaceId={workspace.id}
+                initialFilePath={pathParam}
                 className="h-full"
               />
             )}

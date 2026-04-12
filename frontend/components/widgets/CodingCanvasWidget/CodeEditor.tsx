@@ -5,7 +5,7 @@
  * PRD-66 Phase 1 → now editable with Ctrl+S save
  */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { Loader2 } from 'lucide-react'
 import type { OpenFileTab } from '../types'
@@ -27,36 +27,43 @@ interface CodeEditorProps {
 }
 
 export function CodeEditor({ file, onContentChange, onSave }: CodeEditorProps) {
+  // Store latest callbacks + file path in refs so the Monaco command
+  // always sees current values without needing to re-register.
+  const onSaveRef = useRef(onSave)
+  onSaveRef.current = onSave
+  const filePathRef = useRef(file?.path)
+  filePathRef.current = file?.path
   const editorRef = useRef<any>(null)
 
-  // Register Ctrl+S handler on mount
   const handleEditorMount = useCallback(
-    (editor: any) => {
+    (editor: any, monaco: any) => {
       editorRef.current = editor
 
-      // Ctrl+S / Cmd+S to save
-      editor.addCommand(
-        // Monaco keybinding: CtrlCmd + S
-        2097 /* KeyMod.CtrlCmd | KeyCode.KeyS */,
-        () => {
-          if (!file || !onSave) return
-          const currentContent = editor.getValue()
-          onSave(file.path, currentContent)
+      // Ctrl+S / Cmd+S to save — uses refs so it always sees latest file/callback
+      editor.addAction({
+        id: 'save-file',
+        label: 'Save File',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+        run: () => {
+          const path = filePathRef.current
+          const save = onSaveRef.current
+          if (path && save) {
+            save(path, editor.getValue())
+          }
         },
-      )
+      })
     },
-    [file, onSave],
+    [],
   )
 
-  // Update save handler when file changes (the closure captures file.path)
-  useEffect(() => {
-    if (!editorRef.current || !file || !onSave) return
-    // Re-register the save command with the new file reference
-    editorRef.current.addCommand(2097, () => {
-      const currentContent = editorRef.current.getValue()
-      onSave(file.path, currentContent)
-    })
-  }, [file?.path, onSave])
+  const handleChange = useCallback(
+    (value: string | undefined) => {
+      if (file && onContentChange) {
+        onContentChange(file.path, value ?? '')
+      }
+    },
+    [file?.path, onContentChange],
+  )
 
   if (!file) {
     return (
@@ -81,11 +88,7 @@ export function CodeEditor({ file, onContentChange, onSave }: CodeEditorProps) {
       value={file.content ?? ''}
       theme="vs-dark"
       onMount={handleEditorMount}
-      onChange={(value) => {
-        if (onContentChange && file) {
-          onContentChange(file.path, value ?? '')
-        }
-      }}
+      onChange={handleChange}
       loading={
         <div className="flex items-center justify-center h-full">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

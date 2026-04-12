@@ -32,6 +32,8 @@ export interface WorkspaceExplorerProps {
   workspaceId: string
   /** File event from task streaming — auto-opens the file when set */
   lastEvent?: { path: string; type: string; timestamp?: number } | null
+  /** Deep-link: auto-open this file path on mount (from ?path= URL param) */
+  initialFilePath?: string | null
   /** Minimum height CSS class (default: h-full) */
   className?: string
 }
@@ -39,6 +41,7 @@ export interface WorkspaceExplorerProps {
 export function WorkspaceExplorer({
   workspaceId,
   lastEvent,
+  initialFilePath,
   className = 'h-full',
 }: WorkspaceExplorerProps) {
   // File system hook
@@ -85,6 +88,16 @@ export function WorkspaceExplorer({
       fetchDirectory('.')
     }
   }, [workspaceId, fetchDirectory])
+
+  // Deep-link: auto-open file from URL ?path= param after tree loads
+  const initialFileOpened = useRef(false)
+  useEffect(() => {
+    if (initialFilePath && !initialFileOpened.current && !isLoadingTree) {
+      initialFileOpened.current = true
+      handleFileSelect(initialFilePath)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFilePath, isLoadingTree])
 
   // When a new file event comes in from task streaming, auto-open it
   useEffect(() => {
