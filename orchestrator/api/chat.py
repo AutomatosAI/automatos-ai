@@ -27,39 +27,6 @@ from core.session_queue import get_session_queue
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# PRD-67: CTO Agent lookup (cached in-process)
-# ---------------------------------------------------------------------------
-_CTO_CACHE_SENTINEL = object()
-_cto_agent_id_cache: dict = {}  # {"id": int|None|SENTINEL, "ts": float}
-_CTO_CACHE_TTL = 300  # 5 minutes
-
-
-def _get_cto_agent_id(db: Session) -> Optional[int]:
-    """Get the CTO Agent's ID (cached). Returns None if not seeded."""
-    import time
-
-    cached = _cto_agent_id_cache.get("id", _CTO_CACHE_SENTINEL)
-    ts = _cto_agent_id_cache.get("ts", 0)
-    if cached is not _CTO_CACHE_SENTINEL and (time.time() - ts) < _CTO_CACHE_TTL:
-        return cached  # may be None — means CTO not seeded yet, respect TTL
-
-    try:
-        from core.models.core import Agent
-        row = db.query(Agent.id).filter(
-            Agent.slug == "auto-cto",
-            Agent.is_system_agent.is_(True),
-            Agent.status == "active",
-        ).first()
-        agent_id = row[0] if row else None
-        _cto_agent_id_cache["id"] = agent_id
-        _cto_agent_id_cache["ts"] = time.time()
-        return agent_id
-    except Exception:
-        logger.debug("CTO Agent lookup failed", exc_info=True)
-        return None
-
-
 router = APIRouter(prefix="/api/chat", tags=["💬 Chat"])
 
 
@@ -455,15 +422,14 @@ async def stream_chat(
     _use_workflow_bridge = False  # PRD-68: DEPRECATED — kept for safety net only
     _suggest_mission = False     # PRD-125: True when ORGAN/ORGANISM → suggest mission
 
-    # PRD-67: Admin persona is CTO Agent (Auto with elevated access).
-    # AutoBrain + Router run for ALL users — the CTO agent is the fallback
-    # persona for admins (RESPOND, orchestrate, router-miss), not a routing bypass.
+    # Every workspace has its own Auto agent — the model, persona, and tools
+    # come from that agent's config (set via Settings > Orchestrator).
+    # No hardcoded agent IDs. Admins get elevated tool access on the Auto agent.
     _user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
     _is_admin = _user_role in ("admin", "super_admin")
     logger.info(f"[PRD-67] user_role={_user_role!r}, is_admin={_is_admin}, user_id={getattr(ctx.user, 'id', '?')}")
 
-    _cto_id = _get_cto_agent_id(db) if _is_admin else None
-    _fallback_agent_id = _cto_id or get_default_agent_id(db, ctx.workspace_id)
+    _fallback_agent_id = get_default_agent_id(db, ctx.workspace_id)
 
     if request.agentId:
         # User explicitly selected an agent — skip Auto, use directly
