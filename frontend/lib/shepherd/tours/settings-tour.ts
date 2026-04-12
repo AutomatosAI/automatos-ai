@@ -1,7 +1,7 @@
 import Shepherd from 'shepherd.js'
 import { shepherdTheme } from '../shepherd-theme'
 import { markTourComplete, markTourSkipped } from '../tour-storage'
-import { title, waitForElement, stepProgress } from '../tour-utils'
+import { title, waitForElement, stepProgress, tabList } from '../tour-utils'
 
 const TOUR_ID = 'settings'
 const TOTAL = 3
@@ -15,10 +15,14 @@ export function createSettingsTour(userId: string) {
 
   tour.addStep({
     id: 'settings-overview',
-    title: title('System', 'Settings'),
+    title: title('Workspace', 'Settings'),
     text: `
       <p class="text-gray-300 mb-2">
-        Manage your workspace configuration, API keys, credentials, and security settings.
+        Everything that configures your workspace — system behaviour, model routing,
+        external auth, webhooks, channels and embeddable widgets — lives here.
+      </p>
+      <p class="text-gray-400 text-sm">
+        Changes apply to the whole workspace, so admin access is usually required.
       </p>
       ${stepProgress(1, TOTAL)}
     `,
@@ -29,11 +33,20 @@ export function createSettingsTour(userId: string) {
 
   tour.addStep({
     id: 'settings-tabs',
-    title: title('Navigate', 'Tabs'),
+    title: title('Seven', 'Settings Areas'),
     text: `
       <p class="text-gray-300 mb-2">
-        System Settings, Orchestrator, Webhooks, API Keys, Credentials, Audit Logs, Channels, and more.
+        Each tab handles a different class of configuration:
       </p>
+      ${tabList([
+        ['Orchestrator', 'LLM routing rules — which models handle chat, tools, embeddings, fallbacks.'],
+        ['Webhooks', 'Outbound webhooks that fire on agent events, completions, or errors.'],
+        ['API Keys', 'BYOK — bring your own OpenAI / Anthropic / OpenRouter keys.'],
+        ['Credentials', 'Third-party credentials (OAuth, tokens) agents use to call external services.'],
+        ['Channels', 'Inbound channels — email, Slack, Teams, voice — that feed agents.'],
+        ['Voices', 'Voice profiles for TTS output and voice-channel agents.'],
+        ['Widget SDK', 'Embeddable chat widget keys and site configuration.'],
+      ])}
       ${stepProgress(2, TOTAL)}
     `,
     beforeShowPromise: () => waitForElement('[data-tour="settings-tabs"]'),
@@ -46,10 +59,12 @@ export function createSettingsTour(userId: string) {
 
   tour.addStep({
     id: 'settings-credentials',
-    title: title('API Keys &', 'Credentials'),
+    title: title('Credentials &', 'API Keys'),
     text: `
       <p class="text-gray-300 mb-2">
-        Store your API keys and service credentials securely. Agents use these to connect to external services.
+        The two most common places you'll come back to. <strong>API Keys</strong> is where
+        you drop in LLM provider keys. <strong>Credentials</strong> stores encrypted OAuth
+        tokens and secrets your agents use to sign in to Gmail, Slack, GitHub and friends.
       </p>
       ${stepProgress(3, TOTAL)}
     `,

@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * WorkspaceExplorer — Standalone workspace file browser + code viewer + terminal
+ * WorkspaceExplorer — Standalone workspace file browser + code editor + terminal
  *
  * Extracted from CodingCanvasWidget (PRD-66) so it can be used both as:
  * 1. A standalone page at /workspace
@@ -9,12 +9,16 @@
  *
  * Compound layout: FileExplorer (left) | CodeEditor + Terminal (right)
  * Uses react-resizable-panels for the split.
+ *
+ * Now supports editing: Ctrl+S saves via workspace API, dirty dot on tab.
  */
 
-import { useCallback, useEffect, useState } from 'react'
-import { GitBranch, Terminal } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { GitBranch, Save, Terminal } from 'lucide-react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
+import { apiClient } from '@/lib/api-client'
 
 import { FileExplorer } from '../widgets/CodingCanvasWidget/FileExplorer'
 import { CodeEditor } from '../widgets/CodingCanvasWidget/CodeEditor'
@@ -28,6 +32,8 @@ export interface WorkspaceExplorerProps {
   workspaceId: string
   /** File event from task streaming — auto-opens the file when set */
   lastEvent?: { path: string; type: string; timestamp?: number } | null
+  /** Deep-link: auto-open this file path on mount (from ?path= URL param) */
+  initialFilePath?: string | null
   /** Minimum height CSS class (default: h-full) */
   className?: string
 }
@@ -35,6 +41,7 @@ export interface WorkspaceExplorerProps {
 export function WorkspaceExplorer({
   workspaceId,
   lastEvent,
+  initialFilePath,
   className = 'h-full',
 }: WorkspaceExplorerProps) {
   // File system hook
@@ -50,6 +57,12 @@ export function WorkspaceExplorer({
   // Editor state
   const [openTabs, setOpenTabs] = useState<OpenFileTab[]>([])
   const [activeTabPath, setActiveTabPath] = useState<string | null>(null)
+
+  // Track original content so we can detect dirty state
+  const originalContentRef = useRef<Map<string, string>>(new Map())
+
+  // Saving state
+  const [isSaving, setIsSaving] = useState(false)
 
   // Repo selector dialog
   const [repoSelectorOpen, setRepoSelectorOpen] = useState(false)
@@ -75,6 +88,16 @@ export function WorkspaceExplorer({
       fetchDirectory('.')
     }
   }, [workspaceId, fetchDirectory])
+
+  // Deep-link: auto-open file from URL ?path= param after tree loads
+  const initialFileOpened = useRef(false)
+  useEffect(() => {
+    if (initialFilePath && !initialFileOpened.current && !isLoadingTree) {
+      initialFileOpened.current = true
+      handleFileSelect(initialFilePath)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFilePath, isLoadingTree])
 
   // When a new file event comes in from task streaming, auto-open it
   useEffect(() => {
@@ -105,8 +128,10 @@ export function WorkspaceExplorer({
 
       const result = await fetchFileContent(filePath)
       if (result) {
+        // Store original content for dirty tracking
+        originalContentRef.current.set(filePath, result.content ?? '')
         setOpenTabs((prev) =>
-          prev.map((t) => (t.path === filePath ? result : t))
+          prev.map((t) => (t.path === filePath ? { ...result, isDirty: false } : t))
         )
       } else {
         setOpenTabs((prev) => prev.filter((t) => t.path !== filePath))
@@ -127,6 +152,7 @@ export function WorkspaceExplorer({
 
   const handleCloseTab = useCallback(
     (path: string) => {
+      originalContentRef.current.delete(path)
       setOpenTabs((prev) => {
         const remaining = prev.filter((t) => t.path !== path)
         setActiveTabPath((active) =>
@@ -138,6 +164,44 @@ export function WorkspaceExplorer({
       })
     },
     []
+  )
+
+  const handleContentChange = useCallback(
+    (path: string, newContent: string) => {
+      const original = originalContentRef.current.get(path) ?? ''
+      const isDirty = newContent !== original
+
+      setOpenTabs((prev) =>
+        prev.map((t) =>
+          t.path === path ? { ...t, content: newContent, isDirty } : t
+        )
+      )
+    },
+    []
+  )
+
+  const handleSave = useCallback(
+    async (path: string, content: string) => {
+      setIsSaving(true)
+      try {
+        await apiClient.saveWorkspaceFile(workspaceId, path, content)
+        // Update original content reference to the saved version
+        originalContentRef.current.set(path, content)
+        // Mark tab as clean
+        setOpenTabs((prev) =>
+          prev.map((t) =>
+            t.path === path ? { ...t, isDirty: false } : t
+          )
+        )
+        toast.success(`Saved ${path.split('/').pop()}`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Save failed'
+        toast.error(msg)
+      } finally {
+        setIsSaving(false)
+      }
+    },
+    [workspaceId]
   )
 
   const handleCloneStarted = useCallback(
@@ -152,6 +216,7 @@ export function WorkspaceExplorer({
 
   const activeFile = openTabs.find((t) => t.path === activeTabPath) ?? null
   const isWorkspaceEmpty = !isLoadingTree && !treeError && tree.length === 0
+  const hasDirtyTabs = openTabs.some((t) => t.isDirty)
 
   return (
     <div className={className}>
@@ -205,7 +270,7 @@ export function WorkspaceExplorer({
             {/* Editor section */}
             <Panel defaultSize={showTerminal ? 70 : 100} minSize={30}>
               <div className="h-full flex flex-col overflow-hidden">
-                {/* Tab bar with terminal toggle */}
+                {/* Tab bar with save + terminal toggle */}
                 <div className="flex items-center">
                   <div className="flex-1 min-w-0">
                     <EditorTabs
@@ -215,6 +280,21 @@ export function WorkspaceExplorer({
                       onCloseTab={handleCloseTab}
                     />
                   </div>
+                  {/* Save button — visible when active file is dirty */}
+                  {activeFile?.isDirty && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0 mr-0.5"
+                      onClick={() => {
+                        if (activeFile) handleSave(activeFile.path, activeFile.content ?? '')
+                      }}
+                      disabled={isSaving}
+                      title="Save (Ctrl+S)"
+                    >
+                      <Save className={`h-3.5 w-3.5 ${isSaving ? 'animate-pulse text-muted-foreground' : 'text-amber-500'}`} />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"
@@ -228,7 +308,11 @@ export function WorkspaceExplorer({
 
                 {/* Monaco editor */}
                 <div className="flex-1 min-h-0">
-                  <CodeEditor file={activeFile} />
+                  <CodeEditor
+                    file={activeFile}
+                    onContentChange={handleContentChange}
+                    onSave={handleSave}
+                  />
                 </div>
               </div>
             </Panel>

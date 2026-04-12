@@ -1,7 +1,7 @@
 import Shepherd from 'shepherd.js'
 import { shepherdTheme } from '../shepherd-theme'
 import { markTourComplete, markTourSkipped } from '../tour-storage'
-import { title, waitForElement, stepProgress } from '../tour-utils'
+import { title, waitForElement, stepProgress, tabList } from '../tour-utils'
 
 const TOUR_ID = 'welcome'
 const TOTAL_STEPS = 5
@@ -45,11 +45,19 @@ export function createWelcomeTour(userId: string) {
     title: title('Your', 'Navigation Hub'),
     text: `
       <p class="text-gray-300 mb-2">
-        Everything's in the sidebar — Chat, Agents, Marketplace, Tools, Workflows, and more.
+        The sidebar is the map of the whole platform. Each item is a major area
+        of your workspace:
       </p>
-      <p class="text-gray-400 text-sm">
-        Hover to see labels, click to expand.
-      </p>
+      ${tabList([
+        ['Chat', 'Talk to any agent — your day-to-day home base.'],
+        ['Activity', 'Command centre for everything your agents are doing.'],
+        ['Agents', 'Create, configure and coordinate your AI workforce.'],
+        ['Marketplace', 'One-click installs for agents, recipes, tools and LLMs.'],
+        ['Knowledge Bases', 'Documents, databases, templates, code & business graphs.'],
+        ['Tools', '150+ integrations — Gmail, Slack, GitHub, CRMs, and more.'],
+        ['Analytics', 'Performance, usage and cost dashboards.'],
+        ['Settings', 'Workspace config, API keys, credentials and channels.'],
+      ])}
       ${stepProgress(2, TOTAL_STEPS)}
     `,
     beforeShowPromise: () => waitForElement('[data-tour="sidebar"]'),

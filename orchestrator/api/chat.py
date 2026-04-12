@@ -212,6 +212,8 @@ class MessagePart(BaseModel):
     filename: Optional[str] = None
     mediaType: Optional[str] = None
     url: Optional[str] = None
+    # PRD-127: ephemeral attachment reference (sent by multimodal-input.tsx)
+    attachment_id: Optional[str] = None
 
 
 class ChatMessageRequest(BaseModel):
@@ -219,6 +221,8 @@ class ChatMessageRequest(BaseModel):
     parts: Optional[List[MessagePart]] = None
     # Compatibility with older/alternate clients
     content: Optional[str] = None
+    # PRD-127: top-level list of ephemeral attachment ids for the current message
+    attachment_ids: Optional[List[str]] = None
 
 
 class ChatRequest(BaseModel):
@@ -421,6 +425,38 @@ async def stream_chat(
     # Get chat history
     messages = chat_service.get_messages_by_chat_id(chat_id)
     message_history = [{'role': msg.role, 'parts': msg.parts} for msg in messages]
+
+    # PRD-127: Attach ephemeral attachment_ids from the incoming request to the
+    # latest user message. Attachments are request-scoped (7-day S3 TTL) and not
+    # persisted in chat history — resolved inline by AttachmentResolver.
+    _incoming_attachment_ids: List[str] = []
+    if current_msg.attachment_ids:
+        _incoming_attachment_ids.extend(current_msg.attachment_ids)
+    # Also collect attachment_ids embedded inside file parts (frontend sends both)
+    for _p in (current_msg.parts or []):
+        if _p.attachment_id and _p.attachment_id not in _incoming_attachment_ids:
+            _incoming_attachment_ids.append(_p.attachment_id)
+    # PRD-127 diagnostics: log what the client actually sent
+    try:
+        _parts_debug = [
+            {k: v for k, v in (_p.dict() if hasattr(_p, "dict") else {}).items() if v is not None}
+            for _p in (current_msg.parts or [])
+        ]
+        logger.info(
+            f"[PRD-127] chat request attachments: top_level_ids={current_msg.attachment_ids} "
+            f"parts={_parts_debug} collected={_incoming_attachment_ids}"
+        )
+    except Exception:
+        pass
+    if _incoming_attachment_ids and message_history:
+        for _i in range(len(message_history) - 1, -1, -1):
+            if message_history[_i].get("role") == "user":
+                message_history[_i]["attachment_ids"] = _incoming_attachment_ids
+                logger.info(
+                    f"[PRD-127] injected {len(_incoming_attachment_ids)} attachment_ids "
+                    f"into message_history[{_i}]"
+                )
+                break
     
     # DEBUG: Log incoming request
     logger.info(f"Chat request - agentId: {request.agentId}, model: {request.selectedChatModel}")

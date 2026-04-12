@@ -456,8 +456,9 @@ class StreamingChatService:
 
             new_parts = []
             for part in parts:
-                if part.get("type") == "file" and part.get("url", "").startswith("document://"):
-                    doc_id_str = part["url"].replace("document://", "")
+                url = part.get("url") or ""
+                if part.get("type") == "file" and url.startswith("document://"):
+                    doc_id_str = url.replace("document://", "")
                     filename = part.get("filename", "uploaded file")
                     try:
                         doc_id = int(doc_id_str)
@@ -667,7 +668,9 @@ class StreamingChatService:
 
         if _complexity == Complexity.ATOM:
             llm_messages, use_tools, orchestrated = await self._prepare_atom_path(
-                messages, agent_runtime, smart_chat
+                messages, agent_runtime, smart_chat,
+                attachment_ids=attachment_ids,
+                model_id=model_id,
             )
         else:
             llm_messages, use_tools, orchestrated = await self._prepare_full_path(
@@ -753,6 +756,8 @@ class StreamingChatService:
         messages: List[Dict[str, Any]],
         agent_runtime,
         smart_chat,
+        attachment_ids: Optional[List[str]] = None,
+        model_id: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], None, None]:
         """ATOM path: no tools, no orchestration, lightweight memory only."""
         logger.info("[PRD-68] ATOM path — skipping tools/orchestration, retrieving memory")
@@ -796,6 +801,38 @@ class StreamingChatService:
         llm_messages = self.prompt_analyzer.convert_to_llm_messages(
             messages, system_prompt=_atom_prompt, available_tools=None
         )
+
+        # PRD-127: Resolve ephemeral attachments for ATOM path.
+        # Full path goes through ContextService.build_context which handles this;
+        # ATOM bypasses ContextService, so we resolve directly here.
+        if attachment_ids:
+            try:
+                from uuid import UUID
+                from modules.attachments.resolver import (
+                    AttachmentResolver,
+                    VisionNotSupportedError,
+                    inject_parts_into_last_user_message,
+                )
+                resolver = AttachmentResolver(db_session=self.db)
+                parts = await resolver.resolve(
+                    attachment_ids=[UUID(a) for a in attachment_ids],
+                    workspace_id=UUID(str(self.workspace_id)),
+                    model_id=model_id or "",
+                )
+                if parts:
+                    inject_parts_into_last_user_message(llm_messages, parts)
+                    logger.info(
+                        f"[PRD-127] ATOM path: resolved {len(parts)} attachment parts "
+                        f"from {len(attachment_ids)} ids"
+                    )
+            except VisionNotSupportedError as _vne:
+                logger.warning(f"[PRD-127] ATOM vision not supported: {_vne}")
+            except Exception as _att_err:
+                logger.error(
+                    f"[PRD-127] ATOM attachment resolution failed: {_att_err}",
+                    exc_info=True,
+                )
+
         return llm_messages, None, None
 
     async def _prepare_full_path(
@@ -1834,6 +1871,10 @@ class StreamingChatService:
 
             # PRD-127: Extract attachment_ids and model_id for multimodal resolution
             _attachment_ids = self._extract_attachment_ids(messages)
+            if _attachment_ids:
+                logger.info(
+                    f"[PRD-127] Extracted {len(_attachment_ids)} attachment_ids from messages: {_attachment_ids}"
+                )
             _model_id = None
             _llm_config = getattr(agent_runtime.llm_manager, 'config', None)
             if _llm_config:
