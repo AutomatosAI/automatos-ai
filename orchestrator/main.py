@@ -59,6 +59,7 @@ from api.credentials import router as credentials_router  # PRD-18: Enhanced cre
 from api.system_settings import router as system_settings_router  # System Settings Management
 from api.tools import router as tools_router
 from api.wizard import router as wizard_router  # PRD-130: Business Intake Wizard (PoC)
+from api.onboarding_agents import router as onboarding_agents_router
 # PRD-36: Composio Integration (optional module)
 try:
     from api.composio import router as composio_router
@@ -287,6 +288,15 @@ async def _boot_phase_1_core():
         logger.info(f"PRD-63: Document templates seeded for {len(workspace_ids)} workspace(s)")
     except Exception as e:
         logger.warning(f"PRD-63 template seed init: {e}")
+
+    # Seed onboarding agents (VOYAGER, BLUEPRINT, SCRIBE, FORGE) — Mission Zero team
+    try:
+        from core.seeds.seed_onboarding_agents import seed_onboarding_agents
+        with get_db_session() as db:
+            seed_onboarding_agents(db)
+        logger.info("Onboarding agents seeded successfully")
+    except Exception as e:
+        logger.warning(f"Onboarding agent seed: {e}")
 
 
 def _load_cto_soul() -> str:
@@ -1048,6 +1058,7 @@ app.include_router(credentials_router)  # PRD-18: Enhanced credentials with mana
 app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 app.include_router(wizard_router)  # PRD-130: Business Intake Wizard (PoC)
+app.include_router(onboarding_agents_router)
 if composio_router is not None:
     app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
 if cloud_documents_router is not None:
