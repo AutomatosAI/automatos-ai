@@ -94,6 +94,7 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
             "thinking_level": "medium",
             "proactive_level": "notify",
             "communication_style": "balanced",
+            "personality_mode": "friendly",
         },
         tags=["auto", "system", "orchestrator"],
     )
