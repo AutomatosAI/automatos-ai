@@ -368,13 +368,17 @@ async def _schema_migration():
                     "tags": '["auto", "system", "orchestrator"]',
                 })
 
-            # Backfill personality_mode into existing Auto agents' configuration
+            # Backfill personality_mode into existing Auto agents' configuration (JSON column)
             conn.execute(_t2("""
                 UPDATE agents
-                SET configuration = COALESCE(configuration, CAST('{}' AS JSONB)) || CAST('{"personality_mode": "friendly"}' AS JSONB)
+                SET configuration = CAST(
+                    COALESCE(CAST(configuration AS JSONB), CAST('{}' AS JSONB))
+                    || CAST('{"personality_mode": "friendly"}' AS JSONB)
+                AS JSON)
                 WHERE is_system_agent = true
                   AND slug LIKE 'auto-%'
-                  AND (configuration IS NULL OR NOT jsonb_exists(configuration, 'personality_mode'))
+                  AND (configuration IS NULL
+                       OR CAST(configuration AS JSONB) ->> 'personality_mode' IS NULL)
             """))
 
             conn.commit()
