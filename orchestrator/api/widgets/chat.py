@@ -39,7 +39,7 @@ router = APIRouter(tags=["Widget Chat"])
 class WidgetChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
-    agent_id: Optional[int] = None
+    agent_id: Optional[str] = None  # UUID (public_id) or legacy integer id as string
     model_id: Optional[str] = None
 
 
@@ -168,7 +168,15 @@ async def widget_chat(
     message_history = [{"role": msg.role, "parts": msg.parts} for msg in messages]
 
     # API key can lock the agent — ignore client-provided agent_id when set
-    effective_agent_id = auth.default_agent_id or body.agent_id or 1
+    # Resolve public_id (UUID) or legacy int to internal id
+    from core.utils.agent_resolver import resolve_agent_id as _resolve_aid
+    _raw_agent_ref = auth.default_agent_id or body.agent_id
+    if _raw_agent_ref:
+        effective_agent_id = _resolve_aid(db, _raw_agent_ref, workspace_id)
+    else:
+        # Fallback to workspace Auto agent (Phase 2 will replace the `or 1`)
+        from api.chat import get_default_agent_id
+        effective_agent_id = get_default_agent_id(db, workspace_id)
 
     # PRD-124: Resolve agent team for document scoping
     agent_team: Optional[str] = None

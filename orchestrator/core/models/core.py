@@ -171,8 +171,12 @@ class LLMUsage(Base):
 # Database Models
 class Agent(Base):
     __tablename__ = 'agents'
-    
+    __table_args__ = (
+        UniqueConstraint('workspace_id', 'slug', name='uq_agent_workspace_slug'),
+    )
+
     id = Column(Integer, primary_key=True)
+    public_id = Column(UUID(as_uuid=True), default=uuid4, unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
     agent_type = Column(String(100), nullable=False)  # 'custom', 'system', 'specialized'
@@ -217,7 +221,7 @@ class Agent(Base):
     # PRD-67: CTO Agent / System agents
     is_system_agent = Column(Boolean, default=False, server_default='false')  # Global, platform-seeded
     required_role = Column(String(50), nullable=True)  # If set, only visible to users with this system_role
-    slug = Column(String(100), nullable=True, unique=True)  # Stable ID for system agents (idempotent seeding)
+    slug = Column(String(255), nullable=True)  # Stable ID for system agents (idempotent seeding); unique per workspace via uq_agent_workspace_slug
 
     # Mission Zero: Org structure
     team = Column(String(100), nullable=True)       # Department/team name (e.g., "Engineering", "Marketing")
@@ -241,16 +245,11 @@ class Agent(Base):
     discriminatory_power = Column(Float, nullable=True)  # Discriminatory power
     
     # PRD-15: Multi-Model Configuration
-    model_config = Column(JSON, default=lambda: {
-        "provider": "openai",
-        "model_id": "gpt-4",
-        "temperature": 0.7,
-        "max_tokens": 2000,
-        "top_p": 1.0,
-        "frequency_penalty": 0.0,
-        "presence_penalty": 0.0,
-        "fallback_model_id": None
-    })  # Model configuration for this agent
+    # NOTE: No Python-side default. Agents must get model_config explicitly from their
+    # creator (wizard, AgentFactory, seed_auto_agent) or resolve at runtime via
+    # _get_default_llm_config_from_settings(). A sticky default here silently shackled
+    # agents to gpt-4 (8K ctx). See drop_agents_model_config_default alembic migration.
+    model_config = Column(JSON, nullable=True)  # Model configuration for this agent
     
     model_usage_stats = Column(JSON, default=lambda: {
         "total_tokens": 0,
@@ -649,6 +648,7 @@ class AgentUpdate(BaseModel):
 
 class AgentResponse(BaseModel):
     id: int
+    public_id: Optional[str] = None  # UUID exposed externally (widgets, API); use this instead of id
     name: str
     description: Optional[str]
     agent_type: str

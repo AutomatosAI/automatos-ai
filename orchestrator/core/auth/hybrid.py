@@ -273,6 +273,15 @@ def _provision_new_user_workspace(
     logger.info("Seeded %d default notification preferences for workspace %s", seeded, ws_id)
 
     db.commit()
+
+    # 4) Seed the Auto agent for this workspace (orchestrator default)
+    try:
+        from core.seeds.seed_auto_agent import seed_auto_agent
+        seed_auto_agent(db, ws_id)
+        db.commit()
+    except Exception:
+        logger.exception("Failed to seed Auto agent for workspace %s — non-fatal", ws_id)
+
     logger.info(
         "Provisioned personal workspace %s (%s) for user %s (clerk=%s)",
         ws_id, ws_name, uid, clerk_user_id,

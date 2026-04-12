@@ -84,7 +84,7 @@ class ModelConfiguration:
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "ModelConfiguration":
         return ModelConfiguration(
-            provider=data.get("provider", "openai"),
+            provider=data.get("provider") or config.LLM_PROVIDER,
             model_id=data.get("model_id", config.LLM_MODEL),
             temperature=data.get("temperature", 0.7),
             max_tokens=data.get("max_tokens", 2000),
@@ -118,7 +118,7 @@ class AgentMetadata:
         if self.model_config:
             return self.model_config
         if self.preferred_model:
-            provider = "openai"
+            provider = config.LLM_PROVIDER
             if "claude" in self.preferred_model.lower():
                 provider = "anthropic"
             elif "llama" in self.preferred_model.lower() or "mistral" in self.preferred_model.lower():
@@ -609,7 +609,7 @@ class AgentFactory:
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})")
 
-            provider_str = llm_config_dict.get("provider", "openai")
+            provider_str = llm_config_dict.get("provider") or config.LLM_PROVIDER
             model_id_str = llm_config_dict.get("model", config.LLM_MODEL)
             provider_str = self._resolve_provider_for_model(provider_str, model_id_str)
 
