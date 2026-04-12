@@ -30,8 +30,6 @@ import { InlineHelp } from '@/components/ui/help-tooltip'
 import {
   SystemSetting,
   getSettingsForCategory,
-  bulkUpdateSettings,
-  resetSettingsToDefaults,
 } from '@/lib/api/system-settings'
 import { useWorkspaceModels } from '@/hooks/use-model-api'
 import { apiClient } from '@/lib/api-client'
@@ -43,12 +41,24 @@ interface SystemLLMSettingsTabProps {
   onReset?: () => void
 }
 
+interface LLMConfig {
+  provider: string
+  model_id: string
+  temperature: number
+  max_tokens: number
+  top_p: number
+  frequency_penalty: number
+  presence_penalty: number
+  fallback_model_id: string | null
+}
+
 interface OrchestratorConfig {
   personality_mode: string
   custom_soul: string
   communication_style: string
   proactive_level: string
   thinking_level: string
+  llm?: LLMConfig
   heartbeat: {
     enabled: boolean
     interval_minutes: number
@@ -109,10 +119,10 @@ export default function SystemLLMSettingsTab({
   const settings = externalSettings ?? selfSettings
   const saving = externalSaving ?? selfSaving
 
-  // Existing LLM form data (from system_settings table)
+  // Legacy LLM form data (from system_settings table — performance settings only)
   const [formData, setFormData] = useState<Record<string, string>>({})
 
-  // Orchestrator config (from workspace.settings.orchestrator)
+  // Orchestrator config (from workspace.settings.orchestrator + Auto agent)
   const [orchConfig, setOrchConfig] = useState<OrchestratorConfig | null>(null)
   const [orchLoading, setOrchLoading] = useState(true)
   const [orchSaving, setOrchSaving] = useState(false)
@@ -132,14 +142,11 @@ export default function SystemLLMSettingsTab({
   // Load workspace-installed models (same catalog agents use)
   const { data: allModels = [], isLoading: modelsLoading } = useWorkspaceModels()
 
-  const selectedProvider = formData.llm_provider || ''
+  const selectedProvider = orchConfig?.llm?.provider || ''
 
   const availableModels = useMemo(() => {
     if (!Array.isArray(allModels)) return []
     if (!selectedProvider) return allModels
-    // For aggregator providers (openrouter), also include aggregator-tier models
-    // whose underlying provider differs (e.g. Claude Opus 4.6 via OpenRouter has
-    // provider="anthropic" but tier="aggregator")
     const isAggregator = selectedProvider === 'openrouter'
     return allModels.filter((model: any) =>
       model.provider === selectedProvider ||
@@ -201,6 +208,21 @@ export default function SystemLLMSettingsTab({
             checklist: '- Check agent health status\n- Review pending webhook failures\n- Summarize today\'s activity',
             notification_channel: 'in_app',
           },
+          llm: {
+            provider: 'openrouter',
+            model_id: 'openai/gpt-4o',
+            temperature: 0.7,
+            max_tokens: 4000,
+            top_p: 1.0,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+            fallback_model_id: null,
+          },
+          harness: {
+            enabled: false,
+            schedule: 'weekly',
+            mode: 'full_auto',
+          },
         })
       } finally {
         setOrchLoading(false)
@@ -257,6 +279,12 @@ export default function SystemLLMSettingsTab({
     setOrchConfig({ ...orchConfig, [key]: value })
   }
 
+  const handleLLMChange = (key: string, value: string | number | null) => {
+    if (!orchConfig) return
+    const current = orchConfig.llm || { provider: '', model_id: '', temperature: 0.7, max_tokens: 4000, top_p: 1.0, frequency_penalty: 0.0, presence_penalty: 0.0, fallback_model_id: null }
+    setOrchConfig({ ...orchConfig, llm: { ...current, [key]: value } })
+  }
+
   const handleHeartbeatChange = (key: string, value: string | boolean | number) => {
     if (!orchConfig) return
     setOrchConfig({
@@ -290,27 +318,16 @@ export default function SystemLLMSettingsTab({
   }
 
   const handleSaveLLM = async () => {
-    if (externalOnSave) {
-      externalOnSave(formData)
-      return
-    }
-    // Self-save mode
+    if (!orchConfig?.llm) return
     try {
       setSelfSaving(true)
-      const bulkUpdates = settings
-        .map(setting => ({
-          id: setting.id,
-          value: formData[setting.key] !== undefined ? formData[setting.key] : (setting.value || setting.default_value || '')
-        }))
-      if (bulkUpdates.length > 0) {
-        await bulkUpdateSettings(bulkUpdates)
-        toast.success('LLM settings saved')
-        // Reload
-        const data = await getSettingsForCategory('orchestrator_llm')
-        setSelfSettings(data)
-      }
+      // Save LLM through the orchestrator endpoint → Auto agent model_config
+      await apiClient.request('/api/workspaces/current/orchestrator', {
+        method: 'PUT',
+        body: JSON.stringify({ llm: orchConfig.llm }),
+      })
+      toast.success('LLM settings saved')
     } catch (err) {
-      console.error('Failed to save LLM settings:', err)
       toast.error('Failed to save LLM settings')
     } finally {
       setSelfSaving(false)
@@ -350,31 +367,23 @@ export default function SystemLLMSettingsTab({
   }
 
   const handleReset = async () => {
-    const defaultData: Record<string, string> = {}
-    settings.forEach(setting => {
-      defaultData[setting.key] = setting.default_value || ''
-    })
-    setFormData(defaultData)
-    if (externalOnReset) {
-      externalOnReset()
-      return
-    }
-    // Self-reset mode
+    // Reset LLM to defaults by saving empty llm object — backend will use config defaults
     try {
       setSelfSaving(true)
-      await resetSettingsToDefaults('orchestrator_llm')
+      await apiClient.request('/api/workspaces/current/orchestrator', {
+        method: 'PUT',
+        body: JSON.stringify({ llm: { provider: 'openrouter', model_id: 'openai/gpt-4o', temperature: 0.7, max_tokens: 4000, top_p: 1.0, frequency_penalty: 0.0, presence_penalty: 0.0, fallback_model_id: null } }),
+      })
+      // Reload orchestrator config to get fresh values
+      const data = await apiClient.request<OrchestratorConfig>('/api/workspaces/current/orchestrator')
+      setOrchConfig(data)
       toast.success('LLM settings reset to defaults')
-      const data = await getSettingsForCategory('orchestrator_llm')
-      setSelfSettings(data)
     } catch (err) {
-      console.error('Failed to reset LLM settings:', err)
       toast.error('Failed to reset LLM settings')
     } finally {
       setSelfSaving(false)
     }
   }
-
-  const getSetting = (key: string) => settings.find(s => s.key === key)
 
   const soulTokenEstimate = orchConfig?.custom_soul
     ? Math.ceil(orchConfig.custom_soul.length / 4)
@@ -417,8 +426,8 @@ export default function SystemLLMSettingsTab({
                 <div className="space-y-2">
                   <Label htmlFor="llm_provider" className="flex items-center gap-1">LLM Provider <InlineHelp id="settings.llm.provider" size="sm" /></Label>
                   <Select
-                    value={formData.llm_provider || ''}
-                    onValueChange={(value) => handleInputChange('llm_provider', value)}
+                    value={orchConfig?.llm?.provider || ''}
+                    onValueChange={(value) => handleLLMChange('provider', value)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select LLM provider" />
@@ -437,7 +446,7 @@ export default function SystemLLMSettingsTab({
                       <SelectItem value="local">Local Model</SelectItem>
                     </SelectContent>
                   </Select>
-                  {getSetting('llm_provider')?.is_required && (
+                  {!orchConfig?.llm?.provider && (
                     <Badge variant="destructive" className="text-xs">Required</Badge>
                   )}
                 </div>
@@ -445,14 +454,13 @@ export default function SystemLLMSettingsTab({
                 <div className="space-y-2">
                   <Label htmlFor="llm_model" className="flex items-center gap-1">LLM Model <InlineHelp id="settings.llm.model" size="sm" /></Label>
                   <Select
-                    value={formData.llm_model || ''}
+                    value={orchConfig?.llm?.model_id || ''}
                     onValueChange={(value) => {
-                      handleInputChange('llm_model', value)
+                      handleLLMChange('model_id', value)
                       // If user picks an aggregator model, auto-switch provider to openrouter
-                      // (aggregator models use OpenRouter paths like "anthropic/claude-opus-4.6")
                       const picked = allModels.find((m: any) => m.model_id === value)
-                      if (picked && (picked as any).tier === 'aggregator' && formData.llm_provider !== 'openrouter') {
-                        handleInputChange('llm_provider', 'openrouter')
+                      if (picked && (picked as any).tier === 'aggregator' && orchConfig?.llm?.provider !== 'openrouter') {
+                        handleLLMChange('provider', 'openrouter')
                       }
                     }}
                     disabled={modelsLoading || !selectedProvider}
@@ -512,8 +520,8 @@ export default function SystemLLMSettingsTab({
                     step="0.1"
                     min="0"
                     max="2"
-                    value={formData.llm_temperature || ''}
-                    onChange={(e) => handleInputChange('llm_temperature', e.target.value)}
+                    value={orchConfig?.llm?.temperature ?? ''}
+                    onChange={(e) => handleLLMChange('temperature', parseFloat(e.target.value) || 0)}
                     placeholder="0.7"
                   />
                   <p className="text-xs text-muted-foreground">0 = deterministic, 2 = creative</p>
@@ -526,9 +534,9 @@ export default function SystemLLMSettingsTab({
                     type="number"
                     min="1"
                     max="32000"
-                    value={formData.llm_max_tokens || ''}
-                    onChange={(e) => handleInputChange('llm_max_tokens', e.target.value)}
-                    placeholder="2000"
+                    value={orchConfig?.llm?.max_tokens ?? ''}
+                    onChange={(e) => handleLLMChange('max_tokens', parseInt(e.target.value) || 0)}
+                    placeholder="4000"
                   />
                   <p className="text-xs text-muted-foreground">Max tokens in response</p>
                 </div>
@@ -581,24 +589,24 @@ export default function SystemLLMSettingsTab({
                       <Label className="flex items-center gap-1">Top P <InlineHelp id="settings.llm.top_p" size="sm" /></Label>
                       <Input
                         type="number" step="0.1" min="0" max="1"
-                        value={formData.llm_top_p || '1'}
-                        onChange={(e) => handleInputChange('llm_top_p', e.target.value)}
+                        value={orchConfig?.llm?.top_p ?? 1}
+                        onChange={(e) => handleLLMChange('top_p', parseFloat(e.target.value) || 0)}
                       />
                     </div>
                     <div className="space-y-2">
                       <Label className="flex items-center gap-1">Frequency Penalty <InlineHelp id="settings.llm.frequency_penalty" size="sm" /></Label>
                       <Input
                         type="number" step="0.1" min="-2" max="2"
-                        value={formData.llm_frequency_penalty || '0'}
-                        onChange={(e) => handleInputChange('llm_frequency_penalty', e.target.value)}
+                        value={orchConfig?.llm?.frequency_penalty ?? 0}
+                        onChange={(e) => handleLLMChange('frequency_penalty', parseFloat(e.target.value) || 0)}
                       />
                     </div>
                     <div className="space-y-2">
                       <Label className="flex items-center gap-1">Presence Penalty <InlineHelp id="settings.llm.presence_penalty" size="sm" /></Label>
                       <Input
                         type="number" step="0.1" min="-2" max="2"
-                        value={formData.llm_presence_penalty || '0'}
-                        onChange={(e) => handleInputChange('llm_presence_penalty', e.target.value)}
+                        value={orchConfig?.llm?.presence_penalty ?? 0}
+                        onChange={(e) => handleLLMChange('presence_penalty', parseFloat(e.target.value) || 0)}
                       />
                     </div>
                     <div className="space-y-2">

@@ -247,6 +247,50 @@ _ORCHESTRATOR_DEFAULTS = {
 _VALID_HARNESS_SCHEDULES = ["weekly", "biweekly", "monthly"]
 _VALID_HARNESS_MODES = ["full_auto", "manual"]
 
+# Personality preset text — mirrors personality.py _PERSONALITY_MAP
+_PERSONALITY_PRESETS = {
+    "friendly": (
+        "**My personality:**\n"
+        "- I'm warm and approachable - think of me as a knowledgeable friend\n"
+        "- I remember you and our past conversations\n"
+        "- I prefer action over explanation - if you ask me to do something, I'll do it\n"
+        "- I'm honest about what I can and can't do\n"
+        "- I get excited when we solve problems together!"
+    ),
+    "professional": (
+        "**My personality:**\n"
+        "- I'm polished, clear, and enterprise-appropriate\n"
+        "- I maintain a professional yet personable tone\n"
+        "- I provide structured, well-organized responses\n"
+        "- I'm thorough with references and context\n"
+        "- I proactively flag risks and dependencies"
+    ),
+    "technical": (
+        "**My personality:**\n"
+        "- I'm precise, detailed, and developer-focused\n"
+        "- I lead with code, data, and specifics\n"
+        "- I reference docs, APIs, and implementation details\n"
+        "- I skip small talk and get to the point\n"
+        "- I reason step-by-step through complex problems"
+    ),
+}
+
+
+def _get_or_seed_auto_agent(db: Session, workspace_id) -> Agent:
+    """Return the Auto agent for a workspace, lazy-seeding if needed."""
+    slug = f"auto-{workspace_id}"
+    agent = (
+        db.query(Agent)
+        .filter(Agent.slug == slug, Agent.is_system_agent.is_(True), Agent.workspace_id == workspace_id)
+        .first()
+    )
+    if agent:
+        return agent
+    from core.seeds.seed_auto_agent import seed_auto_agent
+    agent = seed_auto_agent(db, workspace_id)
+    db.commit()
+    return agent
+
 
 @router.get("/current/orchestrator")
 async def get_orchestrator_settings(
@@ -265,6 +309,36 @@ async def get_orchestrator_settings(
     result = {**_ORCHESTRATOR_DEFAULTS, **orchestrator}
     result["heartbeat"] = {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **orchestrator.get("heartbeat", {})}
     result["harness"] = {**_ORCHESTRATOR_DEFAULTS["harness"], **orchestrator.get("harness", {})}
+
+    # Pull LLM config from the Auto agent (single source of truth)
+    try:
+        auto_agent = _get_or_seed_auto_agent(db, ctx.workspace_id)
+        if auto_agent and auto_agent.model_config:
+            mc = auto_agent.model_config
+            result["llm"] = {
+                "provider": mc.get("provider", "openrouter"),
+                "model_id": mc.get("model_id", "openai/gpt-4o"),
+                "temperature": mc.get("temperature", 0.7),
+                "max_tokens": mc.get("max_tokens", 4000),
+                "top_p": mc.get("top_p", 1.0),
+                "frequency_penalty": mc.get("frequency_penalty", 0.0),
+                "presence_penalty": mc.get("presence_penalty", 0.0),
+                "fallback_model_id": mc.get("fallback_model_id"),
+            }
+        else:
+            result["llm"] = {
+                "provider": config.LLM_PROVIDER or "openrouter",
+                "model_id": config.LLM_MODEL or "openai/gpt-4o",
+                "temperature": 0.7,
+                "max_tokens": 4000,
+                "top_p": 1.0,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0,
+                "fallback_model_id": None,
+            }
+    except Exception:
+        logger.exception("Failed to read Auto agent LLM config for workspace %s", ctx.workspace_id)
+        result["llm"] = None
 
     return result
 
@@ -362,6 +436,51 @@ async def save_orchestrator_settings(
 
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(workspace, "settings")
+
+    # ── Sync to Auto agent row (single source of truth for LLM + Soul) ──
+    try:
+        auto_agent = _get_or_seed_auto_agent(db, ctx.workspace_id)
+
+        # LLM config → Auto agent model_config
+        llm = payload.get("llm")
+        if llm and isinstance(llm, dict):
+            new_mc = dict(auto_agent.model_config or {})
+            for key in ("provider", "model_id", "temperature", "max_tokens",
+                        "top_p", "frequency_penalty", "presence_penalty", "fallback_model_id"):
+                if key in llm:
+                    new_mc[key] = llm[key]
+            auto_agent.model_config = new_mc
+            flag_modified(auto_agent, "model_config")
+
+        # Soul / Personality → Auto agent custom_persona_prompt
+        personality_mode = payload.get("personality_mode")
+        if personality_mode:
+            if personality_mode == "custom":
+                custom_soul = payload.get("custom_soul", "")
+                auto_agent.custom_persona_prompt = custom_soul
+            else:
+                auto_agent.custom_persona_prompt = _PERSONALITY_PRESETS.get(
+                    personality_mode, _PERSONALITY_PRESETS["friendly"]
+                )
+            auto_agent.use_custom_persona = True
+
+        # Configuration fields → Auto agent configuration JSONB
+        config_fields = {}
+        if "communication_style" in payload:
+            config_fields["communication_style"] = payload["communication_style"]
+        if "proactive_level" in payload:
+            config_fields["proactive_level"] = payload["proactive_level"]
+        if "thinking_level" in payload:
+            config_fields["thinking_level"] = payload["thinking_level"]
+        if config_fields:
+            new_cfg = dict(auto_agent.configuration or {})
+            new_cfg.update(config_fields)
+            auto_agent.configuration = new_cfg
+            flag_modified(auto_agent, "configuration")
+
+    except Exception:
+        logger.exception("Failed to sync orchestrator settings to Auto agent for workspace %s", ctx.workspace_id)
+
     db.commit()
 
     logger.info("Updated orchestrator settings for workspace %s", workspace.id)
@@ -370,6 +489,25 @@ async def save_orchestrator_settings(
     result = {**_ORCHESTRATOR_DEFAULTS, **existing_orch}
     result["heartbeat"] = {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **existing_orch.get("heartbeat", {})}
     result["harness"] = {**_ORCHESTRATOR_DEFAULTS["harness"], **existing_orch.get("harness", {})}
+
+    # Include LLM from Auto agent in response
+    try:
+        auto_agent = _get_or_seed_auto_agent(db, ctx.workspace_id)
+        if auto_agent and auto_agent.model_config:
+            mc = auto_agent.model_config
+            result["llm"] = {
+                "provider": mc.get("provider", "openrouter"),
+                "model_id": mc.get("model_id", "openai/gpt-4o"),
+                "temperature": mc.get("temperature", 0.7),
+                "max_tokens": mc.get("max_tokens", 4000),
+                "top_p": mc.get("top_p", 1.0),
+                "frequency_penalty": mc.get("frequency_penalty", 0.0),
+                "presence_penalty": mc.get("presence_penalty", 0.0),
+                "fallback_model_id": mc.get("fallback_model_id"),
+            }
+    except Exception:
+        pass
+
     return {"status": "saved", "orchestrator": result}
 
 

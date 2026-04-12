@@ -244,6 +244,7 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
 
     return AgentResponse(
         id=agent.id,
+        public_id=str(agent.public_id) if getattr(agent, 'public_id', None) else None,
         name=agent.name,
         description=agent.description,
         agent_type=agent.agent_type,
@@ -517,6 +518,10 @@ async def list_agents(
             db.query(Agent)
             .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
             .filter(scope_filter)
+            # Hide per-workspace Auto agents from the Roster — they are managed
+            # in Settings > Orchestrator, not in the agent list.  Global system
+            # agents (CTO, workspace_id=None) remain visible to admins.
+            .filter(~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None)))
         )
 
         # Apply filters uniformly to all agents (workspace + system)

@@ -262,64 +262,45 @@ def get_user_id(db: Session) -> int:
     return result[0]
 
 def get_default_agent_id(db: Session, workspace_id) -> int:
-    """
-    Pick a sensible default agent for chat when the client does not send agentId.
+    """Return the workspace's Auto agent (per-workspace system agent).
 
-    Preference:
-    - Any agent in this workspace with active EXTERNAL app assignments (Composio),
-      ordered by number of assignments (desc).
-    - Fallback to agent id=1.
+    Looks up the agent with slug='auto-{workspace_id}'. If missing (workspace
+    created before the migration), lazy-seeds one with deployment defaults.
+
+    Never returns agent id=1 or any agent from another workspace.
     """
+    from core.models.core import Agent
+
+    slug = f"auto-{workspace_id}"
+    row = db.query(Agent.id).filter(
+        Agent.slug == slug,
+        Agent.is_system_agent.is_(True),
+        Agent.workspace_id == workspace_id,
+    ).scalar()
+    if row:
+        return int(row)
+
+    # Lazy-seed for workspaces created before the migration
     try:
-        from core.models import Agent
-        from core.models.composio_cache import AgentAppAssignment
-        from core.composio.entity_manager import EntityManager
-
-        # Connected apps for this workspace (must be connected, otherwise Composio gating will deny)
-        connected_apps: set[str] = set()
-        try:
-            manager = EntityManager(db)
-            connected_apps = {a.upper().strip() for a in manager.get_connected_apps(workspace_id)}
-        except Exception:
-            connected_apps = set()
-
-        # Candidate agents with EXTERNAL app assignments (descending by assignment count)
-        candidates = (
-            db.query(AgentAppAssignment.agent_id)
-            .join(Agent, Agent.id == AgentAppAssignment.agent_id)
-            .filter(
-                Agent.workspace_id == workspace_id,
-                AgentAppAssignment.is_active == True,  # noqa: E712
-                AgentAppAssignment.app_type == "EXTERNAL",
-            )
-            .group_by(AgentAppAssignment.agent_id)
-            .order_by(func.count(AgentAppAssignment.id).desc(), AgentAppAssignment.agent_id.asc())
-            .limit(10)
-            .all()
-        )
-
-        # Pick the first candidate that has at least one assigned app connected in this workspace.
-        for (agent_id,) in candidates:
-            if not agent_id:
-                continue
-            if connected_apps:
-                assigned_apps = {
-                    (r[0] or "").upper().strip()
-                    for r in db.query(AgentAppAssignment.app_name)
-                    .filter(
-                        AgentAppAssignment.agent_id == agent_id,
-                        AgentAppAssignment.is_active == True,  # noqa: E712
-                        AgentAppAssignment.app_type == "EXTERNAL",
-                    )
-                    .all()
-                }
-                assigned_apps.discard("")
-                if not assigned_apps.intersection(connected_apps):
-                    continue
-            return int(agent_id)
+        from core.seeds.seed_auto_agent import seed_auto_agent
+        auto = seed_auto_agent(db, workspace_id)
+        db.commit()
+        logger.info("Lazy-seeded Auto agent for workspace %s → agent.id=%s", workspace_id, auto.id)
+        return auto.id
     except Exception:
-        pass
-    return 1
+        logger.exception("Failed to seed Auto agent for workspace %s", workspace_id)
+
+    # Last resort: first agent in THIS workspace (never cross-tenant)
+    first = db.query(Agent.id).filter(
+        Agent.workspace_id == workspace_id,
+    ).order_by(Agent.id.asc()).scalar()
+    if first:
+        return int(first)
+
+    raise HTTPException(
+        status_code=500,
+        detail="No agent available for workspace. Configure Auto at Settings > Orchestrator.",
+    )
 
 
 # Endpoints
