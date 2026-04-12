@@ -68,3 +68,23 @@ export function finishButton(tour: any) {
 export function stepProgress(current: number, total: number): string {
   return `<div class="text-xs text-gray-500 mt-3">Step ${current} of ${total}</div>`
 }
+
+/**
+ * Render a compact bullet list explaining what each top-level tab does.
+ * Use inside a tour step to walk the user through a page's tab strip.
+ *
+ * Example:
+ *   tabList([
+ *     ['Documents', 'Upload files, connect cloud storage, run semantic search.'],
+ *     ['Database', 'Connect SQL sources and query them in natural language.'],
+ *   ])
+ */
+export function tabList(items: ReadonlyArray<readonly [string, string]>): string {
+  const rows = items
+    .map(
+      ([label, desc]) =>
+        `<li><strong class="text-gray-200">${label}</strong> <span class="text-gray-400">— ${desc}</span></li>`,
+    )
+    .join('')
+  return `<ul class="shepherd-tab-list text-xs text-gray-300 mt-2 space-y-1 list-disc pl-4">${rows}</ul>`
+}

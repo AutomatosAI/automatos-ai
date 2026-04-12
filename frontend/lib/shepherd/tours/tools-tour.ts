@@ -18,7 +18,12 @@ export function createToolsTour(userId: string) {
     title: title('Tools &', 'Integrations'),
     text: `
       <p class="text-gray-300 mb-2">
-        Connect your agents to external services — Gmail, Slack, GitHub, CRMs, and 150+ more.
+        This is where your workspace plugs into the outside world. Connect Gmail,
+        Slack, GitHub, Jira, HubSpot, CRMs, databases — 150+ integrations — and any
+        agent you give access to can start calling them as tools.
+      </p>
+      <p class="text-gray-400 text-sm">
+        Authentication happens here once; agents reuse the saved credentials.
       </p>
       ${stepProgress(1, TOTAL)}
     `,
@@ -32,7 +37,11 @@ export function createToolsTour(userId: string) {
     title: title('Connected', 'Apps'),
     text: `
       <p class="text-gray-300 mb-2">
-        Apps you've already connected show up here. Click any card to manage or reconfigure.
+        Anything you've already authenticated appears here as a card. Click one to
+        reconfigure, re-auth, disable, or see which agents are currently using it.
+      </p>
+      <p class="text-gray-400 text-sm">
+        Green = healthy connection. Amber = needs re-auth.
       </p>
       ${stepProgress(2, TOTAL)}
     `,
@@ -49,7 +58,9 @@ export function createToolsTour(userId: string) {
     title: title('Find &', 'Connect'),
     text: `
       <p class="text-gray-300 mb-2">
-        Search for any app or browse categories to find new integrations.
+        Search for any service or browse by category — Communication, CRM, Dev,
+        Marketing, Productivity. Hit <strong>Connect</strong> on a card and you'll
+        walk through an OAuth flow or key entry, then it's available to every agent.
       </p>
       ${stepProgress(3, TOTAL)}
     `,
