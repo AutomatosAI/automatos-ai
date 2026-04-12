@@ -16,6 +16,7 @@ Unlike the CTO agent (global, admin-only), Auto agents are:
 """
 
 import logging
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -24,14 +25,26 @@ from core.models.core import Agent
 
 logger = logging.getLogger(__name__)
 
-# Default persona — matches personality.py _FRIENDLY_PERSONALITY preset
-_DEFAULT_PERSONA = """\
+# Load soul document — lives alongside seed files so it's in the Docker image
+_SOUL_DOC_PATH = Path(__file__).resolve().parent / "auto-cto-custom-soul.txt"
+
+_FRIENDLY_FALLBACK = """\
 **My personality:**
 - I'm warm and approachable - think of me as a knowledgeable friend
 - I remember you and our past conversations
 - I prefer action over explanation - if you ask me to do something, I'll do it
 - I'm honest about what I can and can't do
 - I get excited when we solve problems together!"""
+
+
+def _load_default_persona() -> str:
+    """Load the CTO soul document, falling back to friendly preset."""
+    try:
+        if _SOUL_DOC_PATH.exists():
+            return _SOUL_DOC_PATH.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        logger.warning("Failed to load soul document from %s: %s", _SOUL_DOC_PATH, e)
+    return _FRIENDLY_FALLBACK
 
 
 def _get_default_model_config() -> dict:
@@ -88,13 +101,13 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
         owner_type="workspace",
         owner_id=str(workspace_id),
         use_custom_persona=True,
-        custom_persona_prompt=_DEFAULT_PERSONA,
+        custom_persona_prompt=_load_default_persona(),
         model_config=_get_default_model_config(),
         configuration={
             "thinking_level": "medium",
             "proactive_level": "notify",
             "communication_style": "balanced",
-            "personality_mode": "friendly",
+            "personality_mode": "custom",
         },
         tags=["auto", "system", "orchestrator"],
     )

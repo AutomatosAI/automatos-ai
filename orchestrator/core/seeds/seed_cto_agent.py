@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 CTO_SLUG = "auto-cto"
 
-# Load soul document from docs/ (relative to repo root)
-_SOUL_DOC_PATH = Path(__file__).resolve().parents[3] / "docs" / "auto-cto-custom-soul.txt"
+# Load soul document — lives alongside seed files so it's in the Docker image
+_SOUL_DOC_PATH = Path(__file__).resolve().parent / "auto-cto-custom-soul.txt"
 
 
 def _load_soul_document() -> str:
