@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Building2 } from 'lucide-react'
 import { markTourSkipped } from '@/lib/shepherd/tour-storage'
 
 interface WelcomeModalProps {
@@ -15,10 +16,17 @@ interface WelcomeModalProps {
 
 export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) {
   const [isStarting, setIsStarting] = useState(false)
+  const router = useRouter()
 
   const handleSkip = () => {
     markTourSkipped('welcome', userId)
     onOpenChange(false)
+  }
+
+  const handleStartIntake = () => {
+    markTourSkipped('welcome', userId)
+    onOpenChange(false)
+    setTimeout(() => router.push('/onboarding/wizard'), 200)
   }
 
   const handleStartTour = () => {
@@ -104,6 +112,32 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
             </div>
           </div>
 
+          {/* Business Intake CTA — PRD-130 */}
+          <div className="p-4 rounded-lg bg-primary/10 border border-primary/30">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5">
+                <Building2 className="w-5 h-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <div className="font-medium text-gray-200 mb-1">
+                  Tell Automatos about your business
+                </div>
+                <div className="text-sm text-gray-400">
+                  Share your domain and we&apos;ll scan your site, build a knowledge graph,
+                  and draft a Mission Zero plan in under 3 minutes.
+                </div>
+                <Button
+                  size="sm"
+                  onClick={handleStartIntake}
+                  className="mt-3 bg-primary hover:bg-primary/90 text-primary-foreground"
+                >
+                  Start Business Intake
+                  <Building2 className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
           {/* Tour CTA */}
           <div className="p-4 rounded-lg bg-orange-500/10 border border-orange-500/30">
             <div className="flex items-start gap-3">
@@ -112,7 +146,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
               </div>
               <div className="flex-1">
                 <div className="font-medium text-gray-200 mb-1">
-                  Take a quick tour
+                  Or take a quick tour
                 </div>
                 <div className="text-sm text-gray-400">
                   We&apos;ll guide you step by step — you can skip or exit anytime by pressing{' '}
@@ -134,7 +168,7 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
             <Button
               onClick={handleStartTour}
               disabled={isStarting}
-              className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white"
+              variant="outline"
             >
               {isStarting ? 'Starting...' : 'Start Tour'}
               <Sparkles className="w-4 h-4 ml-2" />

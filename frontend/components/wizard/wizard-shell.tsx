@@ -1,0 +1,281 @@
+'use client'
+
+/**
+ * PRD-130: Business Intake Wizard Shell
+ * ======================================
+ *
+ * Modal shell mirroring create-agent-modal.tsx — same Card/glass style,
+ * same Tabs-based stepper, same close + animation pattern.
+ *
+ * Phase 1 = 7 steps, ending at the Mission Zero Draft Plan review.
+ * Mission 1 (team provisioning) is parked as Phase 2.
+ */
+
+import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { X, Sparkles } from 'lucide-react'
+import { toast } from 'react-hot-toast'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
+import {
+  useStartWizard,
+  useScanDomain,
+  useScrapeSelected,
+  usePatchProfile,
+  useGenerateDraftPlan,
+  type ScanResponse,
+  type ScrapeResponse,
+  type PlanResponse,
+  type BusinessProfilePayload,
+} from '@/hooks/use-wizard-api'
+
+import { Step1Goals } from './step-1-goals'
+import { Step2Domain } from './step-2-domain'
+import { Step3Scanning } from './step-3-scanning'
+import { Step4PageChecklist } from './step-4-page-checklist'
+import { Step5Intake } from './step-5-intake'
+import { Step6ProfileEditor } from './step-6-profile-editor'
+import { Step7DraftPlan } from './step-7-draft-plan'
+
+interface WizardShellProps {
+  open: boolean
+  onClose: () => void
+  onComplete?: () => void
+}
+
+interface WizardState {
+  goals: string[]
+  domain: string
+  profileId: string | null
+  scan: ScanResponse | null
+  selectedUrls: string[]
+  scrape: ScrapeResponse | null
+  profile: BusinessProfilePayload | null
+  plan: PlanResponse | null
+}
+
+const INITIAL: WizardState = {
+  goals: [],
+  domain: '',
+  profileId: null,
+  scan: null,
+  selectedUrls: [],
+  scrape: null,
+  profile: null,
+  plan: null,
+}
+
+export function WizardShell({ open, onClose, onComplete }: WizardShellProps) {
+  const [step, setStep] = useState(1)
+  const [state, setState] = useState<WizardState>(INITIAL)
+
+  const startMutation = useStartWizard()
+  const scanMutation = useScanDomain()
+  const scrapeMutation = useScrapeSelected()
+  const patchMutation = usePatchProfile()
+  const planMutation = useGenerateDraftPlan()
+
+  const reset = () => {
+    setState(INITIAL)
+    setStep(1)
+  }
+
+  const handleClose = () => {
+    onClose()
+    setTimeout(reset, 200)
+  }
+
+  // ---- Step transitions --------------------------------------------------
+
+  const handleStartScan = async () => {
+    try {
+      const start = await startMutation.mutateAsync({
+        domain: state.domain,
+        goals: state.goals,
+      })
+      setState(s => ({ ...s, profileId: start.profile_id }))
+      setStep(3)
+      const scan = await scanMutation.mutateAsync(start.profile_id)
+      setState(s => ({
+        ...s,
+        scan,
+        selectedUrls: scan.must_have_urls.slice(),
+      }))
+      setStep(4)
+    } catch (err: any) {
+      toast.error(`Scan failed: ${err?.message || 'unknown error'}`)
+    }
+  }
+
+  const handleStartScrape = async () => {
+    if (!state.profileId) return
+    setStep(5)
+    try {
+      const scrape = await scrapeMutation.mutateAsync({
+        profileId: state.profileId,
+        selectedUrls: state.selectedUrls,
+      })
+      setState(s => ({ ...s, scrape, profile: scrape.profile }))
+      setStep(6)
+    } catch (err: any) {
+      toast.error(`Intake failed: ${err?.message || 'unknown error'}`)
+      setStep(4)
+    }
+  }
+
+  const handleSaveProfile = async (patch: Partial<BusinessProfilePayload>) => {
+    if (!state.profileId) return
+    try {
+      await patchMutation.mutateAsync({ profileId: state.profileId, patch })
+      setState(s => ({
+        ...s,
+        profile: s.profile ? { ...s.profile, ...patch } : (patch as BusinessProfilePayload),
+      }))
+      toast.success('Profile saved')
+    } catch (err: any) {
+      toast.error(`Save failed: ${err?.message || 'unknown error'}`)
+    }
+  }
+
+  const handleGeneratePlan = async () => {
+    if (!state.profileId) return
+    try {
+      const plan = await planMutation.mutateAsync(state.profileId)
+      setState(s => ({ ...s, plan }))
+      setStep(7)
+    } catch (err: any) {
+      toast.error(`Plan generation failed: ${err?.message || 'unknown error'}`)
+    }
+  }
+
+  const handleFinish = () => {
+    toast.success('Draft plan saved. Try chatting with Auto about your business!')
+    onComplete?.()
+    handleClose()
+  }
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={handleClose}
+          />
+
+          {/* Modal */}
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
+          >
+            <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
+                <CardTitle className="flex items-center space-x-3">
+                  <Sparkles className="w-6 h-6 text-primary" />
+                  <div>
+                    <span className="text-xl">
+                      Business <span className="gradient-text">Intake Wizard</span>
+                    </span>
+                    <p className="text-sm text-muted-foreground font-normal">
+                      Tell Automatos about your business in under 3 minutes
+                    </p>
+                  </div>
+                </CardTitle>
+                <Button variant="ghost" size="icon" onClick={handleClose}>
+                  <X className="w-5 h-5" />
+                </Button>
+              </CardHeader>
+
+              <CardContent className="overflow-y-auto p-6">
+                <Tabs value={`step-${step}`} className="space-y-6">
+                  <TabsList className="w-full justify-start gap-1 bg-secondary/50 flex-wrap h-auto">
+                    <TabsTrigger value="step-1" disabled={step < 1}>1. Goals</TabsTrigger>
+                    <TabsTrigger value="step-2" disabled={step < 2}>2. Domain</TabsTrigger>
+                    <TabsTrigger value="step-3" disabled={step < 3}>3. Scan</TabsTrigger>
+                    <TabsTrigger value="step-4" disabled={step < 4}>4. Pages</TabsTrigger>
+                    <TabsTrigger value="step-5" disabled={step < 5}>5. Intake</TabsTrigger>
+                    <TabsTrigger value="step-6" disabled={step < 6}>6. Profile</TabsTrigger>
+                    <TabsTrigger value="step-7" disabled={step < 7}>7. Draft Plan</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="step-1" className="space-y-4 max-h-[55vh] overflow-y-auto">
+                    <Step1Goals
+                      selected={state.goals}
+                      onChange={(goals) => setState(s => ({ ...s, goals }))}
+                      onNext={() => setStep(2)}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="step-2" className="space-y-4 max-h-[55vh] overflow-y-auto">
+                    <Step2Domain
+                      domain={state.domain}
+                      onChange={(domain) => setState(s => ({ ...s, domain }))}
+                      onBack={() => setStep(1)}
+                      onScan={handleStartScan}
+                      isScanning={startMutation.isPending || scanMutation.isPending}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="step-3" className="space-y-4 max-h-[55vh] overflow-y-auto">
+                    <Step3Scanning domain={state.domain} />
+                  </TabsContent>
+
+                  <TabsContent value="step-4" className="space-y-4 max-h-[55vh] overflow-y-auto">
+                    {state.scan && (
+                      <Step4PageChecklist
+                        scan={state.scan}
+                        selected={state.selectedUrls}
+                        onChange={(urls) => setState(s => ({ ...s, selectedUrls: urls }))}
+                        onBack={() => setStep(3)}
+                        onIngest={handleStartScrape}
+                      />
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="step-5" className="space-y-4 max-h-[55vh] overflow-y-auto">
+                    <Step5Intake
+                      pageCount={state.selectedUrls.length}
+                      isLoading={scrapeMutation.isPending}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="step-6" className="space-y-4 max-h-[55vh] overflow-y-auto">
+                    {state.profile && (
+                      <Step6ProfileEditor
+                        profile={state.profile}
+                        scrape={state.scrape}
+                        onSave={handleSaveProfile}
+                        isSaving={patchMutation.isPending}
+                        onBack={() => setStep(4)}
+                        onGeneratePlan={handleGeneratePlan}
+                        isGenerating={planMutation.isPending}
+                      />
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="step-7" className="space-y-4 max-h-[55vh] overflow-y-auto">
+                    {state.plan && (
+                      <Step7DraftPlan
+                        plan={state.plan}
+                        onFinish={handleFinish}
+                      />
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  )
+}

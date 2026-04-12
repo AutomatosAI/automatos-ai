@@ -58,6 +58,7 @@ from api.context import router as context_router
 from api.credentials import router as credentials_router  # PRD-18: Enhanced credentials
 from api.system_settings import router as system_settings_router  # System Settings Management
 from api.tools import router as tools_router
+from api.wizard import router as wizard_router  # PRD-130: Business Intake Wizard (PoC)
 # PRD-36: Composio Integration (optional module)
 try:
     from api.composio import router as composio_router
@@ -936,6 +937,7 @@ app.include_router(context_router)
 app.include_router(credentials_router)  # PRD-18: Enhanced credentials with management
 app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
+app.include_router(wizard_router)  # PRD-130: Business Intake Wizard (PoC)
 if composio_router is not None:
     app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
 if cloud_documents_router is not None:

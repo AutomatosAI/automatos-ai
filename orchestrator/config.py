@@ -304,6 +304,16 @@ class Config:
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
 
     # =============================================================================
+    # PRD-130 — Business Intake Wizard (PoC)
+    # =============================================================================
+    FIRECRAWL_API_KEY: str = os.getenv("FIRECRAWL_API_KEY")
+    FIRECRAWL_BASE_URL: str = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev/v1")
+    FIRECRAWL_MAX_PAGES_PER_SCAN: int = int(os.getenv("FIRECRAWL_MAX_PAGES_PER_SCAN", "20"))
+
+    WIZARD_ENABLED: bool = os.getenv("WIZARD_ENABLED", "true").lower() == "true"
+    WIZARD_REQUIRE_DOMAIN_VERIFY: bool = os.getenv("WIZARD_REQUIRE_DOMAIN_VERIFY", "false").lower() == "true"
+
+    # =============================================================================
     # COORDINATOR — PRD-82A Sequential Mission Coordinator
     # =============================================================================
     COORDINATOR_TICK_INTERVAL_SECONDS: int = int(os.getenv("COORDINATOR_TICK_INTERVAL_SECONDS", "5"))

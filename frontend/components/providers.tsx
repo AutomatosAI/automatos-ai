@@ -58,6 +58,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
             attribute="class"
             defaultTheme="system"
             enableSystem
+            themes={['light', 'dark', 'matte']}
             storageKey="automatos-theme"
             disableTransitionOnChange
           >
